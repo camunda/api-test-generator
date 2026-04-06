@@ -124,7 +124,7 @@ normalised JSON file.
 npm run fetch-spec
 
 # Fetch a specific branch or tag
-SPEC_REF=stable/8.8 npm run fetch-spec:ref
+SPEC_REF=stable/8.9 npm run fetch-spec:ref
 
 # Or use the CLI directly for more options
 npx camunda-schema-bundler --help
