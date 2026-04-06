@@ -1,0 +1,132 @@
+{
+  "$schema": "./domain-semantics.schema.json#",
+  "identifiers": {
+    "ProcessDefinitionId": {
+      "kind": "identifier",
+      "validityState": "ProcessDefinitionDeployed",
+      "boundBy": ["createDeployment"],
+      "fieldPaths": ["deployments[].processDefinition.processDefinitionId"]
+    },
+    "JobTypeValue": {
+      "kind": "identifier",
+      "derivedVia": "ModelHasServiceTaskType",
+      "boundBy": ["createDeployment"]
+    }
+  },
+  "capabilities": {
+    "ModelHasServiceTaskType": {
+      "kind": "capability",
+      "parameter": "jobType",
+      "producedBy": ["createDeployment"],
+      "dependsOn": ["ProcessDefinitionDeployed"]
+    }
+  },
+  "runtimeStates": {
+    "ProcessDefinitionDeployed": {
+      "kind": "state",
+      "parameter": "processDefinitionId",
+      "producedBy": ["createDeployment"]
+    },
+    "ProcessInstanceExists": {
+      "kind": "state",
+      "parameter": "processDefinitionId",
+      "producedBy": ["createProcessInstance"],
+      "requires": ["ProcessDefinitionDeployed"]
+    },
+    "JobAvailableForActivation": {
+      "kind": "state",
+      "parameters": ["jobType", "processDefinitionId"],
+      "producedBy": ["activateJobs"],
+      "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"]
+    }
+  },
+  "operationRequirements": {
+    "createProcessInstance": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]],
+      "implicitAdds": ["ProcessInstanceExists"],
+      "valueBindings": {
+  "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
+  "request.processDefinitionKey": "ProcessDefinitionKey.processDefinitionKey",
+  "response.processInstanceKey": "ProcessInstanceExists.processInstanceKey"
+      }
+    },
+    "activateJobs": {
+      "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"],
+      "valueBindings": {
+        "request.jobType": "ModelHasServiceTaskType.jobType"
+      },
+      "produces": ["JobAvailableForActivation"]
+    },
+    "searchJobs": {
+      "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"]
+    },
+    "getUserTask": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "searchProcessInstances": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "createDeployment": {
+      "valueBindings": {
+        "response.deployments[].processDefinition.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
+        "response.deployments[].processDefinition.processDefinitionKey": "ProcessDefinitionKey.processDefinitionKey",
+        "response.deployments[].form.formKey": "FormDeployed.formKey"
+      }
+    },
+    "searchProcessDefinitions": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    }
+  },
+  "artifactKinds": {
+    "bpmnProcess": {
+      "producesStates": ["ProcessDefinitionDeployed", "ModelHasServiceTaskType"],
+      "producesSemantics": ["ProcessDefinitionKey"],
+      "identifierType": "ProcessDefinitionId",
+      "deploymentSlices": ["processDefinition"]
+    },
+    "dmnDecision": {
+      "producesStates": ["DecisionDefinitionDeployed"],
+      "producesSemantics": ["DecisionDefinitionKey"],
+      "identifierType": "DecisionDefinitionId",
+      "deploymentSlices": ["decisionDefinition"]
+    },
+    "dmnDrd": {
+      "producesStates": ["DecisionRequirementsDeployed"],
+      "producesSemantics": ["DecisionRequirementsKey"],
+      "identifierType": "DecisionRequirementsId",
+      "deploymentSlices": ["decisionRequirements"]
+    },
+    "form": {
+  "producesStates": ["FormDeployed"],
+  "producesSemantics": ["FormKey"],
+  "identifierType": "FormId",
+  "deploymentSlices": ["form"]
+    }
+  },
+  "artifactFileKinds": {
+    ".bpmn": ["bpmnProcess"],
+    ".bpmn20.xml": ["bpmnProcess"],
+    ".dmn": ["dmnDecision", "dmnDrd"],
+    ".dmn11.xml": ["dmnDecision", "dmnDrd"],
+    ".form": ["form"],
+    ".json": ["form"]
+  },
+  "semanticTypeToArtifactKind": {
+    "ProcessDefinitionKey": "bpmnProcess",
+    "DecisionDefinitionKey": "dmnDecision",
+    "DecisionRequirementsKey": "dmnDrd",
+    "FormKey": "form"
+  },
+  "operationArtifactRules": {
+    "createDeployment": {
+      "composable": true,
+      "rules": [
+        { "id": "bpmn", "artifactKind": "bpmnProcess" },
+        { "id": "form", "artifactKind": "form" },
+        { "id": "dmn", "artifactKind": "dmnDecision" },
+        { "id": "drd", "artifactKind": "dmnDrd" }
+      ]
+    }
+  },
+  "version": 1
+}

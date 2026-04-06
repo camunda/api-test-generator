@@ -1,0 +1,35 @@
+{
+  "name": "path-analyser",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+  "build": "tsc -p tsconfig.json && node scripts/copy-seed-rules.js",
+    "generate:scenarios": "node ./dist/src/index.js",
+    "start": "npm run build && npm run generate:scenarios",
+    "codegen:playwright": "npm run build && node dist/src/codegen/index.js",
+  "codegen:playwright:all": "npm run build && node dist/src/codegen/index.js --all",
+  "test:pw": "npx playwright test",
+  "test:pw:file": "npx playwright test --",
+  "test:pw:grep": "npx playwright test --grep",
+  "gen-and-test": "npm run codegen:playwright:all && npm run test:pw",
+  "observe:aggregate": "npm run build && node dist/src/scripts/aggregate-observations.js",
+  "observe:run": "npm run codegen:playwright:all && npm run test:pw && npm run observe:aggregate",
+  "validate:providers": "npm run build && node dist/scripts/validate-providers.js",
+  "debug:canonical": "npm run build && node dist/src/scripts/debug-canonical.js",
+    "clean": "rimraf dist || rm -rf dist",
+    "regenerate": "npm run clean && npm run build && npm run generate:scenarios && npm run codegen:playwright:all"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.54.2",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

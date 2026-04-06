@@ -1,0 +1,19 @@
+{
+  "globals": {
+    "size": { "from": "const", "value": 10 },
+    "after": { "from": "base64", "value": "AA==" }
+  },
+  "operations": {
+    "searchJobs": {
+      "jobKey": { "from": "const", "value": 1 },
+      "elementInstanceKey": { "from": "const", "value": 2 },
+      "processInstanceKey": { "from": "ctx", "var": "processInstanceKeyVar" },
+      "processDefinitionKey": { "from": "ctx", "var": "processDefinitionKeyVar" },
+      "type": { "from": "ctx", "var": "jobTypeVar" },
+      "state": { "from": "const", "value": "ACTIVATABLE" },
+      "tenantId": { "from": "ctx", "var": "tenantIdVar" },
+      "size": { "from": "const", "value": 10 },
+      "after": { "from": "base64", "value": "AA==" }
+    }
+  }
+}

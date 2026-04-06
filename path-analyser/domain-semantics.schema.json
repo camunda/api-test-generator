@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "domain-semantics.schema.json",
+  "title": "Domain Semantics Sidecar",
+  "type": "object",
+  "required": ["identifiers","runtimeStates","operationRequirements","version"],
+  "properties": {
+    "version": {"type": "integer"},
+    "identifiers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind","validityState","boundBy"],
+        "properties": {
+          "kind": {"const": "identifier"},
+          "validityState": {"type": "string"},
+          "boundBy": {"type": "array", "items": {"type": "string"}},
+          "fieldPaths": {"type": "array", "items": {"type": "string"}},
+          "derivedVia": {"type": "string"}
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind","parameter","producedBy"],
+        "properties": {
+          "kind": {"const": "capability"},
+          "parameter": {"type": "string"},
+          "producedBy": {"type": "array", "items": {"type": "string"}},
+          "dependsOn": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "runtimeStates": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind","producedBy"],
+        "properties": {
+          "kind": {"const": "state"},
+          "parameter": {"type": "string"},
+          "parameters": {"type": "array", "items": {"type": "string"}},
+          "producedBy": {"type": "array", "items": {"type": "string"}},
+          "requires": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "operationRequirements": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "requires": {"type": "array", "items": {"type": "string"}},
+          "disjunctions": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+          "implicitAdds": {"type": "array", "items": {"type": "string"}},
+          "produces": {"type": "array", "items": {"type": "string"}},
+          "valueBindings": {"type": "object", "additionalProperties": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

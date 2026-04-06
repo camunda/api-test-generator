@@ -1,0 +1,23 @@
+{
+  "global": {
+    "worker": "test-worker",
+    "timeout": 60000,
+    "maxJobsToActivate": 1,
+    "requestTimeout": 10000,
+    "fetchVariable": ["*"],
+    "tenantIds": null
+  },
+  "operations": {
+    "activateJobs": {
+      "worker": "pw-generator",
+      "timeout": 45000,
+      "maxJobsToActivate": 1,
+      "requestTimeout": 15000,
+      "fetchVariable": [],
+      "negativeEmpty": {
+        "type": "__NON_EXISTENT_JOB_TYPE__",
+        "requestTimeout": 250
+      }
+    }
+  }
+}

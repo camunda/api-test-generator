@@ -1,0 +1,9 @@
+{
+  "rules": [
+    { "match": "tenantIdVar", "template": "<default>" },
+    { "match": "/(correlation)/i", "template": "corr-${runId}-${counter:corr}-${rand:4}" },
+    { "match": "/(key|id)$/i", "template": "${var}-${runId}-${counter:id}-${rand:6}" },
+    { "match": "/name/i", "template": "${var}-${rand:8}" },
+    { "match": "*", "template": "${var}-${rand:6}" }
+  ]
+}

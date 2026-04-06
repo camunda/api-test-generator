@@ -1,0 +1,25 @@
+{
+  "name": "semantic-graph-extractor",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "extract-graph": "npm run build && node dist/index.js",
+    "analyze-graph": "npm run build && node dist/analyze.js",
+    "validate-graph": "npm run build && node dist/validate.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "description": "",
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

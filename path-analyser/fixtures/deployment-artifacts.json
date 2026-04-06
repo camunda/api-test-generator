@@ -1,0 +1,25 @@
+{
+  "artifacts": [
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/service-task.bpmn",
+      "description": "BPMN process with a service task and zeebe:taskDefinition type sampleJobType",
+      "parameters": { "jobType": "sampleJobType" }
+    },
+    {
+      "kind": "form",
+      "path": "forms/simple.form",
+      "description": "Minimal Camunda form JSON"
+    },
+    {
+      "kind": "dmnDecision",
+      "path": "dmn/decision.dmn",
+      "description": "Single decision table"
+    },
+    {
+      "kind": "dmnDrd",
+      "path": "dmn/drd.dmn",
+      "description": "Simple DRD with two decisions"
+    }
+  ]
+}
