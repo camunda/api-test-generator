@@ -85,7 +85,7 @@ export interface EndpointScenario {
   filtersDetail?: FilterDetail[];      // structured filter dimension info
   // Response shape (for future assertion synthesis)
   responseShapeSemantics?: string[];   // semantic types inferred from response fields
-  responseShapeFields?: { name: string; type: string; semantic?: string; required?: boolean; }[];
+  responseShapeFields?: { name: string; type: string; semantic?: string; required?: boolean; nullable?: boolean; }[];
   // Nested slice field shapes keyed by slice name for deep assertions
   responseNestedSlices?: Record<string, { name: string; type: string; required?: boolean }[]>;
   // Nested array item field shapes keyed by top-level array field name (e.g., jobs -> fields on jobs[0])

@@ -43,11 +43,11 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
               if (itemObj && (itemObj.type === 'object' || itemObj.$ref)) {
                 const o = resolveSchema(itemObj, components);
                 const innerReq = new Set(o.required || []);
-                const inner: { name: string; type: string; required?: boolean }[] = [];
+                const inner: { name: string; type: string; required?: boolean; nullable?: boolean }[] = [];
                 for (const [iname, isch] of Object.entries<any>(o.properties || {})) {
                   const ir = resolveSchema(isch, components);
                   const t = effectiveType(ir, components);
-                  inner.push({ name: iname, type: t, required: innerReq.has(iname) });
+                  inner.push({ name: iname, type: t, required: innerReq.has(iname), nullable: ir.nullable === true || isch.nullable === true });
                 }
                 if (inner.length) nestedItems[fname] = inner;
               }
@@ -70,11 +70,11 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
               if (sResolved?.type === 'object' || sResolved?.$ref) {
                 const sObj = resolveSchema(sResolved, components);
                 const req = new Set(sObj.required || []);
-                const inner: { name: string; type: string; required?: boolean }[] = [];
+                const inner: { name: string; type: string; required?: boolean; nullable?: boolean }[] = [];
                 for (const [fname, fsch] of Object.entries<any>(sObj.properties || {})) {
                   const r = resolveSchema(fsch, components);
                   const type = effectiveType(r, components);
-                  inner.push({ name: fname, type, required: req.has(fname) });
+                  inner.push({ name: fname, type, required: req.has(fname), nullable: r.nullable === true || fsch.nullable === true });
                 }
                 if (inner.length) nestedSlices[slice] = inner;
               }
@@ -113,17 +113,18 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
 
 function flattenTopLevelFields(schemaRef: any, components: Record<string, any>) {
   const resolved = resolveSchema(schemaRef, components);
-  const out: { name: string; type: string; required?: boolean; objectRef?: string }[] = [];
+  const out: { name: string; type: string; required?: boolean; nullable?: boolean; objectRef?: string }[] = [];
   if (resolved?.type === 'object' && resolved.properties) {
     const req = new Set(resolved.required || []);
     for (const [fname, fsch] of Object.entries<any>(resolved.properties)) {
       const r = resolveSchema(fsch, components);
       const type = effectiveType(r, components);
+      const nullable = r.nullable === true || fsch.nullable === true;
       if (type === 'array' && r.items) {
         const it = resolveSchema(r.items, components);
-        out.push({ name: fname, type: 'array', required: req.has(fname), objectRef: it.$ref ? refName(it.$ref) : undefined });
+        out.push({ name: fname, type: 'array', required: req.has(fname), nullable, objectRef: it.$ref ? refName(it.$ref) : undefined });
       } else {
-        out.push({ name: fname, type, required: req.has(fname), objectRef: r.$ref ? refName(r.$ref) : undefined });
+        out.push({ name: fname, type, required: req.has(fname), nullable, objectRef: r.$ref ? refName(r.$ref) : undefined });
       }
     }
   }

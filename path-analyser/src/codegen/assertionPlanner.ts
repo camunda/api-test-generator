@@ -7,6 +7,7 @@ export interface AssertionSpec {
   path: string;            // json path (dot/bracket) starting under the root json object
   required: boolean;       // whether to assert presence unconditionally
   type?: SimpleType;       // runtime type check
+  nullable?: boolean;      // whether the field is nullable per OpenAPI spec
 }
 
 export interface FinalStepAssertionPlan {
@@ -20,7 +21,8 @@ export function planFinalStepAssertions(s: EndpointScenario, step: RequestStep):
   const topLevel: AssertionSpec[] = (s.responseShapeFields || []).map(f => ({
     path: f.name,
     required: !!f.required,
-    type: (f as any).type as SimpleType || 'unknown'
+    type: (f as any).type as SimpleType || 'unknown',
+    nullable: !!(f as any).nullable
   }));
 
   // Determine expected slices (prefer domain-provided, fallback to heuristic)
@@ -40,20 +42,21 @@ export function planFinalStepAssertions(s: EndpointScenario, step: RequestStep):
   }
 
   const bySlice: Record<string, AssertionSpec[]> = {};
-  const nested = (s as any).responseNestedSlices as Record<string, { name: string; type: string; required?: boolean }[]> | undefined;
+  const nested = (s as any).responseNestedSlices as Record<string, { name: string; type: string; required?: boolean; nullable?: boolean }[]> | undefined;
   if (nested) {
     for (const slice of expected) {
       const defs = nested[slice] || [];
       bySlice[slice] = defs.map(d => ({
         path: `deployments[0].${slice}.${d.name}`,
         required: !!d.required,
-        type: (d as any).type as SimpleType || 'unknown'
+        type: (d as any).type as SimpleType || 'unknown',
+        nullable: !!(d as any).nullable
       }));
     }
   }
   // Array item field plans
   const byArray: Record<string, AssertionSpec[]> = {};
-  const arrSpec = (s as any).responseArrayItemFields as Record<string, { name: string; type: string; required?: boolean }[]> | undefined;
+  const arrSpec = (s as any).responseArrayItemFields as Record<string, { name: string; type: string; required?: boolean; nullable?: boolean }[]> | undefined;
   const arrayNames: string[] = [];
   if (arrSpec) {
     for (const [arrName, defs] of Object.entries(arrSpec)) {
@@ -61,7 +64,8 @@ export function planFinalStepAssertions(s: EndpointScenario, step: RequestStep):
       byArray[arrName] = defs.map(d => ({
         path: `${arrName}[0].${d.name}`,
         required: !!d.required,
-        type: (d as any).type as SimpleType || 'unknown'
+        type: (d as any).type as SimpleType || 'unknown',
+        nullable: !!(d as any).nullable
       }));
     }
   }

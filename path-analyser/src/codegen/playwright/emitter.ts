@@ -295,19 +295,26 @@ function renderScenarioTest(s: EndpointScenario): string {
         const t = f.type || 'unknown';
         if (f.required) {
           body.push(`    expect(${acc}).not.toBeUndefined();`);
-          body.push(`    expect(${acc}).not.toBeNull();`);
-          // If this is an empty-result scenario and the field is an array, assert emptiness
-          if (isEmptyScenario && t === 'array') {
-            body.push(...emitTypeAssertLines(acc, t));
-            body.push(`    expect(Array.isArray(${acc})).toBeTruthy();`);
-            body.push(`    expect(${acc}.length).toBe(0);`);
-          } else {
-            body.push(...emitTypeAssertLines(acc, t));
-            // For non-empty scenarios and arrays, assert at least one item
-            if (!isEmptyScenario && t === 'array') {
+          if (!f.nullable) {
+            body.push(`    expect(${acc}).not.toBeNull();`);
+            // If this is an empty-result scenario and the field is an array, assert emptiness
+            if (isEmptyScenario && t === 'array') {
+              body.push(...emitTypeAssertLines(acc, t));
               body.push(`    expect(Array.isArray(${acc})).toBeTruthy();`);
-              body.push(`    expect(${acc}.length).toBeGreaterThan(0);`);
+              body.push(`    expect(${acc}.length).toBe(0);`);
+            } else {
+              body.push(...emitTypeAssertLines(acc, t));
+              // For non-empty scenarios and arrays, assert at least one item
+              if (!isEmptyScenario && t === 'array') {
+                body.push(`    expect(Array.isArray(${acc})).toBeTruthy();`);
+                body.push(`    expect(${acc}.length).toBeGreaterThan(0);`);
+              }
             }
+          } else {
+            // Nullable field: type assertions only when value is non-null
+            body.push(`    if (${acc} !== null) {`);
+            body.push(...emitTypeAssertLines(acc, t, '      '));
+            body.push(`    }`);
           }
         } else {
           body.push(`    if (${acc} !== undefined && ${acc} !== null) {`);
@@ -332,8 +339,14 @@ function renderScenarioTest(s: EndpointScenario): string {
             if (!f.required) continue;
             const acc = 'json' + toPathAccessor(f.path);
             body.push(`    expect(${acc}).not.toBeUndefined();`);
-            body.push(`    expect(${acc}).not.toBeNull();`);
-            body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
+            if (!f.nullable) {
+              body.push(`    expect(${acc}).not.toBeNull();`);
+              body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
+            } else {
+              body.push(`    if (${acc} !== null) {`);
+              body.push(...emitTypeAssertLines(acc, f.type || 'unknown', '      '));
+              body.push(`    }`);
+            }
           }
         }
       }
@@ -349,8 +362,14 @@ function renderScenarioTest(s: EndpointScenario): string {
             if (!f.required) continue;
             const acc = 'json' + toPathAccessor(f.path);
             body.push(`    expect(${acc}).not.toBeUndefined();`);
-            body.push(`    expect(${acc}).not.toBeNull();`);
-            body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
+            if (!f.nullable) {
+              body.push(`    expect(${acc}).not.toBeNull();`);
+              body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
+            } else {
+              body.push(`    if (${acc} !== null) {`);
+              body.push(...emitTypeAssertLines(acc, f.type || 'unknown', '      '));
+              body.push(`    }`);
+            }
           }
         }
       }

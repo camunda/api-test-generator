@@ -77,7 +77,7 @@ async function main() {
   if (resp) {
       for (const s of collection.scenarios) {
         s.responseShapeSemantics = resp.producedSemantics || undefined;
-    s.responseShapeFields = resp.fields.map(f => ({ name: f.name, type: f.type, semantic: (f as any).semantic, required: f.required }));
+    s.responseShapeFields = resp.fields.map(f => ({ name: f.name, type: f.type, semantic: (f as any).semantic, required: f.required, nullable: (f as any).nullable }));
         if ((resp as any).nestedSlices) s.responseNestedSlices = resp.nestedSlices as any;
     if ((resp as any).nestedItems) (s as any).responseArrayItemFields = (resp as any).nestedItems;
     s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
@@ -247,7 +247,7 @@ async function main() {
           s.operations = chainSource.operations.map(o => ({ ...o }));
         }
   s.responseShapeSemantics = resp.producedSemantics || undefined;
-  s.responseShapeFields = resp.fields.map(f => ({ name: f.name, type: f.type, semantic: (f as any).semantic, required: f.required }));
+  s.responseShapeFields = resp.fields.map(f => ({ name: f.name, type: f.type, semantic: (f as any).semantic, required: f.required, nullable: (f as any).nullable }));
   if ((resp as any).nestedSlices) s.responseNestedSlices = resp.nestedSlices as any;
   if ((resp as any).nestedItems) (s as any).responseArrayItemFields = (resp as any).nestedItems;
   s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
