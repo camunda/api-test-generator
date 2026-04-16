@@ -119,8 +119,8 @@ async function main() {
               // schemaMissingSuppress lists required fields (including endpoint-specific cluster augmentations)
               // we intentionally DROP. Synthesis will skip or remove suppressed fields in one final pass so
               // emitter stays generic.
-              clone.name = `${orig.name} [include=${combo.join(',') || '∅'}]`;
-              clone.description = `${orig.description || ''} Include only: ${combo.join(',') || '∅'}.`;
+              clone.name = `${orig.name} [include=${combo.join(',') || '\u2205'}]`;
+              clone.description = `${orig.description || ''} Include only: ${combo.join(',') || '\u2205'}.`;
               expanded.push(clone);
               budget--;
               if (budget <= 0) break;
