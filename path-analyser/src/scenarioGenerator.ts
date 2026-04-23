@@ -134,10 +134,10 @@ export function generateScenariosForEndpoint(
       if (!seqOpsValid) continue;
       const produced = new Set<string>();
       for (const opId of seq.operations) {
-        graph.operations[opId].produces.forEach((s) => produced.add(s));
+        graph.operations[opId].produces.forEach((s) => { produced.add(s); });
       }
       // Include declared produces on sequence definition (acts as union / override)
-      seq.produces.forEach((s) => produced.add(s));
+      seq.produces.forEach((s) => { produced.add(s); });
       // Only enqueue if it helps satisfy at least one needed semantic type (or endpoint has none -> still useful as canonical setup)
       const helps = [...initialNeeded].some((s) => produced.has(s));
       if (helps || initialNeeded.size === 0) {
@@ -162,7 +162,7 @@ export function generateScenariosForEndpoint(
         // Emit explicit bootstrap scenario if it alone satisfies all required semantic types
         if (bootstrapFull) {
           const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => producedSemanticTypes.add(s));
+          endpoint.produces.forEach((s) => { producedSemanticTypes.add(s); });
           const opRefs = [
             ...seq.operations.map((id) => toRef(graph.operations[id])),
             toRef(endpoint),
@@ -182,7 +182,7 @@ export function generateScenariosForEndpoint(
         } else if (initialNeeded.size === 0) {
           // For endpoints with no requirements we still include a bootstrap variant for reference
           const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => producedSemanticTypes.add(s));
+          endpoint.produces.forEach((s) => { producedSemanticTypes.add(s); });
           const opRefs = [
             ...seq.operations.map((id) => toRef(graph.operations[id])),
             toRef(endpoint),
@@ -226,7 +226,7 @@ export function generateScenariosForEndpoint(
         toRef(endpoint),
       ];
       const producedSemanticTypes = new Set<string>([...state.produced]);
-      endpoint.produces.forEach((s) => producedSemanticTypes.add(s));
+      endpoint.produces.forEach((s) => { producedSemanticTypes.add(s); });
       const key = state.ops.join('->');
       if (!completed.has(key)) {
         const eventuallyConsistentOps = opRefs.filter((o) => o.eventuallyConsistent).length;
@@ -302,11 +302,11 @@ export function generateScenariosForEndpoint(
       );
       const domainCandidates = new Set<string>();
       for (const d of missingDomainAll)
-        (graph.domainProducers?.[d] || []).forEach((opId) => domainCandidates.add(opId));
+        (graph.domainProducers?.[d] || []).forEach((opId) => { domainCandidates.add(opId); });
       for (const group of unmetDisjunctions) {
         // union producers for each member
         for (const member of group)
-          (graph.domainProducers?.[member] || []).forEach((opId) => domainCandidates.add(opId));
+          (graph.domainProducers?.[member] || []).forEach((opId) => { domainCandidates.add(opId); });
       }
       // Expand domain producers similar to semantic producers
       for (const producerOpId of domainCandidates) {
@@ -363,17 +363,17 @@ export function generateScenariosForEndpoint(
         }
         if (newlyAdds.size === 0) continue;
         const newProduced = new Set(state.produced);
-        producerNode.produces.forEach((s) => newProduced.add(s));
+        producerNode.produces.forEach((s) => { newProduced.add(s); });
         const newNeeded = new Set(state.needed);
-        producerNode.requires.required.forEach((s) => newNeeded.add(s));
-        producerNode.requires.optional.forEach((s) => newNeeded.add(s));
+        producerNode.requires.required.forEach((s) => { newNeeded.add(s); });
+        producerNode.requires.optional.forEach((s) => { newNeeded.add(s); });
         const newOps = [...state.ops, producerOpId];
         const newProductionMap = new Map(state.productionMap);
         producerNode.produces.forEach((s) => {
           if (!newProductionMap.has(s)) newProductionMap.set(s, producerOpId);
         });
         const newDomainStates = new Set(state.domainStates);
-        newlyAdds.forEach((d) => newDomainStates.add(d));
+        newlyAdds.forEach((d) => { newDomainStates.add(d); });
         const sig = signature(newOps, newProduced, newNeeded, nextCycle);
         if (seen.has(sig)) continue;
         seen.add(sig);
@@ -442,9 +442,9 @@ export function generateScenariosForEndpoint(
       if (producerOpId === 'createDeployment') {
         applyArtifactRuleSelection(graph, producerNode, state, newProduced, newDomainStates);
       } else {
-        producerNode.produces.forEach((s) => newProduced.add(s));
-        producerNode.domainProduces?.forEach((d) => newDomainStates.add(d));
-        producerNode.domainImplicitAdds?.forEach((d) => newDomainStates.add(d));
+        producerNode.produces.forEach((s) => { newProduced.add(s); });
+        producerNode.domainProduces?.forEach((d) => { newDomainStates.add(d); });
+        producerNode.domainImplicitAdds?.forEach((d) => { newDomainStates.add(d); });
       }
       // Enforce domain prerequisite chains for any newly added domain states after semantic expansion
       const domainAddedNow = [...newDomainStates].filter((d) => !state.domainStates.has(d));
@@ -475,8 +475,8 @@ export function generateScenariosForEndpoint(
         if (prereqFailed) continue; // skip expansion; prerequisites not yet satisfied
       }
       const newNeeded = new Set(state.needed);
-      producerNode.requires.required.forEach((s) => newNeeded.add(s));
-      producerNode.requires.optional.forEach((s) => newNeeded.add(s));
+      producerNode.requires.required.forEach((s) => { newNeeded.add(s); });
+      producerNode.requires.optional.forEach((s) => { newNeeded.add(s); });
       const newOps = [...state.ops, producerOpId];
       const newProductionMap = new Map(state.productionMap);
       producerNode.produces.forEach((s) => {
@@ -583,12 +583,12 @@ function applyArtifactRuleSelection(
 ): void {
   const domain = graph.domain;
   if (!domain?.operationArtifactRules) {
-    producerNode.produces.forEach((s: string) => newProduced.add(s));
+    producerNode.produces.forEach((s: string) => { newProduced.add(s); });
     return;
   }
   const ruleSpec = domain.operationArtifactRules.createDeployment;
   if (!ruleSpec) {
-    producerNode.produces.forEach((s: string) => newProduced.add(s));
+    producerNode.produces.forEach((s: string) => { newProduced.add(s); });
     return;
   }
 
@@ -603,9 +603,9 @@ function applyArtifactRuleSelection(
       const preferred = rules.find((r) => r.artifactKind === 'bpmnProcess') || rules[0];
       if (preferred) {
         const semantics = enumerateRuleSemantics(preferred, graph);
-        semantics.forEach((s) => newProduced.add(s));
+        semantics.forEach((s) => { newProduced.add(s); });
         const states = enumerateRuleStates(preferred, graph);
-        states.forEach((st) => newDomainStates.add(st));
+        states.forEach((st) => { newDomainStates.add(st); });
         ensureArtifactBindings(preferred, graph, state, semantics, states);
         if (preferred.id) applied.push(preferred.id);
         else applied.push(preferred.artifactKind);
@@ -636,7 +636,7 @@ function applyArtifactRuleSelection(
           remaining.delete(s);
         });
         const states = enumerateRuleStates(best, graph);
-        states.forEach((st) => newDomainStates.add(st));
+        states.forEach((st) => { newDomainStates.add(st); });
         if (best.id) applied.push(best.id);
         else applied.push(best.artifactKind);
         ensureArtifactBindings(best, graph, state, adds, states);
@@ -665,12 +665,12 @@ function applyArtifactRuleSelection(
       remaining.delete(s);
     });
     const states = enumerateRuleStates(rule, graph);
-    states.forEach((st) => newDomainStates.add(st));
+    states.forEach((st) => { newDomainStates.add(st); });
     ensureArtifactBindings(rule, graph, state, adds, states);
     if (rule.id) appliedIds.push(rule.id);
     if (remaining.size === 0) break;
   }
-  if (appliedIds.length === 0) producerNode.produces.forEach((s: string) => newProduced.add(s));
+  if (appliedIds.length === 0) producerNode.produces.forEach((s: string) => { newProduced.add(s); });
   if (appliedIds.length) (state.artifactsApplied ||= []).push(...appliedIds);
 }
 
