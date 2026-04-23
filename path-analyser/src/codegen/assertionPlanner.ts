@@ -21,8 +21,8 @@ export function planFinalStepAssertions(s: EndpointScenario, step: RequestStep):
   const topLevel: AssertionSpec[] = (s.responseShapeFields || []).map(f => ({
     path: f.name,
     required: !!f.required,
-    type: (f as any).type as SimpleType || 'unknown',
-    nullable: !!(f as any).nullable
+    type: (f.type as SimpleType) || 'unknown',
+    nullable: !!f.nullable
   }));
 
   // Determine expected slices (prefer domain-provided, fallback to heuristic)
@@ -49,8 +49,8 @@ export function planFinalStepAssertions(s: EndpointScenario, step: RequestStep):
       bySlice[slice] = defs.map(d => ({
         path: `deployments[0].${slice}.${d.name}`,
         required: !!d.required,
-        type: (d as any).type as SimpleType || 'unknown',
-        nullable: !!(d as any).nullable
+        type: (d.type as SimpleType) || 'unknown',
+        nullable: !!d.nullable
       }));
     }
   }
@@ -64,8 +64,8 @@ export function planFinalStepAssertions(s: EndpointScenario, step: RequestStep):
       byArray[arrName] = defs.map(d => ({
         path: `${arrName}[0].${d.name}`,
         required: !!d.required,
-        type: (d as any).type as SimpleType || 'unknown',
-        nullable: !!(d as any).nullable
+        type: (d.type as SimpleType) || 'unknown',
+        nullable: !!d.nullable
       }));
     }
   }

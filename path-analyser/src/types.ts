@@ -164,6 +164,7 @@ export interface ResponseShapeField {
   name: string;
   type: string; // string|integer|boolean|object|array|unknown
   required?: boolean;
+  nullable?: boolean;   // whether the field is nullable per OpenAPI spec
   semantic?: string; // mapped semantic type if recognized
   elementType?: string; // for arrays
   objectRef?: string;   // referenced schema name

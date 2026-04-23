@@ -311,9 +311,18 @@ function renderScenarioTest(s: EndpointScenario): string {
               }
             }
           } else {
-            // Nullable field: type assertions only when value is non-null
+            // Nullable field: type assertions only when value is non-null.
+            // Mirror non-nullable array length assertions inside the guard so
+            // nullability doesn't silently weaken assertion strength when the array is present.
             body.push(`    if (${acc} !== null) {`);
             body.push(...emitTypeAssertLines(acc, t, '      '));
+            if (t === 'array') {
+              if (isEmptyScenario) {
+                body.push(`      expect(${acc}.length).toBe(0);`);
+              } else {
+                body.push(`      expect(${acc}.length).toBeGreaterThan(0);`);
+              }
+            }
             body.push(`    }`);
           }
         } else {
