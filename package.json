@@ -28,7 +28,7 @@
     "pipeline": "npm run fetch-spec && npm run testsuite:generate"
   },
   "devDependencies": {
-    "camunda-schema-bundler": "^1.6.1"
+    "camunda-schema-bundler": "^2.0.0"
   },
   "engines": {
     "node": ">=22.0.0"
