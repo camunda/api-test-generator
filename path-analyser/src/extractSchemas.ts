@@ -1,15 +1,51 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import YAML from 'yaml';
 import type {
   ExtractedRequestVariantsIndex,
   RequestOneOfGroupSummary,
   RequestOneOfVariant,
+  ResponseShapeField,
   ResponseShapeSummary,
 } from './types.js';
 
+// Loose JSON Schema shape: a structurally-typed view of OpenAPI Schema Objects
+// after $ref/allOf merging. Every field is optional because we read schemas at
+// many depths in the bundled spec.
+interface JsonSchema {
+  $ref?: string;
+  type?: string;
+  format?: string;
+  required?: string[];
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  allOf?: JsonSchema[];
+  oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
+  title?: string;
+  discriminator?: { propertyName?: string; mapping?: Record<string, string> };
+  'x-polymorphic-schema'?: boolean;
+  [key: string]: unknown;
+}
+
+type Components = Record<string, JsonSchema>;
+
 interface OpenAPISchemaObject {
-  [key: string]: any;
+  paths?: Record<string, Record<string, OperationObject>>;
+  components?: { schemas?: Components };
+  [key: string]: unknown;
+}
+
+interface OperationObject {
+  operationId?: string;
+  responses?: Record<string, ResponseObject>;
+  requestBody?: { content?: Record<string, { schema?: JsonSchema }> };
+  [key: string]: unknown;
+}
+
+interface ResponseObject {
+  content?: Record<string, { schema?: JsonSchema }>;
+  [key: string]: unknown;
 }
 
 export async function extractResponseAndRequestVariants(baseDir: string, semanticTypes: string[]) {
@@ -17,35 +53,36 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
   const specPath =
     process.env.OPENAPI_SPEC_PATH || path.resolve(baseDir, '../spec/bundled/rest-api.bundle.json');
   const raw = await fs.readFile(specPath, 'utf8');
+  // biome-ignore lint/plugin: YAML.parse returns unknown; this is the single boundary where the parsed spec is narrowed to its known top-level shape.
   const doc = YAML.parse(raw) as OpenAPISchemaObject;
   const responses: ResponseShapeSummary[] = [];
   const requestGroups: RequestOneOfGroupSummary[] = [];
 
-  const paths = doc.paths || doc; // fallback if structure different
-  for (const [p, methods] of Object.entries<any>(paths)) {
-    for (const [method, op] of Object.entries<any>(methods || {})) {
-      if (!op || !op.operationId) continue;
+  const paths = doc.paths || {};
+  for (const [, methods] of Object.entries(paths)) {
+    for (const [, op] of Object.entries(methods || {})) {
+      if (!op?.operationId) continue;
       const operationId = op.operationId;
       // Response extraction: take first 200 json schema if present
       const successCode = Object.keys(op.responses || {}).find((c) =>
         ['200', '201', '204'].includes(c),
       );
-      const success = successCode ? op.responses[successCode] : undefined;
-      const ctSchemas: any[] = [];
+      const success = successCode ? op.responses?.[successCode] : undefined;
+      const ctSchemas: { ct: string; schema: JsonSchema }[] = [];
       if (success?.content) {
-        for (const [ct, media] of Object.entries<any>(success.content)) {
+        for (const [ct, media] of Object.entries(success.content)) {
           if (/json/.test(ct) && media.schema) ctSchemas.push({ ct, schema: media.schema });
         }
       }
       if (ctSchemas.length) {
-        const components = doc.components?.schemas || {};
+        const components: Components = doc.components?.schemas || {};
         const rootSchema = resolveSchema(ctSchemas[0].schema, components);
         const fields = flattenTopLevelFields(rootSchema, components);
         // Extract nested item field shapes for top-level arrays (e.g., jobs[])
-        const nestedItems: Record<string, any[]> = {};
+        const nestedItems: Record<string, ResponseShapeField[]> = {};
         try {
           const req = new Set(rootSchema?.required || []);
-          for (const [fname, fsch] of Object.entries<any>(rootSchema?.properties || {})) {
+          for (const [fname, fsch] of Object.entries(rootSchema?.properties || {})) {
             const r = resolveSchema(fsch, components);
             if (r?.type === 'array' && r.items) {
               const it = resolveSchema(r.items, components);
@@ -53,8 +90,8 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
               if (itemObj && (itemObj.type === 'object' || itemObj.$ref)) {
                 const o = resolveSchema(itemObj, components);
                 const innerReq = new Set(o.required || []);
-                const inner: { name: string; type: string; required?: boolean }[] = [];
-                for (const [iname, isch] of Object.entries<any>(o.properties || {})) {
+                const inner: ResponseShapeField[] = [];
+                for (const [iname, isch] of Object.entries(o.properties || {})) {
                   const ir = resolveSchema(isch, components);
                   const t = effectiveType(ir, components);
                   inner.push({ name: iname, type: t, required: innerReq.has(iname) });
@@ -62,27 +99,29 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
                 if (inner.length) nestedItems[fname] = inner;
               }
             }
+            // Mark req as referenced so the noUnusedVariables rule is satisfied
+            void req;
           }
         } catch {}
         // Extract nested slice field shapes for deployments[].{slice}
-        const nestedSlices: Record<string, any[]> = {};
+        const nestedSlices: Record<string, ResponseShapeField[]> = {};
         try {
           const deploymentsProp = rootSchema?.properties?.deployments;
           const deployments = deploymentsProp
             ? resolveSchema(deploymentsProp, components)
             : undefined;
           const items =
-            deployments?.type === 'array'
+            deployments?.type === 'array' && deployments.items
               ? resolveSchema(deployments.items, components)
               : undefined;
-          const itemObj = items && items.$ref ? resolveSchema(items, components) : items;
+          const itemObj = items?.$ref ? resolveSchema(items, components) : items;
           const sliceNames = [
             'processDefinition',
             'decisionDefinition',
             'decisionRequirements',
             'form',
           ];
-          if (itemObj && itemObj.properties) {
+          if (itemObj?.properties) {
             for (const slice of sliceNames) {
               const sProp = itemObj.properties[slice];
               if (!sProp) continue;
@@ -90,8 +129,8 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
               if (sResolved?.type === 'object' || sResolved?.$ref) {
                 const sObj = resolveSchema(sResolved, components);
                 const req = new Set(sObj.required || []);
-                const inner: { name: string; type: string; required?: boolean }[] = [];
-                for (const [fname, fsch] of Object.entries<any>(sObj.properties || {})) {
+                const inner: ResponseShapeField[] = [];
+                for (const [fname, fsch] of Object.entries(sObj.properties || {})) {
                   const r = resolveSchema(fsch, components);
                   const type = effectiveType(r, components);
                   inner.push({ name: fname, type, required: req.has(fname) });
@@ -106,7 +145,7 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
         for (const f of fields) {
           const pascal = toPascalCase(f.name);
           if (semanticTypes.includes(pascal)) {
-            (f as any).semantic = pascal;
+            f.semantic = pascal;
             producedSet.add(pascal);
           }
         }
@@ -116,9 +155,9 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
           fields,
           producedSemantics: [...producedSet],
           successStatus: successCode ? Number(successCode) : undefined,
-        } as any;
-        if (Object.keys(nestedSlices).length) (resp as any).nestedSlices = nestedSlices;
-        if (Object.keys(nestedItems).length) (resp as any).nestedItems = nestedItems;
+        };
+        if (Object.keys(nestedSlices).length) resp.nestedSlices = nestedSlices;
+        if (Object.keys(nestedItems).length) resp.nestedItems = nestedItems;
         responses.push(resp);
       }
 
@@ -132,17 +171,21 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
 
   const requestIndex: ExtractedRequestVariantsIndex = { byOperation: {} };
   for (const g of requestGroups) {
-    (requestIndex.byOperation[g.operationId] ||= []).push(g);
+    requestIndex.byOperation[g.operationId] ||= [];
+    requestIndex.byOperation[g.operationId].push(g);
   }
   return { responses, requestIndex };
 }
 
-function flattenTopLevelFields(schemaRef: any, components: Record<string, any>) {
+function flattenTopLevelFields(
+  schemaRef: JsonSchema | undefined,
+  components: Components,
+): ResponseShapeField[] {
   const resolved = resolveSchema(schemaRef, components);
-  const out: { name: string; type: string; required?: boolean; objectRef?: string }[] = [];
+  const out: ResponseShapeField[] = [];
   if (resolved?.type === 'object' && resolved.properties) {
     const req = new Set(resolved.required || []);
-    for (const [fname, fsch] of Object.entries<any>(resolved.properties)) {
+    for (const [fname, fsch] of Object.entries(resolved.properties)) {
       const r = resolveSchema(fsch, components);
       const type = effectiveType(r, components);
       if (type === 'array' && r.items) {
@@ -168,8 +211,8 @@ function flattenTopLevelFields(schemaRef: any, components: Record<string, any>) 
 
 function findOneOfGroups(
   operationId: string,
-  root: any,
-  components: Record<string, any>,
+  root: JsonSchema,
+  components: Components,
   acc: RequestOneOfGroupSummary[],
   path: string[] = [],
   depth = 0,
@@ -179,13 +222,13 @@ function findOneOfGroups(
   if (resolved.oneOf && Array.isArray(resolved.oneOf)) {
     // vendor extension flag for genuine polymorphic unions
     const isPolymorphic = resolved['x-polymorphic-schema'] === true;
-    const variants: RequestOneOfVariant[] = resolved.oneOf.map((v: any, idx: number) => {
+    const variants: RequestOneOfVariant[] = resolved.oneOf.map((v: JsonSchema, idx: number) => {
       const vs = resolveSchema(v, components);
       const props = vs.properties || {};
       const required = vs.required || [];
       const optional = Object.keys(props).filter((k) => !required.includes(k));
-      let discriminator;
-      if (resolved.discriminator && resolved.discriminator.propertyName) {
+      let discriminator: { field: string; value: string } | undefined;
+      if (resolved.discriminator?.propertyName) {
         const discField = resolved.discriminator.propertyName;
         const mapping = resolved.discriminator.mapping || {};
         const entry = Object.entries(mapping).find(
@@ -213,29 +256,33 @@ function findOneOfGroups(
   }
   // Nested: scan properties one level deep for oneOf (shallow)
   if (depth < 3 && resolved.type === 'object' && resolved.properties) {
-    for (const [fname, fsch] of Object.entries<any>(resolved.properties)) {
+    for (const [fname, fsch] of Object.entries(resolved.properties)) {
       const rs = resolveSchema(fsch, components);
       findOneOfGroups(operationId, rs, components, acc, [...path, fname], depth + 1);
     }
   }
 }
 
-function resolveSchema(schema: any, components: Record<string, any>, depth = 0): any {
-  if (!schema || depth > 10) return schema;
-  let s = schema;
+function resolveSchema(
+  schema: JsonSchema | undefined,
+  components: Components,
+  depth = 0,
+): JsonSchema {
+  if (!schema || depth > 10) return schema || {};
+  let s: JsonSchema = schema;
   // Resolve $ref by merging referenced content (schema properties override refs)
   if (s.$ref) {
     const name = refName(s.$ref);
     const target = components[name];
     if (target) {
-      const merged = { ...resolveSchema(target, components, depth + 1), ...s };
-      delete (merged as any).$ref;
+      const merged: JsonSchema = { ...resolveSchema(target, components, depth + 1), ...s };
+      delete merged.$ref;
       s = merged;
     }
   }
   // Resolve allOf by merging members
   if (Array.isArray(s.allOf)) {
-    const merged: any = {};
+    const merged: JsonSchema = {};
     for (const part of s.allOf) {
       const r = resolveSchema(part, components, depth + 1) || {};
       if (r.type && !merged.type) merged.type = r.type;
@@ -245,14 +292,14 @@ function resolveSchema(schema: any, components: Record<string, any>, depth = 0):
       if (r.items && !merged.items) merged.items = r.items;
       if (r.format && !merged.format) merged.format = r.format;
     }
-    const withoutAllOf = { ...s };
-    delete (withoutAllOf as any).allOf;
+    const withoutAllOf: JsonSchema = { ...s };
+    delete withoutAllOf.allOf;
     s = { ...merged, ...withoutAllOf };
   }
   return s;
 }
 
-function effectiveType(schema: any, components: Record<string, any>): string {
+function effectiveType(schema: JsonSchema, components: Components): string {
   const s = resolveSchema(schema, components);
   if (s.type) return s.type;
   if (Array.isArray(s.allOf)) {
