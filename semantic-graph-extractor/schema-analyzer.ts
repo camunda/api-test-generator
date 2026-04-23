@@ -1,15 +1,19 @@
 import {
+  type ConditionalIdempotencySpec,
   type FieldSchema,
   type MediaTypeObject,
   type OpenAPISpec,
   type Operation,
+  type OperationMetadata,
   type OperationObject,
   type OperationParameter,
   OperationType,
   type ParameterObject,
   type ParameterSchema,
   type ReferenceObject,
+  type RequestBodyObject,
   type ResponseObject,
+  type ResponsesObject,
   type Schema,
   type SemanticType,
   type SemanticTypeReference,
@@ -161,13 +165,15 @@ export class SchemaAnalyzer {
     const operationType = this.classifyOperation(operation, path, method);
 
     // Extract x-operation-kind (operation metadata). Accept object or array, prefer first object with kind field.
-    let opMeta: any | undefined;
-    const rawKind = (operation as any)['x-operation-kind'];
+    let opMeta: OperationMetadata | undefined;
+    const rawKind = operation['x-operation-kind'];
     if (rawKind) {
       if (Array.isArray(rawKind)) {
         opMeta = rawKind.find(
           (o) =>
-            o && typeof o === 'object' && (o.kind || o.duplicatePolicy || o.idempotencyMechanism),
+            !!o &&
+            typeof o === 'object' &&
+            (!!o.kind || !!o.duplicatePolicy || !!o.idempotencyMechanism),
         );
       } else if (typeof rawKind === 'object') {
         opMeta = rawKind;
@@ -186,8 +192,8 @@ export class SchemaAnalyzer {
       : undefined;
 
     // Extract conditional idempotency extension
-    const cond = (operation as any)['x-conditional-idempotency'];
-    let conditionalIdempotency: any | undefined;
+    const cond = operation['x-conditional-idempotency'];
+    let conditionalIdempotency: ConditionalIdempotencySpec | undefined;
     if (cond && typeof cond === 'object') {
       if (
         Array.isArray(cond.keyFields) &&
@@ -235,7 +241,7 @@ export class SchemaAnalyzer {
     for (const param of parameters) {
       if ('$ref' in param) {
         // Resolve reference
-        const resolvedParam = this.resolveReference(param.$ref, spec) as ParameterObject;
+        const resolvedParam = this.resolveReference<ParameterObject>(param.$ref, spec);
         if (resolvedParam) {
           result.push(this.extractParameter(resolvedParam, spec));
         }
@@ -255,12 +261,12 @@ export class SchemaAnalyzer {
     let provider: boolean | undefined;
     if (param.schema) {
       // If schema is a $ref, resolve and search for x-semantic-type
-      if ('$ref' in param.schema) {
-        const ref = (param.schema as any).$ref as string;
-        const resolved = this.resolveReference(ref, spec) as Schema | undefined;
+      if ('$ref' in param.schema && param.schema.$ref) {
+        const ref = param.schema.$ref;
+        const resolved = this.resolveReference<Schema>(ref, spec);
         if (resolved) {
           semanticType = this.findSemanticTypeInSchema(resolved);
-          if (semanticType && (resolved as any)['x-semantic-provider'] === true) {
+          if (semanticType && resolved['x-semantic-provider'] === true) {
             provider = true;
           }
           // Heuristic: if still not found, derive from last segment of ref if it looks like a semantic type (PascalCase + Key suffix)
@@ -274,8 +280,8 @@ export class SchemaAnalyzer {
         }
       } else if (!('$ref' in param.schema)) {
         // Direct inline schema: check x-semantic-type
-        semanticType = (param.schema as any)['x-semantic-type'];
-        if (semanticType && (param.schema as any)['x-semantic-provider'] === true) {
+        semanticType = param.schema['x-semantic-type'];
+        if (semanticType && param.schema['x-semantic-provider'] === true) {
           provider = true;
         }
       }
@@ -300,7 +306,7 @@ export class SchemaAnalyzer {
    * Extract semantic types from request body
    */
   private extractRequestBodySemanticTypes(
-    requestBody: any,
+    requestBody: RequestBodyObject | ReferenceObject | undefined,
     spec: OpenAPISpec,
   ): SemanticTypeReference[] {
     if (!requestBody) {
@@ -308,18 +314,18 @@ export class SchemaAnalyzer {
     }
 
     // Resolve reference if needed
-    if ('$ref' in requestBody) {
-      requestBody = this.resolveReference(requestBody.$ref, spec);
-    }
+    const resolvedBody: RequestBodyObject | null =
+      '$ref' in requestBody
+        ? this.resolveReference<RequestBodyObject>(requestBody.$ref, spec)
+        : requestBody;
 
     const semanticTypes: SemanticTypeReference[] = [];
 
     // Check content types (usually application/json)
-    if (requestBody.content) {
-      for (const [contentType, mediaType] of Object.entries(requestBody.content)) {
-        const typedMediaType = mediaType as MediaTypeObject;
-        if (typedMediaType.schema) {
-          this.extractSemanticTypesFromMediaType(typedMediaType, '', true, semanticTypes, spec);
+    if (resolvedBody?.content) {
+      for (const mediaType of Object.values(resolvedBody.content)) {
+        if (mediaType.schema) {
+          this.extractSemanticTypesFromMediaType(mediaType, '', true, semanticTypes, spec);
         }
       }
     }
@@ -331,30 +337,30 @@ export class SchemaAnalyzer {
    * Extract semantic types from response schemas
    */
   private extractResponseSemanticTypes(
-    responses: any,
+    responses: ResponsesObject,
     spec: OpenAPISpec,
   ): Record<string, SemanticTypeReference[]> {
     const result: Record<string, SemanticTypeReference[]> = {};
 
     for (const [statusCode, response] of Object.entries(responses)) {
-      let resolvedResponse = response;
+      let resolvedResponse: ResponseObject | null;
 
       // Resolve reference if needed
-      if (typeof response === 'object' && response !== null && '$ref' in response) {
-        resolvedResponse = this.resolveReference((response as ReferenceObject).$ref, spec);
+      if (response && typeof response === 'object' && '$ref' in response) {
+        resolvedResponse = this.resolveReference<ResponseObject>(response.$ref, spec);
         if (!resolvedResponse) {
           // Unresolvable $ref (e.g. path-local cross-reference) — skip this response code
           continue;
         }
+      } else {
+        resolvedResponse = response;
       }
 
       const semanticTypes: SemanticTypeReference[] = [];
 
       // Check response content
-      if ((resolvedResponse as ResponseObject).content) {
-        for (const [contentType, mediaType] of Object.entries(
-          (resolvedResponse as ResponseObject).content!,
-        )) {
+      if (resolvedResponse.content) {
+        for (const mediaType of Object.values(resolvedResponse.content)) {
           this.extractSemanticTypesFromMediaType(mediaType, '', false, semanticTypes, spec);
         }
       }
@@ -402,16 +408,18 @@ export class SchemaAnalyzer {
 
     // Resolve reference if needed
     if ('$ref' in schema && schema.$ref) {
-      resolvedSchema = this.resolveReference(schema.$ref, spec) as Schema;
-      if (!resolvedSchema) {
+      const ref = this.resolveReference<Schema>(schema.$ref, spec);
+      if (!ref) {
         return;
       }
+      resolvedSchema = ref;
     }
 
+    // biome-ignore lint/plugin: After the $ref branch above, the value is structurally a Schema (Schema's own $ref is optional).
     const actualSchema = resolvedSchema as Schema;
 
     // Detect semantic type (direct or via nested allOf chain)
-    const directSemanticType = (actualSchema as any)['x-semantic-type'];
+    const directSemanticType = actualSchema['x-semantic-type'];
     const nestedSemanticType = !directSemanticType
       ? this.findSemanticTypeInSchema(actualSchema)
       : undefined;
@@ -419,14 +427,14 @@ export class SchemaAnalyzer {
     // Fallback: if provider flag present but semantic type unresolved, attempt to resolve via allOf $ref chain
     if (
       !detectedSemanticType &&
-      (actualSchema as any)['x-semantic-provider'] === true &&
+      actualSchema['x-semantic-provider'] === true &&
       Array.isArray(actualSchema.allOf)
     ) {
       for (const sub of actualSchema.allOf) {
-        if (sub && typeof sub === 'object' && '$ref' in sub) {
-          const resolved = this.resolveReference((sub as any).$ref, spec) as Schema | undefined;
-          if (resolved && (resolved as any)['x-semantic-type']) {
-            detectedSemanticType = (resolved as any)['x-semantic-type'];
+        if (sub && typeof sub === 'object' && '$ref' in sub && sub.$ref) {
+          const resolved = this.resolveReference<Schema>(sub.$ref, spec);
+          if (resolved?.['x-semantic-type']) {
+            detectedSemanticType = resolved['x-semantic-type'];
             break;
           }
         }
@@ -434,7 +442,7 @@ export class SchemaAnalyzer {
     }
     if (detectedSemanticType) {
       const fieldSchema = this.extractFieldSchema(actualSchema);
-      const isProvider = (actualSchema as any)['x-semantic-provider'] === true;
+      const isProvider = actualSchema['x-semantic-provider'] === true;
       // Deduplicate by semanticType+fieldPath; upgrade provider flag if any occurrence marks it
       const existing = semanticTypes.find(
         (st) => st.semanticType === detectedSemanticType && st.fieldPath === fieldPath,
@@ -496,7 +504,7 @@ export class SchemaAnalyzer {
           spec,
         );
         // If wrapper is provider, propagate provider to matching semantic type entries just added
-        if ((actualSchema as any)['x-semantic-provider'] === true) {
+        if (actualSchema['x-semantic-provider'] === true) {
           semanticTypes
             .filter((st) => st.fieldPath === fieldPath)
             .forEach((st) => {
@@ -553,31 +561,40 @@ export class SchemaAnalyzer {
   }
 
   /**
-   * Resolve a JSON reference to its actual object
+   * Resolve a JSON reference to its actual object.
+   *
+   * The OpenAPI document is parsed as untyped JSON, so the resolved value's runtime
+   * shape is determined by where the $ref pointed. Callers supply the expected type
+   * via the type parameter, and the casts below are the single boundary where the
+   * unsafe narrowing happens.
    */
-  private resolveReference(ref: string, spec: OpenAPISpec): any {
+  private resolveReference<T = unknown>(ref: string, spec: OpenAPISpec): T | null {
     // Handle #/components/schemas/... references
     if (ref.startsWith('#/components/schemas/')) {
       const schemaName = ref.replace('#/components/schemas/', '');
-      return spec.components?.schemas?.[schemaName];
+      // biome-ignore lint/plugin: single boundary where untyped JSON is narrowed; caller declares expected schema type
+      return (spec.components?.schemas?.[schemaName] as T | undefined) ?? null;
     }
 
     // Handle #/components/responses/... references
     if (ref.startsWith('#/components/responses/')) {
       const responseName = ref.replace('#/components/responses/', '');
-      return spec.components?.responses?.[responseName];
+      // biome-ignore lint/plugin: single boundary where untyped JSON is narrowed; caller declares expected schema type
+      return (spec.components?.responses?.[responseName] as T | undefined) ?? null;
     }
 
     // Handle #/components/parameters/... references
     if (ref.startsWith('#/components/parameters/')) {
       const paramName = ref.replace('#/components/parameters/', '');
-      return spec.components?.parameters?.[paramName];
+      // biome-ignore lint/plugin: single boundary where untyped JSON is narrowed; caller declares expected schema type
+      return (spec.components?.parameters?.[paramName] as T | undefined) ?? null;
     }
 
     // Handle #/components/requestBodies/... references
     if (ref.startsWith('#/components/requestBodies/')) {
       const requestBodyName = ref.replace('#/components/requestBodies/', '');
-      return spec.components?.requestBodies?.[requestBodyName];
+      // biome-ignore lint/plugin: single boundary where untyped JSON is narrowed; caller declares expected schema type
+      return (spec.components?.requestBodies?.[requestBodyName] as T | undefined) ?? null;
     }
 
     console.warn(`Unable to resolve reference: ${ref}`);
@@ -624,7 +641,7 @@ export class SchemaAnalyzer {
   /**
    * Check if an operation is idempotent
    */
-  private isIdempotent(method: string, operation: OperationObject): boolean {
+  private isIdempotent(method: string, _operation: OperationObject): boolean {
     const idempotentMethods = ['GET', 'PUT', 'DELETE', 'HEAD', 'OPTIONS'];
     return idempotentMethods.includes(method.toUpperCase());
   }
@@ -632,7 +649,7 @@ export class SchemaAnalyzer {
   /**
    * Check if an operation is cacheable
    */
-  private isCacheable(method: string, operation: OperationObject): boolean {
+  private isCacheable(method: string, _operation: OperationObject): boolean {
     const cacheableMethods = ['GET', 'HEAD'];
     return cacheableMethods.includes(method.toUpperCase());
   }
@@ -646,12 +663,14 @@ export class SchemaAnalyzer {
   ): ParameterSchema {
     if (!schema) return { type: 'string' };
 
-    let resolvedSchema = schema;
+    let resolvedSchema: Schema | ReferenceObject = schema;
     if ('$ref' in schema && schema.$ref) {
-      resolvedSchema = this.resolveReference(schema.$ref, spec) as Schema;
-      if (!resolvedSchema) return { type: 'string' };
+      const resolved = this.resolveReference<Schema>(schema.$ref, spec);
+      if (!resolved) return { type: 'string' };
+      resolvedSchema = resolved;
     }
 
+    // biome-ignore lint/plugin: After the $ref branch above, the value is structurally a Schema (Schema's own $ref is optional).
     const actualSchema = resolvedSchema as Schema;
 
     return {
@@ -690,8 +709,8 @@ export class SchemaAnalyzer {
   /**
    * Extract examples from parameter objects
    */
-  private extractParameterExamples(param: ParameterObject): any[] {
-    const examples: any[] = [];
+  private extractParameterExamples(param: ParameterObject): unknown[] {
+    const examples: unknown[] = [];
 
     if (param.example !== undefined) {
       examples.push(param.example);
@@ -711,8 +730,8 @@ export class SchemaAnalyzer {
   /**
    * Extract examples from schema objects
    */
-  private extractSchemaExamples(schema: Schema): any[] {
-    const examples: any[] = [];
+  private extractSchemaExamples(schema: Schema): unknown[] {
+    const examples: unknown[] = [];
 
     if (schema.example !== undefined) {
       examples.push(schema.example);

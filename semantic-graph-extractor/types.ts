@@ -62,6 +62,8 @@ export interface OperationObject {
   security?: SecurityRequirementObject[];
   servers?: ServerObject[];
   'x-eventually-consistent'?: boolean;
+  'x-operation-kind'?: OperationMetadata | OperationMetadata[];
+  'x-conditional-idempotency'?: ConditionalIdempotencySpec;
 }
 
 export interface Schema {
@@ -72,6 +74,7 @@ export interface Schema {
   maxLength?: number;
   description?: string;
   'x-semantic-type'?: string;
+  'x-semantic-provider'?: boolean;
   allOf?: (Schema | ReferenceObject)[];
   oneOf?: (Schema | ReferenceObject)[];
   anyOf?: (Schema | ReferenceObject)[];
