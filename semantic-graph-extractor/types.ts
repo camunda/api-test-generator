@@ -13,7 +13,7 @@ export interface OpenAPISpec {
   servers?: Array<{
     url: string;
     description?: string;
-    variables?: Record<string, any>;
+    variables?: Record<string, unknown>;
   }>;
   paths: Record<string, PathItem>;
   components?: {
@@ -82,9 +82,9 @@ export interface Schema {
   required?: string[];
   items?: Schema | ReferenceObject;
   additionalProperties?: boolean | Schema | ReferenceObject;
-  enum?: any[];
-  example?: any;
-  examples?: any[];
+  enum?: unknown[];
+  example?: unknown;
+  examples?: unknown[];
   $ref?: string;
 }
 
@@ -101,7 +101,7 @@ export interface ResponsesObject {
 
 export interface MediaTypeObject {
   schema?: Schema | ReferenceObject;
-  example?: any;
+  example?: unknown;
   examples?: Record<string, ExampleObject | ReferenceObject>;
   encoding?: Record<string, EncodingObject>;
 }
@@ -117,7 +117,7 @@ export interface ParameterObject {
   explode?: boolean;
   allowReserved?: boolean;
   schema?: Schema | ReferenceObject;
-  example?: any;
+  example?: unknown;
   examples?: Record<string, ExampleObject | ReferenceObject>;
   content?: Record<string, MediaTypeObject>;
 }
@@ -165,7 +165,7 @@ export interface HeaderObject extends Omit<ParameterObject, 'name' | 'in'> {}
 export interface ExampleObject {
   summary?: string;
   description?: string;
-  value?: any;
+  value?: unknown;
   externalValue?: string;
 }
 
@@ -180,8 +180,8 @@ export interface EncodingObject {
 export interface LinkObject {
   operationRef?: string;
   operationId?: string;
-  parameters?: Record<string, any>;
-  requestBody?: any;
+  parameters?: Record<string, unknown>;
+  requestBody?: unknown;
   description?: string;
   server?: ServerObject;
 }
@@ -274,7 +274,7 @@ export interface OperationParameter {
   description?: string;
   // NEW: Schema validation details
   schema: ParameterSchema;
-  examples?: any[];
+  examples?: unknown[];
   provider?: boolean; // authoritative provider flag if parameter directly provides semantic type
 }
 
@@ -286,7 +286,7 @@ export interface ParameterSchema {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
-  enum?: any[];
+  enum?: unknown[];
   items?: ParameterSchema; // for arrays
   properties?: Record<string, ParameterSchema>; // for objects
 }
@@ -298,7 +298,7 @@ export interface SemanticTypeReference {
   description?: string;
   // NEW: Schema validation details
   schema: FieldSchema;
-  examples?: any[];
+  examples?: unknown[];
   constraints?: ValidationConstraint[];
   provider?: boolean; // true if this field is an authoritative provider (semantic-provider:true)
 }
@@ -311,7 +311,7 @@ export interface FieldSchema {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
-  enum?: any[];
+  enum?: unknown[];
   nullable?: boolean;
 }
 
@@ -361,14 +361,14 @@ export interface SemanticTypeDefinition {
   minLength?: number;
   maxLength?: number;
   // NEW: Value libraries for test generation
-  validExamples: any[];
+  validExamples: unknown[];
   invalidExamples: InvalidExample[];
   crossContaminationSources: string[]; // Other semantic types with same base type
   generationRules: ValueGenerationRule[];
 }
 
 export interface InvalidExample {
-  value: any;
+  value: unknown;
   invalidationType: 'wrong_type' | 'wrong_format' | 'out_of_bounds' | 'wrong_semantic_type';
   description: string;
 }
@@ -458,6 +458,6 @@ export interface TestStep {
 export interface TestValidation {
   type: 'response_field' | 'status_code' | 'semantic_type';
   field?: string;
-  expectedValue?: any;
+  expectedValue?: unknown;
   semanticType?: string;
 }
