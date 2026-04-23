@@ -3,6 +3,8 @@
 Generates Playwright integration test suites from the Camunda REST API OpenAPI specification.
 Analyses the spec's semantic type annotations (`x-semantic-type`) to build an operation
 dependency graph, then emits scenario-driven test files with full request/response synthesis.
+Also emits **negative request-validation tests** (intended HTTP 400) covering ~24 distinct
+malformed-request scenario kinds.
 
 ## Architecture
 
@@ -12,16 +14,22 @@ dependency graph, then emits scenario-driven test files with full request/respon
 │  (devDependency)         │  → spec/bundled/rest-api.bundle.json
 └────────────┬─────────────┘
              │
+             ├──────────────────────────────────────────┐
+             ▼                                          ▼
+┌──────────────────────────┐               ┌──────────────────────────┐
+│ semantic-graph-extractor │               │   request-validation     │
+│                          │               │ (negative-test generator)│
+│ Parses bundled spec,     │               │                          │
+│ extracts semantic types  │               │ Synthesizes ~24 kinds of │
+│ & operations             │               │ malformed-request tests  │
+│ → operation-dependency-  │               │ expecting HTTP 400       │
+│   graph.json             │               │ → request-validation/    │
+└────────────┬─────────────┘               │   generated/*.spec.ts    │
+             │                             └──────────────────────────┘
              ▼
 ┌──────────────────────────┐
-│ semantic-graph-extractor │  Parses bundled spec, extracts semantic types & operations
-│                          │  → semantic-graph-extractor/dist/output/operation-dependency-graph.json
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│     path-analyser        │  Reads graph + spec, generates scenarios per endpoint,
-│                          │  then emits Playwright test suites
+│     path-analyser        │  Reads graph + spec, generates positive scenarios
+│                          │  per endpoint, emits Playwright test suites
 │                          │  → path-analyser/dist/generated-tests/*.spec.ts
 └──────────────────────────┘
 ```
@@ -30,8 +38,35 @@ dependency graph, then emits scenario-driven test files with full request/respon
 
 - **Node.js ≥ 22**
 - **npm ≥ 10** (ships with Node 22+)
+- **Docker & Docker Compose** (for running Camunda server)
 
 ## Quick Start
+
+### Starting the Camunda Server
+
+```bash
+# Start the Camunda server using Docker Compose
+cd docker
+docker compose up -d
+
+# Verify the server is running (health check)
+docker compose logs camunda
+```
+
+The Camunda REST API will be available at `http://localhost:8080` by default.
+You can override the port with the `CAMUNDA_REST_PORT` environment variable:
+
+```bash
+CAMUNDA_REST_PORT=9080 docker compose up -d
+```
+
+To stop the server:
+
+```bash
+docker compose down
+```
+
+### Running the Test Generator
 
 ```bash
 # Install all workspace dependencies (runs in all sub-packages)
@@ -43,13 +78,13 @@ npm run fetch-spec
 # Run the full pipeline: fetch spec → extract graph → generate scenarios → emit Playwright tests
 npm run pipeline
 
-# Run the generated tests
+# Run the generated tests (requires running Camunda server)
 npm run test:pw
 ```
 
 ## Project Structure
 
-This is an **npm workspaces** monorepo with three packages:
+This is an **npm workspaces** monorepo with four packages:
 
 ```
 api-test-generator/
@@ -59,13 +94,14 @@ api-test-generator/
 │       ├── rest-api.bundle.json
 │       └── spec-metadata.json
 ├── semantic-graph-extractor/ ← workspace: graph extraction from OpenAPI
-├── path-analyser/            ← workspace: scenario generation & Playwright codegen
+├── path-analyser/            ← workspace: positive scenario generation & Playwright codegen
+├── request-validation/       ← workspace: negative request-validation test generator (HTTP 400)
 └── optional-responses/       ← workspace: optional response field analyser
 ```
 
 ## npm Workspaces
 
-All three sub-packages are registered as [npm workspaces](https://docs.npmjs.com/cli/v10/using-npm/workspaces).
+All four sub-packages are registered as [npm workspaces](https://docs.npmjs.com/cli/v10/using-npm/workspaces).
 A single `npm install` at the root installs dependencies for every package.
 
 ### Managing Dependencies
@@ -105,8 +141,11 @@ npm run build --workspaces --if-present
 | `npm run generate:scenarios` | Build the path analyser and generate scenario JSON files |
 | `npm run codegen:playwright` | Build and emit a Playwright test for a single endpoint |
 | `npm run codegen:playwright:all` | Build and emit Playwright tests for all endpoints |
+| `npm run build:request-validation` | Build the request-validation generator |
+| `npm run generate:request-validation` | Emit negative request-validation tests (default scenario kinds) |
+| `npm run generate:request-validation:full` | Emit negative request-validation tests with **all** ~24 scenario kinds (`--deep`) |
 | `npm run test:pw` | Run the generated Playwright tests |
-| `npm run testsuite:generate` | Full generation pipeline: extract graph → scenarios → Playwright tests |
+| `npm run testsuite:generate` | Full positive-generation pipeline: extract graph → scenarios → Playwright tests |
 | `npm run testsuite:observe:run` | Generate tests, run them, and aggregate runtime observations |
 | `npm run observe:aggregate` | Aggregate runtime observation data |
 | `npm run optional-responses` | Run the optional response field analyser |
@@ -169,6 +208,35 @@ npm run test:pw                    # run the generated tests
 npm run observe:aggregate          # aggregate runtime observations
 ```
 
+### request-validation
+
+A spec-driven generator that synthesizes **negative** Playwright tests targeting
+request-validation surfaces — every test sends a deliberately malformed request
+and asserts the server responds with HTTP 400. Covers ~24 scenario kinds
+including missing required fields (single + combinations), wrong primitive
+types, root-body type mismatches, `oneOf` ambiguity / no-match / cross-bleed,
+discriminator mismatches, enum / format / `multipleOf` / `uniqueItems` /
+length / pattern violations, `allOf` conflicts, additional-property rejection
+and multipart-only adaptation.
+
+```bash
+npm run build:request-validation         # compile the generator
+npm run generate:request-validation      # default scenario kinds (missing-required, type-mismatch, union)
+npm run generate:request-validation:full # --deep mode: all ~24 scenario kinds
+```
+
+Output lands in `request-validation/generated/`:
+
+| File | Description |
+|------|-------------|
+| `<resource>-validation-api-tests.spec.ts` | Playwright specs grouped by resource |
+| `MANIFEST.json` | Global counts per scenario kind + generation options |
+| `COVERAGE.json` / `COVERAGE.md` | Per-operation coverage matrix and missing-kind list |
+
+The generator consumes the bundled spec produced by `npm run fetch-spec`. To
+point it at a different OpenAPI document, set `REQUEST_VALIDATION_SPEC` to the
+absolute or repo-relative path.
+
 ### optional-responses
 
 A lightweight utility that scans the OpenAPI spec for response schemas with
@@ -191,7 +259,8 @@ npm run optional-responses
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAPI_SPEC_PATH` | Override the path to the OpenAPI spec file |
+| `OPENAPI_SPEC_PATH` | Override the path to the OpenAPI spec file (consumed by `semantic-graph-extractor` / `path-analyser`) |
 | `OPERATION_GRAPH_PATH` | Override the path to the dependency graph JSON |
 | `SPEC_REF` | Git ref for `fetch-spec:ref` (branch, tag, or SHA) |
 | `CAMUNDA_BASE_URL` | Base URL of the Camunda instance for Playwright tests |
+| `REQUEST_VALIDATION_SPEC` | Override the spec path consumed by the `request-validation` generator |
