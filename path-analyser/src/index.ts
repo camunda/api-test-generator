@@ -7,7 +7,13 @@ import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
 import { generateScenariosForEndpoint } from './scenarioGenerator.js';
-import type { GenerationSummary, GenerationSummaryEntry, ResponseShapeSummary } from './types.js';
+import type {
+  EndpointScenario,
+  GenerationSummary,
+  GenerationSummaryEntry,
+  OperationRef,
+  ResponseShapeSummary,
+} from './types.js';
 import { normalizeEndpointFileName } from './utils.js';
 
 async function main() {
@@ -491,7 +497,7 @@ main().catch((err) => {
 });
 
 function buildRequestPlan(
-  scenario: any,
+  scenario: EndpointScenario,
   resp: any,
   graph: any,
   canonical: Record<string, any>,
@@ -580,7 +586,7 @@ function buildRequestPlan(
   return steps;
 }
 
-function determineExpectedStatus(scenario: any, resp: any, isFinal: boolean): number {
+function determineExpectedStatus(scenario: EndpointScenario, resp: any, isFinal: boolean): number {
   if (
     isFinal &&
     scenario.expectedResult &&
@@ -593,7 +599,7 @@ function determineExpectedStatus(scenario: any, resp: any, isFinal: boolean): nu
   return resp?.successStatus || (isFinal ? 200 : 200);
 }
 
-function synthesizeBodyTemplate(scenario: any, opRef: any) {
+function synthesizeBodyTemplate(scenario: EndpointScenario, opRef: OperationRef) {
   // Heuristic: for search endpoints, include binding-derived fields
   const bindings = scenario.bindings || {};
   if (!bindings || Object.keys(bindings).length === 0) return undefined;
@@ -637,7 +643,7 @@ type RequestBodyPlan =
 
 function buildRequestBodyFromCanonical(
   opId: string,
-  scenario: any,
+  scenario: EndpointScenario,
   graph: any,
   canonical: Record<string, CanonicalShape>,
   requestGroupsIndex: Record<string, any[]>,
@@ -742,22 +748,22 @@ function buildRequestBodyFromCanonical(
       (scenario?.variantKey &&
         typeof scenario.variantKey === 'string' &&
         scenario.variantKey.includes('schemaMissingRequired')) ||
-      Array.isArray((scenario as any).schemaMissingInclude);
+      Array.isArray(scenario.schemaMissingInclude);
     const isSchemaWrongType =
       scenario?.variantKey &&
       typeof scenario.variantKey === 'string' &&
       scenario.variantKey.includes('schemaWrongType');
     const includeSet: Set<string> | undefined =
-      isSchema400Neg && Array.isArray((scenario as any).schemaMissingInclude)
-        ? new Set((scenario as any).schemaMissingInclude as string[])
+      isSchema400Neg && Array.isArray(scenario.schemaMissingInclude)
+        ? new Set(scenario.schemaMissingInclude)
         : undefined;
     const omitSet: Set<string> | undefined =
-      isSchema400Neg && Array.isArray((scenario as any).schemaMissingSuppress)
-        ? new Set((scenario as any).schemaMissingSuppress as string[])
+      isSchema400Neg && Array.isArray(scenario.schemaMissingSuppress)
+        ? new Set(scenario.schemaMissingSuppress)
         : undefined;
     const wrongTypeSet: Set<string> | undefined =
-      isSchemaWrongType && Array.isArray((scenario as any).schemaWrongTypeInclude)
-        ? new Set((scenario as any).schemaWrongTypeInclude as string[])
+      isSchemaWrongType && Array.isArray(scenario.schemaWrongTypeInclude)
+        ? new Set(scenario.schemaWrongTypeInclude)
         : undefined;
     // If wrong-type negative, populate detailed mapping (expectedType -> sentType) for test naming later.
     if (wrongTypeSet && wrongTypeSet.size) {
@@ -772,7 +778,7 @@ function buildRequestBodyFromCanonical(
         // Persist mapping (we also still need to actually apply wrong-type assignment below in synthesis)
         detail.push({ field: f, expectedType, sentType });
       }
-      (scenario as any).schemaWrongTypeDetail = detail;
+      scenario.schemaWrongTypeDetail = detail;
     }
     if (requestGroups.length) {
       // oneOf-aware synthesis
@@ -1229,7 +1235,7 @@ function loadProviderConfig(): ProviderConfig {
   providerConfigCache = { globals: {}, operations: {} };
   return providerConfigCache;
 }
-function resolveProvider(opId: string, field: string, scenario: any): any {
+function resolveProvider(opId: string, field: string, scenario: EndpointScenario): any {
   const cfg = loadProviderConfig();
   const opMap = (cfg.operations && cfg.operations[opId]) || {};
   const spec = opMap[field] || (cfg.globals && cfg.globals[field]);
