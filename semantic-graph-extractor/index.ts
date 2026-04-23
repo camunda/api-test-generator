@@ -111,7 +111,9 @@ export class SemanticGraphExtractor {
       semanticTypes: Array.from(graph.semanticTypes.values()),
       edges: graph.edges,
       metadata: {
-        extractedAt: new Date().toISOString(),
+        extractedAt: process.env.TEST_SEED
+          ? `seeded:${process.env.TEST_SEED}`
+          : new Date().toISOString(),
         totalOperations: graph.operations.size,
         totalSemanticTypes: graph.semanticTypes.size,
         totalDependencies: graph.edges.length,

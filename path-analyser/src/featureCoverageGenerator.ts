@@ -1,3 +1,4 @@
+import { deterministicSuffix } from './codegen/support/seeding.js';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
@@ -288,13 +289,13 @@ function buildScenarioFromVariant(
     for (const o of variant.optionals) {
       const varName = camelLower(o) + 'Var';
       bindings[varName + 'Nonexistent'] =
-        `${camelLower(o)}_nonexistent_${Math.random().toString(36).slice(2, 6)}`;
+        `${camelLower(o)}_nonexistent_${deterministicSuffix(`fc:neg:${endpoint.operationId}:${o}`)}`;
     }
   } else {
     for (const o of variant.optionals) {
       produced.add(o);
       const varName = camelLower(o) + 'Var';
-      bindings[varName] = `${camelLower(o)}_${Math.random().toString(36).slice(2, 6)}`;
+      bindings[varName] = `${camelLower(o)}_${deterministicSuffix(`fc:pos:${endpoint.operationId}:${o}`)}`;
     }
   }
   const scenario: EndpointScenario = {

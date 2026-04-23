@@ -99,7 +99,10 @@ async function main() {
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
   const specCommit: string | undefined = specProvenance;
-  const generationTimestamp = new Date().toISOString();
+  // When TEST_SEED is set, use a stable placeholder so generator output is byte-reproducible.
+  const generationTimestamp = process.env.TEST_SEED
+    ? `seeded:${process.env.TEST_SEED}`
+    : new Date().toISOString();
   const scenarios: ValidationScenario[] = [];
   const kinds = opts.only || new Set(['missing-required', 'type-mismatch', 'union']);
 
@@ -465,7 +468,7 @@ async function main() {
   });
 
   const manifest = {
-    generatedAt: new Date().toISOString(),
+    generatedAt: generationTimestamp,
     counts: deduped.reduce<Record<string, number>>((acc, s) => {
       acc[s.type] = (acc[s.type] || 0) + 1;
       return acc;
@@ -528,7 +531,7 @@ async function main() {
     oc.missingKinds = allKinds.filter((k) => !oc.counts[k]);
   }
   const coverage = {
-    generatedAt: new Date().toISOString(),
+    generatedAt: generationTimestamp,
     specCommit,
     totalScenarios: deduped.length,
     scenarioKinds: allKinds,

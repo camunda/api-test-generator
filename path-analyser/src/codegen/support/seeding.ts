@@ -57,6 +57,36 @@ const globalEnv: SeedEnv = (() => {
   return env;
 })();
 
+/**
+ * Short suffix for test fixture identifiers (e.g. `tenantId_5l5k`).
+ *
+ * When `TEST_SEED` is set, the suffix is derived deterministically from the
+ * input `key` via FNV-1a hash, so repeated pipeline runs produce identical
+ * output regardless of call ordering across modules. When `TEST_SEED` is
+ * unset, falls back to `Math.random()` to preserve historical uniqueness.
+ *
+ * Pass a stable, unique `key` (e.g. the variable name plus a discriminator)
+ * for reproducible output; reuse the same key only when collisions are OK.
+ */
+export function deterministicSuffix(key: string, length = 4): string {
+  if (!process.env.TEST_SEED) {
+    return Math.random().toString(36).slice(2, 2 + length);
+  }
+  // FNV-1a 32-bit hash, seeded by TEST_SEED so different runs give different
+  // (but reproducible) suffixes.
+  let h = 0x811c9dc5;
+  const seed = process.env.TEST_SEED;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36).padStart(length, '0').slice(0, length);
+}
+
 // Dynamic rule loading from external JSON (seed-rules.json)
 let rules: SeedRule[] = [];
 let rulesLoaded = false;
@@ -67,7 +97,6 @@ function loadRules() {
   try {
     // Use dynamic import to allow bundlers / TS to include JSON; fallback if not found
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // @ts-expect-error
     let data: any;
     if (localRequire) {
       data = localRequire('./seed-rules.json');

@@ -1,3 +1,4 @@
+import { deterministicSuffix } from './codegen/support/seeding.js';
 import type {
   ArtifactRule,
   EndpointScenario,
@@ -496,7 +497,7 @@ export function generateScenariosForEndpoint(
         if (/Key$/.test(s)) {
           const varName = semanticToVarName(s, bindingsDraft);
           if (!bindingsDraft[varName])
-            bindingsDraft[varName] = `${camelLower(s)}_${Math.random().toString(36).slice(2, 6)}`;
+            bindingsDraft[varName] = `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
         }
       }
 
@@ -737,7 +738,7 @@ function ensureArtifactBindings(
   for (const s of semantics) {
     const varName = semanticToVarName(s, state.bindingsDraft);
     if (!state.bindingsDraft[varName])
-      state.bindingsDraft[varName] = `${camelLower(s)}_${Math.random().toString(36).slice(2, 6)}`;
+      state.bindingsDraft[varName] = `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     // If BPMN process definition -> ensure BPMN model spec exists
     if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m: any) => m.kind === 'bpmn')) {
       state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
