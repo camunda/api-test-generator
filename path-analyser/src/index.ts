@@ -547,9 +547,7 @@ function buildRequestPlan(
       } else if (plan?.kind === 'multipart') {
         step.multipartTemplate = plan.template;
         step.bodyKind = 'multipart';
-        if ((plan as any).expectedSlices && Array.isArray((plan as any).expectedSlices)) {
-          step.expectedDeploymentSlices = (plan as any).expectedSlices;
-        }
+        step.expectedDeploymentSlices = plan.expectedSlices;
       }
     }
     if (isFinal && resp?.fields?.length) {
@@ -629,6 +627,14 @@ type CanonicalShape = {
   requestByMediaType?: Record<string, { path: string; type: string; required: boolean }[]>;
 };
 
+type RequestBodyPlan =
+  | { kind: 'json'; template: Record<string, unknown> }
+  | {
+      kind: 'multipart';
+      template: { fields: Record<string, string>; files: Record<string, string> };
+      expectedSlices: string[];
+    };
+
 function buildRequestBodyFromCanonical(
   opId: string,
   scenario: any,
@@ -636,7 +642,7 @@ function buildRequestBodyFromCanonical(
   canonical: Record<string, CanonicalShape>,
   requestGroupsIndex: Record<string, any[]>,
   isEndpoint: boolean,
-) {
+): RequestBodyPlan | undefined {
   const shape = canonical[opId];
   if (!shape || !shape.requestByMediaType) return undefined;
   // Prefer multipart when available (e.g., createDeployment), else application/json
