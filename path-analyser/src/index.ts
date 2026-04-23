@@ -1,7 +1,7 @@
-import fsSync from 'fs';
-import { mkdir, readFile as readFileAsync, writeFile } from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fsSync from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
@@ -50,7 +50,7 @@ async function main() {
       'Canonical path validation failed with ' +
       validationErrors.length +
       ' issue(s)\n' +
-      validationErrors.map((e) => '  - ' + e).join('\n');
+      validationErrors.map((e) => `  - ${e}`).join('\n');
     throw new Error(msg);
   }
   // Extract response shapes & request variants (oneOf groups)
@@ -93,8 +93,7 @@ async function main() {
           required: f.required,
         }));
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
-        if (resp.nestedItems)
-          s.responseArrayItemFields = resp.nestedItems;
+        if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
         s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
       }
     }
@@ -110,27 +109,18 @@ async function main() {
       const expanded: any[] = [];
       const requiredFields = getRequiredRequestLeafFields(op.operationId, canonical);
       const hasSchemaMissing = baseScenarios.some(
-        (s) =>
-          typeof s.variantKey === 'string' &&
-          s.variantKey.includes('schemaMissingRequired'),
+        (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired'),
       );
       const hasSchemaWrongType = baseScenarios.some(
-        (s) =>
-          typeof s.variantKey === 'string' &&
-          s.variantKey.includes('schemaWrongType'),
+        (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType'),
       );
       if (requiredFields.length && hasSchemaMissing) {
         const originals = baseScenarios.filter(
-          (s) =>
-            typeof s.variantKey === 'string' &&
-            s.variantKey.includes('schemaMissingRequired'),
+          (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired'),
         );
         const others = baseScenarios.filter(
           (s) =>
-            !(
-              typeof s.variantKey === 'string' &&
-              s.variantKey.includes('schemaMissingRequired')
-            ),
+            !(typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired')),
         );
         expanded.push(...others);
         // generate subsets of fields to include (missing others): sizes 0..n-1, cap 15
@@ -170,16 +160,10 @@ async function main() {
       if (requiredFields.length && hasSchemaWrongType) {
         const base = featureCollection.scenarios;
         const originals = base.filter(
-          (s) =>
-            typeof s.variantKey === 'string' &&
-            s.variantKey.includes('schemaWrongType'),
+          (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType'),
         ) as any[];
         const others = base.filter(
-          (s) =>
-            !(
-              typeof s.variantKey === 'string' &&
-              s.variantKey.includes('schemaWrongType')
-            ),
+          (s) => !(typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType')),
         );
         const result: any[] = [];
         result.push(...others);
@@ -318,15 +302,13 @@ async function main() {
           required: f.required,
         }));
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
-        if (resp.nestedItems)
-          s.responseArrayItemFields = resp.nestedItems;
+        if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
         s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
         // Carry forward suppress metadata (already on scenario) no action needed here except sanity (noop)
         // Consolidation fix: ensure schemaMissingRequired variants truly omit excluded required fields
         try {
           const isMissingReq =
-            typeof s.variantKey === 'string' &&
-            s.variantKey.includes('schemaMissingRequired');
+            typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired');
           const includeArr: string[] | undefined = Array.isArray(s.schemaMissingInclude)
             ? s.schemaMissingInclude
             : undefined;
@@ -417,17 +399,14 @@ async function main() {
         const steps = sc.requestPlan || [];
         for (const st of steps) {
           if (st?.bodyKind === 'multipart' && st?.multipartTemplate?.files) {
-            for (const [k, v] of Object.entries<any>(st.multipartTemplate.files)) {
+            for (const [_k, v] of Object.entries<any>(st.multipartTemplate.files)) {
               const s = typeof v === 'string' ? v : '';
               if (!s.startsWith('@@FILE:')) continue;
               const rel = s.slice('@@FILE:'.length);
               // Determine artifact kind: prefer scenario artifact rule mapping
               let kind: string | undefined;
               const rulesForOp = domainRules?.[st.operationId]?.rules || [];
-              if (
-                Array.isArray(sc.artifactsApplied) &&
-                sc.artifactsApplied.length
-              ) {
+              if (Array.isArray(sc.artifactsApplied) && sc.artifactsApplied.length) {
                 const rid = sc.artifactsApplied[0];
                 const r = rulesForOp.find((r: any) => r.id === rid);
                 kind = r?.artifactKind;
@@ -525,10 +504,10 @@ function buildRequestPlan(
         // Determine target variable name based on parameter portion after last '.' in mapping (state.parameter)
         const mapping = v as string;
         const paramPart = mapping.split('.').pop()!;
-        let bind = camelCase(paramPart) + 'Var';
+        let bind = `${camelCase(paramPart)}Var`;
         if (k.endsWith('$key')) {
           // explicit key semantic mapping
-          bind = camelCase(paramPart.replace(/Id$/, 'Key')) + 'Var';
+          bind = `${camelCase(paramPart.replace(/Id$/, 'Key'))}Var`;
         }
         // Ensure binding variable exists in scenario.bindings placeholder if not set
         scenario.bindings ||= {};
@@ -561,7 +540,7 @@ function buildRequestPlan(
       const extract: any[] = [];
       for (const f of resp.fields) {
         if (f.semantic) {
-          const bind = camelCase(f.semantic) + 'Var';
+          const bind = `${camelCase(f.semantic)}Var`;
           extract.push({ fieldPath: f.name, bind, semantic: f.semantic });
         }
       }
@@ -579,7 +558,7 @@ function buildRequestPlan(
         },
       };
       // Mark duplicate step for emitter logic
-      dup.notes = (dup.notes ? dup.notes + '; ' : '') + 'duplicate-invocation';
+      dup.notes = `${dup.notes ? `${dup.notes}; ` : ''}duplicate-invocation`;
       steps.push(dup);
     }
   }
@@ -599,21 +578,18 @@ function determineExpectedStatus(scenario: EndpointScenario, resp: any, isFinal:
   return resp?.successStatus || (isFinal ? 200 : 200);
 }
 
-function synthesizeBodyTemplate(scenario: EndpointScenario, opRef: OperationRef) {
+function _synthesizeBodyTemplate(scenario: EndpointScenario, opRef: OperationRef) {
   // Heuristic: for search endpoints, include binding-derived fields
   const bindings = scenario.bindings || {};
   if (!bindings || Object.keys(bindings).length === 0) return undefined;
   const result: any = {};
   const isSearch = /\/search$/.test(opRef.path) || /search/i.test(opRef.operationId);
   // Map binding var names like processDefinitionKeyVar -> processDefinitionKey
-  for (const [k, v] of Object.entries(bindings)) {
+  for (const [k, _v] of Object.entries(bindings)) {
     if (!k.endsWith('Var')) continue;
     const base = k.slice(0, -3); // remove 'Var'
     // Only include if variant actually uses this optional semantic OR it's required semantic for endpoint
-    const used =
-      (scenario.filtersUsed &&
-        scenario.filtersUsed.includes(capitalizeFirst(base.replace(/Var$/, '')))) ||
-      false;
+    const used = scenario.filtersUsed?.includes(capitalizeFirst(base.replace(/Var$/, ''))) || false;
     if (isSearch && used) {
       result[base] = `\${${k}}`; // placeholder replaced later in emitter
     }
@@ -650,7 +626,7 @@ function buildRequestBodyFromCanonical(
   isEndpoint: boolean,
 ): RequestBodyPlan | undefined {
   const shape = canonical[opId];
-  if (!shape || !shape.requestByMediaType) return undefined;
+  if (!shape?.requestByMediaType) return undefined;
   // Prefer multipart when available (e.g., createDeployment), else application/json
   const ctOrder = ['multipart/form-data', 'application/json'];
   let chosenCt: string | undefined;
@@ -766,7 +742,7 @@ function buildRequestBodyFromCanonical(
         ? new Set(scenario.schemaWrongTypeInclude)
         : undefined;
     // If wrong-type negative, populate detailed mapping (expectedType -> sentType) for test naming later.
-    if (wrongTypeSet && wrongTypeSet.size) {
+    if (wrongTypeSet?.size) {
       const detail: { field: string; expectedType: string; sentType: string }[] = [];
       for (const f of Array.from(wrongTypeSet)) {
         const expectedType = (declaredTypeByLeaf[f] || 'unknown').toLowerCase();
@@ -789,11 +765,11 @@ function buildRequestBodyFromCanonical(
             template[name] = viaProvider;
             continue;
           }
-          const varName = camelCase(bindingMap[name] || name || 'value') + 'Var';
+          const varName = `${camelCase(bindingMap[name] || name || 'value')}Var`;
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
           // If wrong-type negative applies for this field, inject a mismatched type
-          if (wrongTypeSet && wrongTypeSet.has(name)) {
+          if (wrongTypeSet?.has(name)) {
             template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
           } else {
             template[name] = `${'${'}${varName}}`;
@@ -807,41 +783,41 @@ function buildRequestBodyFromCanonical(
             template[name] = viaProvider;
             continue;
           }
-          const varName = camelCase(bindingMap[name] || name || 'value') + 'Var';
+          const varName = `${camelCase(bindingMap[name] || name || 'value')}Var`;
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          if (wrongTypeSet && wrongTypeSet.has(name)) {
+          if (wrongTypeSet?.has(name)) {
             template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
           } else {
             template[name] = `${'${'}${varName}}`;
           }
           if (!bindingMap[name]) missing.push(name);
         }
-      } else if (chosenVariantRequired && chosenVariantRequired.length) {
+      } else if (chosenVariantRequired?.length) {
         for (const name of chosenVariantRequired) {
-          if (omitSet && omitSet.has(name)) continue;
+          if (omitSet?.has(name)) continue;
           if (includeSet && !includeSet.has(name)) continue; // omit required not selected for include
           if (allowedFields && !allowedFields.has(name)) continue;
           // Special-case: map domain jobType -> request.type if not explicitly bound
           const mappedName =
-            name === 'type' && !bindingMap[name] && bindingMap['jobType'] ? 'jobType' : name;
+            name === 'type' && !bindingMap[name] && bindingMap.jobType ? 'jobType' : name;
           const viaProvider = resolveProvider(opId, name, scenario);
           if (viaProvider !== undefined) {
             template[name] = viaProvider;
             continue;
           }
-          const varName = camelCase(bindingMap[mappedName] || name || 'value') + 'Var';
+          const varName = `${camelCase(bindingMap[mappedName] || name || 'value')}Var`;
           const hasBinding = !!bindingMap[mappedName];
           if (hasBinding) {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-            if (wrongTypeSet && wrongTypeSet.has(name)) {
+            if (wrongTypeSet?.has(name)) {
               template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
             } else {
               template[name] = `${'${'}${varName}}`;
             }
           } else if (defaults && Object.hasOwn(defaults, name)) {
-            if (wrongTypeSet && wrongTypeSet.has(name)) {
+            if (wrongTypeSet?.has(name)) {
               template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
             } else {
               template[name] = defaults[name];
@@ -849,7 +825,7 @@ function buildRequestBodyFromCanonical(
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-            if (wrongTypeSet && wrongTypeSet.has(name)) {
+            if (wrongTypeSet?.has(name)) {
               template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
             } else {
               template[name] = `${'${'}${varName}}`;
@@ -862,7 +838,7 @@ function buildRequestBodyFromCanonical(
       // Non-oneOf: use canonical required flags
       for (const f of requiredFields) {
         const leaf = f.path.split('.').pop()!;
-        if (omitSet && omitSet.has(leaf)) continue;
+        if (omitSet?.has(leaf)) continue;
         if (includeSet && !includeSet.has(leaf)) continue; // omit required not selected for include
         if (allowedFields && !allowedFields.has(leaf)) continue;
         const viaProvider = resolveProvider(opId, leaf, scenario);
@@ -871,23 +847,23 @@ function buildRequestBodyFromCanonical(
           continue;
         }
         // Special-case: support mapping jobType -> type
-        const hasJobType = !!bindingMap['jobType'];
+        const hasJobType = !!bindingMap.jobType;
         const mapJobTypeToType = leaf === 'type' && !bindingMap[f.path] && hasJobType;
         const mappedParamName = mapJobTypeToType
           ? 'jobType'
           : bindingMap[f.path] || leaf || 'value';
-        const varName = camelCase(mappedParamName) + 'Var';
+        const varName = `${camelCase(mappedParamName)}Var`;
         const hasBinding = mapJobTypeToType ? true : !!bindingMap[f.path];
         if (hasBinding) {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          if (wrongTypeSet && wrongTypeSet.has(leaf)) {
+          if (wrongTypeSet?.has(leaf)) {
             template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
           } else {
             template[leaf] = `${'${'}${varName}}`;
           }
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          if (wrongTypeSet && wrongTypeSet.has(leaf)) {
+          if (wrongTypeSet?.has(leaf)) {
             template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
           } else {
             template[leaf] = defaults[leaf];
@@ -895,7 +871,7 @@ function buildRequestBodyFromCanonical(
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          if (wrongTypeSet && wrongTypeSet.has(leaf)) {
+          if (wrongTypeSet?.has(leaf)) {
             template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
           } else {
             template[leaf] = `${'${'}${varName}}`;
@@ -922,7 +898,7 @@ function buildRequestBodyFromCanonical(
     for (const f of nodes.filter((n) => !n.required && !n.path.includes('[]'))) {
       const leaf = f.path.split('.').pop()!;
       if (allowedFields && !allowedFields.has(leaf)) continue;
-      const varBase = camelCase(bindingMap[f.path] || leaf || 'value') + 'Var';
+      const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
       if (!template[leaf]) {
         if (scenario.bindings?.[varBase]) {
           template[leaf] = `${'${'}${varBase}}`;
@@ -945,15 +921,15 @@ function buildRequestBodyFromCanonical(
         includeSet &&
         !includeSet.has(leaf) &&
         requiredFields.some(
-          (rf) => rf.path.endsWith('.' + leaf) || rf.path.split('.').pop() === leaf,
+          (rf) => rf.path.endsWith(`.${leaf}`) || rf.path.split('.').pop() === leaf,
         )
       )
         continue;
-      const varName = camelCase(param) + 'Var';
+      const varName = `${camelCase(param)}Var`;
       scenario.bindings ||= {};
       if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
       if (template[leaf] === undefined) {
-        if (wrongTypeSet && wrongTypeSet.has(leaf)) {
+        if (wrongTypeSet?.has(leaf)) {
           template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
         } else {
           template[leaf] = `${'${'}${varName}}`;
@@ -961,18 +937,18 @@ function buildRequestBodyFromCanonical(
       }
     }
     // Post-process: if jobType binding exists but schema expects 'type', prefer mapping into 'type'
-    if (bindingMap['jobType']) {
+    if (bindingMap.jobType) {
       const jtVar = 'jobTypeVar';
-      if (template['type'] === undefined) {
+      if (template.type === undefined) {
         // If this is a schema-missing-required negative and 'type' was intentionally omitted, do NOT map it in.
         if (
           !(isSchema400Neg && (omitSet?.has('type') || (includeSet && !includeSet.has('type'))))
         ) {
-          template['type'] = `${'${'}${jtVar}}`;
+          template.type = `${'${'}${jtVar}}`;
         }
       }
       // ensure we don't carry a non-schema jobType field
-      if (!leafSet.has('jobType')) delete (template as any)['jobType'];
+      if (!leafSet.has('jobType')) delete (template as any).jobType;
     }
     // Final single-pass omission enforcement (contract):
     // - schemaMissingInclude = fields we intentionally keep
@@ -1004,12 +980,12 @@ function buildRequestBodyFromCanonical(
       const neg = opDefaults.negativeEmpty || {};
       const nonExistentType = typeof neg.type === 'string' ? neg.type : '__NON_EXISTENT_JOB_TYPE__';
       const shortTimeout = Number.isFinite(neg.requestTimeout) ? neg.requestTimeout : 250;
-      template['type'] = nonExistentType;
-      template['requestTimeout'] = shortTimeout as number;
+      template.type = nonExistentType;
+      template.requestTimeout = shortTimeout as number;
       // Seed binding for completeness, though template uses a literal
       scenario.bindings ||= {};
-      if (!scenario.bindings['jobTypeVar'] || scenario.bindings['jobTypeVar'] === '__PENDING__') {
-        scenario.bindings['jobTypeVar'] = nonExistentType;
+      if (!scenario.bindings.jobTypeVar || scenario.bindings.jobTypeVar === '__PENDING__') {
+        scenario.bindings.jobTypeVar = nonExistentType;
       }
     }
     // Removed prior absolute guard (folded into unified omission pass above).
@@ -1024,7 +1000,7 @@ function buildRequestBodyFromCanonical(
     );
     if (fileFields.length) {
       // Choose fixture based on artifact rule selection if present
-      const ruleId = (scenario.artifactsApplied && scenario.artifactsApplied[0]) || undefined;
+      const ruleId = scenario.artifactsApplied?.[0] || undefined;
       const domainRules = (graph.domain as any)?.operationArtifactRules?.[opId]?.rules || [];
       const rule = ruleId ? domainRules.find((r: any) => r.id === ruleId) : undefined;
       let kind = rule?.artifactKind as string | undefined;
@@ -1043,22 +1019,21 @@ function buildRequestBodyFromCanonical(
       // If downstream requires ModelHasServiceTaskType/JobType, prefer an entry carrying a jobType parameter
       const preferJobType = true; // simple heuristic: jobs-related ops exist; could inspect scenario.operations
       const regHit = chooseFixtureFromRegistry(kind, preferJobType);
-      const fileRef =
-        (regHit && regHit.ref) || defaultFixtures[kind || ''] || '@@FILE:bpmn/simple.bpmn';
+      const fileRef = regHit?.ref || defaultFixtures[kind || ''] || '@@FILE:bpmn/simple.bpmn';
       // If registry provides a jobType parameter, bind it for later request body use
       if (regHit?.params && typeof regHit.params.jobType === 'string') {
         const varName = 'jobTypeVar';
         scenario.bindings ||= {};
         if (!scenario.bindings[varName]) scenario.bindings[varName] = regHit.params.jobType;
       }
-      template.files['resources'] = fileRef;
+      template.files.resources = fileRef;
     }
     const tenant = nodes.find((n) => n.path === 'tenantId');
     if (tenant) {
       const varName = 'tenantIdVar';
       scenario.bindings ||= {};
       if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-      template.fields['tenantId'] = `\
+      template.fields.tenantId = `\
 ${'${'}${varName}}`;
     }
     // Derive expected deployment slices using domain sidecar mapping (explicit). Fallback to heuristic later in emitter.
@@ -1067,12 +1042,12 @@ ${'${'}${varName}}`;
       const fileKinds: Record<string, string[]> | undefined = (graph.domain as any)
         ?.artifactFileKinds;
       const kindsSpec: Record<string, any> | undefined = (graph.domain as any)?.artifactKinds;
-      for (const [name, val] of Object.entries<any>(template.files)) {
+      for (const [_name, val] of Object.entries<any>(template.files)) {
         const s = typeof val === 'string' ? val : '';
         const pth = s.startsWith('@@FILE:') ? s.slice('@@FILE:'.length) : s;
         if (!pth) continue;
         const ext = path.extname(pth).toLowerCase();
-        const kinds = (fileKinds && fileKinds[ext]) || [];
+        const kinds = fileKinds?.[ext] || [];
         for (const k of kinds) {
           const spec = kindsSpec?.[k];
           const slices: string[] = spec?.deploymentSlices || [];
@@ -1149,7 +1124,7 @@ function loadRequestDefaults(): RequestDefaults {
 }
 function getRequestDefaultsForOperation(opId: string): Record<string, any> | undefined {
   const all = loadRequestDefaults();
-  const op = (all.operations && all.operations[opId]) || {};
+  const op = all.operations?.[opId] || {};
   const glob = all.global || {};
   return { ...glob, ...op };
 }
@@ -1160,7 +1135,7 @@ function getRequiredRequestLeafFields(
   canonical: Record<string, CanonicalShape>,
 ): string[] {
   const shape = canonical[opId];
-  if (!shape || !shape.requestByMediaType) return [];
+  if (!shape?.requestByMediaType) return [];
   const nodes = shape.requestByMediaType['application/json'] || [];
   const fields = nodes
     .filter((n) => n.required && !n.path.includes('[]'))
@@ -1237,12 +1212,12 @@ function loadProviderConfig(): ProviderConfig {
 }
 function resolveProvider(opId: string, field: string, scenario: EndpointScenario): any {
   const cfg = loadProviderConfig();
-  const opMap = (cfg.operations && cfg.operations[opId]) || {};
-  const spec = opMap[field] || (cfg.globals && cfg.globals[field]);
+  const opMap = cfg.operations?.[opId] || {};
+  const spec = opMap[field] || cfg.globals?.[field];
   if (!spec) return undefined;
   switch (spec.from) {
     case 'ctx': {
-      const vname = spec.var || field + 'Var';
+      const vname = spec.var || `${field}Var`;
       return scenario.bindings && scenario.bindings[vname] !== undefined
         ? `\${${vname}}`
         : undefined;
@@ -1269,6 +1244,6 @@ function chooseFixtureFromRegistry(
       e.kind === kind && preferJobType && e.parameters && typeof e.parameters.jobType === 'string',
   );
   if (!hit) hit = reg.find((e) => e.kind === kind);
-  if (hit && hit.path) return { ref: `@@FILE:${hit.path}`, params: hit.parameters };
+  if (hit?.path) return { ref: `@@FILE:${hit.path}`, params: hit.parameters };
   return undefined;
 }
