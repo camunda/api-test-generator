@@ -128,7 +128,7 @@ export function generateScenariosForEndpoint(
   const bootstrapScenarios: EndpointScenario[] = [];
 
   // Seed states from bootstrap sequences (if any) whose produced set contributes to endpoint requirements.
-  if (graph.bootstrapSequences && graph.bootstrapSequences.length) {
+  if (graph.bootstrapSequences?.length) {
     for (const seq of graph.bootstrapSequences) {
       const seqOpsValid = seq.operations.every((opId) => graph.operations[opId]);
       if (!seqOpsValid) continue;
@@ -320,7 +320,7 @@ export function generateScenariosForEndpoint(
         const producerNode = graph.operations[producerOpId];
         if (!producerNode) continue;
         // Domain gating for domain producer expansion
-        if (producerNode.domainRequiresAll && producerNode.domainRequiresAll.length) {
+        if (producerNode.domainRequiresAll?.length) {
           const missingDomain = producerNode.domainRequiresAll.filter(
             (ds) => !state.domainStates.has(ds),
           );
@@ -430,7 +430,7 @@ export function generateScenariosForEndpoint(
       const producerNode = graph.operations[producerOpId];
       if (!producerNode) continue;
       // Domain gating for semantic producer expansion
-      if (producerNode.domainRequiresAll && producerNode.domainRequiresAll.length) {
+      if (producerNode.domainRequiresAll?.length) {
         const missingDomain = producerNode.domainRequiresAll.filter(
           (ds) => !state.domainStates.has(ds),
         );
@@ -497,7 +497,8 @@ export function generateScenariosForEndpoint(
         if (/Key$/.test(s)) {
           const varName = semanticToVarName(s, bindingsDraft);
           if (!bindingsDraft[varName])
-            bindingsDraft[varName] = `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
+            bindingsDraft[varName] =
+              `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
         }
       }
 
@@ -581,11 +582,11 @@ function applyArtifactRuleSelection(
   newDomainStates: Set<string>,
 ): void {
   const domain = graph.domain;
-  if (!domain || !domain.operationArtifactRules) {
+  if (!domain?.operationArtifactRules) {
     producerNode.produces.forEach((s: string) => newProduced.add(s));
     return;
   }
-  const ruleSpec = domain.operationArtifactRules['createDeployment'];
+  const ruleSpec = domain.operationArtifactRules.createDeployment;
   if (!ruleSpec) {
     producerNode.produces.forEach((s: string) => newProduced.add(s));
     return;
@@ -675,7 +676,7 @@ function applyArtifactRuleSelection(
 
 function inferSemanticsFromArtifact(graph: OperationGraph, artifactKind: string): string[] {
   const domain = graph.domain;
-  if (!domain || !domain.artifactKinds) return [];
+  if (!domain?.artifactKinds) return [];
   const spec = domain.artifactKinds[artifactKind];
   if (!spec) return [];
   const semantics: string[] = [];
@@ -684,8 +685,7 @@ function inferSemanticsFromArtifact(graph: OperationGraph, artifactKind: string)
 }
 
 function enumerateRuleSemantics(rule: ArtifactRule, graph: OperationGraph): string[] {
-  if (rule.producesSemantics && rule.producesSemantics.length)
-    return [...new Set(rule.producesSemantics)];
+  if (rule.producesSemantics?.length) return [...new Set(rule.producesSemantics)];
   return inferSemanticsFromArtifact(graph, rule.artifactKind);
 }
 
@@ -710,7 +710,7 @@ function countRuleCoverage(
 function updateProviderList(
   existing: Record<string, string[]>,
   producerNode: any,
-  productionMap: Map<string, string>,
+  _productionMap: Map<string, string>,
 ): Record<string, string[]> {
   const copy: Record<string, string[]> = { ...existing };
   producerNode.produces?.forEach((s: string) => {
@@ -726,11 +726,11 @@ function coverageCount(rule: ArtifactRule, remaining: Set<string>, graph: Operat
 }
 
 function ensureArtifactBindings(
-  rule: ArtifactRule,
-  graph: OperationGraph,
+  _rule: ArtifactRule,
+  _graph: OperationGraph,
   state: any,
   semantics: string[],
-  states: string[],
+  _states: string[],
 ) {
   state.bindingsDraft ||= {};
   state.modelsDraft ||= [];
@@ -738,7 +738,8 @@ function ensureArtifactBindings(
   for (const s of semantics) {
     const varName = semanticToVarName(s, state.bindingsDraft);
     if (!state.bindingsDraft[varName])
-      state.bindingsDraft[varName] = `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
+      state.bindingsDraft[varName] =
+        `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     // If BPMN process definition -> ensure BPMN model spec exists
     if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m: any) => m.kind === 'bpmn')) {
       state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
@@ -753,7 +754,7 @@ function ensureArtifactBindings(
 }
 
 function semanticToVarName(semantic: string, existing: Record<string, string>): string {
-  const base = camelLower(semantic) + 'Var';
+  const base = `${camelLower(semantic)}Var`;
   if (!existing[base]) return base;
   let i = 2;
   while (existing[base + i]) i++;
@@ -768,8 +769,8 @@ function buildIntegrationScenarioName(
   endpointOpId: string,
   ordinal: number,
   state: any,
-  preOpCount: number,
-  totalRequired: number,
+  _preOpCount: number,
+  _totalRequired: number,
 ): string {
   const parts: string[] = [];
   if (state.bootstrapFull) parts.push('bootstrap');
