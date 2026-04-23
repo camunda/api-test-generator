@@ -47,8 +47,8 @@ function renderScenarioTest(s: EndpointScenario): string {
   const body: string[] = [];
   body.push(`test('${title}', async ({ request }) => {`);
   body.push(`  let __seededTenant = false;`);
-  if ((s as any).description) {
-    const desc = String((s as any).description).trim();
+  if (s.description) {
+    const desc = String(s.description).trim();
     // Wrap long description lines at ~100 chars for readability
     const wrapped: string[] = [];
     const words = desc.split(/\s+/);
@@ -75,7 +75,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
     }
   }
-  if ((s as any).bindings && Object.keys((s as any).bindings).length) {
+  if (s.bindings && Object.keys(s.bindings).length) {
     body.push('  // Seed scenario bindings');
     // Collect vars referenced in body/multipart templates so we can auto-seed PENDING ones actually used.
     const templateVars = new Set<string>();
@@ -90,11 +90,11 @@ function renderScenarioTest(s: EndpointScenario): string {
     }
     if (s.requestPlan) {
       for (const step of s.requestPlan) {
-        if (step.bodyTemplate) collectVarsFromTemplate(step.bodyTemplate as any);
-        if (step.multipartTemplate) collectVarsFromTemplate(step.multipartTemplate as any);
+        if (step.bodyTemplate) collectVarsFromTemplate(step.bodyTemplate);
+        if (step.multipartTemplate) collectVarsFromTemplate(step.multipartTemplate);
       }
     }
-    for (const [k, v] of Object.entries((s as any).bindings)) {
+    for (const [k, v] of Object.entries(s.bindings)) {
       if (v === '__PENDING__') {
         if (!templateVars.has(k)) continue; // Not referenced in a template
         if (extractionVars.has(k)) continue; // Will be provided by extraction
@@ -124,11 +124,11 @@ function renderScenarioTest(s: EndpointScenario): string {
     const method = step.method.toLowerCase();
     const isFinal = idx === s.requestPlan!.length - 1;
     const hasShape =
-      Array.isArray((s as any).responseShapeFields) && (s as any).responseShapeFields.length > 0;
+      Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0;
     // Ensure prerequisite createProcessInstance always supplies a processDefinitionKey when available
     if (step.operationId === 'createProcessInstance' && step.bodyKind === 'json') {
       if (!step.bodyTemplate || Object.keys(step.bodyTemplate).length === 0) {
-        step.bodyTemplate = { processDefinitionKey: '${processDefinitionKeyVar}' } as any;
+        step.bodyTemplate = { processDefinitionKey: '${processDefinitionKeyVar}' };
       }
     }
     // Basic body handling placeholder
@@ -144,11 +144,11 @@ function renderScenarioTest(s: EndpointScenario): string {
       body.push(`    const ${bodyVar} = ${json};`);
       // Preflight assertion for schema-missing-required negatives: ensure omitted fields truly absent
       if (
-        /schema-missing-required/i.test((s as any).variantKey || '') ||
+        /schema-missing-required/i.test(s.variantKey || '') ||
         /negative missing required/.test(s.name || '')
       ) {
-        const includeLit = JSON.stringify((s as any).schemaMissingInclude || []);
-        const suppressLit = JSON.stringify((s as any).schemaMissingSuppress || []);
+        const includeLit = JSON.stringify(s.schemaMissingInclude || []);
+        const suppressLit = JSON.stringify(s.schemaMissingSuppress || []);
         body.push(`    // Preflight omit verification (metadata-driven)`);
         body.push(`    {`);
         body.push(`      const suppress: string[] = ${suppressLit};`);
@@ -159,11 +159,11 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
       // Wrong-type negatives: ensure declared wrongType fields are present (we mutate them upstream).
       if (
-        /schemaWrongType/i.test((s as any).variantKey || '') ||
+        /schemaWrongType/i.test(s.variantKey || '') ||
         /negative wrong type/.test(s.name || '')
       ) {
-        const wrongTypeFields = (s as any).schemaWrongTypeInclude || [];
-        const detail = (s as any).schemaWrongTypeDetail || [];
+        const wrongTypeFields = s.schemaWrongTypeInclude || [];
+        const detail = s.schemaWrongTypeDetail || [];
         // Build expected type map for precise mismatch selection
         const expectedMap: Record<string, string> = {};
         for (const d of detail) {
@@ -207,12 +207,12 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
       // oneOf union-all negative: ensure >=2 unique variant required sets satisfied
       if (
-        Array.isArray((s as any).exclusivityViolations) &&
-        (s as any).exclusivityViolations.some(
+        Array.isArray(s.exclusivityViolations) &&
+        s.exclusivityViolations.some(
           (t: string) => t.startsWith('oneOf:') && t.endsWith(':union-all'),
         )
       ) {
-        const tokens = (s as any).exclusivityViolations.filter(
+        const tokens = s.exclusivityViolations.filter(
           (t: string) => t.startsWith('oneOf:') && t.endsWith(':union-all'),
         ) as string[];
         // We can only validate structure using a lightweight heuristic: count how many variant required sets appear fully
@@ -240,10 +240,10 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
       // Mutual exclusivity negatives (tokens like exclusive:a+b[+c]) ensure all conflict fields present together
       if (
-        Array.isArray((s as any).exclusivityViolations) &&
-        (s as any).exclusivityViolations.some((t: string) => t.startsWith('exclusive:'))
+        Array.isArray(s.exclusivityViolations) &&
+        s.exclusivityViolations.some((t: string) => t.startsWith('exclusive:'))
       ) {
-        const exTokens = (s as any).exclusivityViolations.filter((t: string) =>
+        const exTokens = s.exclusivityViolations.filter((t: string) =>
           t.startsWith('exclusive:'),
         ) as string[];
         body.push(`    // PRECHECK: mutual exclusivity negative verification`);
@@ -338,7 +338,7 @@ function renderScenarioTest(s: EndpointScenario): string {
     body.push(`        status: __status,`);
     body.push(`        expectedStatus: ${step.expect.status},`);
     body.push(
-      `        errorScenario: ${(s as any).expectedResult && (s as any).expectedResult.kind === 'error'},`,
+      `        errorScenario: ${s.expectedResult && s.expectedResult.kind === 'error'},`,
     );
     body.push(
       `        bodyShape: (__status === 200 && bodyJson !== undefined) ? sanitizeBody(bodyJson) : undefined`,
@@ -346,8 +346,8 @@ function renderScenarioTest(s: EndpointScenario): string {
     body.push(`      });`);
     body.push(`    } catch {}`);
     // If this is the final step and scenario expects a success body, assert presence and types
-    const isErrorScenario = (s as any).expectedResult && (s as any).expectedResult.kind === 'error';
-    const isEmptyScenario = (s as any).expectedResult && (s as any).expectedResult.kind === 'empty';
+    const isErrorScenario = s.expectedResult && s.expectedResult.kind === 'error';
+    const isEmptyScenario = s.expectedResult && s.expectedResult.kind === 'empty';
     if (isFinal && hasShape && !isErrorScenario) {
       // Always parse once here so assertions can use it
       body.push(`    const json = await ${varName}.json();`);
