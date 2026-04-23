@@ -29,6 +29,7 @@
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "format": "biome format --write",
+    "snapshot:regenerate": "TEST_SEED=snapshot-baseline npm run testsuite:generate && TEST_SEED=snapshot-baseline npm run generate:request-validation",
     "snapshot:update": "tsx scripts/build-snapshot.ts",
     "test": "vitest run",
     "test:watch": "vitest"

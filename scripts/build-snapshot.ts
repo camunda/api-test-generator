@@ -59,8 +59,21 @@ function listFilesRecursive(root: string): string[] {
   return out.sort();
 }
 
-function hashFile(absPath: string): string {
-  return createHash('sha256').update(readFileSync(absPath)).digest('hex');
+function hashFile(absPath: string, relPath: string): string {
+  const buf = readFileSync(absPath);
+  // Strip volatile fields from generator summary files before hashing so the
+  // snapshot reflects generator behaviour, not wall-clock metadata.
+  if (relPath.endsWith('/dist/output/index.json')) {
+    const parsed: unknown = JSON.parse(buf.toString('utf8'));
+    if (parsed !== null && typeof parsed === 'object') {
+      const clone: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+      delete clone.generatedAt;
+      delete clone.nodeVersion;
+      const normalised = JSON.stringify(clone, null, 2);
+      return createHash('sha256').update(normalised).digest('hex');
+    }
+  }
+  return createHash('sha256').update(buf).digest('hex');
 }
 
 export function buildManifest(): Manifest {
@@ -69,7 +82,7 @@ export function buildManifest(): Manifest {
     const absRoot = join(REPO_ROOT, tree);
     for (const file of listFilesRecursive(absRoot)) {
       const rel = relative(REPO_ROOT, file).replaceAll('\\', '/');
-      files[rel] = hashFile(file);
+      files[rel] = hashFile(file, rel);
     }
   }
   const sorted = Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)));
