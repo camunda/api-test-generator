@@ -83,12 +83,12 @@ async function main() {
         s.responseShapeFields = resp.fields.map((f) => ({
           name: f.name,
           type: f.type,
-          semantic: (f as any).semantic,
+          semantic: f.semantic,
           required: f.required,
         }));
-        if ((resp as any).nestedSlices) s.responseNestedSlices = resp.nestedSlices as any;
-        if ((resp as any).nestedItems)
-          (s as any).responseArrayItemFields = (resp as any).nestedItems;
+        if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
+        if (resp.nestedItems)
+          s.responseArrayItemFields = resp.nestedItems;
         s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
       }
     }
@@ -105,25 +105,25 @@ async function main() {
       const requiredFields = getRequiredRequestLeafFields(op.operationId, canonical);
       const hasSchemaMissing = baseScenarios.some(
         (s) =>
-          typeof (s as any).variantKey === 'string' &&
-          (s as any).variantKey.includes('schemaMissingRequired'),
+          typeof s.variantKey === 'string' &&
+          s.variantKey.includes('schemaMissingRequired'),
       );
       const hasSchemaWrongType = baseScenarios.some(
         (s) =>
-          typeof (s as any).variantKey === 'string' &&
-          (s as any).variantKey.includes('schemaWrongType'),
+          typeof s.variantKey === 'string' &&
+          s.variantKey.includes('schemaWrongType'),
       );
       if (requiredFields.length && hasSchemaMissing) {
         const originals = baseScenarios.filter(
           (s) =>
-            typeof (s as any).variantKey === 'string' &&
-            (s as any).variantKey.includes('schemaMissingRequired'),
+            typeof s.variantKey === 'string' &&
+            s.variantKey.includes('schemaMissingRequired'),
         );
         const others = baseScenarios.filter(
           (s) =>
             !(
-              typeof (s as any).variantKey === 'string' &&
-              (s as any).variantKey.includes('schemaMissingRequired')
+              typeof s.variantKey === 'string' &&
+              s.variantKey.includes('schemaMissingRequired')
             ),
         );
         expanded.push(...others);
@@ -165,14 +165,14 @@ async function main() {
         const base = featureCollection.scenarios;
         const originals = base.filter(
           (s) =>
-            typeof (s as any).variantKey === 'string' &&
-            (s as any).variantKey.includes('schemaWrongType'),
+            typeof s.variantKey === 'string' &&
+            s.variantKey.includes('schemaWrongType'),
         ) as any[];
         const others = base.filter(
           (s) =>
             !(
-              typeof (s as any).variantKey === 'string' &&
-              (s as any).variantKey.includes('schemaWrongType')
+              typeof s.variantKey === 'string' &&
+              s.variantKey.includes('schemaWrongType')
             ),
         );
         const result: any[] = [];
@@ -261,9 +261,9 @@ async function main() {
     }
     // Post-expansion cleanup: remove placeholder wrong-type scenarios that ended up with no fields to mutate
     featureCollection.scenarios = featureCollection.scenarios.filter((sc) => {
-      const vk: any = (sc as any).variantKey;
+      const vk: any = sc.variantKey;
       if (typeof vk === 'string' && vk.includes('schemaWrongType')) {
-        const incl = (sc as any).schemaWrongTypeInclude;
+        const incl = sc.schemaWrongTypeInclude;
         if (!Array.isArray(incl) || incl.length === 0) {
           return false; // drop
         }
@@ -284,15 +284,15 @@ async function main() {
           (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
           /search/i.test(op.operationId) ||
           op.operationId === 'activateJobs';
-        const isEmptyNeg = (s as any).expectedResult && (s as any).expectedResult.kind === 'empty';
+        const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
         const isOneOfPair =
-          Array.isArray((s as any).requestVariants) &&
-          (s as any).requestVariants.some(
+          Array.isArray(s.requestVariants) &&
+          s.requestVariants.some(
             (rv: any) => typeof rv.variant === 'string' && rv.variant.startsWith('pair:'),
           );
         const isUnionAll =
-          Array.isArray((s as any).exclusivityViolations) &&
-          (s as any).exclusivityViolations.some(
+          Array.isArray(s.exclusivityViolations) &&
+          s.exclusivityViolations.some(
             (t: string) => t.includes('oneOf:') && t.endsWith('union-all'),
           );
         const skipGraft = (isSearchLikeOp && isEmptyNeg) || isUnionAll || isOneOfPair;
@@ -308,21 +308,21 @@ async function main() {
         s.responseShapeFields = resp.fields.map((f) => ({
           name: f.name,
           type: f.type,
-          semantic: (f as any).semantic,
+          semantic: f.semantic,
           required: f.required,
         }));
-        if ((resp as any).nestedSlices) s.responseNestedSlices = resp.nestedSlices as any;
-        if ((resp as any).nestedItems)
-          (s as any).responseArrayItemFields = (resp as any).nestedItems;
+        if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
+        if (resp.nestedItems)
+          s.responseArrayItemFields = resp.nestedItems;
         s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
         // Carry forward suppress metadata (already on scenario) no action needed here except sanity (noop)
         // Consolidation fix: ensure schemaMissingRequired variants truly omit excluded required fields
         try {
           const isMissingReq =
-            typeof (s as any).variantKey === 'string' &&
-            (s as any).variantKey.includes('schemaMissingRequired');
-          const includeArr: string[] | undefined = Array.isArray((s as any).schemaMissingInclude)
-            ? (s as any).schemaMissingInclude
+            typeof s.variantKey === 'string' &&
+            s.variantKey.includes('schemaMissingRequired');
+          const includeArr: string[] | undefined = Array.isArray(s.schemaMissingInclude)
+            ? s.schemaMissingInclude
             : undefined;
           if (isMissingReq && includeArr) {
             const finalStep = s.requestPlan?.[s.requestPlan.length - 1];
@@ -340,10 +340,10 @@ async function main() {
         try {
           const final = s.requestPlan?.[s.requestPlan.length - 1];
           const groups = requestIndex.byOperation[op.operationId] || [];
-          const isError = s.expectedResult && (s.expectedResult as any).kind === 'error';
+          const isError = s.expectedResult && s.expectedResult.kind === 'error';
           const unionViolation =
-            Array.isArray((s as any).exclusivityViolations) &&
-            (s as any).exclusivityViolations.some(
+            Array.isArray(s.exclusivityViolations) &&
+            s.exclusivityViolations.some(
               (t: string) => t.includes('oneOf:') && t.endsWith('union-all'),
             );
           if (
@@ -377,11 +377,11 @@ async function main() {
         // Inject detailed wrong-type mapping into scenario name for clarity (expectedType -> sentType per field)
         try {
           if (
-            (s as any).schemaWrongTypeInclude &&
-            Array.isArray((s as any).schemaWrongTypeDetail) &&
-            (s as any).schemaWrongTypeDetail.length
+            s.schemaWrongTypeInclude &&
+            Array.isArray(s.schemaWrongTypeDetail) &&
+            s.schemaWrongTypeDetail.length
           ) {
-            const det = (s as any).schemaWrongTypeDetail as {
+            const det = s.schemaWrongTypeDetail as {
               field: string;
               expectedType: string;
               sentType: string;
@@ -408,7 +408,7 @@ async function main() {
     try {
       const domainRules = (graph.domain as any)?.operationArtifactRules || {};
       for (const sc of featureCollection.scenarios) {
-        const steps = (sc as any).requestPlan || [];
+        const steps = sc.requestPlan || [];
         for (const st of steps) {
           if (st?.bodyKind === 'multipart' && st?.multipartTemplate?.files) {
             for (const [k, v] of Object.entries<any>(st.multipartTemplate.files)) {
@@ -419,10 +419,10 @@ async function main() {
               let kind: string | undefined;
               const rulesForOp = domainRules?.[st.operationId]?.rules || [];
               if (
-                Array.isArray((sc as any).artifactsApplied) &&
-                (sc as any).artifactsApplied.length
+                Array.isArray(sc.artifactsApplied) &&
+                sc.artifactsApplied.length
               ) {
-                const rid = (sc as any).artifactsApplied[0];
+                const rid = sc.artifactsApplied[0];
                 const r = rulesForOp.find((r: any) => r.id === rid);
                 kind = r?.artifactKind;
               }
@@ -556,9 +556,9 @@ function buildRequestPlan(
       // Basic extraction: semantic-labeled fields
       const extract: any[] = [];
       for (const f of resp.fields) {
-        if ((f as any).semantic) {
-          const bind = camelCase((f as any).semantic) + 'Var';
-          extract.push({ fieldPath: f.name, bind, semantic: (f as any).semantic });
+        if (f.semantic) {
+          const bind = camelCase(f.semantic) + 'Var';
+          extract.push({ fieldPath: f.name, bind, semantic: f.semantic });
         }
       }
       if (extract.length) step.extract = (step.extract || []).concat(extract);
