@@ -1,7 +1,7 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk } from '../schema/walker.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -14,8 +14,7 @@ export function generateAdditionalPropsViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const schema: any = op.requestBodySchema;
     if (!schema || schema.type !== 'object') continue;
     if (schema.additionalProperties === false) {

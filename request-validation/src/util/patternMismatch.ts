@@ -24,19 +24,7 @@ export function buildGuaranteedPatternMismatch(
     return undefined;
   }
   // Probe for permissive pattern (matches everything we throw at it)
-  const probe = [
-    'a',
-    '1',
-    '!',
-    '_',
-    '@',
-    'abc123',
-    'A.B',
-    'x-y',
-    '+plus',
-    '',
-    '\n',
-  ];
+  const probe = ['a', '1', '!', '_', '@', 'abc123', 'A.B', 'x-y', '+plus', '', '\n'];
   if (probe.every((s) => rx!.test(s))) return undefined;
 
   const candidates: string[] = [];

@@ -247,14 +247,14 @@ export interface Operation {
 }
 
 export enum OperationType {
-  CREATE = 'create',      // Creates new resources
-  READ = 'read',          // Reads existing resources  
-  UPDATE = 'update',      // Modifies existing resources
-  DELETE = 'delete',      // Removes resources
-  SEARCH = 'search',      // Queries for resources
-  ACTION = 'action',      // Performs actions (activate, complete, etc.)
-  DEPLOY = 'deploy',      // Special: deployment operations
-  SETUP = 'setup'         // Special: setup/initialization operations
+  CREATE = 'create', // Creates new resources
+  READ = 'read', // Reads existing resources
+  UPDATE = 'update', // Modifies existing resources
+  DELETE = 'delete', // Removes resources
+  SEARCH = 'search', // Queries for resources
+  ACTION = 'action', // Performs actions (activate, complete, etc.)
+  DEPLOY = 'deploy', // Special: deployment operations
+  SETUP = 'setup', // Special: setup/initialization operations
 }
 
 export interface SideEffect {
@@ -276,15 +276,15 @@ export interface OperationParameter {
 }
 
 export interface ParameterSchema {
-  type: string;                    // string, number, boolean, array, object
-  format?: string;                 // date, date-time, uri, email, etc.
-  pattern?: string;                // regex pattern
+  type: string; // string, number, boolean, array, object
+  format?: string; // date, date-time, uri, email, etc.
+  pattern?: string; // regex pattern
   minLength?: number;
   maxLength?: number;
   minimum?: number;
   maximum?: number;
   enum?: any[];
-  items?: ParameterSchema;         // for arrays
+  items?: ParameterSchema; // for arrays
   properties?: Record<string, ParameterSchema>; // for objects
 }
 
@@ -322,16 +322,16 @@ export interface DependencyEdge {
   sourceOperationId: string;
   targetOperationId: string;
   semanticType: string;
-  sourceFieldPath: string;  // Where the semantic type is produced
-  targetFieldPath: string;  // Where the semantic type is consumed
+  sourceFieldPath: string; // Where the semantic type is produced
+  targetFieldPath: string; // Where the semantic type is consumed
   strength: DependencyStrength;
   description?: string;
 }
 
 export enum DependencyStrength {
-  REQUIRED = 'required',    // Target operation cannot be called without source
-  OPTIONAL = 'optional',    // Target operation can be called without source, but benefits from it
-  CONDITIONAL = 'conditional' // Target operation may need source depending on conditions
+  REQUIRED = 'required', // Target operation cannot be called without source
+  OPTIONAL = 'optional', // Target operation can be called without source, but benefits from it
+  CONDITIONAL = 'conditional', // Target operation may need source depending on conditions
 }
 
 export interface OperationDependencyGraph {
@@ -395,33 +395,33 @@ export interface ConditionalIdempotencySpec {
 
 // NEW: Root Dependency Analysis interfaces
 export interface RootOperationAnalysis {
-  deploymentOperations: string[];     // Operations that create foundational resources
-  setupOperations: string[];          // Operations that must run before others
-  entryPointOperations: string[];     // Operations with no dependencies
+  deploymentOperations: string[]; // Operations that create foundational resources
+  setupOperations: string[]; // Operations that must run before others
+  entryPointOperations: string[]; // Operations with no dependencies
   bootstrapSequences: BootstrapSequence[];
 }
 
 export interface BootstrapSequence {
   name: string;
   description: string;
-  operations: string[];              // Ordered sequence of operations
-  produces: string[];               // Semantic types produced by this sequence
+  operations: string[]; // Ordered sequence of operations
+  produces: string[]; // Semantic types produced by this sequence
 }
 
 // NEW: Cross-contamination mapping
 export interface CrossContaminationMap {
-  [semanticType: string]: string[];  // Maps semantic type to potential contaminants
+  [semanticType: string]: string[]; // Maps semantic type to potential contaminants
 }
 
 // Analysis result types
 export interface GraphAnalysis {
-  entryPoints: string[];        // Operations with no dependencies
-  sinks: string[];             // Operations that don't produce outputs used by others
+  entryPoints: string[]; // Operations with no dependencies
+  sinks: string[]; // Operations that don't produce outputs used by others
   stronglyConnectedComponents: string[][];
   longestPaths: DependencyPath[];
   coverage: {
-    semanticTypeCoverage: number;  // Percentage of semantic types that are used
-    operationCoverage: number;     // Percentage of operations that are reachable
+    semanticTypeCoverage: number; // Percentage of semantic types that are used
+    operationCoverage: number; // Percentage of operations that are reachable
   };
 }
 

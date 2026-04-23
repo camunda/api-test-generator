@@ -1,13 +1,21 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import YAML from 'yaml';
-import { ResponseShapeSummary, RequestOneOfGroupSummary, RequestOneOfVariant, ExtractedRequestVariantsIndex } from './types.js';
+import type {
+  ExtractedRequestVariantsIndex,
+  RequestOneOfGroupSummary,
+  RequestOneOfVariant,
+  ResponseShapeSummary,
+} from './types.js';
 
-interface OpenAPISchemaObject { [key: string]: any; }
+interface OpenAPISchemaObject {
+  [key: string]: any;
+}
 
 export async function extractResponseAndRequestVariants(baseDir: string, semanticTypes: string[]) {
   // baseDir points to path-analyser; spec lives at repo root under spec/bundled/
-  const specPath = process.env.OPENAPI_SPEC_PATH || path.resolve(baseDir, '../spec/bundled/rest-api.bundle.json');
+  const specPath =
+    process.env.OPENAPI_SPEC_PATH || path.resolve(baseDir, '../spec/bundled/rest-api.bundle.json');
   const raw = await fs.readFile(specPath, 'utf8');
   const doc = YAML.parse(raw) as OpenAPISchemaObject;
   const responses: ResponseShapeSummary[] = [];
@@ -19,8 +27,10 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
       if (!op || !op.operationId) continue;
       const operationId = op.operationId;
       // Response extraction: take first 200 json schema if present
-  const successCode = Object.keys(op.responses||{}).find(c => ['200','201','204'].includes(c));
-  const success = successCode ? op.responses[successCode] : undefined;
+      const successCode = Object.keys(op.responses || {}).find((c) =>
+        ['200', '201', '204'].includes(c),
+      );
+      const success = successCode ? op.responses[successCode] : undefined;
       const ctSchemas: any[] = [];
       if (success?.content) {
         for (const [ct, media] of Object.entries<any>(success.content)) {
@@ -58,10 +68,20 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
         const nestedSlices: Record<string, any[]> = {};
         try {
           const deploymentsProp = rootSchema?.properties?.deployments;
-          const deployments = deploymentsProp ? resolveSchema(deploymentsProp, components) : undefined;
-          const items = deployments?.type === 'array' ? resolveSchema(deployments.items, components) : undefined;
+          const deployments = deploymentsProp
+            ? resolveSchema(deploymentsProp, components)
+            : undefined;
+          const items =
+            deployments?.type === 'array'
+              ? resolveSchema(deployments.items, components)
+              : undefined;
           const itemObj = items && items.$ref ? resolveSchema(items, components) : items;
-          const sliceNames = ['processDefinition','decisionDefinition','decisionRequirements','form'];
+          const sliceNames = [
+            'processDefinition',
+            'decisionDefinition',
+            'decisionRequirements',
+            'form',
+          ];
           if (itemObj && itemObj.properties) {
             for (const slice of sliceNames) {
               const sProp = itemObj.properties[slice];
@@ -85,21 +105,27 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
         const producedSet = new Set<string>();
         for (const f of fields) {
           const pascal = toPascalCase(f.name);
-            if (semanticTypes.includes(pascal)) {
-              (f as any).semantic = pascal;
-              producedSet.add(pascal);
-            }
+          if (semanticTypes.includes(pascal)) {
+            (f as any).semantic = pascal;
+            producedSet.add(pascal);
+          }
         }
-  const resp: ResponseShapeSummary = { operationId, contentTypes: ctSchemas.map(c=>c.ct), fields, producedSemantics: [...producedSet], successStatus: successCode ? Number(successCode) : undefined } as any;
+        const resp: ResponseShapeSummary = {
+          operationId,
+          contentTypes: ctSchemas.map((c) => c.ct),
+          fields,
+          producedSemantics: [...producedSet],
+          successStatus: successCode ? Number(successCode) : undefined,
+        } as any;
         if (Object.keys(nestedSlices).length) (resp as any).nestedSlices = nestedSlices;
-  if (Object.keys(nestedItems).length) (resp as any).nestedItems = nestedItems;
-  responses.push(resp);
+        if (Object.keys(nestedItems).length) (resp as any).nestedItems = nestedItems;
+        responses.push(resp);
       }
 
       // Request oneOf extraction
       const reqSchema = op.requestBody?.content?.['application/json']?.schema;
       if (reqSchema) {
-  findOneOfGroups(operationId, reqSchema, doc.components?.schemas || {}, requestGroups);
+        findOneOfGroups(operationId, reqSchema, doc.components?.schemas || {}, requestGroups);
       }
     }
   }
@@ -121,38 +147,69 @@ function flattenTopLevelFields(schemaRef: any, components: Record<string, any>) 
       const type = effectiveType(r, components);
       if (type === 'array' && r.items) {
         const it = resolveSchema(r.items, components);
-        out.push({ name: fname, type: 'array', required: req.has(fname), objectRef: it.$ref ? refName(it.$ref) : undefined });
+        out.push({
+          name: fname,
+          type: 'array',
+          required: req.has(fname),
+          objectRef: it.$ref ? refName(it.$ref) : undefined,
+        });
       } else {
-        out.push({ name: fname, type, required: req.has(fname), objectRef: r.$ref ? refName(r.$ref) : undefined });
+        out.push({
+          name: fname,
+          type,
+          required: req.has(fname),
+          objectRef: r.$ref ? refName(r.$ref) : undefined,
+        });
       }
     }
   }
   return out;
 }
 
-function findOneOfGroups(operationId: string, root: any, components: Record<string, any>, acc: RequestOneOfGroupSummary[], path: string[] = [], depth = 0) {
+function findOneOfGroups(
+  operationId: string,
+  root: any,
+  components: Record<string, any>,
+  acc: RequestOneOfGroupSummary[],
+  path: string[] = [],
+  depth = 0,
+) {
   const resolved = resolveSchema(root, components);
   // Top-level oneOf
   if (resolved.oneOf && Array.isArray(resolved.oneOf)) {
-  // vendor extension flag for genuine polymorphic unions
-  const isPolymorphic = resolved['x-polymorphic-schema'] === true;
+    // vendor extension flag for genuine polymorphic unions
+    const isPolymorphic = resolved['x-polymorphic-schema'] === true;
     const variants: RequestOneOfVariant[] = resolved.oneOf.map((v: any, idx: number) => {
       const vs = resolveSchema(v, components);
       const props = vs.properties || {};
       const required = vs.required || [];
-      const optional = Object.keys(props).filter(k => !required.includes(k));
+      const optional = Object.keys(props).filter((k) => !required.includes(k));
       let discriminator;
       if (resolved.discriminator && resolved.discriminator.propertyName) {
         const discField = resolved.discriminator.propertyName;
         const mapping = resolved.discriminator.mapping || {};
-  const entry = Object.entries(mapping).find(([, ref]) => typeof ref === 'string' && ref.endsWith(refName(vs.$ref || v.$ref || '')));
+        const entry = Object.entries(mapping).find(
+          ([, ref]) => typeof ref === 'string' && ref.endsWith(refName(vs.$ref || v.$ref || '')),
+        );
         if (entry) discriminator = { field: discField, value: entry[0] };
       }
       const groupId = path.length ? path.join('.') : 'group0';
-      return { groupId, variantName: vs.title || `variant${idx+1}`, required, optional, discriminator };
+      return {
+        groupId,
+        variantName: vs.title || `variant${idx + 1}`,
+        required,
+        optional,
+        discriminator,
+      };
     });
-  const groupId = path.length ? path.join('.') : 'group0';
-  acc.push({ operationId, groupId, variants, unionFields: [...new Set(variants.flatMap(v => [...v.required, ...v.optional]))], isPolymorphic });
+    const groupId = path.length ? path.join('.') : 'group0';
+    acc.push({
+      operationId,
+      groupId,
+      variants,
+      unionFields: [...new Set(variants.flatMap((v) => [...v.required, ...v.optional]))],
+      isPolymorphic,
+    });
   }
   // Nested: scan properties one level deep for oneOf (shallow)
   if (depth < 3 && resolved.type === 'object' && resolved.properties) {
@@ -183,7 +240,8 @@ function resolveSchema(schema: any, components: Record<string, any>, depth = 0):
       const r = resolveSchema(part, components, depth + 1) || {};
       if (r.type && !merged.type) merged.type = r.type;
       if (r.properties) merged.properties = { ...(merged.properties || {}), ...r.properties };
-      if (Array.isArray(r.required)) merged.required = Array.from(new Set([...(merged.required || []), ...r.required]));
+      if (Array.isArray(r.required))
+        merged.required = Array.from(new Set([...(merged.required || []), ...r.required]));
       if (r.items && !merged.items) merged.items = r.items;
       if (r.format && !merged.format) merged.format = r.format;
     }
@@ -210,15 +268,30 @@ function effectiveType(schema: any, components: Record<string, any>): string {
   return 'unknown';
 }
 
-function refName(ref: string): string { return ref.split('/').pop() || ref; }
+function refName(ref: string): string {
+  return ref.split('/').pop() || ref;
+}
 
 export async function writeExtractionOutputs(baseDir: string, semanticTypes: string[]) {
-  const { responses, requestIndex } = await extractResponseAndRequestVariants(baseDir, semanticTypes);
+  const { responses, requestIndex } = await extractResponseAndRequestVariants(
+    baseDir,
+    semanticTypes,
+  );
   const outDir = path.resolve(baseDir, 'dist', 'extraction');
   await fs.mkdir(outDir, { recursive: true });
-  await fs.writeFile(path.join(outDir, 'response-shapes.json'), JSON.stringify(responses, null, 2), 'utf8');
-  await fs.writeFile(path.join(outDir, 'request-variants.json'), JSON.stringify(requestIndex, null, 2), 'utf8');
+  await fs.writeFile(
+    path.join(outDir, 'response-shapes.json'),
+    JSON.stringify(responses, null, 2),
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(outDir, 'request-variants.json'),
+    JSON.stringify(requestIndex, null, 2),
+    'utf8',
+  );
   return { responses, requestIndex };
 }
 
-function toPascalCase(name: string): string { return name ? name[0].toUpperCase() + name.slice(1) : name; }
+function toPascalCase(name: string): string {
+  return name ? name[0].toUpperCase() + name.slice(1) : name;
+}

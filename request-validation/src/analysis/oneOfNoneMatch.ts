@@ -1,5 +1,5 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -7,14 +7,10 @@ interface Opts {
 }
 
 // Produces a body that intentionally matches none of the oneOf variants (by omitting discriminator or required markers)
-export function generateOneOfNoneMatch(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateOneOfNoneMatch(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) continue;
     let produced = 0;

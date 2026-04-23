@@ -1,21 +1,17 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk } from '../schema/walker.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
 }
 
-export function generateEnumViolations(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateEnumViolations(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     let produced = 0;
     if (walk && walk.root) {
@@ -32,7 +28,7 @@ export function generateEnumViolations(
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= opts.capPerOperation) break;
             const body = structuredClone(baseline);
-            const marker = {__invalidEnum: true, value: inv};
+            const marker = { __invalidEnum: true, value: inv };
             if (!applyOrCreatePath(body, path, marker)) continue;
             out.push(makeScenario(op, path.join('.'), body, produced));
             produced++;
@@ -56,30 +52,15 @@ export function generateEnumViolations(
           for (const r of v.required) base[r] = placeholder(v.properties[r]);
         }
         for (const [prop, schema] of Object.entries<any>(v.properties)) {
-          if (!schema || !Array.isArray(schema.enum) || !schema.enum.length)
-            continue;
-          if (
-            opts.capPerOperation &&
-            produced >= (opts.capPerOperation ?? Infinity)
-          )
-            break;
+          if (!schema || !Array.isArray(schema.enum) || !schema.enum.length) continue;
+          if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
           const invalids = buildInvalidVariants(schema.enum[0]);
           for (const inv of invalids) {
-            if (
-              opts.capPerOperation &&
-              produced >= (opts.capPerOperation ?? Infinity)
-            )
-              break;
+            if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
             const body = structuredClone(base);
-            body[prop] = {__invalidEnum: true, value: inv};
+            body[prop] = { __invalidEnum: true, value: inv };
             out.push({
-              id: makeId([
-                op.operationId,
-                'enumOneOf',
-                String(vi),
-                prop,
-                String(produced),
-              ]),
+              id: makeId([op.operationId, 'enumOneOf', String(vi), prop, String(produced)]),
               operationId: op.operationId,
               method: op.method,
               path: op.path,
@@ -118,12 +99,7 @@ function makeScenario(
   idx: number,
 ): ValidationScenario {
   return {
-    id: makeId([
-      op.operationId,
-      'enum',
-      targetPath.replace(/\./g, '_'),
-      String(idx),
-    ]),
+    id: makeId([op.operationId, 'enum', targetPath.replace(/\./g, '_'), String(idx)]),
     operationId: op.operationId,
     method: op.method,
     path: op.path,

@@ -1,9 +1,5 @@
-import {
-  OperationModel,
-  ValidationScenario,
-  ParameterModel,
-} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -25,14 +21,10 @@ function buildQueryParamMap(op: OperationModel): Record<string, string> {
   return q;
 }
 
-export function generateParamMissing(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateParamMissing(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
       if (!p.required) continue;
@@ -65,22 +57,17 @@ export function generateParamMissing(
   return out;
 }
 
-export function generateParamTypeMismatch(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
       if (!p.schema || !p.schema.type) continue;
       if (p.in === 'path') continue; // path params often strictly string serialized
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       // Skip plain string parameters without enum/format; no real type mismatch possible.
-      if (p.schema.type === 'string' && !p.schema.enum && !p.schema.format)
-        continue;
+      if (p.schema.type === 'string' && !p.schema.enum && !p.schema.format) continue;
       const wrong = wrongTypeValue(p.schema.type);
       if (wrong === undefined) continue;
       // Start with all required query params (so we don't unintentionally create identical empty queries)
@@ -90,10 +77,7 @@ export function generateParamTypeMismatch(
         // Overwrite the specific param with wrong typed value (stringified to keep buildUrl logic simple)
         if (p.schema?.type === 'boolean') {
           allQ[p.name] = 'notBoolean';
-        } else if (
-          p.schema?.type === 'integer' ||
-          p.schema?.type === 'number'
-        ) {
+        } else if (p.schema?.type === 'integer' || p.schema?.type === 'number') {
           allQ[p.name] = 'NaNValue';
         } else if (p.schema?.type === 'string') {
           // If we reached here we have format/enum; provide a clearly invalid token
@@ -132,8 +116,7 @@ export function generateParamEnumViolation(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
       const e = p.schema?.enum;
@@ -152,8 +135,7 @@ export function generateParamEnumViolation(
         type: 'param-enum-violation',
         target: `${p.in}.${p.name}`,
         params: buildParams(op.path, {
-          extraQuery:
-            p.in === 'query' ? {[p.name]: String(invalid)} : undefined,
+          extraQuery: p.in === 'query' ? { [p.name]: String(invalid) } : undefined,
         }),
         expectedStatus: 400,
         description: `Enum violation for ${p.in} parameter ${p.name}`,
@@ -189,10 +171,7 @@ interface BuildParamsOpts {
   omit?: string;
   extraQuery?: Record<string, string>;
 }
-function buildParams(
-  path: string,
-  opt: BuildParamsOpts,
-): Record<string, string> | undefined {
+function buildParams(path: string, opt: BuildParamsOpts): Record<string, string> | undefined {
   const m = path.match(/\{([^}]+)}/g);
   const params: Record<string, string> = {};
   if (m) for (const token of m) params[token.slice(1, -1)] = '1'; // default valid numeric-like placeholder

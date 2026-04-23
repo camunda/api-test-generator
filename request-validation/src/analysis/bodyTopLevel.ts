@@ -1,18 +1,14 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
 }
 
-export function generateMissingBody(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateMissingBody(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.requestBodySchema) continue;
     // New policy: Only generate missing-body scenarios when body is explicitly required OR effectively required.
     // Skip optional bodies entirely (we don't assert positives; business logic not derivable here).
@@ -28,8 +24,7 @@ export function generateMissingBody(
         op.requiredProps.length
       ) {
         const propCount = Object.keys(schema.properties).length;
-        if (propCount > 0 && op.requiredProps.length === propCount)
-          required = true;
+        if (propCount > 0 && op.requiredProps.length === propCount) required = true;
       }
     }
     if (!required) continue; // skip optional body omission
@@ -55,8 +50,7 @@ export function generateBodyTopTypeMismatch(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const schema: any = op.requestBodySchema;
     if (!schema) continue;

@@ -1,5 +1,5 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -13,8 +13,7 @@ export function generateOneOfMultiAmbiguous(
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (!op.rootOneOf || op.rootOneOf.length < 3) continue;
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const variants = op.rootOneOf.filter(
       (v) => v && v.type === 'object' && Array.isArray(v.required),
     );
@@ -44,18 +43,12 @@ export function generateOneOfMultiAmbiguous(
   return out;
 }
 
-export function generateOneOfCrossBleed(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateOneOfCrossBleed(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (!op.rootOneOf || op.rootOneOf.length < 2) continue;
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
-    const variants = op.rootOneOf.filter(
-      (v) => v && v.type === 'object' && v.properties,
-    );
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
+    const variants = op.rootOneOf.filter((v) => v && v.type === 'object' && v.properties);
     if (variants.length < 2) continue;
     const a = variants[0];
     const b = variants[1];
@@ -90,15 +83,12 @@ export function generateDiscriminatorStructureMismatch(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const d = op.discriminator;
     if (!d) continue;
     const root = op.requestBodySchema;
     if (!root || !Array.isArray(root.oneOf)) continue;
-    const variants = root.oneOf.filter(
-      (v: any) => v && v.type === 'object' && v.properties,
-    );
+    const variants = root.oneOf.filter((v: any) => v && v.type === 'object' && v.properties);
     if (variants.length < 2) continue;
     const a = variants[0];
     const b = variants[1];
@@ -128,10 +118,7 @@ export function generateDiscriminatorStructureMismatch(
   return out;
 }
 
-function guessDiscriminatorValue(
-  variant: any,
-  disc: string,
-): string | undefined {
+function guessDiscriminatorValue(variant: any, disc: string): string | undefined {
   if (variant.properties && variant.properties[disc]) {
     const p = variant.properties[disc];
     if (p.enum && p.enum.length) return p.enum[0];

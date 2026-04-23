@@ -1,5 +1,5 @@
-import {WalkNode, buildWalk} from './walker.js';
-import {OperationModel} from '../model/types.js';
+import type { OperationModel } from '../model/types.js';
+import { buildWalk, type WalkNode } from './walker.js';
 
 export function buildBaselineBody(op: OperationModel): any {
   const walk = buildWalk(op);

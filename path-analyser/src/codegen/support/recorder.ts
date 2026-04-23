@@ -43,7 +43,7 @@ export function sanitizeBody(value: any): JSONValue {
   if (t === 'string') return '<string>';
   if (t === 'number') return 0;
   if (t === 'boolean') return true;
-  if (Array.isArray(value)) return value.map(v => sanitizeBody(v));
+  if (Array.isArray(value)) return value.map((v) => sanitizeBody(v));
   if (t === 'object') {
     const out: Record<string, JSONValue> = {};
     for (const [k, v] of Object.entries(value)) {

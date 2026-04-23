@@ -1,5 +1,5 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   capPerOperation?: number;
@@ -15,11 +15,9 @@ export function generateMultipartMissingRequired(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.multipartSchema || op.multipartSchema.type !== 'object') continue;
-    if (!op.multipartRequiredProps || !op.multipartRequiredProps.length)
-      continue;
+    if (!op.multipartRequiredProps || !op.multipartRequiredProps.length) continue;
     let count = 0;
     for (const part of op.multipartRequiredProps) {
       if (opts.capPerOperation && count >= opts.capPerOperation) break;

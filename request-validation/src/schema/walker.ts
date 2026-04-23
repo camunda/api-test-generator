@@ -1,4 +1,4 @@
-import {OperationModel} from '../model/types.js';
+import type { OperationModel } from '../model/types.js';
 
 export interface WalkNode {
   pointer: string; // JSON pointer within request body schema
@@ -20,10 +20,7 @@ export interface SchemaWalkResult {
 export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
   if (!op.requestBodySchema) return undefined;
   // Permit roots that either are object or have allOf (flattenable into object)
-  if (
-    op.requestBodySchema.type !== 'object' &&
-    !Array.isArray(op.requestBodySchema.allOf)
-  )
+  if (op.requestBodySchema.type !== 'object' && !Array.isArray(op.requestBodySchema.allOf))
     return undefined;
   const byPointer = new Map<string, WalkNode>();
   function mergeAllOf(schema: any): any {
@@ -46,8 +43,7 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
           }
         }
         if (Array.isArray(m.required)) {
-          for (const r of m.required)
-            if (!merged.required.includes(r)) merged.required.push(r);
+          for (const r of m.required) if (!merged.required.includes(r)) merged.required.push(r);
         }
       }
     }
@@ -59,8 +55,7 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
       }
     }
     if (Array.isArray(schema.required)) {
-      for (const r of schema.required)
-        if (!merged.required.includes(r)) merged.required.push(r);
+      for (const r of schema.required) if (!merged.required.includes(r)) merged.required.push(r);
     }
     // Preserve discriminator or other root-level keys if present
     if (schema.discriminator) merged.discriminator = schema.discriminator;
@@ -74,9 +69,7 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
       pointer,
       key,
       type: effective.type,
-      required: Array.isArray(effective.required)
-        ? effective.required.slice()
-        : undefined,
+      required: Array.isArray(effective.required) ? effective.required.slice() : undefined,
       enum: Array.isArray(effective.enum) ? effective.enum.slice() : undefined,
       constraints: extractConstraints(effective),
       raw: schema,
@@ -95,7 +88,7 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
     return node;
   }
   const root = visit(op.requestBodySchema, '');
-  return {root, byPointer};
+  return { root, byPointer };
 }
 
 function escapeJsonPointer(s: string): string {

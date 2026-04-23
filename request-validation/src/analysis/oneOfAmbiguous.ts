@@ -1,19 +1,15 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
 }
 
-export function generateOneOfAmbiguous(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) continue;
     // For each pair (first up to cap) merge required sets

@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import prettier from 'prettier';
-import {ValidationScenario} from '../model/types.js';
-import {LICENSE_HEADER} from './licenseHeader.js';
+import type { ValidationScenario } from '../model/types.js';
+import { LICENSE_HEADER } from './licenseHeader.js';
 
 interface EmitOpts {
   outDir: string;
@@ -11,10 +11,7 @@ interface EmitOpts {
   generationTimestamp?: string;
 }
 
-export async function emitQaTests(
-  scenarios: ValidationScenario[],
-  opts: EmitOpts,
-) {
+export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
   const byFile = new Map<string, ValidationScenario[]>();
   for (const s of scenarios) {
     const resource = deriveResource(s.path);
@@ -23,15 +20,14 @@ export async function emitQaTests(
     arr.push(s);
     byFile.set(file, arr);
   }
-  await fs.promises.mkdir(opts.outDir, {recursive: true});
+  await fs.promises.mkdir(opts.outDir, { recursive: true });
   // Resolve Prettier config once (fail fast if not found / cannot load)
   let resolvedConfig: prettier.Config | null = null;
   try {
     resolvedConfig = await prettier.resolveConfig(process.cwd());
   } catch (e) {
     throw new Error(
-      '[emit] Failed to resolve Prettier config: ' +
-        (e instanceof Error ? e.message : String(e)),
+      '[emit] Failed to resolve Prettier config: ' + (e instanceof Error ? e.message : String(e)),
     );
   }
   if (!resolvedConfig) {
@@ -47,12 +43,7 @@ export async function emitQaTests(
   }
   for (const [file, list] of byFile.entries()) {
     list.sort((a, b) => a.id.localeCompare(b.id));
-    const raw = buildFile(
-      list,
-      opts.qaImportDepth,
-      opts.specCommit,
-      opts.generationTimestamp,
-    );
+    const raw = buildFile(list, opts.qaImportDepth, opts.specCommit, opts.generationTimestamp);
     let formatted: string;
     try {
       formatted = await prettier.format(raw, {
@@ -61,8 +52,7 @@ export async function emitQaTests(
       });
     } catch (e) {
       throw new Error(
-        '[emit] Prettier formatting failed: ' +
-          (e instanceof Error ? e.message : String(e)),
+        '[emit] Prettier formatting failed: ' + (e instanceof Error ? e.message : String(e)),
       );
     }
     const target = path.join(opts.outDir, file);
@@ -125,12 +115,8 @@ function renderScenario(s: ValidationScenario, title: string): string {
   if (s.bodyEncoding === 'multipart' && s.multipartForm) {
     const formLit = JSON.stringify(s.multipartForm, null, 2);
     lines.push(`    const formData = new FormData();`);
-    lines.push(
-      `    const multipartFields: Record<string,string> = ${formLit};`,
-    );
-    lines.push(
-      `    for (const [k,v] of Object.entries(multipartFields)) formData.append(k, v);`,
-    );
+    lines.push(`    const multipartFields: Record<string,string> = ${formLit};`);
+    lines.push(`    for (const [k,v] of Object.entries(multipartFields)) formData.append(k, v);`);
   } else if (s.requestBody) {
     const body = JSON.stringify(s.requestBody, null, 2);
     if (body === '[]') {
@@ -186,8 +172,7 @@ function methodFn(m: string): string {
 function deriveResource(p: string): string {
   const cleaned = p.startsWith('/') ? p.slice(1) : p;
   const segs = cleaned.split('/');
-  if (segs[0] === 'v1' || segs[0] === 'v2')
-    return (segs[1] || 'root').replace(/[^a-zA-Z0-9]/g, '');
+  if (segs[0] === 'v1' || segs[0] === 'v2') return (segs[1] || 'root').replace(/[^a-zA-Z0-9]/g, '');
   return (segs[0] || 'root').replace(/[^a-zA-Z0-9]/g, '');
 }
 
@@ -198,15 +183,9 @@ function buildBaseTitle(s: ValidationScenario): string {
     const constraint = s.constraintKind || 'constraint';
     const targetSegs = s.target ? s.target.split('.') : [];
     const location = targetSegs.length > 1 ? targetSegs[0] : 'param';
-    const paramName = targetSegs.length
-      ? targetSegs[targetSegs.length - 1]
-      : 'param';
+    const paramName = targetSegs.length ? targetSegs[targetSegs.length - 1] : 'param';
     const locLabel =
-      location === 'path'
-        ? 'Path param'
-        : location === 'query'
-          ? 'Query param'
-          : 'Param';
+      location === 'path' ? 'Path param' : location === 'query' ? 'Query param' : 'Param';
     return `${s.operationId} - ${locLabel} ${paramName} ${constraint} violation`;
   }
   switch (s.type) {

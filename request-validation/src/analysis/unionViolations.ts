@@ -1,18 +1,14 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
 }
 
-export function generateUnionViolations(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateUnionViolations(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.rootOneOf || op.rootOneOf.length < 2) continue;
     // select first two variants with object + required
     const variants = op.rootOneOf.filter(
@@ -21,14 +17,11 @@ export function generateUnionViolations(
     if (variants.length < 2) continue;
     const a = variants[0];
     const b = variants[1];
-    const combinedRequired = Array.from(
-      new Set([...a.required, ...b.required]),
-    );
+    const combinedRequired = Array.from(new Set([...a.required, ...b.required]));
     const body: Record<string, any> = {};
     for (const f of combinedRequired) {
       // prefer variant property schema if present
-      const schema =
-        (a.properties && a.properties[f]) || (b.properties && b.properties[f]);
+      const schema = (a.properties && a.properties[f]) || (b.properties && b.properties[f]);
       body[f] = placeholder(schema);
     }
     const id = makeId([op.operationId, 'unionViolation']);

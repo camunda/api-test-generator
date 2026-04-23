@@ -1,6 +1,6 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -13,8 +13,7 @@ export function generateAllOfMissingRequired(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root) continue;
     if (!Array.isArray(root.allOf)) continue;
@@ -53,14 +52,10 @@ export function generateAllOfMissingRequired(
   return out;
 }
 
-export function generateAllOfConflicts(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateAllOfConflicts(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root) continue;
     if (!Array.isArray(root.allOf)) continue;

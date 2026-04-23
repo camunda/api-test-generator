@@ -1,49 +1,43 @@
 #!/usr/bin/env tsx
 import fs from 'fs';
 import path from 'path';
-import {loadSpec} from '../src/spec/loader.js';
-import {resolveSpecSource} from '../src/spec/source.js';
-import {generateMissingRequired} from '../src/analysis/missingRequired.js';
-import {generateMultipartMissingRequired} from '../src/analysis/multipartMissingRequired.js';
-import {generateTypeMismatch} from '../src/analysis/typeMismatch.js';
-import {generateUnionViolations} from '../src/analysis/unionViolations.js';
-import {generateDeepMissingRequired} from '../src/analysis/deepMissingRequired.js';
-import {generateBodyTypeMismatch} from '../src/analysis/bodyTypeMismatch.js';
-import {generateConstraintViolations} from '../src/analysis/constraintViolations.js';
-import {generateEnumViolations} from '../src/analysis/enumViolations.js';
-import {generateAdditionalPropsViolations} from '../src/analysis/additionalProps.js';
-import {generateOneOfAmbiguous} from '../src/analysis/oneOfAmbiguous.js';
-import {generateOneOfNoneMatch} from '../src/analysis/oneOfNoneMatch.js';
-import {generateDiscriminatorMismatch} from '../src/analysis/discriminatorMismatch.js';
-import {generateMissingRequiredCombos} from '../src/analysis/missingRequiredCombos.js';
+import { generateAdditionalPropsViolations } from '../src/analysis/additionalProps.js';
+import { generateUniversalAdditionalProp } from '../src/analysis/additionalPropUniversal.js';
 import {
-  generateParamMissing,
-  generateParamTypeMismatch,
-  generateParamEnumViolation,
-} from '../src/analysis/parameters.js';
-import {generateParamConstraintViolations} from '../src/analysis/paramConstraintViolations.js';
-import {
-  generateMissingBody,
-  generateBodyTopTypeMismatch,
-} from '../src/analysis/bodyTopLevel.js';
-import {
+  generateFormatInvalid,
+  generateMultipleOfViolations,
   generateNestedAdditionalProps,
   generateUniqueItemsViolations,
-  generateMultipleOfViolations,
-  generateFormatInvalid,
 } from '../src/analysis/advancedSchema.js';
-import {generateUniversalAdditionalProp} from '../src/analysis/additionalPropUniversal.js';
+import { generateAllOfConflicts, generateAllOfMissingRequired } from '../src/analysis/allOf.js';
+import { generateBodyTopTypeMismatch, generateMissingBody } from '../src/analysis/bodyTopLevel.js';
+import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
+import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
+import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
+import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
+import { generateEnumViolations } from '../src/analysis/enumViolations.js';
+import { generateMissingRequired } from '../src/analysis/missingRequired.js';
+import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
+import { generateMultipartMissingRequired } from '../src/analysis/multipartMissingRequired.js';
 import {
-  generateOneOfMultiAmbiguous,
-  generateOneOfCrossBleed,
   generateDiscriminatorStructureMismatch,
+  generateOneOfCrossBleed,
+  generateOneOfMultiAmbiguous,
 } from '../src/analysis/oneOfAdvanced.js';
+import { generateOneOfAmbiguous } from '../src/analysis/oneOfAmbiguous.js';
+import { generateOneOfNoneMatch } from '../src/analysis/oneOfNoneMatch.js';
+import { generateParamConstraintViolations } from '../src/analysis/paramConstraintViolations.js';
 import {
-  generateAllOfMissingRequired,
-  generateAllOfConflicts,
-} from '../src/analysis/allOf.js';
-import {emitQaTests} from '../src/emit/qaEmitter.js';
-import {ValidationScenario} from '../src/model/types.js';
+  generateParamEnumViolation,
+  generateParamMissing,
+  generateParamTypeMismatch,
+} from '../src/analysis/parameters.js';
+import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
+import { generateUnionViolations } from '../src/analysis/unionViolations.js';
+import { emitQaTests } from '../src/emit/qaEmitter.js';
+import type { ValidationScenario } from '../src/model/types.js';
+import { loadSpec } from '../src/spec/loader.js';
+import { resolveSpecSource } from '../src/spec/source.js';
 
 interface CliOptions {
   only?: Set<string>;
@@ -78,9 +72,7 @@ function parseArgs(): CliOptions {
   }
   const get = (k: string) => kv[k];
   const onlyRaw = get('--only');
-  const only = onlyRaw
-    ? new Set(onlyRaw.split(',').map((s) => s.trim()))
-    : undefined;
+  const only = onlyRaw ? new Set(onlyRaw.split(',').map((s) => s.trim())) : undefined;
   const outDir = get('--out-dir') || 'generated';
   const importDepth = get('--qa-import-depth');
   const qaImportDepth = importDepth ? parseInt(importDepth, 10) : 4;
@@ -95,26 +87,21 @@ function parseArgs(): CliOptions {
     outDir,
     qaImportDepth,
     maxMissing: maxMissing ? parseInt(maxMissing, 10) : undefined,
-    maxTypeMismatch: maxTypeMismatch
-      ? parseInt(maxTypeMismatch, 10)
-      : undefined,
+    maxTypeMismatch: maxTypeMismatch ? parseInt(maxTypeMismatch, 10) : undefined,
     onlyOperations,
-    deep:
-      Object.prototype.hasOwnProperty.call(kv, '--deep') ||
-      args.includes('--deep'),
+    deep: Object.hasOwn(kv, '--deep') || args.includes('--deep'),
   };
 }
 
 async function main() {
   const opts = parseArgs();
-  const {specPath, specProvenance, source} = resolveSpecSource();
+  const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
   const specCommit: string | undefined = specProvenance;
   const generationTimestamp = new Date().toISOString();
   const scenarios: ValidationScenario[] = [];
-  const kinds =
-    opts.only || new Set(['missing-required', 'type-mismatch', 'union']);
+  const kinds = opts.only || new Set(['missing-required', 'type-mismatch', 'union']);
 
   if (kinds.has('missing-required')) {
     scenarios.push(
@@ -264,14 +251,9 @@ async function main() {
       : s.multipartForm
         ? fastHash(JSON.stringify(s.multipartForm))
         : '0';
-    const key = [
-      s.method,
-      s.path,
-      s.type,
-      s.target || '',
-      s.bodyEncoding || 'json',
-      bodyHash,
-    ].join('|');
+    const key = [s.method, s.path, s.type, s.target || '', s.bodyEncoding || 'json', bodyHash].join(
+      '|',
+    );
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(s);
@@ -303,15 +285,9 @@ async function main() {
         if (isJsonScenario) {
           const form: Record<string, string> = {};
           try {
-            for (const [k, v] of Object.entries(
-              s.requestBody as Record<string, unknown>,
-            )) {
+            for (const [k, v] of Object.entries(s.requestBody as Record<string, unknown>)) {
               if (v == null) continue;
-              if (
-                typeof v === 'string' ||
-                typeof v === 'number' ||
-                typeof v === 'boolean'
-              ) {
+              if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
                 form[k] = String(v);
               } else {
                 form[k] = JSON.stringify(v);
@@ -403,10 +379,7 @@ async function main() {
     const filtered: ValidationScenario[] = [];
     let removed = 0;
     for (const s of deduped) {
-      if (
-        s.type !== 'additional-prop' &&
-        s.type !== 'additional-prop-general'
-      ) {
+      if (s.type !== 'additional-prop' && s.type !== 'additional-prop-general') {
         filtered.push(s);
         continue;
       }
@@ -418,8 +391,7 @@ async function main() {
         const entries = Object.entries(carrier as Record<string, unknown>)
           .map(([k, v]) => {
             const normK = k.startsWith('__') ? '__X__' : k; // normalize synthetic key
-            const t =
-              v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+            const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
             return [normK, t] as [string, string];
           })
           .sort((a, b) => a[0].localeCompare(b[0]));
@@ -432,13 +404,7 @@ async function main() {
         s.type === 'additional-prop' || s.type === 'additional-prop-general'
           ? 'additional-prop*'
           : s.type;
-      const sig = [
-        s.method,
-        s.path,
-        groupType,
-        s.bodyEncoding || 'json',
-        shape,
-      ].join('|');
+      const sig = [s.method, s.path, groupType, s.bodyEncoding || 'json', shape].join('|');
       if (structuralSeen.has(sig)) {
         removed++;
         continue;
@@ -447,9 +413,7 @@ async function main() {
       filtered.push(s);
     }
     if (removed)
-      console.log(
-        `[generate] Structural additional-prop dedupe removed ${removed} scenarios`,
-      );
+      console.log(`[generate] Structural additional-prop dedupe removed ${removed} scenarios`);
     deduped.length = 0;
     deduped.push(...filtered);
   }
@@ -463,21 +427,16 @@ async function main() {
     const filtered: ValidationScenario[] = [];
     let removed = 0;
     for (const s of deduped) {
-      const isCandidate =
-        s.type === 'param-type-mismatch' || s.type === 'type-mismatch';
+      const isCandidate = s.type === 'param-type-mismatch' || s.type === 'type-mismatch';
       if (!isCandidate || s.bodyEncoding !== 'multipart' || !s.multipartForm) {
         filtered.push(s);
         continue;
       }
       // Build signature ignoring actual values; just the field names present plus target.
       const fieldNames = Object.keys(s.multipartForm).sort().join(',');
-      const sig = [
-        s.method,
-        s.path,
-        'any-multipart-mismatch*',
-        s.target || '',
-        fieldNames,
-      ].join('|');
+      const sig = [s.method, s.path, 'any-multipart-mismatch*', s.target || '', fieldNames].join(
+        '|',
+      );
       if (seenMultipartMismatch.has(sig)) {
         removed++;
         continue;
@@ -486,9 +445,7 @@ async function main() {
       filtered.push(s);
     }
     if (removed)
-      console.log(
-        `[generate] Structural multipart mismatch dedupe removed ${removed} scenarios`,
-      );
+      console.log(`[generate] Structural multipart mismatch dedupe removed ${removed} scenarios`);
     deduped.length = 0;
     deduped.push(...filtered);
   }
@@ -521,9 +478,7 @@ async function main() {
       maxMissing: opts.maxMissing ?? null,
       maxTypeMismatch: opts.maxTypeMismatch ?? null,
       onlyKinds: opts.only ? Array.from(opts.only) : null,
-      onlyOperations: opts.onlyOperations
-        ? Array.from(opts.onlyOperations)
-        : null,
+      onlyOperations: opts.onlyOperations ? Array.from(opts.onlyOperations) : null,
     },
   };
   await fs.promises.writeFile(
@@ -539,9 +494,7 @@ async function main() {
     ...s,
     type: kindAlias[s.type] || s.type,
   }));
-  const allKinds = Array.from(
-    new Set(normalizedScenarios.map((s) => s.type)),
-  ).sort();
+  const allKinds = Array.from(new Set(normalizedScenarios.map((s) => s.type))).sort();
   interface OpCoverage {
     operationId: string;
     method: string;
@@ -584,9 +537,7 @@ async function main() {
       maxMissing: opts.maxMissing ?? null,
       maxTypeMismatch: opts.maxTypeMismatch ?? null,
       onlyKinds: opts.only ? Array.from(opts.only) : null,
-      onlyOperations: opts.onlyOperations
-        ? Array.from(opts.onlyOperations)
-        : null,
+      onlyOperations: opts.onlyOperations ? Array.from(opts.onlyOperations) : null,
     },
     operations: Object.values(byOperation).sort((a, b) =>
       a.operationId.localeCompare(b.operationId),
@@ -635,8 +586,7 @@ async function main() {
         flags.hasObject = true;
         if (depth > 0) flags.hasNestedObject = true;
       }
-      if (t === 'array' && node.items && node.uniqueItems)
-        flags.hasUniqueItems = true;
+      if (t === 'array' && node.items && node.uniqueItems) flags.hasUniqueItems = true;
       if (node.multipleOf !== undefined) flags.hasMultipleOf = true;
       const constraintKeys = [
         'minLength',
@@ -649,12 +599,10 @@ async function main() {
         'maxItems',
         'pattern',
       ];
-      if (constraintKeys.some((k) => node[k] !== undefined))
-        flags.hasConstraints = true;
+      if (constraintKeys.some((k) => node[k] !== undefined)) flags.hasConstraints = true;
       if (node.format) flags.hasFormats = true;
       if (node.properties)
-        for (const v of Object.values(node.properties))
-          walk(v as any, depth + 1); // eslint-disable-line @typescript-eslint/no-explicit-any
+        for (const v of Object.values(node.properties)) walk(v as any, depth + 1); // eslint-disable-line @typescript-eslint/no-explicit-any
       if (node.items) walk(node.items, depth + 1);
       if (Array.isArray(node.allOf)) for (const p of node.allOf) walk(p, depth);
       if (Array.isArray(node.oneOf)) for (const p of node.oneOf) walk(p, depth);
@@ -778,10 +726,7 @@ async function main() {
   const avgPct = (sumPct / coverage.operations.length).toFixed(1);
   md.push(`Scenario kinds generated this run: ${totalKinds}`);
   md.push(`Average kind coverage per operation: ${avgPct}%`);
-  md.push(
-    `Operations with full kind coverage: ${fullCount}/${coverage.operations.length}`,
-    '',
-  );
+  md.push(`Operations with full kind coverage: ${fullCount}/${coverage.operations.length}`, '');
   md.push(
     'Kind coverage % = (# kinds present for operation / total scenario kinds this run) * 100.',
   );
@@ -809,10 +754,7 @@ async function main() {
   const avgAppPctStr = opsWithApplicable
     ? (avgApplicablePct / opsWithApplicable).toFixed(1)
     : '0.0';
-  md.push(
-    `Average applicable kind coverage (ops with applicability): ${avgAppPctStr}%`,
-    '',
-  );
+  md.push(`Average applicable kind coverage (ops with applicability): ${avgAppPctStr}%`, '');
   md.push('| ' + header.join(' | ') + ' |');
   md.push('| ' + header.map(() => '---').join(' | ') + ' |');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -832,8 +774,7 @@ async function main() {
   }
   md.push('', 'Missing kinds per operation:');
   for (const oc of coverage.operations) {
-    if (oc.missingKinds.length)
-      md.push(`- ${oc.operationId}: ${oc.missingKinds.join(', ')}`);
+    if (oc.missingKinds.length) md.push(`- ${oc.operationId}: ${oc.missingKinds.join(', ')}`);
   }
   md.push(
     '',
@@ -849,12 +790,8 @@ async function main() {
   const kindStats: Record<string, KindGapStats> = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const oc of (coverage as any).operations) {
-    const appl: string[] = Array.from(
-      applicabilityPerOp[oc.operationId].applicable,
-    );
-    const missing: Set<string> = new Set(
-      applicabilityPerOp[oc.operationId].missingApplicable,
-    );
+    const appl: string[] = Array.from(applicabilityPerOp[oc.operationId].applicable);
+    const missing: Set<string> = new Set(applicabilityPerOp[oc.operationId].missingApplicable);
     for (const k of appl) {
       const stat = (kindStats[k] ||= {
         applicableOps: 0,
@@ -864,8 +801,7 @@ async function main() {
       stat.applicableOps++;
       if (missing.has(k)) {
         stat.missingOps++;
-        if (stat.sampleMissing.length < 5)
-          stat.sampleMissing.push(oc.operationId);
+        if (stat.sampleMissing.length < 5) stat.sampleMissing.push(oc.operationId);
       }
     }
   }
@@ -877,13 +813,9 @@ async function main() {
       missingPct: s.applicableOps ? (s.missingOps / s.applicableOps) * 100 : 0,
       sample: s.sampleMissing.join(', '),
     }))
-    .sort(
-      (a, b) => b.missingOps - a.missingOps || a.kind.localeCompare(b.kind),
-    );
+    .sort((a, b) => b.missingOps - a.missingOps || a.kind.localeCompare(b.kind));
   if (kindRows.length) {
-    md.push(
-      '| Kind | MissingOps | ApplicableOps | Missing% | SampleMissingOps |',
-    );
+    md.push('| Kind | MissingOps | ApplicableOps | Missing% | SampleMissingOps |');
     md.push('| --- | --- | --- | --- | --- |');
     for (const r of kindRows) {
       md.push(
@@ -898,8 +830,7 @@ async function main() {
   let anyFull = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const oc of (coverage as any).operations) {
-    const missingApp: string[] =
-      applicabilityPerOp[oc.operationId].missingApplicable;
+    const missingApp: string[] = applicabilityPerOp[oc.operationId].missingApplicable;
     if (missingApp.length) {
       md.push(`- ${oc.operationId}: ${missingApp.join(', ')}`);
       anyFull = true;
@@ -932,19 +863,11 @@ async function main() {
     for (let i = 0; i < out.length; i++) {
       const l = out[i];
       // Detect a markdown table header row followed by a separator row
-      if (
-        /^\|.+\|$/.test(l) &&
-        i + 1 < out.length &&
-        /^\|[ \-:|]+\|$/.test(out[i + 1])
-      ) {
+      if (/^\|.+\|$/.test(l) && i + 1 < out.length && /^\|[ \-:|]+\|$/.test(out[i + 1])) {
         // Collect table block until a blank line or non-row
         const tableLines = [l];
         let j = i + 1;
-        while (
-          j < out.length &&
-          /^\|.*\|$/.test(out[j]) &&
-          out[j].trim() !== ''
-        ) {
+        while (j < out.length && /^\|.*\|$/.test(out[j]) && out[j].trim() !== '') {
           tableLines.push(out[j]);
           j++;
         }

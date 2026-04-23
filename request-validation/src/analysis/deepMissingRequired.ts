@@ -1,7 +1,7 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk } from '../schema/walker.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -15,8 +15,7 @@ export function generateDeepMissingRequired(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
@@ -33,11 +32,7 @@ export function generateDeepMissingRequired(
           const targetPath = findPathForRequired(walk.root!, node, req);
           if (!targetPath) continue;
           if (!deleteAtPath(scBody, targetPath)) continue;
-          const id = makeId([
-            op.operationId,
-            'deepMissing',
-            targetPath.join('.'),
-          ]);
+          const id = makeId([op.operationId, 'deepMissing', targetPath.join('.')]);
           out.push({
             id,
             operationId: op.operationId,
@@ -73,11 +68,7 @@ function buildParams(path: string): Record<string, string> | undefined {
   return params;
 }
 
-function findPathForRequired(
-  root: any,
-  node: any,
-  req: string,
-): string[] | undefined {
+function findPathForRequired(root: any, node: any, req: string): string[] | undefined {
   // naive search: traverse to find node pointer match then append required key
   const path: string[] = [];
   let found: string[] | undefined;
@@ -111,11 +102,7 @@ function deleteAtPath(obj: any, path: string[]): boolean {
     parent = parent[seg];
   }
   const last = path[path.length - 1];
-  if (
-    parent &&
-    typeof parent === 'object' &&
-    Object.prototype.hasOwnProperty.call(parent, last)
-  ) {
+  if (parent && typeof parent === 'object' && Object.hasOwn(parent, last)) {
     delete parent[last];
     return true;
   }

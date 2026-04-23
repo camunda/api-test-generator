@@ -1,4 +1,11 @@
-import { OperationGraph, EndpointScenarioCollection, EndpointScenario, OperationRef, FeatureVariantSpec, RequestOneOfGroupSummary } from './types.js';
+import type {
+  EndpointScenario,
+  EndpointScenarioCollection,
+  FeatureVariantSpec,
+  OperationGraph,
+  OperationRef,
+  RequestOneOfGroupSummary,
+} from './types.js';
 
 interface FeatureCoverageOptions {
   maxOptionalPairs: number;
@@ -16,10 +23,14 @@ const DEFAULT_OPTS: FeatureCoverageOptions = {
   includeAllOptionalsThreshold: 5,
   generateNegative: true,
   oneOfPairwiseMax: 10,
-  maxScenariosPerEndpoint: 35
+  maxScenariosPerEndpoint: 35,
 };
 
-export function generateFeatureCoverageForEndpoint(graph: OperationGraph, endpointOpId: string, opts: Partial<FeatureCoverageOptions> = {}): EndpointScenarioCollection {
+export function generateFeatureCoverageForEndpoint(
+  graph: OperationGraph,
+  endpointOpId: string,
+  opts: Partial<FeatureCoverageOptions> = {},
+): EndpointScenarioCollection {
   const endpoint = graph.operations[endpointOpId];
   const options = { ...DEFAULT_OPTS, ...opts };
   const required = [...endpoint.requires.required];
@@ -30,7 +41,10 @@ export function generateFeatureCoverageForEndpoint(graph: OperationGraph, endpoi
     try {
       const reqs = (graph as any).domain?.requestBodies?.[endpointOpId];
       if (Array.isArray(reqs)) {
-        return reqs.some((r: any) => typeof r?.contentType === 'string' && r.contentType.includes('application/json'));
+        return reqs.some(
+          (r: any) =>
+            typeof r?.contentType === 'string' && r.contentType.includes('application/json'),
+        );
       }
     } catch {}
     // Fallback heuristic: methods that typically have bodies
@@ -41,40 +55,93 @@ export function generateFeatureCoverageForEndpoint(graph: OperationGraph, endpoi
   const artifactRules = graph.domain?.operationArtifactRules?.[endpointOpId]?.rules || [];
   if (artifactRules.length) {
     for (const r of artifactRules) {
-      variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'nonEmpty', artifactRuleId: r.id, artifactKind: r.artifactKind });
+      variants.push({
+        endpointId: endpointOpId,
+        optionals: [],
+        disjunctionChoices: [],
+        artifactSemantics: [],
+        expectedResult: 'nonEmpty',
+        artifactRuleId: r.id,
+        artifactKind: r.artifactKind,
+      });
     }
   }
 
   // Base variant (minimal)
   // Generic base variant (only if no artifact rule already covers it)
   if (!artifactRules.length) {
-    variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'nonEmpty' });
+    variants.push({
+      endpointId: endpointOpId,
+      optionals: [],
+      disjunctionChoices: [],
+      artifactSemantics: [],
+      expectedResult: 'nonEmpty',
+    });
   }
 
   // Single optional variants
   for (const o of optional) {
-    variants.push({ endpointId: endpointOpId, optionals: [o], disjunctionChoices: [], artifactSemantics: [o], expectedResult: 'nonEmpty' });
+    variants.push({
+      endpointId: endpointOpId,
+      optionals: [o],
+      disjunctionChoices: [],
+      artifactSemantics: [o],
+      expectedResult: 'nonEmpty',
+    });
   }
 
   // All optionals variant if under threshold
   if (optional.length > 1 && optional.length <= options.includeAllOptionalsThreshold) {
-    variants.push({ endpointId: endpointOpId, optionals: [...optional], disjunctionChoices: [], artifactSemantics: [...optional], expectedResult: 'nonEmpty' });
+    variants.push({
+      endpointId: endpointOpId,
+      optionals: [...optional],
+      disjunctionChoices: [],
+      artifactSemantics: [...optional],
+      expectedResult: 'nonEmpty',
+    });
   }
 
   // Negative empty-result variant: only for search-like endpoints (query style or activateJobs) with no required semantics
-  const isSearchLike = endpoint.method.toUpperCase() === 'POST' && (/\/search$/.test(endpoint.path) || /search/i.test(endpoint.operationId) || endpoint.operationId === 'activateJobs');
+  const isSearchLike =
+    endpoint.method.toUpperCase() === 'POST' &&
+    (/\/search$/.test(endpoint.path) ||
+      /search/i.test(endpoint.operationId) ||
+      endpoint.operationId === 'activateJobs');
   if (options.generateNegative && required.length === 0 && isSearchLike) {
-    variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'empty', negative: true });
+    variants.push({
+      endpointId: endpointOpId,
+      optionals: [],
+      disjunctionChoices: [],
+      artifactSemantics: [],
+      expectedResult: 'empty',
+      negative: true,
+    });
   }
 
   // Schema-missing-required negatives (fast 400 via request validator): generate combinations
   if (options.generateNegative) {
     try {
       // Derive required request fields from canonical shapes at emit time, so just mark here; combinations created in build
-      variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'error', negative: true, schemaMissingRequired: true });
+      variants.push({
+        endpointId: endpointOpId,
+        optionals: [],
+        disjunctionChoices: [],
+        artifactSemantics: [],
+        expectedResult: 'error',
+        negative: true,
+        schemaMissingRequired: true,
+      });
       // Wrong-type negatives (type violations) — only for endpoints with JSON bodies; combos expanded later during request synthesis
       if (hasJsonBody) {
-        variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'error', negative: true, schemaWrongType: true });
+        variants.push({
+          endpointId: endpointOpId,
+          optionals: [],
+          disjunctionChoices: [],
+          artifactSemantics: [],
+          expectedResult: 'error',
+          negative: true,
+          schemaWrongType: true,
+        });
       }
     } catch {}
   }
@@ -84,49 +151,108 @@ export function generateFeatureCoverageForEndpoint(graph: OperationGraph, endpoi
   const cond = (endpoint as any).conditionalIdempotency;
   // Conflict duplicate: expect second call 409 when duplicatePolicy === 'conflict'
   if (meta?.duplicatePolicy === 'conflict') {
-    variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'error', negative: true, duplicateTest: { mode: 'conflict', policy: meta.duplicatePolicy, secondStatus: 409 } });
+    variants.push({
+      endpointId: endpointOpId,
+      optionals: [],
+      disjunctionChoices: [],
+      artifactSemantics: [],
+      expectedResult: 'error',
+      negative: true,
+      duplicateTest: { mode: 'conflict', policy: meta.duplicatePolicy, secondStatus: 409 },
+    });
   }
   // Conditional idempotency duplicate: second call should be ignored (reuse 200 with same response semantics)
   if (cond && cond.duplicatePolicy === 'ignore') {
-    variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'nonEmpty', duplicateTest: { mode: 'conditional', policy: cond.duplicatePolicy, secondStatus: 200 } });
+    variants.push({
+      endpointId: endpointOpId,
+      optionals: [],
+      disjunctionChoices: [],
+      artifactSemantics: [],
+      expectedResult: 'nonEmpty',
+      duplicateTest: { mode: 'conditional', policy: cond.duplicatePolicy, secondStatus: 200 },
+    });
   }
 
   // Request oneOf variants (minimal per variant)
   if (options.requestVariants && options.requestVariants.length) {
     for (const group of options.requestVariants) {
       for (const v of group.variants) {
-        variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'nonEmpty', requestVariantGroup: group.groupId, requestVariantName: v.variantName, requestVariantRichness: 'minimal' });
+        variants.push({
+          endpointId: endpointOpId,
+          optionals: [],
+          disjunctionChoices: [],
+          artifactSemantics: [],
+          expectedResult: 'nonEmpty',
+          requestVariantGroup: group.groupId,
+          requestVariantName: v.variantName,
+          requestVariantRichness: 'minimal',
+        });
         // rich variant (required + optional) if there are optional fields
         if (v.optional.length) {
-          variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'nonEmpty', requestVariantGroup: group.groupId, requestVariantName: v.variantName + ':rich', requestVariantRichness: 'rich' });
+          variants.push({
+            endpointId: endpointOpId,
+            optionals: [],
+            disjunctionChoices: [],
+            artifactSemantics: [],
+            expectedResult: 'nonEmpty',
+            requestVariantGroup: group.groupId,
+            requestVariantName: v.variantName + ':rich',
+            requestVariantRichness: 'rich',
+          });
         }
       }
       // Only generate union violation negatives for genuine polymorphic unions
       const allowUnionNegatives = (group as any).isPolymorphic === true;
       // Union violation negative (all fields) if more than 1 variant and polymorphic
       if (allowUnionNegatives && group.variants.length > 1) {
-        variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'error', negative: true, requestVariantGroup: group.groupId, requestVariantName: 'union-all', requestVariantRichness: 'rich' });
+        variants.push({
+          endpointId: endpointOpId,
+          optionals: [],
+          disjunctionChoices: [],
+          artifactSemantics: [],
+          expectedResult: 'error',
+          negative: true,
+          requestVariantGroup: group.groupId,
+          requestVariantName: 'union-all',
+          requestVariantRichness: 'rich',
+        });
       }
       // Pairwise violation negatives only for polymorphic unions
       if (allowUnionNegatives && group.variants.length > 1) {
-        const reqFields = group.variants.map(v => ({ name: v.variantName, req: v.required[0] || v.required[1] || v.required[2] || v.required[0] }));
-        const pairs: Array<[string,string]> = [];
-        for (let i=0;i<reqFields.length;i++) {
-          for (let j=i+1;j<reqFields.length;j++) {
-            const a = reqFields[i].req; const b = reqFields[j].req;
-            if (a && b) pairs.push([a,b]);
+        const reqFields = group.variants.map((v) => ({
+          name: v.variantName,
+          req: v.required[0] || v.required[1] || v.required[2] || v.required[0],
+        }));
+        const pairs: Array<[string, string]> = [];
+        for (let i = 0; i < reqFields.length; i++) {
+          for (let j = i + 1; j < reqFields.length; j++) {
+            const a = reqFields[i].req;
+            const b = reqFields[j].req;
+            if (a && b) pairs.push([a, b]);
           }
         }
         const cap = options.oneOfPairwiseMax ?? 10;
-        for (let k=0;k<Math.min(cap, pairs.length); k++) {
-          const [a,b] = pairs[k];
-          variants.push({ endpointId: endpointOpId, optionals: [], disjunctionChoices: [], artifactSemantics: [], expectedResult: 'error', negative: true, requestVariantGroup: group.groupId, requestVariantName: `pair:${a}+${b}`, requestVariantRichness: 'minimal' });
+        for (let k = 0; k < Math.min(cap, pairs.length); k++) {
+          const [a, b] = pairs[k];
+          variants.push({
+            endpointId: endpointOpId,
+            optionals: [],
+            disjunctionChoices: [],
+            artifactSemantics: [],
+            expectedResult: 'error',
+            negative: true,
+            requestVariantGroup: group.groupId,
+            requestVariantName: `pair:${a}+${b}`,
+            requestVariantRichness: 'minimal',
+          });
         }
       }
     }
   }
 
-  let scenarios: EndpointScenario[] = variants.map((v, i) => buildScenarioFromVariant(graph, endpointOpId, v, i + 1));
+  let scenarios: EndpointScenario[] = variants.map((v, i) =>
+    buildScenarioFromVariant(graph, endpointOpId, v, i + 1),
+  );
   // Enforce global cap per endpoint
   const cap = options.maxScenariosPerEndpoint ?? 35;
   if (scenarios.length > cap) scenarios = scenarios.slice(0, cap);
@@ -136,53 +262,69 @@ export function generateFeatureCoverageForEndpoint(graph: OperationGraph, endpoi
     requiredSemanticTypes: required,
     optionalSemanticTypes: optional,
     scenarios,
-    unsatisfied: false
+    unsatisfied: false,
   };
 }
 
-function buildScenarioFromVariant(graph: OperationGraph, endpointId: string, variant: FeatureVariantSpec, index: number): EndpointScenario {
+function buildScenarioFromVariant(
+  graph: OperationGraph,
+  endpointId: string,
+  variant: FeatureVariantSpec,
+  index: number,
+): EndpointScenario {
   const endpoint = graph.operations[endpointId];
   const opRefs: OperationRef[] = [toRef(endpoint)];
   const produced = new Set<string>();
-  const bindings: Record<string,string> = {};
+  const bindings: Record<string, string> = {};
   // Heuristic: search-style endpoints (POST .../search) are lenient and return 200 on oneOf violations
-  const isSearchStyle = !!endpoint && endpoint.method.toUpperCase() === 'POST' && ( /\/search$/.test(endpoint.path) || /search/i.test(endpoint.operationId) || endpoint.operationId === 'activateJobs');
+  const isSearchStyle =
+    !!endpoint &&
+    endpoint.method.toUpperCase() === 'POST' &&
+    (/\/search$/.test(endpoint.path) ||
+      /search/i.test(endpoint.operationId) ||
+      endpoint.operationId === 'activateJobs');
   // Synthetic bindings for negative variant
   if (variant.negative) {
     for (const o of variant.optionals) {
       const varName = camelLower(o) + 'Var';
-      bindings[varName + 'Nonexistent'] = `${camelLower(o)}_nonexistent_${Math.random().toString(36).slice(2,6)}`;
+      bindings[varName + 'Nonexistent'] =
+        `${camelLower(o)}_nonexistent_${Math.random().toString(36).slice(2, 6)}`;
     }
   } else {
     for (const o of variant.optionals) {
       produced.add(o);
       const varName = camelLower(o) + 'Var';
-      bindings[varName] = `${camelLower(o)}_${Math.random().toString(36).slice(2,6)}`;
+      bindings[varName] = `${camelLower(o)}_${Math.random().toString(36).slice(2, 6)}`;
     }
   }
   const scenario: EndpointScenario = {
     id: `feature-${index}`,
-  name: buildFeatureScenarioName(endpoint.operationId, variant, index),
-  description: buildFeatureScenarioDescription(endpoint, variant),
+    name: buildFeatureScenarioName(endpoint.operationId, variant, index),
+    description: buildFeatureScenarioDescription(endpoint, variant),
     operations: opRefs,
     producedSemanticTypes: [...produced],
     satisfiedSemanticTypes: [...new Set([...endpoint.requires.required, ...variant.optionals])],
     strategy: 'featureCoverage',
     variantKey: buildVariantKey(variant),
-  // For negative oneOf violations (union-all or pairwise), explicitly expect HTTP 400
-  expectedResult: (variant.negative && variant.requestVariantGroup && (
-    variant.requestVariantName === 'union-all' ||
-    (typeof variant.requestVariantName === 'string' && variant.requestVariantName.startsWith('pair:'))
-  )) ? (isSearchStyle ? { kind: 'nonEmpty' } : { kind: 'error', code: '400' })
-    : (variant.schemaMissingRequired
-      ? { kind: 'error', code: '400' }
-      : (variant.schemaWrongType
-        ? { kind: 'error', code: '400' }
-        : { kind: variant.expectedResult })),
+    // For negative oneOf violations (union-all or pairwise), explicitly expect HTTP 400
+    expectedResult:
+      variant.negative &&
+      variant.requestVariantGroup &&
+      (variant.requestVariantName === 'union-all' ||
+        (typeof variant.requestVariantName === 'string' &&
+          variant.requestVariantName.startsWith('pair:')))
+        ? isSearchStyle
+          ? { kind: 'nonEmpty' }
+          : { kind: 'error', code: '400' }
+        : variant.schemaMissingRequired
+          ? { kind: 'error', code: '400' }
+          : variant.schemaWrongType
+            ? { kind: 'error', code: '400' }
+            : { kind: variant.expectedResult },
     coverageTags: buildCoverageTags(variant),
     filtersUsed: variant.optionals,
     syntheticBindings: variant.negative ? Object.keys(bindings) : undefined,
-    bindings
+    bindings,
   };
   if (variant.duplicateTest) {
     scenario.duplicateTest = {
@@ -190,12 +332,19 @@ function buildScenarioFromVariant(graph: OperationGraph, endpointId: string, var
       policy: variant.duplicateTest.policy,
       secondStatus: variant.duplicateTest.secondStatus,
       keyFields: (endpoint as any).conditionalIdempotency?.keyFields,
-      windowField: (endpoint as any).conditionalIdempotency?.window?.field
+      windowField: (endpoint as any).conditionalIdempotency?.window?.field,
     };
   }
   if (variant.requestVariantGroup && variant.requestVariantName) {
-    scenario.requestVariants = [{ groupId: variant.requestVariantGroup, variant: variant.requestVariantName, richness: variant.requestVariantRichness || 'minimal' }];
-    if (variant.negative && variant.requestVariantName === 'union-all') scenario.exclusivityViolations = [`oneOf:${variant.requestVariantGroup}:union-all`];
+    scenario.requestVariants = [
+      {
+        groupId: variant.requestVariantGroup,
+        variant: variant.requestVariantName,
+        richness: variant.requestVariantRichness || 'minimal',
+      },
+    ];
+    if (variant.negative && variant.requestVariantName === 'union-all')
+      scenario.exclusivityViolations = [`oneOf:${variant.requestVariantGroup}:union-all`];
   }
   // Tag artifact selection in scenario for downstream request planning
   if (variant.artifactRuleId || variant.artifactKind) {
@@ -216,21 +365,31 @@ function buildVariantKey(v: FeatureVariantSpec): string {
 
 function buildCoverageTags(v: FeatureVariantSpec): string[] {
   const tags: string[] = [];
-  v.optionals.forEach(o => tags.push('optional:' + o));
+  v.optionals.forEach((o) => tags.push('optional:' + o));
   if (v.negative) tags.push('negative');
   if (v.schemaWrongType) tags.push('schemaWrongType');
   if (v.requestVariantGroup) tags.push(`oneOf:${v.requestVariantGroup}:${v.requestVariantName}`);
   return tags;
 }
 
-function buildFeatureScenarioName(operationId: string, v: FeatureVariantSpec, index: number): string {
+function buildFeatureScenarioName(
+  operationId: string,
+  v: FeatureVariantSpec,
+  index: number,
+): string {
   if (v.duplicateTest) {
-    if (v.duplicateTest.mode === 'conflict') return `${operationId} - duplicate conflict (${index})`;
-    if (v.duplicateTest.mode === 'conditional') return `${operationId} - conditional duplicate ignore (${index})`;
+    if (v.duplicateTest.mode === 'conflict')
+      return `${operationId} - duplicate conflict (${index})`;
+    if (v.duplicateTest.mode === 'conditional')
+      return `${operationId} - conditional duplicate ignore (${index})`;
   }
   if (v.artifactRuleId) return `${operationId} - ${v.artifactRuleId} (${index})`;
   // Special-case union-all negative before generic negative naming
-  if (v.requestVariantGroup && typeof v.requestVariantName === 'string' && v.requestVariantName.startsWith('pair:')) {
+  if (
+    v.requestVariantGroup &&
+    typeof v.requestVariantName === 'string' &&
+    v.requestVariantName.startsWith('pair:')
+  ) {
     const pair = v.requestVariantName.slice('pair:'.length);
     return `${operationId} - oneOf ${v.requestVariantGroup} pair violation (${pair}) (${index})`;
   }
@@ -241,7 +400,8 @@ function buildFeatureScenarioName(operationId: string, v: FeatureVariantSpec, in
   if (v.schemaWrongType) return `${operationId} - negative wrong type (${index})`;
   if (v.negative) return `${operationId} - negative empty (${index})`;
   if (v.requestVariantGroup) {
-    if (v.requestVariantName === 'union-all') return `${operationId} - oneOf ${v.requestVariantGroup} union violation (${index})`;
+    if (v.requestVariantName === 'union-all')
+      return `${operationId} - oneOf ${v.requestVariantGroup} union violation (${index})`;
     const base = `${operationId} - oneOf ${v.requestVariantGroup} ${v.requestVariantName}`;
     return v.requestVariantRichness === 'rich' ? `${base} rich (${index})` : `${base} (${index})`;
   }
@@ -253,26 +413,42 @@ function buildFeatureScenarioName(operationId: string, v: FeatureVariantSpec, in
 function buildFeatureScenarioDescription(endpoint: any, v: FeatureVariantSpec): string {
   const base = `Invoke ${endpoint.operationId} (${endpoint.method.toUpperCase()} ${endpoint.path})`;
   if (v.duplicateTest) {
-    if (v.duplicateTest.mode === 'conflict') return `${base} twice with identical payload expecting second ${v.duplicateTest.secondStatus || 409} due to duplicatePolicy=conflict.`;
-    if (v.duplicateTest.mode === 'conditional') return `${base} twice with identical key fields triggering conditional idempotency (duplicatePolicy=ignore) expecting second ${v.duplicateTest.secondStatus || 200} with no side-effects.`;
+    if (v.duplicateTest.mode === 'conflict')
+      return `${base} twice with identical payload expecting second ${v.duplicateTest.secondStatus || 409} due to duplicatePolicy=conflict.`;
+    if (v.duplicateTest.mode === 'conditional')
+      return `${base} twice with identical key fields triggering conditional idempotency (duplicatePolicy=ignore) expecting second ${v.duplicateTest.secondStatus || 200} with no side-effects.`;
   }
-  const isSearchStyle = !!endpoint && endpoint.method.toUpperCase() === 'POST' && ( /\/search$/.test(endpoint.path) || /search/i.test(endpoint.operationId) || endpoint.operationId === 'activateJobs');
+  const isSearchStyle =
+    !!endpoint &&
+    endpoint.method.toUpperCase() === 'POST' &&
+    (/\/search$/.test(endpoint.path) ||
+      /search/i.test(endpoint.operationId) ||
+      endpoint.operationId === 'activateJobs');
   if (v.artifactRuleId) return `${base} deploying ${v.artifactRuleId.toUpperCase()} artifact.`;
   // Special-case union-all negative before generic negative description
-  if (v.requestVariantGroup && typeof v.requestVariantName === 'string' && v.requestVariantName.startsWith('pair:')) {
+  if (
+    v.requestVariantGroup &&
+    typeof v.requestVariantName === 'string' &&
+    v.requestVariantName.startsWith('pair:')
+  ) {
     const pair = v.requestVariantName.slice('pair:'.length);
     return `${base} with invalid oneOf payload containing conflicting fields (${pair}) from two different variants (pair union violation)${isSearchStyle ? '' : ' expecting 400 error'}.`;
   }
   if (v.requestVariantGroup && v.requestVariantName === 'union-all') {
     return `${base} with invalid oneOf payload containing ALL fields from group '${v.requestVariantGroup}' variants (union violation)${isSearchStyle ? '' : ' expecting 400 error'}.`;
   }
-  if (v.schemaMissingRequired) return `${base} with a required field omitted to provoke 400 schema validation error.`;
-  if (v.schemaWrongType) return `${base} with one or more fields set to the wrong type expecting 400 schema validation error.`;
+  if (v.schemaMissingRequired)
+    return `${base} with a required field omitted to provoke 400 schema validation error.`;
+  if (v.schemaWrongType)
+    return `${base} with one or more fields set to the wrong type expecting 400 schema validation error.`;
   // NOTE: Detailed wrong-type mapping appended later in emitter when schemaWrongTypeDetail present.
-  if (v.negative) return `${base} expecting empty result set (querying with filters / identifiers that match no existing resources).`;
+  if (v.negative)
+    return `${base} expecting empty result set (querying with filters / identifiers that match no existing resources).`;
   if (v.requestVariantGroup) {
-  if (v.requestVariantName === 'union-all') return `${base} with invalid oneOf payload containing ALL fields from group '${v.requestVariantGroup}' variants (union violation) expecting 400 error.`;
-    if (v.requestVariantRichness === 'rich') return `${base} using oneOf group '${v.requestVariantGroup}' variant '${v.requestVariantName}' with all optional fields present.`;
+    if (v.requestVariantName === 'union-all')
+      return `${base} with invalid oneOf payload containing ALL fields from group '${v.requestVariantGroup}' variants (union violation) expecting 400 error.`;
+    if (v.requestVariantRichness === 'rich')
+      return `${base} using oneOf group '${v.requestVariantGroup}' variant '${v.requestVariantName}' with all optional fields present.`;
     return `${base} using oneOf group '${v.requestVariantGroup}' variant '${v.requestVariantName}' with minimal required fields.`;
   }
   if (v.optionals.length === 0) return `${base} with only required semantics.`;
@@ -280,8 +456,20 @@ function buildFeatureScenarioDescription(endpoint: any, v: FeatureVariantSpec): 
   return `${base} including all ${v.optionals.length} optional semantics: ${v.optionals.join(', ')}.`;
 }
 
-function camelLower(s: string): string { return s.charAt(0).toLowerCase() + s.slice(1); }
+function camelLower(s: string): string {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
 
-function toRef(op: { operationId: string; method: string; path: string; eventuallyConsistent?: boolean }): OperationRef {
-  return { operationId: op.operationId, method: op.method, path: op.path, eventuallyConsistent: op.eventuallyConsistent };
+function toRef(op: {
+  operationId: string;
+  method: string;
+  path: string;
+  eventuallyConsistent?: boolean;
+}): OperationRef {
+  return {
+    operationId: op.operationId,
+    method: op.method,
+    path: op.path,
+    eventuallyConsistent: op.eventuallyConsistent,
+  };
 }

@@ -1,10 +1,6 @@
-import {
-  OperationModel,
-  ValidationScenario,
-  ParameterModel,
-} from '../model/types.js';
-import {makeId} from './common.js';
-import {buildGuaranteedPatternMismatch} from '../util/patternMismatch.js';
+import type { OperationModel, ParameterModel, ValidationScenario } from '../model/types.js';
+import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -21,23 +17,17 @@ interface ResolvedParamSchema {
 }
 
 // Very small resolver: follows allOf chains to merge top-level constraints.
-function resolveParamSchema(
-  p: ParameterModel,
-): ResolvedParamSchema | undefined {
+function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | undefined {
   const schema: any = p.schema; // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!schema) return undefined;
-  const out: ResolvedParamSchema = {schema};
+  const out: ResolvedParamSchema = { schema };
   function merge(s: any) {
     // eslint-disable-line @typescript-eslint/no-explicit-any
     if (!s || typeof s !== 'object') return;
-    if (typeof s.pattern === 'string' && out.pattern === undefined)
-      out.pattern = s.pattern;
-    if (typeof s.minLength === 'number' && out.minLength === undefined)
-      out.minLength = s.minLength;
-    if (typeof s.maxLength === 'number' && out.maxLength === undefined)
-      out.maxLength = s.maxLength;
-    if (Array.isArray(s.enum) && !out.enumValues)
-      out.enumValues = s.enum.slice();
+    if (typeof s.pattern === 'string' && out.pattern === undefined) out.pattern = s.pattern;
+    if (typeof s.minLength === 'number' && out.minLength === undefined) out.minLength = s.minLength;
+    if (typeof s.maxLength === 'number' && out.maxLength === undefined) out.maxLength = s.maxLength;
+    if (Array.isArray(s.enum) && !out.enumValues) out.enumValues = s.enum.slice();
     if (typeof s.type === 'string' && !out.type) out.type = s.type;
   }
   // Direct
@@ -53,8 +43,7 @@ function buildValidValue(r: ResolvedParamSchema): string {
   if (r.enumValues && r.enumValues.length) return String(r.enumValues[0]);
   if (r.pattern) {
     // If numeric-only pattern
-    if (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$')
-      return '1';
+    if (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$') return '1';
   }
   if (r.minLength && r.minLength > 1) return 'a'.repeat(r.minLength);
   return 'x';
@@ -63,29 +52,29 @@ function buildValidValue(r: ResolvedParamSchema): string {
 function buildViolations(
   p: ParameterModel,
   r: ResolvedParamSchema,
-): {kind: string; invalid: string}[] {
-  const out: {kind: string; invalid: string}[] = [];
+): { kind: string; invalid: string }[] {
+  const out: { kind: string; invalid: string }[] = [];
   // Pattern violation
   if (r.pattern) {
     const invalid = buildGuaranteedPatternMismatch(r.pattern, {
       pathSegmentSafe: p.in === 'path',
     });
-    if (invalid) out.push({kind: 'pattern', invalid});
+    if (invalid) out.push({ kind: 'pattern', invalid });
   }
   // Length violations
   if (typeof r.minLength === 'number' && r.minLength > 0) {
     const tooShort = ''.padEnd(Math.max(0, r.minLength - 1), '');
-    out.push({kind: 'length-min', invalid: tooShort});
+    out.push({ kind: 'length-min', invalid: tooShort });
   }
   if (typeof r.maxLength === 'number') {
     const tooLong = 'a'.repeat(r.maxLength + 10);
-    out.push({kind: 'length-max', invalid: tooLong});
+    out.push({ kind: 'length-max', invalid: tooLong });
   }
   // Enum violation (only if enum present)
   if (r.enumValues && r.enumValues.length) {
     let inval = String(r.enumValues[0]) + '_X';
     if (r.pattern === '^-?[0-9]+$') inval = '9999999999999999999999999'; // excessively long number string
-    out.push({kind: 'enum', invalid: inval});
+    out.push({ kind: 'enum', invalid: inval });
   }
   return out;
 }
@@ -108,8 +97,7 @@ export function generateParamConstraintViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
       if (p.in !== 'path' && p.in !== 'query') continue; // focus path+query first
@@ -125,7 +113,7 @@ export function generateParamConstraintViolations(
       }
       for (const v of violations) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-        const params = buildParams(op.path, {...validMap, [p.name]: v.invalid});
+        const params = buildParams(op.path, { ...validMap, [p.name]: v.invalid });
         out.push({
           id: makeId([op.operationId, 'paramConstraint', p.in, p.name, v.kind]),
           operationId: op.operationId,

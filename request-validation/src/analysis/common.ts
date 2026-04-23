@@ -1,4 +1,4 @@
-import {OperationModel} from '../model/types.js';
+import type { OperationModel } from '../model/types.js';
 
 export function firstResourceSegment(path: string): string {
   // strip leading slash then split after /v1|/v2 if present

@@ -1,8 +1,8 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
-import {buildGuaranteedPatternMismatch} from '../util/patternMismatch.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk } from '../schema/walker.js';
+import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -15,8 +15,7 @@ export function generateConstraintViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
@@ -57,16 +56,16 @@ export function generateConstraintViolations(
 function planConstraintMutations(
   cons: Record<string, any>,
   type: string,
-): {kind: string; value: any}[] {
+): { kind: string; value: any }[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const out: {kind: string; value: any}[] = [];
+  const out: { kind: string; value: any }[] = [];
   if (type === 'string') {
     if (typeof cons.minLength === 'number') {
       out.push({
         kind: 'belowMinLength',
         value: ''.padEnd(Math.max(0, cons.minLength - 1), 'a'),
       });
-      if (cons.minLength > 0) out.push({kind: 'emptyString', value: ''});
+      if (cons.minLength > 0) out.push({ kind: 'emptyString', value: '' });
     }
     if (typeof cons.maxLength === 'number') {
       out.push({
@@ -80,27 +79,26 @@ function planConstraintMutations(
     }
     if (typeof cons.pattern === 'string') {
       const invalid = buildGuaranteedPatternMismatch(cons.pattern);
-      if (invalid !== undefined)
-        out.push({kind: 'patternMismatch', value: invalid});
+      if (invalid !== undefined) out.push({ kind: 'patternMismatch', value: invalid });
     }
   } else if (type === 'integer' || type === 'number') {
     if (typeof cons.minimum === 'number') {
-      out.push({kind: 'belowMinimum', value: cons.minimum - 1});
-      out.push({kind: 'wayBelowMinimum', value: cons.minimum - 100});
-      out.push({kind: 'atMinimumMinusEpsilon', value: cons.minimum - 0.00001});
+      out.push({ kind: 'belowMinimum', value: cons.minimum - 1 });
+      out.push({ kind: 'wayBelowMinimum', value: cons.minimum - 100 });
+      out.push({ kind: 'atMinimumMinusEpsilon', value: cons.minimum - 0.00001 });
     }
     if (typeof cons.exclusiveMinimum === 'number')
-      out.push({kind: 'belowExclusiveMinimum', value: cons.exclusiveMinimum});
+      out.push({ kind: 'belowExclusiveMinimum', value: cons.exclusiveMinimum });
     if (typeof cons.maximum === 'number') {
-      out.push({kind: 'aboveMaximum', value: cons.maximum + 1});
-      out.push({kind: 'wayAboveMaximum', value: cons.maximum + 100});
-      out.push({kind: 'atMaximumPlusEpsilon', value: cons.maximum + 0.00001});
+      out.push({ kind: 'aboveMaximum', value: cons.maximum + 1 });
+      out.push({ kind: 'wayAboveMaximum', value: cons.maximum + 100 });
+      out.push({ kind: 'atMaximumPlusEpsilon', value: cons.maximum + 0.00001 });
     }
     if (typeof cons.exclusiveMaximum === 'number')
-      out.push({kind: 'aboveExclusiveMaximum', value: cons.exclusiveMaximum});
+      out.push({ kind: 'aboveExclusiveMaximum', value: cons.exclusiveMaximum });
   } else if (type === 'array') {
     if (typeof cons.minItems === 'number' && cons.minItems > 0)
-      out.push({kind: 'belowMinItems', value: []});
+      out.push({ kind: 'belowMinItems', value: [] });
     if (typeof cons.maxItems === 'number') {
       out.push({
         kind: 'aboveMaxItems',

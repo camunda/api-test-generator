@@ -1,5 +1,5 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -11,25 +11,19 @@ export function generateDiscriminatorMismatch(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.requestBodySchema) continue;
     const d = op.discriminator;
     if (!d || !d.propertyName) continue;
     const root = op.requestBodySchema;
     // baseline body: fill required of first object variant if oneOf present
-    let base: any = {};
+    const base: any = {};
     if (Array.isArray(root.oneOf)) {
       const firstObj = root.oneOf.find((v: any) => v && v.type === 'object');
       if (firstObj && Array.isArray(firstObj.required) && firstObj.properties) {
-        for (const r of firstObj.required)
-          base[r] = placeholder(firstObj.properties[r]);
+        for (const r of firstObj.required) base[r] = placeholder(firstObj.properties[r]);
       }
-    } else if (
-      root.type === 'object' &&
-      Array.isArray(root.required) &&
-      root.properties
-    ) {
+    } else if (root.type === 'object' && Array.isArray(root.required) && root.properties) {
       for (const r of root.required) base[r] = placeholder(root.properties[r]);
     }
     // Insert discriminator value that does not map

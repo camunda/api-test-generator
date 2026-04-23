@@ -1,6 +1,6 @@
 #!/usr/bin/env ts-node
-import {loadSpec} from '../src/spec/loader.js';
 import path from 'path';
+import { loadSpec } from '../src/spec/loader.js';
 
 (async () => {
   const specPath = path.resolve(process.cwd(), '../../rest-api.generated.yaml');
@@ -13,22 +13,14 @@ import path from 'path';
         seen.push(trail.join('.') + ' enum[' + node.enum.length + ']');
       }
       if (node.properties) {
-        for (const [k, v] of Object.entries<any>(node.properties))
-          walk(v, trail.concat(k));
+        for (const [k, v] of Object.entries<any>(node.properties)) walk(v, trail.concat(k));
       }
       if (node.items) walk(node.items, trail.concat('[]'));
-      if (Array.isArray(node.allOf))
-        for (const part of node.allOf) walk(part, trail);
+      if (Array.isArray(node.allOf)) for (const part of node.allOf) walk(part, trail);
     }
     if (op.requestBodySchema) walk(op.requestBodySchema, []);
     if (seen.length) {
-      console.log(
-        op.operationId,
-        'enums:',
-        seen.slice(0, 5).join('; '),
-        'total',
-        seen.length,
-      );
+      console.log(op.operationId, 'enums:', seen.slice(0, 5).join('; '), 'total', seen.length);
     }
   }
 })();

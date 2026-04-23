@@ -27,7 +27,7 @@ interface OpSummary {
 }
 
 function ensureObj(v: any): Record<string, any> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, any> : null;
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : null;
 }
 
 async function main() {
@@ -46,7 +46,11 @@ async function main() {
   const byOp = new Map<string, OpSummary>();
   for (const line of lines) {
     let obs: Observation;
-    try { obs = JSON.parse(line); } catch { continue; }
+    try {
+      obs = JSON.parse(line);
+    } catch {
+      continue;
+    }
     const op = obs.operationId || 'unknown';
     if (!byOp.has(op)) {
       byOp.set(op, {
@@ -56,7 +60,7 @@ async function main() {
         finalCount: 0,
         finalStatusCounts: {},
         topLevelKeys: {},
-        examplesByStatus: {}
+        examplesByStatus: {},
       });
     }
     const s = byOp.get(op)!;
@@ -72,7 +76,8 @@ async function main() {
         const allKeys = new Set([...Object.keys(s.topLevelKeys), ...keys]);
         for (const k of allKeys) {
           const rec = s.topLevelKeys[k] || { present: 0, absent: 0 };
-          if (keys.has(k)) rec.present++; else rec.absent++;
+          if (keys.has(k)) rec.present++;
+          else rec.absent++;
           s.topLevelKeys[k] = rec;
         }
         // Keep a single example per status
@@ -84,11 +89,16 @@ async function main() {
   }
   const summary = {
     generatedAt: new Date().toISOString(),
-    operations: Array.from(byOp.values()).sort((a,b) => a.operationId.localeCompare(b.operationId))
+    operations: Array.from(byOp.values()).sort((a, b) =>
+      a.operationId.localeCompare(b.operationId),
+    ),
   };
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2), 'utf8');
   console.log('Wrote observation summary to', path.join(outDir, 'summary.json'));
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -1,7 +1,7 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk, WalkNode} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk, type WalkNode } from '../schema/walker.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -18,14 +18,10 @@ const TYPE_MISMATCH_TABLE: Record<string, any[]> = {
   array: ['x', {}],
 };
 
-export function generateBodyTypeMismatch(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateBodyTypeMismatch(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
@@ -41,12 +37,7 @@ export function generateBodyTypeMismatch(
         if (opts.maxPerField && perField >= opts.maxPerField) break;
         const mutated = structuredClone(baseline);
         if (!applyMutation(mutated, f.path, wrong)) continue;
-        const id = makeId([
-          op.operationId,
-          'bodyType',
-          f.path.join('_'),
-          String(perField),
-        ]);
+        const id = makeId([op.operationId, 'bodyType', f.path.join('_'), String(perField)]);
         out.push({
           id,
           operationId: op.operationId,
@@ -72,11 +63,11 @@ export function generateBodyTypeMismatch(
 function collectFields(
   node: WalkNode,
   prefix: string[],
-): {path: string[]; type?: string | string[]}[] {
-  const out: {path: string[]; type?: string | string[]}[] = [];
+): { path: string[]; type?: string | string[] }[] {
+  const out: { path: string[]; type?: string | string[] }[] = [];
   const t = Array.isArray(node.type) ? node.type[0] : node.type;
   if (t && t !== 'object' && t !== 'array') {
-    out.push({path: prefix.slice(), type: t});
+    out.push({ path: prefix.slice(), type: t });
   }
   if (t === 'object' && node.properties) {
     for (const [k, c] of Object.entries(node.properties)) {

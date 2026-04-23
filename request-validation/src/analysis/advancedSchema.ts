@@ -1,7 +1,7 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk } from '../schema/walker.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -14,8 +14,7 @@ export function generateNestedAdditionalProps(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
@@ -34,11 +33,7 @@ export function generateNestedAdditionalProps(
         const clone = structuredClone(baseline);
         if (applyAdd(clone, path, '__nestedUnexpected', 'x')) {
           out.push({
-            id: makeId([
-              op.operationId,
-              'nestedAdditionalProp',
-              path.join('.'),
-            ]),
+            id: makeId([op.operationId, 'nestedAdditionalProp', path.join('.')]),
             operationId: op.operationId,
             method: op.method,
             path: op.path,
@@ -55,8 +50,7 @@ export function generateNestedAdditionalProps(
         }
       }
       if (node.properties)
-        for (const [k, v] of Object.entries<any>(node.properties))
-          dfs(v, [...path, k]);
+        for (const [k, v] of Object.entries<any>(node.properties)) dfs(v, [...path, k]);
       if (node.items) dfs(node.items, [...path, '0']);
     }
     dfs(walk.root, []);
@@ -70,18 +64,13 @@ export function generateUniqueItemsViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
-      if (
-        node.type === 'array' &&
-        (node as any).raw &&
-        (node as any).raw.uniqueItems
-      ) {
+      if (node.type === 'array' && (node as any).raw && (node as any).raw.uniqueItems) {
         const path = findPath(walk.root!, node);
         if (!path) continue;
         const clone = structuredClone(baseline);
@@ -115,8 +104,7 @@ export function generateMultipleOfViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
@@ -154,10 +142,7 @@ export function generateMultipleOfViolations(
   return out;
 }
 
-export function generateFormatInvalid(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateFormatInvalid(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   const invalidByFormat: Record<string, string> = {
     uuid: 'not-a-uuid',
@@ -166,20 +151,14 @@ export function generateFormatInvalid(
     uri: 'not a uri',
   };
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     if (!walk || !walk.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
       const raw: any = (node as any).raw;
-      if (
-        node.type === 'string' &&
-        raw &&
-        raw.format &&
-        invalidByFormat[raw.format]
-      ) {
+      if (node.type === 'string' && raw && raw.format && invalidByFormat[raw.format]) {
         const path = findPath(walk.root!, node);
         if (!path) continue;
         const clone = structuredClone(baseline);
