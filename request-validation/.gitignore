@@ -1,0 +1,5 @@
+cache/
+generated/
+dist/
+node_modules/
+*.tsbuildinfo
