@@ -4,3 +4,4 @@ spec/
 external-spec/
 test-results/
 *.tsbuildinfo
+.claw/
