@@ -20,6 +20,8 @@
       "request-validation/src/**/*.ts",
       "request-validation/scripts/**/*.ts",
       "semantic-graph-extractor/**/*.ts",
+      "scripts/**/*.ts",
+      "tests/**/*.ts",
       "!**/dist",
       "!**/generated",
       "!**/node_modules",
@@ -36,6 +38,8 @@
       "request-validation/src/**/*.ts",
       "request-validation/scripts/**/*.ts",
       "semantic-graph-extractor/**/*.ts",
+      "scripts/**/*.ts",
+      "tests/**/*.ts",
       "!**/dist/**",
       "!**/generated/**",
       "!**/node_modules/**"

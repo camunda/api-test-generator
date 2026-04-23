@@ -28,11 +28,15 @@
     "pipeline": "npm run fetch-spec && npm run testsuite:generate",
     "lint": "biome check",
     "lint:fix": "biome check --write",
-    "format": "biome format --write"
+    "format": "biome format --write",
+    "snapshot:update": "tsx scripts/build-snapshot.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.12",
-    "camunda-schema-bundler": "^2.0.0"
+    "camunda-schema-bundler": "^2.0.0",
+    "vitest": "4.1.5"
   },
   "engines": {
     "node": ">=22.0.0"
