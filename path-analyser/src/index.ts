@@ -667,7 +667,7 @@ function buildRequestBodyFromCanonical(
     for (const n of nodes) {
       if (!n.path.includes('[]')) {
         const leaf = n.path.split('.').pop()!;
-        if (leaf && !declaredTypeByLeaf[leaf]) declaredTypeByLeaf[leaf] = (n as any).type;
+        if (leaf && !declaredTypeByLeaf[leaf]) declaredTypeByLeaf[leaf] = n.type;
       }
     }
   } catch {}
@@ -844,7 +844,7 @@ function buildRequestBodyFromCanonical(
             if (wrongTypeSet && wrongTypeSet.has(name)) {
               template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
             } else {
-              template[name] = (defaults as any)[name];
+              template[name] = defaults[name];
             }
           } else {
             scenario.bindings ||= {};
@@ -890,7 +890,7 @@ function buildRequestBodyFromCanonical(
           if (wrongTypeSet && wrongTypeSet.has(leaf)) {
             template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
           } else {
-            template[leaf] = (defaults as any)[leaf];
+            template[leaf] = defaults[leaf];
           }
         } else {
           scenario.bindings ||= {};
@@ -927,7 +927,7 @@ function buildRequestBodyFromCanonical(
         if (scenario.bindings?.[varBase]) {
           template[leaf] = `${'${'}${varBase}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          template[leaf] = (defaults as any)[leaf];
+          template[leaf] = defaults[leaf];
         }
       }
     }
@@ -1001,7 +1001,7 @@ function buildRequestBodyFromCanonical(
       scenario.expectedResult.kind === 'empty'
     ) {
       const opDefaults = getRequestDefaultsForOperation(opId) || {};
-      const neg = (opDefaults as any).negativeEmpty || {};
+      const neg = opDefaults.negativeEmpty || {};
       const nonExistentType = typeof neg.type === 'string' ? neg.type : '__NON_EXISTENT_JOB_TYPE__';
       const shortTimeout = Number.isFinite(neg.requestTimeout) ? neg.requestTimeout : 250;
       template['type'] = nonExistentType;
