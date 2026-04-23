@@ -6,6 +6,7 @@ import type {
   ExtendedGenerationOpts,
   GeneratedModelSpec,
   OperationGraph,
+  OperationNode,
   OperationRef,
 } from './types.js';
 
@@ -13,6 +14,22 @@ import type {
 interface GenerationOpts {
   maxScenarios: number;
   longChains?: { enabled: boolean; maxPreOps: number };
+}
+
+// BFS state used by generateScenariosForEndpoint and its helpers.
+interface State {
+  produced: Set<string>; // semantic types produced
+  needed: Set<string>; // semantic types still potentially needed (includes optional initially)
+  domainStates: Set<string>; // accumulated domain states/capabilities
+  ops: string[]; // operations before endpoint
+  cycle: boolean;
+  productionMap: Map<string, string>; // semanticType -> opId
+  bootstrapSequencesUsed: string[]; // contributing bootstrap sequences
+  bootstrapFull?: boolean; // this state derives from a single bootstrap that covers all required
+  modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
+  bindingsDraft?: Record<string, string>; // variable bindings
+  providerList?: Record<string, string[]>; // semantic -> all providers
+  artifactsApplied?: string[]; // artifact rule ids used so far
 }
 
 /*
@@ -97,21 +114,6 @@ export function generateScenariosForEndpoint(
     };
   }
 
-  interface State {
-    produced: Set<string>; // semantic types produced
-    needed: Set<string>; // semantic types still potentially needed (includes optional initially)
-    domainStates: Set<string>; // accumulated domain states/capabilities
-    ops: string[]; // operations before endpoint
-    cycle: boolean;
-    productionMap: Map<string, string>; // semanticType -> opId
-    bootstrapSequencesUsed: string[]; // contributing bootstrap sequences
-    bootstrapFull?: boolean; // this state derives from a single bootstrap that covers all required
-    modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
-    bindingsDraft?: Record<string, string>; // variable bindings
-    providerList?: Record<string, string[]>; // semantic -> all providers
-    artifactsApplied?: string[]; // artifact rule ids used so far
-  }
-
   const initial: State = {
     produced: new Set(),
     needed: new Set(initialNeeded),
@@ -134,10 +136,14 @@ export function generateScenariosForEndpoint(
       if (!seqOpsValid) continue;
       const produced = new Set<string>();
       for (const opId of seq.operations) {
-        graph.operations[opId].produces.forEach((s) => { produced.add(s); });
+        graph.operations[opId].produces.forEach((s) => {
+          produced.add(s);
+        });
       }
       // Include declared produces on sequence definition (acts as union / override)
-      seq.produces.forEach((s) => { produced.add(s); });
+      seq.produces.forEach((s) => {
+        produced.add(s);
+      });
       // Only enqueue if it helps satisfy at least one needed semantic type (or endpoint has none -> still useful as canonical setup)
       const helps = [...initialNeeded].some((s) => produced.has(s));
       if (helps || initialNeeded.size === 0) {
@@ -162,7 +168,9 @@ export function generateScenariosForEndpoint(
         // Emit explicit bootstrap scenario if it alone satisfies all required semantic types
         if (bootstrapFull) {
           const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => { producedSemanticTypes.add(s); });
+          endpoint.produces.forEach((s) => {
+            producedSemanticTypes.add(s);
+          });
           const opRefs = [
             ...seq.operations.map((id) => toRef(graph.operations[id])),
             toRef(endpoint),
@@ -182,7 +190,9 @@ export function generateScenariosForEndpoint(
         } else if (initialNeeded.size === 0) {
           // For endpoints with no requirements we still include a bootstrap variant for reference
           const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => { producedSemanticTypes.add(s); });
+          endpoint.produces.forEach((s) => {
+            producedSemanticTypes.add(s);
+          });
           const opRefs = [
             ...seq.operations.map((id) => toRef(graph.operations[id])),
             toRef(endpoint),
@@ -205,9 +215,10 @@ export function generateScenariosForEndpoint(
   const seen = new Set<string>(); // simple dedupe by produced+ops signature
   const completed: Map<string, EndpointScenario> = new Map();
 
-  const longChainsEnabled = !!(opts as any).longChains?.enabled;
-  const maxPreOps = (opts as any).longChains?.maxPreOps ?? 25;
+  const longChainsEnabled = !!opts.longChains?.enabled;
+  const maxPreOps = opts.longChains?.maxPreOps ?? 25;
   while (queue.length && scenarios.length < max) {
+    // biome-ignore lint/style/noNonNullAssertion: queue.length is checked in the loop predicate
     const state = queue.shift()!;
     const remaining = [...state.needed].filter((st) => !state.produced.has(st));
 
@@ -226,7 +237,9 @@ export function generateScenariosForEndpoint(
         toRef(endpoint),
       ];
       const producedSemanticTypes = new Set<string>([...state.produced]);
-      endpoint.produces.forEach((s) => { producedSemanticTypes.add(s); });
+      endpoint.produces.forEach((s) => {
+        producedSemanticTypes.add(s);
+      });
       const key = state.ops.join('->');
       if (!completed.has(key)) {
         const eventuallyConsistentOps = opRefs.filter((o) => o.eventuallyConsistent).length;
@@ -234,9 +247,11 @@ export function generateScenariosForEndpoint(
         let bindings = state.bindingsDraft;
         // Fallback simple heuristic if drafts absent
         if (!models && state.ops.includes('createDeployment')) {
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
           bindings = { processDefinitionIdVar1: 'proc_${RANDOM}' };
           if (state.ops.includes('activateJobs'))
-            (bindings as any).jobTypeVar1 = 'jobType_${RANDOM}';
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
+            bindings.jobTypeVar1 = 'jobType_${RANDOM}';
           models = [
             {
               kind: 'bpmn',
@@ -302,11 +317,15 @@ export function generateScenariosForEndpoint(
       );
       const domainCandidates = new Set<string>();
       for (const d of missingDomainAll)
-        (graph.domainProducers?.[d] || []).forEach((opId) => { domainCandidates.add(opId); });
+        (graph.domainProducers?.[d] || []).forEach((opId) => {
+          domainCandidates.add(opId);
+        });
       for (const group of unmetDisjunctions) {
         // union producers for each member
         for (const member of group)
-          (graph.domainProducers?.[member] || []).forEach((opId) => { domainCandidates.add(opId); });
+          (graph.domainProducers?.[member] || []).forEach((opId) => {
+            domainCandidates.add(opId);
+          });
       }
       // Expand domain producers similar to semantic producers
       for (const producerOpId of domainCandidates) {
@@ -363,17 +382,25 @@ export function generateScenariosForEndpoint(
         }
         if (newlyAdds.size === 0) continue;
         const newProduced = new Set(state.produced);
-        producerNode.produces.forEach((s) => { newProduced.add(s); });
+        producerNode.produces.forEach((s) => {
+          newProduced.add(s);
+        });
         const newNeeded = new Set(state.needed);
-        producerNode.requires.required.forEach((s) => { newNeeded.add(s); });
-        producerNode.requires.optional.forEach((s) => { newNeeded.add(s); });
+        producerNode.requires.required.forEach((s) => {
+          newNeeded.add(s);
+        });
+        producerNode.requires.optional.forEach((s) => {
+          newNeeded.add(s);
+        });
         const newOps = [...state.ops, producerOpId];
         const newProductionMap = new Map(state.productionMap);
         producerNode.produces.forEach((s) => {
           if (!newProductionMap.has(s)) newProductionMap.set(s, producerOpId);
         });
         const newDomainStates = new Set(state.domainStates);
-        newlyAdds.forEach((d) => { newDomainStates.add(d); });
+        newlyAdds.forEach((d) => {
+          newDomainStates.add(d);
+        });
         const sig = signature(newOps, newProduced, newNeeded, nextCycle);
         if (seen.has(sig)) continue;
         seen.add(sig);
@@ -442,9 +469,15 @@ export function generateScenariosForEndpoint(
       if (producerOpId === 'createDeployment') {
         applyArtifactRuleSelection(graph, producerNode, state, newProduced, newDomainStates);
       } else {
-        producerNode.produces.forEach((s) => { newProduced.add(s); });
-        producerNode.domainProduces?.forEach((d) => { newDomainStates.add(d); });
-        producerNode.domainImplicitAdds?.forEach((d) => { newDomainStates.add(d); });
+        producerNode.produces.forEach((s) => {
+          newProduced.add(s);
+        });
+        producerNode.domainProduces?.forEach((d) => {
+          newDomainStates.add(d);
+        });
+        producerNode.domainImplicitAdds?.forEach((d) => {
+          newDomainStates.add(d);
+        });
       }
       // Enforce domain prerequisite chains for any newly added domain states after semantic expansion
       const domainAddedNow = [...newDomainStates].filter((d) => !state.domainStates.has(d));
@@ -475,8 +508,12 @@ export function generateScenariosForEndpoint(
         if (prereqFailed) continue; // skip expansion; prerequisites not yet satisfied
       }
       const newNeeded = new Set(state.needed);
-      producerNode.requires.required.forEach((s) => { newNeeded.add(s); });
-      producerNode.requires.optional.forEach((s) => { newNeeded.add(s); });
+      producerNode.requires.required.forEach((s) => {
+        newNeeded.add(s);
+      });
+      producerNode.requires.optional.forEach((s) => {
+        newNeeded.add(s);
+      });
       const newOps = [...state.ops, producerOpId];
       const newProductionMap = new Map(state.productionMap);
       producerNode.produces.forEach((s) => {
@@ -488,6 +525,7 @@ export function generateScenariosForEndpoint(
       let modelsDraft = state.modelsDraft;
       const bindingsDraft = { ...(state.bindingsDraft || {}) };
       if (producerOpId === 'createDeployment' && !modelsDraft) {
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
         modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
       }
@@ -570,25 +608,23 @@ function signature(
 // Select minimal artifact rules for createDeployment based on unmet semantic needs.
 function applyArtifactRuleSelection(
   graph: OperationGraph,
-  producerNode: any,
-  state: {
-    needed: Set<string>;
-    produced: Set<string>;
-    artifactsApplied?: string[];
-    modelsDraft?: GeneratedModelSpec[];
-    bindingsDraft?: Record<string, string>;
-  },
+  producerNode: OperationNode,
+  state: State,
   newProduced: Set<string>,
   newDomainStates: Set<string>,
 ): void {
   const domain = graph.domain;
   if (!domain?.operationArtifactRules) {
-    producerNode.produces.forEach((s: string) => { newProduced.add(s); });
+    producerNode.produces.forEach((s: string) => {
+      newProduced.add(s);
+    });
     return;
   }
   const ruleSpec = domain.operationArtifactRules.createDeployment;
   if (!ruleSpec) {
-    producerNode.produces.forEach((s: string) => { newProduced.add(s); });
+    producerNode.produces.forEach((s: string) => {
+      newProduced.add(s);
+    });
     return;
   }
 
@@ -603,9 +639,13 @@ function applyArtifactRuleSelection(
       const preferred = rules.find((r) => r.artifactKind === 'bpmnProcess') || rules[0];
       if (preferred) {
         const semantics = enumerateRuleSemantics(preferred, graph);
-        semantics.forEach((s) => { newProduced.add(s); });
+        semantics.forEach((s) => {
+          newProduced.add(s);
+        });
         const states = enumerateRuleStates(preferred, graph);
-        states.forEach((st) => { newDomainStates.add(st); });
+        states.forEach((st) => {
+          newDomainStates.add(st);
+        });
         ensureArtifactBindings(preferred, graph, state, semantics, states);
         if (preferred.id) applied.push(preferred.id);
         else applied.push(preferred.artifactKind);
@@ -636,13 +676,18 @@ function applyArtifactRuleSelection(
           remaining.delete(s);
         });
         const states = enumerateRuleStates(best, graph);
-        states.forEach((st) => { newDomainStates.add(st); });
+        states.forEach((st) => {
+          newDomainStates.add(st);
+        });
         if (best.id) applied.push(best.id);
         else applied.push(best.artifactKind);
         ensureArtifactBindings(best, graph, state, adds, states);
       }
     }
-    if (applied.length) (state.artifactsApplied ||= []).push(...applied);
+    if (applied.length) {
+      state.artifactsApplied ||= [];
+      state.artifactsApplied.push(...applied);
+    }
     return;
   }
 
@@ -665,13 +710,21 @@ function applyArtifactRuleSelection(
       remaining.delete(s);
     });
     const states = enumerateRuleStates(rule, graph);
-    states.forEach((st) => { newDomainStates.add(st); });
+    states.forEach((st) => {
+      newDomainStates.add(st);
+    });
     ensureArtifactBindings(rule, graph, state, adds, states);
     if (rule.id) appliedIds.push(rule.id);
     if (remaining.size === 0) break;
   }
-  if (appliedIds.length === 0) producerNode.produces.forEach((s: string) => { newProduced.add(s); });
-  if (appliedIds.length) (state.artifactsApplied ||= []).push(...appliedIds);
+  if (appliedIds.length === 0)
+    producerNode.produces.forEach((s: string) => {
+      newProduced.add(s);
+    });
+  if (appliedIds.length) {
+    state.artifactsApplied ||= [];
+    state.artifactsApplied.push(...appliedIds);
+  }
 }
 
 function inferSemanticsFromArtifact(graph: OperationGraph, artifactKind: string): string[] {
@@ -692,9 +745,8 @@ function enumerateRuleSemantics(rule: ArtifactRule, graph: OperationGraph): stri
 function enumerateRuleStates(rule: ArtifactRule, graph: OperationGraph): string[] {
   const states: string[] = [];
   if (rule.producesStates) states.push(...rule.producesStates);
-  const domain = graph.domain;
-  if (domain?.artifactKinds?.[rule.artifactKind]?.producesStates)
-    states.push(...domain.artifactKinds[rule.artifactKind].producesStates!);
+  const domainProduces = graph.domain?.artifactKinds?.[rule.artifactKind]?.producesStates;
+  if (domainProduces) states.push(...domainProduces);
   return [...new Set(states)];
 }
 
@@ -709,7 +761,7 @@ function countRuleCoverage(
 
 function updateProviderList(
   existing: Record<string, string[]>,
-  producerNode: any,
+  producerNode: OperationNode,
   _productionMap: Map<string, string>,
 ): Record<string, string[]> {
   const copy: Record<string, string[]> = { ...existing };
@@ -728,7 +780,7 @@ function coverageCount(rule: ArtifactRule, remaining: Set<string>, graph: Operat
 function ensureArtifactBindings(
   _rule: ArtifactRule,
   _graph: OperationGraph,
-  state: any,
+  state: State,
   semantics: string[],
   _states: string[],
 ) {
@@ -741,12 +793,12 @@ function ensureArtifactBindings(
       state.bindingsDraft[varName] =
         `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     // If BPMN process definition -> ensure BPMN model spec exists
-    if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m: any) => m.kind === 'bpmn')) {
+    if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
       state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
     }
     if (
       s === 'FormKey' &&
-      !state.modelsDraft.find((m: any) => m.kind === 'form' && m.formKeyVar === varName)
+      !state.modelsDraft.find((m) => m.kind === 'form' && m.formKeyVar === varName)
     ) {
       state.modelsDraft.push({ kind: 'form', formKeyVar: varName });
     }
@@ -768,7 +820,7 @@ function camelLower(s: string): string {
 function buildIntegrationScenarioName(
   endpointOpId: string,
   ordinal: number,
-  state: any,
+  state: State,
   _preOpCount: number,
   _totalRequired: number,
 ): string {
@@ -781,8 +833,8 @@ function buildIntegrationScenarioName(
 }
 
 function buildIntegrationScenarioDescription(
-  endpoint: any,
-  state: any,
+  endpoint: OperationNode,
+  state: State,
   preOpCount: number,
   totalRequired: number,
 ): string {
@@ -817,6 +869,7 @@ function gatherDomainPrerequisites(
   const needed = new Set<string>();
   const stack = [...seeds];
   while (stack.length) {
+    // biome-ignore lint/style/noNonNullAssertion: stack.length is checked in the loop predicate
     const cur = stack.pop()!;
     if (already.has(cur) || needed.has(cur)) continue;
     needed.add(cur);
