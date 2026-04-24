@@ -1,18 +1,12 @@
-import * as fs from 'fs';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import * as path from 'path';
 import { CrossContaminationAnalyzer } from './cross-contamination-analyzer';
 import { GraphBuilder } from './graph-builder';
 import { RootDependencyAnalyzer } from './root-dependency-analyzer';
 import { SchemaAnalyzer } from './schema-analyzer';
 import { SemanticTypeLibraryBuilder } from './semantic-type-library-builder';
-import {
-  DependencyEdge,
-  type OpenAPISpec,
-  type Operation,
-  type OperationDependencyGraph,
-  type SemanticType,
-} from './types';
+import type { OpenAPISpec, Operation, OperationDependencyGraph, SemanticType } from './types';
 
 /**
  * Semantic Graph Extractor for OpenAPI specifications
@@ -43,6 +37,10 @@ export class SemanticGraphExtractor {
 
     // Load and parse the OpenAPI spec
     const specContent = fs.readFileSync(specPath, 'utf8');
+    // yaml.load() returns `unknown`; this is the runtime contract boundary
+    // where we trust the on-disk spec to conform to the OpenAPISpec interface.
+    // Downstream analyzers tolerate missing fields gracefully.
+    // biome-ignore lint/plugin: runtime contract boundary for parsed YAML
     const spec = yaml.load(specContent) as OpenAPISpec;
 
     console.log(`Analyzing semantic types and operations...`);

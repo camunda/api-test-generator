@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import { buildCanonicalShapes } from '../src/canonicalSchemas.js';
 import { loadGraph } from '../src/graphLoader.js';
 
@@ -21,7 +21,7 @@ async function main() {
     const shape = canonical[opId];
     const expectedProviders = new Set<string>();
     for (const n of shape?.response || []) {
-      if ((n as any).semanticProvider) {
+      if (n.semanticProvider) {
         // Derive semantic type name from pointer path end (Key schemas named like ProcessDefinitionKey)
         // If a semantic name was captured elsewhere you'd match it; here we fall back to field name heuristics.
         const leaf = n.path.split('.').pop() || '';
@@ -40,7 +40,7 @@ async function main() {
     }
   }
   if (failures.length) {
-    console.error('Provider validation failed:\n' + failures.map((f) => '  - ' + f).join('\n'));
+    console.error(`Provider validation failed:\n${failures.map((f) => `  - ${f}`).join('\n')}`);
     process.exit(1);
   } else {
     console.log('Provider validation passed for required operations.');

@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 type JSONValue = string | number | boolean | null | JSONValue[] | { [k: string]: JSONValue };
 
@@ -29,27 +29,31 @@ export async function recordResponse(obs: ResponseObservation): Promise<void> {
   try {
     const file = getOutputPath();
     await fs.mkdir(path.dirname(file), { recursive: true });
-    const line = JSON.stringify(obs) + '\n';
+    const line = `${JSON.stringify(obs)}\n`;
     await fs.appendFile(file, line, 'utf8');
   } catch {
     // best-effort; never throw in tests
   }
 }
 
+function isPlainObject(v: unknown): v is { [key: string]: unknown } {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 // Replace concrete values with type-shaped placeholders to avoid leaking data
-export function sanitizeBody(value: any): JSONValue {
-  const t = typeof value;
+export function sanitizeBody(value: unknown): JSONValue {
   if (value === null) return null;
+  const t = typeof value;
   if (t === 'string') return '<string>';
   if (t === 'number') return 0;
   if (t === 'boolean') return true;
   if (Array.isArray(value)) return value.map((v) => sanitizeBody(v));
-  if (t === 'object') {
+  if (isPlainObject(value)) {
     const out: Record<string, JSONValue> = {};
     for (const [k, v] of Object.entries(value)) {
       out[k] = sanitizeBody(v);
     }
-    return out as JSONValue;
+    return out;
   }
   // Fallback for unsupported types
   return '<unknown>';

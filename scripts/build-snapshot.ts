@@ -65,8 +65,8 @@ function hashFile(absPath: string, relPath: string): string {
   // snapshot reflects generator behaviour, not wall-clock metadata.
   if (relPath.endsWith('/dist/output/index.json')) {
     const parsed: unknown = JSON.parse(buf.toString('utf8'));
-    if (parsed !== null && typeof parsed === 'object') {
-      const clone: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const clone: Record<string, unknown> = { ...parsed };
       delete clone.generatedAt;
       delete clone.nodeVersion;
       const normalised = JSON.stringify(clone, null, 2);

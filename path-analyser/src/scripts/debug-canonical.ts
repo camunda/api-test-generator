@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import { buildCanonicalShapes } from '../canonicalSchemas.js';
 
 async function main() {
@@ -19,7 +19,7 @@ async function main() {
       '  ',
       ct,
       'fields:',
-      nodes.map((n: any) => `${n.path}${n.required ? '*' : ''}`),
+      nodes.map((n) => `${n.path}${n.required ? '*' : ''}`),
     );
   }
 }

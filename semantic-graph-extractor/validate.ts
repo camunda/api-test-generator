@@ -1,4 +1,4 @@
-import * as path from 'path';
+import * as path from 'node:path';
 import { SemanticGraphExtractor } from './index';
 import type { DependencyEdge, OperationParameter, SemanticTypeReference } from './types';
 

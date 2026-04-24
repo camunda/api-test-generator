@@ -1,9 +1,8 @@
-import {
-  type BootstrapSequence,
-  type Operation,
-  type OperationDependencyGraph,
-  OperationType,
-  type RootOperationAnalysis,
+import type {
+  BootstrapSequence,
+  Operation,
+  OperationDependencyGraph,
+  RootOperationAnalysis,
 } from './types';
 
 /**

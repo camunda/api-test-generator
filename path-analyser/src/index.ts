@@ -20,6 +20,10 @@ import type {
 } from './types.js';
 import { normalizeEndpointFileName } from './utils.js';
 
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
 async function main() {
   // Robust base directory detection: if the current working directory already IS the
   // path-analyser package, use it directly; otherwise append the relative path.
@@ -335,11 +339,12 @@ async function main() {
             : undefined;
           if (isMissingReq && includeArr) {
             const finalStep = s.requestPlan?.[s.requestPlan.length - 1];
-            if (finalStep?.bodyTemplate && finalStep.bodyKind === 'json') {
+            const bodyTpl = finalStep?.bodyTemplate;
+            if (finalStep && finalStep.bodyKind === 'json' && isPlainRecord(bodyTpl)) {
               const reqFields = getRequiredRequestLeafFields(op.operationId, canonical);
               for (const rf of reqFields) {
-                if (!includeArr.includes(rf) && Object.hasOwn(finalStep.bodyTemplate, rf)) {
-                  delete finalStep.bodyTemplate[rf];
+                if (!includeArr.includes(rf) && Object.hasOwn(bodyTpl, rf)) {
+                  delete bodyTpl[rf];
                 }
               }
             }
@@ -413,8 +418,10 @@ async function main() {
       for (const sc of featureCollection.scenarios) {
         const steps = sc.requestPlan || [];
         for (const st of steps) {
-          if (st?.bodyKind === 'multipart' && st?.multipartTemplate?.files) {
-            for (const [_k, v] of Object.entries<unknown>(st.multipartTemplate.files)) {
+          const mt = isPlainRecord(st?.multipartTemplate) ? st.multipartTemplate : undefined;
+          const mtFiles = mt && isPlainRecord(mt.files) ? mt.files : undefined;
+          if (st?.bodyKind === 'multipart' && mtFiles) {
+            for (const [_k, v] of Object.entries<unknown>(mtFiles)) {
               const s = typeof v === 'string' ? v : '';
               if (!s.startsWith('@@FILE:')) continue;
               const rel = s.slice('@@FILE:'.length);

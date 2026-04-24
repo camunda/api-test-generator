@@ -53,7 +53,7 @@ export class CrossContaminationAnalyzer {
         groups.set(characteristicKey, []);
       }
 
-      groups.get(characteristicKey)!.push(typeName);
+      groups.get(characteristicKey)?.push(typeName);
     }
 
     return groups;
@@ -78,7 +78,7 @@ export class CrossContaminationAnalyzer {
   private findContaminantsForType(
     targetType: SemanticType,
     typeGroups: Map<string, string[]>,
-    semanticTypeLibrary?: SemanticTypeLibrary,
+    _semanticTypeLibrary?: SemanticTypeLibrary,
   ): string[] {
     const contaminants: string[] = [];
     const targetKey = this.createCharacteristicKey(targetType);
@@ -218,7 +218,7 @@ export class CrossContaminationAnalyzer {
 export interface ContaminationScenario {
   targetSemanticType: string;
   contaminantSemanticType: string;
-  contaminantValues: any[];
+  contaminantValues: unknown[];
   expectedBehavior: 'rejection' | 'acceptance' | 'unknown';
   description: string;
 }

@@ -138,10 +138,10 @@ export class GraphBuilder {
    * Determine the strength of a dependency based on various factors
    */
   private determineDependencyStrength(
-    produced: SemanticTypeReference,
+    _produced: SemanticTypeReference,
     consumed: SemanticTypeReference,
     sourceOp: Operation,
-    targetOp: Operation,
+    _targetOp: Operation,
   ): DependencyStrength {
     // If the consumed field is required, it's a required dependency
     if (consumed.required) {
@@ -251,8 +251,8 @@ export class GraphBuilder {
         incoming.set(edge.targetOperationId, new Set());
       }
 
-      outgoing.get(edge.sourceOperationId)!.add(edge.targetOperationId);
-      incoming.get(edge.targetOperationId)!.add(edge.sourceOperationId);
+      outgoing.get(edge.sourceOperationId)?.add(edge.targetOperationId);
+      incoming.get(edge.targetOperationId)?.add(edge.sourceOperationId);
     }
 
     // Find clusters of mutually dependent operations

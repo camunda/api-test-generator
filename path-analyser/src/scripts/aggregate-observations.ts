@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 interface Observation {
   timestamp: string;
@@ -13,7 +13,7 @@ interface Observation {
   status: number;
   expectedStatus?: number;
   errorScenario?: boolean;
-  bodyShape?: any;
+  bodyShape?: unknown;
 }
 
 interface OpSummary {
@@ -23,11 +23,15 @@ interface OpSummary {
   finalCount: number;
   finalStatusCounts: Record<string, number>;
   topLevelKeys: Record<string, { present: number; absent: number }>;
-  examplesByStatus: Record<string, any>;
+  examplesByStatus: Record<string, unknown>;
 }
 
-function ensureObj(v: any): Record<string, any> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : null;
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function ensureObj(v: unknown): Record<string, unknown> | null {
+  return isPlainObject(v) ? v : null;
 }
 
 async function main() {
@@ -38,7 +42,7 @@ async function main() {
   let text = '';
   try {
     text = await fs.readFile(input, 'utf8');
-  } catch (e) {
+  } catch (_e) {
     console.error('No observations found at', input);
     process.exit(1);
   }
@@ -52,8 +56,9 @@ async function main() {
       continue;
     }
     const op = obs.operationId || 'unknown';
-    if (!byOp.has(op)) {
-      byOp.set(op, {
+    let s = byOp.get(op);
+    if (!s) {
+      s = {
         operationId: op,
         count: 0,
         statusCounts: {},
@@ -61,9 +66,9 @@ async function main() {
         finalStatusCounts: {},
         topLevelKeys: {},
         examplesByStatus: {},
-      });
+      };
+      byOp.set(op, s);
     }
-    const s = byOp.get(op)!;
     s.count++;
     s.statusCounts[obs.status] = (s.statusCounts[obs.status] || 0) + 1;
     if (obs.isFinal) {

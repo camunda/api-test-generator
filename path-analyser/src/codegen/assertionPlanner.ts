@@ -30,6 +30,10 @@ function toSimpleType(t: string | undefined): SimpleType {
   return isSimpleType(t) ? t : 'unknown';
 }
 
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
 export interface AssertionSpec {
   path: string; // json path (dot/bracket) starting under the root json object
   required: boolean; // whether to assert presence unconditionally
@@ -57,13 +61,10 @@ export function planFinalStepAssertions(
   const expected = new Set<string>(
     Array.isArray(step.expectedDeploymentSlices) ? step.expectedDeploymentSlices : [],
   );
-  if (
-    expected.size === 0 &&
-    step.bodyKind === 'multipart' &&
-    step.multipartTemplate?.files &&
-    typeof step.multipartTemplate.files === 'object'
-  ) {
-    for (const fval of Object.values(step.multipartTemplate.files)) {
+  const multipart = isPlainRecord(step.multipartTemplate) ? step.multipartTemplate : undefined;
+  const multipartFiles = multipart && isPlainRecord(multipart.files) ? multipart.files : undefined;
+  if (expected.size === 0 && step.bodyKind === 'multipart' && multipartFiles) {
+    for (const fval of Object.values(multipartFiles)) {
       if (typeof fval === 'string' && fval.startsWith('@@FILE:')) {
         const pth = fval.slice('@@FILE:'.length);
         const ext = path.extname(pth).toLowerCase();

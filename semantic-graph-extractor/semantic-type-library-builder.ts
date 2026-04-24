@@ -2,6 +2,7 @@ import type {
   InvalidExample,
   OpenAPISpec,
   Operation,
+  Schema,
   SemanticType,
   SemanticTypeDefinition,
   SemanticTypeLibrary,
@@ -53,13 +54,13 @@ export class SemanticTypeLibraryBuilder {
   private extractValidExamples(
     typeName: string,
     spec: OpenAPISpec,
-    operations: Operation[],
-  ): any[] {
-    const examples: any[] = [];
+    _operations: Operation[],
+  ): unknown[] {
+    const examples: unknown[] = [];
 
     // Extract from OpenAPI schema examples
     if (spec.components?.schemas) {
-      for (const [schemaName, schema] of Object.entries(spec.components.schemas)) {
+      for (const [_schemaName, schema] of Object.entries(spec.components.schemas)) {
         if ('x-semantic-type' in schema && schema['x-semantic-type'] === typeName) {
           if (schema.example !== undefined) {
             examples.push(schema.example);
@@ -187,10 +188,10 @@ export class SemanticTypeLibraryBuilder {
   /**
    * Find the schema definition for a semantic type
    */
-  private findSemanticTypeSchema(typeName: string, spec: OpenAPISpec): any {
+  private findSemanticTypeSchema(typeName: string, spec: OpenAPISpec): Schema | null {
     if (!spec.components?.schemas) return null;
 
-    for (const [schemaName, schema] of Object.entries(spec.components.schemas)) {
+    for (const [_schemaName, schema] of Object.entries(spec.components.schemas)) {
       if ('x-semantic-type' in schema && schema['x-semantic-type'] === typeName) {
         return schema;
       }
@@ -202,7 +203,7 @@ export class SemanticTypeLibraryBuilder {
   /**
    * Generate examples based on regex patterns
    */
-  private generatePatternExamples(pattern: string, typeName: string): any[] {
+  private generatePatternExamples(pattern: string, _typeName: string): unknown[] {
     // For Camunda keys which follow pattern ^-?[0-9]+$
     if (pattern === '^-?[0-9]+$') {
       return ['12345', '-67890', '1', '999999999'];
@@ -215,7 +216,7 @@ export class SemanticTypeLibraryBuilder {
   /**
    * Generate default examples when no specific examples are available
    */
-  private generateDefaultExamples(typeName: string, schema: any): any[] {
+  private generateDefaultExamples(typeName: string, schema: Schema | null): unknown[] {
     // Generate reasonable defaults for Camunda semantic types
     if (typeName.includes('Key')) {
       return ['12345', '67890'];
