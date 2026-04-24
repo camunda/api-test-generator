@@ -175,7 +175,7 @@ export function generateFeatureCoverageForEndpoint(
   }
 
   // Request oneOf variants (minimal per variant)
-  if (options.requestVariants && options.requestVariants.length) {
+  if (options.requestVariants?.length) {
     for (const group of options.requestVariants) {
       for (const v of group.variants) {
         variants.push({
@@ -197,7 +197,7 @@ export function generateFeatureCoverageForEndpoint(
             artifactSemantics: [],
             expectedResult: 'nonEmpty',
             requestVariantGroup: group.groupId,
-            requestVariantName: v.variantName + ':rich',
+            requestVariantName: `${v.variantName}:rich`,
             requestVariantRichness: 'rich',
           });
         }
@@ -287,15 +287,16 @@ function buildScenarioFromVariant(
   // Synthetic bindings for negative variant
   if (variant.negative) {
     for (const o of variant.optionals) {
-      const varName = camelLower(o) + 'Var';
-      bindings[varName + 'Nonexistent'] =
+      const varName = `${camelLower(o)}Var`;
+      bindings[`${varName}Nonexistent`] =
         `${camelLower(o)}_nonexistent_${deterministicSuffix(`fc:neg:${endpoint.operationId}:${o}`)}`;
     }
   } else {
     for (const o of variant.optionals) {
       produced.add(o);
-      const varName = camelLower(o) + 'Var';
-      bindings[varName] = `${camelLower(o)}_${deterministicSuffix(`fc:pos:${endpoint.operationId}:${o}`)}`;
+      const varName = `${camelLower(o)}Var`;
+      bindings[varName] =
+        `${camelLower(o)}_${deterministicSuffix(`fc:pos:${endpoint.operationId}:${o}`)}`;
     }
   }
   const scenario: EndpointScenario = {
@@ -356,7 +357,7 @@ function buildScenarioFromVariant(
 
 function buildVariantKey(v: FeatureVariantSpec): string {
   const parts: string[] = [];
-  if (v.optionals.length) parts.push('opt=' + v.optionals.sort().join('+'));
+  if (v.optionals.length) parts.push(`opt=${v.optionals.sort().join('+')}`);
   if (v.negative) parts.push('neg');
   if (v.schemaMissingRequired) parts.push('schemaMissingRequired');
   if (v.schemaWrongType) parts.push('schemaWrongType');
@@ -366,7 +367,7 @@ function buildVariantKey(v: FeatureVariantSpec): string {
 
 function buildCoverageTags(v: FeatureVariantSpec): string[] {
   const tags: string[] = [];
-  v.optionals.forEach((o) => tags.push('optional:' + o));
+  v.optionals.forEach((o) => tags.push(`optional:${o}`));
   if (v.negative) tags.push('negative');
   if (v.schemaWrongType) tags.push('schemaWrongType');
   if (v.requestVariantGroup) tags.push(`oneOf:${v.requestVariantGroup}:${v.requestVariantName}`);
