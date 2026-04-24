@@ -288,7 +288,7 @@ async function main() {
         if (isJsonScenario) {
           const form: Record<string, string> = {};
           try {
-            for (const [k, v] of Object.entries(s.requestBody as Record<string, unknown>)) {
+            for (const [k, v] of Object.entries(s.requestBody)) {
               if (v == null) continue;
               if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
                 form[k] = String(v);
@@ -391,11 +391,11 @@ async function main() {
       // Prefer multipartForm if present (multipart scenario) else requestBody.
       const carrier = s.multipartForm || s.requestBody;
       if (carrier && typeof carrier === 'object' && !Array.isArray(carrier)) {
-        const entries = Object.entries(carrier as Record<string, unknown>)
-          .map(([k, v]) => {
+        const entries = Object.entries(carrier)
+          .map(([k, v]): [string, string] => {
             const normK = k.startsWith('__') ? '__X__' : k; // normalize synthetic key
             const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
-            return [normK, t] as [string, string];
+            return [normK, t];
           })
           .sort((a, b) => a[0].localeCompare(b[0]));
         shape = entries.map((e) => e.join(':')).join(',');
@@ -506,6 +506,31 @@ async function main() {
     total: number;
     kinds: string[];
     missingKinds: string[];
+    // Enriched downstream by applicability analysis.
+    rawKindCoveragePct?: number;
+    applicableKindCoveragePct?: number;
+    applicableKindCount?: number;
+    presentKindCount?: number;
+    missingApplicableKinds?: string[];
+  }
+  interface CoverageReport {
+    generatedAt: string;
+    specCommit: string | undefined;
+    totalScenarios: number;
+    scenarioKinds: string[];
+    generationOptions: {
+      deep: boolean | undefined;
+      maxMissing: number | null;
+      maxTypeMismatch: number | null;
+      onlyKinds: string[] | null;
+      onlyOperations: string[] | null;
+    };
+    operations: OpCoverage[];
+    endpointTotals?: {
+      totalOps: number;
+      coveredOps: number;
+      endpointCoveragePct: number;
+    };
   }
   const byOperation: Record<string, OpCoverage> = {};
   for (const s of normalizedScenarios) {
@@ -530,7 +555,7 @@ async function main() {
     oc.kinds = Object.keys(oc.counts).sort();
     oc.missingKinds = allKinds.filter((k) => !oc.counts[k]);
   }
-  const coverage = {
+  const coverage: CoverageReport = {
     generatedAt: generationTimestamp,
     specCommit,
     totalScenarios: deduped.length,
@@ -556,12 +581,37 @@ async function main() {
   }
   const opScenarioKinds: Record<string, Set<string>> = {};
   for (const s of normalizedScenarios) {
-    (opScenarioKinds[s.operationId] ||= new Set()).add(s.type);
+    const set = opScenarioKinds[s.operationId] ?? new Set<string>();
+    set.add(s.type);
+    opScenarioKinds[s.operationId] = set;
   }
   // Build feature-derived applicability
-  // Using loose typing for OpenAPI schema fragments; full typing not required for generation logic.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function analyzeBodyFeatures(body: any): Record<string, boolean> {
+  // OpenAPI schema fragments are loosely typed; this helper inspects only the keys we care about.
+  interface SchemaNode {
+    type?: string;
+    enum?: unknown[];
+    oneOf?: unknown[];
+    allOf?: unknown[];
+    discriminator?: unknown;
+    items?: unknown;
+    uniqueItems?: boolean;
+    multipleOf?: number;
+    properties?: Record<string, unknown>;
+    format?: string;
+    minLength?: unknown;
+    maxLength?: unknown;
+    minimum?: unknown;
+    maximum?: unknown;
+    exclusiveMinimum?: unknown;
+    exclusiveMaximum?: unknown;
+    minItems?: unknown;
+    maxItems?: unknown;
+    pattern?: unknown;
+  }
+  function isSchemaNode(v: unknown): v is SchemaNode {
+    return !!v && typeof v === 'object';
+  }
+  function analyzeBodyFeatures(body: unknown): Record<string, boolean> {
     const flags = {
       hasObject: false,
       hasEnums: false,
@@ -574,11 +624,9 @@ async function main() {
       hasFormats: false,
       hasNestedObject: false,
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const seen = new Set<any>();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function walk(node: any, depth: number) {
-      if (!node || typeof node !== 'object' || seen.has(node)) return;
+    const seen = new Set<object>();
+    function walk(node: unknown, depth: number) {
+      if (!isSchemaNode(node) || seen.has(node)) return;
       seen.add(node);
       if (Array.isArray(node.oneOf)) flags.hasOneOf = true;
       if (node.discriminator) flags.hasDiscriminator = true;
@@ -601,11 +649,10 @@ async function main() {
         'minItems',
         'maxItems',
         'pattern',
-      ];
+      ] as const;
       if (constraintKeys.some((k) => node[k] !== undefined)) flags.hasConstraints = true;
       if (node.format) flags.hasFormats = true;
-      if (node.properties)
-        for (const v of Object.values(node.properties)) walk(v as any, depth + 1); // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (node.properties) for (const v of Object.values(node.properties)) walk(v, depth + 1);
       if (node.items) walk(node.items, depth + 1);
       if (Array.isArray(node.allOf)) for (const p of node.allOf) walk(p, depth);
       if (Array.isArray(node.oneOf)) for (const p of node.oneOf) walk(p, depth);
@@ -686,15 +733,12 @@ async function main() {
   const coveredOps = Object.keys(opScenarioKinds).length;
   const endpointCoveragePct = totalOps ? (coveredOps / totalOps) * 100 : 0;
   // Enhance coverage JSON
-  // Cast to mutable to enrich coverage object without creating a new interface hierarchy.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (coverage as any).endpointTotals = {
+  coverage.endpointTotals = {
     totalOps,
     coveredOps,
     endpointCoveragePct: Number(endpointCoveragePct.toFixed(1)),
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (coverage as any).operations = (coverage as any).operations.map((oc: any) => {
+  coverage.operations = coverage.operations.map((oc) => {
     const appl = applicabilityPerOp[oc.operationId];
     return {
       ...oc,
@@ -747,10 +791,9 @@ async function main() {
   ];
   let avgApplicablePct = 0;
   let opsWithApplicable = 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const oc of (coverage as any).operations) {
+  for (const oc of coverage.operations) {
     if (oc.applicableKindCount) {
-      avgApplicablePct += oc.applicableKindCoveragePct;
+      avgApplicablePct += oc.applicableKindCoveragePct ?? 0;
       opsWithApplicable++;
     }
   }
@@ -760,8 +803,7 @@ async function main() {
   md.push(`Average applicable kind coverage (ops with applicability): ${avgAppPctStr}%`, '');
   md.push(`| ${header.join(' | ')} |`);
   md.push(`| ${header.map(() => '---').join(' | ')} |`);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const oc of (coverage as any).operations) {
+  for (const oc of coverage.operations) {
     const row = [
       oc.operationId,
       oc.method,
@@ -791,16 +833,16 @@ async function main() {
     sampleMissing: string[];
   }
   const kindStats: Record<string, KindGapStats> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const oc of (coverage as any).operations) {
+  for (const oc of coverage.operations) {
     const appl: string[] = Array.from(applicabilityPerOp[oc.operationId].applicable);
     const missing: Set<string> = new Set(applicabilityPerOp[oc.operationId].missingApplicable);
     for (const k of appl) {
-      const stat = (kindStats[k] ||= {
+      const stat = kindStats[k] ?? {
         applicableOps: 0,
         missingOps: 0,
         sampleMissing: [],
-      });
+      };
+      kindStats[k] = stat;
       stat.applicableOps++;
       if (missing.has(k)) {
         stat.missingOps++;
@@ -831,8 +873,7 @@ async function main() {
   // Collapsible full per-operation detail
   md.push('', '<details><summary>Full per-operation True Gaps list</summary>');
   let anyFull = false;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const oc of (coverage as any).operations) {
+  for (const oc of coverage.operations) {
     const missingApp: string[] = applicabilityPerOp[oc.operationId].missingApplicable;
     if (missingApp.length) {
       md.push(`- ${oc.operationId}: ${missingApp.join(', ')}`);
