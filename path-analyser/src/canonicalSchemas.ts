@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import YAML from 'yaml';
 
 export interface CanonicalNodeMeta {
@@ -30,9 +30,9 @@ export async function buildCanonicalShapes(
   const doc = YAML.parse(raw) as OpenAPISchemaObject;
   const out: Record<string, OperationCanonicalShapes> = {};
   const paths = doc.paths || doc;
-  for (const [p, methods] of Object.entries<any>(paths)) {
-    for (const [method, op] of Object.entries<any>(methods || {})) {
-      if (!op || !op.operationId) continue;
+  for (const [_p, methods] of Object.entries<any>(paths)) {
+    for (const [_method, op] of Object.entries<any>(methods || {})) {
+      if (!op?.operationId) continue;
       const opId = op.operationId;
       const entry: OperationCanonicalShapes = { operationId: opId };
       // Success response schema
@@ -41,7 +41,7 @@ export async function buildCanonicalShapes(
         const success = op.responses[successCode];
         const media =
           success?.content && Object.entries<any>(success.content).find(([ct]) => /json/.test(ct));
-        if (media && media[1].schema) {
+        if (media?.[1].schema) {
           const schema = media[1].schema;
           const nodes: CanonicalNodeMeta[] = [];
           walkSchema(
@@ -126,17 +126,17 @@ function walkSchema(
       });
     }
     for (const [k, v] of Object.entries<any>(schema.properties)) {
-      const childPath = pathSoFar ? pathSoFar + '.' + k : k;
-      const childPointer = pointer + '/properties/' + escapeJsonPointer(k);
+      const childPath = pathSoFar ? `${pathSoFar}.${k}` : k;
+      const childPointer = `${pointer}/properties/${escapeJsonPointer(k)}`;
       walkSchema(v, childPointer, childPath, acc, seen, components, reqSet.has(k), depth + 1);
     }
     return;
   }
   if (type === 'array' && schema.items) {
-    const childPath = pathSoFar + '[]';
-    const childPointer = pointer + '/items';
+    const childPath = `${pathSoFar}[]`;
+    const childPointer = `${pointer}/items`;
     acc.push({
-      path: pathSoFar + '[]',
+      path: `${pathSoFar}[]`,
       pointer: childPointer,
       type: 'array',
       required,
