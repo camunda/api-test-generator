@@ -11,6 +11,7 @@ import type {
   EndpointScenario,
   GenerationSummary,
   GenerationSummaryEntry,
+  OperationGraph,
   OperationRef,
   ResponseShapeSummary,
 } from './types.js';
@@ -55,7 +56,7 @@ async function main() {
   }
   // Extract response shapes & request variants (oneOf groups)
   const semanticTypes = Object.keys(graph.bySemanticProducer || {});
-  const { requestIndex, responses } = (await writeExtractionOutputs(baseDir, semanticTypes)) as any;
+  const { requestIndex, responses } = await writeExtractionOutputs(baseDir, semanticTypes);
   const responseByOp: Record<string, ResponseShapeSummary> = {};
   for (const r of responses) responseByOp[r.operationId] = r;
 
@@ -65,10 +66,14 @@ async function main() {
     const hint = hints[opId];
     if (hint) {
       const reqReq = new Set(op.requires.required);
-      hint.required.forEach((s) => reqReq.add(s));
+      hint.required.forEach((s) => {
+        reqReq.add(s);
+      });
       op.requires.required = [...reqReq];
       const optReq = new Set(op.requires.optional);
-      hint.optional.forEach((s) => optReq.add(s));
+      hint.optional.forEach((s) => {
+        optReq.add(s);
+      });
       op.requires.optional = [...optReq];
     }
   }
@@ -409,12 +414,12 @@ async function main() {
     }
     // Collect artifact references from feature scenarios (multipart files)
     try {
-      const domainRules = (graph.domain as any)?.operationArtifactRules || {};
+      const domainRules = graph.domain?.operationArtifactRules || {};
       for (const sc of featureCollection.scenarios) {
         const steps = sc.requestPlan || [];
         for (const st of steps) {
           if (st?.bodyKind === 'multipart' && st?.multipartTemplate?.files) {
-            for (const [_k, v] of Object.entries<any>(st.multipartTemplate.files)) {
+            for (const [_k, v] of Object.entries<unknown>(st.multipartTemplate.files)) {
               const s = typeof v === 'string' ? v : '';
               if (!s.startsWith('@@FILE:')) continue;
               const rel = s.slice('@@FILE:'.length);
@@ -423,13 +428,13 @@ async function main() {
               const rulesForOp = domainRules?.[st.operationId]?.rules || [];
               if (Array.isArray(sc.artifactsApplied) && sc.artifactsApplied.length) {
                 const rid = sc.artifactsApplied[0];
-                const r = rulesForOp.find((r: any) => r.id === rid);
+                const r = rulesForOp.find((r) => r.id === rid);
                 kind = r?.artifactKind;
               }
               // Fallback by extension mapping
               if (!kind) {
                 const ext = path.extname(rel).toLowerCase();
-                const kinds = (graph.domain as any)?.artifactFileKinds?.[ext] || [];
+                const kinds = graph.domain?.artifactFileKinds?.[ext] || [];
                 kind = kinds[0];
               }
               const desc = getArtifactsRegistry().find(
@@ -493,7 +498,7 @@ main().catch((err) => {
 function buildRequestPlan(
   scenario: EndpointScenario,
   resp: any,
-  graph: any,
+  graph: OperationGraph,
   canonical: Record<string, any>,
   requestGroupsIndex: Record<string, any[]>,
 ) {
@@ -518,7 +523,7 @@ function buildRequestPlan(
         const norm = fieldPathRaw.replace(/\[\]/g, '[0]'); // first element access for arrays
         // Determine target variable name based on parameter portion after last '.' in mapping (state.parameter)
         const mapping = v as string;
-        const paramPart = mapping.split('.').pop()!;
+        const paramPart = mapping.split('.').pop() ?? '';
         let bind = `${camelCase(paramPart)}Var`;
         if (k.endsWith('$key')) {
           // explicit key semantic mapping
@@ -552,7 +557,7 @@ function buildRequestPlan(
     }
     if (isFinal && resp?.fields?.length) {
       // Basic extraction: semantic-labeled fields
-      const extract: any[] = [];
+      const extract: { fieldPath: string; bind: string; semantic?: string }[] = [];
       for (const f of resp.fields) {
         if (f.semantic) {
           const bind = `${camelCase(f.semantic)}Var`;
@@ -635,7 +640,7 @@ type RequestBodyPlan =
 function buildRequestBodyFromCanonical(
   opId: string,
   scenario: EndpointScenario,
-  graph: any,
+  graph: OperationGraph,
   canonical: Record<string, CanonicalShape>,
   requestGroupsIndex: Record<string, any[]>,
   isEndpoint: boolean,
@@ -1016,8 +1021,8 @@ function buildRequestBodyFromCanonical(
     if (fileFields.length) {
       // Choose fixture based on artifact rule selection if present
       const ruleId = scenario.artifactsApplied?.[0] || undefined;
-      const domainRules = (graph.domain as any)?.operationArtifactRules?.[opId]?.rules || [];
-      const rule = ruleId ? domainRules.find((r: any) => r.id === ruleId) : undefined;
+      const domainRules = graph.domain?.operationArtifactRules?.[opId]?.rules || [];
+      const rule = ruleId ? domainRules.find((r) => r.id === ruleId) : undefined;
       let kind = rule?.artifactKind as string | undefined;
       if (!kind) {
         // Default to BPMN process for deployments when unspecified
@@ -1054,10 +1059,9 @@ ${'${'}${varName}}`;
     // Derive expected deployment slices using domain sidecar mapping (explicit). Fallback to heuristic later in emitter.
     const expectedSlicesSet = new Set<string>();
     try {
-      const fileKinds: Record<string, string[]> | undefined = (graph.domain as any)
-        ?.artifactFileKinds;
-      const kindsSpec: Record<string, any> | undefined = (graph.domain as any)?.artifactKinds;
-      for (const [_name, val] of Object.entries<any>(template.files)) {
+      const fileKinds = graph.domain?.artifactFileKinds;
+      const kindsSpec = graph.domain?.artifactKinds;
+      for (const [_name, val] of Object.entries<unknown>(template.files)) {
         const s = typeof val === 'string' ? val : '';
         const pth = s.startsWith('@@FILE:') ? s.slice('@@FILE:'.length) : s;
         if (!pth) continue;
@@ -1066,7 +1070,9 @@ ${'${'}${varName}}`;
         for (const k of kinds) {
           const spec = kindsSpec?.[k];
           const slices: string[] = spec?.deploymentSlices || [];
-          slices.forEach((x) => expectedSlicesSet.add(x));
+          slices.forEach((x) => {
+            expectedSlicesSet.add(x);
+          });
         }
       }
     } catch {}
