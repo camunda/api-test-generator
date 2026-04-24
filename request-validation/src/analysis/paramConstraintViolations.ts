@@ -40,7 +40,7 @@ function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | undefined 
 }
 
 function buildValidValue(r: ResolvedParamSchema): string {
-  if (r.enumValues && r.enumValues.length) return String(r.enumValues[0]);
+  if (r.enumValues?.length) return String(r.enumValues[0]);
   if (r.pattern) {
     // If numeric-only pattern
     if (/^\^-?\[0-9]\+\$$/.test(r.pattern) || r.pattern === '^-?[0-9]+$') return '1';
@@ -71,8 +71,8 @@ function buildViolations(
     out.push({ kind: 'length-max', invalid: tooLong });
   }
   // Enum violation (only if enum present)
-  if (r.enumValues && r.enumValues.length) {
-    let inval = String(r.enumValues[0]) + '_X';
+  if (r.enumValues?.length) {
+    let inval = `${String(r.enumValues[0])}_X`;
     if (r.pattern === '^-?[0-9]+$') inval = '9999999999999999999999999'; // excessively long number string
     out.push({ kind: 'enum', invalid: inval });
   }
