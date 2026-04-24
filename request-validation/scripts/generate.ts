@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { generateAdditionalPropsViolations } from '../src/analysis/additionalProps.js';
 import { generateUniversalAdditionalProp } from '../src/analysis/additionalPropUniversal.js';
 import {
@@ -724,7 +724,7 @@ async function main() {
     const pct = (oc.kinds.length / totalKinds) * 100;
     if (pct === 100) fullCount++;
     sumPct += pct;
-    percents[oc.operationId] = pct.toFixed(0) + '%';
+    percents[oc.operationId] = `${pct.toFixed(0)}%`;
   }
   const avgPct = (sumPct / coverage.operations.length).toFixed(1);
   md.push(`Scenario kinds generated this run: ${totalKinds}`);
@@ -758,8 +758,8 @@ async function main() {
     ? (avgApplicablePct / opsWithApplicable).toFixed(1)
     : '0.0';
   md.push(`Average applicable kind coverage (ops with applicability): ${avgAppPctStr}%`, '');
-  md.push('| ' + header.join(' | ') + ' |');
-  md.push('| ' + header.map(() => '---').join(' | ') + ' |');
+  md.push(`| ${header.join(' | ')} |`);
+  md.push(`| ${header.map(() => '---').join(' | ')} |`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const oc of (coverage as any).operations) {
     const row = [
@@ -768,12 +768,12 @@ async function main() {
       oc.path,
       String(oc.total),
       percents[oc.operationId],
-      oc.applicableKindCoveragePct + '%',
+      `${oc.applicableKindCoveragePct}%`,
       String(oc.applicableKindCount),
       String(oc.presentKindCount),
       ...allKinds.map((k) => String(oc.counts[k] || '')),
     ];
-    md.push('| ' + row.join(' | ') + ' |');
+    md.push(`| ${row.join(' | ')} |`);
   }
   md.push('', 'Missing kinds per operation:');
   for (const oc of coverage.operations) {
@@ -882,9 +882,9 @@ async function main() {
             .map((c) => c.trim());
           if (idx === 1) {
             // separator line: rebuild with '---'
-            return '| ' + cells.map(() => '---').join(' | ') + ' |';
+            return `| ${cells.map(() => '---').join(' | ')} |`;
           }
-          return '| ' + cells.join(' | ') + ' |';
+          return `| ${cells.join(' | ')} |`;
         });
         norm.push(...rebuilt);
         i = i + tableLines.length - 1;
