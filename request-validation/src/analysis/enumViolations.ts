@@ -14,12 +14,12 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
     let produced = 0;
-    if (walk && walk.root) {
+    if (walk?.root) {
       const baseline = buildBaselineBody(op);
       let enumNodes = 0;
       if (baseline) {
         for (const node of walk.byPointer.values()) {
-          if (!node.enum || !node.enum.length) continue;
+          if (!node.enum?.length) continue;
           enumNodes++;
           const path = findPath(walk.root!, node);
           if (!path) continue;
@@ -41,7 +41,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
       }
     }
     // Fallback: pure oneOf root (walker skipped) – scan variants
-    if ((!walk || !walk.root) && Array.isArray(op.requestBodySchema?.oneOf)) {
+    if (!walk?.root && Array.isArray(op.requestBodySchema?.oneOf)) {
       const variants: any[] = op.requestBodySchema.oneOf;
       for (let vi = 0; vi < variants.length; vi++) {
         const v = variants[vi];
@@ -83,7 +83,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
 function buildInvalidVariants(first: any): any[] {
   const invalids: any[] = [];
   if (typeof first === 'string') {
-    invalids.push(first + '_INVALID');
+    invalids.push(`${first}_INVALID`);
     if (first.toUpperCase() !== first) invalids.push(first.toUpperCase());
     if (first.toLowerCase() !== first) invalids.push(first.toLowerCase());
   } else {
@@ -115,7 +115,7 @@ function makeScenario(
 
 function placeholder(schema: any): any {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';
@@ -151,7 +151,7 @@ function findPath(root: any, node: any): string[] | undefined {
   return found;
 }
 
-function applyAtPath(obj: any, path: string[], value: any): boolean {
+function _applyAtPath(obj: any, path: string[], value: any): boolean {
   let t = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const s = path[i];
