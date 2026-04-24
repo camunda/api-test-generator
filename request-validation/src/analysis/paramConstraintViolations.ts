@@ -7,22 +7,34 @@ interface Opts {
   capPerOperation?: number;
 }
 
-interface ResolvedParamSchema {
-  schema: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+interface SchemaFragment {
+  type?: string;
   pattern?: string;
   minLength?: number;
   maxLength?: number;
-  enumValues?: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+  enum?: unknown[];
+  allOf?: SchemaFragment[];
+}
+
+function isSchemaFragment(v: unknown): v is SchemaFragment {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+interface ResolvedParamSchema {
+  schema: SchemaFragment;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  enumValues?: unknown[];
   type?: string;
 }
 
 // Very small resolver: follows allOf chains to merge top-level constraints.
 function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | undefined {
-  const schema: any = p.schema; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const schema = isSchemaFragment(p.schema) ? p.schema : undefined;
   if (!schema) return undefined;
   const out: ResolvedParamSchema = { schema };
-  function merge(s: any) {
-    // eslint-disable-line @typescript-eslint/no-explicit-any
+  function merge(s: SchemaFragment | undefined) {
     if (!s || typeof s !== 'object') return;
     if (typeof s.pattern === 'string' && out.pattern === undefined) out.pattern = s.pattern;
     if (typeof s.minLength === 'number' && out.minLength === undefined) out.minLength = s.minLength;
@@ -119,8 +131,7 @@ export function generateParamConstraintViolations(
           operationId: op.operationId,
           method: op.method,
           path: op.path,
-          // Temporary cast until ScenarioKind union is extended
-          type: 'param-constraint-violation' as unknown as ValidationScenario['type'],
+          type: 'param-constraint-violation',
           target: `${p.in}.${p.name}`,
           params,
           expectedStatus: 400,
@@ -128,10 +139,8 @@ export function generateParamConstraintViolations(
           headersAuth: true,
           source: p.in,
           // Additional metadata for emitter/title building
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          constraintKind: v.kind as any,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          constraintOrigin: 'param' as any,
+          constraintKind: v.kind,
+          constraintOrigin: 'param',
         });
         produced++;
       }
