@@ -16,7 +16,7 @@ export function generateNestedAdditionalProps(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     let produced = 0;
@@ -24,7 +24,7 @@ export function generateNestedAdditionalProps(
     function dfs(node: any, path: string[]) {
       if (opts.capPerOperation && produced >= opts.capPerOperation) return;
       if (
-        node !== walk!.root &&
+        node !== walk?.root &&
         (node as any).raw &&
         node.type === 'object' &&
         (node as any).raw.additionalProperties === false
@@ -38,7 +38,7 @@ export function generateNestedAdditionalProps(
             method: op.method,
             path: op.path,
             type: 'nested-additional-prop',
-            target: path.join('.') + '.__nestedUnexpected',
+            target: `${path.join('.')}.__nestedUnexpected`,
             requestBody: clone,
             params: buildParams(op.path),
             expectedStatus: 400,
@@ -66,7 +66,7 @@ export function generateUniqueItemsViolations(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
@@ -106,7 +106,7 @@ export function generateMultipleOfViolations(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
@@ -153,7 +153,7 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
