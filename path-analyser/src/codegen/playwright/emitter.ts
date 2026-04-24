@@ -61,7 +61,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
     }
     if (line) wrapped.push(line.trim());
-    wrapped.forEach((l) => body.push(`  // ${l}`));
+    for (const l of wrapped) body.push(`  // ${l}`);
   }
   body.push(`  const baseUrl = buildBaseUrl();`);
   body.push(`  const ctx: Record<string, any> = {};`);
@@ -78,7 +78,7 @@ function renderScenarioTest(s: EndpointScenario): string {
     body.push('  // Seed scenario bindings');
     // Collect vars referenced in body/multipart templates so we can auto-seed PENDING ones actually used.
     const templateVars = new Set<string>();
-    function collectVarsFromTemplate(obj: any) {
+    function collectVarsFromTemplate(obj: unknown) {
       if (!obj || typeof obj !== 'object') return;
       for (const val of Object.values(obj)) {
         if (typeof val === 'string') {
@@ -117,15 +117,17 @@ function renderScenarioTest(s: EndpointScenario): string {
     body.push('});');
     return body.join('\n');
   }
-  s.requestPlan.forEach((step: RequestStep, idx: number) => {
+  const requestPlan = s.requestPlan;
+  requestPlan.forEach((step: RequestStep, idx: number) => {
     const varName = `resp${idx + 1}`;
     const urlExpr = buildUrlExpression(step.pathTemplate);
     const method = step.method.toLowerCase();
-    const isFinal = idx === s.requestPlan?.length - 1;
+    const isFinal = idx === requestPlan.length - 1;
     const hasShape = Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0;
     // Ensure prerequisite createProcessInstance always supplies a processDefinitionKey when available
     if (step.operationId === 'createProcessInstance' && step.bodyKind === 'json') {
       if (!step.bodyTemplate || Object.keys(step.bodyTemplate).length === 0) {
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholder consumed by downstream emitter
         step.bodyTemplate = { processDefinitionKey: '${processDefinitionKeyVar}' };
       }
     }
@@ -209,7 +211,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       ) {
         const tokens = s.exclusivityViolations.filter(
           (t: string) => t.startsWith('oneOf:') && t.endsWith(':union-all'),
-        ) as string[];
+        );
         // We can only validate structure using a lightweight heuristic: count how many variant required sets appear fully
         // Because variant required sets are not serialized in scenario metadata, we approximate using body keys & token group ids (diagnostic only)
         body.push(`    // PRECHECK: oneOf union-all structural violation verification`);
@@ -238,9 +240,7 @@ function renderScenarioTest(s: EndpointScenario): string {
         Array.isArray(s.exclusivityViolations) &&
         s.exclusivityViolations.some((t: string) => t.startsWith('exclusive:'))
       ) {
-        const exTokens = s.exclusivityViolations.filter((t: string) =>
-          t.startsWith('exclusive:'),
-        ) as string[];
+        const exTokens = s.exclusivityViolations.filter((t: string) => t.startsWith('exclusive:'));
         body.push(`    // PRECHECK: mutual exclusivity negative verification`);
         body.push(`    {`);
         body.push(`      const bodyKeys = new Set(Object.keys(${bodyVar}));`);
