@@ -10,7 +10,7 @@ export function generateMissingRequired(ops: OperationModel[], opts: Opts): Vali
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (!op.requiredProps || !op.requiredProps.length) continue;
+    if (!op.requiredProps?.length) continue;
     // Only generate JSON variant if the operation actually advertises application/json
     if (!op.requestBodySchema || op.requestBodySchema.type !== 'object') continue;
     if (op.mediaTypes && !op.mediaTypes.includes('application/json')) {

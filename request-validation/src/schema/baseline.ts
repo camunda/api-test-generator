@@ -3,7 +3,7 @@ import { buildWalk, type WalkNode } from './walker.js';
 
 export function buildBaselineBody(op: OperationModel): any {
   const walk = buildWalk(op);
-  if (!walk || !walk.root) return undefined;
+  if (!walk?.root) return undefined;
   function synth(node: WalkNode): any {
     const t = Array.isArray(node.type) ? node.type[0] : node.type;
     switch (t) {
@@ -19,7 +19,7 @@ export function buildBaselineBody(op: OperationModel): any {
         // Include "interesting" optional properties (constraints, enum, format, nested additionalProperties=false)
         if (node.properties) {
           for (const [k, child] of Object.entries(node.properties)) {
-            if (node.required && node.required.includes(k)) continue;
+            if (node.required?.includes(k)) continue;
             const raw: any = (child as any).raw;
             if (raw) {
               const interesting = !!(
@@ -52,7 +52,7 @@ export function buildBaselineBody(op: OperationModel): any {
       case 'boolean':
         return true;
       case 'string':
-        return node.enum && node.enum.length ? node.enum[0] : 'x';
+        return node.enum?.length ? node.enum[0] : 'x';
       default:
         return null;
     }

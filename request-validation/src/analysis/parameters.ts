@@ -63,7 +63,7 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
-      if (!p.schema || !p.schema.type) continue;
+      if (!p.schema?.type) continue;
       if (p.in === 'path') continue; // path params often strictly string serialized
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       // Skip plain string parameters without enum/format; no real type mismatch possible.
@@ -125,7 +125,7 @@ export function generateParamEnumViolation(
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       let invalid = '__INVALID_ENUM__';
       if (typeof e[0] === 'string') {
-        invalid = e[0] + '_X';
+        invalid = `${e[0]}_X`;
       }
       out.push({
         id: makeId([op.operationId, 'paramEnum', p.in, p.name]),

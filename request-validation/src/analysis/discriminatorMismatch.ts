@@ -14,7 +14,7 @@ export function generateDiscriminatorMismatch(
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.requestBodySchema) continue;
     const d = op.discriminator;
-    if (!d || !d.propertyName) continue;
+    if (!d?.propertyName) continue;
     const root = op.requestBodySchema;
     // baseline body: fill required of first object variant if oneOf present
     const base: any = {};
@@ -47,7 +47,7 @@ export function generateDiscriminatorMismatch(
 
 function placeholder(schema: any): any {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';

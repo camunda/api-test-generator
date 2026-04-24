@@ -1,6 +1,5 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
-import { buildWalk } from '../schema/walker.js';
 import { makeId } from './common.js';
 
 interface Opts {

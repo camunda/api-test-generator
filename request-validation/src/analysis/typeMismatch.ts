@@ -97,7 +97,7 @@ function buildMinimalBody(op: OperationModel): any | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function schemaValue(schema: any): any {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';

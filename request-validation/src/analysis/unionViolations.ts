@@ -21,7 +21,7 @@ export function generateUnionViolations(ops: OperationModel[], opts: Opts): Vali
     const body: Record<string, any> = {};
     for (const f of combinedRequired) {
       // prefer variant property schema if present
-      const schema = (a.properties && a.properties[f]) || (b.properties && b.properties[f]);
+      const schema = a.properties?.[f] || b.properties?.[f];
       body[f] = placeholder(schema);
     }
     const id = makeId([op.operationId, 'unionViolation']);
@@ -44,7 +44,7 @@ export function generateUnionViolations(ops: OperationModel[], opts: Opts): Vali
 
 function placeholder(schema: any): any {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';

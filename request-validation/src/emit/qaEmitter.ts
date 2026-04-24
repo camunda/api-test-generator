@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import prettier from 'prettier';
 import type { ValidationScenario } from '../model/types.js';
 import { LICENSE_HEADER } from './licenseHeader.js';
@@ -27,7 +27,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
     resolvedConfig = await prettier.resolveConfig(process.cwd());
   } catch (e) {
     throw new Error(
-      '[emit] Failed to resolve Prettier config: ' + (e instanceof Error ? e.message : String(e)),
+      `[emit] Failed to resolve Prettier config: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   if (!resolvedConfig) {
@@ -52,7 +52,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       });
     } catch (e) {
       throw new Error(
-        '[emit] Prettier formatting failed: ' + (e instanceof Error ? e.message : String(e)),
+        `[emit] Prettier formatting failed: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
     const target = path.join(opts.outDir, file);
@@ -136,7 +136,7 @@ function renderScenario(s: ValidationScenario, title: string): string {
       : s.requestBody
         ? ',\n      data: requestBody'
         : '';
-  lines.push('    const res = await request.' + methodFn(s.method) + '(');
+  lines.push(`    const res = await request.${methodFn(s.method)}(`);
   lines.push(`      ${urlCall}, {`);
   lines.push(`        headers: ${headersExpr}${dataPart}`);
   lines.push('      }');

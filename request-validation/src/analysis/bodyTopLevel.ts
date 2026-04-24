@@ -16,13 +16,7 @@ export function generateMissingBody(ops: OperationModel[], opts: Opts): Validati
     if (!required) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const schema: any = op.requestBodySchema;
-      if (
-        schema &&
-        schema.type === 'object' &&
-        schema.properties &&
-        op.requiredProps &&
-        op.requiredProps.length
-      ) {
+      if (schema && schema.type === 'object' && schema.properties && op.requiredProps?.length) {
         const propCount = Object.keys(schema.properties).length;
         if (propCount > 0 && op.requiredProps.length === propCount) required = true;
       }

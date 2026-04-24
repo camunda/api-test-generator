@@ -46,7 +46,7 @@ export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): Valid
 
 function placeholder(schema: any): any {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';

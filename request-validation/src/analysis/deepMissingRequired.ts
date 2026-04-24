@@ -17,7 +17,7 @@ export function generateDeepMissingRequired(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline || typeof baseline !== 'object') continue;
     let produced = 0;
@@ -25,7 +25,7 @@ export function generateDeepMissingRequired(
     const queue = [walk.root];
     while (queue.length) {
       const node = queue.shift()!;
-      if (node.properties && node.required && node.required.length) {
+      if (node.properties && node.required?.length) {
         for (const req of node.required) {
           if (opts.capPerOperation && produced >= opts.capPerOperation) break;
           const scBody = structuredClone(baseline);
