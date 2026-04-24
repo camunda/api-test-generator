@@ -13,6 +13,9 @@ import type {
   GenerationSummaryEntry,
   OperationGraph,
   OperationRef,
+  RequestOneOfGroupSummary,
+  RequestOneOfVariant,
+  RequestStep,
   ResponseShapeSummary,
 } from './types.js';
 import { normalizeEndpointFileName } from './utils.js';
@@ -298,13 +301,11 @@ async function main() {
         const isOneOfPair =
           Array.isArray(s.requestVariants) &&
           s.requestVariants.some(
-            (rv: any) => typeof rv.variant === 'string' && rv.variant.startsWith('pair:'),
+            (rv) => typeof rv.variant === 'string' && rv.variant.startsWith('pair:'),
           );
         const isUnionAll =
           Array.isArray(s.exclusivityViolations) &&
-          s.exclusivityViolations.some(
-            (t: string) => t.includes('oneOf:') && t.endsWith('union-all'),
-          );
+          s.exclusivityViolations.some((t) => t.includes('oneOf:') && t.endsWith('union-all'));
         const skipGraft = (isSearchLikeOp && isEmptyNeg) || isUnionAll || isOneOfPair;
         if (
           !skipGraft &&
@@ -364,11 +365,9 @@ async function main() {
             const presentKeys = new Set(Object.keys(final.bodyTemplate));
             for (const g of groups) {
               // Count variants whose required keys are fully present in the body
-              const hits = g.variants.filter((v: any) =>
-                v.required.every((k: string) => presentKeys.has(k)),
-              );
+              const hits = g.variants.filter((v) => v.required.every((k) => presentKeys.has(k)));
               // Deduplicate by required set (some variants only differ by discriminator value but share the same required keys)
-              const uniqByReq = new Map<string, any>();
+              const uniqByReq = new Map<string, (typeof hits)[number]>();
               for (const v of hits) {
                 const key = [...v.required].sort().join('|');
                 if (!uniqByReq.has(key)) uniqByReq.set(key, v);
@@ -389,11 +388,7 @@ async function main() {
             Array.isArray(s.schemaWrongTypeDetail) &&
             s.schemaWrongTypeDetail.length
           ) {
-            const det = s.schemaWrongTypeDetail as {
-              field: string;
-              expectedType: string;
-              sentType: string;
-            }[];
+            const det = s.schemaWrongTypeDetail;
             const count = det.length;
             const segments = det.map(
               (d, i) => `${i === 0 ? '' : ' | + '}${d.field}: ${d.expectedType} -> ${d.sentType}`,
@@ -497,17 +492,17 @@ main().catch((err) => {
 
 function buildRequestPlan(
   scenario: EndpointScenario,
-  resp: any,
+  resp: ResponseShapeSummary | undefined,
   graph: OperationGraph,
-  canonical: Record<string, any>,
-  requestGroupsIndex: Record<string, any[]>,
-) {
-  const steps: any[] = [];
+  canonical: Record<string, CanonicalShape>,
+  requestGroupsIndex: Record<string, RequestOneOfGroupSummary[]>,
+): RequestStep[] {
+  const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
   const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
   for (const opRef of scenario.operations) {
     const isFinal = opRef.operationId === lastOpId;
-    const step: any = {
+    const step: RequestStep = {
       operationId: opRef.operationId,
       method: opRef.method,
       pathTemplate: opRef.path,
@@ -516,13 +511,13 @@ function buildRequestPlan(
     // Domain valueBindings driven response extraction (non-final steps included)
     const opDom = graph.domain?.operationRequirements?.[opRef.operationId];
     if (opDom?.valueBindings) {
-      const extracts: any[] = [];
+      const extracts: { fieldPath: string; bind: string; note?: string }[] = [];
       for (const [k, v] of Object.entries(opDom.valueBindings)) {
         if (!k.startsWith('response.')) continue; // only handle response mappings here
         const fieldPathRaw = k.slice('response.'.length); // canonical path with [] markers
         const norm = fieldPathRaw.replace(/\[\]/g, '[0]'); // first element access for arrays
         // Determine target variable name based on parameter portion after last '.' in mapping (state.parameter)
-        const mapping = v as string;
+        const mapping = v;
         const paramPart = mapping.split('.').pop() ?? '';
         let bind = `${camelCase(paramPart)}Var`;
         if (k.endsWith('$key')) {
@@ -569,7 +564,7 @@ function buildRequestPlan(
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
     if (isFinal && scenario.duplicateTest) {
-      const dup: any = {
+      const dup: RequestStep = {
         ...step,
         expect: {
           status:
@@ -585,7 +580,11 @@ function buildRequestPlan(
   return steps;
 }
 
-function determineExpectedStatus(scenario: EndpointScenario, resp: any, isFinal: boolean): number {
+function determineExpectedStatus(
+  scenario: EndpointScenario,
+  resp: ResponseShapeSummary | undefined,
+  isFinal: boolean,
+): number {
   if (
     isFinal &&
     scenario.expectedResult &&
@@ -602,7 +601,7 @@ function _synthesizeBodyTemplate(scenario: EndpointScenario, opRef: OperationRef
   // Heuristic: for search endpoints, include binding-derived fields
   const bindings = scenario.bindings || {};
   if (!bindings || Object.keys(bindings).length === 0) return undefined;
-  const result: any = {};
+  const result: Record<string, string> = {};
   const isSearch = /\/search$/.test(opRef.path) || /search/i.test(opRef.operationId);
   // Map binding var names like processDefinitionKeyVar -> processDefinitionKey
   for (const [k, _v] of Object.entries(bindings)) {
@@ -642,7 +641,7 @@ function buildRequestBodyFromCanonical(
   scenario: EndpointScenario,
   graph: OperationGraph,
   canonical: Record<string, CanonicalShape>,
-  requestGroupsIndex: Record<string, any[]>,
+  requestGroupsIndex: Record<string, RequestOneOfGroupSummary[]>,
   isEndpoint: boolean,
 ): RequestBodyPlan | undefined {
   const shape = canonical[opId];
@@ -692,7 +691,7 @@ function buildRequestBodyFromCanonical(
     // Determine selected variant for endpoint scenarios
     const selected = isEndpoint ? scenario.requestVariants?.[0] : undefined;
     const groupId = selected?.groupId || requestGroups[0]?.groupId;
-    const group = requestGroups.find((g: any) => g.groupId === groupId) || requestGroups[0];
+    const group = requestGroups.find((g) => g.groupId === groupId) || requestGroups[0];
     unionFieldsForGroup = group?.unionFields || [];
     // Detect pairwise negative (requestVariantName: 'pair:a+b')
     if (
@@ -716,28 +715,27 @@ function buildRequestBodyFromCanonical(
       allowedFields = new Set(group.unionFields);
     } else {
       // Choose a concrete variant: prefer one that contains a '*Key' field if possible
-      const variants: any[] = group?.variants || [];
+      const variants: RequestOneOfVariant[] = group?.variants || [];
       let chosen = selected ? variants.find((v) => v.variantName === selected.variant) : undefined;
       if (!chosen)
-        chosen =
-          variants.find((v) => v.required.some((f: string) => /Key$/.test(f))) || variants[0];
+        chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || variants[0];
       // For non-endpoint dependent steps, prefer Key similarly
       if (!isEndpoint) {
-        chosen = variants.find((v) => v.required.some((f: string) => /Key$/.test(f))) || chosen;
+        chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || chosen;
       }
       chosenVariantRequired = [...(chosen?.required || [])];
       // Allow chosen required, plus chosen optional that are NOT required by any other variant
       const otherRequired = new Set<string>(
         variants.filter((v) => v !== chosen).flatMap((v) => v.required || []),
       );
-      const safeOptional = (chosen?.optional || []).filter((n: string) => !otherRequired.has(n));
+      const safeOptional = (chosen?.optional || []).filter((n) => !otherRequired.has(n));
       const names: string[] = [...(chosen?.required || []), ...safeOptional];
       allowedFields = new Set(names);
     }
   }
   // Build template
   if (chosenCt === 'application/json') {
-    const template: any = {};
+    const template: Record<string, unknown> = {};
     const missing: string[] = [];
     // Detect missing-required negative either by original variantKey marker or by presence of expansion metadata
     const isSchema400Neg =
@@ -968,7 +966,7 @@ function buildRequestBodyFromCanonical(
         }
       }
       // ensure we don't carry a non-schema jobType field
-      if (!leafSet.has('jobType')) delete (template as any).jobType;
+      if (!leafSet.has('jobType')) delete template.jobType;
     }
     // Final single-pass omission enforcement (contract):
     // - schemaMissingInclude = fields we intentionally keep
@@ -982,7 +980,9 @@ function buildRequestBodyFromCanonical(
       }
       for (const n of chosenVariantRequired || []) unionRequired.add(n);
       if (opId === 'activateJobs')
-        ['type', 'timeout', 'maxJobsToActivate'].forEach((n) => unionRequired.add(n));
+        ['type', 'timeout', 'maxJobsToActivate'].forEach((n) => {
+          unionRequired.add(n);
+        });
       for (const n of unionRequired) {
         const shouldKeep = includeSet ? includeSet.has(n) : false;
         const explicitlyDrop = omitSet ? omitSet.has(n) : false;
@@ -997,11 +997,16 @@ function buildRequestBodyFromCanonical(
       scenario.expectedResult.kind === 'empty'
     ) {
       const opDefaults = getRequestDefaultsForOperation(opId) || {};
-      const neg = opDefaults.negativeEmpty || {};
+      const negRaw = opDefaults.negativeEmpty;
+      const neg: Record<string, unknown> =
+        negRaw !== null && typeof negRaw === 'object' ? { ...negRaw } : {};
       const nonExistentType = typeof neg.type === 'string' ? neg.type : '__NON_EXISTENT_JOB_TYPE__';
-      const shortTimeout = Number.isFinite(neg.requestTimeout) ? neg.requestTimeout : 250;
+      const shortTimeout =
+        typeof neg.requestTimeout === 'number' && Number.isFinite(neg.requestTimeout)
+          ? neg.requestTimeout
+          : 250;
       template.type = nonExistentType;
-      template.requestTimeout = shortTimeout as number;
+      template.requestTimeout = shortTimeout;
       // Seed binding for completeness, though template uses a literal
       scenario.bindings ||= {};
       if (!scenario.bindings.jobTypeVar || scenario.bindings.jobTypeVar === '__PENDING__') {
@@ -1014,7 +1019,10 @@ function buildRequestBodyFromCanonical(
   if (chosenCt === 'multipart/form-data') {
     // Represent multipart template as { fields: Record<string,string>, files: Record<string,string> }
     // Detect array of binaries: look for paths matching resources[] with type string/binary
-    const template: any = { fields: {}, files: {} };
+    const template: { fields: Record<string, string>; files: Record<string, string> } = {
+      fields: {},
+      files: {},
+    };
     const fileFields = nodes.filter(
       (n) => /\bstring\b/i.test(n.type) && /resources\[\]/.test(n.path),
     );
@@ -1023,7 +1031,7 @@ function buildRequestBodyFromCanonical(
       const ruleId = scenario.artifactsApplied?.[0] || undefined;
       const domainRules = graph.domain?.operationArtifactRules?.[opId]?.rules || [];
       const rule = ruleId ? domainRules.find((r) => r.id === ruleId) : undefined;
-      let kind = rule?.artifactKind as string | undefined;
+      let kind = rule?.artifactKind;
       if (!kind) {
         // Default to BPMN process for deployments when unspecified
         if (opId === 'createDeployment') kind = 'bpmnProcess';
@@ -1087,7 +1095,7 @@ type ArtifactRegistryEntry = {
   kind: string;
   path: string;
   description?: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 };
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
@@ -1107,7 +1115,7 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
       const data = fsSync.readFileSync(p, 'utf8');
       const json = JSON.parse(data);
       const arr = Array.isArray(json?.artifacts) ? json.artifacts : Array.isArray(json) ? json : [];
-      artifactsRegistryCache = arr.map((e: any) => ({
+      artifactsRegistryCache = arr.map((e: ArtifactRegistryEntry) => ({
         kind: e.kind,
         path: e.path,
         description: e.description,
@@ -1122,8 +1130,8 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
 
 // -------- Request Defaults support ---------
 type RequestDefaults = {
-  operations?: Record<string, Record<string, any>>;
-  global?: Record<string, any>;
+  operations?: Record<string, Record<string, unknown>>;
+  global?: Record<string, unknown>;
 };
 let requestDefaultsCache: RequestDefaults | null = null;
 function loadRequestDefaults(): RequestDefaults {
@@ -1135,15 +1143,16 @@ function loadRequestDefaults(): RequestDefaults {
   for (const p of candidates) {
     try {
       const data = fsSync.readFileSync(p, 'utf8');
-      const json = JSON.parse(data);
-      requestDefaultsCache = json as RequestDefaults;
+      // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for request-defaults.json.
+      const json = JSON.parse(data) as RequestDefaults;
+      requestDefaultsCache = json;
       return requestDefaultsCache;
     } catch {}
   }
   requestDefaultsCache = { operations: {}, global: {} };
   return requestDefaultsCache;
 }
-function getRequestDefaultsForOperation(opId: string): Record<string, any> | undefined {
+function getRequestDefaultsForOperation(opId: string): Record<string, unknown> | undefined {
   const all = loadRequestDefaults();
   const op = all.operations?.[opId] || {};
   const glob = all.global || {};
@@ -1186,7 +1195,7 @@ function kCombinations<T>(arr: T[], k: number): T[][] {
 
 // Choose a deliberately wrong-type value for a field given its declared type.
 // Strategy keeps values primitive & JSON-serializable while maximizing mismatch likelihood.
-function chooseWrongTypeValue(declared?: string): any {
+function chooseWrongTypeValue(declared?: string): unknown {
   switch ((declared || '').toLowerCase()) {
     case 'string':
       return 12345; // number for string
@@ -1208,7 +1217,7 @@ function chooseWrongTypeValue(declared?: string): any {
 type ProviderSpec = {
   from: 'ctx' | 'const' | 'enumFirst' | 'base64' | 'now';
   var?: string;
-  value?: any;
+  value?: unknown;
 };
 type ProviderConfig = {
   globals?: Record<string, ProviderSpec>;
@@ -1224,6 +1233,7 @@ function loadProviderConfig(): ProviderConfig {
   for (const p of candidates) {
     try {
       const data = fsSync.readFileSync(p, 'utf8');
+      // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for filter-providers.json.
       providerConfigCache = JSON.parse(data) as ProviderConfig;
       return providerConfigCache;
     } catch {}
@@ -1231,7 +1241,7 @@ function loadProviderConfig(): ProviderConfig {
   providerConfigCache = { globals: {}, operations: {} };
   return providerConfigCache;
 }
-function resolveProvider(opId: string, field: string, scenario: EndpointScenario): any {
+function resolveProvider(opId: string, field: string, scenario: EndpointScenario): unknown {
   const cfg = loadProviderConfig();
   const opMap = cfg.operations?.[opId] || {};
   const spec = opMap[field] || cfg.globals?.[field];
@@ -1257,7 +1267,7 @@ function resolveProvider(opId: string, field: string, scenario: EndpointScenario
 function chooseFixtureFromRegistry(
   kind?: string,
   preferJobType = false,
-): { ref: string; params?: Record<string, any> } | undefined {
+): { ref: string; params?: Record<string, unknown> } | undefined {
   if (!kind) return undefined;
   const reg = getArtifactsRegistry();
   let hit = reg.find(
