@@ -66,9 +66,10 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
       if (!p.schema?.type) continue;
       if (p.in === 'path') continue; // path params often strictly string serialized
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
+      const paramType = Array.isArray(p.schema.type) ? p.schema.type[0] : p.schema.type;
       // Skip plain string parameters without enum/format; no real type mismatch possible.
-      if (p.schema.type === 'string' && !p.schema.enum && !p.schema.format) continue;
-      const wrong = wrongTypeValue(p.schema.type);
+      if (paramType === 'string' && !p.schema.enum && !p.schema.format) continue;
+      const wrong = wrongTypeValue(paramType);
       if (wrong === undefined) continue;
       // Start with all required query params (so we don't unintentionally create identical empty queries)
       let params: Record<string, string> | undefined;
@@ -148,8 +149,7 @@ export function generateParamEnumViolation(
   return out;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function wrongTypeValue(type: string): any {
+function wrongTypeValue(type: string): string | number | undefined {
   switch (type) {
     case 'integer':
     case 'number':

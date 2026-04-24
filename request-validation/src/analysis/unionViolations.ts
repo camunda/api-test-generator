@@ -1,4 +1,4 @@
-import type { OperationModel, ValidationScenario } from '../model/types.js';
+import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
 import { makeId } from './common.js';
 
 interface Opts {
@@ -17,8 +17,8 @@ export function generateUnionViolations(ops: OperationModel[], opts: Opts): Vali
     if (variants.length < 2) continue;
     const a = variants[0];
     const b = variants[1];
-    const combinedRequired = Array.from(new Set([...a.required, ...b.required]));
-    const body: Record<string, any> = {};
+    const combinedRequired = Array.from(new Set([...(a.required ?? []), ...(b.required ?? [])]));
+    const body: Record<string, unknown> = {};
     for (const f of combinedRequired) {
       // prefer variant property schema if present
       const schema = a.properties?.[f] || b.properties?.[f];
@@ -42,10 +42,11 @@ export function generateUnionViolations(ops: OperationModel[], opts: Opts): Vali
   return out;
 }
 
-function placeholder(schema: any): any {
+function placeholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
-  if (schema.enum?.length) return schema.enum[0];
-  switch (schema.type) {
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  const t = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  switch (t) {
     case 'string':
       return 'x';
     case 'integer':

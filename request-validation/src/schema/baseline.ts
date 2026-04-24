@@ -1,14 +1,27 @@
 import type { OperationModel } from '../model/types.js';
-import { buildWalk, type WalkNode } from './walker.js';
+import { buildWalk, type SchemaFragment, type WalkNode } from './walker.js';
 
-export function buildBaselineBody(op: OperationModel): any {
+export type BaselineValue =
+  | Record<string, unknown>
+  | unknown[]
+  | string
+  | number
+  | boolean
+  | null
+  | undefined;
+
+function isSchemaFragment(v: unknown): v is SchemaFragment {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+export function buildBaselineBody(op: OperationModel): BaselineValue {
   const walk = buildWalk(op);
   if (!walk?.root) return undefined;
-  function synth(node: WalkNode): any {
+  function synth(node: WalkNode): BaselineValue {
     const t = Array.isArray(node.type) ? node.type[0] : node.type;
     switch (t) {
       case 'object': {
-        const obj: Record<string, any> = {};
+        const obj: Record<string, unknown> = {};
         // Always include required
         if (node.required && node.properties) {
           for (const r of node.required) {
@@ -20,10 +33,10 @@ export function buildBaselineBody(op: OperationModel): any {
         if (node.properties) {
           for (const [k, child] of Object.entries(node.properties)) {
             if (node.required?.includes(k)) continue;
-            const raw: any = (child as any).raw;
+            const raw = isSchemaFragment(child.raw) ? child.raw : undefined;
             if (raw) {
               const interesting = !!(
-                raw.enum?.length ||
+                (Array.isArray(raw.enum) && raw.enum.length) ||
                 raw.format ||
                 raw.pattern ||
                 raw.minimum !== undefined ||
@@ -51,8 +64,10 @@ export function buildBaselineBody(op: OperationModel): any {
         return 1;
       case 'boolean':
         return true;
-      case 'string':
-        return node.enum?.length ? node.enum[0] : 'x';
+      case 'string': {
+        const first = node.enum?.[0];
+        return typeof first === 'string' ? first : 'x';
+      }
       default:
         return null;
     }

@@ -1,4 +1,4 @@
-import type { OperationModel, ValidationScenario } from '../model/types.js';
+import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
 import { makeId } from './common.js';
 
 interface Opts {
@@ -6,15 +6,7 @@ interface Opts {
   capPerOperation?: number;
 }
 
-interface VariantSchema {
-  type?: string;
-  required?: string[];
-  properties?: Record<string, VariantSchema>;
-  enum?: unknown[];
-  oneOf?: VariantSchema[];
-}
-
-function isVariantSchema(v: unknown): v is VariantSchema {
+function isVariantSchema(v: unknown): v is SchemaFragment {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
@@ -136,7 +128,7 @@ export function generateDiscriminatorStructureMismatch(
   return out;
 }
 
-function guessDiscriminatorValue(variant: VariantSchema, disc: string): string | undefined {
+function guessDiscriminatorValue(variant: SchemaFragment, disc: string): string | undefined {
   const p = variant.properties?.[disc];
   if (p?.enum?.length) {
     const v = p.enum[0];
@@ -145,7 +137,7 @@ function guessDiscriminatorValue(variant: VariantSchema, disc: string): string |
   return undefined;
 }
 
-function placeholder(schema: VariantSchema | undefined): unknown {
+function placeholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
   if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {

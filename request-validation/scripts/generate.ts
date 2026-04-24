@@ -284,11 +284,13 @@ async function main() {
       const hasMultipart = !!op.mediaTypes?.includes('multipart/form-data');
       const multipartOnly = hasMultipart && !hasJson;
       if (multipartOnly) {
-        const isJsonScenario = !!s.requestBody && !s.bodyEncoding; // default JSON body
-        if (isJsonScenario) {
+        const body = s.requestBody;
+        const isJsonObjectBody =
+          !!body && typeof body === 'object' && !Array.isArray(body) && !s.bodyEncoding;
+        if (isJsonObjectBody && body && typeof body === 'object' && !Array.isArray(body)) {
           const form: Record<string, string> = {};
           try {
-            for (const [k, v] of Object.entries(s.requestBody)) {
+            for (const [k, v] of Object.entries(body)) {
               if (v == null) continue;
               if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
                 form[k] = String(v);
