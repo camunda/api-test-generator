@@ -78,12 +78,12 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
     if (effective.type === 'object' && effective.properties) {
       node.properties = {};
       for (const [k, v] of Object.entries<any>(effective.properties)) {
-        const childPtr = pointer + '/properties/' + escapeJsonPointer(k);
+        const childPtr = `${pointer}/properties/${escapeJsonPointer(k)}`;
         node.properties[k] = visit(v, childPtr, k);
       }
     }
     if (effective.type === 'array' && effective.items) {
-      node.items = visit(effective.items, pointer + '/items');
+      node.items = visit(effective.items, `${pointer}/items`);
     }
     return node;
   }
