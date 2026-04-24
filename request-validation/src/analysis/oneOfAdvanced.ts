@@ -119,16 +119,16 @@ export function generateDiscriminatorStructureMismatch(
 }
 
 function guessDiscriminatorValue(variant: any, disc: string): string | undefined {
-  if (variant.properties && variant.properties[disc]) {
+  if (variant.properties?.[disc]) {
     const p = variant.properties[disc];
-    if (p.enum && p.enum.length) return p.enum[0];
+    if (p.enum?.length) return p.enum[0];
   }
   return undefined;
 }
 
 function placeholder(schema: any): any {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';
