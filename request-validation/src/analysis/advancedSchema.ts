@@ -1,11 +1,17 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
-import { buildWalk } from '../schema/walker.js';
+import { buildWalk, type WalkNode } from '../schema/walker.js';
 import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+}
+
+type JsonObject = Record<string, unknown>;
+
+function isObject(v: unknown): v is JsonObject {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 export function generateNestedAdditionalProps(
@@ -16,18 +22,19 @@ export function generateNestedAdditionalProps(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk?.root) continue;
+    const root = walk?.root;
+    if (!root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     let produced = 0;
     // naive recursive search for object schema with additionalProperties=false beyond root
-    function dfs(node: any, path: string[]) {
+    function dfs(node: WalkNode, path: string[]) {
       if (opts.capPerOperation && produced >= opts.capPerOperation) return;
       if (
-        node !== walk?.root &&
-        (node as any).raw &&
+        node !== root &&
+        node.raw &&
         node.type === 'object' &&
-        (node as any).raw.additionalProperties === false
+        node.raw.additionalProperties === false
       ) {
         // inject unexpected at this path
         const clone = structuredClone(baseline);
@@ -50,10 +57,10 @@ export function generateNestedAdditionalProps(
         }
       }
       if (node.properties)
-        for (const [k, v] of Object.entries<any>(node.properties)) dfs(v, [...path, k]);
+        for (const [k, v] of Object.entries(node.properties)) dfs(v, [...path, k]);
       if (node.items) dfs(node.items, [...path, '0']);
     }
-    dfs(walk.root, []);
+    dfs(root, []);
   }
   return out;
 }
@@ -66,12 +73,13 @@ export function generateUniqueItemsViolations(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk?.root) continue;
+    const root = walk?.root;
+    if (!root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
-      if (node.type === 'array' && (node as any).raw && (node as any).raw.uniqueItems) {
-        const path = findPath(walk.root!, node);
+      if (node.type === 'array' && node.raw && node.raw.uniqueItems) {
+        const path = findPath(root, node);
         if (!path) continue;
         const clone = structuredClone(baseline);
         // Ensure array exists (if not in baseline) by creating it
@@ -106,17 +114,18 @@ export function generateMultipleOfViolations(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk?.root) continue;
+    const root = walk?.root;
+    if (!root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
-      const raw: any = (node as any).raw;
+      const raw = node.raw;
       if (
         (node.type === 'integer' || node.type === 'number') &&
         raw &&
         typeof raw.multipleOf === 'number'
       ) {
-        const path = findPath(walk.root!, node);
+        const path = findPath(root, node);
         if (!path) continue;
         const bad = raw.multipleOf * 2 + 1; // off by one
         const clone = structuredClone(baseline);
@@ -153,13 +162,19 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk?.root) continue;
+    const root = walk?.root;
+    if (!root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     for (const node of walk.byPointer.values()) {
-      const raw: any = (node as any).raw;
-      if (node.type === 'string' && raw && raw.format && invalidByFormat[raw.format]) {
-        const path = findPath(walk.root!, node);
+      const raw = node.raw;
+      if (
+        node.type === 'string' &&
+        raw &&
+        typeof raw.format === 'string' &&
+        invalidByFormat[raw.format]
+      ) {
+        const path = findPath(root, node);
         if (!path) continue;
         const clone = structuredClone(baseline);
         if (applySet(clone, path, invalidByFormat[raw.format])) {
@@ -185,43 +200,45 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
 }
 
 // Helpers
-function applyAdd(obj: any, path: string[], key: string, value: any): boolean {
-  let target = obj;
+function applyAdd(obj: unknown, path: string[], key: string, value: unknown): boolean {
+  let target: unknown = obj;
   for (const seg of path) {
-    if (!(seg in target)) return false;
+    if (!isObject(target) || !(seg in target)) return false;
     target = target[seg];
   }
-  if (typeof target !== 'object') return false;
+  if (!isObject(target)) return false;
   target[key] = value;
   return true;
 }
-function applySet(obj: any, path: string[], value: any): boolean {
-  let target = obj;
+function applySet(obj: unknown, path: string[], value: unknown): boolean {
+  let target: unknown = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const seg = path[i];
-    if (!(seg in target)) return false;
+    if (!isObject(target) || !(seg in target)) return false;
     target = target[seg];
   }
+  if (!isObject(target)) return false;
   const last = path[path.length - 1];
   if (!(last in target)) return false;
   target[last] = value;
   return true;
 }
-function applyEnsureArrayPath(obj: any, path: string[]): boolean {
-  let target = obj;
+function applyEnsureArrayPath(obj: unknown, path: string[]): boolean {
+  let target: unknown = obj;
   for (let i = 0; i < path.length - 1; i++) {
+    if (!isObject(target)) return false;
     const seg = path[i];
     if (!(seg in target) || typeof target[seg] !== 'object') target[seg] = {};
     target = target[seg];
-    if (typeof target !== 'object') return false;
   }
+  if (!isObject(target)) return false;
   const last = path[path.length - 1];
   if (!(last in target) || !Array.isArray(target[last])) target[last] = [];
   return true;
 }
-function findPath(root: any, node: any): string[] | undefined {
+function findPath(root: WalkNode, node: WalkNode): string[] | undefined {
   let found: string[] | undefined;
-  function dfs(cur: any, p: string[]) {
+  function dfs(cur: WalkNode, p: string[]) {
     if (cur === node) {
       found = p;
       return;
