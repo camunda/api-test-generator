@@ -1,8 +1,7 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from '../../types.js';
 import { planFinalStepAssertions } from '../assertionPlanner.js';
-import { seedBinding } from '../support/seeding.js';
 
 interface EmitOptions {
   outDir: string;
@@ -54,7 +53,7 @@ function renderScenarioTest(s: EndpointScenario): string {
     const words = desc.split(/\s+/);
     let line = '';
     for (const w of words) {
-      if ((line + ' ' + w).trim().length > 100) {
+      if (`${line} ${w}`.trim().length > 100) {
         wrapped.push(line.trim());
         line = w;
       } else {
@@ -62,7 +61,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
     }
     if (line) wrapped.push(line.trim());
-    wrapped.forEach((l) => body.push('  // ' + l));
+    wrapped.forEach((l) => body.push(`  // ${l}`));
   }
   body.push(`  const baseUrl = buildBaseUrl();`);
   body.push(`  const ctx: Record<string, any> = {};`);
@@ -122,9 +121,8 @@ function renderScenarioTest(s: EndpointScenario): string {
     const varName = `resp${idx + 1}`;
     const urlExpr = buildUrlExpression(step.pathTemplate);
     const method = step.method.toLowerCase();
-    const isFinal = idx === s.requestPlan!.length - 1;
-    const hasShape =
-      Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0;
+    const isFinal = idx === s.requestPlan?.length - 1;
+    const hasShape = Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0;
     // Ensure prerequisite createProcessInstance always supplies a processDefinitionKey when available
     if (step.operationId === 'createProcessInstance' && step.bodyKind === 'json') {
       if (!step.bodyTemplate || Object.keys(step.bodyTemplate).length === 0) {
@@ -139,7 +137,7 @@ function renderScenarioTest(s: EndpointScenario): string {
     if (step.bodyKind === 'json' && step.bodyTemplate) {
       const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
         /"\\?\$\{([^}]+)\}"/g,
-        (_, v) => 'ctx["' + v + '"]',
+        (_, v) => `ctx["${v}"]`,
       );
       body.push(`    const ${bodyVar} = ${json};`);
       // Preflight assertion for schema-missing-required negatives: ensure omitted fields truly absent
@@ -147,7 +145,7 @@ function renderScenarioTest(s: EndpointScenario): string {
         /schema-missing-required/i.test(s.variantKey || '') ||
         /negative missing required/.test(s.name || '')
       ) {
-        const includeLit = JSON.stringify(s.schemaMissingInclude || []);
+        const _includeLit = JSON.stringify(s.schemaMissingInclude || []);
         const suppressLit = JSON.stringify(s.schemaMissingSuppress || []);
         body.push(`    // Preflight omit verification (metadata-driven)`);
         body.push(`    {`);
@@ -158,10 +156,7 @@ function renderScenarioTest(s: EndpointScenario): string {
         body.push(`    }`);
       }
       // Wrong-type negatives: ensure declared wrongType fields are present (we mutate them upstream).
-      if (
-        /schemaWrongType/i.test(s.variantKey || '') ||
-        /negative wrong type/.test(s.name || '')
-      ) {
+      if (/schemaWrongType/i.test(s.variantKey || '') || /negative wrong type/.test(s.name || '')) {
         const wrongTypeFields = s.schemaWrongTypeInclude || [];
         const detail = s.schemaWrongTypeDetail || [];
         // Build expected type map for precise mismatch selection
@@ -268,7 +263,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       // multipart template format: { fields: Record<string,string>, files: Record<string,string> }
       const tpl = JSON.stringify(step.multipartTemplate, null, 4).replace(
         /"\\?\$\{([^}]+)\}"/g,
-        (_, v) => 'ctx["' + v + '"]',
+        (_, v) => `ctx["${v}"]`,
       );
       body.push(`    const ${bodyVar} = ${tpl};`);
     }
@@ -337,9 +332,7 @@ function renderScenarioTest(s: EndpointScenario): string {
     body.push(`        pathTemplate: ${JSON.stringify(step.pathTemplate)},`);
     body.push(`        status: __status,`);
     body.push(`        expectedStatus: ${step.expect.status},`);
-    body.push(
-      `        errorScenario: ${s.expectedResult && s.expectedResult.kind === 'error'},`,
-    );
+    body.push(`        errorScenario: ${s.expectedResult && s.expectedResult.kind === 'error'},`);
     body.push(
       `        bodyShape: (__status === 200 && bodyJson !== undefined) ? sanitizeBody(bodyJson) : undefined`,
     );
@@ -354,7 +347,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       const plan = planFinalStepAssertions(s, step);
       // Top-level field assertions
       for (const f of plan.topLevel) {
-        const acc = 'json' + toPathAccessor(f.path);
+        const acc = `json${toPathAccessor(f.path)}`;
         const t = f.type || 'unknown';
         if (f.required) {
           body.push(`    expect(${acc}).not.toBeUndefined();`);
@@ -381,7 +374,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       // Deep array item field assertions for first item when available
       if (!isEmptyScenario && plan.arrays && plan.arrays.arrayNames.length) {
         for (const arrName of plan.arrays.arrayNames) {
-          const itemPath = 'json' + toPathAccessor(`${arrName}[0]`);
+          const itemPath = `json${toPathAccessor(`${arrName}[0]`)}`;
           body.push(`    // Assert required fields on first item of ${arrName}[]`);
           // If this is the activateJobs base scenario and array is jobs[], assert exactly one item
           if (
@@ -389,7 +382,7 @@ function renderScenarioTest(s: EndpointScenario): string {
             /\bbase\b/i.test(s.name || '') &&
             arrName === 'jobs'
           ) {
-            const arrAcc = 'json' + toPathAccessor(arrName);
+            const arrAcc = `json${toPathAccessor(arrName)}`;
             body.push(`    expect(Array.isArray(${arrAcc})).toBeTruthy();`);
             body.push(`    expect(${arrAcc}.length).toBe(1);`);
           }
@@ -397,7 +390,7 @@ function renderScenarioTest(s: EndpointScenario): string {
           const fields = plan.arrays.byArray[arrName] || [];
           for (const f of fields) {
             if (!f.required) continue;
-            const acc = 'json' + toPathAccessor(f.path);
+            const acc = `json${toPathAccessor(f.path)}`;
             body.push(`    expect(${acc}).not.toBeUndefined();`);
             body.push(`    expect(${acc}).not.toBeNull();`);
             body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
@@ -416,7 +409,7 @@ function renderScenarioTest(s: EndpointScenario): string {
           const inner = plan.slices.bySlice[slice] || [];
           for (const f of inner) {
             if (!f.required) continue;
-            const acc = 'json' + toPathAccessor(f.path);
+            const acc = `json${toPathAccessor(f.path)}`;
             body.push(`    expect(${acc}).not.toBeUndefined();`);
             body.push(`    expect(${acc}).not.toBeNull();`);
             body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
@@ -425,7 +418,7 @@ function renderScenarioTest(s: EndpointScenario): string {
       }
     }
     // Extraction
-    if (step.extract && step.extract.length) {
+    if (step.extract?.length) {
       // Avoid duplicate parsing if already parsed for final-step assertions above
       if (!(isFinal && hasShape && !isErrorScenario)) {
         body.push(`    const json = await ${varName}.json();`);
@@ -448,24 +441,21 @@ function buildUrlExpression(pathTemplate: string): string {
   // Replace {param} with string interpolation referencing ctx binding paramVar if exists
   return (
     '`' +
-    pathTemplate.replace(
-      /\{([^}]+)\}/g,
-      (_, p) => '${ctx.' + camelCase(p) + 'Var || ' + "'" + '${' + p + '}' + "'" + '}',
-    ) +
+    pathTemplate.replace(/\{([^}]+)\}/g, (_, p) => `\${ctx.${camelCase(p)}Var || '\${${p}}'}`) +
     '`'
   );
 }
 
 function toPathAccessor(fieldPath: string): string {
   // Support paths like processes[0].bpmnProcessId or nested.simple
-  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(fieldPath)) return '.' + fieldPath;
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(fieldPath)) return `.${fieldPath}`;
   // Split on dots, preserve bracket indices
   const parts = fieldPath.split('.');
   return parts
     .map((p) => {
       const m = p.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(\[[0-9]+\])?$/);
       if (m) {
-        const base = '.' + m[1];
+        const base = `.${m[1]}`;
         const idx = m[2] || '';
         return base + idx;
       }
