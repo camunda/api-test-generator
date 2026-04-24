@@ -33,7 +33,7 @@ async function main() {
   // Validate domain valueBindings against canonical response paths (fail-hard soon; warn now)
   const validationErrors: string[] = [];
   const opReqs = graph.domain?.operationRequirements || {};
-  for (const [opId, req] of Object.entries<any>(opReqs)) {
+  for (const [opId, req] of Object.entries(opReqs)) {
     if (!req.valueBindings) continue;
     const shape = canonical[opId];
     const respSet = new Set((shape?.response || []).map((n) => n.path));
@@ -106,7 +106,7 @@ async function main() {
     // Expand schema-missing-required into combinations (cap at 35) before planning
     {
       const baseScenarios = featureCollection.scenarios;
-      const expanded: any[] = [];
+      const expanded: EndpointScenario[] = [];
       const requiredFields = getRequiredRequestLeafFields(op.operationId, canonical);
       const hasSchemaMissing = baseScenarios.some(
         (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired'),
@@ -132,7 +132,10 @@ async function main() {
           for (const combo of combos) {
             if (budget <= 0) break;
             for (const orig of originals) {
-              const clone = { ...orig, id: `${orig.id}-mr-${k}-${expanded.length + 1}` } as any;
+              const clone: EndpointScenario = {
+                ...orig,
+                id: `${orig.id}-mr-${k}-${expanded.length + 1}`,
+              };
               clone.schemaMissingInclude = combo;
               // Pre-compute suppress list (required fields not in include)
               const requiredClusterOverrides: Record<string, string[]> = {
@@ -154,23 +157,23 @@ async function main() {
             }
           }
         }
-        featureCollection.scenarios = expanded as any;
+        featureCollection.scenarios = expanded;
       }
       // Expand wrong-type negatives similarly, but operate on a small subset of fields to keep within cap
       if (requiredFields.length && hasSchemaWrongType) {
         const base = featureCollection.scenarios;
         const originals = base.filter(
           (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType'),
-        ) as any[];
+        );
         const others = base.filter(
           (s) => !(typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType')),
         );
-        const result: any[] = [];
+        const result: EndpointScenario[] = [];
         result.push(...others);
         const fields = [...requiredFields].sort();
         // SUPPRESSION: If no candidate fields (after any future filtering) skip emitting placeholder wrong-type scenarios.
         if (!fields.length) {
-          featureCollection.scenarios = result as any; // drop originals entirely
+          featureCollection.scenarios = result; // drop originals entirely
           continue; // proceed to next endpoint
         }
         const capWT = 50; // new expanded cap for wrong-type scenarios per endpoint
@@ -180,7 +183,10 @@ async function main() {
         for (const c of combos1) {
           if (budget <= 0) break;
           for (const orig of originals) {
-            const clone = { ...orig, id: `${orig.id}-wt-1-${result.length + 1}` } as any;
+            const clone: EndpointScenario = {
+              ...orig,
+              id: `${orig.id}-wt-1-${result.length + 1}`,
+            };
             clone.schemaWrongTypeInclude = c;
             clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
             clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
@@ -195,7 +201,10 @@ async function main() {
           for (const c of combos2) {
             if (budget <= 0) break;
             for (const orig of originals) {
-              const clone = { ...orig, id: `${orig.id}-wt-2-${result.length + 1}` } as any;
+              const clone: EndpointScenario = {
+                ...orig,
+                id: `${orig.id}-wt-2-${result.length + 1}`,
+              };
               clone.schemaWrongTypeInclude = c;
               clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
               clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
@@ -213,7 +222,10 @@ async function main() {
             for (const c of combos3) {
               if (budget <= 0) break;
               for (const orig of originals) {
-                const clone = { ...orig, id: `${orig.id}-wt-3-${result.length + 1}` } as any;
+                const clone: EndpointScenario = {
+                  ...orig,
+                  id: `${orig.id}-wt-3-${result.length + 1}`,
+                };
                 clone.schemaWrongTypeInclude = c;
                 clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
                 clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
@@ -228,7 +240,10 @@ async function main() {
             const c = [...fields];
             for (const orig of originals) {
               if (budget <= 0) break;
-              const clone = { ...orig, id: `${orig.id}-wt-4-${result.length + 1}` } as any;
+              const clone: EndpointScenario = {
+                ...orig,
+                id: `${orig.id}-wt-4-${result.length + 1}`,
+              };
               clone.schemaWrongTypeInclude = c;
               clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
               clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
@@ -241,7 +256,7 @@ async function main() {
             // (Skip duplicate if already added by combos3)
           }
         }
-        featureCollection.scenarios = result as any;
+        featureCollection.scenarios = result;
       }
     }
     // Final guardrail: enforce max scenarios per endpoint after expansions (cap 35)
@@ -251,7 +266,7 @@ async function main() {
     }
     // Post-expansion cleanup: remove placeholder wrong-type scenarios that ended up with no fields to mutate
     featureCollection.scenarios = featureCollection.scenarios.filter((sc) => {
-      const vk: any = sc.variantKey;
+      const vk = sc.variantKey;
       if (typeof vk === 'string' && vk.includes('schemaWrongType')) {
         const incl = sc.schemaWrongTypeInclude;
         if (!Array.isArray(incl) || incl.length === 0) {
