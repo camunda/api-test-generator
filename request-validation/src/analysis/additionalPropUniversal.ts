@@ -14,13 +14,13 @@ export function generateUniversalAdditionalProp(
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const schema: any = op.requestBodySchema;
+    const schema = op.requestBodySchema;
     if (!schema || schema.type !== 'object') continue;
     const baseline = buildBaselineBody(op);
-    if (!baseline || typeof baseline !== 'object') continue;
+    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
     const body = structuredClone(baseline);
-    if ((body as any).__extraField === undefined) {
-      (body as any).__extraField = 'unexpected';
+    if (body.__extraField === undefined) {
+      body.__extraField = 'unexpected';
     }
     out.push({
       id: makeId([op.operationId, 'additionalPropAny']),

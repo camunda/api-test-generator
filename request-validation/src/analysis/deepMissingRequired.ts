@@ -1,6 +1,6 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
-import { buildWalk } from '../schema/walker.js';
+import { buildWalk, type WalkNode } from '../schema/walker.js';
 import { makeId } from './common.js';
 
 interface Opts {
@@ -19,17 +19,18 @@ export function generateDeepMissingRequired(
     const walk = buildWalk(op);
     if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
-    if (!baseline || typeof baseline !== 'object') continue;
+    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
     let produced = 0;
     // Queue of object nodes
-    const queue = [walk.root];
+    const queue: WalkNode[] = [walk.root];
     while (queue.length) {
-      const node = queue.shift()!;
+      const node = queue.shift();
+      if (!node) break;
       if (node.properties && node.required?.length) {
         for (const req of node.required) {
           if (opts.capPerOperation && produced >= opts.capPerOperation) break;
           const scBody = structuredClone(baseline);
-          const targetPath = findPathForRequired(walk.root!, node, req);
+          const targetPath = findPathForRequired(walk.root, node, req);
           if (!targetPath) continue;
           if (!deleteAtPath(scBody, targetPath)) continue;
           const id = makeId([op.operationId, 'deepMissing', targetPath.join('.')]);
@@ -68,41 +69,45 @@ function buildParams(path: string): Record<string, string> | undefined {
   return params;
 }
 
-function findPathForRequired(root: any, node: any, req: string): string[] | undefined {
+function findPathForRequired(root: WalkNode, node: WalkNode, req: string): string[] | undefined {
   // naive search: traverse to find node pointer match then append required key
   const path: string[] = [];
   let found: string[] | undefined;
-  function dfs(current: any, currentPath: string[]) {
+  function dfs(current: WalkNode, currentPath: string[]) {
     if (current === node) {
       found = [...currentPath, req];
       return;
     }
-    if (current && typeof current === 'object') {
-      if (current.properties) {
-        for (const [k, v] of Object.entries<any>(current.properties)) {
-          dfs(v, [...currentPath, k]);
-          if (found) return;
-        }
+    if (current.properties) {
+      for (const [k, v] of Object.entries(current.properties)) {
+        dfs(v, [...currentPath, k]);
+        if (found) return;
       }
-      if (current.items) {
-        dfs(current.items, [...currentPath, '0']);
-      }
+    }
+    if (current.items) {
+      dfs(current.items, [...currentPath, '0']);
     }
   }
   dfs(root, path);
   return found;
 }
 
-function deleteAtPath(obj: any, path: string[]): boolean {
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function deleteAtPath(obj: Record<string, unknown>, path: string[]): boolean {
   if (!path.length) return false;
-  let parent = obj;
+  let parent: Record<string, unknown> = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const seg = path[i];
     if (!(seg in parent)) return false;
-    parent = parent[seg];
+    const next = parent[seg];
+    if (!isRecord(next)) return false;
+    parent = next;
   }
   const last = path[path.length - 1];
-  if (parent && typeof parent === 'object' && Object.hasOwn(parent, last)) {
+  if (Object.hasOwn(parent, last)) {
     delete parent[last];
     return true;
   }

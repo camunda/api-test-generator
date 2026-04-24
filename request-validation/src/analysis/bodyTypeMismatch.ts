@@ -9,7 +9,7 @@ interface Opts {
   maxPerField?: number;
 }
 
-const TYPE_MISMATCH_TABLE: Record<string, any[]> = {
+const TYPE_MISMATCH_TABLE: Record<string, unknown[]> = {
   string: [123, true, {}, []],
   integer: ['not-a-number', true, {}, []],
   number: ['not-a-number', true, {}, []],
@@ -25,7 +25,7 @@ export function generateBodyTypeMismatch(ops: OperationModel[], opts: Opts): Val
     const walk = buildWalk(op);
     if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
-    if (!baseline || typeof baseline !== 'object') continue;
+    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
     let produced = 0;
     const fields = collectFields(walk.root, []);
     for (const f of fields) {
@@ -79,12 +79,18 @@ function collectFields(
   return out;
 }
 
-function applyMutation(obj: any, path: string[], value: any): boolean {
-  let target = obj;
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function applyMutation(obj: Record<string, unknown>, path: string[], value: unknown): boolean {
+  let target: Record<string, unknown> = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const seg = path[i];
     if (!(seg in target)) return false;
-    target = target[seg];
+    const next = target[seg];
+    if (!isRecord(next)) return false;
+    target = next;
   }
   const last = path[path.length - 1];
   if (!(last in target)) return false;

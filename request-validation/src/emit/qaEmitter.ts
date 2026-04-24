@@ -32,11 +32,12 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
   }
   if (!resolvedConfig) {
     // Provide a deterministic fallback matching QA expectations
-    resolvedConfig = {
+    const fallback: prettier.Config = {
       singleQuote: true,
       trailingComma: 'all',
       bracketSpacing: false,
-    } as prettier.Config;
+    };
+    resolvedConfig = fallback;
     console.warn(
       '[emit] No Prettier config found. Using built-in fallback config { singleQuote:true, trailingComma:"all", bracketSpacing:false }',
     );

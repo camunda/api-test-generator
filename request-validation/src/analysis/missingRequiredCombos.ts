@@ -23,7 +23,7 @@ export function generateMissingRequiredCombos(
     for (const combo of combos) {
       if (combo.length < 2) continue; // single omissions handled elsewhere
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      const body: Record<string, any> = {};
+      const body: Record<string, unknown> = {};
       for (const p of op.requiredProps) {
         if (combo.includes(p)) continue; // omit
         const schema = op.requestBodySchema.properties?.[p];

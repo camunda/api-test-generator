@@ -14,8 +14,7 @@ export function generateMissingBody(ops: OperationModel[], opts: Opts): Validati
     // Skip optional bodies entirely (we don't assert positives; business logic not derivable here).
     let required = op.bodyRequired === true;
     if (!required) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const schema: any = op.requestBodySchema;
+      const schema = op.requestBodySchema;
       if (schema && schema.type === 'object' && schema.properties && op.requiredProps?.length) {
         const propCount = Object.keys(schema.properties).length;
         if (propCount > 0 && op.requiredProps.length === propCount) required = true;
@@ -45,12 +44,10 @@ export function generateBodyTopTypeMismatch(
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const schema: any = op.requestBodySchema;
+    const schema = op.requestBodySchema;
     if (!schema) continue;
-    const actual = schema.type;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let wrong: any;
+    const actual = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+    let wrong: unknown;
     switch (actual) {
       case 'object':
         wrong = [];

@@ -1,4 +1,4 @@
-import type { OperationModel, ValidationScenario } from '../model/types.js';
+import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
 import { makeId } from './common.js';
 
 interface Opts {
@@ -17,9 +17,9 @@ export function generateDiscriminatorMismatch(
     if (!d?.propertyName) continue;
     const root = op.requestBodySchema;
     // baseline body: fill required of first object variant if oneOf present
-    const base: any = {};
+    const base: Record<string, unknown> = {};
     if (Array.isArray(root.oneOf)) {
-      const firstObj = root.oneOf.find((v: any) => v && v.type === 'object');
+      const firstObj = root.oneOf.find((v) => v && v.type === 'object');
       if (firstObj && Array.isArray(firstObj.required) && firstObj.properties) {
         for (const r of firstObj.required) base[r] = placeholder(firstObj.properties[r]);
       }
@@ -45,10 +45,11 @@ export function generateDiscriminatorMismatch(
   return out;
 }
 
-function placeholder(schema: any): any {
+function placeholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
-  if (schema.enum?.length) return schema.enum[0];
-  switch (schema.type) {
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  const t = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  switch (t) {
     case 'string':
       return 'x';
     case 'integer':
