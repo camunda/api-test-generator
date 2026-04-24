@@ -17,7 +17,7 @@ export function generateConstraintViolations(
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    if (!walk?.root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     let produced = 0;
