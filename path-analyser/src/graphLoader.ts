@@ -8,35 +8,108 @@ const GRAPH_RELATIVE = '../semantic-graph-extractor/dist/output/operation-depend
 // The bundled OpenAPI spec lives at the repo root under spec/bundled/.
 const OPENAPI_SPEC = '../spec/bundled/rest-api.bundle.json';
 
+// ---- Raw shapes for permissive JSON ingestion ----
+interface RawOp {
+  operationId?: string;
+  id?: string;
+  name?: string;
+  method?: string;
+  httpMethod?: string;
+  verb?: string;
+  path?: string;
+  route?: string;
+  url?: string;
+  produces?: unknown;
+  producesSemanticType?: string;
+  producesSemanticTypes?: unknown;
+  outputsSemanticTypes?: unknown;
+  responseSemanticTypes?: Record<string, unknown>;
+  requires?: unknown;
+  requiresSemanticTypes?: unknown;
+  parameters?: Array<{
+    schema?: { semanticType?: string };
+    semanticType?: string;
+    required?: boolean;
+  }>;
+  requestBodySemanticTypes?: Array<{ semanticType?: string; required?: boolean }>;
+  edges?: string[];
+  outgoingEdges?: string[];
+  dependencies?: string[];
+  deps?: string[];
+  eventuallyConsistent?: boolean;
+  operationMetadata?: OperationNode['operationMetadata'];
+  conditionalIdempotency?: OperationNode['conditionalIdempotency'];
+  'x-eventually-consistent'?: boolean;
+}
+
+interface RawGraphRoot {
+  operationsById?: Record<string, RawOp>;
+  operations?: Record<string, RawOp> | RawOp[];
+  nodes?: Record<string, RawOp> | RawOp[];
+  operationNodes?: Record<string, RawOp> | RawOp[];
+  graph?: RawGraphRoot;
+  data?: RawGraphRoot;
+  bootstrapSequences?: RawBootstrapSeq[];
+  bootstrap_sequences?: RawBootstrapSeq[];
+  sequences?: RawBootstrapSeq[];
+}
+
+interface RawBootstrapSeq {
+  name?: string;
+  id?: string;
+  description?: string;
+  desc?: string;
+  operations?: unknown[];
+  produces?: string[];
+}
+
+interface RawSchema {
+  required?: string[];
+  properties?: Record<string, RawSchema>;
+  items?: RawSchema;
+  allOf?: RawSchema[];
+  oneOf?: RawSchema[];
+  anyOf?: RawSchema[];
+  'x-semantic-type'?: string;
+}
+
+interface RawOpenApiOp {
+  operationId?: string;
+  parameters?: Array<{ schema?: RawSchema & { 'x-semantic-type'?: string }; required?: boolean }>;
+  requestBody?: { content?: Record<string, { schema?: RawSchema }> };
+}
+
+interface RawOpenApiDoc {
+  paths?: Record<string, Record<string, RawOpenApiOp>>;
+}
+
 export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // Allow override via env vars (relative to baseDir or absolute)
   const overrideGraph = process.env.OPERATION_GRAPH_PATH;
   const graphPath = path.resolve(baseDir, overrideGraph || GRAPH_RELATIVE);
   const raw = await readFile(graphPath, 'utf8');
-  let parsed: any;
+  let parsed: RawGraphRoot | RawOp[];
   try {
-    parsed = JSON.parse(raw);
+    // biome-ignore lint/plugin: JSON.parse returns `any`; the operation graph file is the runtime contract.
+    parsed = JSON.parse(raw) as RawGraphRoot | RawOp[];
     // debug: graph JSON loaded from computed path
   } catch (e) {
-    throw new Error(`Failed to parse graph JSON at ${graphPath}: ${(e as Error).message}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Failed to parse graph JSON at ${graphPath}: ${msg}`);
   }
 
   const operations: Record<string, OperationNode> = {};
 
   // Support multiple possible root shapes
   // Prefer object map if available (operationsById) to avoid loss of operations due to large array truncation
-  let candidateOps: any =
-    parsed.operationsById ??
-    parsed.operations ??
-    parsed.nodes ??
-    (Array.isArray(parsed) ? parsed : null) ??
-    parsed.operationNodes ??
-    null;
+  let candidateOps: Record<string, RawOp> | RawOp[] | null = Array.isArray(parsed)
+    ? parsed
+    : (parsed.operationsById ?? parsed.operations ?? parsed.nodes ?? parsed.operationNodes ?? null);
 
-  if (!candidateOps) {
+  if (!candidateOps && !Array.isArray(parsed)) {
     const g = parsed.graph || parsed.data;
     if (g) {
-      candidateOps = g.operations ?? g.nodes ?? (Array.isArray(g) ? g : null);
+      candidateOps = Array.isArray(g) ? g : (g.operations ?? g.nodes ?? null);
     }
   }
 
@@ -58,7 +131,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       operations[opId] = normalizeOp(opId, op);
     }
   } else {
-    for (const [opId, op] of Object.entries<any>(candidateOps)) {
+    for (const [opId, op] of Object.entries(candidateOps)) {
       operations[opId] = normalizeOp(opId, op);
     }
   }
@@ -66,7 +139,9 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   const bySemanticProducer: Record<string, string[]> = {};
   for (const op of Object.values(operations)) {
     for (const st of op.produces) {
-      (bySemanticProducer[st] ||= []).push(op.operationId);
+      const list = bySemanticProducer[st] ?? [];
+      list.push(op.operationId);
+      bySemanticProducer[st] = list;
     }
   }
 
@@ -78,8 +153,9 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
 
   // Bootstrap sequences (optional)
   const bootstrapSequences: BootstrapSequence[] = [];
-  const rawSequences: any[] =
-    parsed.bootstrapSequences || parsed.bootstrap_sequences || parsed.sequences || [];
+  const rawSequences: RawBootstrapSeq[] = !Array.isArray(parsed)
+    ? parsed.bootstrapSequences || parsed.bootstrap_sequences || parsed.sequences || []
+    : [];
   if (Array.isArray(rawSequences)) {
     for (const seq of rawSequences) {
       if (!seq) continue;
@@ -88,7 +164,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       bootstrapSequences.push({
         name,
         description: seq.description || seq.desc,
-        operations: seq.operations.filter((o: any) => typeof o === 'string'),
+        operations: seq.operations.filter((o): o is string => typeof o === 'string'),
         produces: Array.isArray(seq.produces) ? unique(seq.produces) : [],
       });
     }
@@ -103,7 +179,8 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   try {
     const domainPath = path.resolve(baseDir, 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
-    domain = JSON.parse(domainRaw);
+    // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
+    domain = JSON.parse(domainRaw) as DomainSemantics;
     // debug: domain semantics sidecar loaded
     if (domain?.operationRequirements) {
       for (const [opId, req] of Object.entries(domain.operationRequirements)) {
@@ -116,9 +193,12 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       }
     }
     // Build domainProducers
-    domainProducers = {};
+    const producers: Record<string, string[]> = {};
+    domainProducers = producers;
     const addProducer = (state: string, opId: string) => {
-      (domainProducers![state] ||= []).push(opId);
+      const list = producers[state] ?? [];
+      list.push(opId);
+      producers[state] = list;
       const node = operations[opId];
       if (node) {
         if (!node.domainProduces) node.domainProduces = [state];
@@ -127,31 +207,31 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     };
     if (domain?.runtimeStates) {
       for (const [stateName, spec] of Object.entries(domain.runtimeStates)) {
-        spec.producedBy?.forEach((opId) => {
+        for (const opId of spec.producedBy ?? []) {
           if (operations[opId]) addProducer(stateName, opId);
-        });
+        }
       }
     }
     if (domain?.capabilities) {
       for (const [capName, spec] of Object.entries(domain.capabilities)) {
-        spec.producedBy?.forEach((opId) => {
+        for (const opId of spec.producedBy ?? []) {
           if (operations[opId]) addProducer(capName, opId);
-        });
+        }
       }
     }
     if (domain?.identifiers) {
       for (const [, spec] of Object.entries(domain.identifiers)) {
         const state = spec.validityState;
-        spec.boundBy?.forEach((opId) => {
+        for (const opId of spec.boundBy ?? []) {
           if (operations[opId]) addProducer(state, opId);
-        });
+        }
       }
     }
     if (domain?.operationRequirements) {
       for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
         if (!operations[opId]) continue;
-        spec.produces?.forEach((st) => addProducer(st, opId));
-        spec.implicitAdds?.forEach((st) => addProducer(st, opId));
+        for (const st of spec.produces ?? []) addProducer(st, opId);
+        for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
       }
     }
   } catch {
@@ -161,7 +241,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   return { operations, bySemanticProducer, bootstrapSequences, domain, domainProducers };
 }
 
-function normalizeOp(opId: string, op: any): OperationNode {
+function normalizeOp(opId: string, op: RawOp): OperationNode {
   // Extract produced semantic types.
   // Priority:
   // 1. Explicit fields (producesSemanticTypes / producesSemanticType / produces / outputsSemanticTypes)
@@ -174,7 +254,7 @@ function normalizeOp(opId: string, op: any): OperationNode {
     [];
 
   const produces: string[] = [];
-  const pushProduce = (v: any) => {
+  const pushProduce = (v: unknown) => {
     if (v && typeof v === 'string') produces.push(v);
   };
   if (Array.isArray(directProduces)) directProduces.forEach(pushProduce);
@@ -184,11 +264,11 @@ function normalizeOp(opId: string, op: any): OperationNode {
   const responseDerived: string[] = [];
   const providerMap: Record<string, boolean> = {};
   if (op.responseSemanticTypes && typeof op.responseSemanticTypes === 'object') {
-    for (const arr of Object.values<any>(op.responseSemanticTypes)) {
+    for (const arr of Object.values(op.responseSemanticTypes)) {
       if (Array.isArray(arr)) {
         for (const entry of arr) {
-          const st = entry?.semanticType;
-          if (st) {
+          const st: unknown = entry?.semanticType;
+          if (st && typeof st === 'string') {
             responseDerived.push(st);
             if (entry?.provider) providerMap[st] = true;
           }
@@ -202,7 +282,9 @@ function normalizeOp(opId: string, op: any): OperationNode {
       if (providerMap[st]) produces.push(st);
     });
   } else {
-    responseDerived.forEach((st) => produces.push(st));
+    responseDerived.forEach((st) => {
+      produces.push(st);
+    });
   }
 
   const { required, optional } = extractRequires(op);
@@ -224,12 +306,12 @@ function normalizeOp(opId: string, op: any): OperationNode {
   };
 }
 
-function extractRequires(op: any): { required: string[]; optional: string[] } {
+function extractRequires(op: RawOp): { required: string[]; optional: string[] } {
   // Include requestBodySemanticTypes / parameters with semanticType as input requirements.
   const accRequired: string[] = [];
   const accOptional: string[] = [];
 
-  const mergeArray = (arr: any[], target: string[]) => {
+  const mergeArray = (arr: unknown[], target: string[]) => {
     for (const v of arr) {
       if (typeof v === 'string') target.push(v);
     }
@@ -238,9 +320,11 @@ function extractRequires(op: any): { required: string[]; optional: string[] } {
   if (Array.isArray(op.requiresSemanticTypes)) mergeArray(op.requiresSemanticTypes, accRequired);
   if (Array.isArray(op.requires)) mergeArray(op.requires, accRequired);
 
-  const reqObjReq = op.requiresSemanticTypes?.required || op.requires?.required;
+  const reqLikeSem = asReqLike(op.requiresSemanticTypes);
+  const reqLike = asReqLike(op.requires);
+  const reqObjReq = reqLikeSem?.required ?? reqLike?.required;
   if (Array.isArray(reqObjReq)) mergeArray(reqObjReq, accRequired);
-  const reqObjOpt = op.requiresSemanticTypes?.optional || op.requires?.optional;
+  const reqObjOpt = reqLikeSem?.optional ?? reqLike?.optional;
   if (Array.isArray(reqObjOpt)) mergeArray(reqObjOpt, accOptional);
 
   // Parameters (assume required flag indicates required vs optional)
@@ -265,6 +349,16 @@ function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
 }
 
+// Narrow `unknown` to a permissive `{ required?, optional? }` shape — `requires` and
+// `requiresSemanticTypes` may legally be either a string[] (handled by the Array.isArray
+// branches in extractRequires) or an object carrying nested required/optional arrays.
+function asReqLike(v: unknown): { required?: unknown; optional?: unknown } | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const required = Reflect.get(v, 'required');
+  const optional = Reflect.get(v, 'optional');
+  return { required, optional };
+}
+
 export async function loadOpenApiSemanticHints(
   baseDir: string,
 ): Promise<Record<string, { required: string[]; optional: string[] }>> {
@@ -279,16 +373,17 @@ export async function loadOpenApiSemanticHints(
     );
     return {};
   }
-  let doc: any;
+  let doc: RawOpenApiDoc;
   try {
-    doc = parseYaml(raw);
+    // biome-ignore lint/plugin: parseYaml returns `any`; the OpenAPI spec is the runtime contract.
+    doc = parseYaml(raw) as RawOpenApiDoc;
   } catch {
     return {};
   }
   const result: Record<string, { required: string[]; optional: string[] }> = {};
   if (doc.paths) {
-    for (const [_p, methods] of Object.entries<any>(doc.paths)) {
-      for (const [_m, operation] of Object.entries<any>(methods)) {
+    for (const [_p, methods] of Object.entries(doc.paths)) {
+      for (const [_m, operation] of Object.entries(methods)) {
         if (!operation || typeof operation !== 'object') continue;
         const opId = operation.operationId;
         if (!opId) continue;
@@ -305,7 +400,7 @@ export async function loadOpenApiSemanticHints(
         }
         const rb = operation.requestBody;
         if (rb?.content && typeof rb.content === 'object') {
-          for (const media of Object.values<any>(rb.content)) {
+          for (const media of Object.values(rb.content)) {
             collectSemanticTypesFromSchema(media?.schema, required, optional);
           }
         }
@@ -318,7 +413,7 @@ export async function loadOpenApiSemanticHints(
 }
 
 function collectSemanticTypesFromSchema(
-  schema: any,
+  schema: RawSchema | undefined,
   required: string[],
   optional: string[],
   parentRequired: string[] = [],
@@ -333,7 +428,7 @@ function collectSemanticTypesFromSchema(
   }
   if (schema.properties) {
     const propsReq: string[] = Array.isArray(schema.required) ? schema.required : [];
-    for (const [prop, propSchema] of Object.entries<any>(schema.properties)) {
+    for (const [prop, propSchema] of Object.entries(schema.properties)) {
       if (propSchema?.['x-semantic-type']) {
         const st = propSchema['x-semantic-type'];
         (propsReq.includes(prop) ? required : optional).push(st);
@@ -341,11 +436,11 @@ function collectSemanticTypesFromSchema(
       collectSemanticTypesFromSchema(propSchema, required, optional, propsReq);
     }
   }
-  for (const key of ['allOf', 'oneOf', 'anyOf']) {
+  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
     if (Array.isArray(schema[key]))
-      schema[key].forEach((s: any) =>
-        collectSemanticTypesFromSchema(s, required, optional, ownRequired),
-      );
+      schema[key]?.forEach((s) => {
+        collectSemanticTypesFromSchema(s, required, optional, ownRequired);
+      });
   }
   if (schema.items)
     collectSemanticTypesFromSchema(
