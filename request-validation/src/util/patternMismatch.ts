@@ -24,20 +24,8 @@ export function buildGuaranteedPatternMismatch(
     return undefined;
   }
   // Probe for permissive pattern (matches everything we throw at it)
-  const probe = [
-    'a',
-    '1',
-    '!',
-    '_',
-    '@',
-    'abc123',
-    'A.B',
-    'x-y',
-    '+plus',
-    '',
-    '\n',
-  ];
-  if (probe.every((s) => rx!.test(s))) return undefined;
+  const probe = ['a', '1', '!', '_', '@', 'abc123', 'A.B', 'x-y', '+plus', '', '\n'];
+  if (probe.every((s) => rx?.test(s))) return undefined;
 
   const candidates: string[] = [];
   // Digit-only (allowing optional leading '-')
@@ -78,13 +66,13 @@ export function buildGuaranteedPatternMismatch(
     if (seen.has(raw)) continue;
     seen.add(raw);
     if (!isAllowedForPath(raw)) continue;
-    if (opts.disallow && opts.disallow.includes(raw)) continue;
+    if (opts.disallow?.includes(raw)) continue;
     const materialized = raw
       .replace(/\\n/g, '\n')
       .replace(/\\t/g, '\t')
       .replace(/\\u2603/g, '\u2603')
       .replace(/\\u0000/g, '\u0000');
-    if (!rx!.test(materialized)) return materialized;
+    if (!rx?.test(materialized)) return materialized;
   }
   return undefined;
 }

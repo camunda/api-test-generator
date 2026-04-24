@@ -1,38 +1,54 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk, type WalkNode } from '../schema/walker.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
 }
 
-export function generateEnumViolations(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+// Permissive subset of an OpenAPI schema fragment used by the oneOf fallback walker.
+interface SchemaFragment {
+  type?: string;
+  enum?: unknown[];
+  required?: string[];
+  properties?: Record<string, SchemaFragment>;
+  oneOf?: SchemaFragment[];
+}
+
+type JsonObject = Record<string, unknown>;
+
+function isObject(v: unknown): v is JsonObject {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function isSchemaFragment(v: unknown): v is SchemaFragment {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+export function generateEnumViolations(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
+    const root = walk?.root;
     let produced = 0;
-    if (walk && walk.root) {
+    if (root) {
       const baseline = buildBaselineBody(op);
       let enumNodes = 0;
       if (baseline) {
         for (const node of walk.byPointer.values()) {
-          if (!node.enum || !node.enum.length) continue;
+          if (!node.enum?.length) continue;
           enumNodes++;
-          const path = findPath(walk.root!, node);
+          const path = findPath(root, node);
           if (!path) continue;
           if (opts.capPerOperation && produced >= opts.capPerOperation) break;
           const invalids = buildInvalidVariants(node.enum[0]);
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= opts.capPerOperation) break;
             const body = structuredClone(baseline);
-            const marker = {__invalidEnum: true, value: inv};
+            const marker = { __invalidEnum: true, value: inv };
             if (!applyOrCreatePath(body, path, marker)) continue;
             out.push(makeScenario(op, path.join('.'), body, produced));
             produced++;
@@ -45,41 +61,29 @@ export function generateEnumViolations(
       }
     }
     // Fallback: pure oneOf root (walker skipped) – scan variants
-    if ((!walk || !walk.root) && Array.isArray(op.requestBodySchema?.oneOf)) {
-      const variants: any[] = op.requestBodySchema.oneOf;
+    const reqBodySchema: SchemaFragment | undefined = isSchemaFragment(op.requestBodySchema)
+      ? op.requestBodySchema
+      : undefined;
+    if (!root && reqBodySchema && Array.isArray(reqBodySchema.oneOf)) {
+      const variants = reqBodySchema.oneOf;
       for (let vi = 0; vi < variants.length; vi++) {
         const v = variants[vi];
         if (!v || v.type !== 'object' || !v.properties) continue;
         // Build variant baseline from its required
-        const base: Record<string, any> = {};
+        const base: Record<string, unknown> = {};
         if (Array.isArray(v.required)) {
           for (const r of v.required) base[r] = placeholder(v.properties[r]);
         }
-        for (const [prop, schema] of Object.entries<any>(v.properties)) {
-          if (!schema || !Array.isArray(schema.enum) || !schema.enum.length)
-            continue;
-          if (
-            opts.capPerOperation &&
-            produced >= (opts.capPerOperation ?? Infinity)
-          )
-            break;
+        for (const [prop, schema] of Object.entries(v.properties)) {
+          if (!schema || !Array.isArray(schema.enum) || !schema.enum.length) continue;
+          if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
           const invalids = buildInvalidVariants(schema.enum[0]);
           for (const inv of invalids) {
-            if (
-              opts.capPerOperation &&
-              produced >= (opts.capPerOperation ?? Infinity)
-            )
-              break;
+            if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
             const body = structuredClone(base);
-            body[prop] = {__invalidEnum: true, value: inv};
+            body[prop] = { __invalidEnum: true, value: inv };
             out.push({
-              id: makeId([
-                op.operationId,
-                'enumOneOf',
-                String(vi),
-                prop,
-                String(produced),
-              ]),
+              id: makeId([op.operationId, 'enumOneOf', String(vi), prop, String(produced)]),
               operationId: op.operationId,
               method: op.method,
               path: op.path,
@@ -99,10 +103,10 @@ export function generateEnumViolations(
   }
   return out;
 }
-function buildInvalidVariants(first: any): any[] {
-  const invalids: any[] = [];
+function buildInvalidVariants(first: unknown): unknown[] {
+  const invalids: unknown[] = [];
   if (typeof first === 'string') {
-    invalids.push(first + '_INVALID');
+    invalids.push(`${first}_INVALID`);
     if (first.toUpperCase() !== first) invalids.push(first.toUpperCase());
     if (first.toLowerCase() !== first) invalids.push(first.toLowerCase());
   } else {
@@ -114,16 +118,11 @@ function buildInvalidVariants(first: any): any[] {
 function makeScenario(
   op: OperationModel,
   targetPath: string,
-  body: any,
+  body: unknown,
   idx: number,
 ): ValidationScenario {
   return {
-    id: makeId([
-      op.operationId,
-      'enum',
-      targetPath.replace(/\./g, '_'),
-      String(idx),
-    ]),
+    id: makeId([op.operationId, 'enum', targetPath.replace(/\./g, '_'), String(idx)]),
     operationId: op.operationId,
     method: op.method,
     path: op.path,
@@ -137,9 +136,9 @@ function makeScenario(
   };
 }
 
-function placeholder(schema: any): any {
+function placeholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
+  if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
     case 'string':
       return 'x';
@@ -157,9 +156,9 @@ function placeholder(schema: any): any {
   }
 }
 
-function findPath(root: any, node: any): string[] | undefined {
+function findPath(root: WalkNode, node: WalkNode): string[] | undefined {
   let found: string[] | undefined;
-  function dfs(cur: any, path: string[]) {
+  function dfs(cur: WalkNode, path: string[]) {
     if (cur === node) {
       found = path;
       return;
@@ -175,28 +174,17 @@ function findPath(root: any, node: any): string[] | undefined {
   return found;
 }
 
-function applyAtPath(obj: any, path: string[], value: any): boolean {
-  let t = obj;
+function applyOrCreatePath(obj: unknown, path: string[], value: unknown): boolean {
+  let t: unknown = obj;
   for (let i = 0; i < path.length - 1; i++) {
-    const s = path[i];
-    if (!(s in t)) return false;
-    t = t[s];
-  }
-  const last = path[path.length - 1];
-  if (!(last in t)) return false;
-  t[last] = value;
-  return true;
-}
-function applyOrCreatePath(obj: any, path: string[], value: any): boolean {
-  let t = obj;
-  for (let i = 0; i < path.length - 1; i++) {
+    if (!isObject(t)) return false;
     const s = path[i];
     if (!(s in t)) {
       t[s] = {};
     }
     t = t[s];
-    if (typeof t !== 'object') return false;
   }
+  if (!isObject(t)) return false;
   t[path[path.length - 1]] = value;
   return true;
 }

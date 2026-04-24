@@ -150,6 +150,51 @@ npm run build --workspaces --if-present
 | `npm run observe:aggregate` | Aggregate runtime observation data |
 | `npm run optional-responses` | Run the optional response field analyser |
 | `npm run pipeline` | End-to-end: fetch spec + generate entire test suite |
+| `npm run lint` | Lint all workspaces with Biome |
+| `npm run lint:fix` | Lint and apply safe Biome fixes |
+| `npm run format` | Format all workspaces with Biome |
+| `npm test` | Run the regression test suite (snapshot guard) |
+| `npm run snapshot:update` | Recapture the pipeline output snapshot after intentional generator changes |
+
+## Code Quality Tooling
+
+This repo uses [Biome](https://biomejs.dev/) for both linting and formatting,
+configured at the root in `biome.json`. The `recommended` ruleset is enabled
+with three additional escalations to `error`:
+
+- `suspicious/noExplicitAny`
+- `suspicious/noImplicitAnyLet`
+- `suspicious/noEvolvingTypes`
+
+A custom GritQL plugin (`plugins/no-unsafe-type-assertion.grit`) bans `as T`
+type assertions outside of imports and `as const`. Use type guards,
+narrowing, or `satisfies` instead — and only suppress with
+`// biome-ignore lint/plugin: <reason>` when genuinely unavoidable.
+
+## Regression Testing
+
+The pipeline emits 396 generated files (semantic graph, scenario JSON,
+Playwright tests, validation tests). To guard against accidental drift
+during refactoring, `npm test` runs a SHA-256 snapshot comparison against
+a captured baseline (`tests/regression/pipeline-snapshot.json`).
+
+**Workflow:**
+
+```bash
+# 1. Regenerate the pipeline outputs
+npm run testsuite:generate
+npm run generate:request-validation
+
+# 2. Run the regression test
+npm test
+
+# 3. If you intentionally changed generator behaviour and the test fails,
+#    recapture the baseline and commit it alongside your production change:
+npm run snapshot:update
+```
+
+This is a class-scoped guard — any drift in any analyser, planner or emitter
+will fail the test, not just one specific defect path.
 
 ## Fetching the OpenAPI Spec
 

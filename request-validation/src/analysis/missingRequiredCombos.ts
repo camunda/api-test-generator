@@ -1,5 +1,5 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {genPlaceholder, makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { genPlaceholder, makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -14,18 +14,16 @@ export function generateMissingRequiredCombos(
   const out: ValidationScenario[] = [];
   const maxComboSize = opts.maxComboSize ?? 3; // omit up to 3 at once
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.requiredProps || op.requiredProps.length < 2) continue;
-    if (!op.requestBodySchema || op.requestBodySchema.type !== 'object')
-      continue;
+    if (!op.requestBodySchema || op.requestBodySchema.type !== 'object') continue;
     const req = op.requiredProps.slice(0, 12); // hard cap to avoid blowup
     const combos = kSubsets(req, maxComboSize);
     let produced = 0;
     for (const combo of combos) {
       if (combo.length < 2) continue; // single omissions handled elsewhere
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      const body: Record<string, any> = {};
+      const body: Record<string, unknown> = {};
       for (const p of op.requiredProps) {
         if (combo.includes(p)) continue; // omit
         const schema = op.requestBodySchema.properties?.[p];
@@ -53,7 +51,7 @@ export function generateMissingRequiredCombos(
 function* kSubsets(arr: string[], maxK: number): Generator<string[]> {
   const n = arr.length;
   for (let k = 1; k <= Math.min(maxK, n); k++) {
-    const idx = Array.from({length: k}, (_, i) => i);
+    const idx = Array.from({ length: k }, (_, i) => i);
     while (true) {
       yield idx.map((i) => arr[i]);
       // next

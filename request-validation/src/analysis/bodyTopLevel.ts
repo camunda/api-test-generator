@@ -1,35 +1,23 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
 }
 
-export function generateMissingBody(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateMissingBody(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!op.requestBodySchema) continue;
     // New policy: Only generate missing-body scenarios when body is explicitly required OR effectively required.
     // Skip optional bodies entirely (we don't assert positives; business logic not derivable here).
     let required = op.bodyRequired === true;
     if (!required) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const schema: any = op.requestBodySchema;
-      if (
-        schema &&
-        schema.type === 'object' &&
-        schema.properties &&
-        op.requiredProps &&
-        op.requiredProps.length
-      ) {
+      const schema = op.requestBodySchema;
+      if (schema && schema.type === 'object' && schema.properties && op.requiredProps?.length) {
         const propCount = Object.keys(schema.properties).length;
-        if (propCount > 0 && op.requiredProps.length === propCount)
-          required = true;
+        if (propCount > 0 && op.requiredProps.length === propCount) required = true;
       }
     }
     if (!required) continue; // skip optional body omission
@@ -55,14 +43,11 @@ export function generateBodyTopTypeMismatch(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const schema: any = op.requestBodySchema;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
+    const schema = op.requestBodySchema;
     if (!schema) continue;
-    const actual = schema.type;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let wrong: any;
+    const actual = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+    let wrong: unknown;
     switch (actual) {
       case 'object':
         wrong = [];

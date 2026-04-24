@@ -1,4 +1,4 @@
-import {OperationModel} from '../model/types.js';
+import type { OperationModel, SchemaFragment } from '../model/types.js';
 
 export function firstResourceSegment(path: string): string {
   // strip leading slash then split after /v1|/v2 if present
@@ -15,10 +15,11 @@ export function makeId(parts: string[]): string {
     .replace(/[^a-zA-Z0-9_]+/g, '_');
 }
 
-export function genPlaceholder(schema: any): any {
+export function genPlaceholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
-  switch (schema.type) {
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  const t = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  switch (t) {
     case 'string':
       return 'x';
     case 'integer':

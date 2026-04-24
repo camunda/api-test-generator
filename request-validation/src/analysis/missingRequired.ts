@@ -1,23 +1,18 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId, genPlaceholder} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { genPlaceholder, makeId } from './common.js';
 
 interface Opts {
   capPerOperation?: number;
   onlyOperations?: Set<string>;
 }
 
-export function generateMissingRequired(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateMissingRequired(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
-    if (!op.requiredProps || !op.requiredProps.length) continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
+    if (!op.requiredProps?.length) continue;
     // Only generate JSON variant if the operation actually advertises application/json
-    if (!op.requestBodySchema || op.requestBodySchema.type !== 'object')
-      continue;
+    if (!op.requestBodySchema || op.requestBodySchema.type !== 'object') continue;
     if (op.mediaTypes && !op.mediaTypes.includes('application/json')) {
       // Skip: we'll rely on multipart generator for required-part omissions
       continue;
@@ -26,8 +21,7 @@ export function generateMissingRequired(
     for (const prop of op.requiredProps) {
       if (opts.capPerOperation && count >= opts.capPerOperation) break;
       // build minimal body with all required except this one
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const body: Record<string, any> = {};
+      const body: Record<string, unknown> = {};
       for (const p of op.requiredProps) {
         if (p === prop) continue; // omit
         const schema = op.requestBodySchema.properties?.[p];

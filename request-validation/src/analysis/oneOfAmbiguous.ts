@@ -1,19 +1,15 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
 }
 
-export function generateOneOfAmbiguous(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateOneOfAmbiguous(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) continue;
     // For each pair (first up to cap) merge required sets
@@ -25,7 +21,7 @@ export function generateOneOfAmbiguous(
         const b = root.oneOf[j];
         if (!a || !b || a.type !== 'object' || b.type !== 'object') continue;
         if (!Array.isArray(a.required) || !Array.isArray(b.required)) continue;
-        const merged: Record<string, any> = {};
+        const merged: Record<string, unknown> = {};
         for (const r of a.required) merged[r] = placeholder(a.properties?.[r]);
         for (const r of b.required) merged[r] = placeholder(b.properties?.[r]);
         out.push({
@@ -48,10 +44,11 @@ export function generateOneOfAmbiguous(
   return out;
 }
 
-function placeholder(schema: any): any {
+function placeholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return schema.enum[0];
-  switch (schema.type) {
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  const t = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  switch (t) {
     case 'string':
       return 'x';
     case 'integer':

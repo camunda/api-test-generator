@@ -1,5 +1,5 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 interface Observation {
   timestamp: string;
@@ -13,7 +13,7 @@ interface Observation {
   status: number;
   expectedStatus?: number;
   errorScenario?: boolean;
-  bodyShape?: any;
+  bodyShape?: unknown;
 }
 
 interface OpSummary {
@@ -23,11 +23,15 @@ interface OpSummary {
   finalCount: number;
   finalStatusCounts: Record<string, number>;
   topLevelKeys: Record<string, { present: number; absent: number }>;
-  examplesByStatus: Record<string, any>;
+  examplesByStatus: Record<string, unknown>;
 }
 
-function ensureObj(v: any): Record<string, any> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, any> : null;
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function ensureObj(v: unknown): Record<string, unknown> | null {
+  return isPlainObject(v) ? v : null;
 }
 
 async function main() {
@@ -38,7 +42,7 @@ async function main() {
   let text = '';
   try {
     text = await fs.readFile(input, 'utf8');
-  } catch (e) {
+  } catch (_e) {
     console.error('No observations found at', input);
     process.exit(1);
   }
@@ -46,20 +50,25 @@ async function main() {
   const byOp = new Map<string, OpSummary>();
   for (const line of lines) {
     let obs: Observation;
-    try { obs = JSON.parse(line); } catch { continue; }
+    try {
+      obs = JSON.parse(line);
+    } catch {
+      continue;
+    }
     const op = obs.operationId || 'unknown';
-    if (!byOp.has(op)) {
-      byOp.set(op, {
+    let s = byOp.get(op);
+    if (!s) {
+      s = {
         operationId: op,
         count: 0,
         statusCounts: {},
         finalCount: 0,
         finalStatusCounts: {},
         topLevelKeys: {},
-        examplesByStatus: {}
-      });
+        examplesByStatus: {},
+      };
+      byOp.set(op, s);
     }
-    const s = byOp.get(op)!;
     s.count++;
     s.statusCounts[obs.status] = (s.statusCounts[obs.status] || 0) + 1;
     if (obs.isFinal) {
@@ -72,7 +81,8 @@ async function main() {
         const allKeys = new Set([...Object.keys(s.topLevelKeys), ...keys]);
         for (const k of allKeys) {
           const rec = s.topLevelKeys[k] || { present: 0, absent: 0 };
-          if (keys.has(k)) rec.present++; else rec.absent++;
+          if (keys.has(k)) rec.present++;
+          else rec.absent++;
           s.topLevelKeys[k] = rec;
         }
         // Keep a single example per status
@@ -84,11 +94,16 @@ async function main() {
   }
   const summary = {
     generatedAt: new Date().toISOString(),
-    operations: Array.from(byOp.values()).sort((a,b) => a.operationId.localeCompare(b.operationId))
+    operations: Array.from(byOp.values()).sort((a, b) =>
+      a.operationId.localeCompare(b.operationId),
+    ),
   };
   await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2), 'utf8');
   console.log('Wrote observation summary to', path.join(outDir, 'summary.json'));
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -1,12 +1,16 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
-import {buildGuaranteedPatternMismatch} from '../util/patternMismatch.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { buildWalk, type WalkNode } from '../schema/walker.js';
+import { buildGuaranteedPatternMismatch } from '../util/patternMismatch.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 export function generateConstraintViolations(
@@ -15,17 +19,17 @@ export function generateConstraintViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
-    if (!walk || !walk.root) continue;
+    const root = walk?.root;
+    if (!root) continue;
     const baseline = buildBaselineBody(op);
     if (!baseline) continue;
     let produced = 0;
     for (const node of walk.byPointer.values()) {
       const t = Array.isArray(node.type) ? node.type?.[0] : node.type;
       if (!node.constraints || !t) continue;
-      const path = findPathFromRoot(walk.root!, node);
+      const path = findPathFromRoot(root, node);
       if (!path) continue;
       const mutations = planConstraintMutations(node.constraints, t);
       for (const mut of mutations) {
@@ -53,20 +57,18 @@ export function generateConstraintViolations(
   return out;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function planConstraintMutations(
-  cons: Record<string, any>,
+  cons: Record<string, unknown>,
   type: string,
-): {kind: string; value: any}[] {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const out: {kind: string; value: any}[] = [];
+): { kind: string; value: unknown }[] {
+  const out: { kind: string; value: unknown }[] = [];
   if (type === 'string') {
     if (typeof cons.minLength === 'number') {
       out.push({
         kind: 'belowMinLength',
         value: ''.padEnd(Math.max(0, cons.minLength - 1), 'a'),
       });
-      if (cons.minLength > 0) out.push({kind: 'emptyString', value: ''});
+      if (cons.minLength > 0) out.push({ kind: 'emptyString', value: '' });
     }
     if (typeof cons.maxLength === 'number') {
       out.push({
@@ -80,27 +82,26 @@ function planConstraintMutations(
     }
     if (typeof cons.pattern === 'string') {
       const invalid = buildGuaranteedPatternMismatch(cons.pattern);
-      if (invalid !== undefined)
-        out.push({kind: 'patternMismatch', value: invalid});
+      if (invalid !== undefined) out.push({ kind: 'patternMismatch', value: invalid });
     }
   } else if (type === 'integer' || type === 'number') {
     if (typeof cons.minimum === 'number') {
-      out.push({kind: 'belowMinimum', value: cons.minimum - 1});
-      out.push({kind: 'wayBelowMinimum', value: cons.minimum - 100});
-      out.push({kind: 'atMinimumMinusEpsilon', value: cons.minimum - 0.00001});
+      out.push({ kind: 'belowMinimum', value: cons.minimum - 1 });
+      out.push({ kind: 'wayBelowMinimum', value: cons.minimum - 100 });
+      out.push({ kind: 'atMinimumMinusEpsilon', value: cons.minimum - 0.00001 });
     }
     if (typeof cons.exclusiveMinimum === 'number')
-      out.push({kind: 'belowExclusiveMinimum', value: cons.exclusiveMinimum});
+      out.push({ kind: 'belowExclusiveMinimum', value: cons.exclusiveMinimum });
     if (typeof cons.maximum === 'number') {
-      out.push({kind: 'aboveMaximum', value: cons.maximum + 1});
-      out.push({kind: 'wayAboveMaximum', value: cons.maximum + 100});
-      out.push({kind: 'atMaximumPlusEpsilon', value: cons.maximum + 0.00001});
+      out.push({ kind: 'aboveMaximum', value: cons.maximum + 1 });
+      out.push({ kind: 'wayAboveMaximum', value: cons.maximum + 100 });
+      out.push({ kind: 'atMaximumPlusEpsilon', value: cons.maximum + 0.00001 });
     }
     if (typeof cons.exclusiveMaximum === 'number')
-      out.push({kind: 'aboveExclusiveMaximum', value: cons.exclusiveMaximum});
+      out.push({ kind: 'aboveExclusiveMaximum', value: cons.exclusiveMaximum });
   } else if (type === 'array') {
     if (typeof cons.minItems === 'number' && cons.minItems > 0)
-      out.push({kind: 'belowMinItems', value: []});
+      out.push({ kind: 'belowMinItems', value: [] });
     if (typeof cons.maxItems === 'number') {
       out.push({
         kind: 'aboveMaxItems',
@@ -115,11 +116,9 @@ function planConstraintMutations(
   return out; // no slice; allow expansion
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function findPathFromRoot(root: any, node: any): string[] | undefined {
+function findPathFromRoot(root: WalkNode, node: WalkNode): string[] | undefined {
   let found: string[] | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function dfs(cur: any, path: string[]) {
+  function dfs(cur: WalkNode, path: string[]) {
     if (cur === node) {
       found = path;
       return;
@@ -136,14 +135,15 @@ function findPathFromRoot(root: any, node: any): string[] | undefined {
   return found;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyAtPath(obj: any, path: string[], value: any): boolean {
-  let target = obj;
+function applyAtPath(obj: unknown, path: string[], value: unknown): boolean {
+  let target: unknown = obj;
   for (let i = 0; i < path.length - 1; i++) {
+    if (!isObject(target)) return false;
     const seg = path[i];
     if (!(seg in target)) return false;
     target = target[seg];
   }
+  if (!isObject(target)) return false;
   const last = path[path.length - 1];
   if (!(last in target)) return false;
   target[last] = value;

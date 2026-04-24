@@ -1,0 +1,64 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "all",
+      "semicolons": "always"
+    }
+  },
+  "files": {
+    "includes": [
+      "path-analyser/src/**/*.ts",
+      "path-analyser/scripts/**/*.ts",
+      "request-validation/src/**/*.ts",
+      "request-validation/scripts/**/*.ts",
+      "semantic-graph-extractor/**/*.ts",
+      "scripts/**/*.ts",
+      "tests/**/*.ts",
+      "!**/dist",
+      "!**/generated",
+      "!**/node_modules",
+      "!**/spec",
+      "!**/cache",
+      "!**/external-spec"
+    ]
+  },
+  "linter": {
+    "enabled": true,
+    "includes": [
+      "path-analyser/src/**/*.ts",
+      "path-analyser/scripts/**/*.ts",
+      "request-validation/src/**/*.ts",
+      "request-validation/scripts/**/*.ts",
+      "semantic-graph-extractor/**/*.ts",
+      "scripts/**/*.ts",
+      "tests/**/*.ts",
+      "!**/dist/**",
+      "!**/generated/**",
+      "!**/node_modules/**"
+    ],
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noImplicitAnyLet": "error",
+        "noEvolvingTypes": "error"
+      }
+    },
+    "domains": {
+      "react": "none",
+      "solid": "none",
+      "next": "none",
+      "qwik": "none",
+      "vue": "none"
+    }
+  },
+  "plugins": ["./plugins/no-unsafe-type-assertion.grit"]
+}

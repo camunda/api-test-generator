@@ -1,5 +1,5 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {makeId} from './common.js';
+import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -7,26 +7,22 @@ interface Opts {
 }
 
 // Produces a body that intentionally matches none of the oneOf variants (by omitting discriminator or required markers)
-export function generateOneOfNoneMatch(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateOneOfNoneMatch(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root || !Array.isArray(root.oneOf) || root.oneOf.length < 2) continue;
     let produced = 0;
     // Strategy: collect union of required keys across first two object variants, then remove at least one required from each variant
-    const objVariants = root.oneOf.filter((v: any) => v && v.type === 'object');
+    const objVariants = root.oneOf.filter((v) => v && v.type === 'object');
     if (objVariants.length < 2) continue;
     const a = objVariants[0];
     const b = objVariants[1];
     const reqA: string[] = Array.isArray(a.required) ? a.required : [];
     const reqB: string[] = Array.isArray(b.required) ? b.required : [];
     if (!reqA.length && !reqB.length) continue; // nothing to omit
-    const body: Record<string, any> = {};
+    const body: Record<string, unknown> = {};
     // Include all but first required of variant A and all but first required of variant B (ensuring each variant's requirement set is broken)
     for (const r of reqA.slice(1)) body[r] = placeholder(a.properties?.[r]);
     for (const r of reqB.slice(1)) body[r] = placeholder(b.properties?.[r]);
@@ -53,10 +49,11 @@ export function generateOneOfNoneMatch(
   return out;
 }
 
-function placeholder(schema: any): any {
+function placeholder(schema: SchemaFragment | undefined): unknown {
   if (!schema) return 'x';
-  if (schema.enum && schema.enum.length) return '__NOT_ENUM__';
-  switch (schema.type) {
+  if (Array.isArray(schema.enum) && schema.enum.length) return '__NOT_ENUM__';
+  const t = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  switch (t) {
     case 'string':
       return 'x';
     case 'integer':

@@ -13,7 +13,7 @@ export interface OpenAPISpec {
   servers?: Array<{
     url: string;
     description?: string;
-    variables?: Record<string, any>;
+    variables?: Record<string, unknown>;
   }>;
   paths: Record<string, PathItem>;
   components?: {
@@ -62,6 +62,8 @@ export interface OperationObject {
   security?: SecurityRequirementObject[];
   servers?: ServerObject[];
   'x-eventually-consistent'?: boolean;
+  'x-operation-kind'?: OperationMetadata | OperationMetadata[];
+  'x-conditional-idempotency'?: ConditionalIdempotencySpec;
 }
 
 export interface Schema {
@@ -72,6 +74,7 @@ export interface Schema {
   maxLength?: number;
   description?: string;
   'x-semantic-type'?: string;
+  'x-semantic-provider'?: boolean;
   allOf?: (Schema | ReferenceObject)[];
   oneOf?: (Schema | ReferenceObject)[];
   anyOf?: (Schema | ReferenceObject)[];
@@ -79,9 +82,9 @@ export interface Schema {
   required?: string[];
   items?: Schema | ReferenceObject;
   additionalProperties?: boolean | Schema | ReferenceObject;
-  enum?: any[];
-  example?: any;
-  examples?: any[];
+  enum?: unknown[];
+  example?: unknown;
+  examples?: unknown[];
   $ref?: string;
 }
 
@@ -98,7 +101,7 @@ export interface ResponsesObject {
 
 export interface MediaTypeObject {
   schema?: Schema | ReferenceObject;
-  example?: any;
+  example?: unknown;
   examples?: Record<string, ExampleObject | ReferenceObject>;
   encoding?: Record<string, EncodingObject>;
 }
@@ -114,7 +117,7 @@ export interface ParameterObject {
   explode?: boolean;
   allowReserved?: boolean;
   schema?: Schema | ReferenceObject;
-  example?: any;
+  example?: unknown;
   examples?: Record<string, ExampleObject | ReferenceObject>;
   content?: Record<string, MediaTypeObject>;
 }
@@ -162,7 +165,7 @@ export interface HeaderObject extends Omit<ParameterObject, 'name' | 'in'> {}
 export interface ExampleObject {
   summary?: string;
   description?: string;
-  value?: any;
+  value?: unknown;
   externalValue?: string;
 }
 
@@ -177,8 +180,8 @@ export interface EncodingObject {
 export interface LinkObject {
   operationRef?: string;
   operationId?: string;
-  parameters?: Record<string, any>;
-  requestBody?: any;
+  parameters?: Record<string, unknown>;
+  requestBody?: unknown;
   description?: string;
   server?: ServerObject;
 }
@@ -247,14 +250,14 @@ export interface Operation {
 }
 
 export enum OperationType {
-  CREATE = 'create',      // Creates new resources
-  READ = 'read',          // Reads existing resources  
-  UPDATE = 'update',      // Modifies existing resources
-  DELETE = 'delete',      // Removes resources
-  SEARCH = 'search',      // Queries for resources
-  ACTION = 'action',      // Performs actions (activate, complete, etc.)
-  DEPLOY = 'deploy',      // Special: deployment operations
-  SETUP = 'setup'         // Special: setup/initialization operations
+  CREATE = 'create', // Creates new resources
+  READ = 'read', // Reads existing resources
+  UPDATE = 'update', // Modifies existing resources
+  DELETE = 'delete', // Removes resources
+  SEARCH = 'search', // Queries for resources
+  ACTION = 'action', // Performs actions (activate, complete, etc.)
+  DEPLOY = 'deploy', // Special: deployment operations
+  SETUP = 'setup', // Special: setup/initialization operations
 }
 
 export interface SideEffect {
@@ -271,20 +274,20 @@ export interface OperationParameter {
   description?: string;
   // NEW: Schema validation details
   schema: ParameterSchema;
-  examples?: any[];
+  examples?: unknown[];
   provider?: boolean; // authoritative provider flag if parameter directly provides semantic type
 }
 
 export interface ParameterSchema {
-  type: string;                    // string, number, boolean, array, object
-  format?: string;                 // date, date-time, uri, email, etc.
-  pattern?: string;                // regex pattern
+  type: string; // string, number, boolean, array, object
+  format?: string; // date, date-time, uri, email, etc.
+  pattern?: string; // regex pattern
   minLength?: number;
   maxLength?: number;
   minimum?: number;
   maximum?: number;
-  enum?: any[];
-  items?: ParameterSchema;         // for arrays
+  enum?: unknown[];
+  items?: ParameterSchema; // for arrays
   properties?: Record<string, ParameterSchema>; // for objects
 }
 
@@ -295,7 +298,7 @@ export interface SemanticTypeReference {
   description?: string;
   // NEW: Schema validation details
   schema: FieldSchema;
-  examples?: any[];
+  examples?: unknown[];
   constraints?: ValidationConstraint[];
   provider?: boolean; // true if this field is an authoritative provider (semantic-provider:true)
 }
@@ -308,7 +311,7 @@ export interface FieldSchema {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
-  enum?: any[];
+  enum?: unknown[];
   nullable?: boolean;
 }
 
@@ -322,16 +325,16 @@ export interface DependencyEdge {
   sourceOperationId: string;
   targetOperationId: string;
   semanticType: string;
-  sourceFieldPath: string;  // Where the semantic type is produced
-  targetFieldPath: string;  // Where the semantic type is consumed
+  sourceFieldPath: string; // Where the semantic type is produced
+  targetFieldPath: string; // Where the semantic type is consumed
   strength: DependencyStrength;
   description?: string;
 }
 
 export enum DependencyStrength {
-  REQUIRED = 'required',    // Target operation cannot be called without source
-  OPTIONAL = 'optional',    // Target operation can be called without source, but benefits from it
-  CONDITIONAL = 'conditional' // Target operation may need source depending on conditions
+  REQUIRED = 'required', // Target operation cannot be called without source
+  OPTIONAL = 'optional', // Target operation can be called without source, but benefits from it
+  CONDITIONAL = 'conditional', // Target operation may need source depending on conditions
 }
 
 export interface OperationDependencyGraph {
@@ -358,14 +361,14 @@ export interface SemanticTypeDefinition {
   minLength?: number;
   maxLength?: number;
   // NEW: Value libraries for test generation
-  validExamples: any[];
+  validExamples: unknown[];
   invalidExamples: InvalidExample[];
   crossContaminationSources: string[]; // Other semantic types with same base type
   generationRules: ValueGenerationRule[];
 }
 
 export interface InvalidExample {
-  value: any;
+  value: unknown;
   invalidationType: 'wrong_type' | 'wrong_format' | 'out_of_bounds' | 'wrong_semantic_type';
   description: string;
 }
@@ -395,33 +398,33 @@ export interface ConditionalIdempotencySpec {
 
 // NEW: Root Dependency Analysis interfaces
 export interface RootOperationAnalysis {
-  deploymentOperations: string[];     // Operations that create foundational resources
-  setupOperations: string[];          // Operations that must run before others
-  entryPointOperations: string[];     // Operations with no dependencies
+  deploymentOperations: string[]; // Operations that create foundational resources
+  setupOperations: string[]; // Operations that must run before others
+  entryPointOperations: string[]; // Operations with no dependencies
   bootstrapSequences: BootstrapSequence[];
 }
 
 export interface BootstrapSequence {
   name: string;
   description: string;
-  operations: string[];              // Ordered sequence of operations
-  produces: string[];               // Semantic types produced by this sequence
+  operations: string[]; // Ordered sequence of operations
+  produces: string[]; // Semantic types produced by this sequence
 }
 
 // NEW: Cross-contamination mapping
 export interface CrossContaminationMap {
-  [semanticType: string]: string[];  // Maps semantic type to potential contaminants
+  [semanticType: string]: string[]; // Maps semantic type to potential contaminants
 }
 
 // Analysis result types
 export interface GraphAnalysis {
-  entryPoints: string[];        // Operations with no dependencies
-  sinks: string[];             // Operations that don't produce outputs used by others
+  entryPoints: string[]; // Operations with no dependencies
+  sinks: string[]; // Operations that don't produce outputs used by others
   stronglyConnectedComponents: string[][];
   longestPaths: DependencyPath[];
   coverage: {
-    semanticTypeCoverage: number;  // Percentage of semantic types that are used
-    operationCoverage: number;     // Percentage of operations that are reachable
+    semanticTypeCoverage: number; // Percentage of semantic types that are used
+    operationCoverage: number; // Percentage of operations that are reachable
   };
 }
 
@@ -455,6 +458,6 @@ export interface TestStep {
 export interface TestValidation {
   type: 'response_field' | 'status_code' | 'semantic_type';
   field?: string;
-  expectedValue?: any;
+  expectedValue?: unknown;
   semanticType?: string;
 }

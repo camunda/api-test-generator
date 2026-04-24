@@ -1,7 +1,6 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildWalk} from '../schema/walker.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -14,16 +13,15 @@ export function generateAdditionalPropsViolations(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
-    const schema: any = op.requestBodySchema;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
+    const schema = op.requestBodySchema;
     if (!schema || schema.type !== 'object') continue;
     if (schema.additionalProperties === false) {
       const baseline = buildBaselineBody(op);
-      if (!baseline) continue;
+      if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
       if ((opts.capPerOperation ?? 1) < 1) continue;
       const body = structuredClone(baseline);
-      (body as any).__unexpectedField = 'x';
+      body.__unexpectedField = 'x';
       out.push({
         id: makeId([op.operationId, 'additionalProp']),
         operationId: op.operationId,

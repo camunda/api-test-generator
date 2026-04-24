@@ -1,6 +1,6 @@
-import {OperationModel, ValidationScenario} from '../model/types.js';
-import {buildBaselineBody} from '../schema/baseline.js';
-import {makeId} from './common.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -13,25 +13,24 @@ export function generateAllOfMissingRequired(
 ): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root) continue;
     if (!Array.isArray(root.allOf)) continue;
     // Build baseline to anchor other requireds
     const baseline = buildBaselineBody(op);
-    if (!baseline || typeof baseline !== 'object') continue;
+    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
     // Collect required sets per constituent
     const constituents = root.allOf.filter(
-      (c: any) => c && c.type === 'object' && Array.isArray(c.required),
+      (c) => c && c.type === 'object' && Array.isArray(c.required),
     );
     if (constituents.length < 2) continue;
     for (const c of constituents) {
-      for (const r of c.required) {
+      for (const r of c.required ?? []) {
         // Create body missing this required but present others
         const body = structuredClone(baseline);
         if (r in body) {
-          delete (body as any)[r];
+          delete body[r];
         } else continue;
         out.push({
           id: makeId([op.operationId, 'allofMissing', r]),
@@ -53,25 +52,19 @@ export function generateAllOfMissingRequired(
   return out;
 }
 
-export function generateAllOfConflicts(
-  ops: OperationModel[],
-  opts: Opts,
-): ValidationScenario[] {
+export function generateAllOfConflicts(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
-    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId))
-      continue;
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const root = op.requestBodySchema;
     if (!root) continue;
     if (!Array.isArray(root.allOf)) continue;
-    const objectConstituents = root.allOf.filter(
-      (c: any) => c && c.type === 'object' && c.properties,
-    );
+    const objectConstituents = root.allOf.filter((c) => c && c.type === 'object' && c.properties);
     if (objectConstituents.length < 2) continue;
     // Look for same property name with different types across constituents
     const typeMap: Record<string, Set<string>> = {};
     for (const c of objectConstituents) {
-      for (const [k, v] of Object.entries<any>(c.properties)) {
+      for (const [k, v] of Object.entries(c.properties ?? {})) {
         const t = v.type || 'any';
         if (!typeMap[k]) typeMap[k] = new Set();
         typeMap[k].add(Array.isArray(t) ? t[0] : t);
@@ -82,7 +75,7 @@ export function generateAllOfConflicts(
       .map(([k]) => k);
     if (!conflicts.length) continue;
     const baseline = buildBaselineBody(op);
-    if (!baseline) continue;
+    if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) continue;
     for (const prop of conflicts) {
       const body = structuredClone(baseline);
       body[prop] = 12345; // number
