@@ -4,9 +4,37 @@ import type {
   EndpointScenarioCollection,
   FeatureVariantSpec,
   OperationGraph,
+  OperationNode,
   OperationRef,
   RequestOneOfGroupSummary,
 } from './types.js';
+
+// Optional sidecar shape: `domain.requestBodies` is an off-spec extension keyed by
+// operationId, mapping to per-content-type descriptors. Not part of `DomainSemantics`,
+// so we narrow at the runtime boundary rather than widening the canonical type.
+interface RequestBodyDescriptor {
+  contentType?: string;
+}
+
+function extractRequestBodies(
+  graph: OperationGraph,
+  endpointOpId: string,
+): RequestBodyDescriptor[] | undefined {
+  const domain: unknown = graph.domain;
+  if (!domain || typeof domain !== 'object') return undefined;
+  const rb: unknown = Reflect.get(domain, 'requestBodies');
+  if (!rb || typeof rb !== 'object') return undefined;
+  const entry: unknown = Reflect.get(rb, endpointOpId);
+  if (!Array.isArray(entry)) return undefined;
+  const out: RequestBodyDescriptor[] = [];
+  for (const r of entry) {
+    if (r && typeof r === 'object') {
+      const ct: unknown = Reflect.get(r, 'contentType');
+      out.push({ contentType: typeof ct === 'string' ? ct : undefined });
+    }
+  }
+  return out;
+}
 
 interface FeatureCoverageOptions {
   maxOptionalPairs: number;
@@ -39,15 +67,12 @@ export function generateFeatureCoverageForEndpoint(
   const variants: FeatureVariantSpec[] = [];
   // Determine if endpoint has a JSON request body (only these get schemaWrongType variants)
   const hasJsonBody = (() => {
-    try {
-      const reqs = (graph as any).domain?.requestBodies?.[endpointOpId];
-      if (Array.isArray(reqs)) {
-        return reqs.some(
-          (r: any) =>
-            typeof r?.contentType === 'string' && r.contentType.includes('application/json'),
-        );
-      }
-    } catch {}
+    const reqs = extractRequestBodies(graph, endpointOpId);
+    if (reqs) {
+      return reqs.some(
+        (r) => typeof r.contentType === 'string' && r.contentType.includes('application/json'),
+      );
+    }
     // Fallback heuristic: methods that typically have bodies
     return ['POST', 'PUT', 'PATCH'].includes(endpoint.method.toUpperCase());
   })();
@@ -148,8 +173,8 @@ export function generateFeatureCoverageForEndpoint(
   }
 
   // Duplicate invocation variants (only for create/command endpoints with duplicatePolicy or conditionalIdempotency)
-  const meta = (endpoint as any).operationMetadata;
-  const cond = (endpoint as any).conditionalIdempotency;
+  const meta = endpoint.operationMetadata;
+  const cond = endpoint.conditionalIdempotency;
   // Conflict duplicate: expect second call 409 when duplicatePolicy === 'conflict'
   if (meta?.duplicatePolicy === 'conflict') {
     variants.push({
@@ -203,7 +228,7 @@ export function generateFeatureCoverageForEndpoint(
         }
       }
       // Only generate union violation negatives for genuine polymorphic unions
-      const allowUnionNegatives = (group as any).isPolymorphic === true;
+      const allowUnionNegatives = group.isPolymorphic === true;
       // Union violation negative (all fields) if more than 1 variant and polymorphic
       if (allowUnionNegatives && group.variants.length > 1) {
         variants.push({
@@ -333,8 +358,8 @@ function buildScenarioFromVariant(
       mode: variant.duplicateTest.mode,
       policy: variant.duplicateTest.policy,
       secondStatus: variant.duplicateTest.secondStatus,
-      keyFields: (endpoint as any).conditionalIdempotency?.keyFields,
-      windowField: (endpoint as any).conditionalIdempotency?.window?.field,
+      keyFields: endpoint.conditionalIdempotency?.keyFields,
+      windowField: endpoint.conditionalIdempotency?.window?.field,
     };
   }
   if (variant.requestVariantGroup && variant.requestVariantName) {
@@ -367,7 +392,7 @@ function buildVariantKey(v: FeatureVariantSpec): string {
 
 function buildCoverageTags(v: FeatureVariantSpec): string[] {
   const tags: string[] = [];
-  v.optionals.forEach((o) => tags.push(`optional:${o}`));
+  for (const o of v.optionals) tags.push(`optional:${o}`);
   if (v.negative) tags.push('negative');
   if (v.schemaWrongType) tags.push('schemaWrongType');
   if (v.requestVariantGroup) tags.push(`oneOf:${v.requestVariantGroup}:${v.requestVariantName}`);
@@ -412,7 +437,7 @@ function buildFeatureScenarioName(
   return `${operationId} - with ${v.optionals.length} optionals (${index})`;
 }
 
-function buildFeatureScenarioDescription(endpoint: any, v: FeatureVariantSpec): string {
+function buildFeatureScenarioDescription(endpoint: OperationNode, v: FeatureVariantSpec): string {
   const base = `Invoke ${endpoint.operationId} (${endpoint.method.toUpperCase()} ${endpoint.path})`;
   if (v.duplicateTest) {
     if (v.duplicateTest.mode === 'conflict')
