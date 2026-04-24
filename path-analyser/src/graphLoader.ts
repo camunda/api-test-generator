@@ -1,5 +1,5 @@
-import { readFile } from 'fs/promises';
-import path from 'path';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
@@ -42,7 +42,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
 
   if (!candidateOps) {
     throw new Error(
-      'Unrecognized graph structure. Adjust loader. Keys seen: ' + Object.keys(parsed).join(','),
+      `Unrecognized graph structure. Adjust loader. Keys seen: ${Object.keys(parsed).join(',')}`,
     );
   }
 
@@ -105,7 +105,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const domainRaw = await readFile(domainPath, 'utf8');
     domain = JSON.parse(domainRaw);
     // debug: domain semantics sidecar loaded
-    if (domain && domain.operationRequirements) {
+    if (domain?.operationRequirements) {
       for (const [opId, req] of Object.entries(domain.operationRequirements)) {
         const node = operations[opId];
         if (!node) continue;
@@ -125,21 +125,21 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
       }
     };
-    if (domain && domain.runtimeStates) {
+    if (domain?.runtimeStates) {
       for (const [stateName, spec] of Object.entries(domain.runtimeStates)) {
         spec.producedBy?.forEach((opId) => {
           if (operations[opId]) addProducer(stateName, opId);
         });
       }
     }
-    if (domain && domain.capabilities) {
+    if (domain?.capabilities) {
       for (const [capName, spec] of Object.entries(domain.capabilities)) {
         spec.producedBy?.forEach((opId) => {
           if (operations[opId]) addProducer(capName, opId);
         });
       }
     }
-    if (domain && domain.identifiers) {
+    if (domain?.identifiers) {
       for (const [, spec] of Object.entries(domain.identifiers)) {
         const state = spec.validityState;
         spec.boundBy?.forEach((opId) => {
@@ -147,7 +147,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         });
       }
     }
-    if (domain && domain.operationRequirements) {
+    if (domain?.operationRequirements) {
       for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
         if (!operations[opId]) continue;
         spec.produces?.forEach((st) => addProducer(st, opId));
@@ -287,8 +287,8 @@ export async function loadOpenApiSemanticHints(
   }
   const result: Record<string, { required: string[]; optional: string[] }> = {};
   if (doc.paths) {
-    for (const [p, methods] of Object.entries<any>(doc.paths)) {
-      for (const [m, operation] of Object.entries<any>(methods)) {
+    for (const [_p, methods] of Object.entries<any>(doc.paths)) {
+      for (const [_m, operation] of Object.entries<any>(methods)) {
         if (!operation || typeof operation !== 'object') continue;
         const opId = operation.operationId;
         if (!opId) continue;
