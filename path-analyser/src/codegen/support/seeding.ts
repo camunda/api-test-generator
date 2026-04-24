@@ -3,14 +3,35 @@
 // Deterministic mode: set TEST_SEED to a stable string (e.g. commit hash) to make outputs reproducible.
 import { createRequire } from 'node:module';
 
-const localRequire =
-  typeof createRequire === 'function' ? createRequire(import.meta.url) : (undefined as any);
+type LocalRequire = ((id: string) => unknown) | undefined;
+const localRequire: LocalRequire =
+  typeof createRequire === 'function' ? createRequire(import.meta.url) : undefined;
 
-export type SeedOptions = {};
+export type SeedOptions = Record<string, never>;
 
 interface SeedRule {
   match: RegExp | ((name: string) => boolean);
   gen: (name: string, env: SeedEnv) => string;
+}
+
+interface RawSeedRule {
+  match: string;
+  template: string;
+}
+
+interface SeedRulesFile {
+  rules: RawSeedRule[];
+}
+
+function isRawSeedRule(v: unknown): v is RawSeedRule {
+  if (!v || typeof v !== 'object') return false;
+  return (
+    typeof Reflect.get(v, 'match') === 'string' && typeof Reflect.get(v, 'template') === 'string'
+  );
+}
+
+function isSeedRulesFile(v: unknown): v is SeedRulesFile {
+  return !!v && typeof v === 'object' && Array.isArray(Reflect.get(v, 'rules'));
 }
 
 interface SeedEnv {
@@ -98,14 +119,13 @@ function loadRules() {
   rulesLoaded = true;
   try {
     // Use dynamic import to allow bundlers / TS to include JSON; fallback if not found
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    let data: any;
+    let data: unknown;
     if (localRequire) {
       data = localRequire('./seed-rules.json');
     }
-    if (data && Array.isArray(data.rules)) {
-      rules = data.rules.map((r: any) => {
-        const rawMatch: string = r.match;
+    if (isSeedRulesFile(data)) {
+      rules = data.rules.filter(isRawSeedRule).map((r): SeedRule => {
+        const rawMatch = r.match;
         let matcher: RegExp | ((name: string) => boolean);
         if (rawMatch === '*') {
           matcher = () => true;
@@ -117,11 +137,11 @@ function loadRules() {
         } else {
           matcher = new RegExp(rawMatch);
         }
-        const template: string = r.template;
+        const template = r.template;
         return {
           match: matcher,
           gen: (name: string, env: SeedEnv) => expandTemplate(template, name, env),
-        } as SeedRule;
+        };
       });
     }
   } catch (_e) {
