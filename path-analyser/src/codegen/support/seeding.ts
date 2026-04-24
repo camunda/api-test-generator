@@ -1,7 +1,7 @@
 // Centralized seeding utilities for generated Playwright tests.
 // Provides pattern-based value generation with optional deterministic mode.
 // Deterministic mode: set TEST_SEED to a stable string (e.g. commit hash) to make outputs reproducible.
-import { createRequire } from 'module';
+import { createRequire } from 'node:module';
 
 const localRequire =
   typeof createRequire === 'function' ? createRequire(import.meta.url) : (undefined as any);
@@ -51,7 +51,7 @@ const globalEnv: SeedEnv = (() => {
       counters.set(bucket, v);
       return v;
     },
-    runId: deterministic ? 'det-' + seedStr : 'rt-' + Date.now().toString(36),
+    runId: deterministic ? `det-${seedStr}` : `rt-${Date.now().toString(36)}`,
     deterministic,
   };
   return env;
@@ -70,7 +70,9 @@ const globalEnv: SeedEnv = (() => {
  */
 export function deterministicSuffix(key: string, length = 4): string {
   if (!process.env.TEST_SEED) {
-    return Math.random().toString(36).slice(2, 2 + length);
+    return Math.random()
+      .toString(36)
+      .slice(2, 2 + length);
   }
   // FNV-1a 32-bit hash, seeded by TEST_SEED so different runs give different
   // (but reproducible) suffixes.
@@ -122,12 +124,12 @@ function loadRules() {
         } as SeedRule;
       });
     }
-  } catch (e) {
+  } catch (_e) {
     // Fallback to internal defaults if JSON load fails
     rules = [
       {
         match: /(correlation)/i,
-        gen: (n, e) => `corr-${e.runId}-${e.counter('corr')}-${e.random().slice(0, 4)}`,
+        gen: (_n, e) => `corr-${e.runId}-${e.counter('corr')}-${e.random().slice(0, 4)}`,
       },
       {
         match: /(key|id)$/i,
@@ -162,7 +164,7 @@ function expandTemplate(tpl: string, varName: string, env: SeedEnv): string {
       const bucket = parts[1] || 'default';
       return String(env.counter(bucket));
     }
-    return '${' + expr + '}';
+    return `\${${expr}}`;
   });
 }
 
@@ -173,7 +175,7 @@ export function seedBinding(varName: string, _opts?: SeedOptions): string {
     if (m) return r.gen(varName, globalEnv);
   }
   // Should never reach here due to fallback rule
-  return varName + '-' + globalEnv.random().slice(0, 6);
+  return `${varName}-${globalEnv.random().slice(0, 6)}`;
 }
 
 export function debugSeed(varName: string): string {
