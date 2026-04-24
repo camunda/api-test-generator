@@ -636,13 +636,13 @@ function buildRequestBodyFromCanonical(
       break;
     }
   if (!chosenCt) return undefined;
-  const nodes = shape.requestByMediaType[chosenCt]!;
+  const nodes = shape.requestByMediaType[chosenCt] ?? [];
   // Build quick lookup of expected (declared) JSON field types by leaf name (top-level) for type-aware wrong-type mutation
   const declaredTypeByLeaf: Record<string, string> = {};
   try {
     for (const n of nodes) {
       if (!n.path.includes('[]')) {
-        const leaf = n.path.split('.').pop()!;
+        const leaf = n.path.split('.').pop() ?? '';
         if (leaf && !declaredTypeByLeaf[leaf]) declaredTypeByLeaf[leaf] = n.type;
       }
     }
@@ -655,7 +655,7 @@ function buildRequestBodyFromCanonical(
     for (const [k, v] of Object.entries<string>(opDom.valueBindings)) {
       if (k.startsWith('request.')) {
         const raw = k.slice('request.'.length);
-        bindingMap[raw] = v.split('.').pop()!; // take parameter name
+        bindingMap[raw] = v.split('.').pop() ?? ''; // take parameter name
       }
     }
   }
@@ -837,7 +837,7 @@ function buildRequestBodyFromCanonical(
     } else {
       // Non-oneOf: use canonical required flags
       for (const f of requiredFields) {
-        const leaf = f.path.split('.').pop()!;
+        const leaf = f.path.split('.').pop() ?? '';
         if (omitSet?.has(leaf)) continue;
         if (includeSet && !includeSet.has(leaf)) continue; // omit required not selected for include
         if (allowedFields && !allowedFields.has(leaf)) continue;
@@ -884,7 +884,7 @@ function buildRequestBodyFromCanonical(
       const isEmptyNeg = scenario?.expectedResult && scenario.expectedResult.kind === 'empty';
       if (isSearchLikeOp && isEmptyNeg) {
         for (const f of nodes.filter((n) => !n.required && !n.path.includes('[]'))) {
-          const leaf = f.path.split('.').pop()!;
+          const leaf = f.path.split('.').pop() ?? '';
           if (allowedFields && !allowedFields.has(leaf)) continue;
           if (template[leaf] !== undefined) continue;
           const viaProvider = resolveProvider(opId, leaf, scenario);
@@ -896,7 +896,7 @@ function buildRequestBodyFromCanonical(
     }
     // Fill a few optional fields if present and we have bindings
     for (const f of nodes.filter((n) => !n.required && !n.path.includes('[]'))) {
-      const leaf = f.path.split('.').pop()!;
+      const leaf = f.path.split('.').pop() ?? '';
       if (allowedFields && !allowedFields.has(leaf)) continue;
       const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
       if (!template[leaf]) {
@@ -909,10 +909,10 @@ function buildRequestBodyFromCanonical(
     }
     // Fallback: ensure all domain request.* bindings are present even if canonical nodes are missing (e.g., oneOf variants).
     const leafSet = new Set(
-      nodes.filter((n) => !n.path.includes('[]')).map((n) => n.path.split('.').pop()!),
+      nodes.filter((n) => !n.path.includes('[]')).map((n) => n.path.split('.').pop() ?? ''),
     );
     for (const [fieldPath, param] of Object.entries(bindingMap)) {
-      const leaf = fieldPath.split('.').pop()!;
+      const leaf = fieldPath.split('.').pop() ?? '';
       if (!leafSet.has(leaf)) continue; // don't inject fields not in schema
       if (allowedFields && !allowedFields.has(leaf) && !forceUnionAll) continue;
       // For schemaMissingRequired negatives, do not re-add omitted required fields
@@ -1139,7 +1139,7 @@ function getRequiredRequestLeafFields(
   const nodes = shape.requestByMediaType['application/json'] || [];
   const fields = nodes
     .filter((n) => n.required && !n.path.includes('[]'))
-    .map((n) => n.path.split('.').pop()!)
+    .map((n) => n.path.split('.').pop() ?? '')
     .filter(Boolean);
   return Array.from(new Set(fields));
 }
