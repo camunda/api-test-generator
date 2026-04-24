@@ -17,8 +17,36 @@ export interface OperationCanonicalShapes {
   requestByMediaType?: Record<string, CanonicalNodeMeta[]>; // e.g., application/json, multipart/form-data
 }
 
-interface OpenAPISchemaObject {
-  [k: string]: any;
+// Permissive subset of an OpenAPI schema fragment (only the fields this walker uses).
+interface SchemaObject {
+  type?: string;
+  $ref?: string;
+  properties?: Record<string, SchemaObject>;
+  items?: SchemaObject;
+  required?: string[];
+  allOf?: SchemaObject[];
+  anyOf?: SchemaObject[];
+  oneOf?: SchemaObject[];
+  'x-semantic-provider'?: boolean;
+}
+
+interface MediaObject {
+  schema?: SchemaObject;
+}
+
+interface ResponseObject {
+  content?: Record<string, MediaObject>;
+}
+
+interface OperationObject {
+  operationId?: string;
+  responses?: Record<string, ResponseObject>;
+  requestBody?: { content?: Record<string, MediaObject> };
+}
+
+interface OpenAPIDocument {
+  paths?: Record<string, Record<string, OperationObject>>;
+  components?: { schemas?: Record<string, SchemaObject> };
 }
 
 export async function buildCanonicalShapes(
@@ -27,50 +55,56 @@ export async function buildCanonicalShapes(
   const specPath =
     process.env.OPENAPI_SPEC_PATH || path.resolve(specRootDir, 'spec/bundled/rest-api.bundle.json');
   const raw = await fs.readFile(specPath, 'utf8');
-  const doc = YAML.parse(raw) as OpenAPISchemaObject;
+  // biome-ignore lint/plugin: YAML.parse returns `unknown`; the OpenAPI bundle is the runtime contract.
+  const doc = YAML.parse(raw) as OpenAPIDocument;
   const out: Record<string, OperationCanonicalShapes> = {};
-  const paths = doc.paths || doc;
-  for (const [_p, methods] of Object.entries<any>(paths)) {
-    for (const [_method, op] of Object.entries<any>(methods || {})) {
+  const components = doc.components?.schemas ?? {};
+  const paths = doc.paths ?? {};
+  for (const [_p, methods] of Object.entries(paths)) {
+    for (const [_method, op] of Object.entries(methods ?? {})) {
       if (!op?.operationId) continue;
       const opId = op.operationId;
       const entry: OperationCanonicalShapes = { operationId: opId };
       // Success response schema
-      const successCode = Object.keys(op.responses || {}).find((c) => ['200', '201'].includes(c));
+      const responses = op.responses ?? {};
+      const successCode = Object.keys(responses).find((c) => ['200', '201'].includes(c));
       if (successCode) {
-        const success = op.responses[successCode];
-        const media =
-          success?.content && Object.entries<any>(success.content).find(([ct]) => /json/.test(ct));
-        if (media?.[1].schema) {
-          const schema = media[1].schema;
+        const success = responses[successCode];
+        const media = success?.content
+          ? Object.entries(success.content).find(([ct]) => /json/.test(ct))
+          : undefined;
+        const successSchema = media?.[1]?.schema;
+        if (successSchema) {
           const nodes: CanonicalNodeMeta[] = [];
           walkSchema(
-            resolveSchema(schema, doc.components?.schemas || {}),
+            resolveSchema(successSchema, components),
             '#',
             '',
             nodes,
             new Set(),
-            doc.components?.schemas || {},
+            components,
           );
           entry.response = nodes;
         }
       }
       // Request schemas by media type (json + multipart supported)
-      const reqContent: Record<string, any> | undefined = op.requestBody?.content;
+      const reqContent = op.requestBody?.content;
       if (reqContent && typeof reqContent === 'object') {
-        for (const [ct, media] of Object.entries<any>(reqContent)) {
+        for (const [ct, media] of Object.entries(reqContent)) {
           if (!media?.schema) continue;
           if (!/json|multipart\/form-data/i.test(ct)) continue; // limit to supported kinds
           const nodes: CanonicalNodeMeta[] = [];
           walkSchema(
-            resolveSchema(media.schema, doc.components?.schemas || {}),
+            resolveSchema(media.schema, components),
             '#',
             '',
             nodes,
             new Set(),
-            doc.components?.schemas || {},
+            components,
           );
-          (entry.requestByMediaType ||= {})[ct] = nodes;
+          const byMedia = entry.requestByMediaType ?? {};
+          byMedia[ct] = nodes;
+          entry.requestByMediaType = byMedia;
           if (/application\/json/i.test(ct)) {
             // maintain legacy field for callers expecting request under JSON
             entry.request = nodes;
@@ -84,12 +118,12 @@ export async function buildCanonicalShapes(
 }
 
 function walkSchema(
-  schema: any,
+  schema: SchemaObject | undefined,
   pointer: string,
   pathSoFar: string,
   acc: CanonicalNodeMeta[],
-  seen: Set<any>,
-  components: Record<string, any>,
+  seen: Set<SchemaObject>,
+  components: Record<string, SchemaObject>,
   required = false,
   depth = 0,
 ) {
@@ -125,7 +159,7 @@ function walkSchema(
           : undefined,
       });
     }
-    for (const [k, v] of Object.entries<any>(schema.properties)) {
+    for (const [k, v] of Object.entries(schema.properties)) {
       const childPath = pathSoFar ? `${pathSoFar}.${k}` : k;
       const childPointer = `${pointer}/properties/${escapeJsonPointer(k)}`;
       walkSchema(v, childPointer, childPath, acc, seen, components, reqSet.has(k), depth + 1);
@@ -155,16 +189,20 @@ function walkSchema(
   }
 }
 
-function resolveSchema(schema: any, components: Record<string, any>, depth = 0): any {
+function resolveSchema(
+  schema: SchemaObject,
+  components: Record<string, SchemaObject>,
+  depth = 0,
+): SchemaObject {
   if (!schema || depth > 30) return schema;
   if (schema.$ref) {
     const name = schema.$ref.split('/').pop();
-    const target = components[name!];
+    const target = name ? components[name] : undefined;
     if (target) return resolveSchema(target, components, depth + 1);
   }
   if (schema.allOf && Array.isArray(schema.allOf)) {
-    return schema.allOf.reduce(
-      (acc: any, part: any) => Object.assign(acc, resolveSchema(part, components, depth + 1)),
+    return schema.allOf.reduce<SchemaObject>(
+      (acc, part) => Object.assign(acc, resolveSchema(part, components, depth + 1)),
       {},
     );
   }
