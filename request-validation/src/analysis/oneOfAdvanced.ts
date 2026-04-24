@@ -6,6 +6,18 @@ interface Opts {
   capPerOperation?: number;
 }
 
+interface VariantSchema {
+  type?: string;
+  required?: string[];
+  properties?: Record<string, VariantSchema>;
+  enum?: unknown[];
+  oneOf?: VariantSchema[];
+}
+
+function isVariantSchema(v: unknown): v is VariantSchema {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
 export function generateOneOfMultiAmbiguous(
   ops: OperationModel[],
   opts: Opts,
@@ -14,17 +26,17 @@ export function generateOneOfMultiAmbiguous(
   for (const op of ops) {
     if (!op.rootOneOf || op.rootOneOf.length < 3) continue;
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const variants = op.rootOneOf.filter(
-      (v) => v && v.type === 'object' && Array.isArray(v.required),
-    );
+    const variants = op.rootOneOf
+      .filter(isVariantSchema)
+      .filter((v) => v.type === 'object' && Array.isArray(v.required));
     if (variants.length < 3) continue;
-    const a = variants[0],
-      b = variants[1],
-      c = variants[2];
-    const merged: Record<string, any> = {};
-    for (const r of a.required) merged[r] = placeholder(a.properties?.[r]);
-    for (const r of b.required) merged[r] = placeholder(b.properties?.[r]);
-    for (const r of c.required) merged[r] = placeholder(c.properties?.[r]);
+    const a = variants[0];
+    const b = variants[1];
+    const c = variants[2];
+    const merged: Record<string, unknown> = {};
+    for (const r of a.required ?? []) merged[r] = placeholder(a.properties?.[r]);
+    for (const r of b.required ?? []) merged[r] = placeholder(b.properties?.[r]);
+    for (const r of c.required ?? []) merged[r] = placeholder(c.properties?.[r]);
     out.push({
       id: makeId([op.operationId, 'oneofMultiAmbiguous']),
       operationId: op.operationId,
@@ -48,17 +60,21 @@ export function generateOneOfCrossBleed(ops: OperationModel[], opts: Opts): Vali
   for (const op of ops) {
     if (!op.rootOneOf || op.rootOneOf.length < 2) continue;
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    const variants = op.rootOneOf.filter((v) => v && v.type === 'object' && v.properties);
+    const variants = op.rootOneOf
+      .filter(isVariantSchema)
+      .filter((v) => v.type === 'object' && v.properties);
     if (variants.length < 2) continue;
     const a = variants[0];
     const b = variants[1];
     // Build body for variant A then inject a property unique to B
-    const body: Record<string, any> = {};
+    const body: Record<string, unknown> = {};
     const reqA = Array.isArray(a.required) ? a.required : [];
     for (const r of reqA) body[r] = placeholder(a.properties?.[r]);
-    const uniqueB = Object.keys(b.properties).find((k) => !(k in a.properties));
+    const aProps = a.properties ?? {};
+    const bProps = b.properties ?? {};
+    const uniqueB = Object.keys(bProps).find((k) => !(k in aProps));
     if (!uniqueB) continue;
-    body[uniqueB] = placeholder(b.properties[uniqueB]);
+    body[uniqueB] = placeholder(bProps[uniqueB]);
     out.push({
       id: makeId([op.operationId, 'oneofCrossBleed', uniqueB]),
       operationId: op.operationId,
@@ -86,14 +102,16 @@ export function generateDiscriminatorStructureMismatch(
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const d = op.discriminator;
     if (!d) continue;
-    const root = op.requestBodySchema;
+    const root = isVariantSchema(op.requestBodySchema) ? op.requestBodySchema : undefined;
     if (!root || !Array.isArray(root.oneOf)) continue;
-    const variants = root.oneOf.filter((v: any) => v && v.type === 'object' && v.properties);
+    const variants = root.oneOf
+      .filter(isVariantSchema)
+      .filter((v) => v.type === 'object' && v.properties);
     if (variants.length < 2) continue;
     const a = variants[0];
     const b = variants[1];
     // Choose discriminator value for A but shape of B
-    const body: Record<string, any> = {};
+    const body: Record<string, unknown> = {};
     // Attempt to reuse discriminated mapping enum value if exists
     const discVal = guessDiscriminatorValue(a, d.propertyName) || 'VariantA';
     body[d.propertyName] = discVal;
@@ -118,15 +136,16 @@ export function generateDiscriminatorStructureMismatch(
   return out;
 }
 
-function guessDiscriminatorValue(variant: any, disc: string): string | undefined {
-  if (variant.properties?.[disc]) {
-    const p = variant.properties[disc];
-    if (p.enum?.length) return p.enum[0];
+function guessDiscriminatorValue(variant: VariantSchema, disc: string): string | undefined {
+  const p = variant.properties?.[disc];
+  if (p?.enum?.length) {
+    const v = p.enum[0];
+    if (typeof v === 'string') return v;
   }
   return undefined;
 }
 
-function placeholder(schema: any): any {
+function placeholder(schema: VariantSchema | undefined): unknown {
   if (!schema) return 'x';
   if (schema.enum?.length) return schema.enum[0];
   switch (schema.type) {
