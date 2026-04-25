@@ -196,6 +196,46 @@ npm run snapshot:update
 This is a class-scoped guard — any drift in any analyser, planner or emitter
 will fail the test, not just one specific defect path.
 
+### Spec pin
+
+Snapshot byte-identity is only meaningful against a fixed upstream spec.
+`tests/regression/spec-pin.json` records the `expectedSpecHash` of the
+upstream spec content the snapshot was captured against, plus the `specRef`
+CI fetches. A precondition test (`tests/regression/spec-pin.test.ts`) fails
+fast with an actionable message if the bundled spec drifts from that hash,
+so reviewers don't have to debug a 396-file diff.
+
+To bump the spec:
+
+```bash
+# 1. Fetch the new spec (set SPEC_REF to a branch, tag, or commit SHA)
+SPEC_REF=stable/8.10 npm run fetch-spec:ref
+
+# 2. Regenerate everything
+npm run testsuite:generate
+npm run generate:request-validation
+npm run snapshot:update
+
+# 3. Update tests/regression/spec-pin.json with the new specRef and the
+#    `specHash` printed in spec/bundled/spec-metadata.json
+# 4. Commit spec-pin.json + pipeline-snapshot.json together
+```
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every PR to `main` (and on pushes to
+`main`). It executes:
+
+1. `npm run lint` — Biome
+2. `tsc --noEmit` against each workspace tsconfig
+3. Builds (`build:analyser`, `build:request-validation`)
+4. `npm run fetch-spec:ref` at the pinned `specRef`
+5. Full pipeline regeneration with `TEST_SEED=snapshot-baseline`
+6. `npm test` — spec-pin guard, snapshot regression, and unit tests
+
+On failure the generated outputs are uploaded as the
+`pipeline-outputs` artifact for inspection.
+
 ## Fetching the OpenAPI Spec
 
 The bundled spec is produced by [`camunda-schema-bundler`](https://github.com/camunda/camunda-schema-bundler),
