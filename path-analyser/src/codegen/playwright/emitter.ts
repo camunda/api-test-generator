@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from '../../types.js';
 import { planFinalStepAssertions } from '../assertionPlanner.js';
+import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 
 interface EmitOptions {
   outDir: string;
@@ -9,19 +10,69 @@ interface EmitOptions {
   mode?: 'feature' | 'integration';
 }
 
+/**
+ * Build the file name a scenario collection lowers to. Exposed for the
+ * Emitter wrapper so it can return a relative path without re-deriving it.
+ */
+export function playwrightSuiteFileName(
+  collection: EndpointScenarioCollection,
+  mode: 'feature' | 'integration',
+): string {
+  return `${collection.endpoint.operationId}.${mode}.spec.ts`;
+}
+
+/**
+ * Pure rendering entry point — returns the suite source as a string.
+ * Used by the {@link PlaywrightEmitter} strategy and by callers that want
+ * the source without writing it.
+ */
+export function renderPlaywrightSuite(
+  collection: EndpointScenarioCollection,
+  opts: { suiteName?: string; mode?: 'feature' | 'integration' },
+): string {
+  return buildSuiteSource(collection, {
+    outDir: '',
+    suiteName: opts.suiteName,
+    mode: opts.mode,
+  });
+}
+
+/**
+ * Legacy filesystem-writing entry point. Retained for backwards compatibility
+ * with the existing `codegen:playwright` script. New callers should use the
+ * {@link PlaywrightEmitter} via the registry.
+ */
 export async function emitPlaywrightSuite(
   collection: EndpointScenarioCollection,
   opts: EmitOptions,
 ) {
   await fs.mkdir(opts.outDir, { recursive: true });
-  const file = path.join(
-    opts.outDir,
-    `${collection.endpoint.operationId}.${opts.mode || 'feature'}.spec.ts`,
-  );
-  const code = buildSuiteSource(collection, opts);
+  const file = path.join(opts.outDir, playwrightSuiteFileName(collection, opts.mode || 'feature'));
+  const code = renderPlaywrightSuite(collection, opts);
   await fs.writeFile(file, code, 'utf8');
   return file;
 }
+
+/**
+ * {@link Emitter} implementation for Playwright/REST tests. Pure: returns
+ * an in-memory {@link EmittedFile} list and never touches the filesystem.
+ */
+export const PlaywrightEmitter: Emitter = {
+  id: 'playwright',
+  name: 'Playwright (REST)',
+  async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
+    const content = renderPlaywrightSuite(collection, {
+      suiteName: ctx.suiteName,
+      mode: ctx.mode,
+    });
+    return [
+      {
+        relativePath: playwrightSuiteFileName(collection, ctx.mode),
+        content,
+      },
+    ];
+  },
+};
 
 function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOptions): string {
   const lines: string[] = [];
