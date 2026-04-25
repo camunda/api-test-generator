@@ -58,11 +58,6 @@ jobs:
       - name: Typecheck (request-validation)
         run: npx tsc --noEmit -p request-validation/tsconfig.json
 
-      - name: Build workspaces
-        run: |
-          npm run build:analyser
-          npm run build:request-validation
-
       - name: Fetch pinned OpenAPI spec
         env:
           SPEC_REF: ${{ steps.pin.outputs.spec_ref }}

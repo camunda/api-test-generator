@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 
 /**
  * Resolves the spec path + provenance string for the request validation generator.
@@ -23,11 +23,9 @@ export function resolveSpecSource(cwd: string = process.cwd()): {
   if (envPath) {
     const abs = path.isAbsolute(envPath) ? envPath : path.resolve(cwd, envPath);
     if (!fs.existsSync(abs)) {
-      throw new Error(
-        `[spec/source] REQUEST_VALIDATION_SPEC points to non-existent path: ${abs}`,
-      );
+      throw new Error(`[spec/source] REQUEST_VALIDATION_SPEC points to non-existent path: ${abs}`);
     }
-    return {specPath: abs, source: 'env'};
+    return { specPath: abs, source: 'env' };
   }
 
   // 2. Look for the bundled spec produced by the root workspace pipeline.
@@ -44,7 +42,7 @@ export function resolveSpecSource(cwd: string = process.cwd()): {
         /* ignore malformed metadata */
       }
     }
-    return {specPath: bundled, specProvenance: provenance, source: 'bundled'};
+    return { specPath: bundled, specProvenance: provenance, source: 'bundled' };
   }
 
   // 3. Legacy in-package cache fallback.
@@ -59,7 +57,7 @@ export function resolveSpecSource(cwd: string = process.cwd()): {
         /* ignore */
       }
     }
-    return {specPath: legacyYaml, specProvenance: provenance, source: 'legacy-cache'};
+    return { specPath: legacyYaml, specProvenance: provenance, source: 'legacy-cache' };
   }
 
   throw new Error(

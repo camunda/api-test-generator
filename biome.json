@@ -25,9 +25,9 @@
       "!**/dist",
       "!**/generated",
       "!**/node_modules",
-      "!**/spec",
+      "!spec",
       "!**/cache",
-      "!**/external-spec"
+      "!external-spec"
     ]
   },
   "linter": {
