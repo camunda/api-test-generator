@@ -1,7 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { EndpointScenarioCollection } from '../types.js';
-import { emitPlaywrightSuite } from './playwright/emitter.js';
+import { parseCliArgs } from './cli-args.js';
+import { writeEmitted } from './orchestrator.js';
+import { PlaywrightEmitter } from './playwright/emitter.js';
+import { getEmitter, listEmitters, registerEmitter } from './registry.js';
+
+// Built-in emitter registration. New emitters register themselves here.
+registerEmitter(PlaywrightEmitter);
 
 // JSON.parse is a runtime contract boundary: the on-disk scenario files are
 // produced by the generator and conform structurally to EndpointScenarioCollection.
@@ -12,8 +18,18 @@ function parseScenarioCollection(text: string): EndpointScenarioCollection {
   return JSON.parse(text) as EndpointScenarioCollection;
 }
 
+function printUsage(): void {
+  const targets = listEmitters()
+    .map((e) => `${e.id} (${e.name})`)
+    .join(', ');
+  console.error(
+    'Usage: node dist/src/codegen/index.js [--target=<id>] <operationId>|--all\n' +
+      `Available targets: ${targets || '(none)'}`,
+  );
+}
+
 async function run() {
-  const arg = process.argv[2];
+  const { target, positional, help } = parseCliArgs(process.argv.slice(2));
   const baseDir = process.cwd().endsWith('path-analyser')
     ? process.cwd()
     : path.resolve(process.cwd(), 'path-analyser');
@@ -29,21 +45,31 @@ async function run() {
     await fs.copyFile(envSrc, envDst);
   } catch {}
 
-  if (!arg || arg === '--help' || arg === '-h') {
-    console.error('Usage: node dist/codegen/index.js <operationId>|--all');
+  if (help || !positional) {
+    printUsage();
+    process.exit(1);
+  }
+
+  const emitter = getEmitter(target);
+  if (!emitter) {
+    console.error(
+      `Unknown emitter target: '${target}'. Available: ${listEmitters()
+        .map((e) => e.id)
+        .join(', ')}`,
+    );
     process.exit(1);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
 
-  if (arg === '--all') {
+  if (positional === '--all') {
     let count = 0;
     for (const f of files) {
       try {
         const content = await fs.readFile(path.join(featureDir, f), 'utf8');
         const parsed = parseScenarioCollection(content);
         if (!parsed.endpoint?.operationId) continue;
-        await emitPlaywrightSuite(parsed, {
+        await writeEmitted(emitter, parsed, {
           outDir,
           suiteName: parsed.endpoint.operationId,
           mode: 'feature',
@@ -54,11 +80,13 @@ async function run() {
         console.warn('Skipping file (parse/emission failed):', f, msg);
       }
     }
-    console.log(`Generated test suites for ${count} endpoints in ${outDir}`);
+    console.log(
+      `Generated test suites for ${count} endpoints in ${outDir} (target: ${emitter.id})`,
+    );
     return;
   }
 
-  const endpointOpId = arg;
+  const endpointOpId = positional;
   let match: string | null = null;
   for (const f of files) {
     const content = await fs.readFile(path.join(featureDir, f), 'utf8');
@@ -77,8 +105,12 @@ async function run() {
     process.exit(1);
   }
   const json = parseScenarioCollection(await fs.readFile(path.join(featureDir, match), 'utf8'));
-  await emitPlaywrightSuite(json, { outDir, suiteName: endpointOpId, mode: 'feature' });
-  console.log('Generated test suite for', endpointOpId, 'at', outDir);
+  await writeEmitted(emitter, json, {
+    outDir,
+    suiteName: endpointOpId,
+    mode: 'feature',
+  });
+  console.log('Generated test suite for', endpointOpId, 'at', outDir, `(target: ${emitter.id})`);
 }
 
 function _hyphenizeOp(op: string) {

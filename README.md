@@ -253,6 +253,23 @@ npm run test:pw                    # run the generated tests
 npm run observe:aggregate          # aggregate runtime observations
 ```
 
+#### Pluggable test emitters
+
+Suite generation is layered behind a small `Emitter` strategy interface
+(`path-analyser/src/codegen/emitter.ts`). The CLI selects an emitter via
+`--target=<id>` and falls back to `playwright` when omitted:
+
+```bash
+node path-analyser/dist/src/codegen/index.js --target=playwright createWidget
+node path-analyser/dist/src/codegen/index.js --target=playwright --all
+```
+
+The current built-in is `playwright`. Additional targets (e.g. SDK-based
+suites — see [#8](https://github.com/camunda/api-test-generator/issues/8))
+register themselves through `registerEmitter()` and are listed in
+`--help`. The emitter contract is **experimental** and may change while
+the SDK strategies land.
+
 ### request-validation
 
 A spec-driven generator that synthesizes **negative** Playwright tests targeting
