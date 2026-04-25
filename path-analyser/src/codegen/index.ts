@@ -23,7 +23,7 @@ function printUsage(): void {
     .map((e) => `${e.id} (${e.name})`)
     .join(', ');
   console.error(
-    'Usage: node dist/codegen/index.js [--target=<id>] <operationId>|--all\n' +
+    'Usage: node dist/src/codegen/index.js [--target=<id>] <operationId>|--all\n' +
       `Available targets: ${targets || '(none)'}`,
   );
 }

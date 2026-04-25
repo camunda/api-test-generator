@@ -10,7 +10,7 @@ import type { EndpointScenarioCollection } from '../types.js';
 export interface EmitContext {
   /** Absolute path of the directory tests should be emitted into. */
   outDir: string;
-  /** Suite name used in the file name and `describe()` block. */
+  /** Suite name used for test naming (for example, `describe()` blocks) and optionally for file names, depending on the emitter. */
   suiteName: string;
   /** Generation mode — `feature` is the default for path-analyser scenarios. */
   mode: 'feature' | 'integration';

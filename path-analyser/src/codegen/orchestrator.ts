@@ -24,12 +24,17 @@ export async function writeEmitted(
           'Emitted file paths must be relative to ctx.outDir.',
       );
     }
-    if (f.relativePath.includes('..')) {
+    // Resolve and assert the destination stays within ctx.outDir. A naive
+    // substring check on `..` would reject legitimate filenames like
+    // `foo..bar.ts` and would not catch escapes hidden inside deeper segments.
+    const resolvedOutDir = path.resolve(ctx.outDir);
+    const abs = path.resolve(resolvedOutDir, f.relativePath);
+    const rel = path.relative(resolvedOutDir, abs);
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
       throw new Error(
         `Emitter '${emitter.id}' returned path '${f.relativePath}' that escapes ctx.outDir.`,
       );
     }
-    const abs = path.join(ctx.outDir, f.relativePath);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, f.content, 'utf8');
     written.push(abs);

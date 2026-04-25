@@ -72,4 +72,23 @@ describe('orchestrator.writeEmitted', () => {
     const e = buildEmitter([{ relativePath: '../escape.ts', content: 'oops' }]);
     await expect(writeEmitted(e, FIXTURE, ctx())).rejects.toThrowError(/escapes ctx.outDir/);
   });
+
+  test('rejects paths that escape outDir via a deeper .. segment', async () => {
+    const e = buildEmitter([{ relativePath: 'a/b/../../../escape.ts', content: 'oops' }]);
+    await expect(writeEmitted(e, FIXTURE, ctx())).rejects.toThrowError(/escapes ctx.outDir/);
+  });
+
+  test('allows a filename that contains .. as a substring (not a parent-dir segment)', async () => {
+    const e = buildEmitter([{ relativePath: 'foo..bar.spec.ts', content: '// ok' }]);
+    const written = await writeEmitted(e, FIXTURE, ctx());
+    expect(written).toHaveLength(1);
+    expect(readFileSync(path.join(tmp, 'foo..bar.spec.ts'), 'utf8')).toBe('// ok');
+  });
+
+  test('allows nested .. segments that resolve to a path inside outDir', async () => {
+    const e = buildEmitter([{ relativePath: 'a/b/../inside.ts', content: '// ok' }]);
+    const written = await writeEmitted(e, FIXTURE, ctx());
+    expect(written).toHaveLength(1);
+    expect(readFileSync(path.join(tmp, 'a/inside.ts'), 'utf8')).toBe('// ok');
+  });
 });
