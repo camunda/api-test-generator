@@ -4,7 +4,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   materializeStandalone,
+  SCRIPTS_DIR_NAME,
   STANDALONE_ROOT_FILES,
+  STANDALONE_SCRIPT_FILES,
   STANDALONE_SUPPORT_FILES,
   SUPPORT_DIR_NAME,
 } from '../../request-validation/src/emit/materializeStandalone.ts';
@@ -35,6 +37,18 @@ describe('materializeStandalone', () => {
     }
   });
 
+  test('writes all analyser scripts into <outDir>/scripts/', async () => {
+    await materializeStandalone(tmp);
+    const scriptsDir = path.join(tmp, SCRIPTS_DIR_NAME);
+    expect(existsSync(scriptsDir)).toBe(true);
+    const entries = (await fs.readdir(scriptsDir)).sort();
+    expect(entries).toEqual([...STANDALONE_SCRIPT_FILES].sort());
+    for (const name of STANDALONE_SCRIPT_FILES) {
+      const stat = await fs.stat(path.join(scriptsDir, name));
+      expect(stat.size).toBeGreaterThan(0);
+    }
+  });
+
   test('is idempotent: a second call overwrites without error', async () => {
     await materializeStandalone(tmp);
     await expect(materializeStandalone(tmp)).resolves.toBe(path.join(tmp, SUPPORT_DIR_NAME));
@@ -48,6 +62,11 @@ describe('materializeStandalone', () => {
       for (const name of STANDALONE_SUPPORT_FILES) {
         await fs.writeFile(path.join(fakeSupport, name), `// fake-support-${name}\n`, 'utf8');
       }
+      const fakeScripts = path.join(fakeSrc, SCRIPTS_DIR_NAME);
+      await fs.mkdir(fakeScripts, { recursive: true });
+      for (const name of STANDALONE_SCRIPT_FILES) {
+        await fs.writeFile(path.join(fakeScripts, name), `// fake-script-${name}\n`, 'utf8');
+      }
       for (const name of STANDALONE_ROOT_FILES) {
         await fs.writeFile(path.join(fakeSrc, name), `// fake-root-${name}\n`, 'utf8');
       }
@@ -57,6 +76,10 @@ describe('materializeStandalone', () => {
       for (const name of STANDALONE_SUPPORT_FILES) {
         const content = await fs.readFile(path.join(tmp, SUPPORT_DIR_NAME, name), 'utf8');
         expect(content).toBe(`// fake-support-${name}\n`);
+      }
+      for (const name of STANDALONE_SCRIPT_FILES) {
+        const content = await fs.readFile(path.join(tmp, SCRIPTS_DIR_NAME, name), 'utf8');
+        expect(content).toBe(`// fake-script-${name}\n`);
       }
       for (const name of STANDALONE_ROOT_FILES) {
         const content = await fs.readFile(path.join(tmp, name), 'utf8');
@@ -74,6 +97,11 @@ describe('materializeStandalone', () => {
       await fs.mkdir(fakeSupport, { recursive: true });
       for (const name of STANDALONE_SUPPORT_FILES) {
         await fs.writeFile(path.join(fakeSupport, name), 'NEW SUPPORT', 'utf8');
+      }
+      const fakeScripts = path.join(fakeSrc, SCRIPTS_DIR_NAME);
+      await fs.mkdir(fakeScripts, { recursive: true });
+      for (const name of STANDALONE_SCRIPT_FILES) {
+        await fs.writeFile(path.join(fakeScripts, name), 'NEW SCRIPT', 'utf8');
       }
       for (const name of STANDALONE_ROOT_FILES) {
         await fs.writeFile(path.join(fakeSrc, name), 'NEW ROOT', 'utf8');
@@ -107,6 +135,11 @@ describe('materializeStandalone', () => {
       await fs.mkdir(fakeSupport, { recursive: true });
       for (const name of STANDALONE_SUPPORT_FILES.slice(1)) {
         await fs.writeFile(path.join(fakeSupport, name), 'x', 'utf8');
+      }
+      const fakeScripts = path.join(fakeSrc, SCRIPTS_DIR_NAME);
+      await fs.mkdir(fakeScripts, { recursive: true });
+      for (const name of STANDALONE_SCRIPT_FILES) {
+        await fs.writeFile(path.join(fakeScripts, name), 'x', 'utf8');
       }
       for (const name of STANDALONE_ROOT_FILES) {
         await fs.writeFile(path.join(fakeSrc, name), 'x', 'utf8');

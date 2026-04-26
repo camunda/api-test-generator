@@ -4,7 +4,8 @@
   "private": true,
   "description": "Generated negative request validation Playwright suite for the Camunda Orchestration Cluster REST API.",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "summarize": "node scripts/summarize-failures.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
