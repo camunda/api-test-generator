@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from '../../types.js';
 import { planFinalStepAssertions } from '../assertionPlanner.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
+import { materializeSupport } from './materialize-support.js';
 
 interface EmitOptions {
   outDir: string;
@@ -41,12 +42,18 @@ export function renderPlaywrightSuite(
  * Legacy filesystem-writing entry point. Retained for backwards compatibility
  * with the existing `codegen:playwright` script. New callers should use the
  * {@link PlaywrightEmitter} via the registry.
+ *
+ * Vendors the runtime support helpers into `<outDir>/support/` so the
+ * emitted suite is self-contained — direct callers of this function get a
+ * runnable suite without needing to call {@link materializeSupport}
+ * separately.
  */
 export async function emitPlaywrightSuite(
   collection: EndpointScenarioCollection,
   opts: EmitOptions,
 ) {
   await fs.mkdir(opts.outDir, { recursive: true });
+  await materializeSupport(opts.outDir);
   const file = path.join(opts.outDir, playwrightSuiteFileName(collection, opts.mode || 'feature'));
   const code = renderPlaywrightSuite(collection, opts);
   await fs.writeFile(file, code, 'utf8');
@@ -79,10 +86,12 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   const suiteName = opts.suiteName || collection.endpoint.operationId;
   // Import only test & expect; request fixture is provided per-test via parameters
   lines.push("import { test, expect } from '@playwright/test';");
-  // Import env helpers from compiled support location relative to generated tests
-  lines.push("import { buildBaseUrl, authHeaders } from '../src/codegen/support/env';");
-  lines.push("import { recordResponse, sanitizeBody } from '../src/codegen/support/recorder';");
-  lines.push("import { seedBinding } from '../src/codegen/support/seeding';");
+  // Import vendored helpers from the suite-local ./support/ directory.
+  // materializeSupport() copies these files alongside the emitted specs so
+  // the generated suite has no dependency on this generator project.
+  lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
+  lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
+  lines.push("import { seedBinding } from './support/seeding';");
   lines.push('');
   lines.push(`test.describe('${suiteName}', () => {`);
   for (const scenario of collection.scenarios) {

@@ -4,6 +4,7 @@ import type { EndpointScenarioCollection } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
+import { materializeSupport } from './playwright/materialize-support.js';
 import { getEmitter, listEmitters, registerEmitter } from './registry.js';
 
 // Built-in emitter registration. New emitters register themselves here.
@@ -35,15 +36,6 @@ async function run() {
     : path.resolve(process.cwd(), 'path-analyser');
   const featureDir = path.join(baseDir, 'dist/feature-output');
   const outDir = path.join(baseDir, 'dist/generated-tests');
-  await fs.mkdir(outDir, { recursive: true });
-  // Ensure runtime support files are available alongside generated tests
-  try {
-    const envSrc = path.join(baseDir, 'dist/src/codegen/support/env.js');
-    const envDstDir = path.join(outDir, 'support');
-    await fs.mkdir(envDstDir, { recursive: true });
-    const envDst = path.join(envDstDir, 'env.js');
-    await fs.copyFile(envSrc, envDst);
-  } catch {}
 
   if (help || !positional) {
     printUsage();
@@ -58,6 +50,15 @@ async function run() {
         .join(', ')}`,
     );
     process.exit(1);
+  }
+
+  await fs.mkdir(outDir, { recursive: true });
+  // Vendor the runtime support helpers into <outDir>/support/ so the
+  // emitted suite is self-contained (no imports back into this generator).
+  // Only the Playwright emitter currently needs these; gate on the emitter id
+  // so future targets that don't depend on these helpers don't pay the cost.
+  if (emitter.id === 'playwright') {
+    await materializeSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
