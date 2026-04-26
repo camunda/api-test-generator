@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-04-26T05:48:17.630Z",
-  "fileCount": 406,
+  "generatedAt": "2026-04-26T05:54:24.782Z",
+  "fileCount": 411,
   "trees": [
     "semantic-graph-extractor/dist/output",
     "path-analyser/dist/output",
@@ -8,6 +8,7 @@
     "request-validation/generated"
   ],
   "files": {
+    "path-analyser/dist/generated-tests/.env.example": "77117daf3c11eee35b4ac6cd6eb9eb7f7094760758fb3fdc5501e898b269933a",
     "path-analyser/dist/generated-tests/activateAdHocSubProcessActivities.feature.spec.ts": "4b961f8bd547468b3b7f5457b5aa58d1356fe00c646e4496d8ae0aae848466ed",
     "path-analyser/dist/generated-tests/activateJobs.feature.spec.ts": "6688094748e620d7117b08984a179eb41bd02fb1613e235139504d6aff5ba155",
     "path-analyser/dist/generated-tests/assignClientToGroup.feature.spec.ts": "cc4c5a77ef4fd372f90cc6cb9c0104aaebbbf554f88696cc83e4308a8a677ec0",
@@ -117,8 +118,11 @@
     "path-analyser/dist/generated-tests/migrateProcessInstancesBatchOperation.feature.spec.ts": "fcb05535da15e7ed17c1da6fc14cb6fd02631fe864089d2a3a434bf42e4d47a1",
     "path-analyser/dist/generated-tests/modifyProcessInstance.feature.spec.ts": "052b1b5eadea85d7dab3b54b262cae2773c2d4bad52f8628a2005adb8a974476",
     "path-analyser/dist/generated-tests/modifyProcessInstancesBatchOperation.feature.spec.ts": "c0963fa82a66e809c281036f59919ccab26d9cc18803cbbf98a9418374ee2aa3",
+    "path-analyser/dist/generated-tests/package.json": "23e4444769ed20c8c0a5153a39c4b33dfb6c87d0b9b1ff4298c2f9ddd0c14f6d",
     "path-analyser/dist/generated-tests/pinClock.feature.spec.ts": "486e3f33c3f2fd5a79c256d5146ad5a90e5b2714acf0cd212a7aaf2ae81a5784",
+    "path-analyser/dist/generated-tests/playwright.config.ts": "e59aeec1bc49b340aed05266a493b9c41e76a4b84b960b399d1a827b83300351",
     "path-analyser/dist/generated-tests/publishMessage.feature.spec.ts": "fc5283309bddd36552501cd709aaa288fa83a14e7f79117f4df13e4ab92c5ae1",
+    "path-analyser/dist/generated-tests/README.md": "d3fd9aab51d4cdc397b13ff7adfe7d8a6410a50f4f7bca6039e7541b7c10b7d4",
     "path-analyser/dist/generated-tests/resetClock.feature.spec.ts": "bc377b94aa4060c646af4889bb60f6b706abc1856abfc1729ac27304c26a3b50",
     "path-analyser/dist/generated-tests/resolveIncident.feature.spec.ts": "e0c131b2495017f0291cd5f44217a515f6390e0617c974754515ce751375bb4b",
     "path-analyser/dist/generated-tests/resolveIncidentsBatchOperation.feature.spec.ts": "381969beb85ad95ffc3a2ffed27651b0aaca1927e99475ef571d07834ec9ca1a",
@@ -171,6 +175,7 @@
     "path-analyser/dist/generated-tests/support/seeding.ts": "931b97cedddf6711e11546fb15797b3aac1982bb0fe9cd86423feae6e94f6cdc",
     "path-analyser/dist/generated-tests/suspendBatchOperation.feature.spec.ts": "2fd7d06e8b77805983f4e0004c5f93f59876a691bfdecdff8944fe32de27d657",
     "path-analyser/dist/generated-tests/throwJobError.feature.spec.ts": "de9f7b25d756a98f2a6cfac62d1527dcec936ba61869dc388931051b5671a036",
+    "path-analyser/dist/generated-tests/tsconfig.json": "4cbe5253520faab8eaee005058db1cb5a36c3747e7a73929ba451ac2adb1f983",
     "path-analyser/dist/generated-tests/unassignClientFromGroup.feature.spec.ts": "2af022ff4443da4c07b322147a256701ba8c550697d1c1a49400c3f30ababc0c",
     "path-analyser/dist/generated-tests/unassignClientFromTenant.feature.spec.ts": "b739765890b9d95782cd1e981251025c0144ae5194a67b965aac2755d747fdce",
     "path-analyser/dist/generated-tests/unassignGroupFromTenant.feature.spec.ts": "29233a1a0cd340294fd1059b02cf04eb32a55bb085a7b0b35c1b7b9e9f8c39a6",
