@@ -99,8 +99,17 @@ function buildFile(
   if (specCommit) meta.push(` * Spec Commit: ${specCommit}`);
   meta.push(' */');
   lines.push(meta.join('\n'));
-  lines.push("import {test} from '@playwright/test'");
-  lines.push(`import {jsonHeaders, buildUrl, assertResponseStatus} from '${httpImport}'`);
+  if (standalone) {
+    lines.push("import {test} from '@playwright/test'");
+    lines.push(`import {jsonHeaders, buildUrl, assertResponseStatus} from '${httpImport}'`);
+  } else {
+    // Legacy QA-tree mode: the external `utils/http` module does not export
+    // `assertResponseStatus`, so fall back to a bare `expect(...).toBe(...)`
+    // assertion. Diagnostics-rich failure messages and report attachments are
+    // a standalone-only feature.
+    lines.push("import {expect, test} from '@playwright/test'");
+    lines.push(`import {jsonHeaders, buildUrl} from '${httpImport}'`);
+  }
   lines.push('');
   lines.push(`test.describe('${describeTitle}', () => {`);
   // Pre-compute base titles and detect duplicates for uniqueness
@@ -118,16 +127,17 @@ function buildFile(
       occurrence.set(base, n);
       finalTitle = `${base} (#${n})`;
     }
-    lines.push(renderScenario(s, finalTitle));
+    lines.push(renderScenario(s, finalTitle, standalone));
   }
   lines.push('});');
   lines.push('');
   return lines.join('\n');
 }
 
-function renderScenario(s: ValidationScenario, title: string): string {
+function renderScenario(s: ValidationScenario, title: string, standalone: boolean): string {
   const lines: string[] = [];
-  lines.push(`  test(${JSON.stringify(title)}, async ({request}, testInfo) => {`);
+  const fixtureArg = standalone ? '({request}, testInfo)' : '({request})';
+  lines.push(`  test(${JSON.stringify(title)}, async ${fixtureArg} => {`);
   const paramsLit = s.params ? JSON.stringify(s.params) : 'undefined';
   const pathLit = JSON.stringify(s.path.replace(/\{([^}]+)}/g, '{$1}'));
   const urlCall = `buildUrl(${pathLit}, ${paramsLit})`;
@@ -161,23 +171,28 @@ function renderScenario(s: ValidationScenario, title: string): string {
   lines.push(`        headers: ${headersExpr}${dataPart}`);
   lines.push('      }');
   lines.push('    );');
-  // Diagnostics: assertResponseStatus attaches request/response artifacts to
-  // the Playwright report on failure and produces a multi-line failure message
-  // including method, URL, expected vs. actual status, and the response body.
-  const ctxParts: string[] = [
-    `operationId: ${JSON.stringify(s.operationId)}`,
-    `scenarioKind: ${JSON.stringify(s.type)}`,
-    `method: ${JSON.stringify(s.method.toUpperCase())}`,
-    `url`,
-  ];
-  if (s.bodyEncoding === 'multipart' && s.multipartForm) {
-    ctxParts.push(`multipart: multipartFields`);
-  } else if (s.requestBody) {
-    ctxParts.push(`body: requestBody`);
+  if (standalone) {
+    // Diagnostics: assertResponseStatus attaches request/response artifacts to
+    // the Playwright report on failure and produces a multi-line failure message
+    // including method, URL, expected vs. actual status, and the response body.
+    const ctxParts: string[] = [
+      `operationId: ${JSON.stringify(s.operationId)}`,
+      `scenarioKind: ${JSON.stringify(s.type)}`,
+      `method: ${JSON.stringify(s.method.toUpperCase())}`,
+      `url`,
+    ];
+    if (s.bodyEncoding === 'multipart' && s.multipartForm) {
+      ctxParts.push(`multipart: multipartFields`);
+    } else if (s.requestBody) {
+      ctxParts.push(`body: requestBody`);
+    }
+    lines.push(
+      `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} });`,
+    );
+  } else {
+    // Legacy QA-tree mode: bare assertion, no attachments.
+    lines.push(`    expect(res.status()).toBe(${s.expectedStatus});`);
   }
-  lines.push(
-    `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} });`,
-  );
   lines.push('  });');
   return lines.join('\n');
 }

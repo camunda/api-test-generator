@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-26T06:35:53.423Z",
+  "generatedAt": "2026-04-26T09:18:12.610Z",
   "fileCount": 412,
   "trees": [
     "semantic-graph-extractor/dist/output",
@@ -411,11 +411,11 @@
     "request-validation/generated/processinstances-validation-api-tests.spec.ts": "84a4d3cae691962346fa4777c0776dbfb11975440f1f66184115ff044185916c",
     "request-validation/generated/README.md": "832b86f717d94b28937f992a377035c868698a64ea3b9afd80869b65e657b1f8",
     "request-validation/generated/roles-validation-api-tests.spec.ts": "809e662788da9233a7ad2285483c43a708ee2948e56311744371ceef6e6061e0",
-    "request-validation/generated/scripts/summarize-failures.mjs": "0352de117647f2472b0f091941c00899377065e5e49038d3bc7c09383fc3c1a4",
+    "request-validation/generated/scripts/summarize-failures.mjs": "aeb809bd854501a6a79b8e18e67d49ae349c24f2ee32970ab369887d9078077a",
     "request-validation/generated/setup-validation-api-tests.spec.ts": "4ee189a5f5941619b4c76649bb621d3a7ed207631ac88e7a6a72f25ae339302a",
     "request-validation/generated/signals-validation-api-tests.spec.ts": "773521a7f81b3b4aa70e8bd73b076e46466a1cf00bb436f1c2de121578d6d4cf",
     "request-validation/generated/support/env.ts": "015783074d7d4c671a63eaa3987a336d06c30a2c08949500f1e384fd39a46942",
-    "request-validation/generated/support/http.ts": "718ed1cdea07174e89b4d92c882a861671d01639335e00564951baea969919fd",
+    "request-validation/generated/support/http.ts": "22b39a73f639aa84a4fe4a4fb0ece793a953952fe381314155cd98b38a2a085d",
     "request-validation/generated/tenants-validation-api-tests.spec.ts": "8d52f8d8acf7b9b9f4a201d8b79c3205cd7a4a5d320212e01b18552c692b9075",
     "request-validation/generated/tsconfig.json": "4cbe5253520faab8eaee005058db1cb5a36c3747e7a73929ba451ac2adb1f983",
     "request-validation/generated/users-validation-api-tests.spec.ts": "a14d23f8b6d6895295d697b252df8f04074dd75c4da871ab911756b353897805",

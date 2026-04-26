@@ -81,15 +81,20 @@ function walkSuites(suites, out, fileHint) {
     const file = suite.file ?? fileHint;
     for (const spec of suite.specs ?? []) {
       for (const test of spec.tests ?? []) {
-        for (const result of test.results ?? []) {
-          if (result.status === 'passed' || result.status === 'skipped') continue;
-          const ctx = extractContext(result);
-          out.push({
-            title: spec.title,
-            file: file ?? '(unknown)',
-            ...ctx,
-          });
-        }
+        // Only inspect the final attempt: with Playwright `retries > 0` a
+        // flaky test that eventually passes will leave failed entries in
+        // `test.results`, which would otherwise inflate failure counts and
+        // misattribute groupings.
+        const results = test.results ?? [];
+        const result = results[results.length - 1];
+        if (!result) continue;
+        if (result.status === 'passed' || result.status === 'skipped') continue;
+        const ctx = extractContext(result);
+        out.push({
+          title: spec.title,
+          file: file ?? '(unknown)',
+          ...ctx,
+        });
       }
     }
     if (suite.suites) walkSuites(suite.suites, out, file);

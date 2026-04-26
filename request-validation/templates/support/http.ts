@@ -102,12 +102,19 @@ export async function assertResponseStatus(
     null,
     2,
   );
+  // Cap attached body so that a single oversized error payload (e.g. an HTML
+  // error page) cannot bloat `test-results.json` / the HTML report. The JSON
+  // reporter base64-encodes attachments, so each KB here costs ~1.33 KB on
+  // disk.
+  const cappedBodyText = capString(bodyText, MAX_ATTACHMENT_BODY_BYTES);
   const responseArtifact = JSON.stringify(
     {
       status: actual,
       statusText: res.statusText(),
       headers: res.headers(),
-      body: tryParseJson(bodyText) ?? bodyText,
+      body: tryParseJson(cappedBodyText.value) ?? cappedBodyText.value,
+      bodyTruncated: cappedBodyText.truncated || undefined,
+      bodyOriginalBytes: cappedBodyText.truncated ? cappedBodyText.originalBytes : undefined,
     },
     null,
     2,
@@ -161,4 +168,23 @@ function tryParseJson(s: string): unknown | undefined {
 function truncate(s: string, n: number): string {
   if (!s) return '(empty)';
   return s.length > n ? `${s.slice(0, n)}… (${s.length - n} more bytes)` : s;
+}
+
+/**
+ * Maximum number of bytes (UTF-8) of response body to embed in attachments.
+ * Keeps `test-results.json` and `playwright-report/` bounded even when the
+ * server returns large payloads (e.g. HTML error pages, verbose stack traces).
+ */
+const MAX_ATTACHMENT_BODY_BYTES = 64 * 1024;
+
+function capString(
+  s: string,
+  maxBytes: number,
+): { value: string; truncated: boolean; originalBytes: number } {
+  if (!s) return { value: s, truncated: false, originalBytes: 0 };
+  const originalBytes = Buffer.byteLength(s, 'utf8');
+  if (originalBytes <= maxBytes) return { value: s, truncated: false, originalBytes };
+  // Slice on byte boundary, then trim any partial UTF-8 sequence.
+  const buf = Buffer.from(s, 'utf8').subarray(0, maxBytes);
+  return { value: buf.toString('utf8'), truncated: true, originalBytes };
 }
