@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-04-26T21:27:44.689Z",
-  "fileCount": 413,
+  "generatedAt": "2026-04-26T21:31:01.693Z",
+  "fileCount": 412,
   "trees": [
     "semantic-graph-extractor/dist/output",
     "path-analyser/dist/output",
@@ -174,7 +174,6 @@
     "path-analyser/dist/generated-tests/support/seed-rules.json": "5819f41d4a789c4af66b9953cd35b0705af515cc72ec922a9765857f15f14f2d",
     "path-analyser/dist/generated-tests/support/seeding.ts": "931b97cedddf6711e11546fb15797b3aac1982bb0fe9cd86423feae6e94f6cdc",
     "path-analyser/dist/generated-tests/suspendBatchOperation.feature.spec.ts": "2fd7d06e8b77805983f4e0004c5f93f59876a691bfdecdff8944fe32de27d657",
-    "path-analyser/dist/generated-tests/test-results/.last-run.json": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903",
     "path-analyser/dist/generated-tests/throwJobError.feature.spec.ts": "de9f7b25d756a98f2a6cfac62d1527dcec936ba61869dc388931051b5671a036",
     "path-analyser/dist/generated-tests/tsconfig.json": "4cbe5253520faab8eaee005058db1cb5a36c3747e7a73929ba451ac2adb1f983",
     "path-analyser/dist/generated-tests/unassignClientFromGroup.feature.spec.ts": "2af022ff4443da4c07b322147a256701ba8c550697d1c1a49400c3f30ababc0c",
