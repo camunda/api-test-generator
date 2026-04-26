@@ -237,8 +237,6 @@ function findOneOfGroups(
   const resolved = resolveSchema(root, components);
   // Top-level oneOf
   if (resolved.oneOf && Array.isArray(resolved.oneOf)) {
-    // vendor extension flag for genuine polymorphic unions
-    const isPolymorphic = resolved['x-polymorphic-schema'] === true;
     const variants: RequestOneOfVariant[] = resolved.oneOf.map((v: JsonSchema, idx: number) => {
       const vs = resolveSchema(v, components);
       const props = vs.properties || {};
@@ -268,7 +266,6 @@ function findOneOfGroups(
       groupId,
       variants,
       unionFields: [...new Set(variants.flatMap((v) => [...v.required, ...v.optional]))],
-      isPolymorphic,
     });
   }
   // Nested: scan properties one level deep for oneOf (shallow)

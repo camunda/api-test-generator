@@ -81,7 +81,6 @@ export interface EndpointScenario {
   syntheticBindings?: string[]; // variables created without a producing op
   // Request variant / filter coverage enrichments
   requestVariants?: { groupId: string; variant: string; richness: 'minimal' | 'rich' }[];
-  exclusivityViolations?: string[]; // for negative mutual exclusivity tests
   filtersDetail?: FilterDetail[]; // structured filter dimension info
   // Response shape (for future assertion synthesis)
   responseShapeSemantics?: string[]; // semantic types inferred from response fields
@@ -103,14 +102,6 @@ export interface EndpointScenario {
     { name: string; type: string; required?: boolean; nullable?: boolean }[]
   >;
   requestPlan?: RequestStep[]; // concrete request assembly plan per operation (ordered)
-  // For schema 400 negatives: which required fields are included (others are omitted)
-  schemaMissingInclude?: string[];
-  // For schema 400 negatives: explicit list of required fields we intentionally suppress/omit
-  schemaMissingSuppress?: string[];
-  // For schema wrong-type negatives: which leaf fields should be assigned wrong types
-  schemaWrongTypeInclude?: string[];
-  // Detailed mapping for wrong-type negatives: field -> expected vs sent (mutated) type
-  schemaWrongTypeDetail?: { field: string; expectedType: string; sentType: string }[];
   // Duplicate invocation testing (for conditional idempotency / duplicatePolicy conflict)
   duplicateTest?: {
     mode: 'conditional' | 'conflict';
@@ -152,10 +143,6 @@ export interface FeatureVariantSpec {
   // Artifact deployment coverage (from domain.operationArtifactRules)
   artifactRuleId?: string; // e.g., 'bpmn' | 'form' | 'dmn' | 'drd'
   artifactKind?: string; // e.g., 'bpmnProcess' | 'form' | 'dmnDecision' | 'dmnDrd'
-  // Schema negative: omit at least one required field to provoke 400
-  schemaMissingRequired?: boolean;
-  // Schema negative: send wrong type for one or more fields to provoke 400
-  schemaWrongType?: boolean;
   // Duplicate invocation variant (adds a second call of endpoint within scenario)
   duplicateTest?: {
     mode: 'conditional' | 'conflict';
@@ -212,10 +199,6 @@ export interface RequestOneOfGroupSummary {
   groupId: string;
   variants: RequestOneOfVariant[];
   unionFields: string[]; // all distinct field names across variants
-  // When true, the source schema for this oneOf group is explicitly marked as polymorphic
-  // via the vendor extension `x-polymorphic-schema: true` in the OpenAPI spec.
-  // Use this to decide whether to generate union violation negatives (union-all/pairwise).
-  isPolymorphic?: boolean;
 }
 
 export interface ExtractedRequestVariantsIndex {
