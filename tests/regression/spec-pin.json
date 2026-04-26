@@ -1,0 +1,5 @@
+{
+  "$comment": "Spec pin for the regression baseline. The pipeline-snapshot.json was captured against the upstream spec content fingerprinted by `expectedSpecHash`. CI fetches the spec at `specRef` and aborts early if its hash drifts, so reviewers see a clear 'spec changed upstream — re-pin' signal instead of an opaque snapshot diff. To bump: fetch a newer spec, run `npm run snapshot:update`, then update both fields below in the same PR.",
+  "specRef": "main",
+  "expectedSpecHash": "sha256:9a643728aa05c5af18f6b6ed9dc1f088521de4b14b113d1fd4ba42888a578aff"
+}

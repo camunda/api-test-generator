@@ -1,0 +1,90 @@
+name: PR & Branch CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Lint, typecheck, regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Read pinned spec ref
+        id: pin
+        # The snapshot regression baseline was captured against a specific
+        # upstream spec content. We fetch that ref so unrelated upstream
+        # changes don't randomly fail PRs. See tests/regression/spec-pin.json
+        # for the bump procedure.
+        run: |
+          spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('tests/regression/spec-pin.json','utf8')).specRef)")
+          echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"
+          echo "Pinned spec ref: ${spec_ref}"
+
+      - name: Lint (Biome)
+        run: npm run lint
+
+      - name: Typecheck (semantic-graph-extractor)
+        run: npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
+
+      - name: Typecheck (path-analyser)
+        run: npx tsc --noEmit -p path-analyser/tsconfig.json
+
+      - name: Typecheck (request-validation)
+        run: npx tsc --noEmit -p request-validation/tsconfig.json
+
+      - name: Fetch pinned OpenAPI spec
+        env:
+          SPEC_REF: ${{ steps.pin.outputs.spec_ref }}
+        run: npm run fetch-spec:ref
+
+      - name: Regenerate pipeline outputs
+        env:
+          # Match the seed used to capture the baseline so any pseudo-random
+          # ordering / sampling in the generators is reproducible in CI.
+          TEST_SEED: snapshot-baseline
+        run: |
+          npm run testsuite:generate
+          npm run generate:request-validation
+
+      - name: Run regression + unit tests
+        run: npm test
+
+      - name: Upload pipeline outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pipeline-outputs
+          path: |
+            semantic-graph-extractor/dist/output
+            path-analyser/dist/output
+            path-analyser/dist/generated-tests
+            request-validation/generated
+            spec/bundled/spec-metadata.json
+          if-no-files-found: warn
+          retention-days: 7
