@@ -25,7 +25,7 @@ export const SUPPORT_TEMPLATE_FILES = [
 /** Subdirectory created under the emitter's outDir to hold vendored helpers. */
 export const SUPPORT_DIR_NAME = 'support';
 
-function templatesDir(): string {
+function defaultTemplatesDir(): string {
   // import.meta.url resolves to the running module location:
   //   - dist:  <pkg>/dist/src/codegen/playwright/materialize-support.js
   //   - tsx :  <pkg>/src/codegen/playwright/materialize-support.ts
@@ -46,9 +46,16 @@ function templatesDir(): string {
  *
  * Idempotent: safe to call multiple times per emit run; later calls just
  * overwrite the previous copies.
+ *
+ * @param outDir       Directory to materialize the support files into.
+ * @param templatesDir Optional override for the templates source directory.
+ *                     Production callers should omit this; it exists so tests
+ *                     can exercise the missing-template path without mutating
+ *                     checked-in source files (which would race with other
+ *                     tests under Vitest's `pool: 'forks'` configuration).
  */
-export async function materializeSupport(outDir: string): Promise<string> {
-  const srcDir = templatesDir();
+export async function materializeSupport(outDir: string, templatesDir?: string): Promise<string> {
+  const srcDir = templatesDir ?? defaultTemplatesDir();
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
   await fs.mkdir(destDir, { recursive: true });
   for (const name of SUPPORT_TEMPLATE_FILES) {
