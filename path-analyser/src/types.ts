@@ -85,11 +85,23 @@ export interface EndpointScenario {
   filtersDetail?: FilterDetail[]; // structured filter dimension info
   // Response shape (for future assertion synthesis)
   responseShapeSemantics?: string[]; // semantic types inferred from response fields
-  responseShapeFields?: { name: string; type: string; semantic?: string; required?: boolean }[];
+  responseShapeFields?: {
+    name: string;
+    type: string;
+    semantic?: string;
+    required?: boolean;
+    nullable?: boolean;
+  }[];
   // Nested slice field shapes keyed by slice name for deep assertions
-  responseNestedSlices?: Record<string, { name: string; type: string; required?: boolean }[]>;
+  responseNestedSlices?: Record<
+    string,
+    { name: string; type: string; required?: boolean; nullable?: boolean }[]
+  >;
   // Nested array item field shapes keyed by top-level array field name (e.g., jobs -> fields on jobs[0])
-  responseArrayItemFields?: Record<string, { name: string; type: string; required?: boolean }[]>;
+  responseArrayItemFields?: Record<
+    string,
+    { name: string; type: string; required?: boolean; nullable?: boolean }[]
+  >;
   requestPlan?: RequestStep[]; // concrete request assembly plan per operation (ordered)
   // For schema 400 negatives: which required fields are included (others are omitted)
   schemaMissingInclude?: string[];
@@ -164,6 +176,10 @@ export interface ResponseShapeField {
   name: string;
   type: string; // string|integer|boolean|object|array|unknown
   required?: boolean;
+  // Whether the field is nullable per OpenAPI spec (`nullable: true`).
+  // Propagated end-to-end so the emitter can guard type assertions against
+  // legitimate `null` values instead of failing on them.
+  nullable?: boolean;
   semantic?: string; // mapped semantic type if recognized
   elementType?: string; // for arrays
   objectRef?: string; // referenced schema name

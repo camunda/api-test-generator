@@ -23,6 +23,10 @@ interface JsonSchema {
   oneOf?: JsonSchema[];
   anyOf?: JsonSchema[];
   title?: string;
+  // OpenAPI 3.0 `nullable: true` marker. Propagated through the codegen
+  // pipeline so the emitter can guard runtime type assertions against
+  // legitimate `null` values.
+  nullable?: boolean;
   discriminator?: { propertyName?: string; mapping?: Record<string, string> };
   'x-polymorphic-schema'?: boolean;
   [key: string]: unknown;
@@ -94,7 +98,12 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
                 for (const [iname, isch] of Object.entries(o.properties || {})) {
                   const ir = resolveSchema(isch, components);
                   const t = effectiveType(ir, components);
-                  inner.push({ name: iname, type: t, required: innerReq.has(iname) });
+                  inner.push({
+                    name: iname,
+                    type: t,
+                    required: innerReq.has(iname),
+                    nullable: isNullable(ir, isch),
+                  });
                 }
                 if (inner.length) nestedItems[fname] = inner;
               }
@@ -133,7 +142,12 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
                 for (const [fname, fsch] of Object.entries(sObj.properties || {})) {
                   const r = resolveSchema(fsch, components);
                   const type = effectiveType(r, components);
-                  inner.push({ name: fname, type, required: req.has(fname) });
+                  inner.push({
+                    name: fname,
+                    type,
+                    required: req.has(fname),
+                    nullable: isNullable(r, fsch),
+                  });
                 }
                 if (inner.length) nestedSlices[slice] = inner;
               }
@@ -188,12 +202,14 @@ function flattenTopLevelFields(
     for (const [fname, fsch] of Object.entries(resolved.properties)) {
       const r = resolveSchema(fsch, components);
       const type = effectiveType(r, components);
+      const nullable = isNullable(r, fsch);
       if (type === 'array' && r.items) {
         const it = resolveSchema(r.items, components);
         out.push({
           name: fname,
           type: 'array',
           required: req.has(fname),
+          nullable,
           objectRef: it.$ref ? refName(it.$ref) : undefined,
         });
       } else {
@@ -201,6 +217,7 @@ function flattenTopLevelFields(
           name: fname,
           type,
           required: req.has(fname),
+          nullable,
           objectRef: r.$ref ? refName(r.$ref) : undefined,
         });
       }
@@ -297,6 +314,14 @@ function resolveSchema(
     s = { ...merged, ...withoutAllOf };
   }
   return s;
+}
+
+// True iff either the resolved schema or the original (pre-$ref) schema has
+// `nullable: true`. Inspecting both forms catches the common case where a
+// component schema carries `nullable` and the field references it via $ref,
+// as well as inline schemas that override.
+function isNullable(resolved: JsonSchema | undefined, original: JsonSchema | undefined): boolean {
+  return resolved?.nullable === true || original?.nullable === true;
 }
 
 function effectiveType(schema: JsonSchema, components: Components): string {
