@@ -9,40 +9,11 @@ import type {
   RequestOneOfGroupSummary,
 } from './types.js';
 
-// Optional sidecar shape: `domain.requestBodies` is an off-spec extension keyed by
-// operationId, mapping to per-content-type descriptors. Not part of `DomainSemantics`,
-// so we narrow at the runtime boundary rather than widening the canonical type.
-interface RequestBodyDescriptor {
-  contentType?: string;
-}
-
-function extractRequestBodies(
-  graph: OperationGraph,
-  endpointOpId: string,
-): RequestBodyDescriptor[] | undefined {
-  const domain: unknown = graph.domain;
-  if (!domain || typeof domain !== 'object') return undefined;
-  const rb: unknown = Reflect.get(domain, 'requestBodies');
-  if (!rb || typeof rb !== 'object') return undefined;
-  const entry: unknown = Reflect.get(rb, endpointOpId);
-  if (!Array.isArray(entry)) return undefined;
-  const out: RequestBodyDescriptor[] = [];
-  for (const r of entry) {
-    if (r && typeof r === 'object') {
-      const ct: unknown = Reflect.get(r, 'contentType');
-      out.push({ contentType: typeof ct === 'string' ? ct : undefined });
-    }
-  }
-  return out;
-}
-
 interface FeatureCoverageOptions {
   maxOptionalPairs: number;
   includeAllOptionalsThreshold: number;
   generateNegative: boolean;
   requestVariants?: RequestOneOfGroupSummary[]; // injected extracted request variant groups
-  // Cap for pairwise oneOf negatives per endpoint to avoid explosion
-  oneOfPairwiseMax?: number;
   // Cap total scenarios per endpoint for feature coverage
   maxScenariosPerEndpoint?: number;
 }
@@ -51,7 +22,6 @@ const DEFAULT_OPTS: FeatureCoverageOptions = {
   maxOptionalPairs: 20,
   includeAllOptionalsThreshold: 5,
   generateNegative: true,
-  oneOfPairwiseMax: 10,
   maxScenariosPerEndpoint: 35,
 };
 
@@ -65,17 +35,6 @@ export function generateFeatureCoverageForEndpoint(
   const required = [...endpoint.requires.required];
   const optional = [...endpoint.requires.optional];
   const variants: FeatureVariantSpec[] = [];
-  // Determine if endpoint has a JSON request body (only these get schemaWrongType variants)
-  const hasJsonBody = (() => {
-    const reqs = extractRequestBodies(graph, endpointOpId);
-    if (reqs) {
-      return reqs.some(
-        (r) => typeof r.contentType === 'string' && r.contentType.includes('application/json'),
-      );
-    }
-    // Fallback heuristic: methods that typically have bodies
-    return ['POST', 'PUT', 'PATCH'].includes(endpoint.method.toUpperCase());
-  })();
 
   // Artifact coverage: if domain has artifact rules for this operation, generate a base variant per rule
   const artifactRules = graph.domain?.operationArtifactRules?.[endpointOpId]?.rules || [];
@@ -144,33 +103,9 @@ export function generateFeatureCoverageForEndpoint(
     });
   }
 
-  // Schema-missing-required negatives (fast 400 via request validator): generate combinations
-  if (options.generateNegative) {
-    try {
-      // Derive required request fields from canonical shapes at emit time, so just mark here; combinations created in build
-      variants.push({
-        endpointId: endpointOpId,
-        optionals: [],
-        disjunctionChoices: [],
-        artifactSemantics: [],
-        expectedResult: 'error',
-        negative: true,
-        schemaMissingRequired: true,
-      });
-      // Wrong-type negatives (type violations) — only for endpoints with JSON bodies; combos expanded later during request synthesis
-      if (hasJsonBody) {
-        variants.push({
-          endpointId: endpointOpId,
-          optionals: [],
-          disjunctionChoices: [],
-          artifactSemantics: [],
-          expectedResult: 'error',
-          negative: true,
-          schemaWrongType: true,
-        });
-      }
-    } catch {}
-  }
+  // Schema-level negative variants (missing-required, wrong-type, oneOf union-all/pairwise)
+  // are owned by the dedicated `request-validation` suite and intentionally NOT emitted here.
+  // See https://github.com/camunda/api-test-generator/issues/27.
 
   // Duplicate invocation variants (only for create/command endpoints with duplicatePolicy or conditionalIdempotency)
   const meta = endpoint.operationMetadata;
@@ -228,51 +163,9 @@ export function generateFeatureCoverageForEndpoint(
         }
       }
       // Only generate union violation negatives for genuine polymorphic unions
-      const allowUnionNegatives = group.isPolymorphic === true;
-      // Union violation negative (all fields) if more than 1 variant and polymorphic
-      if (allowUnionNegatives && group.variants.length > 1) {
-        variants.push({
-          endpointId: endpointOpId,
-          optionals: [],
-          disjunctionChoices: [],
-          artifactSemantics: [],
-          expectedResult: 'error',
-          negative: true,
-          requestVariantGroup: group.groupId,
-          requestVariantName: 'union-all',
-          requestVariantRichness: 'rich',
-        });
-      }
-      // Pairwise violation negatives only for polymorphic unions
-      if (allowUnionNegatives && group.variants.length > 1) {
-        const reqFields = group.variants.map((v) => ({
-          name: v.variantName,
-          req: v.required[0] || v.required[1] || v.required[2] || v.required[0],
-        }));
-        const pairs: Array<[string, string]> = [];
-        for (let i = 0; i < reqFields.length; i++) {
-          for (let j = i + 1; j < reqFields.length; j++) {
-            const a = reqFields[i].req;
-            const b = reqFields[j].req;
-            if (a && b) pairs.push([a, b]);
-          }
-        }
-        const cap = options.oneOfPairwiseMax ?? 10;
-        for (let k = 0; k < Math.min(cap, pairs.length); k++) {
-          const [a, b] = pairs[k];
-          variants.push({
-            endpointId: endpointOpId,
-            optionals: [],
-            disjunctionChoices: [],
-            artifactSemantics: [],
-            expectedResult: 'error',
-            negative: true,
-            requestVariantGroup: group.groupId,
-            requestVariantName: `pair:${a}+${b}`,
-            requestVariantRichness: 'minimal',
-          });
-        }
-      }
+      // NOTE: oneOf union-all/pairwise negatives are owned by the request-validation suite
+      // (see issue #27); intentionally not emitted here even when isPolymorphic is true.
+      void group.isPolymorphic;
     }
   }
 
