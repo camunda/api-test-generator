@@ -1,0 +1,13 @@
+{
+  "name": "camunda-path-analyser-suite",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generated Playwright integration suite produced by the api-test-generator path-analyser.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "typescript": "^5.5.4"
+  }
+}

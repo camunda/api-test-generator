@@ -67,13 +67,30 @@ Outputs go to `dist/generated-tests/`:
 
 ### Running the Generated Tests
 
-You can execute a generated spec with Playwright directly (ensure you have installed `@playwright/test`, which this package already depends on):
+The emitted suite at `dist/generated-tests/` is now a self-contained, runnable Playwright project. Each codegen run materializes:
+
+- `package.json` (declares the `test` script and `@playwright/test` devDep)
+- `playwright.config.ts`
+- `tsconfig.json`
+- `.env.example` (documents `API_BASE_URL`)
+- `README.md` (run instructions)
+- `support/` (vendored runtime helpers — `env.ts`, `recorder.ts`, `seeding.ts`, `seed-rules.json`)
+
+So you can install and run the suite in place against any reachable Camunda cluster:
+
+```bash
+cd dist/generated-tests
+npm install
+API_BASE_URL=http://localhost:8080/v2 npm test
+```
+
+Alternatively you can still execute a single spec via the parent project's already-installed Playwright:
 
 ```bash
 npx playwright test dist/generated-tests/searchProcessInstances.feature.spec.ts
 ```
 
-Or run all generated specs (when multiple exist):
+Or run all generated specs from the parent project:
 
 ```bash
 npx playwright test dist/generated-tests
