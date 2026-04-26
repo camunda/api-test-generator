@@ -26,10 +26,13 @@ export function generateDeepMissingRequired(
       const node = queue.shift();
       if (!node || visited.has(node)) continue;
       visited.add(node);
-      // Emit one scenario per required property of this node (root included).
-      // The downstream dedup in scripts/generate.ts collapses duplicates with
-      // top-level `missingRequired` output by (method, path, type, target,
-      // body-hash).
+      // Emit one scenario per required property of every object node in the
+      // schema, including the root. We must walk the root because some
+      // schemas (e.g. `MappingRuleUpdateRequest`) wrap their required list in
+      // an `allOf`, leaving `op.requiredProps` empty and causing
+      // `missingRequired` to skip the op entirely. Any duplicates between
+      // this generator and `missingRequired` are collapsed by the body-hash
+      // dedup in `request-validation/scripts/generate.ts`.
       if (node.properties && node.required?.length) {
         for (const req of node.required) {
           if (opts.capPerOperation && produced >= opts.capPerOperation) break;
@@ -102,18 +105,34 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-function deleteAtPath(obj: Record<string, unknown>, path: string[]): boolean {
+/**
+ * Delete the value at `path` from `root`. Path segments may address either
+ * object keys or array indexes (numeric strings). Returns true on success.
+ */
+function deleteAtPath(root: Record<string, unknown>, path: string[]): boolean {
   if (!path.length) return false;
-  let parent: Record<string, unknown> = obj;
+  let parent: unknown = root;
   for (let i = 0; i < path.length - 1; i++) {
     const seg = path[i];
-    if (!(seg in parent)) return false;
-    const next = parent[seg];
-    if (!isRecord(next)) return false;
-    parent = next;
+    if (Array.isArray(parent)) {
+      const idx = Number(seg);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= parent.length) return false;
+      parent = parent[idx];
+    } else if (isRecord(parent)) {
+      if (!(seg in parent)) return false;
+      parent = parent[seg];
+    } else {
+      return false;
+    }
   }
   const last = path[path.length - 1];
-  if (Object.hasOwn(parent, last)) {
+  if (Array.isArray(parent)) {
+    const idx = Number(last);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= parent.length) return false;
+    parent.splice(idx, 1);
+    return true;
+  }
+  if (isRecord(parent) && Object.hasOwn(parent, last)) {
     delete parent[last];
     return true;
   }
