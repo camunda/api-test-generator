@@ -404,16 +404,13 @@ function renderScenarioTest(s: EndpointScenario): string {
           body.push(`    expect(${acc}).not.toBeUndefined();`);
           if (!f.nullable) {
             body.push(`    expect(${acc}).not.toBeNull();`);
-            // If this is an empty-result scenario and the field is an array, assert emptiness
-            if (isEmptyScenario && t === 'array') {
-              body.push(...emitTypeAssertLines(acc, t));
-              body.push(`    expect(Array.isArray(${acc})).toBeTruthy();`);
-              body.push(`    expect(${acc}.length).toBe(0);`);
-            } else {
-              body.push(...emitTypeAssertLines(acc, t));
-              // For non-empty scenarios and arrays, assert at least one item
-              if (!isEmptyScenario && t === 'array') {
-                body.push(`    expect(Array.isArray(${acc})).toBeTruthy();`);
+            // emitTypeAssertLines() already emits `Array.isArray(...)` for `array`,
+            // so we only add the length assertion here — no duplicate type check.
+            body.push(...emitTypeAssertLines(acc, t));
+            if (t === 'array') {
+              if (isEmptyScenario) {
+                body.push(`    expect(${acc}.length).toBe(0);`);
+              } else {
                 body.push(`    expect(${acc}.length).toBeGreaterThan(0);`);
               }
             }
@@ -425,7 +422,6 @@ function renderScenarioTest(s: EndpointScenario): string {
             body.push(`    if (${acc} !== null) {`);
             body.push(...emitTypeAssertLines(acc, t, '      '));
             if (t === 'array') {
-              body.push(`      expect(Array.isArray(${acc})).toBeTruthy();`);
               if (isEmptyScenario) {
                 body.push(`      expect(${acc}.length).toBe(0);`);
               } else {

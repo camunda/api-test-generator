@@ -155,7 +155,11 @@ describe('nullable required field assertions (regression for #1)', () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const dir = path.resolve('path-analyser/dist/generated-tests');
-    if (!fs.existsSync(dir)) return; // generated artifacts not present in this environment
+    if (!fs.existsSync(dir)) {
+      throw new Error(
+        `Missing generated test artifacts at ${dir}. Generate the path-analyser pipeline outputs (e.g. \`npm run snapshot:regenerate\`) before running this invariant test.`,
+      );
+    }
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.spec.ts'));
     const offenders: { file: string; path: string }[] = [];
     const guardRe = /if \((json[A-Za-z0-9_.[\]]+) !== null\) \{/g;
