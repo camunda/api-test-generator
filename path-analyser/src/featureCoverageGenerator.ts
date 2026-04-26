@@ -162,10 +162,8 @@ export function generateFeatureCoverageForEndpoint(
           });
         }
       }
-      // Only generate union violation negatives for genuine polymorphic unions
-      // NOTE: oneOf union-all/pairwise negatives are owned by the request-validation suite
-      // (see issue #27); intentionally not emitted here even when isPolymorphic is true.
-      void group.isPolymorphic;
+      // oneOf union-all/pairwise negatives are owned by the request-validation suite
+      // (see issue #27); intentionally not emitted here.
     }
   }
 
@@ -195,13 +193,6 @@ function buildScenarioFromVariant(
   const opRefs: OperationRef[] = [toRef(endpoint)];
   const produced = new Set<string>();
   const bindings: Record<string, string> = {};
-  // Heuristic: search-style endpoints (POST .../search) are lenient and return 200 on oneOf violations
-  const isSearchStyle =
-    !!endpoint &&
-    endpoint.method.toUpperCase() === 'POST' &&
-    (/\/search$/.test(endpoint.path) ||
-      /search/i.test(endpoint.operationId) ||
-      endpoint.operationId === 'activateJobs');
   // Synthetic bindings for negative variant
   if (variant.negative) {
     for (const o of variant.optionals) {
@@ -226,21 +217,7 @@ function buildScenarioFromVariant(
     satisfiedSemanticTypes: [...new Set([...endpoint.requires.required, ...variant.optionals])],
     strategy: 'featureCoverage',
     variantKey: buildVariantKey(variant),
-    // For negative oneOf violations (union-all or pairwise), explicitly expect HTTP 400
-    expectedResult:
-      variant.negative &&
-      variant.requestVariantGroup &&
-      (variant.requestVariantName === 'union-all' ||
-        (typeof variant.requestVariantName === 'string' &&
-          variant.requestVariantName.startsWith('pair:')))
-        ? isSearchStyle
-          ? { kind: 'nonEmpty' }
-          : { kind: 'error', code: '400' }
-        : variant.schemaMissingRequired
-          ? { kind: 'error', code: '400' }
-          : variant.schemaWrongType
-            ? { kind: 'error', code: '400' }
-            : { kind: variant.expectedResult },
+    expectedResult: { kind: variant.expectedResult },
     coverageTags: buildCoverageTags(variant),
     filtersUsed: variant.optionals,
     syntheticBindings: variant.negative ? Object.keys(bindings) : undefined,
@@ -263,8 +240,6 @@ function buildScenarioFromVariant(
         richness: variant.requestVariantRichness || 'minimal',
       },
     ];
-    if (variant.negative && variant.requestVariantName === 'union-all')
-      scenario.exclusivityViolations = [`oneOf:${variant.requestVariantGroup}:union-all`];
   }
   // Tag artifact selection in scenario for downstream request planning
   if (variant.artifactRuleId || variant.artifactKind) {
@@ -277,8 +252,6 @@ function buildVariantKey(v: FeatureVariantSpec): string {
   const parts: string[] = [];
   if (v.optionals.length) parts.push(`opt=${v.optionals.sort().join('+')}`);
   if (v.negative) parts.push('neg');
-  if (v.schemaMissingRequired) parts.push('schemaMissingRequired');
-  if (v.schemaWrongType) parts.push('schemaWrongType');
   if (v.requestVariantGroup) parts.push(`oneOf=${v.requestVariantGroup}:${v.requestVariantName}`);
   return parts.join('|') || 'base';
 }
@@ -287,7 +260,6 @@ function buildCoverageTags(v: FeatureVariantSpec): string[] {
   const tags: string[] = [];
   for (const o of v.optionals) tags.push(`optional:${o}`);
   if (v.negative) tags.push('negative');
-  if (v.schemaWrongType) tags.push('schemaWrongType');
   if (v.requestVariantGroup) tags.push(`oneOf:${v.requestVariantGroup}:${v.requestVariantName}`);
   return tags;
 }
@@ -304,24 +276,8 @@ function buildFeatureScenarioName(
       return `${operationId} - conditional duplicate ignore (${index})`;
   }
   if (v.artifactRuleId) return `${operationId} - ${v.artifactRuleId} (${index})`;
-  // Special-case union-all negative before generic negative naming
-  if (
-    v.requestVariantGroup &&
-    typeof v.requestVariantName === 'string' &&
-    v.requestVariantName.startsWith('pair:')
-  ) {
-    const pair = v.requestVariantName.slice('pair:'.length);
-    return `${operationId} - oneOf ${v.requestVariantGroup} pair violation (${pair}) (${index})`;
-  }
-  if (v.requestVariantGroup && v.requestVariantName === 'union-all') {
-    return `${operationId} - oneOf ${v.requestVariantGroup} union violation (${index})`;
-  }
-  if (v.schemaMissingRequired) return `${operationId} - negative missing required (${index})`;
-  if (v.schemaWrongType) return `${operationId} - negative wrong type (${index})`;
   if (v.negative) return `${operationId} - negative empty (${index})`;
   if (v.requestVariantGroup) {
-    if (v.requestVariantName === 'union-all')
-      return `${operationId} - oneOf ${v.requestVariantGroup} union violation (${index})`;
     const base = `${operationId} - oneOf ${v.requestVariantGroup} ${v.requestVariantName}`;
     return v.requestVariantRichness === 'rich' ? `${base} rich (${index})` : `${base} (${index})`;
   }
@@ -338,35 +294,10 @@ function buildFeatureScenarioDescription(endpoint: OperationNode, v: FeatureVari
     if (v.duplicateTest.mode === 'conditional')
       return `${base} twice with identical key fields triggering conditional idempotency (duplicatePolicy=ignore) expecting second ${v.duplicateTest.secondStatus || 200} with no side-effects.`;
   }
-  const isSearchStyle =
-    !!endpoint &&
-    endpoint.method.toUpperCase() === 'POST' &&
-    (/\/search$/.test(endpoint.path) ||
-      /search/i.test(endpoint.operationId) ||
-      endpoint.operationId === 'activateJobs');
   if (v.artifactRuleId) return `${base} deploying ${v.artifactRuleId.toUpperCase()} artifact.`;
-  // Special-case union-all negative before generic negative description
-  if (
-    v.requestVariantGroup &&
-    typeof v.requestVariantName === 'string' &&
-    v.requestVariantName.startsWith('pair:')
-  ) {
-    const pair = v.requestVariantName.slice('pair:'.length);
-    return `${base} with invalid oneOf payload containing conflicting fields (${pair}) from two different variants (pair union violation)${isSearchStyle ? '' : ' expecting 400 error'}.`;
-  }
-  if (v.requestVariantGroup && v.requestVariantName === 'union-all') {
-    return `${base} with invalid oneOf payload containing ALL fields from group '${v.requestVariantGroup}' variants (union violation)${isSearchStyle ? '' : ' expecting 400 error'}.`;
-  }
-  if (v.schemaMissingRequired)
-    return `${base} with a required field omitted to provoke 400 schema validation error.`;
-  if (v.schemaWrongType)
-    return `${base} with one or more fields set to the wrong type expecting 400 schema validation error.`;
-  // NOTE: Detailed wrong-type mapping appended later in emitter when schemaWrongTypeDetail present.
   if (v.negative)
     return `${base} expecting empty result set (querying with filters / identifiers that match no existing resources).`;
   if (v.requestVariantGroup) {
-    if (v.requestVariantName === 'union-all')
-      return `${base} with invalid oneOf payload containing ALL fields from group '${v.requestVariantGroup}' variants (union violation) expecting 400 error.`;
     if (v.requestVariantRichness === 'rich')
       return `${base} using oneOf group '${v.requestVariantGroup}' variant '${v.requestVariantName}' with all optional fields present.`;
     return `${base} using oneOf group '${v.requestVariantGroup}' variant '${v.requestVariantName}' with minimal required fields.`;

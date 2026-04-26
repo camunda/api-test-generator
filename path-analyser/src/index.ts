@@ -116,178 +116,11 @@ async function main() {
     const featureCollection = generateFeatureCoverageForEndpoint(graph, op.operationId, {
       requestVariants: requestIndex.byOperation[op.operationId],
     });
-    // Expand schema-missing-required into combinations (cap at 35) before planning
-    {
-      const baseScenarios = featureCollection.scenarios;
-      const expanded: EndpointScenario[] = [];
-      const requiredFields = getRequiredRequestLeafFields(op.operationId, canonical);
-      const hasSchemaMissing = baseScenarios.some(
-        (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired'),
-      );
-      const hasSchemaWrongType = baseScenarios.some(
-        (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType'),
-      );
-      if (requiredFields.length && hasSchemaMissing) {
-        const originals = baseScenarios.filter(
-          (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired'),
-        );
-        const others = baseScenarios.filter(
-          (s) =>
-            !(typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired')),
-        );
-        expanded.push(...others);
-        // generate subsets of fields to include (missing others): sizes 0..n-1, cap 15
-        const fields = [...requiredFields].sort();
-        const cap = 35;
-        let budget = cap;
-        for (let k = 0; k <= Math.max(0, fields.length - 1) && budget > 0; k++) {
-          const combos = k === 0 ? [[]] : k === fields.length ? [] : kCombinations(fields, k);
-          for (const combo of combos) {
-            if (budget <= 0) break;
-            for (const orig of originals) {
-              const clone: EndpointScenario = {
-                ...orig,
-                id: `${orig.id}-mr-${k}-${expanded.length + 1}`,
-              };
-              clone.schemaMissingInclude = combo;
-              // Pre-compute suppress list (required fields not in include)
-              const requiredClusterOverrides: Record<string, string[]> = {
-                activateJobs: ['type', 'timeout', 'maxJobsToActivate'],
-              };
-              const cluster = fields.length
-                ? fields
-                : requiredClusterOverrides[op.operationId] || fields;
-              clone.schemaMissingSuppress = cluster.filter((f) => !combo.includes(f));
-              // CONTRACT: schemaMissingInclude lists the required fields we intentionally KEEP.
-              // schemaMissingSuppress lists required fields (including endpoint-specific cluster augmentations)
-              // we intentionally DROP. Synthesis will skip or remove suppressed fields in one final pass so
-              // emitter stays generic.
-              clone.name = `${orig.name} [include=${combo.join(',') || '∅'}]`;
-              clone.description = `${orig.description || ''} Include only: ${combo.join(',') || '∅'}.`;
-              expanded.push(clone);
-              budget--;
-              if (budget <= 0) break;
-            }
-          }
-        }
-        featureCollection.scenarios = expanded;
-      }
-      // Expand wrong-type negatives similarly, but operate on a small subset of fields to keep within cap
-      if (requiredFields.length && hasSchemaWrongType) {
-        const base = featureCollection.scenarios;
-        const originals = base.filter(
-          (s) => typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType'),
-        );
-        const others = base.filter(
-          (s) => !(typeof s.variantKey === 'string' && s.variantKey.includes('schemaWrongType')),
-        );
-        const result: EndpointScenario[] = [];
-        result.push(...others);
-        const fields = [...requiredFields].sort();
-        // SUPPRESSION: If no candidate fields (after any future filtering) skip emitting placeholder wrong-type scenarios.
-        if (!fields.length) {
-          featureCollection.scenarios = result; // drop originals entirely
-          continue; // proceed to next endpoint
-        }
-        const capWT = 50; // new expanded cap for wrong-type scenarios per endpoint
-        let budget = capWT; // allow up to capWT (will naturally be much smaller for small R)
-        // Create single-field wrong-type and small pairs first
-        const combos1: string[][] = fields.map((f) => [f]);
-        for (const c of combos1) {
-          if (budget <= 0) break;
-          for (const orig of originals) {
-            const clone: EndpointScenario = {
-              ...orig,
-              id: `${orig.id}-wt-1-${result.length + 1}`,
-            };
-            clone.schemaWrongTypeInclude = c;
-            clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
-            clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
-            result.push(clone);
-            budget--;
-            if (budget <= 0) break;
-          }
-        }
-        // Optionally add a couple of 2-field combos if budget remains
-        if (budget > 0) {
-          const combos2 = kCombinations(fields, 2);
-          for (const c of combos2) {
-            if (budget <= 0) break;
-            for (const orig of originals) {
-              const clone: EndpointScenario = {
-                ...orig,
-                id: `${orig.id}-wt-2-${result.length + 1}`,
-              };
-              clone.schemaWrongTypeInclude = c;
-              clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
-              clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
-              result.push(clone);
-              budget--;
-              if (budget <= 0) break;
-            }
-          }
-        }
-        // If field count small (<=4) add higher-order combos (triples and full set) for comprehensive coverage
-        if (fields.length <= 4 && budget > 0) {
-          if (fields.length >= 3) {
-            // triples (if R=3 this is also the full set, still treat as size 3 label)
-            const combos3 = kCombinations(fields, 3);
-            for (const c of combos3) {
-              if (budget <= 0) break;
-              for (const orig of originals) {
-                const clone: EndpointScenario = {
-                  ...orig,
-                  id: `${orig.id}-wt-3-${result.length + 1}`,
-                };
-                clone.schemaWrongTypeInclude = c;
-                clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
-                clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
-                result.push(clone);
-                budget--;
-                if (budget <= 0) break;
-              }
-            }
-          }
-          if (fields.length === 4 && budget > 0) {
-            // full set (size 4)
-            const c = [...fields];
-            for (const orig of originals) {
-              if (budget <= 0) break;
-              const clone: EndpointScenario = {
-                ...orig,
-                id: `${orig.id}-wt-4-${result.length + 1}`,
-              };
-              clone.schemaWrongTypeInclude = c;
-              clone.name = `${orig.name} [wrongType=${c.join('+')}]`;
-              clone.description = `${orig.description || ''} Wrong type fields: ${c.join(',')}.`;
-              result.push(clone);
-              budget--;
-            }
-          }
-          if (fields.length === 3 && budget > 0) {
-            // For R=3 add explicit full set (already produced as triple but ensure label consistency if desired)
-            // (Skip duplicate if already added by combos3)
-          }
-        }
-        featureCollection.scenarios = result;
-      }
-    }
-    // Final guardrail: enforce max scenarios per endpoint after expansions (cap 35)
-    const MAX_FEATURE_SCENARIOS = 90; // raised to accommodate expanded wrong-type coverage
+    // Final guardrail: enforce max scenarios per endpoint (cap 90)
+    const MAX_FEATURE_SCENARIOS = 90;
     if (featureCollection.scenarios.length > MAX_FEATURE_SCENARIOS) {
       featureCollection.scenarios = featureCollection.scenarios.slice(0, MAX_FEATURE_SCENARIOS);
     }
-    // Post-expansion cleanup: remove placeholder wrong-type scenarios that ended up with no fields to mutate
-    featureCollection.scenarios = featureCollection.scenarios.filter((sc) => {
-      const vk = sc.variantKey;
-      if (typeof vk === 'string' && vk.includes('schemaWrongType')) {
-        const incl = sc.schemaWrongTypeInclude;
-        if (!Array.isArray(incl) || incl.length === 0) {
-          return false; // drop
-        }
-      }
-      return true;
-    });
     // Choose a representative integration scenario to supply dependency chain (shortest non-unsatisfied with >1 ops; fallback scenario-1)
     const integrationCandidates = collection.scenarios.filter((sc) => sc.id !== 'unsatisfied');
     const chainSource =
@@ -303,15 +136,7 @@ async function main() {
           /search/i.test(op.operationId) ||
           op.operationId === 'activateJobs';
         const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
-        const isOneOfPair =
-          Array.isArray(s.requestVariants) &&
-          s.requestVariants.some(
-            (rv) => typeof rv.variant === 'string' && rv.variant.startsWith('pair:'),
-          );
-        const isUnionAll =
-          Array.isArray(s.exclusivityViolations) &&
-          s.exclusivityViolations.some((t) => t.includes('oneOf:') && t.endsWith('union-all'));
-        const skipGraft = (isSearchLikeOp && isEmptyNeg) || isUnionAll || isOneOfPair;
+        const skipGraft = isSearchLikeOp && isEmptyNeg;
         if (
           !skipGraft &&
           chainSource &&
@@ -331,44 +156,12 @@ async function main() {
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
         if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
         s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
-        // Carry forward suppress metadata (already on scenario) no action needed here except sanity (noop)
-        // Consolidation fix: ensure schemaMissingRequired variants truly omit excluded required fields
-        try {
-          const isMissingReq =
-            typeof s.variantKey === 'string' && s.variantKey.includes('schemaMissingRequired');
-          const includeArr: string[] | undefined = Array.isArray(s.schemaMissingInclude)
-            ? s.schemaMissingInclude
-            : undefined;
-          if (isMissingReq && includeArr) {
-            const finalStep = s.requestPlan?.[s.requestPlan.length - 1];
-            const bodyTpl = finalStep?.bodyTemplate;
-            if (finalStep && finalStep.bodyKind === 'json' && isPlainRecord(bodyTpl)) {
-              const reqFields = getRequiredRequestLeafFields(op.operationId, canonical);
-              for (const rf of reqFields) {
-                if (!includeArr.includes(rf) && Object.hasOwn(bodyTpl, rf)) {
-                  delete bodyTpl[rf];
-                }
-              }
-            }
-          }
-        } catch {}
         // Validation: for JSON requests with oneOf groups, non-negative scenarios must set exactly one variant's required keys
         try {
           const final = s.requestPlan?.[s.requestPlan.length - 1];
           const groups = requestIndex.byOperation[op.operationId] || [];
           const isError = s.expectedResult && s.expectedResult.kind === 'error';
-          const unionViolation =
-            Array.isArray(s.exclusivityViolations) &&
-            s.exclusivityViolations.some(
-              (t: string) => t.includes('oneOf:') && t.endsWith('union-all'),
-            );
-          if (
-            final?.bodyKind === 'json' &&
-            final?.bodyTemplate &&
-            groups.length &&
-            !isError &&
-            !unionViolation
-          ) {
+          if (final?.bodyKind === 'json' && final?.bodyTemplate && groups.length && !isError) {
             const presentKeys = new Set(Object.keys(final.bodyTemplate));
             for (const g of groups) {
               // Count variants whose required keys are fully present in the body
@@ -385,30 +178,6 @@ async function main() {
                   `oneOf validation failed for ${op.operationId} group '${g.groupId}': expected exactly 1 variant's required keys present, found ${uniqCount}`,
                 );
               }
-            }
-          }
-        } catch {}
-        // Inject detailed wrong-type mapping into scenario name for clarity (expectedType -> sentType per field)
-        try {
-          if (
-            s.schemaWrongTypeInclude &&
-            Array.isArray(s.schemaWrongTypeDetail) &&
-            s.schemaWrongTypeDetail.length
-          ) {
-            const det = s.schemaWrongTypeDetail;
-            const count = det.length;
-            const segments = det.map(
-              (d, i) => `${i === 0 ? '' : ' | + '}${d.field}: ${d.expectedType} -> ${d.sentType}`,
-            );
-            const mapping = segments.join('');
-            if (s.name && /negative wrong type/.test(s.name)) {
-              s.name = s.name.replace(
-                /negative wrong type \([^)]*\)/,
-                `negative wrong type (${count})`,
-              );
-              // Remove any existing [wrongType=...] suffix then append our detailed mapping
-              s.name = s.name.replace(/\s\[wrongType=[^\]]*\]$/, '');
-              s.name = `${s.name} [wrongType=${mapping}]`;
             }
           }
         } catch {}
@@ -692,138 +461,38 @@ function buildRequestBodyFromCanonical(
   // Load request defaults (operation-level overrides global)
   const defaults = getRequestDefaultsForOperation(opId);
   let allowedFields: Set<string> | undefined;
-  let forceUnionAll = false;
   let chosenVariantRequired: string[] | undefined;
-  let unionFieldsForGroup: string[] | undefined;
-  let pairFields: string[] | undefined;
   if (chosenCt === 'application/json' && requestGroups.length) {
     // Determine selected variant for endpoint scenarios
     const selected = isEndpoint ? scenario.requestVariants?.[0] : undefined;
     const groupId = selected?.groupId || requestGroups[0]?.groupId;
     const group = requestGroups.find((g) => g.groupId === groupId) || requestGroups[0];
-    unionFieldsForGroup = group?.unionFields || [];
-    // Detect pairwise negative (requestVariantName: 'pair:a+b')
-    if (
-      isEndpoint &&
-      selected?.variant &&
-      typeof selected.variant === 'string' &&
-      selected.variant.startsWith('pair:')
-    ) {
-      const pair = selected.variant.slice('pair:'.length);
-      const parts = pair.split('+').filter(Boolean);
-      if (parts.length === 2) {
-        pairFields = parts;
-        allowedFields = new Set(parts);
-      }
-    } else if (
-      isEndpoint &&
-      scenario.exclusivityViolations?.includes(`oneOf:${groupId}:union-all`)
-    ) {
-      // Negative: include union of all fields to provoke 400
-      forceUnionAll = true;
-      allowedFields = new Set(group.unionFields);
-    } else {
-      // Choose a concrete variant: prefer one that contains a '*Key' field if possible
-      const variants: RequestOneOfVariant[] = group?.variants || [];
-      let chosen = selected ? variants.find((v) => v.variantName === selected.variant) : undefined;
-      if (!chosen)
-        chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || variants[0];
-      // For non-endpoint dependent steps, prefer Key similarly
-      if (!isEndpoint) {
-        chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || chosen;
-      }
-      chosenVariantRequired = [...(chosen?.required || [])];
-      // Allow chosen required, plus chosen optional that are NOT required by any other variant
-      const otherRequired = new Set<string>(
-        variants.filter((v) => v !== chosen).flatMap((v) => v.required || []),
-      );
-      const safeOptional = (chosen?.optional || []).filter((n) => !otherRequired.has(n));
-      const names: string[] = [...(chosen?.required || []), ...safeOptional];
-      allowedFields = new Set(names);
+    // Choose a concrete variant: prefer one that contains a '*Key' field if possible
+    const variants: RequestOneOfVariant[] = group?.variants || [];
+    let chosen = selected ? variants.find((v) => v.variantName === selected.variant) : undefined;
+    if (!chosen)
+      chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || variants[0];
+    // For non-endpoint dependent steps, prefer Key similarly
+    if (!isEndpoint) {
+      chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || chosen;
     }
+    chosenVariantRequired = [...(chosen?.required || [])];
+    // Allow chosen required, plus chosen optional that are NOT required by any other variant
+    const otherRequired = new Set<string>(
+      variants.filter((v) => v !== chosen).flatMap((v) => v.required || []),
+    );
+    const safeOptional = (chosen?.optional || []).filter((n) => !otherRequired.has(n));
+    const names: string[] = [...(chosen?.required || []), ...safeOptional];
+    allowedFields = new Set(names);
   }
   // Build template
   if (chosenCt === 'application/json') {
     const template: Record<string, unknown> = {};
     const missing: string[] = [];
-    // Detect missing-required negative either by original variantKey marker or by presence of expansion metadata
-    const isSchema400Neg =
-      (scenario?.variantKey &&
-        typeof scenario.variantKey === 'string' &&
-        scenario.variantKey.includes('schemaMissingRequired')) ||
-      Array.isArray(scenario.schemaMissingInclude);
-    const isSchemaWrongType =
-      scenario?.variantKey &&
-      typeof scenario.variantKey === 'string' &&
-      scenario.variantKey.includes('schemaWrongType');
-    const includeSet: Set<string> | undefined =
-      isSchema400Neg && Array.isArray(scenario.schemaMissingInclude)
-        ? new Set(scenario.schemaMissingInclude)
-        : undefined;
-    const omitSet: Set<string> | undefined =
-      isSchema400Neg && Array.isArray(scenario.schemaMissingSuppress)
-        ? new Set(scenario.schemaMissingSuppress)
-        : undefined;
-    const wrongTypeSet: Set<string> | undefined =
-      isSchemaWrongType && Array.isArray(scenario.schemaWrongTypeInclude)
-        ? new Set(scenario.schemaWrongTypeInclude)
-        : undefined;
-    // If wrong-type negative, populate detailed mapping (expectedType -> sentType) for test naming later.
-    if (wrongTypeSet?.size) {
-      const detail: { field: string; expectedType: string; sentType: string }[] = [];
-      for (const f of Array.from(wrongTypeSet)) {
-        const expectedType = (declaredTypeByLeaf[f] || 'unknown').toLowerCase();
-        const sentVal = chooseWrongTypeValue(declaredTypeByLeaf[f]);
-        let sentType: string = typeof sentVal;
-        // Map JS typeof to schema-like type names for readability
-        if (Array.isArray(sentVal)) sentType = 'array';
-        if (sentVal === null) sentType = 'null';
-        // Persist mapping (we also still need to actually apply wrong-type assignment below in synthesis)
-        detail.push({ field: f, expectedType, sentType });
-      }
-      scenario.schemaWrongTypeDetail = detail;
-    }
     if (requestGroups.length) {
       // oneOf-aware synthesis
-      if (pairFields && pairFields.length === 2) {
-        for (const name of pairFields) {
-          const viaProvider = resolveProvider(opId, name, scenario);
-          if (viaProvider !== undefined) {
-            template[name] = viaProvider;
-            continue;
-          }
-          const varName = `${camelCase(bindingMap[name] || name || 'value')}Var`;
-          scenario.bindings ||= {};
-          if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          // If wrong-type negative applies for this field, inject a mismatched type
-          if (wrongTypeSet?.has(name)) {
-            template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
-          } else {
-            template[name] = `${'${'}${varName}}`;
-          }
-          if (!bindingMap[name]) missing.push(name);
-        }
-      } else if (forceUnionAll && unionFieldsForGroup) {
-        for (const name of unionFieldsForGroup) {
-          const viaProvider = resolveProvider(opId, name, scenario);
-          if (viaProvider !== undefined) {
-            template[name] = viaProvider;
-            continue;
-          }
-          const varName = `${camelCase(bindingMap[name] || name || 'value')}Var`;
-          scenario.bindings ||= {};
-          if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          if (wrongTypeSet?.has(name)) {
-            template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
-          } else {
-            template[name] = `${'${'}${varName}}`;
-          }
-          if (!bindingMap[name]) missing.push(name);
-        }
-      } else if (chosenVariantRequired?.length) {
+      if (chosenVariantRequired?.length) {
         for (const name of chosenVariantRequired) {
-          if (omitSet?.has(name)) continue;
-          if (includeSet && !includeSet.has(name)) continue; // omit required not selected for include
           if (allowedFields && !allowedFields.has(name)) continue;
           // Special-case: map domain jobType -> request.type if not explicitly bound
           const mappedName =
@@ -838,25 +507,13 @@ function buildRequestBodyFromCanonical(
           if (hasBinding) {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-            if (wrongTypeSet?.has(name)) {
-              template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
-            } else {
-              template[name] = `${'${'}${varName}}`;
-            }
+            template[name] = `${'${'}${varName}}`;
           } else if (defaults && Object.hasOwn(defaults, name)) {
-            if (wrongTypeSet?.has(name)) {
-              template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
-            } else {
-              template[name] = defaults[name];
-            }
+            template[name] = defaults[name];
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-            if (wrongTypeSet?.has(name)) {
-              template[name] = chooseWrongTypeValue(declaredTypeByLeaf[name]);
-            } else {
-              template[name] = `${'${'}${varName}}`;
-            }
+            template[name] = `${'${'}${varName}}`;
             if (!bindingMap[mappedName]) missing.push(name);
           }
         }
@@ -865,8 +522,6 @@ function buildRequestBodyFromCanonical(
       // Non-oneOf: use canonical required flags
       for (const f of requiredFields) {
         const leaf = f.path.split('.').pop() ?? '';
-        if (omitSet?.has(leaf)) continue;
-        if (includeSet && !includeSet.has(leaf)) continue; // omit required not selected for include
         if (allowedFields && !allowedFields.has(leaf)) continue;
         const viaProvider = resolveProvider(opId, leaf, scenario);
         if (viaProvider !== undefined) {
@@ -884,25 +539,13 @@ function buildRequestBodyFromCanonical(
         if (hasBinding) {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          if (wrongTypeSet?.has(leaf)) {
-            template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
-          } else {
-            template[leaf] = `${'${'}${varName}}`;
-          }
+          template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
-          if (wrongTypeSet?.has(leaf)) {
-            template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
-          } else {
-            template[leaf] = defaults[leaf];
-          }
+          template[leaf] = defaults[leaf];
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-          if (wrongTypeSet?.has(leaf)) {
-            template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
-          } else {
-            template[leaf] = `${'${'}${varName}}`;
-          }
+          template[leaf] = `${'${'}${varName}}`;
           if (!bindingMap[f.path]) missing.push(f.path);
         }
       }
@@ -941,62 +584,22 @@ function buildRequestBodyFromCanonical(
     for (const [fieldPath, param] of Object.entries(bindingMap)) {
       const leaf = fieldPath.split('.').pop() ?? '';
       if (!leafSet.has(leaf)) continue; // don't inject fields not in schema
-      if (allowedFields && !allowedFields.has(leaf) && !forceUnionAll) continue;
-      // For schemaMissingRequired negatives, do not re-add omitted required fields
-      if (
-        isSchema400Neg &&
-        includeSet &&
-        !includeSet.has(leaf) &&
-        requiredFields.some(
-          (rf) => rf.path.endsWith(`.${leaf}`) || rf.path.split('.').pop() === leaf,
-        )
-      )
-        continue;
+      if (allowedFields && !allowedFields.has(leaf)) continue;
       const varName = `${camelCase(param)}Var`;
       scenario.bindings ||= {};
       if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
       if (template[leaf] === undefined) {
-        if (wrongTypeSet?.has(leaf)) {
-          template[leaf] = chooseWrongTypeValue(declaredTypeByLeaf[leaf]);
-        } else {
-          template[leaf] = `${'${'}${varName}}`;
-        }
+        template[leaf] = `${'${'}${varName}}`;
       }
     }
     // Post-process: if jobType binding exists but schema expects 'type', prefer mapping into 'type'
     if (bindingMap.jobType) {
       const jtVar = 'jobTypeVar';
       if (template.type === undefined) {
-        // If this is a schema-missing-required negative and 'type' was intentionally omitted, do NOT map it in.
-        if (
-          !(isSchema400Neg && (omitSet?.has('type') || (includeSet && !includeSet.has('type'))))
-        ) {
-          template.type = `${'${'}${jtVar}}`;
-        }
+        template.type = `${'${'}${jtVar}}`;
       }
       // ensure we don't carry a non-schema jobType field
       if (!leafSet.has('jobType')) delete template.jobType;
-    }
-    // Final single-pass omission enforcement (contract):
-    // - schemaMissingInclude = fields we intentionally keep
-    // - schemaMissingSuppress = fields we intentionally drop (precomputed)
-    // We compute union of: requiredFields (canonical), chosenVariantRequired (oneOf), plus endpoint cluster hint for activateJobs.
-    if (isSchema400Neg && (includeSet || omitSet)) {
-      const unionRequired = new Set<string>();
-      for (const f of requiredFields) {
-        const leaf = f.path.split('.').pop();
-        if (leaf) unionRequired.add(leaf);
-      }
-      for (const n of chosenVariantRequired || []) unionRequired.add(n);
-      if (opId === 'activateJobs')
-        ['type', 'timeout', 'maxJobsToActivate'].forEach((n) => {
-          unionRequired.add(n);
-        });
-      for (const n of unionRequired) {
-        const shouldKeep = includeSet ? includeSet.has(n) : false;
-        const explicitlyDrop = omitSet ? omitSet.has(n) : false;
-        if ((!shouldKeep || explicitlyDrop) && Object.hasOwn(template, n)) delete template[n];
-      }
     }
     // Scenario-specific overrides
     // For activateJobs negative-empty scenarios, use config-driven non-existent job type and short requestTimeout
@@ -1166,60 +769,6 @@ function getRequestDefaultsForOperation(opId: string): Record<string, unknown> |
   const op = all.operations?.[opId] || {};
   const glob = all.global || {};
   return { ...glob, ...op };
-}
-
-// -------- Helpers for schema-missing-required expansion ---------
-function getRequiredRequestLeafFields(
-  opId: string,
-  canonical: Record<string, CanonicalShape>,
-): string[] {
-  const shape = canonical[opId];
-  if (!shape?.requestByMediaType) return [];
-  const nodes = shape.requestByMediaType['application/json'] || [];
-  const fields = nodes
-    .filter((n) => n.required && !n.path.includes('[]'))
-    .map((n) => n.path.split('.').pop() ?? '')
-    .filter(Boolean);
-  return Array.from(new Set(fields));
-}
-
-function kCombinations<T>(arr: T[], k: number): T[][] {
-  const res: T[][] = [];
-  const n = arr.length;
-  if (k <= 0 || k > n) return res;
-  const idx = Array.from({ length: k }, (_, i) => i);
-  const take = () => res.push(idx.map((i) => arr[i]));
-  while (true) {
-    take();
-    let i: number;
-    for (i = k - 1; i >= 0; i--) {
-      if (idx[i] !== i + n - k) break;
-    }
-    if (i < 0) break;
-    idx[i]++;
-    for (let j = i + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
-  }
-  return res;
-}
-
-// Choose a deliberately wrong-type value for a field given its declared type.
-// Strategy keeps values primitive & JSON-serializable while maximizing mismatch likelihood.
-function chooseWrongTypeValue(declared?: string): unknown {
-  switch ((declared || '').toLowerCase()) {
-    case 'string':
-      return 12345; // number for string
-    case 'number':
-    case 'integer':
-      return 'not-a-number'; // string for numeric
-    case 'boolean':
-      return 'NOT_A_BOOLEAN'; // clearly non-boolean string
-    case 'array':
-      return {}; // object for array
-    case 'object':
-      return 42; // number for object
-    default:
-      return null; // unexpected type -> null (often invalid if not nullable)
-  }
 }
 
 // -------- Filter Providers (search filters, oneOf negatives) ---------
