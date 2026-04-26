@@ -79,10 +79,12 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   const suiteName = opts.suiteName || collection.endpoint.operationId;
   // Import only test & expect; request fixture is provided per-test via parameters
   lines.push("import { test, expect } from '@playwright/test';");
-  // Import env helpers from compiled support location relative to generated tests
-  lines.push("import { buildBaseUrl, authHeaders } from '../src/codegen/support/env';");
-  lines.push("import { recordResponse, sanitizeBody } from '../src/codegen/support/recorder';");
-  lines.push("import { seedBinding } from '../src/codegen/support/seeding';");
+  // Import vendored helpers from the suite-local ./support/ directory.
+  // materializeSupport() copies these files alongside the emitted specs so
+  // the generated suite has no dependency on this generator project.
+  lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
+  lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
+  lines.push("import { seedBinding } from './support/seeding';");
   lines.push('');
   lines.push(`test.describe('${suiteName}', () => {`);
   for (const scenario of collection.scenarios) {

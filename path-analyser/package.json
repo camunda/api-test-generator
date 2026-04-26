@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-  "build": "tsc -p tsconfig.json && node scripts/copy-seed-rules.js",
+  "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
     "generate:scenarios": "node ./dist/src/index.js",
     "start": "npm run build && npm run generate:scenarios",
     "codegen:playwright": "npm run build && node dist/src/codegen/index.js",
