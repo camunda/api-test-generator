@@ -55,14 +55,34 @@ npm install
 npm run regenerate
 ```
 
-Artifacts are written to `generated/`:
+Artifacts are written to `generated/`. By default the suite is **standalone** —
+it vendors its runtime helpers and project scaffolding so it can run in place
+with no external dependency other than a running Camunda server:
 
-|      File       |                Description                |
-|-----------------|-------------------------------------------|
-| `*.spec.ts`     | Playwright tests grouped by tag/domain    |
-| `MANIFEST.json` | Global scenario kind counts               |
-| `COVERAGE.json` | Per-operation kind counts & missing kinds |
-| `COVERAGE.md`   | Human-readable coverage table             |
+```
+cd request-validation/generated
+npm install
+CORE_APPLICATION_URL=http://localhost:8080 npm test
+```
+
+For a cluster that requires Basic auth:
+
+```
+CAMUNDA_BASIC_AUTH_USER=demo CAMUNDA_BASIC_AUTH_PASSWORD=demo npm test
+```
+
+|        File         |                Description                |
+|---------------------|-------------------------------------------|
+| `*.spec.ts`         | Playwright tests grouped by tag/domain    |
+| `support/http.ts`   | Vendored HTTP helpers (URL building, headers) |
+| `support/env.ts`    | Vendored auth + base-URL config           |
+| `package.json`      | Standalone project manifest               |
+| `playwright.config.ts` | Standalone Playwright config           |
+| `tsconfig.json`     | Standalone TS config                      |
+| `.env.example`      | Documents the supported env vars          |
+| `MANIFEST.json`     | Global scenario kind counts               |
+| `COVERAGE.json`     | Per-operation kind counts & missing kinds |
+| `COVERAGE.md`       | Human-readable coverage table             |
 
 View coverage:
 
@@ -76,7 +96,8 @@ less generated/COVERAGE.md
 |-----------------------|------------------------------------------------------------|------------------------------------------|
 | `--only`              | Base kinds subset (`missing-required,type-mismatch,union`) | `--only=missing-required`                |
 | `--out-dir`           | Output directory                                           | `--out-dir=../some/path`                 |
-| `--qa-import-depth`   | Relative depth to QA `utils/`                              | `--qa-import-depth=4`                    |
+| `--qa-import-depth`   | (legacy) Relative depth to QA `utils/`. Implicitly turns standalone mode off. | `--qa-import-depth=4`                    |
+| `--no-standalone`     | Force off standalone mode (combine with `--qa-import-depth` for QA-tree placement) | `--no-standalone --qa-import-depth=4`    |
 | `--max-missing`       | Cap per-operation missing-required                         | `--max-missing=4`                        |
 | `--max-type-mismatch` | Cap per-operation type-mismatch                            | `--max-type-mismatch=8`                  |
 | `--only-operations`   | Comma list of operationIds                                 | `--only-operations=createGroup,getGroup` |
@@ -101,9 +122,19 @@ Scenario IDs are stable unless the required / enum / composition structure of sc
 
 Fingerprints: `(method, path, kind, target, bodyHash)` to collapse structurally identical mutations across overlapping generators while preserving semantic breadth.
 
-### Integration into QA Suite
+### Integration into QA Suite (legacy / opt-in)
 
-Place (or symlink) `generated/` under the QA test tree: `camunda/qa/c8-orchestration-cluster-e2e-test-suite/tests/api/v2/<module>/`. Adjust `--qa-import-depth` so relative imports reach `utils/http` correctly.
+The default standalone mode replaces the previous workflow of dropping the
+emitted suite under the Camunda QA test tree. To produce QA-tree-ready output
+instead, pass `--no-standalone` and `--qa-import-depth`:
+
+```
+npm run generate:raw -- --no-standalone --qa-import-depth=4
+```
+
+Then place (or symlink) `generated/` under
+`camunda/qa/c8-orchestration-cluster-e2e-test-suite/tests/api/v2/<module>/`.
+Adjust `--qa-import-depth` so relative imports reach `utils/http` correctly.
 
 ### Generated File Metadata
 

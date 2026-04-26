@@ -3,10 +3,18 @@ import path from 'node:path';
 import prettier from 'prettier';
 import type { ValidationScenario } from '../model/types.js';
 import { LICENSE_HEADER } from './licenseHeader.js';
+import { materializeStandalone } from './materializeStandalone.js';
 
 interface EmitOpts {
   outDir: string;
   qaImportDepth: number;
+  /**
+   * When true (default), emit a self-contained suite that imports its support
+   * helpers from `./support/http` (relative to the spec file) and materialize
+   * the support templates + project scaffolding into `outDir`. When false,
+   * use the legacy QA-tree import path computed from `qaImportDepth`.
+   */
+  standalone?: boolean;
   specCommit?: string;
   generationTimestamp?: string;
 }
@@ -21,6 +29,9 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
     byFile.set(file, arr);
   }
   await fs.promises.mkdir(opts.outDir, { recursive: true });
+  if (opts.standalone !== false) {
+    await materializeStandalone(opts.outDir);
+  }
   // Resolve Prettier config once (fail fast if not found / cannot load)
   let resolvedConfig: prettier.Config | null = null;
   try {
@@ -44,7 +55,13 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
   }
   for (const [file, list] of byFile.entries()) {
     list.sort((a, b) => a.id.localeCompare(b.id));
-    const raw = buildFile(list, opts.qaImportDepth, opts.specCommit, opts.generationTimestamp);
+    const raw = buildFile(
+      list,
+      opts.qaImportDepth,
+      opts.specCommit,
+      opts.generationTimestamp,
+      opts.standalone !== false,
+    );
     let formatted: string;
     try {
       formatted = await prettier.format(raw, {
@@ -67,11 +84,11 @@ function buildFile(
   depth: number,
   specCommit?: string,
   ts?: string,
+  standalone: boolean = true,
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
-  const up = '../'.repeat(depth);
-  const httpImport = `${up}utils/http`;
+  const httpImport = standalone ? './support/http' : `${'../'.repeat(depth)}utils/http`;
   const lines: string[] = [];
   lines.push(LICENSE_HEADER.trimEnd());
   const meta: string[] = [];
