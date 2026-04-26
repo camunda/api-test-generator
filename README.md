@@ -92,7 +92,9 @@ npm run fetch-spec
 npm run pipeline
 
 # Run the generated tests (requires running Camunda server)
-npm run test:pw
+npm run test:pw                       # both suites (path-analyser + request-validation)
+npm run test:pw:path-analyser         # positive scenarios only
+npm run test:pw:request-validation    # negative request-validation only
 ```
 
 ## Project Structure
@@ -157,7 +159,9 @@ npm run build --workspaces --if-present
 | `npm run build:request-validation` | Build the request-validation generator |
 | `npm run generate:request-validation` | Emit negative request-validation tests (default scenario kinds) |
 | `npm run generate:request-validation:full` | Emit negative request-validation tests with **all** ~24 scenario kinds (`--deep`) |
-| `npm run test:pw` | Run the generated Playwright tests |
+| `npm run test:pw` | Run both generated Playwright suites (path-analyser + request-validation) |
+| `npm run test:pw:path-analyser` | Run only the positive path-analyser suite |
+| `npm run test:pw:request-validation` | Run only the negative request-validation suite |
 | `npm run testsuite:generate` | Full positive-generation pipeline: extract graph → scenarios → Playwright tests |
 | `npm run testsuite:observe:run` | Generate tests, run them, and aggregate runtime observations |
 | `npm run observe:aggregate` | Aggregate runtime observation data |
