@@ -38,32 +38,45 @@ malformed-request scenario kinds.
 
 - **Node.js ≥ 22**
 - **npm ≥ 10** (ships with Node 22+)
-- **Docker & Docker Compose** (for running Camunda server)
+- **Camunda 8 server** — either via [`c8ctl`](https://github.com/camunda/c8ctl) (recommended) or Docker Compose
 
 ## Quick Start
 
 ### Starting the Camunda Server
 
-```bash
-# Start the Camunda server using Docker Compose
-cd docker
-docker compose up -d
+#### Option A — [`c8ctl`](https://github.com/camunda/c8ctl) (recommended)
 
-# Verify the server is running (health check)
-docker compose logs camunda
+`c8ctl` is the Camunda 8 CLI. It manages a local cluster lifecycle for you and
+is the fastest path from clone to a running server:
+
+```bash
+# One-off install (Node ≥ 22)
+npm install -g @camunda8/c8ctl
+
+# Start a cluster pinned to a specific Camunda version
+c8ctl cluster start 8.9
+
+# Stop it when you're done
+c8ctl cluster stop
 ```
 
-The Camunda REST API will be available at `http://localhost:8080` by default.
-You can override the port with the `CAMUNDA_REST_PORT` environment variable:
+The Camunda REST API will be available at `http://localhost:8080`.
+
+#### Option B — Docker Compose
+
+If you prefer to run Compose directly:
+
+```bash
+cd docker
+docker compose up -d
+docker compose logs camunda          # health check
+docker compose down                  # stop
+```
+
+Override the REST port with `CAMUNDA_REST_PORT`:
 
 ```bash
 CAMUNDA_REST_PORT=9080 docker compose up -d
-```
-
-To stop the server:
-
-```bash
-docker compose down
 ```
 
 ### Running the Test Generator
