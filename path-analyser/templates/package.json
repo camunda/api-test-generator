@@ -2,6 +2,7 @@
   "name": "camunda-path-analyser-suite",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "Generated Playwright integration suite produced by the api-test-generator path-analyser.",
   "scripts": {
     "test": "playwright test"

@@ -32,6 +32,18 @@ const OUTPUT_TREES = [
   'request-validation/generated',
 ] as const;
 
+/**
+ * Path patterns that may appear inside an output tree but represent runtime
+ * artifacts (Playwright runs, npm installs) rather than generator output.
+ * They MUST be excluded from the snapshot — otherwise the snapshot drifts
+ * locally vs. CI depending on whether tests / installs ran first.
+ */
+const EXCLUDE_SEGMENTS = ['/node_modules/', '/test-results/', '/playwright-report/'];
+
+function isExcluded(relPath: string): boolean {
+  return EXCLUDE_SEGMENTS.some((seg) => relPath.includes(seg));
+}
+
 interface Manifest {
   generatedAt: string;
   fileCount: number;
@@ -82,6 +94,7 @@ export function buildManifest(): Manifest {
     const absRoot = join(REPO_ROOT, tree);
     for (const file of listFilesRecursive(absRoot)) {
       const rel = relative(REPO_ROOT, file).replaceAll('\\', '/');
+      if (isExcluded(`/${rel}`)) continue;
       files[rel] = hashFile(file, rel);
     }
   }

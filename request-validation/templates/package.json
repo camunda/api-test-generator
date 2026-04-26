@@ -2,6 +2,7 @@
   "name": "camunda-request-validation-suite",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "Generated negative request validation Playwright suite for the Camunda Orchestration Cluster REST API.",
   "scripts": {
     "test": "playwright test",

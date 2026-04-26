@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-26T09:18:12.610Z",
+  "generatedAt": "2026-04-26T21:31:01.693Z",
   "fileCount": 412,
   "trees": [
     "semantic-graph-extractor/dist/output",
@@ -118,7 +118,7 @@
     "path-analyser/dist/generated-tests/migrateProcessInstancesBatchOperation.feature.spec.ts": "fcb05535da15e7ed17c1da6fc14cb6fd02631fe864089d2a3a434bf42e4d47a1",
     "path-analyser/dist/generated-tests/modifyProcessInstance.feature.spec.ts": "052b1b5eadea85d7dab3b54b262cae2773c2d4bad52f8628a2005adb8a974476",
     "path-analyser/dist/generated-tests/modifyProcessInstancesBatchOperation.feature.spec.ts": "c0963fa82a66e809c281036f59919ccab26d9cc18803cbbf98a9418374ee2aa3",
-    "path-analyser/dist/generated-tests/package.json": "23e4444769ed20c8c0a5153a39c4b33dfb6c87d0b9b1ff4298c2f9ddd0c14f6d",
+    "path-analyser/dist/generated-tests/package.json": "dfccf97a742144a4313023f71533ba0da46a5d9bbdd21259149029717d5bb87e",
     "path-analyser/dist/generated-tests/pinClock.feature.spec.ts": "486e3f33c3f2fd5a79c256d5146ad5a90e5b2714acf0cd212a7aaf2ae81a5784",
     "path-analyser/dist/generated-tests/playwright.config.ts": "e59aeec1bc49b340aed05266a493b9c41e76a4b84b960b399d1a827b83300351",
     "path-analyser/dist/generated-tests/publishMessage.feature.spec.ts": "fc5283309bddd36552501cd709aaa288fa83a14e7f79117f4df13e4ab92c5ae1",
@@ -405,7 +405,7 @@
     "request-validation/generated/MANIFEST.json": "0f5a514f2646ac9746682eebc40c0e4251303e21c1c023ac69c401a6b7ebbc1e",
     "request-validation/generated/mappingrules-validation-api-tests.spec.ts": "92793eb6e3dd4b9560a8d2d86c28074b13e16692cdd50dd92a8ad24e4fe09006",
     "request-validation/generated/messages-validation-api-tests.spec.ts": "2ba5e96ddea3baa32ac3ffd5f065d42f968be0e53632a4d0070afb83dfac16a0",
-    "request-validation/generated/package.json": "e8ae722e9a67a5726f2b0cbfdbef3ed335837ddc88237efca58fc5db33de9c81",
+    "request-validation/generated/package.json": "edc7a27bd925fa7730fe6c01eefa9ba2d9d1f8439ca05d81011f32eb1dbdf3d5",
     "request-validation/generated/playwright.config.ts": "116ee1081b1d1f5ba13076cc5f6c58053d9969f1729545e8a2e4357ebca89012",
     "request-validation/generated/processdefinitions-validation-api-tests.spec.ts": "58199df848e70358013f023b922cb708771c35606d211e8c041c8c446dbe0cc7",
     "request-validation/generated/processinstances-validation-api-tests.spec.ts": "84a4d3cae691962346fa4777c0776dbfb11975440f1f66184115ff044185916c",
