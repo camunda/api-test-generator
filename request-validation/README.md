@@ -47,6 +47,32 @@ If you are not deep into the codebase, here is the 30‑second view:
 
 All generated scenarios currently expect 400; "stateful" follow-on semantic checks are out of scope here.
 
+### Quickstart: generate against `stable/8.9` and run against a local cluster
+
+End-to-end in five commands. Generates the request-validation suite from the upstream `stable/8.9` spec, starts a matching local Camunda cluster with [`c8ctl`](https://github.com/camunda/c8ctl), and runs the generated suite against it.
+
+```bash
+# 1. From the repo root: fetch the stable/8.9 spec and generate the suite.
+SPEC_REF=stable/8.9 npm run fetch-spec:ref
+npm run generate:request-validation
+
+# 2. Start a local Camunda 8.9 cluster (defaults to http://localhost:8080).
+c8ctl cluster start 8.9
+
+# 3. Install + run the generated suite in place.
+cd request-validation/generated
+npm install
+CORE_APPLICATION_URL=http://localhost:8080 npm test
+```
+
+The emitted suite is standalone (vendors its own `package.json`, `playwright.config.ts`, `tsconfig.json`, and `support/` helpers), so step 3 has no dependency on this generator project.
+
+Stop the cluster when you're done:
+
+```bash
+c8ctl cluster stop
+```
+
 ### Quick Start
 
 ```
