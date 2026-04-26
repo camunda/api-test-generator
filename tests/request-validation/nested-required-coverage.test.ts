@@ -18,26 +18,29 @@ import { loadSpec } from '../../request-validation/src/spec/loader.js';
  * field that no negative test exercises — i.e. the API would silently accept
  * a payload missing that field.
  */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function hasNonEmptyRequired(v: unknown): boolean {
+  if (!isRecord(v)) return false;
+  const req = v.required;
+  return Array.isArray(req) && req.length > 0;
+}
+
 describe('request-validation: nested-required negative coverage', () => {
   it('every operation with a nested-required field emits at least one missing-required scenario', async () => {
-    const m = await loadSpec(
-      `${process.cwd()}/spec/bundled/rest-api.bundle.json`,
-    );
+    const m = await loadSpec(`${process.cwd()}/spec/bundled/rest-api.bundle.json`);
 
     // Find ops with at least one nested-required leaf below the root.
     const opsWithNestedRequired: string[] = [];
     for (const op of m.operations) {
-      const root = op.requestBodySchema;
-      if (!root || typeof root !== 'object') continue;
-      const props = (root as { properties?: Record<string, unknown> }).properties;
-      if (!props) continue;
+      const root: unknown = op.requestBodySchema;
+      if (!isRecord(root)) continue;
+      const props = root.properties;
+      if (!isRecord(props)) continue;
       for (const child of Object.values(props)) {
-        if (
-          child &&
-          typeof child === 'object' &&
-          Array.isArray((child as { required?: unknown[] }).required) &&
-          ((child as { required?: unknown[] }).required as unknown[]).length > 0
-        ) {
+        if (hasNonEmptyRequired(child)) {
           opsWithNestedRequired.push(op.operationId);
           break;
         }
@@ -53,6 +56,9 @@ describe('request-validation: nested-required negative coverage', () => {
     const covered = new Set<string>([...top, ...deep].map((s) => s.operationId));
 
     const uncovered = opsWithNestedRequired.filter((op) => !covered.has(op));
-    expect(uncovered, `Operations with nested-required fields but no missing-required scenarios:\n  - ${uncovered.join('\n  - ')}`).toEqual([]);
+    expect(
+      uncovered,
+      `Operations with nested-required fields but no missing-required scenarios:\n  - ${uncovered.join('\n  - ')}`,
+    ).toEqual([]);
   });
 });
