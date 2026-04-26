@@ -36,10 +36,6 @@ async function run() {
     : path.resolve(process.cwd(), 'path-analyser');
   const featureDir = path.join(baseDir, 'dist/feature-output');
   const outDir = path.join(baseDir, 'dist/generated-tests');
-  await fs.mkdir(outDir, { recursive: true });
-  // Vendor the runtime support helpers into <outDir>/support/ so the
-  // emitted suite is self-contained (no imports back into this generator).
-  await materializeSupport(outDir);
 
   if (help || !positional) {
     printUsage();
@@ -54,6 +50,15 @@ async function run() {
         .join(', ')}`,
     );
     process.exit(1);
+  }
+
+  await fs.mkdir(outDir, { recursive: true });
+  // Vendor the runtime support helpers into <outDir>/support/ so the
+  // emitted suite is self-contained (no imports back into this generator).
+  // Only the Playwright emitter currently needs these; gate on the emitter id
+  // so future targets that don't depend on these helpers don't pay the cost.
+  if (emitter.id === 'playwright') {
+    await materializeSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
