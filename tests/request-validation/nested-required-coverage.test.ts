@@ -59,8 +59,9 @@ describe('request-validation: nested-required negative coverage', () => {
 });
 
 /**
- * Walk a schema subtree and invoke `emit(path)` for every required leaf
- * found below the entry node. `path` is the dotted address from the
+ * Walk a schema subtree and invoke `emit(path)` for every required field
+ * found below the entry node (the field may itself be an object or array,
+ * not necessarily a scalar leaf). `path` is the dotted address from the
  * request-body root.
  */
 function collectNestedLeaves(node: unknown, path: string[], emit: (path: string[]) => void): void {

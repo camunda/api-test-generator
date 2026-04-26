@@ -18,8 +18,9 @@ export function generateDeepMissingRequired(
     const walk = buildWalk(op);
     if (!walk?.root) continue;
     let produced = 0;
-    // Walk every object node; for each, emit one scenario per required property
-    // that is NOT itself at the root (those are handled by `missingRequired`).
+    // Walk every object node; for each, emit one scenario per required
+    // property, including properties at the root (see block comment below
+    // for why the root is included).
     const queue: WalkNode[] = [walk.root];
     const visited = new Set<WalkNode>();
     while (queue.length) {
