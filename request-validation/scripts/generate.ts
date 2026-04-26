@@ -43,6 +43,7 @@ interface CliOptions {
   only?: Set<string>;
   outDir: string;
   qaImportDepth: number;
+  standalone: boolean;
   maxMissing?: number;
   maxTypeMismatch?: number;
   onlyOperations?: Set<string>;
@@ -82,10 +83,16 @@ function parseArgs(): CliOptions {
   const onlyOperations = onlyOpsRaw
     ? new Set(onlyOpsRaw.split(',').map((s) => s.trim()))
     : undefined;
+  // Standalone mode is the default. It is implicitly disabled when the user
+  // supplies --qa-import-depth (legacy QA-tree placement). --no-standalone
+  // forces it off explicitly.
+  const explicitNoStandalone = Object.hasOwn(kv, '--no-standalone');
+  const standalone = !explicitNoStandalone && importDepth === undefined;
   return {
     only,
     outDir,
     qaImportDepth,
+    standalone,
     maxMissing: maxMissing ? parseInt(maxMissing, 10) : undefined,
     maxTypeMismatch: maxTypeMismatch ? parseInt(maxTypeMismatch, 10) : undefined,
     onlyOperations,
@@ -458,6 +465,7 @@ async function main() {
   await emitQaTests(deduped, {
     outDir: opts.outDir,
     qaImportDepth: opts.qaImportDepth,
+    standalone: opts.standalone,
     specCommit,
     generationTimestamp,
   });
