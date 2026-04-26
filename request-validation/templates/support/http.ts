@@ -127,8 +127,26 @@ export async function assertResponseStatus(
     `  scenarioKind:    ${ctx.scenarioKind}\n` +
     `  expected status: ${expected}\n` +
     `  actual status:   ${actual} ${res.statusText()}\n` +
+    `  request body:    ${formatRequestPayload(ctx)}\n` +
     `  response body:   ${truncate(bodyText, 500)}`;
   expect(actual, summary).toBe(expected);
+}
+
+function formatRequestPayload(ctx: RequestContext): string {
+  if (ctx.multipart) {
+    const fields = Object.keys(ctx.multipart);
+    if (fields.length === 0) return '(multipart, no fields)';
+    return `(multipart) ${truncate(JSON.stringify(ctx.multipart), 500)}`;
+  }
+  if (ctx.body === undefined) return '(none)';
+  // `null` is a legitimate JSON body and should be shown as-is.
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(ctx.body);
+  } catch {
+    serialized = String(ctx.body);
+  }
+  return truncate(serialized, 500);
 }
 
 function tryParseJson(s: string): unknown | undefined {
