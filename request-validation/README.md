@@ -97,13 +97,30 @@ For a cluster that requires Basic auth:
 CAMUNDA_BASIC_AUTH_USER=demo CAMUNDA_BASIC_AUTH_PASSWORD=demo npm test
 ```
 
+### Diagnosing failing tests
+
+Each generated test sends a malformed request and expects HTTP 400. When the server responds with a different status, the suite captures full request and response context so you can tell what was sent and what came back without re-running anything:
+
+1. **Inline failure messages**: the failing test prints `METHOD URL`, the operation id, the scenario kind, expected vs. actual status, and a truncated response body.
+2. **Per-test attachments**: `request.json` and `response.json` are attached to every failing test. Open the HTML report (`npx playwright show-report`) to inspect them — full URL, headers, body, response payload.
+3. **Grouped summary**: after a run, `npm run summarize` reads `test-results.json` (produced by the JSON reporter) and prints failures grouped by actual HTTP status, scenario kind, and operationId, plus per-failure detail for the first 20 failures.
+
+Typical workflow when a run reports a large number of failures:
+
+```bash
+npm test                    # runs the suite; writes test-results.json + playwright-report/
+npm run summarize           # cluster the failures to spot patterns (e.g. all 401, or all on one operationId)
+npx playwright show-report  # open the HTML report for full request/response detail
+```
+
 |        File         |                Description                |
 |---------------------|-------------------------------------------|
 | `*.spec.ts`         | Playwright tests grouped by tag/domain    |
-| `support/http.ts`   | Vendored HTTP helpers (URL building, headers) |
+| `support/http.ts`   | Vendored HTTP helpers (URL building, headers, `assertResponseStatus`) |
 | `support/env.ts`    | Vendored auth + base-URL config           |
+| `scripts/summarize-failures.mjs` | Post-run analyser; invoked via `npm run summarize` |
 | `package.json`      | Standalone project manifest               |
-| `playwright.config.ts` | Standalone Playwright config           |
+| `playwright.config.ts` | Standalone Playwright config (list + json + html reporters) |
 | `tsconfig.json`     | Standalone TS config                      |
 | `.env.example`      | Documents the supported env vars          |
 | `MANIFEST.json`     | Global scenario kind counts               |

@@ -8,8 +8,10 @@
 
 // Vendored support file. Trimmed subset of the Camunda QA suite's utils/http
 // module — exposes only the symbols the generated specs actually import:
-// `jsonHeaders` and `buildUrl`. Auth/base-URL handling lives in `./env`.
+// `jsonHeaders`, `buildUrl`, and `assertResponseStatus`. Auth/base-URL
+// handling lives in `./env`.
 
+import { type APIResponse, expect, type TestInfo } from '@playwright/test';
 import { credentials } from './env';
 
 export { jsonHeaders, authHeaders, credentials } from './env';
@@ -41,4 +43,148 @@ export function buildUrl(
     if (q) url += (url.includes('?') ? '&' : '?') + q;
   }
   return url;
+}
+
+/** Context captured for every assertion so failures are self-explanatory. */
+export interface RequestContext {
+  /** Operation identifier from the OpenAPI spec (e.g. `assignClientToTenant`). */
+  operationId: string;
+  /** Validation scenario kind (e.g. `param-constraint-violation`). */
+  scenarioKind: string;
+  /** HTTP method, upper-case. */
+  method: string;
+  /** Fully-qualified request URL after path/query substitution. */
+  url: string;
+  /** JSON body if any; for multipart, pass the field map under `multipart`. */
+  body?: unknown;
+  /** Multipart form fields if `bodyEncoding === 'multipart'`. */
+  multipart?: Record<string, string>;
+}
+
+/**
+ * Assert the server responded with the expected status. On mismatch:
+ *
+ *   1. Attach `request.json` and `response.json` artifacts to the Playwright
+ *      report so `npx playwright show-report` (and the JSON reporter) carry
+ *      the full request/response payloads.
+ *   2. Throw an `expect` failure whose message includes the method, URL,
+ *      expected vs. actual status, and a truncated response body — so the
+ *      `list` reporter inline output is immediately diagnostic.
+ *
+ * Pass tests do not produce attachments, keeping the report size bounded.
+ */
+export async function assertResponseStatus(
+  testInfo: TestInfo,
+  res: APIResponse,
+  expected: number,
+  ctx: RequestContext,
+): Promise<void> {
+  const actual = res.status();
+  if (actual === expected) return;
+
+  let bodyText = '';
+  try {
+    bodyText = await res.text();
+  } catch {
+    // Response body may already be consumed; the status mismatch is still actionable.
+  }
+
+  const requestArtifact = JSON.stringify(
+    {
+      operationId: ctx.operationId,
+      scenarioKind: ctx.scenarioKind,
+      method: ctx.method,
+      url: ctx.url,
+      expectedStatus: expected,
+      body: ctx.body,
+      multipart: ctx.multipart,
+    },
+    null,
+    2,
+  );
+  // Cap attached body so that a single oversized error payload (e.g. an HTML
+  // error page) cannot bloat `test-results.json` / the HTML report. The JSON
+  // reporter base64-encodes attachments, so each KB here costs ~1.33 KB on
+  // disk.
+  const cappedBodyText = capString(bodyText, MAX_ATTACHMENT_BODY_BYTES);
+  const responseArtifact = JSON.stringify(
+    {
+      status: actual,
+      statusText: res.statusText(),
+      headers: res.headers(),
+      body: tryParseJson(cappedBodyText.value) ?? cappedBodyText.value,
+      bodyTruncated: cappedBodyText.truncated || undefined,
+      bodyOriginalBytes: cappedBodyText.truncated ? cappedBodyText.originalBytes : undefined,
+    },
+    null,
+    2,
+  );
+  await testInfo.attach('request.json', {
+    body: requestArtifact,
+    contentType: 'application/json',
+  });
+  await testInfo.attach('response.json', {
+    body: responseArtifact,
+    contentType: 'application/json',
+  });
+
+  const summary =
+    `${ctx.method} ${ctx.url}\n` +
+    `  operationId:     ${ctx.operationId}\n` +
+    `  scenarioKind:    ${ctx.scenarioKind}\n` +
+    `  expected status: ${expected}\n` +
+    `  actual status:   ${actual} ${res.statusText()}\n` +
+    `  request body:    ${formatRequestPayload(ctx)}\n` +
+    `  response body:   ${truncate(bodyText, 500)}`;
+  expect(actual, summary).toBe(expected);
+}
+
+function formatRequestPayload(ctx: RequestContext): string {
+  if (ctx.multipart) {
+    const fields = Object.keys(ctx.multipart);
+    if (fields.length === 0) return '(multipart, no fields)';
+    return `(multipart) ${truncate(JSON.stringify(ctx.multipart), 500)}`;
+  }
+  if (ctx.body === undefined) return '(none)';
+  // `null` is a legitimate JSON body and should be shown as-is.
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(ctx.body);
+  } catch {
+    serialized = String(ctx.body);
+  }
+  return truncate(serialized, 500);
+}
+
+function tryParseJson(s: string): unknown | undefined {
+  if (!s) return undefined;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return undefined;
+  }
+}
+
+function truncate(s: string, n: number): string {
+  if (!s) return '(empty)';
+  return s.length > n ? `${s.slice(0, n)}… (${s.length - n} more bytes)` : s;
+}
+
+/**
+ * Maximum number of bytes (UTF-8) of response body to embed in attachments.
+ * Keeps `test-results.json` and `playwright-report/` bounded even when the
+ * server returns large payloads (e.g. HTML error pages, verbose stack traces).
+ */
+const MAX_ATTACHMENT_BODY_BYTES = 64 * 1024;
+
+function capString(
+  s: string,
+  maxBytes: number,
+): { value: string; truncated: boolean; originalBytes: number } {
+  if (!s) return { value: s, truncated: false, originalBytes: 0 };
+  const originalBytes = Buffer.byteLength(s, 'utf8');
+  if (originalBytes <= maxBytes) return { value: s, truncated: false, originalBytes };
+  // Slice on byte boundary, then trim any partial UTF-8 sequence.
+  const buf = Buffer.from(s, 'utf8').subarray(0, maxBytes);
+  return { value: buf.toString('utf8'), truncated: true, originalBytes };
 }

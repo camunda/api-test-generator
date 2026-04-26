@@ -28,8 +28,14 @@ export const STANDALONE_ROOT_FILES = [
 /** Files copied into <outDir>/support/ (runtime helpers imported by specs). */
 export const STANDALONE_SUPPORT_FILES = ['env.ts', 'http.ts'] as const;
 
+/** Files copied into <outDir>/scripts/ (post-run analyser, run via `npm run summarize`). */
+export const STANDALONE_SCRIPT_FILES = ['summarize-failures.mjs'] as const;
+
 /** Subdirectory created under outDir to hold vendored helpers. */
 export const SUPPORT_DIR_NAME = 'support';
+
+/** Subdirectory under outDir for the post-run analyser script. */
+export const SCRIPTS_DIR_NAME = 'scripts';
 
 function defaultTemplatesDir(): string {
   // import.meta.url resolves to:
@@ -74,12 +80,20 @@ export async function materializeStandalone(
   const srcDir = templatesDir ?? defaultTemplatesDir();
   const supportSrcDir = path.join(srcDir, SUPPORT_DIR_NAME);
   const supportDestDir = path.join(outDir, SUPPORT_DIR_NAME);
+  const scriptsSrcDir = path.join(srcDir, SCRIPTS_DIR_NAME);
+  const scriptsDestDir = path.join(outDir, SCRIPTS_DIR_NAME);
 
   await fs.mkdir(supportDestDir, { recursive: true });
+  await fs.mkdir(scriptsDestDir, { recursive: true });
 
   // Always overwrite support/ — these are part of the generator's contract.
   for (const name of STANDALONE_SUPPORT_FILES) {
     await fs.copyFile(path.join(supportSrcDir, name), path.join(supportDestDir, name));
+  }
+
+  // Always overwrite scripts/ — analyser script is part of the contract.
+  for (const name of STANDALONE_SCRIPT_FILES) {
+    await fs.copyFile(path.join(scriptsSrcDir, name), path.join(scriptsDestDir, name));
   }
 
   // Project root scaffolding: overwritten by default; opt-out preserves user edits.
