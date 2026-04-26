@@ -36,6 +36,16 @@ const SUITES: readonly Suite[] = [
 
 const IMPORT_RE = /^\s*import\s[^'"]*['"]([^'"]+)['"]/gm;
 
+/**
+ * Directories under the suite root that must NOT be recursed into when
+ * collecting `*.spec.ts` files. These are produced by `npm install` /
+ * `playwright test` runs once a developer follows the README to run the
+ * standalone suite in place. Recursing into `node_modules/` in particular
+ * would pull in spec files shipped by transitive dependencies and cause
+ * false failures, as well as drastically slow the test.
+ */
+const SKIP_DIRS = new Set(['node_modules', 'playwright-report', 'test-results', '.git']);
+
 async function listSpecs(root: string): Promise<string[]> {
   const out: string[] = [];
   const stack = [root];
@@ -44,9 +54,12 @@ async function listSpecs(root: string): Promise<string[]> {
     if (!dir) continue;
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.isFile() && entry.name.endsWith('.spec.ts')) out.push(full);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        stack.push(path.join(dir, entry.name));
+      } else if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
+        out.push(path.join(dir, entry.name));
+      }
     }
   }
   return out.sort();
