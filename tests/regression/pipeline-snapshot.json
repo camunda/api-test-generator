@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-04-26T05:43:08.247Z",
-  "fileCount": 400,
+  "generatedAt": "2026-04-26T05:45:57.638Z",
+  "fileCount": 399,
   "trees": [
     "semantic-graph-extractor/dist/output",
     "path-analyser/dist/output",
@@ -165,7 +165,6 @@
     "path-analyser/dist/generated-tests/searchUserTasks.feature.spec.ts": "57d171eb317890d818dea429d2a3d652f18c48dd522ca88210e158e4677b2890",
     "path-analyser/dist/generated-tests/searchUserTaskVariables.feature.spec.ts": "76be59d4027c8856d2fde0bb3181d108c05cc0b8d88c250501624fcf768f975a",
     "path-analyser/dist/generated-tests/searchVariables.feature.spec.ts": "06232e9efaa1a5a476e2e8e0eccdecf2695076a1e22e90255b0b29ac1d39f016",
-    "path-analyser/dist/generated-tests/support/env.js": "c0c8baa65f5949eb7b1f85ef1e44490f740ef699534e7132561ff2e0d52ec9de",
     "path-analyser/dist/generated-tests/support/env.ts": "accc60237367bc4199bffa128cb81974871b63b9d5e36ca33f7fd28e1ad49c22",
     "path-analyser/dist/generated-tests/support/recorder.ts": "abe8049c2523e83e62a59047cd04d29dd353889b2d20c6ff407ebe6ed52ff12a",
     "path-analyser/dist/generated-tests/support/seed-rules.json": "5819f41d4a789c4af66b9953cd35b0705af515cc72ec922a9765857f15f14f2d",
