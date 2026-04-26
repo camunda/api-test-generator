@@ -103,6 +103,7 @@ async function main() {
           type: f.type,
           semantic: f.semantic,
           required: f.required,
+          nullable: f.nullable,
         }));
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
         if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
@@ -325,6 +326,7 @@ async function main() {
           type: f.type,
           semantic: f.semantic,
           required: f.required,
+          nullable: f.nullable,
         }));
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
         if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;

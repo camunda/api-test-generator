@@ -38,6 +38,7 @@ export interface AssertionSpec {
   path: string; // json path (dot/bracket) starting under the root json object
   required: boolean; // whether to assert presence unconditionally
   type?: SimpleType; // runtime type check
+  nullable?: boolean; // whether the field is nullable per OpenAPI spec
 }
 
 export interface FinalStepAssertionPlan {
@@ -55,6 +56,7 @@ export function planFinalStepAssertions(
     path: f.name,
     required: !!f.required,
     type: toSimpleType(f.type),
+    nullable: !!f.nullable,
   }));
 
   // Determine expected slices (prefer domain-provided, fallback to heuristic)
@@ -88,6 +90,7 @@ export function planFinalStepAssertions(
         path: `deployments[0].${slice}.${d.name}`,
         required: !!d.required,
         type: toSimpleType(d.type),
+        nullable: !!d.nullable,
       }));
     }
   }
@@ -102,6 +105,7 @@ export function planFinalStepAssertions(
         path: `${arrName}[0].${d.name}`,
         required: !!d.required,
         type: toSimpleType(d.type),
+        nullable: !!d.nullable,
       }));
     }
   }
