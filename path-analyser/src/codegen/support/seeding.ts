@@ -52,18 +52,34 @@ function mulberry32(a: number) {
   };
 }
 
+/**
+ * Resolve the active seed string. Determinism is the default — generator
+ * output is byte-reproducible across runs and machines unless the caller
+ * explicitly opts out by setting `TEST_SEED=random`.
+ *
+ * - unset / `'snapshot-baseline'` (the default): deterministic.
+ * - any other non-empty string: deterministic (seeded by that string).
+ * - `'random'`: nondeterministic (`Math.random()` fallback). Used only
+ *   when explicitly requested for live-broker exploration.
+ */
+const DEFAULT_SEED = 'snapshot-baseline';
+function resolveSeed(): { seed: string; random: boolean } {
+  const raw = process.env.TEST_SEED;
+  if (raw === 'random') return { seed: '', random: true };
+  return { seed: raw && raw.length > 0 ? raw : DEFAULT_SEED, random: false };
+}
+
 const globalEnv: SeedEnv = (() => {
-  const seedStr = process.env.TEST_SEED;
-  const deterministic = !!seedStr;
+  const { seed: seedStr, random } = resolveSeed();
   let seedNum = 0;
-  if (seedStr) {
+  if (random) {
+    seedNum = Date.now() ^ (Math.random() * 0xffffffff);
+  } else {
     // hash string to 32-bit int
     for (let i = 0; i < seedStr.length; i++)
       seedNum = (Math.imul(31, seedNum) + seedStr.charCodeAt(i)) | 0;
-  } else {
-    seedNum = Date.now() ^ (Math.random() * 0xffffffff);
   }
-  const rand = deterministic ? mulberry32(seedNum >>> 0) : Math.random;
+  const rand = random ? Math.random : mulberry32(seedNum >>> 0);
   const counters = new Map<string, number>();
   const env: SeedEnv = {
     random: () => rand().toString(36).slice(2),
@@ -72,8 +88,8 @@ const globalEnv: SeedEnv = (() => {
       counters.set(bucket, v);
       return v;
     },
-    runId: deterministic ? `det-${seedStr}` : `rt-${Date.now().toString(36)}`,
-    deterministic,
+    runId: random ? `rt-${Date.now().toString(36)}` : `det-${seedStr}`,
+    deterministic: !random,
   };
   return env;
 })();
@@ -81,24 +97,23 @@ const globalEnv: SeedEnv = (() => {
 /**
  * Short suffix for test fixture identifiers (e.g. `tenantId_5l5k`).
  *
- * When `TEST_SEED` is set, the suffix is derived deterministically from the
- * input `key` via FNV-1a hash, so repeated pipeline runs produce identical
- * output regardless of call ordering across modules. When `TEST_SEED` is
- * unset, falls back to `Math.random()` to preserve historical uniqueness.
+ * Deterministic by default: the suffix is derived from the input `key`
+ * via FNV-1a hash, mixed with the active seed (`TEST_SEED` or its default
+ * `'snapshot-baseline'`). Repeated pipeline runs produce identical output
+ * regardless of call ordering across modules.
  *
- * Pass a stable, unique `key` (e.g. the variable name plus a discriminator)
- * for reproducible output; reuse the same key only when collisions are OK.
+ * Pass `TEST_SEED=random` to force `Math.random()` fallback (only useful
+ * for live-broker exploration where unique-per-run ids are desired).
  */
 export function deterministicSuffix(key: string, length = 4): string {
-  if (!process.env.TEST_SEED) {
+  const { seed, random } = resolveSeed();
+  if (random) {
     return Math.random()
       .toString(36)
       .slice(2, 2 + length);
   }
-  // FNV-1a 32-bit hash, seeded by TEST_SEED so different runs give different
-  // (but reproducible) suffixes.
+  // FNV-1a 32-bit hash, seeded by the resolved seed.
   let h = 0x811c9dc5;
-  const seed = process.env.TEST_SEED;
   for (let i = 0; i < seed.length; i++) {
     h ^= seed.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
