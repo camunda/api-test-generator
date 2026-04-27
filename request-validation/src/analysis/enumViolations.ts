@@ -1,7 +1,7 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
-import { makeId } from './common.js';
+import { makeId, setAtPath } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -15,12 +15,6 @@ interface SchemaFragment {
   required?: string[];
   properties?: Record<string, SchemaFragment>;
   oneOf?: SchemaFragment[];
-}
-
-type JsonObject = Record<string, unknown>;
-
-function isObject(v: unknown): v is JsonObject {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 function isSchemaFragment(v: unknown): v is SchemaFragment {
@@ -48,8 +42,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= opts.capPerOperation) break;
             const body = structuredClone(baseline);
-            const marker = { __invalidEnum: true, value: inv };
-            if (!applyOrCreatePath(body, path, marker)) continue;
+            if (!setAtPath(body, path, inv)) continue;
             out.push(makeScenario(op, path.join('.'), body, produced));
             produced++;
           }
@@ -81,7 +74,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
             const body = structuredClone(base);
-            body[prop] = { __invalidEnum: true, value: inv };
+            body[prop] = inv;
             out.push({
               id: makeId([op.operationId, 'enumOneOf', String(vi), prop, String(produced)]),
               operationId: op.operationId,
@@ -174,20 +167,6 @@ function findPath(root: WalkNode, node: WalkNode): string[] | undefined {
   return found;
 }
 
-function applyOrCreatePath(obj: unknown, path: string[], value: unknown): boolean {
-  let t: unknown = obj;
-  for (let i = 0; i < path.length - 1; i++) {
-    if (!isObject(t)) return false;
-    const s = path[i];
-    if (!(s in t)) {
-      t[s] = {};
-    }
-    t = t[s];
-  }
-  if (!isObject(t)) return false;
-  t[path[path.length - 1]] = value;
-  return true;
-}
 function buildParams(path: string): Record<string, string> | undefined {
   const m = path.match(/\{([^}]+)}/g);
   if (!m) return undefined;
