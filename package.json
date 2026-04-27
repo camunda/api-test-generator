@@ -27,7 +27,7 @@
     "testsuite:observe:run": "npm run codegen:playwright:all && npm run test:pw:path-analyser && npm run observe:aggregate",
     "observe:aggregate": "npm run build:analyser && node path-analyser/dist/src/scripts/aggregate-observations.js",
     "optional-responses": "node optional-responses/report.js",
-    "pipeline": "npm run fetch-spec && npm run testsuite:generate",
+    "pipeline": "npm run fetch-spec && npm run testsuite:generate && npm run generate:request-validation",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "format": "biome format --write",

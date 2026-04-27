@@ -72,10 +72,11 @@ export default function setup(): void {
         `  Actual current hash:  ${actual}\n\n` +
         `If the upstream spec changed intentionally, re-pin and re-run:\n` +
         `  1. Update tests/regression/spec-pin.json (specRef + expectedSpecHash)\n` +
-        `  2. npm run testsuite:generate && npm run generate:request-validation\n` +
-        `  3. Update any invariants in tests/regression/bundled-spec-invariants.test.ts\n` +
+        `  2. SPEC_REF=<newSpecRef> npm run fetch-spec:ref   (re-fetch the bundled spec)\n` +
+        `  3. npm run testsuite:generate && npm run generate:request-validation\n` +
+        `  4. Update any invariants in tests/regression/bundled-spec-invariants.test.ts\n` +
         `     whose values legitimately changed.\n` +
-        `  4. Commit spec-pin.json alongside the invariant updates.\n`,
+        `  5. Commit spec-pin.json alongside the invariant updates.\n`,
     );
   }
 }
