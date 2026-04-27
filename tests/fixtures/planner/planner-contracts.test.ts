@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { generateScenariosForEndpoint } from '../../../path-analyser/dist/src/scenarioGenerator.js';
+import { generateScenariosForEndpoint } from '../../../path-analyser/src/scenarioGenerator.ts';
 import type {
   EndpointScenarioCollection,
   OperationGraph,
   OperationNode,
-} from '../../../path-analyser/dist/src/types.js';
+} from '../../../path-analyser/src/types.ts';
 
 /**
  * Planner contract fixtures — Layer 2 of the layered test strategy (#36).
