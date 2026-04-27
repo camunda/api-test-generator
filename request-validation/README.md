@@ -76,7 +76,7 @@ c8ctl cluster stop
 ### Quick Start
 
 ```
-cd api-test/request-validation
+cd request-validation
 npm install
 npm run regenerate
 ```

@@ -10,7 +10,7 @@
     "request-validation"
   ],
   "scripts": {
-    "fetch-spec": "camunda-schema-bundler --output-spec spec/bundled/rest-api.bundle.json --output-metadata spec/bundled/spec-metadata.json",
+    "fetch-spec": "camunda-schema-bundler ${SPEC_REF:+--ref $SPEC_REF} --output-spec spec/bundled/rest-api.bundle.json --output-metadata spec/bundled/spec-metadata.json",
     "fetch-spec:ref": "camunda-schema-bundler --ref $SPEC_REF --output-spec spec/bundled/rest-api.bundle.json --output-metadata spec/bundled/spec-metadata.json",
     "extract-graph": "npm run build -w semantic-graph-extractor && node semantic-graph-extractor/dist/index.js",
     "build:analyser": "npm run build -w path-analyser",
@@ -39,9 +39,11 @@
   "devDependencies": {
     "@apidevtools/swagger-parser": "^12.0.0",
     "@biomejs/biome": "2.4.12",
+    "@playwright/test": "^1.54.2",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
     "camunda-schema-bundler": "^2.1.0",
+    "js-yaml": "^4.1.0",
     "prettier": "^3.2.5",
     "rimraf": "^6.0.0",
     "tsx": "^4.7.0",

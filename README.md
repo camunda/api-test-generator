@@ -88,8 +88,11 @@ npm install
 # Fetch the upstream OpenAPI spec and bundle it
 npm run fetch-spec
 
-# Run the full pipeline: fetch spec → extract graph → generate scenarios → emit Playwright tests
+# Run the positive pipeline: extract graph → generate scenarios → emit Playwright tests
 npm run pipeline
+
+# Generate the negative request-validation suite (HTTP 400 tests, ~24 scenario kinds)
+npm run generate:request-validation:full
 
 # Run the generated tests (requires running Camunda server)
 npm run test:pw                       # both suites (path-analyser + request-validation)
@@ -198,9 +201,8 @@ a captured baseline (`tests/regression/pipeline-snapshot.json`).
 **Workflow:**
 
 ```bash
-# 1. Regenerate the pipeline outputs
-npm run testsuite:generate
-npm run generate:request-validation
+# 1. Regenerate the pipeline outputs (positive + negative)
+npm run snapshot:regenerate
 
 # 2. Run the regression test
 npm test
@@ -228,9 +230,8 @@ To bump the spec:
 # 1. Fetch the new spec (set SPEC_REF to a branch, tag, or commit SHA)
 SPEC_REF=stable/8.10 npm run fetch-spec:ref
 
-# 2. Regenerate everything
-npm run testsuite:generate
-npm run generate:request-validation
+# 2. Regenerate everything (positive + negative)
+npm run snapshot:regenerate
 npm run snapshot:update
 
 # 3. Update tests/regression/spec-pin.json with the new specRef and the
@@ -298,9 +299,12 @@ npm run validate-graph -w semantic-graph-extractor  # validate graph integrity
 
 ### path-analyser
 
-Reads the dependency graph and the OpenAPI spec to generate test scenarios for
-every endpoint. Scenarios cover happy paths, missing required fields, wrong types,
-oneOf variant selection, and more. Then emits executable Playwright test files.
+Reads the dependency graph and the OpenAPI spec to generate **positive** test
+scenarios for every endpoint — happy paths, oneOf variant selection, dependency
+chaining, response-shape assertions and artifact deployment coverage. Then
+emits executable Playwright test files. Negative-request scenarios (missing
+required fields, wrong types, etc.) are owned exclusively by
+[`request-validation`](#request-validation).
 
 ```bash
 npm run build -w path-analyser
