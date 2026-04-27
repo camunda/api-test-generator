@@ -82,9 +82,9 @@ export function generateUniqueItemsViolations(
         const path = findPath(root, node);
         if (!path) continue;
         const clone = structuredClone(baseline);
-        // Ensure array exists at the target path (creating any intermediates).
-        if (!setAtPath(clone, path, [])) continue;
-        if (applySet(clone, path, [1, 1, 1])) {
+        // Place the duplicate-array directly at the target path; setAtPath
+        // creates any missing intermediates (with array-aware shaping).
+        if (setAtPath(clone, path, [1, 1, 1])) {
           out.push({
             id: makeId([op.operationId, 'uniqueItems', path.join('_')]),
             operationId: op.operationId,

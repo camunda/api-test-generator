@@ -47,10 +47,15 @@ export function deriveOperationKey(op: OperationModel): string {
  * intermediate must be created, the NEXT segment's shape is inspected to
  * choose between `[]` (next is numeric) and `{}` (otherwise).
  *
- * Returns false if traversal hits a primitive that cannot be descended into.
+ * Returns false if traversal hits a primitive that cannot be descended into,
+ * or if any segment is a prototype-polluting key (`__proto__`, `prototype`,
+ * `constructor`).
  */
+const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
 export function setAtPath(root: unknown, path: string[], value: unknown): boolean {
   if (path.length === 0) return false;
+  for (const seg of path) if (UNSAFE_KEYS.has(seg)) return false;
   let cur: unknown = root;
   for (let i = 0; i < path.length - 1; i++) {
     const seg = path[i];
@@ -64,7 +69,7 @@ export function setAtPath(root: unknown, path: string[], value: unknown): boolea
     } else if (cur && typeof cur === 'object') {
       // biome-ignore lint/plugin: descending into a generic object container; runtime check above narrows shape.
       const obj = cur as Record<string, unknown>;
-      if (!(seg in obj) || obj[seg] === null) obj[seg] = nextIsIndex ? [] : {};
+      if (!Object.hasOwn(obj, seg) || obj[seg] === null) obj[seg] = nextIsIndex ? [] : {};
       cur = obj[seg];
     } else {
       return false;
