@@ -391,11 +391,20 @@ export class SchemaAnalyzer {
       required,
       semanticTypes,
       spec,
+      false,
     );
   }
 
   /**
-   * Extract semantic types from a schema, handling references
+   * Extract semantic types from a schema, handling references.
+   *
+   * `inheritedProvider` carries down whether an enclosing object schema named
+   * this leaf in its `x-semantic-provider: [propA, propB, ...]` array. The
+   * canonical form of the annotation in the Camunda spec is the array form
+   * applied to the object schema (e.g. `DeploymentProcessResult` declares
+   * `x-semantic-provider: ["processDefinitionKey", "processDefinitionId"]`).
+   * The legacy boolean form on the leaf itself is also supported. See
+   * camunda/api-test-generator#33 for the bug this fixes.
    */
   private extractSemanticTypesFromSchemaReference(
     schema: Schema | ReferenceObject,
@@ -403,6 +412,7 @@ export class SchemaAnalyzer {
     required: boolean,
     semanticTypes: SemanticTypeReference[],
     spec: OpenAPISpec,
+    inheritedProvider = false,
   ): void {
     let resolvedSchema = schema;
 
@@ -442,7 +452,8 @@ export class SchemaAnalyzer {
     }
     if (detectedSemanticType) {
       const fieldSchema = this.extractFieldSchema(actualSchema);
-      const isProvider = actualSchema['x-semantic-provider'] === true;
+      const directProvider = actualSchema['x-semantic-provider'] === true;
+      const isProvider = directProvider || inheritedProvider;
       // Deduplicate by semanticType+fieldPath; upgrade provider flag if any occurrence marks it
       const existing = semanticTypes.find(
         (st) => st.semanticType === detectedSemanticType && st.fieldPath === fieldPath,
@@ -463,13 +474,32 @@ export class SchemaAnalyzer {
       }
     }
 
-    // Recursively check properties
+    // Recursively check properties.
+    //
+    // Iteration 1 of camunda/api-test-generator#31: a property leaf is reported
+    // as `required: true` only when every ancestor along its field path was
+    // also required. Previously a leaf could end up flagged required because
+    // its immediate parent listed it in `required`, even when the parent
+    // itself sat under an optional/array/oneOf ancestor — leaking conditional
+    // requiredness up to consumers that planned prerequisite call chains.
     if (actualSchema.properties) {
       const requiredFields = actualSchema.required || [];
+      const providerAnnotation = actualSchema['x-semantic-provider'];
+      const providerProps = Array.isArray(providerAnnotation) ? providerAnnotation : undefined;
 
       for (const [propName, propSchema] of Object.entries(actualSchema.properties)) {
         const propPath = fieldPath ? `${fieldPath}.${propName}` : propName;
-        const propRequired = requiredFields.includes(propName);
+        const propRequired = required && requiredFields.includes(propName);
+        // A child property is an authoritative provider when either:
+        //   (a) this object schema lists its name in `x-semantic-provider: [...]`, or
+        //   (b) the inherited flag is already true — i.e. an ancestor's array
+        //       annotation named a property whose subtree contains this child.
+        // Without the OR, a provider annotation on an outer object would be
+        // dropped at any intermediate object boundary inside the named subtree.
+        // The legacy boolean form (`x-semantic-provider: true`) is honoured at
+        // the leaf itself in the detection block above.
+        const childInheritedProvider =
+          inheritedProvider || (providerProps?.includes(propName) ?? false);
 
         this.extractSemanticTypesFromSchemaReference(
           propSchema,
@@ -477,19 +507,25 @@ export class SchemaAnalyzer {
           propRequired,
           semanticTypes,
           spec,
+          childInheritedProvider,
         );
       }
     }
 
-    // Check array items
+    // Array items are present only when the array itself is non-empty. Even if
+    // the items schema lists required properties, those leaves should not be
+    // classified as required at the request level for iteration 1 — base
+    // scenarios do not populate optional arrays. (See #31; later iterations
+    // may special-case `minItems > 0` to keep strictly required items.)
     if (actualSchema.items) {
       const itemPath = fieldPath ? `${fieldPath}[]` : '[]';
       this.extractSemanticTypesFromSchemaReference(
         actualSchema.items,
         itemPath,
-        required,
+        false,
         semanticTypes,
         spec,
+        inheritedProvider,
       );
     }
 
@@ -502,6 +538,7 @@ export class SchemaAnalyzer {
           required,
           semanticTypes,
           spec,
+          inheritedProvider,
         );
         // If wrapper is provider, propagate provider to matching semantic type entries just added
         if (actualSchema['x-semantic-provider'] === true) {
@@ -514,6 +551,10 @@ export class SchemaAnalyzer {
       });
     }
 
+    // oneOf / anyOf describe alternative shapes. Each branch is a complete
+    // schema with its own `required` list, and exactly one branch is selected
+    // per request, so the parent's requiredness propagates into each branch
+    // unchanged — the per-branch `required` list then drives leaf classification.
     if (actualSchema.oneOf) {
       actualSchema.oneOf.forEach((subSchema) => {
         this.extractSemanticTypesFromSchemaReference(
@@ -522,6 +563,7 @@ export class SchemaAnalyzer {
           required,
           semanticTypes,
           spec,
+          inheritedProvider,
         );
       });
     }
@@ -534,6 +576,7 @@ export class SchemaAnalyzer {
           required,
           semanticTypes,
           spec,
+          inheritedProvider,
         );
       });
     }

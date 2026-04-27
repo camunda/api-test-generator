@@ -334,7 +334,11 @@ function extractRequires(op: RawOp): { required: string[]; optional: string[] } 
       if (st) (p.required ? accRequired : accOptional).push(st);
     }
   }
-  // Request body semantic types (extractor structure)
+  // Request body semantic types (extractor structure). The upstream extractor
+  // (semantic-graph-extractor/schema-analyzer.ts) tracks the ancestor-required
+  // chain when classifying leaves, so an `entry.required === true` here means
+  // every ancestor on the field path was also required. See iteration 1 of
+  // camunda/api-test-generator#31.
   if (Array.isArray(op.requestBodySemanticTypes)) {
     for (const entry of op.requestBodySemanticTypes) {
       const st = entry?.semanticType;
@@ -416,37 +420,57 @@ function collectSemanticTypesFromSchema(
   schema: RawSchema | undefined,
   required: string[],
   optional: string[],
-  parentRequired: string[] = [],
+  ancestorAllRequired = true,
 ) {
   if (!schema || typeof schema !== 'object') return;
-  const ownRequired: string[] = Array.isArray(schema.required) ? schema.required : parentRequired;
+  // A leaf x-semantic-type at this node inherits the requiredness of the path
+  // taken to reach it. See iteration 1 of camunda/api-test-generator#31:
+  // descendants under an optional object property or under array `items` are
+  // treated as optional and must not force prerequisite operations. By
+  // contrast, `oneOf` / `anyOf` branch selection is currently flattened
+  // separately: the parent's requiredness propagates into each branch
+  // unchanged, and only the per-branch `required` list affects descendants.
   if (schema['x-semantic-type']) {
     const st = schema['x-semantic-type'];
-    // Without property name context we treat as optional unless explicitly required list contains a synthetic name
-    if (ownRequired.length === 0) optional.push(st);
-    else required.push(st);
+    (ancestorAllRequired ? required : optional).push(st);
   }
   if (schema.properties) {
     const propsReq: string[] = Array.isArray(schema.required) ? schema.required : [];
     for (const [prop, propSchema] of Object.entries(schema.properties)) {
+      const childAllRequired = ancestorAllRequired && propsReq.includes(prop);
       if (propSchema?.['x-semantic-type']) {
         const st = propSchema['x-semantic-type'];
-        (propsReq.includes(prop) ? required : optional).push(st);
+        (childAllRequired ? required : optional).push(st);
       }
-      collectSemanticTypesFromSchema(propSchema, required, optional, propsReq);
+      collectSemanticTypesFromSchema(propSchema, required, optional, childAllRequired);
     }
   }
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    if (Array.isArray(schema[key]))
-      schema[key]?.forEach((s) => {
-        collectSemanticTypesFromSchema(s, required, optional, ownRequired);
-      });
+  // allOf composes the schema; every branch contributes and inherits the
+  // ancestor chain unchanged.
+  if (Array.isArray(schema.allOf)) {
+    schema.allOf.forEach((s) => {
+      collectSemanticTypesFromSchema(s, required, optional, ancestorAllRequired);
+    });
   }
-  if (schema.items)
-    collectSemanticTypesFromSchema(
-      schema.items,
-      required,
-      optional,
-      Array.isArray(schema.items.required) ? schema.items.required : [],
-    );
+  // oneOf/anyOf describe alternative shapes. Each branch is a complete schema
+  // with its own `required` list and exactly one branch is selected per
+  // request, so the parent's requiredness propagates into each branch
+  // unchanged — the per-branch `required` list then drives leaf classification.
+  // This mirrors `extractSemanticTypesFromSchemaReference` in
+  // semantic-graph-extractor/schema-analyzer.ts; the two walkers must agree on
+  // requiredness or the planner can omit prerequisites for operations whose
+  // request schema is a required `oneOf`.
+  for (const key of ['oneOf', 'anyOf'] as const) {
+    if (Array.isArray(schema[key])) {
+      schema[key]?.forEach((s) => {
+        collectSemanticTypesFromSchema(s, required, optional, ancestorAllRequired);
+      });
+    }
+  }
+  // Array items are present only when the array itself is non-empty. Treat them
+  // as optional for iteration 1; later iterations may use minItems > 0 to keep
+  // strictly required items.
+  if (schema.items) {
+    collectSemanticTypesFromSchema(schema.items, required, optional, false);
+  }
 }
