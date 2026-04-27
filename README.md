@@ -193,10 +193,40 @@ narrowing, or `satisfies` instead — and only suppress with
 
 ## Regression Testing
 
-The pipeline emits 396 generated files (semantic graph, scenario JSON,
-Playwright tests, validation tests). To guard against accidental drift
-during refactoring, `npm test` runs a SHA-256 snapshot comparison against
-a captured baseline (`tests/regression/pipeline-snapshot.json`).
+The pipeline emits hundreds of generated files (semantic graph, scenario JSON,
+Playwright tests, validation tests). The regression strategy is **layered**
+(see #36):
+
+- **Layer 1 — extractor construct fixtures.** Hand-curated minimal OpenAPI
+  snippets in `tests/fixtures/extractor/` paired with property assertions.
+  *(coming soon)*
+- **Layer 2 — planner contract fixtures.** Tiny dependency-graph fixtures in
+  `tests/fixtures/planner/` paired with chain-shape assertions. *(coming soon)*
+- **Layer 3 — bundled-spec invariants** ([tests/regression/bundled-spec-invariants.test.ts](tests/regression/bundled-spec-invariants.test.ts)).
+  Named, human-readable invariants over the real bundled spec. Each `it`
+  block is one regression statement.
+- **Layer 4 — end-to-end snapshot** ([tests/regression/pipeline-snapshot.test.ts](tests/regression/pipeline-snapshot.test.ts)).
+  SHA-256 snapshot comparison against a captured baseline. Slated for removal
+  once Layers 1–3 cover the high-value regressions.
+
+### Determinism
+
+Generator output is byte-reproducible **by default**. The seeding module
+(`path-analyser/src/codegen/support/seeding.ts`) uses `TEST_SEED` to seed all
+`deterministicSuffix(...)` calls; if unset, it falls back to the constant
+`'snapshot-baseline'`, so `npm run pipeline` produces identical output across
+runs and machines without needing `TEST_SEED` to be set explicitly.
+
+To opt out (for example, when generating a one-off suite for live-broker
+exploration where unique-per-run identifiers are useful), set:
+
+```bash
+TEST_SEED=random npm run pipeline
+```
+
+Any other non-empty value is treated as a custom deterministic seed.
+
+### Snapshot workflow
 
 **Workflow:**
 

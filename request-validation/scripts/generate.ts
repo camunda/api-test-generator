@@ -106,10 +106,13 @@ async function main() {
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
   const specCommit: string | undefined = specProvenance;
-  // When TEST_SEED is set, use a stable placeholder so generator output is byte-reproducible.
-  const generationTimestamp = process.env.TEST_SEED
-    ? `seeded:${process.env.TEST_SEED}`
-    : new Date().toISOString();
+  // When TEST_SEED is set (or left at the default), use a stable placeholder
+  // so generator output is byte-reproducible. Set TEST_SEED=random to opt in
+  // to a real wall-clock timestamp.
+  const generationTimestamp =
+    process.env.TEST_SEED === 'random'
+      ? new Date().toISOString()
+      : `seeded:${process.env.TEST_SEED || 'snapshot-baseline'}`;
   const scenarios: ValidationScenario[] = [];
   // --only filters by scenario kind across the entire generator (base AND deep).
   // Without --only, all kinds permitted by the active mode (deep on/off) run.

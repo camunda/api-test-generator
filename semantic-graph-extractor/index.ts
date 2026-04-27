@@ -109,9 +109,13 @@ export class SemanticGraphExtractor {
       semanticTypes: Array.from(graph.semanticTypes.values()),
       edges: graph.edges,
       metadata: {
-        extractedAt: process.env.TEST_SEED
-          ? `seeded:${process.env.TEST_SEED}`
-          : new Date().toISOString(),
+        // Use a deterministic placeholder by default so generated artifacts
+        // are byte-reproducible. Set TEST_SEED=random to opt in to a real
+        // wall-clock timestamp (only useful for live-broker exploration).
+        extractedAt:
+          process.env.TEST_SEED === 'random'
+            ? new Date().toISOString()
+            : `seeded:${process.env.TEST_SEED || 'snapshot-baseline'}`,
         totalOperations: graph.operations.size,
         totalSemanticTypes: graph.semanticTypes.size,
         totalDependencies: graph.edges.length,
