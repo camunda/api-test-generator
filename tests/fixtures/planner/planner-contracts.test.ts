@@ -67,9 +67,10 @@ function opIdsOf(scenario: { operations: { operationId: string }[] }): string[] 
 // ---------------------------------------------------------------------------
 //
 // Two operations both produce ProcessDefinitionKey, but only
-// `createDeployment` is annotated provider:true. The planner must pick
-// the authoritative producer; the incidental search-style operation
-// should not appear in the resulting chain.
+// `createDeployment` is annotated provider:true. The planner must
+// prefer the authoritative producer for the first/canonical scenario;
+// additional scenarios may still be generated via the incidental
+// search-style operation (the contract is ordering, not suppression).
 const fixtureProviderPreference: OperationGraph = makeGraph([
   makeOp('createDeployment', {
     produces: ['ProcessDefinitionKey'],
