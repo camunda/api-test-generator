@@ -424,9 +424,12 @@ function collectSemanticTypesFromSchema(
 ) {
   if (!schema || typeof schema !== 'object') return;
   // A leaf x-semantic-type at this node inherits the requiredness of the path
-  // taken to reach it. See iteration 1 of camunda/api-test-generator#31: leaves
-  // nested under any optional ancestor (property, array, oneOf branch) must not
-  // force prerequisite operations.
+  // taken to reach it. See iteration 1 of camunda/api-test-generator#31:
+  // descendants under an optional object property or under array `items` are
+  // treated as optional and must not force prerequisite operations. By
+  // contrast, `oneOf` / `anyOf` branch selection is currently flattened
+  // separately: the parent's requiredness propagates into each branch
+  // unchanged, and only the per-branch `required` list affects descendants.
   if (schema['x-semantic-type']) {
     const st = schema['x-semantic-type'];
     (ancestorAllRequired ? required : optional).push(st);
