@@ -157,7 +157,7 @@ describe('nullable required field assertions (regression for #1)', () => {
     const dir = path.resolve('path-analyser/dist/generated-tests');
     if (!fs.existsSync(dir)) {
       throw new Error(
-        `Missing generated test artifacts at ${dir}. Generate the path-analyser pipeline outputs (e.g. \`npm run snapshot:regenerate\`) before running this invariant test.`,
+        `Missing generated test artifacts at ${dir}. Run \`npm run testsuite:generate\` before running this invariant test.`,
       );
     }
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.spec.ts'));

@@ -173,8 +173,7 @@ npm run build --workspaces --if-present
 | `npm run lint` | Lint all workspaces with Biome |
 | `npm run lint:fix` | Lint and apply safe Biome fixes |
 | `npm run format` | Format all workspaces with Biome |
-| `npm test` | Run the regression test suite (snapshot guard) |
-| `npm run snapshot:update` | Recapture the pipeline output snapshot after intentional generator changes |
+| `npm test` | Run the regression test suite (extractor + planner fixtures, bundled-spec invariants) |
 
 ## Code Quality Tooling
 
@@ -197,17 +196,25 @@ The pipeline emits hundreds of generated files (semantic graph, scenario JSON,
 Playwright tests, validation tests). The regression strategy is **layered**
 (see #36):
 
-- **Layer 1 — extractor construct fixtures.** Hand-curated minimal OpenAPI
-  snippets in `tests/fixtures/extractor/` paired with property assertions.
-  *(coming soon)*
-- **Layer 2 — planner contract fixtures.** Tiny dependency-graph fixtures in
-  `tests/fixtures/planner/` paired with chain-shape assertions. *(coming soon)*
+- **Layer 1 — extractor construct fixtures** ([tests/fixtures/extractor/](tests/fixtures/extractor)).
+  Hand-curated minimal OpenAPI snippets paired with property assertions.
+  Each `it` block is one regression statement; failures point at one
+  construct, not at hundreds of hashed files.
+- **Layer 2 — planner contract fixtures** ([tests/fixtures/planner/](tests/fixtures/planner)).
+  Tiny dependency-graph fixtures paired with chain-shape assertions on
+  `generateScenariosForEndpoint`.
 - **Layer 3 — bundled-spec invariants** ([tests/regression/bundled-spec-invariants.test.ts](tests/regression/bundled-spec-invariants.test.ts)).
-  Named, human-readable invariants over the real bundled spec. Each `it`
-  block is one regression statement.
-- **Layer 4 — end-to-end snapshot** ([tests/regression/pipeline-snapshot.test.ts](tests/regression/pipeline-snapshot.test.ts)).
-  SHA-256 snapshot comparison against a captured baseline. Slated for removal
-  once Layers 1–3 cover the high-value regressions.
+  Named, human-readable invariants over the real bundled spec output.
+
+There is no Layer 4 end-to-end snapshot. The previous SHA-256 manifest
+guard was retired in favour of the layered strategy: a 412-file diff is
+not a useful signal, whereas a fixture or invariant failure names the
+broken property directly.
+
+**Standing rule:** every bug fix to the extractor or planner should land
+with (a) a fixture demonstrating the bug BEFORE the fix, and (b) an
+invariant if the property is observable at the chain or graph level. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Determinism
 
@@ -226,33 +233,16 @@ TEST_SEED=random npm run pipeline
 
 Any other non-empty value is treated as a custom deterministic seed.
 
-### Snapshot workflow
-
-**Workflow:**
-
-```bash
-# 1. Regenerate the pipeline outputs (positive + negative)
-npm run snapshot:regenerate
-
-# 2. Run the regression test
-npm test
-
-# 3. If you intentionally changed generator behaviour and the test fails,
-#    recapture the baseline and commit it alongside your production change:
-npm run snapshot:update
-```
-
-This is a class-scoped guard — any drift in any analyser, planner or emitter
-will fail the test, not just one specific defect path.
-
 ### Spec pin
 
-Snapshot byte-identity is only meaningful against a fixed upstream spec.
-`tests/regression/spec-pin.json` records the `expectedSpecHash` of the
-upstream spec content the snapshot was captured against, plus the `specRef`
-CI fetches. A precondition test (`tests/regression/spec-pin.test.ts`) fails
-fast with an actionable message if the bundled spec drifts from that hash,
-so reviewers don't have to debug a 396-file diff.
+The bundled-spec invariants test the real upstream spec output, so it is
+only meaningful against a fixed upstream spec content.
+[tests/regression/spec-pin.json](tests/regression/spec-pin.json) records
+the `expectedSpecHash` plus the `specRef` CI fetches. A vitest
+`globalSetup` ([tests/regression/spec-pin.setup.ts](tests/regression/spec-pin.setup.ts))
+aborts the entire run with a single actionable error if the bundled spec
+drifts from that hash, so reviewers don't have to debug a confusing
+invariant failure when the real cause is upstream drift.
 
 To bump the spec:
 
@@ -260,13 +250,14 @@ To bump the spec:
 # 1. Fetch the new spec (set SPEC_REF to a branch, tag, or commit SHA)
 SPEC_REF=stable/8.10 npm run fetch-spec:ref
 
-# 2. Regenerate everything (positive + negative)
-npm run snapshot:regenerate
-npm run snapshot:update
+# 2. Regenerate the pipeline so the invariants run against fresh output
+npm run testsuite:generate
+npm run generate:request-validation
 
 # 3. Update tests/regression/spec-pin.json with the new specRef and the
 #    `specHash` printed in spec/bundled/spec-metadata.json
-# 4. Commit spec-pin.json + pipeline-snapshot.json together
+# 4. Update any invariants whose values legitimately changed, then commit
+#    spec-pin.json alongside the invariant updates.
 ```
 
 ### Continuous integration
@@ -279,7 +270,7 @@ npm run snapshot:update
 3. Builds (`build:analyser`, `build:request-validation`)
 4. `npm run fetch-spec:ref` at the pinned `specRef`
 5. Full pipeline regeneration with `TEST_SEED=snapshot-baseline`
-6. `npm test` — spec-pin guard, snapshot regression, and unit tests
+6. `npm test` — spec-pin guard, layered regression, and unit tests
 
 On failure the generated outputs are uploaded as the
 `pipeline-outputs` artifact for inspection.

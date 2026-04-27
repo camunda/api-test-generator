@@ -37,7 +37,7 @@ jobs:
 
       - name: Read pinned spec ref
         id: pin
-        # The snapshot regression baseline was captured against a specific
+        # The bundled-spec invariants are evaluated against a specific
         # upstream spec content. We fetch that ref so unrelated upstream
         # changes don't randomly fail PRs. See tests/regression/spec-pin.json
         # for the bump procedure.
