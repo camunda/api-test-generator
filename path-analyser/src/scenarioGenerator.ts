@@ -347,12 +347,7 @@ export function generateScenariosForEndpoint(
         }
         // Issue #35: reject candidates whose semantic prereqs are not yet
         // satisfied (mirror the semantic-targeting branch).
-        if (
-          producerNode.requires.required.length &&
-          !producerNode.requires.required.every((s) => state.produced.has(s))
-        ) {
-          continue;
-        }
+        if (!hasSatisfiedRequiredInputs(producerNode, state.produced)) continue;
         // Must add at least one new domain state to avoid infinite loops
         const newlyAdds = new Set<string>();
         producerNode.domainProduces?.forEach((d) => {
@@ -474,12 +469,7 @@ export function generateScenariosForEndpoint(
       // are not produced by an earlier step. Without this guard the
       // candidate is appended anyway and emits code that falls back to
       // a literal `${...}` placeholder URL at runtime.
-      if (
-        producerNode.requires.required.length &&
-        !producerNode.requires.required.every((s) => state.produced.has(s))
-      ) {
-        continue;
-      }
+      if (!hasSatisfiedRequiredInputs(producerNode, state.produced)) continue;
 
       const newProduced = new Set(state.produced);
       const newDomainStates = new Set(state.domainStates);
@@ -620,6 +610,17 @@ function signature(
   cycle: boolean,
 ): string {
   return `${cycle ? 1 : 0}|${ops.join(',')}|p:${[...produced].sort().join(',')}|n:${[...needed].sort().join(',')}`;
+}
+
+// Issue #35: shared prereq guard. The semantic-producer and
+// domain-producer expansion branches both need to reject candidates
+// whose own required semantic inputs are not yet produced. Centralising
+// the check keeps both branches in sync.
+function hasSatisfiedRequiredInputs(
+  producerNode: OperationNode,
+  produced: ReadonlySet<string>,
+): boolean {
+  return producerNode.requires.required.every((s) => produced.has(s));
 }
 
 // Select minimal artifact rules for createDeployment based on unmet semantic needs.
@@ -763,16 +764,16 @@ function enumerateRuleSemantics(rule: ArtifactRule, graph: OperationGraph): stri
   const semantics = new Set<string>();
   if (rule.producesSemantics?.length) {
     for (const s of rule.producesSemantics) semantics.add(s);
+    // Also include the artifact-kind's identifier for rules that
+    // hand-roll producesSemantics, since inferSemanticsFromArtifact()
+    // is not used in this branch and would otherwise silently drop it.
+    const spec = graph.domain?.artifactKinds?.[rule.artifactKind];
+    if (spec?.identifierType) semantics.add(spec.identifierType);
   } else {
     for (const s of inferSemanticsFromArtifact(graph, rule.artifactKind)) {
       semantics.add(s);
     }
   }
-  // Always also include the artifact-kind's identifier (mirrors
-  // inferSemanticsFromArtifact). Rules that hand-roll producesSemantics
-  // would otherwise silently drop the identifier.
-  const spec = graph.domain?.artifactKinds?.[rule.artifactKind];
-  if (spec?.identifierType) semantics.add(spec.identifierType);
   return [...semantics];
 }
 

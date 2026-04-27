@@ -61,6 +61,7 @@ interface ScenarioFile {
 }
 
 let cachedGraph: DependencyGraph | undefined;
+let cachedOperationById: Map<string, OperationNode> | undefined;
 function loadGraph(): DependencyGraph {
   if (cachedGraph) return cachedGraph;
   if (!existsSync(GRAPH_PATH)) {
@@ -70,11 +71,13 @@ function loadGraph(): DependencyGraph {
   }
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; downstream property accesses tolerate malformed entries
   cachedGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as DependencyGraph;
+  cachedOperationById = new Map(cachedGraph.operations.map((o) => [o.operationId, o]));
   return cachedGraph;
 }
 
 function findOperation(opId: string): OperationNode {
-  const op = loadGraph().operations.find((o) => o.operationId === opId);
+  loadGraph();
+  const op = cachedOperationById?.get(opId);
   if (!op) throw new Error(`Operation ${opId} not found in dependency graph`);
   return op;
 }
