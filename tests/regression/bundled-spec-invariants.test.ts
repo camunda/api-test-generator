@@ -207,7 +207,12 @@ describe('bundled-spec invariants: planner output', () => {
           if (missing.length) {
             offenders.push({ file: f, scenario: sc.id, step: ref.operationId, missing });
           }
-          for (const entries of Object.values(opNode.responseSemanticTypes ?? {})) {
+          for (const [statusCode, entries] of Object.entries(opNode.responseSemanticTypes ?? {})) {
+            // Mirror semantic-graph-extractor/graph-builder.ts
+            // getProducedSemanticTypes(): only count semantics from
+            // success/redirect responses, otherwise an error-only
+            // semantic could spuriously satisfy a downstream prereq.
+            if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
             for (const e of entries) produced.add(e.semanticType);
           }
         }
