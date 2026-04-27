@@ -247,15 +247,18 @@ invariant failure when the real cause is upstream drift.
 To bump the spec:
 
 ```bash
-# 1. Fetch the new spec (set SPEC_REF to a branch, tag, or commit SHA)
+# 1. Fetch the new spec. SPEC_REF can be a branch, tag, or commit SHA;
+#    a branch/tag is fine for convenience here, but step 3 must record
+#    the resolved 40-char commit SHA in spec-pin.json (branches drift).
 SPEC_REF=stable/8.10 npm run fetch-spec:ref
 
 # 2. Regenerate the pipeline so the invariants run against fresh output
 npm run testsuite:generate
 npm run generate:request-validation
 
-# 3. Update tests/regression/spec-pin.json with the new specRef and the
-#    `specHash` printed in spec/bundled/spec-metadata.json
+# 3. Update tests/regression/spec-pin.json:
+#    - specRef:          the resolved 40-char commit SHA (NOT the branch/tag)
+#    - expectedSpecHash: the `specHash` printed in spec/bundled/spec-metadata.json
 # 4. Update any invariants whose values legitimately changed, then commit
 #    spec-pin.json alongside the invariant updates.
 ```
