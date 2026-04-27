@@ -191,12 +191,11 @@ describe('bundled-spec invariants: planner output', () => {
         if (sc.id === 'unsatisfied') continue; // explicitly flagged unreachable
         const produced = new Set<string>();
         for (const ref of sc.operations) {
-          let opNode: OperationNode | undefined;
-          try {
-            opNode = findOperation(ref.operationId);
-          } catch {
-            continue; // unknown op (skip rather than fail loudly)
-          }
+          // Let findOperation throw if the scenario references an
+          // operationId not in the dependency graph: that would be a
+          // pipeline/graph mismatch and a silent skip could hide a
+          // real prereq violation.
+          const opNode = findOperation(ref.operationId);
           const req = (opNode.requestBodySemanticTypes ?? [])
             .filter((e) => e.required)
             .map((e) => e.semanticType);
