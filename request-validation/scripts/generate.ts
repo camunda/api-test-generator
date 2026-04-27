@@ -96,7 +96,7 @@ function parseArgs(): CliOptions {
     maxMissing: maxMissing ? parseInt(maxMissing, 10) : undefined,
     maxTypeMismatch: maxTypeMismatch ? parseInt(maxTypeMismatch, 10) : undefined,
     onlyOperations,
-    deep: Object.hasOwn(kv, '--deep') || args.includes('--deep'),
+    deep: !(Object.hasOwn(kv, '--no-deep') || args.includes('--no-deep')),
   };
 }
 

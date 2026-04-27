@@ -17,7 +17,7 @@
     "build:request-validation": "npm run build -w request-validation",
     "generate:scenarios": "npm run build:analyser && node path-analyser/dist/src/index.js",
     "generate:request-validation": "npm run generate -w request-validation",
-    "generate:request-validation:full": "npm run generate:full -w request-validation",
+    "generate:request-validation:shallow": "npm run generate:shallow -w request-validation",
     "codegen:playwright": "npm run build:analyser && node path-analyser/dist/src/codegen/index.js",
     "codegen:playwright:all": "npm run build:analyser && node path-analyser/dist/src/codegen/index.js --all",
     "test:pw": "npm run test:pw:path-analyser && npm run test:pw:request-validation",

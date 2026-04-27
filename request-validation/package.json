@@ -8,7 +8,7 @@
     "build": "tsc -p .",
     "generate:raw": "tsx scripts/generate.ts",
     "generate": "npm run generate:raw && npm run format",
-    "generate:full": "npm run generate:raw -- --deep && npm run format",
+    "generate:shallow": "npm run generate:raw -- --no-deep && npm run format",
     "generate:smoke": "npm run generate:raw -- --max-missing=2 --max-type-mismatch=3 && npm run format",
     "analyze-spec": "tsx scripts/analyze-spec.ts",
     "format": "prettier --write generated/**/*.ts",
@@ -16,6 +16,6 @@
     "regenerate": "npm run generate",
     "clean": "rimraf dist generated",
     "sync:tests": "tsx scripts/sync-tests.ts",
-    "sync:full": "npm run build && npm run generate:full && npm run sync:tests"
+    "sync:full": "npm run build && npm run generate && npm run sync:tests"
   }
 }
