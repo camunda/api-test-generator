@@ -345,6 +345,14 @@ export function generateScenariosForEndpoint(
           );
           if (missingDomain.length) continue; // enforce strict satisfaction first
         }
+        // Issue #35: reject candidates whose semantic prereqs are not yet
+        // satisfied (mirror the semantic-targeting branch).
+        if (
+          producerNode.requires.required.length &&
+          !producerNode.requires.required.every((s) => state.produced.has(s))
+        ) {
+          continue;
+        }
         // Must add at least one new domain state to avoid infinite loops
         const newlyAdds = new Set<string>();
         producerNode.domainProduces?.forEach((d) => {
@@ -389,9 +397,8 @@ export function generateScenariosForEndpoint(
         producerNode.requires.required.forEach((s) => {
           newNeeded.add(s);
         });
-        producerNode.requires.optional.forEach((s) => {
-          newNeeded.add(s);
-        });
+        // Issue #35: producer `optional` requirements stay opportunistic
+        // (mirror the semantic-targeting branch below).
         const newOps = [...state.ops, producerOpId];
         const newProductionMap = new Map(state.productionMap);
         producerNode.produces.forEach((s) => {
@@ -463,6 +470,16 @@ export function generateScenariosForEndpoint(
         );
         if (missingDomain.length) continue; // wait until domain states present
       }
+      // Issue #35: reject candidates whose own required semantic inputs
+      // are not produced by an earlier step. Without this guard the
+      // candidate is appended anyway and emits code that falls back to
+      // a literal `${...}` placeholder URL at runtime.
+      if (
+        producerNode.requires.required.length &&
+        !producerNode.requires.required.every((s) => state.produced.has(s))
+      ) {
+        continue;
+      }
 
       const newProduced = new Set(state.produced);
       const newDomainStates = new Set(state.domainStates);
@@ -511,9 +528,9 @@ export function generateScenariosForEndpoint(
       producerNode.requires.required.forEach((s) => {
         newNeeded.add(s);
       });
-      producerNode.requires.optional.forEach((s) => {
-        newNeeded.add(s);
-      });
+      // Issue #35: producer `optional` requirements are opportunistic and
+      // must NOT be promoted to `needed`, otherwise BFS chases an
+      // arbitrary producer for them and inserts a spurious step.
       const newOps = [...state.ops, producerOpId];
       const newProductionMap = new Map(state.productionMap);
       producerNode.produces.forEach((s) => {
@@ -734,12 +751,29 @@ function inferSemanticsFromArtifact(graph: OperationGraph, artifactKind: string)
   if (!spec) return [];
   const semantics: string[] = [];
   if (spec.producesSemantics) semantics.push(...spec.producesSemantics);
+  // Issue #35: an artifact also produces its identifier semantic (e.g.
+  // bpmnProcess returns ProcessDefinitionId in the deployment response).
+  // Without this, BFS chases a separate producer for the identifier and
+  // inserts a spurious step.
+  if (spec.identifierType) semantics.push(spec.identifierType);
   return [...new Set(semantics)];
 }
 
 function enumerateRuleSemantics(rule: ArtifactRule, graph: OperationGraph): string[] {
-  if (rule.producesSemantics?.length) return [...new Set(rule.producesSemantics)];
-  return inferSemanticsFromArtifact(graph, rule.artifactKind);
+  const semantics = new Set<string>();
+  if (rule.producesSemantics?.length) {
+    for (const s of rule.producesSemantics) semantics.add(s);
+  } else {
+    for (const s of inferSemanticsFromArtifact(graph, rule.artifactKind)) {
+      semantics.add(s);
+    }
+  }
+  // Always also include the artifact-kind's identifier (mirrors
+  // inferSemanticsFromArtifact). Rules that hand-roll producesSemantics
+  // would otherwise silently drop the identifier.
+  const spec = graph.domain?.artifactKinds?.[rule.artifactKind];
+  if (spec?.identifierType) semantics.add(spec.identifierType);
+  return [...semantics];
 }
 
 function enumerateRuleStates(rule: ArtifactRule, graph: OperationGraph): string[] {

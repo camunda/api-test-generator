@@ -37,10 +37,17 @@ interface SemanticTypeEntry {
   required: boolean;
   provider: boolean;
 }
+interface ParameterEntry {
+  name: string;
+  location: string;
+  semanticType?: string;
+  required?: boolean;
+}
 interface OperationNode {
   operationId: string;
   method: string;
   path: string;
+  parameters?: ParameterEntry[];
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
 }
@@ -140,17 +147,16 @@ describe('bundled-spec invariants: extractor classification', () => {
 });
 
 describe('bundled-spec invariants: planner output', () => {
-  it('every createProcessInstance scenario includes createDeployment as a prerequisite (#32)', () => {
-    // Locks in #32: ProcessDefinitionKey/Id must always be sourced from
-    // createDeployment, the canonical authoritative provider. Tightening
-    // this further (e.g. "is the FIRST step") is blocked by #35
-    // (spurious intermediate steps), which can prepend an unrelated GET
-    // for an eventually-consistent variant. Tighten when #35 lands.
+  it('every createProcessInstance scenario starts with createDeployment as the first prerequisite (#32, #35)', () => {
+    // Locks in #32 (PDK/PDI sourced from createDeployment) and #35
+    // (no spurious intermediate steps): with prereq-checking and the
+    // optional-leak fix, createDeployment must be the FIRST operation
+    // in every non-trivial scenario.
     const scen = loadScenarioFile('post--process-instances-scenarios.json');
     expect(scen.scenarios.length).toBeGreaterThan(0);
     const offenders = scen.scenarios
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
-      .filter((s) => !s.ops.includes('createDeployment'));
+      .filter((s) => s.ops[0] !== 'createDeployment');
     expect(offenders).toEqual([]);
   });
 
@@ -162,6 +168,51 @@ describe('bundled-spec invariants: planner output', () => {
     const offenders = scen.scenarios
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
       .filter((s) => s.ops.includes('searchElementInstances'));
+    expect(offenders).toEqual([]);
+  });
+
+  it('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', () => {
+    // Class-scoped guard against the #35 defect family: BFS must not
+    // insert any operation whose `requires.required` is not satisfied
+    // by either a seeded binding (none here) or an earlier step's
+    // `produces`. A violation means a generated test would render with
+    // a literal `${...}` placeholder URL at runtime.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      for (const sc of file.scenarios) {
+        if (sc.id === 'unsatisfied') continue; // explicitly flagged unreachable
+        const produced = new Set<string>();
+        for (const ref of sc.operations) {
+          let opNode: OperationNode | undefined;
+          try {
+            opNode = findOperation(ref.operationId);
+          } catch {
+            continue; // unknown op (skip rather than fail loudly)
+          }
+          const req = (opNode.requestBodySemanticTypes ?? [])
+            .filter((e) => e.required)
+            .map((e) => e.semanticType);
+          for (const p of opNode.parameters ?? []) {
+            if (p.required && p.semanticType) req.push(p.semanticType);
+          }
+          const missing = req.filter((s) => !produced.has(s));
+          if (missing.length) {
+            offenders.push({ file: f, scenario: sc.id, step: ref.operationId, missing });
+          }
+          for (const entries of Object.values(opNode.responseSemanticTypes ?? {})) {
+            for (const e of entries) produced.add(e.semanticType);
+          }
+        }
+      }
+    }
     expect(offenders).toEqual([]);
   });
 });
