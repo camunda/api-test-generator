@@ -463,13 +463,20 @@ export class SchemaAnalyzer {
       }
     }
 
-    // Recursively check properties
+    // Recursively check properties.
+    //
+    // Iteration 1 of camunda/api-test-generator#31: a property leaf is reported
+    // as `required: true` only when every ancestor along its field path was
+    // also required. Previously a leaf could end up flagged required because
+    // its immediate parent listed it in `required`, even when the parent
+    // itself sat under an optional/array/oneOf ancestor — leaking conditional
+    // requiredness up to consumers that planned prerequisite call chains.
     if (actualSchema.properties) {
       const requiredFields = actualSchema.required || [];
 
       for (const [propName, propSchema] of Object.entries(actualSchema.properties)) {
         const propPath = fieldPath ? `${fieldPath}.${propName}` : propName;
-        const propRequired = requiredFields.includes(propName);
+        const propRequired = required && requiredFields.includes(propName);
 
         this.extractSemanticTypesFromSchemaReference(
           propSchema,
@@ -481,13 +488,17 @@ export class SchemaAnalyzer {
       }
     }
 
-    // Check array items
+    // Array items are present only when the array itself is non-empty. Even if
+    // the items schema lists required properties, those leaves should not be
+    // classified as required at the request level for iteration 1 — base
+    // scenarios do not populate optional arrays. (See #31; later iterations
+    // may special-case `minItems > 0` to keep strictly required items.)
     if (actualSchema.items) {
       const itemPath = fieldPath ? `${fieldPath}[]` : '[]';
       this.extractSemanticTypesFromSchemaReference(
         actualSchema.items,
         itemPath,
-        required,
+        false,
         semanticTypes,
         spec,
       );
@@ -514,6 +525,10 @@ export class SchemaAnalyzer {
       });
     }
 
+    // oneOf / anyOf describe alternative shapes. Each branch is a complete
+    // schema with its own `required` list, and exactly one branch is selected
+    // per request, so the parent's requiredness propagates into each branch
+    // unchanged — the per-branch `required` list then drives leaf classification.
     if (actualSchema.oneOf) {
       actualSchema.oneOf.forEach((subSchema) => {
         this.extractSemanticTypesFromSchemaReference(
