@@ -449,13 +449,18 @@ function collectSemanticTypesFromSchema(
       collectSemanticTypesFromSchema(s, required, optional, ancestorAllRequired);
     });
   }
-  // oneOf/anyOf describe alternative shapes; only one branch is selected per
-  // request, so semantics inside are conditional on the variant chosen elsewhere
-  // and must not be classified as planner-required for the base scenario.
+  // oneOf/anyOf describe alternative shapes. Each branch is a complete schema
+  // with its own `required` list and exactly one branch is selected per
+  // request, so the parent's requiredness propagates into each branch
+  // unchanged — the per-branch `required` list then drives leaf classification.
+  // This mirrors `extractSemanticTypesFromSchemaReference` in
+  // semantic-graph-extractor/schema-analyzer.ts; the two walkers must agree on
+  // requiredness or the planner can omit prerequisites for operations whose
+  // request schema is a required `oneOf`.
   for (const key of ['oneOf', 'anyOf'] as const) {
     if (Array.isArray(schema[key])) {
       schema[key]?.forEach((s) => {
-        collectSemanticTypesFromSchema(s, required, optional, false);
+        collectSemanticTypesFromSchema(s, required, optional, ancestorAllRequired);
       });
     }
   }
