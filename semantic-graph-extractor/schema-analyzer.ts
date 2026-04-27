@@ -490,11 +490,16 @@ export class SchemaAnalyzer {
       for (const [propName, propSchema] of Object.entries(actualSchema.properties)) {
         const propPath = fieldPath ? `${fieldPath}.${propName}` : propName;
         const propRequired = required && requiredFields.includes(propName);
-        // A child property is an authoritative provider when this object
-        // schema lists its name in `x-semantic-provider: [...]`. The legacy
-        // boolean form (`x-semantic-provider: true`) is handled at the leaf
-        // itself in the detection block above.
-        const childInheritedProvider = providerProps?.includes(propName) ?? false;
+        // A child property is an authoritative provider when either:
+        //   (a) this object schema lists its name in `x-semantic-provider: [...]`, or
+        //   (b) the inherited flag is already true — i.e. an ancestor's array
+        //       annotation named a property whose subtree contains this child.
+        // Without the OR, a provider annotation on an outer object would be
+        // dropped at any intermediate object boundary inside the named subtree.
+        // The legacy boolean form (`x-semantic-provider: true`) is honoured at
+        // the leaf itself in the detection block above.
+        const childInheritedProvider =
+          inheritedProvider || (providerProps?.includes(propName) ?? false);
 
         this.extractSemanticTypesFromSchemaReference(
           propSchema,
