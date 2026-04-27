@@ -37,9 +37,17 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "^12.0.0",
     "@biomejs/biome": "2.4.12",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
     "camunda-schema-bundler": "^2.1.0",
-    "vitest": "4.1.5"
+    "prettier": "^3.2.5",
+    "rimraf": "^6.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.5.4",
+    "vitest": "4.1.5",
+    "yaml": "^2.5.0"
   },
   "engines": {
     "node": ">=22.0.0"

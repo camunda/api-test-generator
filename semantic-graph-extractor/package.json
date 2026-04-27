@@ -14,11 +14,6 @@
   "license": "ISC",
   "type": "commonjs",
   "description": "",
-  "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
-  },
   "dependencies": {
     "js-yaml": "^4.1.0"
   }

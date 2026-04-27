@@ -17,14 +17,5 @@
     "clean": "rimraf dist generated",
     "sync:tests": "tsx scripts/sync-tests.ts",
     "sync:full": "npm run build && npm run generate:full && npm run sync:tests"
-  },
-  "devDependencies": {
-    "@apidevtools/swagger-parser": "^12.0.0",
-    "@types/node": "^24.0.0",
-    "prettier": "^3.2.5",
-    "rimraf": "^6.0.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.5.4",
-    "yaml": "^2.4.2"
   }
 }

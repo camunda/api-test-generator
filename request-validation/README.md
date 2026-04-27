@@ -54,7 +54,7 @@ End-to-end in five commands. Generates the request-validation suite from the ups
 ```bash
 # 1. From the repo root: fetch the stable/8.9 spec and generate the suite.
 SPEC_REF=stable/8.9 npm run fetch-spec:ref
-npm run generate:request-validation
+npm run generate:request-validation:full
 
 # 2. Start a local Camunda 8.9 cluster (defaults to http://localhost:8080).
 c8ctl cluster start 8.9
