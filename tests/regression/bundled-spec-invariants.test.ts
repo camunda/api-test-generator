@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
  * `npm run testsuite:generate` first.
  */
 
-const REPO_ROOT = join(__dirname, '..', '..');
+const REPO_ROOT = join(import.meta.dirname, '..', '..');
 const GRAPH_PATH = join(
   REPO_ROOT,
   'semantic-graph-extractor',
@@ -92,6 +92,11 @@ function providersOf(opId: string): string[] {
 
 function loadScenarioFile(filename: string): ScenarioFile {
   const p = join(SCENARIOS_DIR, filename);
+  if (!existsSync(p)) {
+    throw new Error(
+      `Scenario file not found at ${p}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+    );
+  }
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
   return JSON.parse(readFileSync(p, 'utf8')) as ScenarioFile;
 }
@@ -166,6 +171,11 @@ describe('bundled-spec invariants: emitted Playwright suite', () => {
     // Layer-3 mirror of the targeted enum-violation test in
     // tests/request-validation/. Catches any future analyser that
     // re-introduces the same sentinel-leak pattern.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
     const offenders: string[] = [];
     for (const f of readdirSync(GENERATED_TESTS_DIR)) {
       if (!f.endsWith('.spec.ts')) continue;
