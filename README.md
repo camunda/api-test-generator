@@ -91,8 +91,8 @@ npm run fetch-spec
 # Run the positive pipeline: extract graph → generate scenarios → emit Playwright tests
 npm run pipeline
 
-# Generate the negative request-validation suite (HTTP 400 tests, ~24 scenario kinds)
-npm run generate:request-validation:full
+# Generate the negative request-validation suite (HTTP 400 tests, all supported scenario kinds)
+npm run generate:request-validation
 
 # Run the generated tests (requires running Camunda server)
 npm run test:pw                       # both suites (path-analyser + request-validation)
