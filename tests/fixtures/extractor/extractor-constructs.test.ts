@@ -10,20 +10,57 @@
  * BEFORE the fix, alongside the assertion.
  */
 import { describe, expect, it } from 'vitest';
-import { SchemaAnalyzer } from '../../../semantic-graph-extractor/dist/schema-analyzer.js';
 import type {
   OpenAPISpec,
   SemanticTypeReference,
 } from '../../../semantic-graph-extractor/dist/types.js';
 
-function extractRequestBodyFor(spec: OpenAPISpec, opId: string): SemanticTypeReference[] {
+type ExtractedOperation = {
+  operationId: string;
+  requestBodySemanticTypes: SemanticTypeReference[];
+  responseSemanticTypes?: Record<string, SemanticTypeReference[]>;
+};
+
+type SchemaAnalyzerCtor = new () => {
+  extractOperations(spec: OpenAPISpec): ExtractedOperation[];
+};
+
+// Lazy import: `semantic-graph-extractor/dist` may not exist on a fresh
+// checkout. `npm run pipeline` builds it via `extract-graph`. If the
+// build is missing, surface an actionable error instead of a raw
+// module-not-found stack.
+let cachedSchemaAnalyzer: SchemaAnalyzerCtor | undefined;
+async function loadSchemaAnalyzer(): Promise<SchemaAnalyzerCtor> {
+  if (cachedSchemaAnalyzer) return cachedSchemaAnalyzer;
+  try {
+    const mod = await import('../../../semantic-graph-extractor/dist/schema-analyzer.js');
+    // biome-ignore lint/plugin: dynamic import of CJS build output; constructor shape is locked by SchemaAnalyzerCtor + the surrounding extractRequestBodyFor/extractResponseFor call sites
+    cachedSchemaAnalyzer = mod.SchemaAnalyzer as SchemaAnalyzerCtor;
+    return cachedSchemaAnalyzer;
+  } catch (cause) {
+    throw new Error(
+      "Failed to load semantic-graph-extractor build output. Run 'npm run extract-graph' (or 'npm run pipeline') before these tests.",
+      { cause },
+    );
+  }
+}
+
+async function extractRequestBodyFor(
+  spec: OpenAPISpec,
+  opId: string,
+): Promise<SemanticTypeReference[]> {
+  const SchemaAnalyzer = await loadSchemaAnalyzer();
   const ops = new SchemaAnalyzer().extractOperations(spec);
   const op = ops.find((o) => o.operationId === opId);
   if (!op) throw new Error(`fixture: operation ${opId} not present in extracted spec`);
   return op.requestBodySemanticTypes;
 }
 
-function extractResponseFor(spec: OpenAPISpec, opId: string): SemanticTypeReference[] {
+async function extractResponseFor(
+  spec: OpenAPISpec,
+  opId: string,
+): Promise<SemanticTypeReference[]> {
+  const SchemaAnalyzer = await loadSchemaAnalyzer();
   const ops = new SchemaAnalyzer().extractOperations(spec);
   const op = ops.find((o) => o.operationId === opId);
   if (!op) throw new Error(`fixture: operation ${opId} not present in extracted spec`);
@@ -272,8 +309,8 @@ const fixtureProviderBooleanLeaf: OpenAPISpec = {
 
 describe('extractor construct fixtures', () => {
   describe('optional ancestor demotes leaf to optional (#31)', () => {
-    it('startInstructions[].elementId is classified optional even though items.required lists it', () => {
-      const refs = extractRequestBodyFor(fixtureOptionalAncestor, 'createThing');
+    it('startInstructions[].elementId is classified optional even though items.required lists it', async () => {
+      const refs = await extractRequestBodyFor(fixtureOptionalAncestor, 'createThing');
       const leaf = refs.find((r) => r.fieldPath === 'startInstructions[].elementId');
       expect(
         leaf,
@@ -282,16 +319,16 @@ describe('extractor construct fixtures', () => {
       expect(leaf?.required).toBe(false);
     });
 
-    it('a sibling required leaf at top level remains required', () => {
-      const refs = extractRequestBodyFor(fixtureOptionalAncestor, 'createThing');
+    it('a sibling required leaf at top level remains required', async () => {
+      const refs = await extractRequestBodyFor(fixtureOptionalAncestor, 'createThing');
       const leaf = refs.find((r) => r.fieldPath === 'processDefinitionKey');
       expect(leaf?.required).toBe(true);
     });
   });
 
   describe('oneOf parent required-ness propagates into branches (#32 review)', () => {
-    it('every branch leaf inherits the parent property requiredness', () => {
-      const refs = extractRequestBodyFor(fixtureOneOfRequiredBranch, 'createThingOneOf');
+    it('every branch leaf inherits the parent property requiredness', async () => {
+      const refs = await extractRequestBodyFor(fixtureOneOfRequiredBranch, 'createThingOneOf');
       const branchLeaves = refs.filter(
         (r) => r.fieldPath.startsWith('target.') && r.semanticType.startsWith('ProcessDefinition'),
       );
@@ -305,8 +342,8 @@ describe('extractor construct fixtures', () => {
   });
 
   describe('x-semantic-provider array form classifies named children (#33)', () => {
-    it('every property listed in the parent`s array-form annotation is flagged provider:true', () => {
-      const refs = extractResponseFor(fixtureProviderArrayForm, 'createDeploymentLike');
+    it("every property listed in the parent's array-form annotation is flagged provider:true", async () => {
+      const refs = await extractResponseFor(fixtureProviderArrayForm, 'createDeploymentLike');
       const key = refs.find((r) => r.semanticType === 'ProcessDefinitionKey');
       const id = refs.find((r) => r.semanticType === 'ProcessDefinitionId');
       expect(key?.provider).toBe(true);
@@ -315,8 +352,8 @@ describe('extractor construct fixtures', () => {
   });
 
   describe('inheritedProvider stays through nested object subtrees (#34 review)', () => {
-    it('provider stays true while descending through an intermediate object boundary', () => {
-      const refs = extractResponseFor(fixtureProviderDeeplyNested, 'createDeploymentDeep');
+    it('provider stays true while descending through an intermediate object boundary', async () => {
+      const refs = await extractResponseFor(fixtureProviderDeeplyNested, 'createDeploymentDeep');
       const leaf = refs.find((r) => r.fieldPath === 'result.processDefinitionKey');
       expect(leaf, 'expected result.processDefinitionKey to be extracted').toBeDefined();
       expect(leaf?.provider).toBe(true);
@@ -324,8 +361,11 @@ describe('extractor construct fixtures', () => {
   });
 
   describe('legacy boolean x-semantic-provider on the leaf is still honoured', () => {
-    it('a leaf-level `x-semantic-provider: true` flags the entry as provider', () => {
-      const refs = extractResponseFor(fixtureProviderBooleanLeaf, 'createThingBooleanProvider');
+    it('a leaf-level `x-semantic-provider: true` flags the entry as provider', async () => {
+      const refs = await extractResponseFor(
+        fixtureProviderBooleanLeaf,
+        'createThingBooleanProvider',
+      );
       const leaf = refs.find((r) => r.semanticType === 'ProcessDefinitionKey');
       expect(leaf?.provider).toBe(true);
     });
