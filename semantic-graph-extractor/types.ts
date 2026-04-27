@@ -74,7 +74,12 @@ export interface Schema {
   maxLength?: number;
   description?: string;
   'x-semantic-type'?: string;
-  'x-semantic-provider'?: boolean;
+  // Either `true` (this leaf schema is the authoritative provider for its
+  // semantic type) or an array of property names — in which case the listed
+  // *child* properties of this object schema are the authoritative providers
+  // for their semantic types. The array form is the canonical shape used in
+  // the bundled Camunda spec; see camunda/api-test-generator#33.
+  'x-semantic-provider'?: boolean | string[];
   allOf?: (Schema | ReferenceObject)[];
   oneOf?: (Schema | ReferenceObject)[];
   anyOf?: (Schema | ReferenceObject)[];

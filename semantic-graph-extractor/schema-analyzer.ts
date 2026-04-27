@@ -391,11 +391,20 @@ export class SchemaAnalyzer {
       required,
       semanticTypes,
       spec,
+      false,
     );
   }
 
   /**
-   * Extract semantic types from a schema, handling references
+   * Extract semantic types from a schema, handling references.
+   *
+   * `inheritedProvider` carries down whether an enclosing object schema named
+   * this leaf in its `x-semantic-provider: [propA, propB, ...]` array. The
+   * canonical form of the annotation in the Camunda spec is the array form
+   * applied to the object schema (e.g. `DeploymentProcessResult` declares
+   * `x-semantic-provider: ["processDefinitionKey", "processDefinitionId"]`).
+   * The legacy boolean form on the leaf itself is also supported. See
+   * camunda/api-test-generator#33 for the bug this fixes.
    */
   private extractSemanticTypesFromSchemaReference(
     schema: Schema | ReferenceObject,
@@ -403,6 +412,7 @@ export class SchemaAnalyzer {
     required: boolean,
     semanticTypes: SemanticTypeReference[],
     spec: OpenAPISpec,
+    inheritedProvider = false,
   ): void {
     let resolvedSchema = schema;
 
@@ -442,7 +452,8 @@ export class SchemaAnalyzer {
     }
     if (detectedSemanticType) {
       const fieldSchema = this.extractFieldSchema(actualSchema);
-      const isProvider = actualSchema['x-semantic-provider'] === true;
+      const directProvider = actualSchema['x-semantic-provider'] === true;
+      const isProvider = directProvider || inheritedProvider;
       // Deduplicate by semanticType+fieldPath; upgrade provider flag if any occurrence marks it
       const existing = semanticTypes.find(
         (st) => st.semanticType === detectedSemanticType && st.fieldPath === fieldPath,
@@ -473,10 +484,17 @@ export class SchemaAnalyzer {
     // requiredness up to consumers that planned prerequisite call chains.
     if (actualSchema.properties) {
       const requiredFields = actualSchema.required || [];
+      const providerAnnotation = actualSchema['x-semantic-provider'];
+      const providerProps = Array.isArray(providerAnnotation) ? providerAnnotation : undefined;
 
       for (const [propName, propSchema] of Object.entries(actualSchema.properties)) {
         const propPath = fieldPath ? `${fieldPath}.${propName}` : propName;
         const propRequired = required && requiredFields.includes(propName);
+        // A child property is an authoritative provider when this object
+        // schema lists its name in `x-semantic-provider: [...]`. The legacy
+        // boolean form (`x-semantic-provider: true`) is handled at the leaf
+        // itself in the detection block above.
+        const childInheritedProvider = providerProps?.includes(propName) ?? false;
 
         this.extractSemanticTypesFromSchemaReference(
           propSchema,
@@ -484,6 +502,7 @@ export class SchemaAnalyzer {
           propRequired,
           semanticTypes,
           spec,
+          childInheritedProvider,
         );
       }
     }
@@ -501,6 +520,7 @@ export class SchemaAnalyzer {
         false,
         semanticTypes,
         spec,
+        inheritedProvider,
       );
     }
 
@@ -513,6 +533,7 @@ export class SchemaAnalyzer {
           required,
           semanticTypes,
           spec,
+          inheritedProvider,
         );
         // If wrapper is provider, propagate provider to matching semantic type entries just added
         if (actualSchema['x-semantic-provider'] === true) {
@@ -537,6 +558,7 @@ export class SchemaAnalyzer {
           required,
           semanticTypes,
           spec,
+          inheritedProvider,
         );
       });
     }
@@ -549,6 +571,7 @@ export class SchemaAnalyzer {
           required,
           semanticTypes,
           spec,
+          inheritedProvider,
         );
       });
     }
