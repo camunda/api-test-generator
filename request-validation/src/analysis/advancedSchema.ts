@@ -1,7 +1,7 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { buildWalk, type WalkNode } from '../schema/walker.js';
-import { makeId } from './common.js';
+import { makeId, setAtPath } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -82,9 +82,9 @@ export function generateUniqueItemsViolations(
         const path = findPath(root, node);
         if (!path) continue;
         const clone = structuredClone(baseline);
-        // Ensure array exists (if not in baseline) by creating it
-        if (!applyEnsureArrayPath(clone, path)) continue;
-        if (applySet(clone, path, [1, 1, 1])) {
+        // Place the duplicate-array directly at the target path; setAtPath
+        // creates any missing intermediates (with array-aware shaping).
+        if (setAtPath(clone, path, [1, 1, 1])) {
           out.push({
             id: makeId([op.operationId, 'uniqueItems', path.join('_')]),
             operationId: op.operationId,
@@ -221,19 +221,6 @@ function applySet(obj: unknown, path: string[], value: unknown): boolean {
   const last = path[path.length - 1];
   if (!(last in target)) return false;
   target[last] = value;
-  return true;
-}
-function applyEnsureArrayPath(obj: unknown, path: string[]): boolean {
-  let target: unknown = obj;
-  for (let i = 0; i < path.length - 1; i++) {
-    if (!isObject(target)) return false;
-    const seg = path[i];
-    if (!(seg in target) || typeof target[seg] !== 'object') target[seg] = {};
-    target = target[seg];
-  }
-  if (!isObject(target)) return false;
-  const last = path[path.length - 1];
-  if (!(last in target) || !Array.isArray(target[last])) target[last] = [];
   return true;
 }
 function findPath(root: WalkNode, node: WalkNode): string[] | undefined {
