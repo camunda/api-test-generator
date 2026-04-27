@@ -91,8 +91,8 @@ npm run fetch-spec
 # Run the positive pipeline: extract graph → generate scenarios → emit Playwright tests
 npm run pipeline
 
-# Generate the negative request-validation suite (HTTP 400 tests, ~24 scenario kinds)
-npm run generate:request-validation:full
+# Generate the negative request-validation suite (HTTP 400 tests, all supported scenario kinds)
+npm run generate:request-validation
 
 # Run the generated tests (requires running Camunda server)
 npm run test:pw                       # both suites (path-analyser + request-validation)
@@ -160,8 +160,8 @@ npm run build --workspaces --if-present
 | `npm run codegen:playwright` | Build and emit a Playwright test for a single endpoint |
 | `npm run codegen:playwright:all` | Build and emit Playwright tests for all endpoints |
 | `npm run build:request-validation` | Build the request-validation generator |
-| `npm run generate:request-validation` | Emit negative request-validation tests (default scenario kinds) |
-| `npm run generate:request-validation:full` | Emit negative request-validation tests with **all** ~24 scenario kinds (`--deep`) |
+| `npm run generate:request-validation` | Emit negative request-validation tests with all supported scenario kinds (deep coverage by default) |
+| `npm run generate:request-validation:shallow` | Emit only the core kinds (`missing-required`, `type-mismatch`, `union`) — fast iteration |
 | `npm run test:pw` | Run both generated Playwright suites (path-analyser + request-validation) |
 | `npm run test:pw:path-analyser` | Run only the positive path-analyser suite |
 | `npm run test:pw:request-validation` | Run only the negative request-validation suite |
@@ -343,9 +343,9 @@ length / pattern violations, `allOf` conflicts, additional-property rejection
 and multipart-only adaptation.
 
 ```bash
-npm run build:request-validation         # compile the generator
-npm run generate:request-validation      # default scenario kinds (missing-required, type-mismatch, union)
-npm run generate:request-validation:full # --deep mode: all ~24 scenario kinds
+npm run build:request-validation             # compile the generator
+npm run generate:request-validation          # all supported scenario kinds (deep coverage by default)
+npm run generate:request-validation:shallow  # only missing-required, type-mismatch, union
 ```
 
 Output lands in `request-validation/generated/`:

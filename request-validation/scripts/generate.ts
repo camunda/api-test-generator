@@ -96,7 +96,7 @@ function parseArgs(): CliOptions {
     maxMissing: maxMissing ? parseInt(maxMissing, 10) : undefined,
     maxTypeMismatch: maxTypeMismatch ? parseInt(maxTypeMismatch, 10) : undefined,
     onlyOperations,
-    deep: Object.hasOwn(kv, '--deep') || args.includes('--deep'),
+    deep: !(Object.hasOwn(kv, '--no-deep') || args.includes('--no-deep')),
   };
 }
 
@@ -111,9 +111,11 @@ async function main() {
     ? `seeded:${process.env.TEST_SEED}`
     : new Date().toISOString();
   const scenarios: ValidationScenario[] = [];
-  const kinds = opts.only || new Set(['missing-required', 'type-mismatch', 'union']);
+  // --only filters by scenario kind across the entire generator (base AND deep).
+  // Without --only, all kinds permitted by the active mode (deep on/off) run.
+  const wantKind = (k: string): boolean => !opts.only || opts.only.has(k);
 
-  if (kinds.has('missing-required')) {
+  if (wantKind('missing-required')) {
     scenarios.push(
       ...generateMissingRequired(model.operations, {
         capPerOperation: opts.maxMissing,
@@ -133,15 +135,19 @@ async function main() {
           onlyOperations: opts.onlyOperations,
           includeNested: true,
         }),
-        ...generateMissingRequiredCombos(model.operations, {
-          capPerOperation: opts.maxMissing ? opts.maxMissing * 2 : undefined,
-          onlyOperations: opts.onlyOperations,
-          maxComboSize: 3,
-        }),
       );
     }
   }
-  if (kinds.has('type-mismatch')) {
+  if (opts.deep && wantKind('missing-required-combo')) {
+    scenarios.push(
+      ...generateMissingRequiredCombos(model.operations, {
+        capPerOperation: opts.maxMissing ? opts.maxMissing * 2 : undefined,
+        onlyOperations: opts.onlyOperations,
+        maxComboSize: 3,
+      }),
+    );
+  }
+  if (wantKind('type-mismatch')) {
     scenarios.push(
       ...generateTypeMismatch(model.operations, {
         capPerOperation: opts.maxTypeMismatch,
@@ -158,7 +164,7 @@ async function main() {
       );
     }
   }
-  if (kinds.has('union')) {
+  if (wantKind('union')) {
     scenarios.push(
       ...generateUnionViolations(model.operations, {
         onlyOperations: opts.onlyOperations,
@@ -166,90 +172,176 @@ async function main() {
     );
   }
   if (opts.deep) {
-    scenarios.push(
-      ...generateConstraintViolations(model.operations, {
-        capPerOperation: undefined,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateEnumViolations(model.operations, {
-        capPerOperation: undefined,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateAdditionalPropsViolations(model.operations, {
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateOneOfAmbiguous(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateOneOfNoneMatch(model.operations, {
-        capPerOperation: 1,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateDiscriminatorMismatch(model.operations, {
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateParamMissing(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateParamTypeMismatch(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateParamEnumViolation(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateParamConstraintViolations(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateMissingBody(model.operations, {
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateBodyTopTypeMismatch(model.operations, {
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateNestedAdditionalProps(model.operations, {
-        capPerOperation: 5,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateUniqueItemsViolations(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateMultipleOfViolations(model.operations, {
-        capPerOperation: 10,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateFormatInvalid(model.operations, {
-        capPerOperation: 20,
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateUniversalAdditionalProp(model.operations, {
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateOneOfMultiAmbiguous(model.operations, {
-        onlyOperations: opts.onlyOperations,
-        capPerOperation: 20,
-      }),
-      ...generateOneOfCrossBleed(model.operations, {
-        onlyOperations: opts.onlyOperations,
-        capPerOperation: 40,
-      }),
-      ...generateDiscriminatorStructureMismatch(model.operations, {
-        onlyOperations: opts.onlyOperations,
-      }),
-      ...generateAllOfMissingRequired(model.operations, {
-        onlyOperations: opts.onlyOperations,
-        capPerOperation: 50,
-      }),
-      ...generateAllOfConflicts(model.operations, {
-        onlyOperations: opts.onlyOperations,
-        capPerOperation: 50,
-      }),
-    );
+    if (wantKind('constraint-violation')) {
+      scenarios.push(
+        ...generateConstraintViolations(model.operations, {
+          capPerOperation: undefined,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('enum-violation')) {
+      scenarios.push(
+        ...generateEnumViolations(model.operations, {
+          capPerOperation: undefined,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('additional-prop')) {
+      scenarios.push(
+        ...generateAdditionalPropsViolations(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('oneof-ambiguous')) {
+      scenarios.push(
+        ...generateOneOfAmbiguous(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('oneof-none-match')) {
+      scenarios.push(
+        ...generateOneOfNoneMatch(model.operations, {
+          capPerOperation: 1,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('discriminator-mismatch')) {
+      scenarios.push(
+        ...generateDiscriminatorMismatch(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('param-missing')) {
+      scenarios.push(
+        ...generateParamMissing(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('param-type-mismatch')) {
+      scenarios.push(
+        ...generateParamTypeMismatch(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('param-enum-violation')) {
+      scenarios.push(
+        ...generateParamEnumViolation(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('param-constraint-violation')) {
+      scenarios.push(
+        ...generateParamConstraintViolations(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('missing-body')) {
+      scenarios.push(
+        ...generateMissingBody(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('body-top-type-mismatch')) {
+      scenarios.push(
+        ...generateBodyTopTypeMismatch(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('nested-additional-prop')) {
+      scenarios.push(
+        ...generateNestedAdditionalProps(model.operations, {
+          capPerOperation: 5,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('unique-items-violation')) {
+      scenarios.push(
+        ...generateUniqueItemsViolations(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('multiple-of-violation')) {
+      scenarios.push(
+        ...generateMultipleOfViolations(model.operations, {
+          capPerOperation: 10,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('format-invalid')) {
+      scenarios.push(
+        ...generateFormatInvalid(model.operations, {
+          capPerOperation: 20,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('additional-prop-general')) {
+      scenarios.push(
+        ...generateUniversalAdditionalProp(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('oneof-multi-ambiguous')) {
+      scenarios.push(
+        ...generateOneOfMultiAmbiguous(model.operations, {
+          onlyOperations: opts.onlyOperations,
+          capPerOperation: 20,
+        }),
+      );
+    }
+    if (wantKind('oneof-cross-bleed')) {
+      scenarios.push(
+        ...generateOneOfCrossBleed(model.operations, {
+          onlyOperations: opts.onlyOperations,
+          capPerOperation: 40,
+        }),
+      );
+    }
+    if (wantKind('discriminator-structure-mismatch')) {
+      scenarios.push(
+        ...generateDiscriminatorStructureMismatch(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    if (wantKind('allof-missing-required')) {
+      scenarios.push(
+        ...generateAllOfMissingRequired(model.operations, {
+          onlyOperations: opts.onlyOperations,
+          capPerOperation: 50,
+        }),
+      );
+    }
+    if (wantKind('allof-conflict')) {
+      scenarios.push(
+        ...generateAllOfConflicts(model.operations, {
+          onlyOperations: opts.onlyOperations,
+          capPerOperation: 50,
+        }),
+      );
+    }
   }
 
   // Dedupe

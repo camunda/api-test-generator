@@ -1,6 +1,7 @@
 node_modules/
 dist/
 /spec/
+/generated/
 external-spec/
 test-results/
 *.tsbuildinfo

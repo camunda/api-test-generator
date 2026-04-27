@@ -14,7 +14,6 @@ If you are not deep into the codebase, here is the 30‑second view:
 * Where to look: `generated/` for test files, `generated/COVERAGE.md` for a table of endpoints vs. validation scenarios covered (now with % coverage per endpoint).
 * When to re-run: After any API schema change (new fields, enums, unions, constraints) or before a release validation round.
 * Safe to edit? Generated test files: NO (they’ll be overwritten). Extend logic by adding a new generator module instead.
-* Next planned enhancement: Parameter enum violations (placeholder already reserved).
 
 ### Implemented Scenario Kinds
 
@@ -33,9 +32,9 @@ If you are not deep into the codebase, here is the 30‑second view:
 | `discriminator-mismatch`           | Invalid discriminator value                        |
 | `discriminator-structure-mismatch` | Discriminator value + wrong structure              |
 | `enum-violation`                   | Invalid enum value injection                       |
-| `param-missing`                    | Required path/query param omitted                  |
-| `param-type-mismatch`              | Param supplied with wrong type                     |
-| `param-enum-violation`             | (reserved – implement when needed)                 |
+| `param-missing`                    | Required query/header param omitted (path params skipped — they cannot be omitted without changing the URL) |
+| `param-type-mismatch`              | Param supplied with wrong type (query/header)      |
+| `param-enum-violation`             | Invalid enum value for query/header param          |
 | `additional-prop-general`          | Unexpected top-level body property                 |
 | `nested-additional-prop`           | Unexpected nested property                         |
 | `unique-items-violation`           | Duplicate elements where `uniqueItems: true`       |
@@ -54,7 +53,7 @@ End-to-end in five commands. Generates the request-validation suite from the ups
 ```bash
 # 1. From the repo root: fetch the stable/8.9 spec and generate the suite.
 SPEC_REF=stable/8.9 npm run fetch-spec:ref
-npm run generate:request-validation:full
+npm run generate:request-validation
 
 # 2. Start a local Camunda 8.9 cluster (defaults to http://localhost:8080).
 c8ctl cluster start 8.9
@@ -137,14 +136,14 @@ less generated/COVERAGE.md
 
 |         Flag          |                        Description                         |                 Example                  |
 |-----------------------|------------------------------------------------------------|------------------------------------------|
-| `--only`              | Base kinds subset (`missing-required,type-mismatch,union`) | `--only=missing-required`                |
+| `--only`              | Filter by scenario kind (any of the kinds in the table above; comma-separated). Applies to all base AND deep generators. | `--only=enum-violation,constraint-violation` |
 | `--out-dir`           | Output directory                                           | `--out-dir=../some/path`                 |
 | `--qa-import-depth`   | (legacy) Relative depth to QA `utils/`. Implicitly turns standalone mode off. | `--qa-import-depth=4`                    |
 | `--no-standalone`     | Force off standalone mode (combine with `--qa-import-depth` for QA-tree placement) | `--no-standalone --qa-import-depth=4`    |
 | `--max-missing`       | Cap per-operation missing-required                         | `--max-missing=4`                        |
 | `--max-type-mismatch` | Cap per-operation type-mismatch                            | `--max-type-mismatch=8`                  |
 | `--only-operations`   | Comma list of operationIds                                 | `--only-operations=createGroup,getGroup` |
-| `--deep`              | Enable full deep coverage set                              | `--deep`                                 |
+| `--no-deep`           | Disable deep coverage (enabled by default); emit only `missing-required`, `type-mismatch`, `union` for faster iteration | `--no-deep`                              |
 | (removed)             | (Multipart adaptation now automatic; flags removed)        | N/A                                      |
 
 ### Spec Source
@@ -193,7 +192,6 @@ Each emitted spec includes:
 
 ### Limitations / Known Gaps
 
-* Parameter enum violations not yet emitted (`param-enum-violation`).
 * Some `allOf` conflict detection is conservative to avoid false positives.
 * Dedupe may hide certain exotic overlapping oneOf shapes (acceptable trade-off).
 * Binary-only bodies still skipped intentionally.
