@@ -144,7 +144,7 @@ less generated/COVERAGE.md
 | `--max-missing`       | Cap per-operation missing-required                         | `--max-missing=4`                        |
 | `--max-type-mismatch` | Cap per-operation type-mismatch                            | `--max-type-mismatch=8`                  |
 | `--only-operations`   | Comma list of operationIds                                 | `--only-operations=createGroup,getGroup` |
-| `--no-deep`           | Disable deep coverage; emit only `missing-required`, `type-mismatch`, `union` (faster iteration) | (off)                                    |
+| `--no-deep`           | Disable deep coverage (enabled by default); emit only `missing-required`, `type-mismatch`, `union` for faster iteration | `--no-deep`                              |
 | (removed)             | (Multipart adaptation now automatic; flags removed)        | N/A                                      |
 
 ### Spec Source

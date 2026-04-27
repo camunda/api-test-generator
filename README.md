@@ -160,7 +160,7 @@ npm run build --workspaces --if-present
 | `npm run codegen:playwright` | Build and emit a Playwright test for a single endpoint |
 | `npm run codegen:playwright:all` | Build and emit Playwright tests for all endpoints |
 | `npm run build:request-validation` | Build the request-validation generator |
-| `npm run generate:request-validation` | Emit negative request-validation tests with all ~24 scenario kinds (deep coverage by default) |
+| `npm run generate:request-validation` | Emit negative request-validation tests with all supported scenario kinds (deep coverage by default) |
 | `npm run generate:request-validation:shallow` | Emit only the core kinds (`missing-required`, `type-mismatch`, `union`) — fast iteration |
 | `npm run test:pw` | Run both generated Playwright suites (path-analyser + request-validation) |
 | `npm run test:pw:path-analyser` | Run only the positive path-analyser suite |
@@ -344,7 +344,7 @@ and multipart-only adaptation.
 
 ```bash
 npm run build:request-validation             # compile the generator
-npm run generate:request-validation          # all ~24 scenario kinds (deep coverage by default)
+npm run generate:request-validation          # all supported scenario kinds (deep coverage by default)
 npm run generate:request-validation:shallow  # only missing-required, type-mismatch, union
 ```
 
