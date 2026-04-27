@@ -70,7 +70,7 @@ describe.each(SUITES)('emitted $label specs', ({ label, root }) => {
     if (!existsSync(root)) {
       throw new Error(
         `${label} suite directory not found at ${root}. ` +
-          `Run \`npm run snapshot:regenerate\` to produce it before running this test.`,
+          `Run \`npm run testsuite:generate && npm run generate:request-validation\` to produce it before running this test.`,
       );
     }
     const specs = await listSpecs(root);

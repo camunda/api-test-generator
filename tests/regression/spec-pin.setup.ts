@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
  * Vitest globalSetup — runs once before any test file is collected.
  *
  * Acts as a precondition gate for the regression suite: the
- * pipeline-snapshot baseline is only meaningful against a fixed
- * upstream OpenAPI spec content. If the bundled spec drifts from the
- * pin recorded in `tests/regression/spec-pin.json`, throw here so
- * Vitest aborts the entire run with a single actionable error before
- * loading the (now-misleading) snapshot diff.
+ * bundled-spec invariants are only meaningful against a fixed upstream
+ * OpenAPI spec content. If the bundled spec drifts from the pin
+ * recorded in `tests/regression/spec-pin.json`, throw here so Vitest
+ * aborts the entire run with a single actionable error before loading
+ * the (now-misleading) invariant assertions.
  *
  * Running this in `globalSetup` (rather than as a sibling test file)
  * removes the test-ordering hazard the reviewer flagged: with
@@ -70,11 +70,15 @@ export default function setup(): void {
         `  Pinned ref:           ${pin.specRef}\n` +
         `  Pinned expected hash: ${pin.expectedSpecHash}\n` +
         `  Actual current hash:  ${actual}\n\n` +
-        `If the upstream spec changed intentionally, re-pin and re-snapshot:\n` +
-        `  1. Update tests/regression/spec-pin.json (specRef + expectedSpecHash)\n` +
+        `If the upstream spec changed intentionally, re-pin and re-run:\n` +
+        `  1. SPEC_REF=<newSha> npm run fetch-spec:ref   (re-fetch the bundled spec)\n` +
         `  2. npm run testsuite:generate && npm run generate:request-validation\n` +
-        `  3. npm run snapshot:update\n` +
-        `  4. Commit both files together.\n`,
+        `  3. Update tests/regression/spec-pin.json: set specRef to the\n` +
+        `     resolved 40-char commit SHA and expectedSpecHash to the\n` +
+        `     value printed in spec/bundled/spec-metadata.json\n` +
+        `  4. Update any invariants in tests/regression/bundled-spec-invariants.test.ts\n` +
+        `     whose values legitimately changed.\n` +
+        `  5. Commit spec-pin.json alongside the invariant updates.\n`,
     );
   }
 }
