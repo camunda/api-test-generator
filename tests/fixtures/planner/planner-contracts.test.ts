@@ -135,6 +135,42 @@ const fixtureTrivial: OperationGraph = makeGraph([
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Fixture E: spurious intermediate steps must not be inserted (#35)
+// ---------------------------------------------------------------------------
+//
+// Two coupled defects, one fixture:
+//
+//   1. A producer's `optional` requirements must NOT be promoted to
+//      hard `needed` after expansion. createDeployment opportunistically
+//      accepts TenantId but does not require it; the planner used to
+//      add it to `needed`, which then forced BFS to chase a producer.
+//
+//   2. The candidate getAuditLog incidentally produces TenantId, but its
+//      own `requires.required = [AuditLogKey]` is unsatisfiable in the
+//      current chain state. The planner must reject any candidate whose
+//      required inputs are not produced by an earlier step.
+//
+// Together these guarantee the planner produces exactly
+// [createDeployment, createProcessInstance] — no spurious step that
+// would render with a literal `${auditLogKey}` placeholder URL at
+// runtime.
+const fixtureSpuriousIntermediate: OperationGraph = makeGraph([
+  makeOp('createDeployment', {
+    produces: ['ProcessDefinitionKey'],
+    providerMap: { ProcessDefinitionKey: true },
+    optional: ['TenantId'], // opportunistic — must not leak into `needed`
+  }),
+  makeOp('getAuditLog', {
+    // incidental producer of TenantId; required input is unsatisfiable
+    produces: ['TenantId', 'AuditLogKey'],
+    required: ['AuditLogKey'],
+  }),
+  makeOp('createProcessInstance', {
+    required: ['ProcessDefinitionKey'],
+  }),
+]);
+
 describe('planner contracts: provider preference', () => {
   it('first scenario uses the authoritative provider (#34)', () => {
     // The planner explores both authoritative and incidental producers
@@ -186,5 +222,28 @@ describe('planner contracts: trivial endpoint', () => {
     const collection = plan(fixtureTrivial, 'listTopology');
     expect(collection.scenarios).toHaveLength(1);
     expect(opIdsOf(collection.scenarios[0])).toEqual(['listTopology']);
+  });
+});
+
+describe('planner contracts: spurious intermediate steps (#35)', () => {
+  it('does not insert a step whose required inputs are unsatisfiable', () => {
+    // Class-scoped guard: every step's `requires.required` must be
+    // produced by an earlier step. getAuditLog requires AuditLogKey,
+    // which nothing in the chain produces — it must not appear in any
+    // scenario regardless of its incidental contributions.
+    const collection = plan(fixtureSpuriousIntermediate, 'createProcessInstance');
+    for (const scenario of collection.scenarios) {
+      expect(opIdsOf(scenario), `scenario ${scenario.id}`).not.toContain('getAuditLog');
+    }
+  });
+
+  it('producer optional requirements do not leak into `needed` (#35 root cause)', () => {
+    // createDeployment.optional = [TenantId] is opportunistic. The
+    // planner must not promote it to a hard requirement after
+    // expansion, otherwise BFS would chase any producer of TenantId
+    // (incidental or not).
+    const collection = plan(fixtureSpuriousIntermediate, 'createProcessInstance');
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    expect(opIdsOf(collection.scenarios[0])).toEqual(['createDeployment', 'createProcessInstance']);
   });
 });

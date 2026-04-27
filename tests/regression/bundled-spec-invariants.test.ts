@@ -37,10 +37,17 @@ interface SemanticTypeEntry {
   required: boolean;
   provider: boolean;
 }
+interface ParameterEntry {
+  name: string;
+  location: string;
+  semanticType?: string;
+  required?: boolean;
+}
 interface OperationNode {
   operationId: string;
   method: string;
   path: string;
+  parameters?: ParameterEntry[];
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
 }
@@ -54,6 +61,7 @@ interface ScenarioFile {
 }
 
 let cachedGraph: DependencyGraph | undefined;
+let cachedOperationById: Map<string, OperationNode> | undefined;
 function loadGraph(): DependencyGraph {
   if (cachedGraph) return cachedGraph;
   if (!existsSync(GRAPH_PATH)) {
@@ -63,11 +71,13 @@ function loadGraph(): DependencyGraph {
   }
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; downstream property accesses tolerate malformed entries
   cachedGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as DependencyGraph;
+  cachedOperationById = new Map(cachedGraph.operations.map((o) => [o.operationId, o]));
   return cachedGraph;
 }
 
 function findOperation(opId: string): OperationNode {
-  const op = loadGraph().operations.find((o) => o.operationId === opId);
+  loadGraph();
+  const op = cachedOperationById?.get(opId);
   if (!op) throw new Error(`Operation ${opId} not found in dependency graph`);
   return op;
 }
@@ -140,17 +150,16 @@ describe('bundled-spec invariants: extractor classification', () => {
 });
 
 describe('bundled-spec invariants: planner output', () => {
-  it('every createProcessInstance scenario includes createDeployment as a prerequisite (#32)', () => {
-    // Locks in #32: ProcessDefinitionKey/Id must always be sourced from
-    // createDeployment, the canonical authoritative provider. Tightening
-    // this further (e.g. "is the FIRST step") is blocked by #35
-    // (spurious intermediate steps), which can prepend an unrelated GET
-    // for an eventually-consistent variant. Tighten when #35 lands.
+  it('every createProcessInstance scenario starts with createDeployment as the first prerequisite (#32, #35)', () => {
+    // Locks in #32 (PDK/PDI sourced from createDeployment) and #35
+    // (no spurious intermediate steps): with prereq-checking and the
+    // optional-leak fix, createDeployment must be the FIRST operation
+    // in every non-trivial scenario.
     const scen = loadScenarioFile('post--process-instances-scenarios.json');
     expect(scen.scenarios.length).toBeGreaterThan(0);
     const offenders = scen.scenarios
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
-      .filter((s) => !s.ops.includes('createDeployment'));
+      .filter((s) => s.ops[0] !== 'createDeployment');
     expect(offenders).toEqual([]);
   });
 
@@ -162,6 +171,55 @@ describe('bundled-spec invariants: planner output', () => {
     const offenders = scen.scenarios
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
       .filter((s) => s.ops.includes('searchElementInstances'));
+    expect(offenders).toEqual([]);
+  });
+
+  it('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', () => {
+    // Class-scoped guard against the #35 defect family: BFS must not
+    // insert any operation whose `requires.required` is not satisfied
+    // by either a seeded binding (none here) or an earlier step's
+    // `produces`. A violation means a generated test would render with
+    // a literal `${...}` placeholder URL at runtime.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      for (const sc of file.scenarios) {
+        if (sc.id === 'unsatisfied') continue; // explicitly flagged unreachable
+        const produced = new Set<string>();
+        for (const ref of sc.operations) {
+          // Let findOperation throw if the scenario references an
+          // operationId not in the dependency graph: that would be a
+          // pipeline/graph mismatch and a silent skip could hide a
+          // real prereq violation.
+          const opNode = findOperation(ref.operationId);
+          const req = (opNode.requestBodySemanticTypes ?? [])
+            .filter((e) => e.required)
+            .map((e) => e.semanticType);
+          for (const p of opNode.parameters ?? []) {
+            if (p.required && p.semanticType) req.push(p.semanticType);
+          }
+          const missing = req.filter((s) => !produced.has(s));
+          if (missing.length) {
+            offenders.push({ file: f, scenario: sc.id, step: ref.operationId, missing });
+          }
+          for (const [statusCode, entries] of Object.entries(opNode.responseSemanticTypes ?? {})) {
+            // Mirror semantic-graph-extractor/graph-builder.ts
+            // getProducedSemanticTypes(): only count semantics from
+            // success/redirect responses, otherwise an error-only
+            // semantic could spuriously satisfy a downstream prereq.
+            if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
+            for (const e of entries) produced.add(e.semanticType);
+          }
+        }
+      }
+    }
     expect(offenders).toEqual([]);
   });
 });
