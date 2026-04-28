@@ -29,6 +29,7 @@ const GRAPH_PATH = join(
   'operation-dependency-graph.json',
 );
 const SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'output');
+const FEATURE_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'feature-output');
 const GENERATED_TESTS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'generated-tests');
 
 interface SemanticTypeEntry {
@@ -185,7 +186,12 @@ describe('bundled-spec invariants: planner output', () => {
         `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
       );
     }
-    const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
+    const offenders: {
+      file: string;
+      scenario: string;
+      step: string;
+      missing: string[];
+    }[] = [];
     for (const f of readdirSync(SCENARIOS_DIR)) {
       if (!f.endsWith('-scenarios.json')) continue;
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
@@ -207,7 +213,12 @@ describe('bundled-spec invariants: planner output', () => {
           }
           const missing = req.filter((s) => !produced.has(s));
           if (missing.length) {
-            offenders.push({ file: f, scenario: sc.id, step: ref.operationId, missing });
+            offenders.push({
+              file: f,
+              scenario: sc.id,
+              step: ref.operationId,
+              missing,
+            });
           }
           for (const [statusCode, entries] of Object.entries(opNode.responseSemanticTypes ?? {})) {
             // Mirror semantic-graph-extractor/graph-builder.ts
@@ -217,6 +228,177 @@ describe('bundled-spec invariants: planner output', () => {
             if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
             for (const e of entries) produced.add(e.semanticType);
           }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('every feature-output scenario binds or chains every {placeholder} whose path parameter has a recognised semanticType', () => {
+    // Class-scoped guard for the "un-extracted ${var} in URL" defect family:
+    // when an endpoint's response analyser produces no shape (typically for
+    // 204 No-Content operations like cancelProcessInstance, completeJob,
+    // resolveIncident, deleteRole, deleteUser, …), the feature-coverage
+    // pipeline previously skipped the chain-graft + requestPlan step, leaving
+    // a single-step scenario for an endpoint with required path parameters.
+    // The emitter then rendered URLs like `/process-instances/${processInstanceKey}/cancellation`
+    // — the literal placeholder, never substituted at runtime.
+    //
+    // Scope: only path placeholders whose parameter on the dependency graph
+    // carries a `semanticType`. That excludes:
+    //   - Bug B (admin-entity IDs lacking upstream `x-semantic-type` —
+    //     roles/groups/mapping-rules/global cluster variables/resources):
+    //     the parameter has no `semanticType`, so no producer is recognised.
+    //   - The Bug A class itself is operations whose placeholders DO have
+    //     recognised semantic types but whose chain was previously dropped.
+    // Bug B will land its own invariant once we add the upstream x-semantic-type
+    // tags (or the local domain-semantics fallback). Bug C (BFS empty-chain
+    // for semanticised endpoints) is already separately surfaced by other
+    // planner invariants and will get its own named guard with its fix.
+    //
+    // Invariant: for every feature-output scenario, every `{x}` in the
+    // endpoint path whose parameter has a `semanticType` set must be either
+    // (a) bound via `scenario.bindings.xVar`, or (b) covered by at least
+    // one earlier step in `scenario.operations[]`.
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Planner scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const graph = loadGraph();
+    const opByKey = new Map<string, OperationNode>();
+    for (const op of graph.operations) {
+      opByKey.set(`${op.method.toUpperCase()} ${op.path}`, op);
+    }
+    interface FeatureScenarioFile {
+      endpoint: { operationId: string; method: string; path: string };
+      scenarios: {
+        id: string;
+        operations: { operationId: string }[];
+        bindings?: Record<string, unknown>;
+        requestPlan?: {
+          operationId: string;
+          extract?: { fieldPath: string; bind: string; semantic?: string }[];
+        }[];
+      }[];
+    }
+    interface PlannerScenarioFile {
+      scenarios: { missingSemanticTypes?: string[] }[];
+    }
+    const offenders: {
+      file: string;
+      scenario: string;
+      placeholders: string[];
+    }[] = [];
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const plannerPath = join(SCENARIOS_DIR, f);
+      // The pipeline emits one planner-scenarios file per feature-scenarios
+      // file (same normalised filename). A missing companion is a pipeline
+      // bug — fail fast rather than silently skip and mask it.
+      if (!existsSync(plannerPath)) {
+        throw new Error(
+          `Missing planner scenario file for feature scenario ${relative(
+            REPO_ROOT,
+            join(FEATURE_SCENARIOS_DIR, f),
+          )}; expected ${relative(REPO_ROOT, plannerPath)}`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const planner = JSON.parse(readFileSync(plannerPath, 'utf8')) as PlannerScenarioFile;
+      // Out-of-scope: Bug C class — BFS could not produce a fully-satisfied
+      // chain for this endpoint (every scenario has unmet semantic
+      // prerequisites, e.g. ResourceKey has no producer). The BFS may still
+      // emit a single "unsatisfied" scenario, so we filter on satisfaction
+      // rather than non-emptiness. Tracked separately; will get its own
+      // named guard with its fix.
+      const hasSatisfiedChain = (planner.scenarios ?? []).some(
+        (s) => !s.missingSemanticTypes || s.missingSemanticTypes.length === 0,
+      );
+      if (!hasSatisfiedChain) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as FeatureScenarioFile;
+      const placeholders = [...file.endpoint.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+      if (placeholders.length === 0) continue;
+      const endpointKey = `${file.endpoint.method.toUpperCase()} ${file.endpoint.path}`;
+      const node = opByKey.get(endpointKey);
+      // A missing dependency-graph node for an endpoint that has a
+      // feature-output file is a graph/feature-output mismatch (or an
+      // endpoint-keying bug) — fail fast rather than silently skip.
+      if (!node) {
+        throw new Error(
+          `Missing dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f}. This indicates a graph/feature-output mismatch or endpoint-keying bug.`,
+        );
+      }
+      // Out-of-scope: Bug B (placeholder parameter lacks `semanticType`,
+      // i.e. upstream `x-semantic-type` is missing). Tracked separately;
+      // will get its own named guard with its fix.
+      const parameters = node.parameters ?? [];
+      const pathParameters = parameters.filter((p) => p.location === 'path');
+      // If the path has placeholders but the graph node has no path
+      // parameters at all, that is a graph/extractor bug — fail fast.
+      if (pathParameters.length === 0) {
+        throw new Error(
+          `Dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f} has path placeholders (${placeholders.join(', ')}) but no path parameters on the node. This indicates a graph extraction or endpoint-keying bug.`,
+        );
+      }
+      const inScope = placeholders.filter((ph) => {
+        const param = parameters.find((p) => p.name === ph && p.location === 'path');
+        return Boolean(param?.semanticType);
+      });
+      if (inScope.length === 0) continue;
+      for (const sc of file.scenarios) {
+        const bindings = sc.bindings ?? {};
+        // Mirror the Playwright emitter's URL templating, which references
+        // `ctx.<camelCase(placeholder)>Var` (see
+        // path-analyser/src/codegen/playwright/emitter.ts buildUrlExpression).
+        // Lowering only the first char keeps existing lowerCamelCase
+        // placeholders untouched while normalising any future PascalCase
+        // ones, so the invariant cannot false-fail on casing alone.
+        const placeholderVarName = (ph: string) => `${ph.charAt(0).toLowerCase()}${ph.slice(1)}Var`;
+        // Collect every variable name that an earlier step in the request
+        // plan actually `extract`s. Mere presence of a multi-step chain is
+        // not sufficient — the chain must produce the binding the URL
+        // template needs, otherwise `${...Var}` would still leak into the
+        // emitted URL at runtime.
+        const lastOpId = sc.operations[sc.operations.length - 1]?.operationId;
+        const producedByEarlierStep = new Set<string>();
+        for (const step of sc.requestPlan ?? []) {
+          if (step.operationId === lastOpId) break;
+          for (const e of step.extract ?? []) producedByEarlierStep.add(e.bind);
+        }
+        // Mirror the emitter's substitution semantics: `buildUrlExpression`
+        // uses `ctx.<var>Var || '${placeholder}'`, so a binding that is
+        // falsy (`null`, `''`, `0`, `false`) or the `__PENDING__` sentinel
+        // (which the emitter only seeds for body/multipart template vars,
+        // not URL placeholders) would still leak `${...Var}` into the URL
+        // at runtime. Treat such bindings as unsatisfied.
+        const isUsableBinding = (v: unknown) =>
+          v !== undefined &&
+          v !== null &&
+          v !== '' &&
+          v !== '__PENDING__' &&
+          v !== 0 &&
+          v !== false;
+        const unsatisfied = inScope.filter((ph) => {
+          const varName = placeholderVarName(ph);
+          if (isUsableBinding(bindings[varName])) return false;
+          if (producedByEarlierStep.has(varName)) return false;
+          return true;
+        });
+        if (unsatisfied.length) {
+          offenders.push({
+            file: f,
+            scenario: sc.id,
+            placeholders: unsatisfied,
+          });
         }
       }
     }

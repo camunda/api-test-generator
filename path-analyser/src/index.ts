@@ -63,7 +63,10 @@ async function main() {
   }
   // Extract response shapes & request variants (oneOf groups)
   const semanticTypes = Object.keys(graph.bySemanticProducer || {});
-  const { requestIndex, responses } = await writeExtractionOutputs(baseDir, semanticTypes);
+  const { requestIndex, responses, successStatusByOp } = await writeExtractionOutputs(
+    baseDir,
+    semanticTypes,
+  );
   const responseByOp: Record<string, ResponseShapeSummary> = {};
   for (const r of responses) responseByOp[r.operationId] = r;
 
@@ -92,7 +95,9 @@ async function main() {
 
   for (const op of Object.values(graph.operations)) {
     // Generate scenarios for every endpoint, even if it has no semantic requirements.
-    const collection = generateScenariosForEndpoint(graph, op.operationId, { maxScenarios: 20 });
+    const collection = generateScenariosForEndpoint(graph, op.operationId, {
+      maxScenarios: 20,
+    });
     // Augment scenarios with response shape
     const resp = responseByOp[op.operationId];
     if (resp) {
@@ -107,7 +112,14 @@ async function main() {
         }));
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
         if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
-        s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
+        s.requestPlan = buildRequestPlan(
+          s,
+          resp,
+          graph,
+          canonical,
+          requestIndex.byOperation,
+          successStatusByOp,
+        );
       }
     }
     const fileName = normalizeEndpointFileName(op.method, op.path);
@@ -127,24 +139,32 @@ async function main() {
       integrationCandidates
         .filter((sc) => sc.operations.length > 1)
         .sort((a, b) => a.operations.length - b.operations.length)[0] || integrationCandidates[0];
-    if (resp) {
-      for (const s of featureCollection.scenarios) {
-        // Graft chain if available and feature scenario currently only has endpoint op
-        // Special-case: for search-like empty-negative, skip grafting to produce an empty result without prerequisites
-        const isSearchLikeOp =
-          (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
-          /search/i.test(op.operationId) ||
-          op.operationId === 'activateJobs';
-        const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
-        const skipGraft = isSearchLikeOp && isEmptyNeg;
-        if (
-          !skipGraft &&
-          chainSource &&
-          s.operations.length === 1 &&
-          chainSource.operations.length > 1
-        ) {
-          s.operations = chainSource.operations.map((o) => ({ ...o }));
-        }
+    // The chain-graft + requestPlan synthesis must run for every endpoint,
+    // not just those with a response shape. Operations with a
+    // 204 No-Content response (cancelProcessInstance, completeJob,
+    // resolveIncident, deleteRole, deleteUser, …) used to fall into the
+    // `if (resp)` branch's else and be left as a single-step scenario, which
+    // the emitter then rendered with literal `${var}` placeholders in URLs.
+    // The response-shape assignments below are still gated on `resp` because
+    // they have no meaning when the response body is empty.
+    for (const s of featureCollection.scenarios) {
+      // Graft chain if available and feature scenario currently only has endpoint op
+      // Special-case: for search-like empty-negative, skip grafting to produce an empty result without prerequisites
+      const isSearchLikeOp =
+        (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
+        /search/i.test(op.operationId) ||
+        op.operationId === 'activateJobs';
+      const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
+      const skipGraft = isSearchLikeOp && isEmptyNeg;
+      if (
+        !skipGraft &&
+        chainSource &&
+        s.operations.length === 1 &&
+        chainSource.operations.length > 1
+      ) {
+        s.operations = chainSource.operations.map((o) => ({ ...o }));
+      }
+      if (resp) {
         s.responseShapeSemantics = resp.producedSemantics || undefined;
         s.responseShapeFields = resp.fields.map((f) => ({
           name: f.name,
@@ -155,33 +175,40 @@ async function main() {
         }));
         if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
         if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
-        s.requestPlan = buildRequestPlan(s, resp, graph, canonical, requestIndex.byOperation);
-        // Validation: for JSON requests with oneOf groups, non-negative scenarios must set exactly one variant's required keys
-        try {
-          const final = s.requestPlan?.[s.requestPlan.length - 1];
-          const groups = requestIndex.byOperation[op.operationId] || [];
-          const isError = s.expectedResult && s.expectedResult.kind === 'error';
-          if (final?.bodyKind === 'json' && final?.bodyTemplate && groups.length && !isError) {
-            const presentKeys = new Set(Object.keys(final.bodyTemplate));
-            for (const g of groups) {
-              // Count variants whose required keys are fully present in the body
-              const hits = g.variants.filter((v) => v.required.every((k) => presentKeys.has(k)));
-              // Deduplicate by required set (some variants only differ by discriminator value but share the same required keys)
-              const uniqByReq = new Map<string, (typeof hits)[number]>();
-              for (const v of hits) {
-                const key = [...v.required].sort().join('|');
-                if (!uniqByReq.has(key)) uniqByReq.set(key, v);
-              }
-              const uniqCount = uniqByReq.size;
-              if (uniqCount !== 1) {
-                throw new Error(
-                  `oneOf validation failed for ${op.operationId} group '${g.groupId}': expected exactly 1 variant's required keys present, found ${uniqCount}`,
-                );
-              }
+      }
+      s.requestPlan = buildRequestPlan(
+        s,
+        resp,
+        graph,
+        canonical,
+        requestIndex.byOperation,
+        successStatusByOp,
+      );
+      // Validation: for JSON requests with oneOf groups, non-negative scenarios must set exactly one variant's required keys
+      try {
+        const final = s.requestPlan?.[s.requestPlan.length - 1];
+        const groups = requestIndex.byOperation[op.operationId] || [];
+        const isError = s.expectedResult && s.expectedResult.kind === 'error';
+        if (final?.bodyKind === 'json' && final?.bodyTemplate && groups.length && !isError) {
+          const presentKeys = new Set(Object.keys(final.bodyTemplate));
+          for (const g of groups) {
+            // Count variants whose required keys are fully present in the body
+            const hits = g.variants.filter((v) => v.required.every((k) => presentKeys.has(k)));
+            // Deduplicate by required set (some variants only differ by discriminator value but share the same required keys)
+            const uniqByReq = new Map<string, (typeof hits)[number]>();
+            for (const v of hits) {
+              const key = [...v.required].sort().join('|');
+              if (!uniqByReq.has(key)) uniqByReq.set(key, v);
+            }
+            const uniqCount = uniqByReq.size;
+            if (uniqCount !== 1) {
+              throw new Error(
+                `oneOf validation failed for ${op.operationId} group '${g.groupId}': expected exactly 1 variant's required keys present, found ${uniqCount}`,
+              );
             }
           }
-        } catch {}
-      }
+        }
+      } catch {}
     }
     // Collect artifact references from feature scenarios (multipart files)
     try {
@@ -274,6 +301,7 @@ function buildRequestPlan(
   graph: OperationGraph,
   canonical: Record<string, CanonicalShape>,
   requestGroupsIndex: Record<string, RequestOneOfGroupSummary[]>,
+  successStatusByOp: Record<string, number>,
 ): RequestStep[] {
   const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
@@ -284,7 +312,14 @@ function buildRequestPlan(
       operationId: opRef.operationId,
       method: opRef.method,
       pathTemplate: opRef.path,
-      expect: { status: determineExpectedStatus(scenario, resp, isFinal) },
+      expect: {
+        status: determineExpectedStatus(
+          scenario,
+          resp,
+          isFinal,
+          successStatusByOp[opRef.operationId],
+        ),
+      },
     };
     // Domain valueBindings driven response extraction (non-final steps included)
     const opDom = graph.domain?.operationRequirements?.[opRef.operationId];
@@ -339,6 +374,39 @@ function buildRequestPlan(
       }
       if (extract.length) step.extract = (step.extract || []).concat(extract);
     }
+    // Non-final producer steps: emit semantic-labeled extracts using the
+    // dependency graph's `responseSemanticTypes` (which captures nested
+    // fieldPaths like `metadata.processInstanceKey`, unlike
+    // `extractSchemas.flattenTopLevelFields` which only sees top-level).
+    // Without this, a grafted prerequisite chain could exist but never
+    // populate the URL var, leaving `${...Var}` literally in the emitted
+    // URL.
+    if (!isFinal) {
+      const stepNode = graph.operations[opRef.operationId];
+      const stepSuccess = successStatusByOp[opRef.operationId];
+      const responseEntries = stepNode?.responseSemanticTypes?.[String(stepSuccess)] ?? [];
+      if (responseEntries.length) {
+        const extract: { fieldPath: string; bind: string; semantic?: string }[] = [];
+        const existingBinds = new Set((step.extract ?? []).map((e) => e.bind));
+        for (const entry of responseEntries) {
+          const bind = `${camelCase(entry.semanticType)}Var`;
+          if (existingBinds.has(bind)) continue;
+          // semantic-graph-extractor emits array item paths with `[]`
+          // markers (schema-analyzer.ts: `${fieldPath}[]`). The Playwright
+          // emitter's accessor builder expects numeric indices, so
+          // normalise to first-element access — same convention used for
+          // domainBinding extracts above.
+          const fieldPath = entry.fieldPath.replace(/\[\]/g, '[0]');
+          extract.push({
+            fieldPath,
+            bind,
+            semantic: entry.semanticType,
+          });
+          existingBinds.add(bind);
+        }
+        if (extract.length) step.extract = (step.extract || []).concat(extract);
+      }
+    }
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
     if (isFinal && scenario.duplicateTest) {
@@ -362,6 +430,7 @@ function determineExpectedStatus(
   scenario: EndpointScenario,
   resp: ResponseShapeSummary | undefined,
   isFinal: boolean,
+  opSuccessStatus: number | undefined,
 ): number {
   if (
     isFinal &&
@@ -372,7 +441,13 @@ function determineExpectedStatus(
     const n = Number(scenario.expectedResult.code);
     if (!Number.isNaN(n)) return n;
   }
-  return resp?.successStatus || (isFinal ? 200 : 200);
+  // Prefer the operation's own declared success status for every step
+  // (covers 204 endpoints, and prerequisite steps whose status differs
+  // from the final step). Only the final step falls back to the
+  // endpoint response shape's `successStatus`; non-final steps fall
+  // back directly to 200 because `resp` describes the final endpoint,
+  // not the prerequisite.
+  return opSuccessStatus ?? (isFinal ? (resp?.successStatus ?? 200) : 200);
 }
 
 function _synthesizeBodyTemplate(scenario: EndpointScenario, opRef: OperationRef) {
@@ -410,7 +485,10 @@ type RequestBodyPlan =
   | { kind: 'json'; template: Record<string, unknown> }
   | {
       kind: 'multipart';
-      template: { fields: Record<string, string>; files: Record<string, string> };
+      template: {
+        fields: Record<string, string>;
+        files: Record<string, string>;
+      };
       expectedSlices: string[];
     };
 
@@ -631,7 +709,10 @@ function buildRequestBodyFromCanonical(
   if (chosenCt === 'multipart/form-data') {
     // Represent multipart template as { fields: Record<string,string>, files: Record<string,string> }
     // Detect array of binaries: look for paths matching resources[] with type string/binary
-    const template: { fields: Record<string, string>; files: Record<string, string> } = {
+    const template: {
+      fields: Record<string, string>;
+      files: Record<string, string>;
+    } = {
       fields: {},
       files: {},
     };
