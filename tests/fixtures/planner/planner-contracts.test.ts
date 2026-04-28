@@ -171,6 +171,34 @@ const fixtureSpuriousIntermediate: OperationGraph = makeGraph([
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Fixture F: transitive prereqs are discoverable (PR #45 review)
+// ---------------------------------------------------------------------------
+//
+// The #35 prereq guard rejects candidates whose required inputs are not
+// yet produced. Without a deferral mechanism, the planner would also drop
+// chains where the missing input has its own producer that simply has not
+// been planned yet.
+//
+// Endpoint requires `T`. Producer `A` produces `T` but requires `X`.
+// Producer `P` produces `X` and requires nothing. The planner must
+// discover the transitive chain `[P, A, endpoint]` rather than failing
+// with "unsatisfied".
+const fixtureTransitivePrereq: OperationGraph = makeGraph([
+  makeOp('produceX', {
+    produces: ['X'],
+    providerMap: { X: true },
+  }),
+  makeOp('produceTRequiringX', {
+    produces: ['T'],
+    required: ['X'],
+    providerMap: { T: true },
+  }),
+  makeOp('endpointRequiringT', {
+    required: ['T'],
+  }),
+]);
+
 describe('planner contracts: provider preference', () => {
   it('first scenario uses the authoritative provider (#34)', () => {
     // The planner explores both authoritative and incidental producers
@@ -245,5 +273,17 @@ describe('planner contracts: spurious intermediate steps (#35)', () => {
     const collection = plan(fixtureSpuriousIntermediate, 'createProcessInstance');
     expect(collection.scenarios.length).toBeGreaterThan(0);
     expect(opIdsOf(collection.scenarios[0])).toEqual(['createDeployment', 'createProcessInstance']);
+  });
+
+  it('discovers transitive prereqs rather than dropping the chain (#45 review)', () => {
+    // The prereq guard rejects `produceTRequiringX` because X is not yet
+    // produced, but the planner must still find a chain by deferring and
+    // discovering `produceX` first. The expected chain is
+    // [produceX, produceTRequiringX, endpointRequiringT].
+    const collection = plan(fixtureTransitivePrereq, 'endpointRequiringT');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const firstOps = opIdsOf(collection.scenarios[0]);
+    expect(firstOps).toEqual(['produceX', 'produceTRequiringX', 'endpointRequiringT']);
   });
 });

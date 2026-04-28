@@ -346,7 +346,10 @@ export function generateScenariosForEndpoint(
           if (missingDomain.length) continue; // enforce strict satisfaction first
         }
         // Issue #35: reject candidates whose semantic prereqs are not yet
-        // satisfied (mirror the semantic-targeting branch).
+        // satisfied (mirror the semantic-targeting branch). PR #45 review:
+        // deferral does not apply here — domain producer expansion has no
+        // single targetSemantic + provider-preference concept, so we rely
+        // on the strict guard.
         if (!hasSatisfiedRequiredInputs(producerNode, state.produced)) continue;
         // Must add at least one new domain state to avoid infinite loops
         const newlyAdds = new Set<string>();
@@ -468,8 +471,10 @@ export function generateScenariosForEndpoint(
       // Issue #35: reject candidates whose own required semantic inputs
       // are not produced by an earlier step. Without this guard the
       // candidate is appended anyway and emits code that falls back to
-      // a literal `${...}` placeholder URL at runtime.
-      if (!hasSatisfiedRequiredInputs(producerNode, state.produced)) continue;
+      // a literal `${...}` placeholder URL at runtime. PR #45 review:
+      // also enqueue a deferred state so transitive prereq producers can
+      // still be discovered (see deferForMissingPrereqs docstring).
+      if (deferForMissingPrereqs(producerNode, targetSemantic, state, seen, queue)) continue;
 
       const newProduced = new Set(state.produced);
       const newDomainStates = new Set(state.domainStates);
@@ -621,6 +626,59 @@ function hasSatisfiedRequiredInputs(
   produced: ReadonlySet<string>,
 ): boolean {
   return producerNode.requires.required.every((s) => produced.has(s));
+}
+
+// Issue #35 follow-up (PR #45 review): when a candidate producer is
+// rejected because its own required inputs are not yet produced, do not
+// silently drop it — enqueue a *deferred* state that adds those missing
+// inputs to `needed` (without appending the candidate). Subsequent BFS
+// iterations can then plan a producer for the missing prereq and revisit
+// the candidate once the input is satisfied. Without this, valid
+// transitive chains like `[producer(X), A, endpoint]` (when A requires X
+// and X has its own producer not yet planned) would be unreachable.
+//
+// Only authoritative providers (`providerMap[targetSemantic] === true`)
+// are deferred. Deferring incidental producers would generate spurious
+// scenarios where the incidental's output is unused, because the
+// authoritative producer is already being explored in the same iteration
+// and yields the canonical chain. Limiting deferral to authoritative
+// providers preserves the #35 spirit (no spurious steps) while still
+// recovering otherwise-valid transitive chains.
+//
+// The missing prereqs are inserted at the *front* of the deferred
+// `needed` set so BFS targets them first (`remaining[0]` selection),
+// rather than re-targeting the original semantic and looping on the
+// same dead-end candidate.
+//
+// Returns true when the caller should `continue` (either the candidate
+// was deferred or was already covered by an existing seen state).
+function deferForMissingPrereqs(
+  producerNode: OperationNode,
+  targetSemantic: string | undefined,
+  state: State,
+  seen: Set<string>,
+  queue: State[],
+): boolean {
+  if (hasSatisfiedRequiredInputs(producerNode, state.produced)) return false;
+  // Only defer for authoritative providers. Incidental producers without
+  // satisfied prereqs are skipped outright — the authoritative provider
+  // (explored earlier in the same producer loop, courtesy of provider
+  // preference ordering) yields the canonical chain.
+  const isAuthoritative = !!targetSemantic && producerNode.providerMap?.[targetSemantic] === true;
+  if (!isAuthoritative) return true;
+  const missing = producerNode.requires.required.filter((s) => !state.produced.has(s));
+  // If every missing prereq is already in `needed`, BFS would loop on
+  // this same dead-end candidate. Just skip without re-enqueueing.
+  if (missing.every((s) => state.needed.has(s))) return true;
+  // Front-load missing prereqs so BFS targets them first.
+  const deferredNeeded = new Set<string>(missing);
+  for (const s of state.needed) deferredNeeded.add(s);
+  const sig = signature(state.ops, state.produced, deferredNeeded, state.cycle);
+  if (!seen.has(sig)) {
+    seen.add(sig);
+    queue.push({ ...state, needed: deferredNeeded });
+  }
+  return true;
 }
 
 // Select minimal artifact rules for createDeployment based on unmet semantic needs.
