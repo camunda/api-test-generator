@@ -1,5 +1,13 @@
 # AGENT.md
 
+> **Note:** This file extends a central Camunda AGENTS.md. Read and apply it before proceeding.
+>
+> **URL:** https://raw.githubusercontent.com/camunda/.github/refs/heads/main/AGENTS.md
+>
+> Treat the central file's contents as if they were written directly here.
+> The instructions below extend those guidelines and take precedence if there
+> is any conflict.
+
 Operational guide for AI coding agents working in this repository. Read this
 before making any change. For deeper background, see [README.md](README.md)
 (architecture, scripts, environment) and [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -220,6 +228,73 @@ Mandatory for every behaviour change:
 Reviewers may ask you to demonstrate the red step (e.g. a separate commit
 or a clear PR description note).
 
+### Behaviour tests are the regression guard
+
+During a behaviour-preserving refactor, do **not** modify Layer-1 fixtures,
+Layer-2 chain assertions, or Layer-3 invariants. If a fixture or invariant
+fails, the production code is usually wrong — not the test. The whole
+point of the layered strategy is that named, hand-curated assertions
+encode preserved behaviour; rewriting them to match the new output erases
+the guard.
+
+If a change intentionally modifies observable behaviour (e.g. a planner
+chain shape, an emitter contract, or an extractor property), update the
+affected fixtures/invariants and explicitly document and justify the
+intended behaviour change in the PR.
+
+### Coverage analysis before a behaviour-preserving refactor (green/green)
+
+Before any non-trivial refactor of `path-analyser` or
+`semantic-graph-extractor`, audit whether the surface you're about to
+change is sufficiently guarded. A passing test suite is necessary but not
+sufficient — it only proves that *what is currently tested* still works.
+The risk of a refactor is the behaviour that nobody asserts.
+
+For each behaviour you intend to preserve, find or write the fixture or
+invariant that would fail if it changed. If the surface is unguarded,
+**add the missing fixture/invariant first, on the pre-refactor branch**,
+and prove it passes against the current implementation. This is the
+green/green discipline:
+
+1. **Green on the pre-refactor code** — proves the assertion encodes
+   preserved behaviour, not aspirational behaviour.
+2. **Green on the refactored code** — proves the refactor preserved it.
+
+Land the new guard fixtures in a separate PR off `main` and merge it
+before the refactor PR. A guard that lands together with the change it's
+supposed to guard has no recorded moment at which it passed against the
+old code.
+
+### There are no flaky tests
+
+Intermittent failures are either a **test defect** (race, unsynchronised
+readiness signal, timeout-as-correctness, wall-clock dependency, shared
+temp dir across runs, parallel-test interaction) or a **product defect**
+(race, missed signal, resource leak under load). Either way, an
+intermittent failure is a real defect that must be diagnosed and fixed
+before the change merges.
+
+Never: retry CI, mark the test `it.skip`, add `.retry()`, or describe the
+failure as "flaky" or "unrelated" in the PR description. "Re-run and
+hope" is a coping strategy, not engineering.
+
+When triaging:
+
+- Reproduce locally if possible (loops, resource pressure, timeout
+  reduction). If you can't reproduce, reason from first principles about
+  what could differ between local and CI (load, network, vitest worker
+  scheduling, fs semantics).
+- Common causes for this repo specifically: tests that race the spec
+  fetch, tests that depend on `**/generated/` output without first
+  running the pipeline, tests that share a temp dir without isolating
+  per-`it`, fixtures whose ordering depends on a non-deterministic
+  `TEST_SEED`.
+- In the fix commit, name "test defect" or "product defect" explicitly
+  and explain which signal the test was previously relying on vs the new
+  deterministic one.
+- Generous timeouts are safety nets, not correctness signals — comment
+  them so future maintainers don't tighten them back into a race.
+
 ## Commit conventions
 
 This repo follows [Conventional Commits](https://www.conventionalcommits.org/).
@@ -291,6 +366,15 @@ npm test
 For Layer-3 invariant changes you must run the pipeline first or the test
 file aborts with a "graph not found" / "scenarios directory not found"
 error.
+
+## Terminal commands (agent tooling)
+
+- Avoid heredocs (`<< EOF`) when running shell commands through an AI
+  agent or other automation tool — they don't work reliably in zsh on
+  macOS and produce confusing failures that look like syntax errors.
+- Prefer the agent's native file-editing tools for creating or modifying
+  files. Don't pipe content through `cat > file` from the shell.
+- Appending a single line with `echo` or `printf >> file` is fine.
 
 ## Boundaries
 
