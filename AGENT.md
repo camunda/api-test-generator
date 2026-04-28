@@ -90,14 +90,36 @@ CI passes `TEST_SEED=snapshot-baseline` explicitly.
 Bundled-spec invariants are evaluated against a pinned upstream commit SHA
 in `tests/regression/spec-pin.json`. A vitest `globalSetup`
 (`tests/regression/spec-pin.setup.ts`) aborts the entire run if the bundled
-spec content drifts. To bump:
+spec content drifts.
 
-1. `SPEC_REF=<branch|tag|sha> npm run fetch-spec:ref`
-2. `npm run testsuite:generate && npm run generate:request-validation`
-3. Update `spec-pin.json`:
-   - `specRef`: the **resolved 40-char commit SHA** (never a branch — branches drift)
+> **`specRef` is a commit SHA on the upstream `camunda/camunda` repo — NOT
+> on this repo (`camunda/api-test-generator`).** `camunda-schema-bundler`
+> shallow-clones `camunda/camunda` and runs `git fetch --depth 1 origin
+> <specRef>`. If you paste a SHA that doesn't exist there (e.g. a SHA from
+> this repo, a fork, or a squashed/rebased commit), CI fails the
+> "Fetch pinned OpenAPI spec" step with:
+>
+> ```
+> fatal: remote error: upload-pack: not our ref <sha>
+> ```
+>
+> Verify before committing: `git ls-remote https://github.com/camunda/camunda <sha>`
+> must print a line. If it prints nothing, the SHA is wrong.
+
+To bump:
+
+1. Pick a real commit SHA from `camunda/camunda` (e.g. from
+   <https://github.com/camunda/camunda/commits/main>) and confirm it with
+   `git ls-remote` as above.
+2. `SPEC_REF=<that-sha> npm run fetch-spec:ref` — the bundler resolves any
+   branch/tag/SHA to a SHA and writes `spec/bundled/spec-metadata.json`.
+3. `npm run testsuite:generate && npm run generate:request-validation`
+4. Update `spec-pin.json`:
+   - `specRef`: the **resolved 40-char commit SHA** from
+     `spec/bundled/spec-metadata.json` (never a branch — branches drift,
+     and never this repo's own SHA — see the callout above)
    - `expectedSpecHash`: the `specHash` printed in `spec/bundled/spec-metadata.json`
-4. Update any invariants whose values legitimately changed; commit together.
+5. Update any invariants whose values legitimately changed; commit together.
 
 ## Code style & lint (Biome)
 
