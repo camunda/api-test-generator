@@ -230,7 +230,15 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     if (domain?.operationRequirements) {
       for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
         if (!operations[opId]) continue;
-        for (const st of spec.produces ?? []) addProducer(st, opId);
+        for (const st of spec.produces ?? []) {
+          addProducer(st, opId);
+          // Also register as a semantic producer so BFS semantic expansion can use it
+          if (!bySemanticProducer[st]) bySemanticProducer[st] = [];
+          if (!bySemanticProducer[st].includes(opId)) bySemanticProducer[st].push(opId);
+          // And add to the operation's produces list so BFS can track production
+          const node = operations[opId];
+          if (node && !node.produces.includes(st)) node.produces.push(st);
+        }
         for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
       }
     }

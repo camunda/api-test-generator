@@ -127,24 +127,28 @@ async function main() {
       integrationCandidates
         .filter((sc) => sc.operations.length > 1)
         .sort((a, b) => a.operations.length - b.operations.length)[0] || integrationCandidates[0];
+
+    // Graft integration chain onto feature scenarios regardless of whether a response shape exists.
+    // Operations returning 204 (no body) have no `resp`, but still need their prerequisite chain.
+    const isSearchLikeOp =
+      (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
+      /search/i.test(op.operationId) ||
+      op.operationId === 'activateJobs';
+    for (const s of featureCollection.scenarios) {
+      const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
+      const skipGraft = isSearchLikeOp && isEmptyNeg;
+      if (
+        !skipGraft &&
+        chainSource &&
+        s.operations.length === 1 &&
+        chainSource.operations.length > 1
+      ) {
+        s.operations = chainSource.operations.map((o) => ({ ...o }));
+      }
+    }
+
     if (resp) {
       for (const s of featureCollection.scenarios) {
-        // Graft chain if available and feature scenario currently only has endpoint op
-        // Special-case: for search-like empty-negative, skip grafting to produce an empty result without prerequisites
-        const isSearchLikeOp =
-          (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
-          /search/i.test(op.operationId) ||
-          op.operationId === 'activateJobs';
-        const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
-        const skipGraft = isSearchLikeOp && isEmptyNeg;
-        if (
-          !skipGraft &&
-          chainSource &&
-          s.operations.length === 1 &&
-          chainSource.operations.length > 1
-        ) {
-          s.operations = chainSource.operations.map((o) => ({ ...o }));
-        }
         s.responseShapeSemantics = resp.producedSemantics || undefined;
         s.responseShapeFields = resp.fields.map((f) => ({
           name: f.name,
