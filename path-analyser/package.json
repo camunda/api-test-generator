@@ -16,6 +16,7 @@
     "observe:aggregate": "npm run build && node dist/src/scripts/aggregate-observations.js",
     "observe:run": "npm run codegen:playwright:all && npm run test:pw && npm run observe:aggregate",
     "validate:providers": "npm run build && node dist/scripts/validate-providers.js",
+    "audit:sidecar": "npm run build && node dist/scripts/audit-sidecar.js",
     "debug:canonical": "npm run build && node dist/src/scripts/debug-canonical.js",
     "clean": "rimraf dist || rm -rf dist",
     "regenerate": "npm run clean && npm run build && npm run generate:scenarios && npm run codegen:playwright:all"

@@ -37,7 +37,68 @@
       "kind": "state",
       "parameters": ["jobType", "processDefinitionId"],
       "producedBy": ["activateJobs"],
-      "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"]
+      "$comment": "Conceptually requires ProcessInstanceExists+ModelHasServiceTaskType, but omitting 'requires' here avoids BFS domain-prereq deadlock. The semantic edges from createDeployment/createProcessInstance already enforce ordering."
+    },
+    "DecisionDefinitionDeployed": {
+      "kind": "state",
+      "parameter": "decisionDefinitionId",
+      "producedBy": ["createDeployment"]
+    },
+    "DecisionRequirementsDeployed": {
+      "kind": "state",
+      "parameter": "decisionRequirementsId",
+      "producedBy": ["createDeployment"]
+    },
+    "FormDeployed": {
+      "kind": "state",
+      "parameter": "formKey",
+      "producedBy": ["createDeployment"]
+    },
+    "TenantExists": {
+      "kind": "state",
+      "parameter": "tenantId",
+      "producedBy": ["createTenant"]
+    },
+    "UserExists": {
+      "kind": "state",
+      "parameter": "username",
+      "producedBy": ["createUser"]
+    },
+    "AuthorizationExists": {
+      "kind": "state",
+      "parameter": "authorizationKey",
+      "producedBy": ["createAuthorization"]
+    },
+    "BatchOperationExists": {
+      "kind": "state",
+      "parameter": "batchOperationKey",
+      "producedBy": [
+        "cancelProcessInstancesBatchOperation",
+        "deleteDecisionInstancesBatchOperation",
+        "deleteProcessInstancesBatchOperation"
+      ]
+    },
+    "DocumentExists": {
+      "kind": "state",
+      "parameter": "documentId",
+      "producedBy": ["createDocument", "createDocuments"]
+    },
+    "GlobalListenerExists": {
+      "kind": "state",
+      "parameter": "globalListenerId",
+      "producedBy": ["createGlobalTaskListener"]
+    },
+    "DecisionEvaluationExists": {
+      "kind": "state",
+      "parameter": "decisionEvaluationKey",
+      "producedBy": ["evaluateDecision"],
+      "requires": ["DecisionDefinitionDeployed"]
+    },
+    "IncidentExists": {
+      "kind": "state",
+      "parameter": "incidentKey",
+      "producedBy": [],
+      "$comment": "Incidents are produced when service tasks exhaust retries or workers fail. No automated happy-path producer. This is at the research boundary: cannot be derived from the spec alone — requires domain knowledge about how to trigger process failure."
     }
   },
   "operationRequirements": {
@@ -51,14 +112,14 @@
       }
     },
     "activateJobs": {
-      "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"],
+      "$comment": "activateJobs conceptually requires ProcessInstanceExists and ModelHasServiceTaskType, but these are tracked as domain annotation only to avoid blocking BFS semantic expansion for downstream consumers (completeJob, failJob, etc.)",
       "valueBindings": {
         "request.jobType": "ModelHasServiceTaskType.jobType"
       },
       "produces": ["JobAvailableForActivation"]
     },
     "searchJobs": {
-      "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"]
+      "$comment": "Conceptually requires ProcessInstanceExists+ModelHasServiceTaskType; omitted from domainRequiresAll to keep BFS unblocked."
     },
     "getUserTask": {
       "requires": ["ProcessInstanceExists"]
@@ -67,6 +128,8 @@
       "requires": ["ProcessInstanceExists"]
     },
     "createDeployment": {
+      "produces": ["DecisionDefinitionId"],
+      "$comment": "DecisionDefinitionId is present in deployment response as deployments[].decision.decisionDefinitionId but not picked up by the extractor; explicitly declared here.",
       "valueBindings": {
         "response.deployments[].processDefinition.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
         "response.deployments[].processDefinition.processDefinitionKey": "ProcessDefinitionKey.processDefinitionKey",
@@ -75,6 +138,282 @@
     },
     "searchProcessDefinitions": {
       "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "getProcessDefinition": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "getProcessDefinitionXML": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "getProcessDefinitionStatistics": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "getStartProcessForm": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "getProcessDefinitionInstanceVersionStatistics": {
+      "requires": ["ProcessDefinitionDeployed"]
+    },
+    "migrateProcessInstancesBatchOperation": {
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "cancelProcessInstance": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "deleteProcessInstance": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getProcessInstance": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "modifyProcessInstance": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "resolveProcessInstanceIncidents": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "searchProcessInstanceIncidents": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getProcessInstanceCallHierarchy": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getProcessInstanceSequenceFlows": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getProcessInstanceStatistics": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "migrateProcessInstance": {
+      "requires": ["ProcessInstanceExists"],
+      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+    },
+    "assignUserTask": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "completeUserTask": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "unassignUserTask": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "updateUserTask": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getUserTaskForm": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "searchUserTaskAuditLogs": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "searchUserTaskEffectiveVariables": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "searchUserTaskVariables": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "completeJob": {
+      "$comment": "Semantic edge activateJobs->completeJob via JobKey already enforces activateJobs prerequisite; domain state JobAvailableForActivation omitted from requires to avoid BFS circular deadlock."
+    },
+    "failJob": {
+      "$comment": "Same as completeJob — JobKey semantic edge provides the activateJobs prerequisite."
+    },
+    "throwJobError": {
+      "$comment": "Same as completeJob — JobKey semantic edge provides the activateJobs prerequisite."
+    },
+    "updateJob": {
+      "$comment": "Same as completeJob — JobKey semantic edge provides the activateJobs prerequisite."
+    },
+    "evaluateDecision": {
+      "requires": ["DecisionDefinitionDeployed"],
+      "implicitAdds": ["DecisionEvaluationExists"]
+    },
+    "getDecisionDefinition": {
+      "requires": ["DecisionDefinitionDeployed"]
+    },
+    "getDecisionDefinitionXML": {
+      "requires": ["DecisionDefinitionDeployed"]
+    },
+    "getDecisionRequirements": {
+      "requires": ["DecisionRequirementsDeployed"]
+    },
+    "getDecisionRequirementsXML": {
+      "requires": ["DecisionRequirementsDeployed"]
+    },
+    "deleteDecisionInstance": {
+      "requires": ["DecisionEvaluationExists"]
+    },
+    "getDecisionInstance": {
+      "requires": ["DecisionEvaluationExists"]
+    },
+    "getTenant": {
+      "requires": ["TenantExists"]
+    },
+    "updateTenant": {
+      "requires": ["TenantExists"]
+    },
+    "deleteTenant": {
+      "requires": ["TenantExists"]
+    },
+    "assignClientToTenant": {
+      "requires": ["TenantExists"]
+    },
+    "assignGroupToTenant": {
+      "requires": ["TenantExists"]
+    },
+    "assignMappingRuleToTenant": {
+      "requires": ["TenantExists"]
+    },
+    "assignRoleToTenant": {
+      "requires": ["TenantExists"]
+    },
+    "assignUserToTenant": {
+      "requires": ["TenantExists", "UserExists"]
+    },
+    "unassignClientFromTenant": {
+      "requires": ["TenantExists"]
+    },
+    "unassignGroupFromTenant": {
+      "requires": ["TenantExists"]
+    },
+    "unassignMappingRuleFromTenant": {
+      "requires": ["TenantExists"]
+    },
+    "unassignRoleFromTenant": {
+      "requires": ["TenantExists"]
+    },
+    "unassignUserFromTenant": {
+      "requires": ["TenantExists", "UserExists"]
+    },
+    "searchClientsForTenant": {
+      "requires": ["TenantExists"]
+    },
+    "searchGroupIdsForTenant": {
+      "requires": ["TenantExists"]
+    },
+    "searchMappingRulesForTenant": {
+      "requires": ["TenantExists"]
+    },
+    "searchRolesForTenant": {
+      "requires": ["TenantExists"]
+    },
+    "searchUsersForTenant": {
+      "requires": ["TenantExists"]
+    },
+    "getTenantClusterVariable": {
+      "requires": ["TenantExists"]
+    },
+    "createTenantClusterVariable": {
+      "requires": ["TenantExists"]
+    },
+    "deleteTenantClusterVariable": {
+      "requires": ["TenantExists"]
+    },
+    "getUser": {
+      "requires": ["UserExists"]
+    },
+    "updateUser": {
+      "requires": ["UserExists"]
+    },
+    "deleteUser": {
+      "requires": ["UserExists"]
+    },
+    "assignRoleToUser": {
+      "requires": ["UserExists"]
+    },
+    "unassignRoleFromUser": {
+      "requires": ["UserExists"]
+    },
+    "assignUserToGroup": {
+      "requires": ["UserExists"]
+    },
+    "unassignUserFromGroup": {
+      "requires": ["UserExists"]
+    },
+    "activateAdHocSubProcessActivities": {
+      "requires": ["ProcessInstanceExists"],
+      "$comment": "Also requires the BPMN to have an ad-hoc sub-process element. Cannot be fully derived from the spec alone — domain knowledge required about BPMN model structure."
+    },
+    "createElementInstanceVariables": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getElementInstance": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "searchElementInstanceIncidents": {
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getIncident": {
+      "requires": ["IncidentExists"],
+      "$comment": "IncidentExists cannot be established via happy-path API calls. Requires a process to fail (e.g. service task exhausting retries). This is the research boundary: encode in test fixtures manually."
+    },
+    "resolveIncident": {
+      "requires": ["IncidentExists"],
+      "$comment": "Same as getIncident: requires a failed process. Cannot be auto-derived."
+    },
+    "getAuthorization": {
+      "requires": ["AuthorizationExists"]
+    },
+    "updateAuthorization": {
+      "requires": ["AuthorizationExists"]
+    },
+    "deleteAuthorization": {
+      "requires": ["AuthorizationExists"]
+    },
+    "getBatchOperation": {
+      "requires": ["BatchOperationExists"]
+    },
+    "cancelBatchOperation": {
+      "requires": ["BatchOperationExists"]
+    },
+    "resumeBatchOperation": {
+      "requires": ["BatchOperationExists"]
+    },
+    "suspendBatchOperation": {
+      "requires": ["BatchOperationExists"]
+    },
+    "createDocumentLink": {
+      "requires": ["DocumentExists"]
+    },
+    "getDocument": {
+      "requires": ["DocumentExists"]
+    },
+    "deleteDocument": {
+      "requires": ["DocumentExists"]
+    },
+    "createGlobalTaskListener": {
+      "$comment": "createGlobalTaskListener appears to take a user-provided listenerId (PUT-style idempotent create). The graph marks it as requiring GlobalListenerId because the path/body parameter has that semantic type, but no prior operation produces it — the ID is caller-generated. Treating as no domain state precondition.",
+      "implicitAdds": ["GlobalListenerExists"]
+    },
+    "getGlobalTaskListener": {
+      "requires": ["GlobalListenerExists"]
+    },
+    "updateGlobalTaskListener": {
+      "requires": ["GlobalListenerExists"]
+    },
+    "deleteGlobalTaskListener": {
+      "requires": ["GlobalListenerExists"]
+    },
+    "getAuditLog": {
+      "$comment": "AuditLogKey is obtained by searching audit logs. Any state-changing operation produces audit log entries. Treating as requiring at least one prior state-changing operation (modelled loosely as ProcessInstanceExists for test chain building).",
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getVariable": {
+      "$comment": "VariableKey is available on any running process instance that has set variables.",
+      "requires": ["ProcessInstanceExists"]
+    },
+    "getResource": {
+      "$comment": "ResourceKey is produced by createDeployment. Resources are deployed BPMN/DMN/form artifacts.",
+      "requires": ["ProcessDefinitionDeployed"]
+    },
+    "getResourceContent": {
+      "requires": ["ProcessDefinitionDeployed"]
+    },
+    "deleteResource": {
+      "requires": ["ProcessDefinitionDeployed"]
+    },
+    "updateTenantClusterVariable": {
+      "requires": ["TenantExists"]
     }
   },
   "artifactKinds": {
