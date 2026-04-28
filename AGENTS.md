@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 > **Note:** This file extends a central Camunda AGENTS.md. Read and apply it before proceeding.
 >
