@@ -6,7 +6,10 @@ import { buildCanonicalShapes } from './canonicalSchemas.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
-import { generateScenariosForEndpoint } from './scenarioGenerator.js';
+import {
+  generateOptionalSubShapeVariants,
+  generateScenariosForEndpoint,
+} from './scenarioGenerator.js';
 import type {
   EndpointScenario,
   GenerationSummary,
@@ -32,6 +35,7 @@ async function main() {
   const baseDir = cwd.endsWith(suffix) ? cwd : path.resolve(cwd, suffix);
   const outputDir = path.resolve(baseDir, 'dist/output');
   const featureDir = path.resolve(baseDir, 'dist/feature-output');
+  const variantDir = path.resolve(baseDir, 'dist/variant-output');
   // Wipe before write so files left over from a previous spec version (e.g.
   // an operationId that no longer exists upstream) cannot survive into the
   // current run and silently break Layer-3 invariants. Without this, local
@@ -39,8 +43,10 @@ async function main() {
   // and never sees the stale files.
   await rm(outputDir, { recursive: true, force: true });
   await rm(featureDir, { recursive: true, force: true });
+  await rm(variantDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   await mkdir(featureDir, { recursive: true });
+  await mkdir(variantDir, { recursive: true });
 
   const graph = await loadGraph(baseDir);
   // Build canonical deep schema shapes (requests + responses)
@@ -312,6 +318,47 @@ async function main() {
       JSON.stringify(featureCollection, null, 2),
       'utf8',
     );
+
+    // Issue #37: optional sub-shape variant scenarios. Only emit a file
+    // when this endpoint has at least one optional sub-shape, so the
+    // variant-output directory remains a clear signal of which endpoints
+    // have populated-shape coverage.
+    if (op.optionalSubShapes?.length) {
+      const variantCollection = generateOptionalSubShapeVariants(graph, op.operationId, {
+        maxScenarios: 20,
+      });
+      // Augment with response shape so downstream codegen has the same
+      // metadata as base/feature scenarios.
+      if (resp) {
+        for (const s of variantCollection.scenarios) {
+          s.responseShapeSemantics = resp.producedSemantics || undefined;
+          s.responseShapeFields = resp.fields.map((f) => ({
+            name: f.name,
+            type: f.type,
+            semantic: f.semantic,
+            required: f.required,
+            nullable: f.nullable,
+          }));
+          if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
+          if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
+          s.requestPlan = buildRequestPlan(
+            s,
+            resp,
+            graph,
+            canonical,
+            requestIndex.byOperation,
+            successStatusByOp,
+          );
+        }
+      }
+      if (variantCollection.scenarios.length) {
+        await writeFile(
+          path.join(variantDir, fileName),
+          JSON.stringify(variantCollection, null, 2),
+          'utf8',
+        );
+      }
+    }
     summaryEntries.push({
       operationId: op.operationId,
       method: op.method,

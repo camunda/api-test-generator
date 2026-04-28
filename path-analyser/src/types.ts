@@ -47,11 +47,42 @@ export interface OperationNode extends OperationRef {
   // from its semanticType (issue #61). Populated in graphLoader from the
   // raw operation node.
   pathParameters?: { name: string; semanticType?: string }[];
+  // Issue #37: optional sub-shape grouping for variant-scenario planning.
+  // Derived from request-body semantic leaves whose `fieldPath` shares an
+  // optional object/array-of-object ancestor (e.g. `startInstructions[]`
+  // groups `startInstructions[].elementId`). Each entry lists the
+  // semantic-typed leaves under that root. Variant planning emits one
+  // positive scenario per (rootPath, leaf) pair to exercise the populated
+  // shape that base scenarios skip.
+  optionalSubShapes?: Array<{
+    rootPath: string; // e.g. "startInstructions[]"
+    leaves: Array<{ fieldPath: string; semantic: string }>;
+  }>;
+  // Issue #37: full response-leaf semantic catalog (success-status only).
+  // Includes both authoritative (provider:true) and incidental
+  // (provider:false) entries, so variant planning can route ElementId via
+  // `searchElementInstances.items[].elementId` even though that op's
+  // authoritative outputs are page cursors. After #98 the `produces` field
+  // contains only authoritative outputs (provider:true); this catalog
+  // remains the inclusive view used for variant-only planning.
+  responseSemanticLeaves?: Array<{
+    semantic: string;
+    fieldPath: string;
+    status: string;
+    provider: boolean;
+  }>;
 }
 
 export interface OperationGraph {
   operations: Record<string, OperationNode>;
   producersByType: Record<string, string[]>;
+  // Issue #37: parallel producer index that includes ALL response-leaf
+  // semantics (provider:true and provider:false). Used by the variant
+  // planner to discover non-authoritative producers (e.g.
+  // searchElementInstances → ElementId via items[].elementId) without
+  // affecting base-scenario planning, which still consults
+  // `producersByType` (authoritative outputs only after #98).
+  responseProducersByType?: Record<string, string[]>;
   bootstrapSequences?: BootstrapSequence[];
   domain?: DomainSemantics; // loaded sidecar
   producersByState?: Record<string, string[]>; // domain state -> operations
@@ -87,10 +118,18 @@ export interface EndpointScenario {
   artifactsApplied?: string[]; // ids of artifact rules applied
   eventualConsistencyOps?: string[]; // operationIds that are eventually consistent in chain
   // Feature coverage strategy additions
-  strategy?: 'integrationPath' | 'featureCoverage';
+  strategy?: 'integrationPath' | 'featureCoverage' | 'optionalSubShapeVariant';
   variantKey?: string; // structured key summarizing variant dimensions
   expectedResult?: { kind: 'nonEmpty' | 'empty' | 'error'; code?: string };
   coverageTags?: string[]; // dimension tags e.g. optional:FormKey, disjunction:alt-1
+  // Issue #37: which optional sub-shape this variant populates and which
+  // semantic-typed leaves it sets (one leaf per variant in iteration 1).
+  // Codegen uses this to synthesize the populated body.
+  populatesSubShape?: {
+    rootPath: string; // e.g. "startInstructions[]"
+    leafPaths: string[]; // semantic-typed leaves to populate
+    leafSemantics: string[]; // matching semantic types in same order
+  };
   filtersUsed?: string[]; // semantic / parameter filters applied
   syntheticBindings?: string[]; // variables created without a producing op
   // Request variant / filter coverage enrichments
@@ -363,6 +402,9 @@ export interface LongChainConfig {
 export interface ExtendedGenerationOpts {
   maxScenarios: number;
   longChains?: LongChainConfig;
+  // Issue #37: see scenarioGenerator GenerationOpts for semantics.
+  allowEndpointAsProducer?: boolean;
+  additionalNeeded?: string[];
 }
 
 export type GeneratedModelSpec = BpmnModelSpec | FormModelSpec;

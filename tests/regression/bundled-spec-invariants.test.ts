@@ -30,6 +30,7 @@ const GRAPH_PATH = join(
 );
 const SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'output');
 const FEATURE_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'feature-output');
+const VARIANT_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'variant-output');
 const GENERATED_TESTS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'generated-tests');
 
 interface SemanticTypeEntry {
@@ -64,6 +65,18 @@ interface ScenarioFile {
     operations: { operationId: string }[];
     missingSemanticTypes?: string[];
   }[];
+}
+
+interface VariantScenario {
+  id: string;
+  variantKey?: string;
+  hasEventuallyConsistent?: boolean;
+  populatesSubShape?: { rootPath: string; leafPaths: string[]; leafSemantics?: string[] };
+  operations: { operationId: string }[];
+}
+interface VariantScenarioFile {
+  endpoint: { operationId: string };
+  scenarios: VariantScenario[];
 }
 
 let cachedGraph: DependencyGraph | undefined;
@@ -197,10 +210,13 @@ describe('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('no createProcessInstance scenario calls searchElementInstances (#31)', () => {
+  it('no createProcessInstance BASE scenario calls searchElementInstances (#31)', () => {
     // The original symptom of #31: the planner inserted a search-step
     // chain because ElementId was wrongly required. Ancestor-required
-    // tracking removed that branch.
+    // tracking removed that branch from BASE scenarios. Variant
+    // scenarios (#37) explicitly DO call searchElementInstances when
+    // populating optional sub-shapes — they live in dist/variant-output/
+    // and are exempt from this invariant.
     const scen = loadScenarioFile('post--process-instances-scenarios.json');
     const offenders = scen.scenarios
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
@@ -1167,6 +1183,85 @@ describe('bundled-spec invariants: planner output', () => {
       offenders,
       'Feature-output chain selector grafted a prerequisite chain whose producers are not authoritative for the endpoint\'s required semantic type. The selected chain extracts the type from an "echo" response field (e.g. createDocument\'s `metadata.processInstanceKey` with provider:false) instead of from a real producer (createProcessInstance with provider:true). At runtime the extracted variable is empty and the URL placeholder leaks. Prefer chains containing at least one `provider:true` producer per required type before falling back to the shortest chain.',
     ).toEqual([]);
+  });
+});
+
+describe('bundled-spec invariants: planner variant output (#37)', () => {
+  function loadVariantFile(filename: string): VariantScenarioFile {
+    const p = join(VARIANT_SCENARIOS_DIR, filename);
+    if (!existsSync(p)) {
+      throw new Error(
+        `Variant scenario file not found at ${p}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    return JSON.parse(readFileSync(p, 'utf8')) as VariantScenarioFile;
+  }
+
+  it('createProcessInstance has a variant populating startInstructions[].elementId with the canonical chain (#37)', () => {
+    // Acceptance criteria from #37:
+    //  - At least one scenario populates startInstructions[].elementId
+    //  - Chain has a warm-up createProcessInstance before the final one
+    //  - Chain has searchElementInstances between warm-up and final
+    //  - Scenario marked eventuallyConsistent: true
+    const file = loadVariantFile('post--process-instances-scenarios.json');
+    const startInstrVariants = file.scenarios.filter(
+      (s) => s.populatesSubShape?.rootPath === 'startInstructions[]',
+    );
+    expect(startInstrVariants.length).toBeGreaterThan(0);
+
+    const canonical = startInstrVariants.find((s) => {
+      const ops = s.operations.map((o) => o.operationId);
+      const cpiCount = ops.filter((o) => o === 'createProcessInstance').length;
+      const seiIdx = ops.indexOf('searchElementInstances');
+      const lastCpiIdx = ops.lastIndexOf('createProcessInstance');
+      const firstCpiIdx = ops.indexOf('createProcessInstance');
+      return (
+        cpiCount >= 2 &&
+        seiIdx > -1 &&
+        seiIdx > firstCpiIdx &&
+        seiIdx < lastCpiIdx &&
+        s.hasEventuallyConsistent === true
+      );
+    });
+    expect(canonical).toBeDefined();
+  });
+
+  it('every step in every variant scenario has its required semantic inputs satisfied (#37)', () => {
+    // Mirror of the base-scenario prereq invariant, scoped to variant
+    // scenarios. The variant family lifts the OUT-as-producer guard, so
+    // we want explicit confirmation that the warm-up endpoint truly
+    // produces the semantics the search-step then consumes.
+    if (!existsSync(VARIANT_SCENARIOS_DIR)) return; // no variants generated yet
+    const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantScenarioFile;
+      for (const sc of file.scenarios) {
+        const produced = new Set<string>();
+        for (const ref of sc.operations) {
+          const opNode = findOperation(ref.operationId);
+          const req = (opNode.requestBodySemanticTypes ?? [])
+            .filter((e) => e.required)
+            .map((e) => e.semanticType);
+          for (const p of opNode.parameters ?? []) {
+            if (p.required && p.semanticType) req.push(p.semanticType);
+          }
+          const missing = req.filter((s) => !produced.has(s));
+          if (missing.length) {
+            offenders.push({ file: f, scenario: sc.id, step: ref.operationId, missing });
+          }
+          for (const [statusCode, entries] of Object.entries(opNode.responseSemanticTypes ?? {})) {
+            if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
+            for (const e of entries) produced.add(e.semanticType);
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

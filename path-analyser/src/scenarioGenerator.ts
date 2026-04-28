@@ -14,6 +14,19 @@ import type {
 interface GenerationOpts {
   maxScenarios: number;
   longChains?: { enabled: boolean; maxPreOps: number };
+  // Issue #37: when planning an optional sub-shape variant, the endpoint
+  // itself is allowed to appear as a producer in the BFS (i.e. the
+  // OUT-exclusion guard is lifted). This is what enables the warm-up +
+  // search + final pattern for `createProcessInstance.startInstructions[]`.
+  // The existing one-cycle allowance bounds usage to a single warm-up.
+  allowEndpointAsProducer?: boolean;
+  // Issue #37: extra semantic types added to `initialNeeded` without
+  // mutating the endpoint's own `requires.required`. Used to inject the
+  // sub-shape's leaf semantic and any warm-up-trigger inputs (producer's
+  // optional inputs that the endpoint itself produces). Insertion order
+  // matters: warm-up triggers come first so BFS targets them before the
+  // leaf semantic via `remaining[0]` selection.
+  additionalNeeded?: string[];
 }
 
 // BFS state used by generateScenariosForEndpoint and its helpers.
@@ -56,7 +69,11 @@ export function generateScenariosForEndpoint(
   const domainRequiredStates = endpoint.domainRequiresAll ? [...endpoint.domainRequiresAll] : [];
   const domainDisjunctions = endpoint.domainDisjunctions ? [...endpoint.domainDisjunctions] : [];
   // Only treat required semantics as blocking; optional ones are opportunistic and won't force extra pre-ops.
-  const initialNeeded = new Set([...required]);
+  // Issue #37: variant planning may inject `additionalNeeded` (the
+  // sub-shape leaf's semantic plus warm-up triggers) WITHOUT mutating
+  // the endpoint's own `requires.required` — this preserves the
+  // endpoint's prereq set for when it appears as a warm-up step.
+  const initialNeeded = new Set([...required, ...(opts.additionalNeeded ?? [])]);
 
   // Trivial endpoint (no semantic AND no domain requirements). Return a single scenario containing only the endpoint.
   if (
@@ -449,7 +466,10 @@ export function generateScenariosForEndpoint(
     }
 
     for (const producerOpId of producers) {
-      if (producerOpId === endpointOpId) continue; // don't pre-run endpoint
+      if (producerOpId === endpointOpId && !opts.allowEndpointAsProducer) continue; // don't pre-run endpoint
+      // Issue #37 variant planning: when allowEndpointAsProducer is set,
+      // the endpoint may legitimately appear as a warm-up step. The
+      // existing cycle handling below caps it at one repeat.
 
       // Cycle detection logic
       const indexInPath = state.ops.indexOf(producerOpId);
@@ -1313,4 +1333,161 @@ function gatherDomainPrerequisites(
       });
   }
   return [...needed];
+}
+
+// =============================================================================
+// Issue #37 — optional sub-shape variant scenarios
+// =============================================================================
+//
+// Iteration 1 of issue #31 (PR #32) demoted optional-ancestor leaves like
+// `startInstructions[].elementId` to `required: false`, so base scenarios
+// no longer drag in spurious dependency producers when the optional
+// sub-shape is omitted. That created a coverage gap: the populated case
+// of those sub-shapes is no longer exercised by any scenario.
+//
+// `generateOptionalSubShapeVariants` fills that gap. For each
+// `OperationNode.optionalSubShapes` entry on the endpoint, and for each
+// semantic-typed leaf within that sub-shape, this function plans a
+// sibling positive scenario where:
+//
+//   1. The leaf's semantic is added to the endpoint's required inputs.
+//   2. If the chosen producer of the leaf needs an input that the endpoint
+//      itself produces (e.g. `searchElementInstances` filters by
+//      `ProcessInstanceKey`, which `createProcessInstance` produces), that
+//      input is also promoted to required — forcing a WARM-UP endpoint
+//      call before the producer can run.
+//   3. The OUT-exclusion guard is lifted so BFS can use the endpoint as
+//      the warm-up step. The existing one-cycle allowance caps usage at
+//      one warm-up + one final.
+//
+// Variant scenarios are tagged `strategy: 'optionalSubShapeVariant'` and
+// carry `populatesSubShape: { rootPath, leafPaths, leafSemantics }` so
+// codegen can synthesize the populated request body.
+export function generateOptionalSubShapeVariants(
+  graph: OperationGraph,
+  endpointOpId: string,
+  opts: GenerationOpts,
+): EndpointScenarioCollection {
+  const endpoint = graph.operations[endpointOpId];
+  if (!endpoint) {
+    return {
+      endpoint: { operationId: endpointOpId, method: 'GET', path: '' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [],
+      unsatisfied: false,
+    };
+  }
+  const subShapes = endpoint.optionalSubShapes ?? [];
+  const collectionScenarios: EndpointScenario[] = [];
+  const seenVariantKeys = new Set<string>();
+
+  for (const subShape of subShapes) {
+    for (const leaf of subShape.leaves) {
+      // Resolve producer candidates: prefer authoritative (provider:true)
+      // producers from `producersByType`, but fall back to the
+      // inclusive index that includes provider:false response leaves
+      // (e.g. searchElementInstances → ElementId via items[].elementId).
+      const authoritative = graph.producersByType[leaf.semantic] ?? [];
+      const inclusive = graph.responseProducersByType?.[leaf.semantic] ?? [];
+      // Prefer inclusive (search-style) producers first: search/list ops
+      // typically take optional filters that overlap endpoint outputs,
+      // making them the natural "look up the entity we just created" step
+      // in a variant chain. Authoritative producers (provider:true) are
+      // tried only as fallback. Note many ops appear in both lists; unique
+      // preserves first occurrence, so inclusive order wins.
+      const producerCandidates = unique([...inclusive, ...authoritative]).filter(
+        (id) => id !== endpointOpId,
+      );
+      if (!producerCandidates.length) continue;
+      // Try each candidate producer; pick the first that yields a valid
+      // variant. The first authoritative producer often won't (e.g.
+      // `getElementInstance` requires `ElementInstanceKey` which the
+      // endpoint doesn't produce, so no warm-up is forced). A search-style
+      // producer (e.g. `searchElementInstances`) is usually the one whose
+      // optional filters overlap the endpoint's outputs.
+      let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
+      for (const candidateOpId of producerCandidates) {
+        const candidate = graph.operations[candidateOpId];
+        if (!candidate) continue;
+        const additional = new Set<string>();
+        for (const opt of candidate.requires.optional) {
+          if (endpoint.produces.includes(opt)) additional.add(opt);
+        }
+        for (const req of candidate.requires.required) additional.add(req);
+        additional.add(leaf.semantic);
+        const overlapsEndpoint = [...additional].some((s) => endpoint.produces.includes(s));
+        if (!overlapsEndpoint) continue;
+        chosenProducer = { node: candidate, additional };
+        break;
+      }
+      if (!chosenProducer) continue;
+      const { additional } = chosenProducer;
+
+      // Build a per-variant graph view: pin the chosen producer as the
+      // SOLE producer of the leaf semantic AND mark it as authoritative
+      // (`providerMap[leaf.semantic] = true`, semantic added to `produces`).
+      // Without that, BFS would insert the chosen producer but its
+      // `produces` list (built from `provider:true` annotations only)
+      // wouldn't include the leaf semantic — leaving ElementId unsatisfied
+      // in `remaining` and looping forever. The endpoint itself is NOT
+      // mutated — augmented needs are passed via `additionalNeeded` so
+      // they don't bleed into the endpoint's prereq set when it appears
+      // as a warm-up step.
+      const chosenId = chosenProducer.node.operationId;
+      const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
+      variantProducersByType[leaf.semantic] = [chosenId];
+      const variantOperations: Record<string, OperationNode> = { ...graph.operations };
+      variantOperations[chosenId] = {
+        ...chosenProducer.node,
+        produces: chosenProducer.node.produces.includes(leaf.semantic)
+          ? chosenProducer.node.produces
+          : [...chosenProducer.node.produces, leaf.semantic],
+        providerMap: {
+          ...(chosenProducer.node.providerMap ?? {}),
+          [leaf.semantic]: true,
+        },
+      };
+      const variantGraph: OperationGraph = {
+        ...graph,
+        operations: variantOperations,
+        producersByType: variantProducersByType,
+      };
+
+      const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
+        ...opts,
+        allowEndpointAsProducer: true,
+        additionalNeeded: [...additional],
+        maxScenarios: 1,
+      });
+      const scenario = planned.scenarios[0];
+      if (!scenario || planned.unsatisfied) continue;
+
+      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
+      if (seenVariantKeys.has(variantKey)) continue;
+      seenVariantKeys.add(variantKey);
+
+      scenario.id = `variant-${collectionScenarios.length + 1}`;
+      scenario.strategy = 'optionalSubShapeVariant';
+      scenario.variantKey = variantKey;
+      scenario.populatesSubShape = {
+        rootPath: subShape.rootPath,
+        leafPaths: [leaf.fieldPath],
+        leafSemantics: [leaf.semantic],
+      };
+      collectionScenarios.push(scenario);
+    }
+  }
+
+  return {
+    endpoint: toRef(endpoint),
+    requiredSemanticTypes: [...endpoint.requires.required],
+    optionalSemanticTypes: [...endpoint.requires.optional],
+    scenarios: collectionScenarios,
+    unsatisfied: false,
+  };
+}
+
+function unique<T>(arr: T[]): T[] {
+  return [...new Set(arr)];
 }

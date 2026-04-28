@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { generateScenariosForEndpoint } from '../../../path-analyser/src/scenarioGenerator.ts';
+import {
+  generateOptionalSubShapeVariants,
+  generateScenariosForEndpoint,
+} from '../../../path-analyser/src/scenarioGenerator.ts';
 import type {
   EndpointScenarioCollection,
   OperationGraph,
@@ -26,6 +29,9 @@ interface NodeOpts {
   providerMap?: Record<string, boolean>;
   domainRequiresAll?: string[];
   domainProduces?: string[];
+  optionalSubShapes?: OperationNode['optionalSubShapes'];
+  responseSemanticLeaves?: OperationNode['responseSemanticLeaves'];
+  eventuallyConsistent?: boolean;
 }
 
 function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
@@ -41,6 +47,9 @@ function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
     providerMap: opts.providerMap,
     domainRequiresAll: opts.domainRequiresAll,
     domainProduces: opts.domainProduces,
+    optionalSubShapes: opts.optionalSubShapes,
+    responseSemanticLeaves: opts.responseSemanticLeaves,
+    eventuallyConsistent: opts.eventuallyConsistent,
   };
 }
 
@@ -48,6 +57,7 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
   const operations: Record<string, OperationNode> = {};
   const producersByType: Record<string, string[]> = {};
   const producersByState: Record<string, string[]> = {};
+  const responseProducersByType: Record<string, string[]> = {};
   for (const node of nodes) {
     operations[node.operationId] = node;
     for (const sem of node.produces) {
@@ -60,8 +70,13 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
       list.push(node.operationId);
       producersByState[ds] = list;
     }
+    for (const leaf of node.responseSemanticLeaves ?? []) {
+      const list = responseProducersByType[leaf.semantic] ?? [];
+      if (!list.includes(node.operationId)) list.push(node.operationId);
+      responseProducersByType[leaf.semantic] = list;
+    }
   }
-  return { operations, producersByType, producersByState };
+  return { operations, producersByType, producersByState, responseProducersByType };
 }
 
 function plan(graph: OperationGraph, endpointOpId: string): EndpointScenarioCollection {
@@ -348,5 +363,86 @@ describe('planner contracts: domain-prereq-blocked authoritative producer (#58)'
     expect(barIdx, 'produceBar must appear in the chain').toBeGreaterThanOrEqual(0);
     expect(fooIdx).toBeGreaterThan(barIdx);
     expect(endpointIdx).toBeGreaterThan(fooIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture H: optional sub-shape variant scenario (#37)
+// ---------------------------------------------------------------------------
+//
+// Endpoint `createOrder` requires `OrderId` (produced authoritatively by
+// `mintOrderId`). It produces `OrderInstanceKey`. It also has an
+// OPTIONAL sub-shape `lineItems[]` whose only semantic-typed leaf is
+// `lineItems[].productId` carrying a `ProductId`.
+//
+// `searchProducts` produces `ProductId`. Its optional filter input is
+// `OrderInstanceKey` — exactly what the endpoint produces. Variant
+// planning must recognise this overlap and force a warm-up endpoint
+// call BEFORE searchProducts runs, so the search has something
+// meaningful to filter by.
+//
+// Base scenario for `createOrder` is just `[mintOrderId, createOrder]`
+// (the optional sub-shape is omitted, so ProductId is never needed).
+//
+// Variant scenario must populate `lineItems[].productId`. Expected
+// chain:
+//
+//   [mintOrderId, createOrder (warm-up), searchProducts, createOrder (real)]
+//
+// `populatesSubShape` and `hasEventuallyConsistent` are propagated.
+const fixtureSubShapeVariant: OperationGraph = makeGraph([
+  makeOp('mintOrderId', {
+    produces: ['OrderId'],
+    providerMap: { OrderId: true },
+  }),
+  makeOp('searchProducts', {
+    optional: ['OrderInstanceKey'],
+    produces: ['ProductId'],
+    providerMap: { ProductId: true },
+    eventuallyConsistent: true,
+  }),
+  makeOp('createOrder', {
+    required: ['OrderId'],
+    produces: ['OrderInstanceKey'],
+    providerMap: { OrderInstanceKey: true },
+    optionalSubShapes: [
+      {
+        rootPath: 'lineItems[]',
+        leaves: [{ fieldPath: 'lineItems[].productId', semantic: 'ProductId' }],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: optional sub-shape variants (#37)', () => {
+  it('emits a variant scenario per sub-shape leaf with warm-up + producer + final', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureSubShapeVariant, 'createOrder', {
+      maxScenarios: 10,
+    });
+    expect(variants.scenarios.length).toBeGreaterThan(0);
+    const variant = variants.scenarios[0];
+    expect(opIdsOf(variant)).toEqual([
+      'mintOrderId',
+      'createOrder',
+      'searchProducts',
+      'createOrder',
+    ]);
+    expect(variant.strategy).toBe('optionalSubShapeVariant');
+    expect(variant.populatesSubShape?.rootPath).toBe('lineItems[]');
+    expect(variant.populatesSubShape?.leafPaths).toEqual(['lineItems[].productId']);
+    expect(variant.populatesSubShape?.leafSemantics).toEqual(['ProductId']);
+    expect(variant.hasEventuallyConsistent).toBe(true);
+    expect(variant.variantKey).toContain('lineItems[]');
+  });
+
+  it('does NOT alter base scenarios for the same endpoint', () => {
+    // Base planner is unchanged: the optional sub-shape's leaf semantic
+    // (`ProductId`) is opportunistic, so no `searchProducts` step appears.
+    const base = plan(fixtureSubShapeVariant, 'createOrder');
+    expect(base.scenarios.length).toBeGreaterThan(0);
+    for (const s of base.scenarios) {
+      expect(opIdsOf(s)).not.toContain('searchProducts');
+    }
+    expect(opIdsOf(base.scenarios[0])).toEqual(['mintOrderId', 'createOrder']);
   });
 });
