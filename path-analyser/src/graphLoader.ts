@@ -291,6 +291,33 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
 
   // providerMap already built above; if still empty leave as undefined later
 
+  // Pass through responseSemanticTypes (per status code -> array of
+  // {semanticType, fieldPath, ...}). The path-analyser request-plan builder
+  // uses these to emit per-step extracts on prerequisite producer steps so
+  // grafted chains actually populate downstream URL placeholder vars.
+  const normalizedResponseSemanticTypes: Record<
+    string,
+    { semanticType: string; fieldPath: string; required?: boolean }[]
+  > = {};
+  if (op.responseSemanticTypes && typeof op.responseSemanticTypes === 'object') {
+    for (const [status, arr] of Object.entries(op.responseSemanticTypes)) {
+      if (!Array.isArray(arr)) continue;
+      const entries: { semanticType: string; fieldPath: string; required?: boolean }[] = [];
+      for (const entry of arr) {
+        const st: unknown = entry?.semanticType;
+        const fp: unknown = entry?.fieldPath;
+        if (typeof st === 'string' && typeof fp === 'string') {
+          entries.push({
+            semanticType: st,
+            fieldPath: fp,
+            required: typeof entry?.required === 'boolean' ? entry.required : undefined,
+          });
+        }
+      }
+      if (entries.length) normalizedResponseSemanticTypes[status] = entries;
+    }
+  }
+
   return {
     operationId: op.operationId ?? op.id ?? op.name ?? opId,
     method: (op.method ?? op.httpMethod ?? op.verb ?? 'GET').toUpperCase(),
@@ -303,6 +330,9 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
       op.eventuallyConsistent === true || op['x-eventually-consistent'] === true,
     operationMetadata: op.operationMetadata || undefined,
     conditionalIdempotency: op.conditionalIdempotency || undefined,
+    responseSemanticTypes: Object.keys(normalizedResponseSemanticTypes).length
+      ? normalizedResponseSemanticTypes
+      : undefined,
   };
 }
 

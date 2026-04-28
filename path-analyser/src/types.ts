@@ -33,6 +33,14 @@ export interface OperationNode extends OperationRef {
     duplicatePolicy: string; // e.g. ignore
     appliesWhen: string; // e.g. key-present
   };
+  // Response semantic-type entries keyed by status code, sourced from the
+  // semantic-graph extractor. Each entry captures the field path (which may
+  // be nested, e.g. `metadata.processInstanceKey`) and the semantic type
+  // produced by that field on a 2xx response.
+  responseSemanticTypes?: Record<
+    string,
+    { semanticType: string; fieldPath: string; required?: boolean }[]
+  >;
 }
 
 export interface OperationGraph {

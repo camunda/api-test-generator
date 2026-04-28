@@ -61,16 +61,29 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
   const doc = YAML.parse(raw) as OpenAPISchemaObject;
   const responses: ResponseShapeSummary[] = [];
   const requestGroups: RequestOneOfGroupSummary[] = [];
+  // Per-operation success status map. Populated for every operation that
+  // declares a 2xx (200/201/204) response, even when there is no JSON body.
+  // Used by the request-plan builder to assert the correct HTTP status for
+  // each step (final and prerequisite). 204 No-Content endpoints in
+  // particular have no JSON shape but must still be asserted as 204.
+  const successStatusByOp: Record<string, number> = {};
 
   const paths = doc.paths || {};
   for (const [, methods] of Object.entries(paths)) {
     for (const [, op] of Object.entries(methods || {})) {
       if (!op?.operationId) continue;
       const operationId = op.operationId;
-      // Response extraction: take first 200 json schema if present
+      // Pick the first 2xx response declared by the operation (200/201/204).
+      // We record `successStatusByOp[operationId]` for every such operation,
+      // even when it has no JSON body (e.g. 204 No-Content), so that the
+      // request-plan builder can assert the correct HTTP status. The JSON
+      // schema parsing below only runs when there *is* a JSON body — hence
+      // an operation can be present in `successStatusByOp` without producing
+      // an entry in `responses`.
       const successCode = Object.keys(op.responses || {}).find((c) =>
         ['200', '201', '204'].includes(c),
       );
+      if (successCode) successStatusByOp[operationId] = Number(successCode);
       const success = successCode ? op.responses?.[successCode] : undefined;
       const ctSchemas: { ct: string; schema: JsonSchema }[] = [];
       if (success?.content) {
@@ -188,7 +201,7 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
     requestIndex.byOperation[g.operationId] ||= [];
     requestIndex.byOperation[g.operationId].push(g);
   }
-  return { responses, requestIndex };
+  return { responses, requestIndex, successStatusByOp };
 }
 
 function flattenTopLevelFields(
@@ -342,7 +355,7 @@ function refName(ref: string): string {
 }
 
 export async function writeExtractionOutputs(baseDir: string, semanticTypes: string[]) {
-  const { responses, requestIndex } = await extractResponseAndRequestVariants(
+  const { responses, requestIndex, successStatusByOp } = await extractResponseAndRequestVariants(
     baseDir,
     semanticTypes,
   );
@@ -358,7 +371,7 @@ export async function writeExtractionOutputs(baseDir: string, semanticTypes: str
     JSON.stringify(requestIndex, null, 2),
     'utf8',
   );
-  return { responses, requestIndex };
+  return { responses, requestIndex, successStatusByOp };
 }
 
 function toPascalCase(name: string): string {
