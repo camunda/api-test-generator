@@ -103,7 +103,7 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // the generated suite has no dependency on this generator project.
   lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
-  lines.push("import { seedBinding } from './support/seeding';");
+  lines.push("import { extractInto, seedBinding } from './support/seeding';");
   lines.push('');
   if (needsValidation) {
     // Resolve responses.json relative to this spec file so the suite is
@@ -314,12 +314,12 @@ function renderScenarioTest(s: EndpointScenario): string {
     // Extraction
     if (step.extract?.length) {
       body.push(`    const json = await ${varName}.json();`);
-      let exIdx = 0;
       for (const ex of step.extract) {
         const optAcc = toOptionalAccessor(ex.fieldPath);
-        const vname = `val_${idx + 1}_${++exIdx}`;
-        body.push(`    const ${vname} = json${optAcc};`);
-        body.push(`    if (${vname} !== undefined) { ctx['${ex.bind}'] = ${vname}; }`);
+        // extractInto preserves the existing ctx binding when the response
+        // field is undefined — matters for seeded values (e.g. tenantIdVar)
+        // and for earlier extracts that later steps must not clobber.
+        body.push(`    extractInto(ctx, '${ex.bind}', json${optAcc});`);
       }
     }
     body.push('  }');
