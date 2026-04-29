@@ -86,7 +86,7 @@ export function generateScenariosForEndpoint(
   // Determine impossible semantic types (no producer anywhere, excluding endpoint self-production)
   const missing: string[] = [];
   for (const st of initialNeeded) {
-    if (!graph.bySemanticProducer[st] || graph.bySemanticProducer[st].length === 0) {
+    if (!graph.producersByType[st] || graph.producersByType[st].length === 0) {
       if (!endpoint.produces.includes(st)) missing.push(st);
     }
   }
@@ -317,13 +317,13 @@ export function generateScenariosForEndpoint(
       );
       const domainCandidates = new Set<string>();
       for (const d of missingDomainAll)
-        (graph.domainProducers?.[d] || []).forEach((opId) => {
+        (graph.producersByState?.[d] || []).forEach((opId) => {
           domainCandidates.add(opId);
         });
       for (const group of unmetDisjunctions) {
         // union producers for each member
         for (const member of group)
-          (graph.domainProducers?.[member] || []).forEach((opId) => {
+          (graph.producersByState?.[member] || []).forEach((opId) => {
             domainCandidates.add(opId);
           });
       }
@@ -427,7 +427,7 @@ export function generateScenariosForEndpoint(
 
     // Choose a semantic type to target next
     const targetSemantic = remaining[0];
-    let producers: string[] = targetSemantic ? graph.bySemanticProducer[targetSemantic] || [] : [];
+    let producers: string[] = targetSemantic ? graph.producersByType[targetSemantic] || [] : [];
 
     // Provider preference & incidental suppression
     if (targetSemantic) {
@@ -783,7 +783,7 @@ function deferForMissingDomainPrereqs(
   const missingAll = gatherDomainPrerequisites(graph, directMissing, state.domainStates);
   const candidates = new Set<string>();
   for (const ds of missingAll) {
-    for (const opId of graph.domainProducers?.[ds] ?? []) candidates.add(opId);
+    for (const opId of graph.producersByState?.[ds] ?? []) candidates.add(opId);
   }
   let enqueued = false;
   for (const candidateOpId of candidates) {

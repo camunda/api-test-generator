@@ -62,7 +62,7 @@ async function main() {
     throw new Error(msg);
   }
   // Extract response shapes & request variants (oneOf groups)
-  const semanticTypes = Object.keys(graph.bySemanticProducer || {});
+  const semanticTypes = Object.keys(graph.producersByType || {});
   const { requestIndex, responses, successStatusByOp } = await writeExtractionOutputs(
     baseDir,
     semanticTypes,
