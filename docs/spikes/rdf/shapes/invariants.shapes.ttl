@@ -1,0 +1,156 @@
+# SHACL shapes — structural invariants
+#
+# These shapes pin invariants the codebase currently enforces with
+# procedural checks (or, in some cases, fails to enforce at all and
+# silently mis-generates tests). Loading the model through these shapes
+# at adapter time turns silent gaps into typed, queryable errors.
+#
+# Validate with rdf-validate-shacl (npm) — see ../adapters/validate.ts.
+
+@prefix core:  <https://camunda.io/api-test-generator/core#> .
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+#
+# === Operation must have stable identity ==================================
+#
+
+core:OperationShape a sh:NodeShape ;
+    sh:targetClass core:Operation ;
+    sh:property [
+        sh:path core:operationId ;
+        sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "Every Operation needs exactly one operationId."
+    ] ;
+    sh:property [
+        sh:path core:method ;
+        sh:minCount 1 ; sh:maxCount 1 ;
+        sh:in ( "GET" "POST" "PUT" "PATCH" "DELETE" "HEAD" "OPTIONS" )
+    ] ;
+    sh:property [
+        sh:path core:path ;
+        sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:string
+    ] .
+
+#
+# === Every required SemanticType must have at least one producer =========
+#
+# Today: graphLoader builds bySemanticProducer but does not error when a
+# required type has no producer; the planner just fails to find a chain.
+# Here: SHACL turns it into a load-time violation.
+
+core:RequiredSemanticTypeHasProducer a sh:NodeShape ;
+    sh:targetSubjectsOf core:requires ;
+    sh:sparql [
+        sh:message "An operation requires a semantic type with no declared producer." ;
+        sh:select """
+            PREFIX core: <https://camunda.io/api-test-generator/core#>
+            SELECT $this ?type WHERE {
+              $this core:requires ?type .
+              FILTER NOT EXISTS { ?producer core:produces ?type }
+            }
+        """
+    ] .
+
+#
+# === Every required RuntimeState must have at least one producer =========
+#
+
+core:RequiredRuntimeStateHasProducer a sh:NodeShape ;
+    sh:targetSubjectsOf core:requiresState ;
+    sh:sparql [
+        sh:message "An operation requires a runtime state with no declared producer." ;
+        sh:select """
+            PREFIX core: <https://camunda.io/api-test-generator/core#>
+            SELECT $this ?state WHERE {
+              $this core:requiresState ?state .
+              FILTER NOT EXISTS {
+                { ?producer core:producesState ?state }
+                UNION
+                { ?producer core:implicitlyAdds ?state }
+              }
+            }
+        """
+    ] .
+
+#
+# === Value bindings must resolve to a known FieldPath ====================
+#
+# This is the silent-miss class the brief flags repeatedly: a typo in
+# valueBindings is a runtime no-op today. Under SHACL it's a load-time
+# error.
+
+core:ValueBindingResolvesShape a sh:NodeShape ;
+    sh:targetClass core:ValueBinding ;
+    sh:property [
+        sh:path core:bindsFromFieldPath ;
+        sh:minCount 1 ;
+        sh:message "Value binding has no FieldPath. The string-path lookup would silently miss at runtime."
+    ] ;
+    sh:property [
+        sh:path core:bindsToState ;
+        sh:minCount 1
+    ] ;
+    sh:property [
+        sh:path core:bindsToParameter ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string
+    ] ;
+    # Stronger: the named parameter must actually be exposed by the target state.
+    sh:sparql [
+        sh:message "Value binding references a parameter not declared by its target RuntimeState." ;
+        sh:select """
+            PREFIX core: <https://camunda.io/api-test-generator/core#>
+            SELECT $this ?param ?state WHERE {
+              $this core:bindsToState ?state ;
+                    core:bindsToParameter ?param .
+              FILTER NOT EXISTS { ?state core:hasParameter ?param }
+            }
+        """
+    ] .
+
+#
+# === Disjunctions must have at least two alternatives ====================
+#
+
+core:DisjunctionShape a sh:NodeShape ;
+    sh:targetClass core:Disjunction ;
+    sh:property [
+        sh:path core:hasAlternative ;
+        sh:minCount 2 ;
+        sh:message "A disjunction with fewer than two alternatives should be a plain requires."
+    ] .
+
+#
+# === Identifier must declare its validity state ==========================
+#
+
+core:IdentifierShape a sh:NodeShape ;
+    sh:targetClass core:Identifier ;
+    sh:property [
+        sh:path core:validityState ;
+        sh:minCount 1 ; sh:maxCount 1 ;
+        sh:class core:RuntimeState
+    ] .
+
+#
+# === FieldPath must locate a SemanticType ================================
+#
+# Justification: a FieldPath without a SemanticType is dead weight in
+# the model — it can't participate in value-binding resolution.
+
+core:FieldPathShape a sh:NodeShape ;
+    sh:targetClass core:FieldPath ;
+    sh:property [
+        sh:path core:fieldPath ;
+        sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:string
+    ] ;
+    sh:property [
+        sh:path core:locatesSemanticType ;
+        sh:minCount 1
+    ] .
