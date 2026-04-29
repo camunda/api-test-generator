@@ -82,3 +82,94 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
     expect(file.content).toBe(direct);
   });
 });
+
+// Regression guard for PR #79 / issue #80: the emitter no longer declares or
+// writes a `__seededTenant` flag. The `tenantIdVar` fallback is now a single
+// idempotent `=== undefined` guard. These tests exercise the three shapes the
+// bindings loop can produce for `tenantIdVar` (literal value, __PENDING__
+// auto-seed, and extracted-by-an-earlier-step) plus a control with no
+// `tenantIdVar` binding at all, asserting the simplified guard appears
+// exactly once and `__seededTenant` never appears anywhere in the output.
+describe('emitter: tenantIdVar seeding (no __seededTenant flag, #79/#80)', () => {
+  const TENANT_FALLBACK = `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
+
+  function buildCollectionWithBindings(
+    bindings: Record<string, unknown>,
+    extras: { templateRefsTenant?: boolean; extractsTenant?: boolean } = {},
+  ): EndpointScenarioCollection {
+    return {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'tenant case',
+          operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          bindings,
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              expect: { status: 200 },
+              bodyTemplate: extras.templateRefsTenant
+                ? { tenantId: '${' + 'tenantIdVar}' }
+                : { name: 'static' },
+              extract: extras.extractsTenant
+                ? [{ fieldPath: 'tenantId', bind: 'tenantIdVar' }]
+                : undefined,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  async function renderFirst(collection: EndpointScenarioCollection): Promise<string> {
+    const [file] = await PlaywrightEmitter.emit(collection, {
+      outDir: '/unused',
+      suiteName: 'createWidget',
+      mode: 'feature',
+    });
+    return file.content;
+  }
+
+  test('literal tenantIdVar binding seeds the value and emits the simplified fallback', async () => {
+    const content = await renderFirst(buildCollectionWithBindings({ tenantIdVar: 'acme' }));
+    expect(content).toContain(`ctx['tenantIdVar'] = "acme";`);
+    expect(content).toContain(TENANT_FALLBACK);
+    expect(content).not.toMatch(/__seededTenant/);
+  });
+
+  test('__PENDING__ tenantIdVar referenced by a template emits a guarded auto-seed and the simplified fallback', async () => {
+    const content = await renderFirst(
+      buildCollectionWithBindings({ tenantIdVar: '__PENDING__' }, { templateRefsTenant: true }),
+    );
+    expect(content).toContain(
+      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
+    );
+    expect(content).toContain(TENANT_FALLBACK);
+    expect(content).not.toMatch(/__seededTenant/);
+  });
+
+  test('extractionVars tenantIdVar skips eager seeding but still emits the simplified fallback', async () => {
+    const content = await renderFirst(
+      buildCollectionWithBindings(
+        { tenantIdVar: 'ignored-because-extracted' },
+        { extractsTenant: true },
+      ),
+    );
+    expect(content).not.toContain(`ctx['tenantIdVar'] = "ignored-because-extracted";`);
+    expect(content).toContain(TENANT_FALLBACK);
+    expect(content).not.toMatch(/__seededTenant/);
+  });
+
+  test('no tenantIdVar binding at all still emits the simplified fallback (control)', async () => {
+    const content = await renderFirst(buildCollectionWithBindings({}));
+    expect(content).toContain(TENANT_FALLBACK);
+    expect(content).not.toMatch(/__seededTenant/);
+  });
+});
