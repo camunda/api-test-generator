@@ -105,7 +105,14 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // bypasses the loader cannot smuggle malformed seeds through to the
   // string-interpolation sites below. The loader (codegen/index.ts) also
   // validates, so this is intentionally redundant defense-in-depth.
-  if (opts.globalContextSeeds && opts.globalContextSeeds.length > 0) {
+  //
+  // Validate whenever the caller supplied *anything* for globalContextSeeds
+  // (including `[]`, non-arrays, or otherwise iterable values). The previous
+  // `length > 0` short-circuit could be bypassed by a non-array with no
+  // `length` property, leaving downstream `for (const seed of …)` to throw
+  // a less actionable error. assertSafeGlobalContextSeeds is the single
+  // chokepoint that enforces both Array-ness and per-entry safety.
+  if (opts.globalContextSeeds !== undefined) {
     assertSafeGlobalContextSeeds(opts.globalContextSeeds);
   }
   const lines: string[] = [];

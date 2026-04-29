@@ -370,7 +370,12 @@ export function validateDomainSemantics(raw: unknown): DomainSemanticsValidation
  * — both surfaces use the same `GlobalContextSeedSchema` and
  * `checkGlobalContextSeedsCoherent` so they cannot drift.
  */
-export function assertSafeGlobalContextSeeds(seeds: readonly unknown[]): void {
+export function assertSafeGlobalContextSeeds(seeds: unknown): void {
+  if (!Array.isArray(seeds)) {
+    throw new TypeError(
+      `globalContextSeeds must be an array when provided (received ${seeds === null ? 'null' : typeof seeds}).`,
+    );
+  }
   const arrayResult = z.array(GlobalContextSeedSchema).safeParse(seeds);
   if (!arrayResult.success) {
     const formatted = arrayResult.error.issues
