@@ -196,11 +196,6 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const producers: Record<string, string[]> = {};
     domainProducers = producers;
     const addProducer = (state: string, opId: string) => {
-      if (typeof state !== 'string' || state.length === 0) {
-        throw new Error(
-          `addProducer: invalid state key for opId="${opId}" (got ${JSON.stringify(state)})`,
-        );
-      }
       const list = producers[state] ?? [];
       list.push(opId);
       producers[state] = list;
@@ -227,7 +222,14 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     if (domain?.identifiers) {
       for (const [, spec] of Object.entries(domain.identifiers)) {
         const state = spec.validityState;
-        if (!state) continue;
+        // Skip identifiers whose validityState is not declared in the sidecar.
+        // Empty strings are invalid data and would surface as a malformed
+        // domainProducers key — the regression test in
+        // tests/regression/graph-loader-undefined-state-key.test.ts asserts
+        // no such key is ever written. We use `state == null` per #65 review:
+        // an empty string is not the same as "absent" and should not be
+        // silently treated as such.
+        if (state == null) continue;
         for (const opId of spec.boundBy ?? []) {
           if (operations[opId]) addProducer(state, opId);
         }

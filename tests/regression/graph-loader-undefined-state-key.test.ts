@@ -4,12 +4,15 @@ import { loadGraph } from '../../path-analyser/src/graphLoader.ts';
 
 describe('graphLoader: domainProducers validation', () => {
   it('does not write invalid keys to domainProducers', async () => {
-    // Point it at the real path-analyser directory which has the real domain-semantics.json
-    const baseDir = path.resolve('path-analyser');
+    // Anchor paths off this test file so the test does not depend on process.cwd().
+    const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
+    const baseDir = path.join(REPO_ROOT, 'path-analyser');
     const graph = await loadGraph(baseDir);
 
-    const producers = graph.domainProducers ?? {};
-    const keys = Object.keys(producers);
+    expect(graph.domainProducers, 'domainProducers sidecar should be loaded').toBeDefined();
+
+    const producers = graph.domainProducers;
+    const keys = Object.keys(producers ?? {});
 
     expect(keys, 'domainProducers should not contain the literal string "undefined"').not.toContain(
       'undefined',
