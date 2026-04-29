@@ -252,8 +252,8 @@ export interface DomainSemantics {
 
 export interface IdentifierSpec {
   kind: 'identifier';
-  validityState: string; // state name produced when bound
-  boundBy: string[]; // operations producing validity state
+  validityState?: string; // state name produced when bound; absent identifiers are skipped at load
+  boundBy?: string[]; // operations producing validity state
   fieldPaths?: string[]; // where value appears in responses
   derivedVia?: string; // capability linking
 }
@@ -261,13 +261,13 @@ export interface IdentifierSpec {
 export interface CapabilitySpec {
   kind: 'capability';
   parameter: string; // parameter variable name
-  producedBy: string[]; // operations producing capability
+  producedBy?: string[]; // operations producing capability
   dependsOn?: string[]; // prerequisite states
 }
 
 export interface RuntimeStateSpec {
   kind: 'state';
-  producedBy: string[]; // operations producing state
+  producedBy?: string[]; // operations producing state
   parameter?: string; // single parameter name
   parameters?: string[]; // multi parameters
   requires?: string[]; // prerequisite states
