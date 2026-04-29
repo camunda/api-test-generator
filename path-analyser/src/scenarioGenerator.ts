@@ -857,10 +857,17 @@ function deferForMissingDomainPrereqs(
     });
     // Mirror the semantic-producer branch's createDeployment seeding so
     // a deferred deployment step still surfaces a process-definition
-    // binding for downstream consumers. Operate on the working clones
-    // so the mutations stay scoped to this child state.
-    let modelsDraft = workingModelsDraft;
-    const bindingsDraft = workingBindingsDraft;
+    // binding for downstream consumers.
+    //
+    // Read modelsDraft/bindingsDraft/artifactsApplied from `workingState`
+    // (post-call), not from the pre-call locals. applyArtifactRuleSelection
+    // and ensureArtifactBindings use `state.x ||= …` to allocate new
+    // arrays/objects when their input was undefined; those allocations
+    // land on `workingState.x`, while the pre-call locals stay undefined.
+    // Reading from workingState preserves any artifact-selected
+    // models/bindings/artifactsApplied for the enqueued child state.
+    let modelsDraft = workingState.modelsDraft;
+    const bindingsDraft = workingState.bindingsDraft ?? {};
     if (candidateOpId === 'createDeployment' && !modelsDraft) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
       bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
@@ -883,11 +890,11 @@ function deferForMissingDomainPrereqs(
       // Propagate scenario-metadata bookkeeping from `state` and update
       // providerList for the candidate's produced semantics so later
       // scenario naming/description stays consistent with the semantic
-      // expansion branch. Use the working clone of artifactsApplied so
-      // sibling candidates and already-enqueued states aren't mutated
-      // by appends from applyArtifactRuleSelection.
+      // expansion branch. Read artifactsApplied from `workingState` so
+      // any array allocated by applyArtifactRuleSelection (`state.x ||= []`)
+      // is preserved on the enqueued child without leaking into siblings.
       providerList: updateProviderList(state.providerList || {}, candidateNode, newProductionMap),
-      artifactsApplied: workingArtifactsApplied,
+      artifactsApplied: workingState.artifactsApplied,
     });
     enqueued = true;
   }
