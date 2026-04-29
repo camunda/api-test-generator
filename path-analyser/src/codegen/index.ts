@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { EndpointScenarioCollection } from '../types.js';
+import { validateDomainSemantics } from '../domainSemanticsValidator.js';
+import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
@@ -20,6 +21,49 @@ registerEmitter(PlaywrightEmitter);
 function parseScenarioCollection(text: string): EndpointScenarioCollection {
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
   return JSON.parse(text) as EndpointScenarioCollection;
+}
+
+/**
+ * Load `globalContextSeeds` from `domain-semantics.json`. The full sidecar
+ * is validated by graphLoader during planning, but we re-validate here
+ * because these values are interpolated directly into emitted TS source —
+ * a malformed entry (wrong type, unsafe characters, duplicate fieldName)
+ * would produce a broken suite or, worse, allow config-driven code
+ * injection. A missing file is non-fatal; an invalid file aborts the
+ * generator with a fail-fast diagnostic.
+ */
+async function loadGlobalContextSeeds(baseDir: string): Promise<GlobalContextSeed[]> {
+  let text: string;
+  try {
+    text = await fs.readFile(path.join(baseDir, 'domain-semantics.json'), 'utf8');
+  } catch (error) {
+    // Only treat a missing sidecar as non-fatal. EACCES, EISDIR, transient
+    // I/O errors, etc. all indicate a real operational problem and must
+    // surface so the build fails loudly rather than silently emitting a
+    // suite without its universal-seed prologue.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      Reflect.get(error, 'code') === 'ENOENT'
+    ) {
+      return [];
+    }
+    throw error;
+  }
+  // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+  const parsed = JSON.parse(text) as unknown;
+  const errors = validateDomainSemantics(parsed);
+  if (errors.length > 0) {
+    const formatted = errors.map((e) => `  - [${e.invariant}] ${e.message}`).join('\n');
+    throw new Error(
+      `domain-semantics.json failed validation (${errors.length} error(s)):\n${formatted}`,
+    );
+  }
+  // validateDomainSemantics returning [] means the parsed shape conforms.
+  // biome-ignore lint/plugin: validated above by validateDomainSemantics
+  const validated = parsed as { globalContextSeeds?: GlobalContextSeed[] };
+  return validated.globalContextSeeds ?? [];
 }
 
 function printUsage(): void {
@@ -75,6 +119,7 @@ async function run() {
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
+  const globalContextSeeds = await loadGlobalContextSeeds(baseDir);
 
   if (positional === '--all') {
     let count = 0;
@@ -87,6 +132,7 @@ async function run() {
           outDir,
           suiteName: parsed.endpoint.operationId,
           mode: 'feature',
+          globalContextSeeds,
         });
         count++;
       } catch (e) {
@@ -123,6 +169,7 @@ async function run() {
     outDir,
     suiteName: endpointOpId,
     mode: 'feature',
+    globalContextSeeds,
   });
   console.log('Generated test suite for', endpointOpId, 'at', outDir, `(target: ${emitter.id})`);
 }

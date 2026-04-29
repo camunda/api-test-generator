@@ -59,6 +59,48 @@
           "valueBindings": {"type": "object", "additionalProperties": {"type": "string"}}
         }
       }
+    },
+    "globalContextSeeds": {
+      "description": "Bindings that every emitted scenario must seed into ctx before its request plan runs (e.g. the default-tenant identifier under single-tenant mode). Drives the emitter's universal-seed logic so the codegen layer carries no hard-coded bind names or sentinel values.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["binding", "fieldName", "seedRule"],
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "type": "string",
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+            "description": "ctx[<binding>] key the seed populates. Must be a safe JS identifier (matches the runtime check in domainSemanticsValidator.ts) so the emitter can interpolate it into emitted TS without escaping."
+          },
+          "fieldName": {
+            "type": "string",
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+            "description": "Request-body / multipart field name this binding maps to. Must be a safe JS identifier — used to derive the emitter's `__<fieldName>IsDefault` sentinel local."
+          },
+          "seedRule": {
+            "type": "string",
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+            "description": "Key passed to seedBinding() at runtime; must match a rule in seed-rules.json. Restricted to a safe identifier so it can be interpolated into the emitted seedBinding('<seedRule>') call without escaping."
+          },
+          "defaultSentinel": {
+            "type": "string",
+            "pattern": "^[^'\\\\\r\n\t\u0000-\u001f\u2028\u2029]*$",
+            "description": "Magic value that, when present in ctx[<binding>], triggers field-stripping in multipart bodies. Rejects single quotes, backslashes, line terminators, and control characters (including U+2028/U+2029) so it stays safe inside the single-quoted TS string literal the emitter produces."
+          },
+          "stripFromMultipartWhenDefault": {"type": "boolean", "description": "If true, the emitter inserts a multipart-loop branch that drops the field when ctx[<binding>] equals the defaultSentinel."},
+          "rationale": {"type": "string"}
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"stripFromMultipartWhenDefault": {"const": true}},
+              "required": ["stripFromMultipartWhenDefault"]
+            },
+            "then": {"required": ["defaultSentinel"]}
+          }
+        ]
+      }
     }
   }
 }

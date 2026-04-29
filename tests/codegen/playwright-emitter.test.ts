@@ -4,7 +4,22 @@ import {
   playwrightSuiteFileName,
   renderPlaywrightSuite,
 } from '../../path-analyser/src/codegen/playwright/emitter.ts';
-import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
+import type {
+  EndpointScenarioCollection,
+  GlobalContextSeed,
+} from '../../path-analyser/src/types.ts';
+
+// The tenant-related tests below all derive the emitter's universal-seed
+// behaviour from this fixture, mirroring the entry shipped in
+// path-analyser/domain-semantics.json so the assertions track production
+// configuration shape.
+const TENANT_SEED: GlobalContextSeed = {
+  binding: 'tenantIdVar',
+  fieldName: 'tenantId',
+  seedRule: 'tenantIdVar',
+  defaultSentinel: '<default>',
+  stripFromMultipartWhenDefault: true,
+};
 
 const COLLECTION: EndpointScenarioCollection = {
   endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
@@ -133,6 +148,7 @@ describe('emitter: tenantIdVar seeding (no __seededTenant flag, #79/#80)', () =>
       outDir: '/unused',
       suiteName: 'createWidget',
       mode: 'feature',
+      globalContextSeeds: [TENANT_SEED],
     });
     return file.content;
   }
@@ -269,5 +285,219 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
     const noExtracts = await renderFirst(buildCollectionWithExtracts([]));
     expect(noExtracts).not.toContain('extractInto(');
     expect(noExtracts).not.toContain('const json = await');
+  });
+});
+
+// Regression guard for #87: the emitter contains zero hard-coded bind names
+// or sentinel string literals. Every "tenant"-flavoured branch must derive
+// from a globalContextSeeds entry passed via EmitContext. The tests here
+// pin both halves of that contract:
+//
+//   1. A class-scoped source scan rejects reintroduction of the literals
+//      'tenantIdVar', 'tenantId', '<default>', or '__seededTenant' anywhere
+//      in path-analyser/src/codegen/playwright/emitter.ts.
+//   2. Parallel-entry test: a *second* globalContextSeeds entry produces
+//      parallel code with no further emitter changes — proving the loop is
+//      generic and not a one-off branch dressed up as a loop.
+//   3. Empty-seeds test: when no seeds are supplied, no universal-seed
+//      prologue is emitted and no multipart strip branch is inserted.
+describe('emitter: globalContextSeeds is the only source of universal-seed knowledge (#87)', () => {
+  test('emitter.ts source contains no hard-coded tenant bind names or sentinel strings (any quote style)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const url = await import('node:url');
+    const here = path.dirname(url.fileURLToPath(import.meta.url));
+    const emitterPath = path.resolve(here, '../../path-analyser/src/codegen/playwright/emitter.ts');
+    const source = await fs.readFile(emitterPath, 'utf8');
+    // Strip line comments so the issue/PR cross-references in JSDoc don't
+    // false-positive. Block comments are kept intentionally — a block
+    // comment matching one of these literals is still a smell.
+    const codeOnly = source
+      .split('\n')
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+    // Match any quote style (single, double, backtick) so re-introducing
+    // the same coupling via "tenantIdVar" or `tenantIdVar` is also caught.
+    const forbiddenPatterns = [
+      { label: 'quoted tenantIdVar', pattern: /['"`]tenantIdVar['"`]/ },
+      { label: 'quoted tenantId', pattern: /['"`]tenantId['"`]/ },
+      { label: 'quoted <default>', pattern: /['"`]<default>['"`]/ },
+      { label: 'bare __seededTenant', pattern: /\b__seededTenant\b/ },
+      { label: 'quoted __seededTenant', pattern: /['"`]__seededTenant['"`]/ },
+    ];
+    for (const { label, pattern } of forbiddenPatterns) {
+      expect(codeOnly, `emitter.ts must not contain ${label} (issue #87)`).not.toMatch(pattern);
+    }
+  });
+
+  function buildCollectionWithMultipart(): EndpointScenarioCollection {
+    return {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'multipart case',
+          operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              expect: { status: 200 },
+              bodyKind: 'multipart',
+              multipartTemplate: {
+                fields: { tenantId: '${' + 'tenantIdVar}', orgId: '${' + 'orgIdVar}' },
+                files: {},
+              },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  test('a second globalContextSeeds entry produces parallel seed + strip code', async () => {
+    const orgSeed: GlobalContextSeed = {
+      binding: 'orgIdVar',
+      fieldName: 'orgId',
+      seedRule: 'orgIdVar',
+      defaultSentinel: '<root>',
+      stripFromMultipartWhenDefault: true,
+    };
+    const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
+      outDir: '/unused',
+      suiteName: 'createWidget',
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED, orgSeed],
+    });
+    const c = file.content;
+    // Both seeds emit an idempotent ?? guard.
+    expect(c).toContain(
+      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
+    );
+    expect(c).toContain(
+      `if (ctx['orgIdVar'] === undefined) { ctx['orgIdVar'] = seedBinding('orgIdVar'); }`,
+    );
+    // Both seeds declare a sentinel local named after the field.
+    expect(c).toContain(`const __tenantIdIsDefault = ctx['tenantIdVar'] === '<default>';`);
+    expect(c).toContain(`const __orgIdIsDefault = ctx['orgIdVar'] === '<root>';`);
+    // Both seeds insert a parallel multipart-strip branch.
+    expect(c).toContain(`if (k === 'tenantId' && __tenantIdIsDefault) continue;`);
+    expect(c).toContain(`if (k === 'orgId' && __orgIdIsDefault) continue;`);
+  });
+
+  test('without seeds the emitter writes no universal-seed prologue and no multipart strip branch', async () => {
+    const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
+      outDir: '/unused',
+      suiteName: 'createWidget',
+      mode: 'feature',
+      // no globalContextSeeds
+    });
+    const c = file.content;
+    expect(c).not.toMatch(/IsDefault\b/);
+    expect(c).not.toMatch(/seedBinding\('tenantIdVar'\)/);
+    expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
+  });
+
+  test('seed without stripFromMultipartWhenDefault emits the guard but no strip branch', async () => {
+    const seedOnly: GlobalContextSeed = {
+      binding: 'tenantIdVar',
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+    };
+    const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
+      outDir: '/unused',
+      suiteName: 'createWidget',
+      mode: 'feature',
+      globalContextSeeds: [seedOnly],
+    });
+    const c = file.content;
+    expect(c).toContain(
+      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
+    );
+    expect(c).not.toMatch(/__tenantIdIsDefault/);
+    expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
+  });
+});
+
+// Boundary safety guards (#87 review): the public emitter entry points
+// re-validate `globalContextSeeds` so a programmatic caller that bypasses
+// the loader (codegen/index.ts) still cannot smuggle malformed input
+// through to the string-interpolation sites in the emitted suite.
+describe('emitter: boundary safety re-validation (#87 review)', () => {
+  test('rejects unsafe identifier in binding via PlaywrightEmitter.emit', async () => {
+    const badSeed = {
+      binding: 'tenant-id', // '-' is not safe-identifier syntax
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+    } satisfies GlobalContextSeed;
+    await expect(
+      PlaywrightEmitter.emit(COLLECTION, {
+        outDir: '/unused',
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [badSeed],
+      }),
+    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier/);
+  });
+
+  test('rejects duplicate fieldName via renderPlaywrightSuite', () => {
+    const seedA: GlobalContextSeed = {
+      binding: 'tenantIdVar',
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+    };
+    const seedB: GlobalContextSeed = {
+      binding: 'orgIdVar',
+      fieldName: 'tenantId', // duplicate
+      seedRule: 'orgIdVar',
+    };
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [seedA, seedB],
+      }),
+    ).toThrow(/globalContextSeedFieldNameUnique|duplicate fieldName/);
+  });
+
+  test('rejects unsafe sentinel (newline) via renderPlaywrightSuite', () => {
+    const badSeed: GlobalContextSeed = {
+      binding: 'tenantIdVar',
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+      defaultSentinel: 'line1\nline2',
+    };
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [badSeed],
+      }),
+    ).toThrow(/globalContextSeedSentinelSafe|line terminator|control char/);
+  });
+
+  test('accepts the production tenant seed shape', () => {
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [TENANT_SEED],
+      }),
+    ).not.toThrow();
+  });
+
+  test('empty seeds array is a no-op (no validation triggered)', () => {
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [],
+      }),
+    ).not.toThrow();
   });
 });

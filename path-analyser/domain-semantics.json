@@ -151,5 +151,15 @@
       ]
     }
   },
+  "globalContextSeeds": [
+    {
+      "binding": "tenantIdVar",
+      "fieldName": "tenantId",
+      "seedRule": "tenantIdVar",
+      "defaultSentinel": "<default>",
+      "stripFromMultipartWhenDefault": true,
+      "rationale": "Camunda single-tenant mode default — every emitted scenario seeds tenantIdVar via the seed rule (which yields '<default>'), and multipart bodies must drop the tenantId field when the default sentinel is present so the broker assigns the default tenant."
+    }
+  ],
   "version": 1
 }

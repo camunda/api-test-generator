@@ -1,4 +1,4 @@
-import type { EndpointScenarioCollection } from '../types.js';
+import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 
 /**
  * Context passed to an {@link Emitter} on every invocation.
@@ -14,6 +14,15 @@ export interface EmitContext {
   suiteName: string;
   /** Generation mode — `feature` is the default for path-analyser scenarios. */
   mode: 'feature' | 'integration';
+  /**
+   * Bindings that every emitted scenario must seed before its request plan
+   * runs (e.g. the default-tenant identifier under single-tenant mode).
+   * Sourced from `domain-semantics.json#globalContextSeeds`. Optional so
+   * emitters that don't need universal seeding (or unit tests that exercise
+   * unrelated paths) can omit it; when omitted the emitter writes no
+   * universal-seed prologue and no multipart strip branches.
+   */
+  globalContextSeeds?: readonly GlobalContextSeed[];
 }
 
 /**

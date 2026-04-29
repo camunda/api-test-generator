@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { validateDomainSemantics } from '../../path-analyser/src/domainSemanticsValidator.ts';
+import {
+  assertSafeGlobalContextSeeds,
+  validateDomainSemantics,
+} from '../../path-analyser/src/domainSemanticsValidator.ts';
 
 // ---------------------------------------------------------------------------
 // Class-scoped guards for path-analyser/src/domainSemanticsValidator.ts.
@@ -127,5 +130,140 @@ describe('validateDomainSemantics', () => {
     const raw = await fs.readFile(file, 'utf8');
     const parsed: unknown = JSON.parse(raw);
     expect(validateDomainSemantics(parsed)).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // globalContextSeeds: input-validation guards (#87 review)
+  //
+  // Every seed entry is interpolated directly into emitted TS source — these
+  // checks make config-driven code injection structurally impossible and
+  // pre-empt collisions in the emitted prologue / multipart strip branch.
+  // -------------------------------------------------------------------------
+
+  it('reports globalContextSeedBindingUnique when two seeds share a binding', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenantId', seedRule: 'tenantIdVar' },
+        { binding: 'tenantIdVar', fieldName: 'otherField', seedRule: 'tenantIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedBindingUnique');
+  });
+
+  it('reports globalContextSeedFieldNameUnique when two seeds share a fieldName', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenantId', seedRule: 'tenantIdVar' },
+        { binding: 'orgIdVar', fieldName: 'tenantId', seedRule: 'orgIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedFieldNameUnique');
+  });
+
+  it('reports globalContextSeedSafeIdentifier when binding is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenant-id', fieldName: 'tenantId', seedRule: 'tenantIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSafeIdentifier');
+  });
+
+  it('reports globalContextSeedSafeIdentifier when fieldName is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenant-id', seedRule: 'tenantIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSafeIdentifier');
+  });
+
+  it('reports globalContextSeedSafeIdentifier when seedRule is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenantId', seedRule: 'rule with spaces' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSafeIdentifier');
+  });
+
+  it('reports globalContextSeedSentinelSafe when defaultSentinel contains a single quote', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        {
+          binding: 'tenantIdVar',
+          fieldName: 'tenantId',
+          seedRule: 'tenantIdVar',
+          defaultSentinel: "it's broken",
+        },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSentinelSafe');
+  });
+
+  it('reports globalContextSeedSentinelSafe when defaultSentinel contains a newline', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        {
+          binding: 'tenantIdVar',
+          fieldName: 'tenantId',
+          seedRule: 'tenantIdVar',
+          defaultSentinel: 'line1\nline2',
+        },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSentinelSafe');
+  });
+
+  it('rejects unknown properties on a globalContextSeeds entry (.strict())', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        {
+          binding: 'tenantIdVar',
+          fieldName: 'tenantId',
+          seedRule: 'tenantIdVar',
+          unknownKey: 'oops', // typo or removed-but-still-in-config field
+        },
+      ],
+    });
+    // Strict-mode Zod surfaces a structural issue (not one of our named
+    // cross-ref invariants), so the error list is non-empty even though no
+    // cross-ref invariant fires.
+    expect(errs.length).toBeGreaterThan(0);
+  });
+});
+
+// Boundary chokepoint used by the emitter (renderPlaywrightSuite /
+// emitPlaywrightSuite / PlaywrightEmitter.emit). Class-of-defect guard:
+// the previous boundary check short-circuited on `seeds.length > 0`, which
+// a programmatic JS caller could bypass with any non-array value (no
+// `.length`, or `.length === 0` on an iterable). The validator must reject
+// every non-array shape with a clear "must be an array" message before the
+// per-entry zod schema runs.
+describe('assertSafeGlobalContextSeeds (boundary)', () => {
+  it('accepts an empty array (validation runs and trivially passes)', () => {
+    expect(() => assertSafeGlobalContextSeeds([])).not.toThrow();
+  });
+
+  it('rejects every non-array shape with a "must be an array" error', () => {
+    const nonArrays: readonly unknown[] = [
+      undefined,
+      null,
+      'not-an-array',
+      42,
+      true,
+      { 0: 'fake', length: 0 },
+      { 0: 'fake', length: 1 },
+      new Set([{ binding: 'x', fieldName: 'x', seedRule: 'x' }]),
+    ];
+    for (const bad of nonArrays) {
+      expect(() => assertSafeGlobalContextSeeds(bad)).toThrow(/must be an array/);
+    }
+  });
+
+  it('rejects an array of malformed entries with structural validation errors', () => {
+    expect(() => assertSafeGlobalContextSeeds([{ binding: 'tenant-id' }])).toThrow(
+      /structural validation/,
+    );
   });
 });

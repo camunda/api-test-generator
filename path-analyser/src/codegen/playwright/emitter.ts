@@ -1,6 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from '../../types.js';
+import { assertSafeGlobalContextSeeds } from '../../domainSemanticsValidator.js';
+import type {
+  EndpointScenario,
+  EndpointScenarioCollection,
+  GlobalContextSeed,
+  RequestStep,
+} from '../../types.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 import { materializeSupport } from './materialize-support.js';
 
@@ -8,6 +14,12 @@ interface EmitOptions {
   outDir: string;
   suiteName?: string;
   mode?: 'feature' | 'integration';
+  /**
+   * See {@link EmitContext.globalContextSeeds}. Forwarded verbatim from the
+   * orchestrator so this entry point and {@link PlaywrightEmitter.emit}
+   * produce identical output for the same inputs.
+   */
+  globalContextSeeds?: readonly GlobalContextSeed[];
 }
 
 /**
@@ -28,12 +40,17 @@ export function playwrightSuiteFileName(
  */
 export function renderPlaywrightSuite(
   collection: EndpointScenarioCollection,
-  opts: { suiteName?: string; mode?: 'feature' | 'integration' },
+  opts: {
+    suiteName?: string;
+    mode?: 'feature' | 'integration';
+    globalContextSeeds?: readonly GlobalContextSeed[];
+  },
 ): string {
   return buildSuiteSource(collection, {
     outDir: '',
     suiteName: opts.suiteName,
     mode: opts.mode,
+    globalContextSeeds: opts.globalContextSeeds,
   });
 }
 
@@ -70,6 +87,7 @@ export const PlaywrightEmitter: Emitter = {
     const content = renderPlaywrightSuite(collection, {
       suiteName: ctx.suiteName,
       mode: ctx.mode,
+      globalContextSeeds: ctx.globalContextSeeds,
     });
     return [
       {
@@ -81,6 +99,22 @@ export const PlaywrightEmitter: Emitter = {
 };
 
 function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOptions): string {
+  // Boundary safety re-check (#87 review): every public entry point —
+  // renderPlaywrightSuite, emitPlaywrightSuite, PlaywrightEmitter.emit —
+  // funnels through here. Re-validating means a programmatic caller that
+  // bypasses the loader cannot smuggle malformed seeds through to the
+  // string-interpolation sites below. The loader (codegen/index.ts) also
+  // validates, so this is intentionally redundant defense-in-depth.
+  //
+  // Validate whenever the caller supplied *anything* for globalContextSeeds
+  // (including `[]`, non-arrays, or otherwise iterable values). The previous
+  // `length > 0` short-circuit could be bypassed by a non-array with no
+  // `length` property, leaving downstream `for (const seed of …)` to throw
+  // a less actionable error. assertSafeGlobalContextSeeds is the single
+  // chokepoint that enforces both Array-ness and per-entry safety.
+  if (opts.globalContextSeeds !== undefined) {
+    assertSafeGlobalContextSeeds(opts.globalContextSeeds);
+  }
   const lines: string[] = [];
   const suiteName = opts.suiteName || collection.endpoint.operationId;
 
@@ -114,14 +148,18 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     lines.push('');
   }
   lines.push(`test.describe('${suiteName}', () => {`);
+  const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario));
+    lines.push(renderScenarioTest(scenario, seeds));
   }
   lines.push('});');
   return lines.join('\n');
 }
 
-function renderScenarioTest(s: EndpointScenario): string {
+function renderScenarioTest(
+  s: EndpointScenario,
+  globalContextSeeds: readonly GlobalContextSeed[],
+): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
   body.push(`test('${title}', async ({ request }) => {`);
@@ -188,13 +226,32 @@ function renderScenarioTest(s: EndpointScenario): string {
       body.push(`  ctx['${k}'] = ${JSON.stringify(v)};`);
     }
   }
-  // Ensure tenantIdVar default sourced from seeding rules (configurable). Idempotent: the
-  // `=== undefined` guard means re-seeding never happens if the bindings loop above already
-  // populated tenantIdVar (whether from a literal value or from seedBinding for __PENDING__).
-  body.push(
-    `  if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
-  );
-  body.push(`  const __tenantIdIsDefault = ctx['tenantIdVar'] === '<default>';`);
+  // Universal-seed prologue derived from domain-semantics.json#globalContextSeeds.
+  // Each entry emits an idempotent `=== undefined` guard so the bindings loop
+  // above (which may already have populated the binding from a literal value
+  // or from seedBinding for __PENDING__) is never overwritten. Entries that
+  // declare a defaultSentinel + stripFromMultipartWhenDefault also emit a
+  // `__<fieldName>IsDefault` local that drives the multipart skip branch
+  // below — this is the only place the emitter knows about the sentinel.
+  //
+  // Safety: `binding`, `fieldName`, `seedRule` are all required by the
+  // domain-semantics validator (#87) to match `/^[A-Za-z_$][A-Za-z0-9_$]*$/`,
+  // and `defaultSentinel` is required to contain no single quotes,
+  // backslashes, or line terminators. That lets us interpolate them
+  // directly into emitted single-quoted TS string literals without an
+  // escape pass and preserves byte identity with the pre-#87 hand-written
+  // strings.
+  const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
+  for (const seed of globalContextSeeds) {
+    body.push(
+      `  if (ctx['${seed.binding}'] === undefined) { ctx['${seed.binding}'] = seedBinding('${seed.seedRule}'); }`,
+    );
+    if (seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined) {
+      const local = `__${seed.fieldName}IsDefault`;
+      sentinelLocals.set(seed.fieldName, local);
+      body.push(`  const ${local} = ctx['${seed.binding}'] === '${seed.defaultSentinel}';`);
+    }
+  }
   if (!s.requestPlan) {
     body.push('  // No request plan available');
     body.push('});');
@@ -247,7 +304,13 @@ function renderScenarioTest(s: EndpointScenario): string {
         `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
       );
       body.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
-      body.push(`      if (k === 'tenantId' && __tenantIdIsDefault) continue;`);
+      // Emit a strip branch for every globalContextSeeds entry whose
+      // sentinel local was declared in the prologue. The emitter never
+      // hard-codes a field name here — the field name is the metadata key
+      // and the local was named after it.
+      for (const [fieldName, local] of sentinelLocals) {
+        body.push(`      if (k === '${fieldName}' && ${local}) continue;`);
+      }
       body.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
       body.push(`    }`);
       body.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
@@ -327,10 +390,10 @@ function renderScenarioTest(s: EndpointScenario): string {
     }
     // Extraction. `extractInto` is the vendored helper from
     // support/seeding.ts; it skips the assignment when the value is
-    // `undefined` so seeded bindings (e.g. tenantIdVar) and earlier
-    // extracts in the same scenario aren't clobbered by a later step
-    // whose response shape omits the field. See its JSDoc for the full
-    // preserve-on-undefined rationale.
+    // `undefined` so seeded bindings (e.g. globalContextSeeds entries)
+    // and earlier extracts in the same scenario aren't clobbered by a
+    // later step whose response shape omits the field. See its JSDoc
+    // for the full preserve-on-undefined rationale.
     if (step.extract?.length) {
       body.push(`    const json = await ${varName}.json();`);
       for (const ex of step.extract) {

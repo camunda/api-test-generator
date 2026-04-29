@@ -56,6 +56,21 @@ const OperationDomainRequirementsSchema = z
   })
   .passthrough();
 
+// Strict: mirrors `additionalProperties: false` in domain-semantics.schema.json
+// so runtime validation matches the published JSON Schema. Unknown keys are
+// almost always a typo (e.g. `seedRules` for `seedRule`) and silently
+// dropping them would mask the typo until the emitted suite misbehaves.
+export const GlobalContextSeedSchema = z
+  .object({
+    binding: z.string().min(1),
+    fieldName: z.string().min(1),
+    seedRule: z.string().min(1),
+    defaultSentinel: z.string().optional(),
+    stripFromMultipartWhenDefault: z.boolean().optional(),
+    rationale: z.string().optional(),
+  })
+  .strict();
+
 // Top-level shape — `passthrough` so unrelated fields (operationArtifactRules,
 // artifactFileKinds, semanticTypeToArtifactKind, identifiers, version, $schema)
 // flow through unmodified.
@@ -66,6 +81,7 @@ const DomainSemanticsShape = z
     semanticTypes: z.record(z.string(), SemanticTypeSpecSchema).optional(),
     artifactKinds: z.record(z.string(), ArtifactKindSpecSchema).optional(),
     operationRequirements: z.record(z.string(), OperationDomainRequirementsSchema).optional(),
+    globalContextSeeds: z.array(GlobalContextSeedSchema).optional(),
   })
   .passthrough();
 
@@ -198,6 +214,90 @@ function checkDisjunctionMemberResolves(d: DomainSemanticsShape): CrossRefIssue[
   return issues;
 }
 
+// JS/TS identifier syntax. Conservative — ASCII only — because the emitter
+// builds locals like `__<fieldName>IsDefault` and ctx keys like `<binding>`
+// from these strings; restricting them to identifier-safe ASCII rules out
+// accidental code injection (`'; DROP TABLE`-style) and ensures the emitted
+// TS compiles regardless of the surrounding generator's escape choices.
+function isSafeIdentifierName(name: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
+}
+
+// `defaultSentinel` is interpolated into a single-quoted TS string literal
+// (preserved verbatim from the pre-#87 emitter so generated suites stay
+// byte-identical). Reject characters that would break that literal: single
+// quotes, backslashes, line terminators, and other control characters.
+// Unicode line separators U+2028 / U+2029 also terminate string literals in
+// JS so they're rejected too. The current production sentinel `<default>`
+// passes; anything that would have required escaping fails fast at load.
+function sentinelHasUnsafeChars(sentinel: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matching control chars to reject them
+  return /['\\\r\n\t\u0000-\u001f\u2028\u2029]/.test(sentinel);
+}
+
+// #87: every globalContextSeeds entry must have a unique, identifier-safe
+// `binding` and `fieldName`. The emitter's sentinel local is
+// `__<fieldName>IsDefault`, the multipart strip branch keys off `fieldName`,
+// and ctx[<binding>] / seedBinding('<seedRule>') interpolate `binding` and
+// `seedRule` directly. Restricting these to safe identifiers (and rejecting
+// duplicates) means the emitter can interpolate them without an escape pass,
+// rules out config-driven code injection, and prevents two entries from
+// declaring the same `const __...IsDefault`. Also reject
+// `stripFromMultipartWhenDefault: true` without a `defaultSentinel` — the
+// strip branch needs something to compare against, otherwise the emitter
+// would have to choose a fallback sentinel itself (re-introducing the very
+// hard-coding this entry is meant to remove).
+function checkGlobalContextSeedsCoherent(d: DomainSemanticsShape): CrossRefIssue[] {
+  const issues: CrossRefIssue[] = [];
+  const seenBindings = new Set<string>();
+  const seenFieldNames = new Set<string>();
+  for (const seed of d.globalContextSeeds ?? []) {
+    if (seenBindings.has(seed.binding)) {
+      issues.push({
+        code: 'globalContextSeedBindingUnique',
+        message: `globalContextSeeds contains duplicate binding "${seed.binding}"`,
+      });
+    }
+    seenBindings.add(seed.binding);
+
+    if (seenFieldNames.has(seed.fieldName)) {
+      issues.push({
+        code: 'globalContextSeedFieldNameUnique',
+        message: `globalContextSeeds contains duplicate fieldName "${seed.fieldName}"`,
+      });
+    }
+    seenFieldNames.add(seed.fieldName);
+
+    for (const [key, value] of [
+      ['binding', seed.binding],
+      ['fieldName', seed.fieldName],
+      ['seedRule', seed.seedRule],
+    ] as const) {
+      if (!isSafeIdentifierName(value)) {
+        issues.push({
+          code: 'globalContextSeedSafeIdentifier',
+          message: `globalContextSeeds entry for binding "${seed.binding}" has ${key} "${value}", which is not a safe identifier (must match /^[A-Za-z_$][A-Za-z0-9_$]*$/)`,
+        });
+      }
+    }
+
+    if (seed.defaultSentinel !== undefined && sentinelHasUnsafeChars(seed.defaultSentinel)) {
+      issues.push({
+        code: 'globalContextSeedSentinelSafe',
+        message: `globalContextSeeds entry for binding "${seed.binding}" has defaultSentinel containing characters (single-quote, backslash, line terminator, or control char) that would break the emitted single-quoted string literal`,
+      });
+    }
+
+    if (seed.stripFromMultipartWhenDefault === true && seed.defaultSentinel === undefined) {
+      issues.push({
+        code: 'globalContextSeedStripRequiresSentinel',
+        message: `globalContextSeeds entry for binding "${seed.binding}" sets stripFromMultipartWhenDefault but has no defaultSentinel`,
+      });
+    }
+  }
+  return issues;
+}
+
 const CROSS_REF_CHECKS = [
   checkArtifactKindStateDeclared,
   checkArtifactKindWitnessDeclared,
@@ -205,6 +305,7 @@ const CROSS_REF_CHECKS = [
   checkSemanticBindingTargetResolves,
   checkDisjunctionNotWitnessRedundant,
   checkDisjunctionMemberResolves,
+  checkGlobalContextSeedsCoherent,
 ] as const;
 
 // Composed schema: structural shape + every cross-reference invariant.
@@ -246,4 +347,45 @@ export function validateDomainSemantics(raw: unknown): DomainSemanticsValidation
     const invariant = typeof invariantRaw === 'string' ? invariantRaw : 'shape';
     return { invariant, message: issue.message };
   });
+}
+
+/**
+ * Boundary-level safety assertion for `globalContextSeeds`.
+ *
+ * The Playwright emitter interpolates `binding`, `fieldName`, `seedRule`,
+ * and `defaultSentinel` directly into emitted TS source as identifiers and
+ * single-quoted string literals (#87). The loader validates the seeds when
+ * reading `domain-semantics.json`, but the public emitter entry points
+ * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`)
+ * accept a `globalContextSeeds` argument from any caller. This helper
+ * re-validates at that boundary so a programmatic caller cannot bypass
+ * the loader's safety net and produce broken or injection-vulnerable
+ * generated suites.
+ *
+ * Throws on any structural issue (Zod `.strict()` schema) or any
+ * cross-seed coherence violation (uniqueness, identifier safety, sentinel
+ * char safety, strip-requires-sentinel). Returns silently on success.
+ *
+ * The validation is intentionally redundant with `validateDomainSemantics`
+ * — both surfaces use the same `GlobalContextSeedSchema` and
+ * `checkGlobalContextSeedsCoherent` so they cannot drift.
+ */
+export function assertSafeGlobalContextSeeds(seeds: unknown): void {
+  if (!Array.isArray(seeds)) {
+    throw new TypeError(
+      `globalContextSeeds must be an array when provided (received ${seeds === null ? 'null' : typeof seeds}).`,
+    );
+  }
+  const arrayResult = z.array(GlobalContextSeedSchema).safeParse(seeds);
+  if (!arrayResult.success) {
+    const formatted = arrayResult.error.issues
+      .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
+    throw new Error(`globalContextSeeds failed structural validation:\n${formatted}`);
+  }
+  const issues = checkGlobalContextSeedsCoherent({ globalContextSeeds: arrayResult.data });
+  if (issues.length > 0) {
+    const formatted = issues.map((i) => `  - [${i.code}] ${i.message}`).join('\n');
+    throw new Error(`globalContextSeeds failed coherence validation:\n${formatted}`);
+  }
 }
