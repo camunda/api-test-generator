@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from '../../types.js';
-import { planFinalStepAssertions } from '../assertionPlanner.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 import { materializeSupport } from './materialize-support.js';
 
@@ -86,12 +85,19 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   const suiteName = opts.suiteName || collection.endpoint.operationId;
   // Import only test & expect; request fixture is provided per-test via parameters
   lines.push("import { test, expect } from '@playwright/test';");
+  lines.push("import { validateResponse } from 'assert-json-body';");
   // Import vendored helpers from the suite-local ./support/ directory.
   // materializeSupport() copies these files alongside the emitted specs so
   // the generated suite has no dependency on this generator project.
   lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   lines.push("import { seedBinding } from './support/seeding';");
+  lines.push('');
+  // Resolve responses.json relative to this spec file so the suite is
+  // portable regardless of the working directory the test runner uses.
+  lines.push(
+    "const __responsesFile = import.meta.dirname + '/json-body-assertions/responses.json';",
+  );
   lines.push('');
   lines.push(`test.describe('${suiteName}', () => {`);
   for (const scenario of collection.scenarios) {
@@ -280,117 +286,16 @@ function renderScenarioTest(s: EndpointScenario): string {
     );
     body.push(`      });`);
     body.push(`    } catch {}`);
-    // If this is the final step and scenario expects a success body, assert presence and types
+    // If this is the final step and scenario expects a success body, validate response shape
     const isErrorScenario = s.expectedResult && s.expectedResult.kind === 'error';
-    const isEmptyScenario = s.expectedResult && s.expectedResult.kind === 'empty';
     if (isFinal && hasShape && !isErrorScenario) {
-      // Always parse once here so assertions can use it
-      body.push(`    const json = await ${varName}.json();`);
-      const plan = planFinalStepAssertions(s, step);
-      // Top-level field assertions
-      for (const f of plan.topLevel) {
-        const acc = `json${toPathAccessor(f.path)}`;
-        const t = f.type || 'unknown';
-        if (f.required) {
-          body.push(`    expect(${acc}).not.toBeUndefined();`);
-          if (!f.nullable) {
-            body.push(`    expect(${acc}).not.toBeNull();`);
-            // emitTypeAssertLines() already emits `Array.isArray(...)` for `array`,
-            // so we only add the length assertion here — no duplicate type check.
-            body.push(...emitTypeAssertLines(acc, t));
-            if (t === 'array') {
-              if (isEmptyScenario) {
-                body.push(`    expect(${acc}.length).toBe(0);`);
-              } else {
-                body.push(`    expect(${acc}.length).toBeGreaterThan(0);`);
-              }
-            }
-          } else {
-            // Nullable required field: skip `.not.toBeNull()` and gate the
-            // type/length assertions on a non-null check so legitimate
-            // `null` responses don't fail the test. Length assertions still
-            // fire when the array is present, preserving assertion strength.
-            body.push(`    if (${acc} !== null) {`);
-            body.push(...emitTypeAssertLines(acc, t, '      '));
-            if (t === 'array') {
-              if (isEmptyScenario) {
-                body.push(`      expect(${acc}.length).toBe(0);`);
-              } else {
-                body.push(`      expect(${acc}.length).toBeGreaterThan(0);`);
-              }
-            }
-            body.push(`    }`);
-          }
-        } else {
-          body.push(`    if (${acc} !== undefined && ${acc} !== null) {`);
-          body.push(...emitTypeAssertLines(acc, t, '      '));
-          body.push(`    }`);
-        }
-      }
-      // Deep array item field assertions for first item when available
-      if (!isEmptyScenario && plan.arrays && plan.arrays.arrayNames.length) {
-        for (const arrName of plan.arrays.arrayNames) {
-          const itemPath = `json${toPathAccessor(`${arrName}[0]`)}`;
-          body.push(`    // Assert required fields on first item of ${arrName}[]`);
-          // If this is the activateJobs base scenario and array is jobs[], assert exactly one item
-          if (
-            s.operations[s.operations.length - 1]?.operationId === 'activateJobs' &&
-            /\bbase\b/i.test(s.name || '') &&
-            arrName === 'jobs'
-          ) {
-            const arrAcc = `json${toPathAccessor(arrName)}`;
-            body.push(`    expect(Array.isArray(${arrAcc})).toBeTruthy();`);
-            body.push(`    expect(${arrAcc}.length).toBe(1);`);
-          }
-          body.push(`    expect(${itemPath}).toBeTruthy();`);
-          const fields = plan.arrays.byArray[arrName] || [];
-          for (const f of fields) {
-            if (!f.required) continue;
-            const acc = `json${toPathAccessor(f.path)}`;
-            body.push(`    expect(${acc}).not.toBeUndefined();`);
-            if (!f.nullable) {
-              body.push(`    expect(${acc}).not.toBeNull();`);
-              body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
-            } else {
-              body.push(`    if (${acc} !== null) {`);
-              body.push(...emitTypeAssertLines(acc, f.type || 'unknown', '      '));
-              body.push(`    }`);
-            }
-          }
-        }
-      }
-      // Slice object + inner required fields assertions
-      if (plan.slices.expected.length) {
-        body.push(
-          `    // Assert deployment items contain expected slices based on uploaded resources`,
-        );
-        body.push(`    expect(Array.isArray(json.deployments)).toBeTruthy();`);
-        for (const slice of plan.slices.expected) {
-          const objAcc = `json.deployments?.[0]?.${slice}`;
-          body.push(`    expect(${objAcc}).toBeTruthy();`);
-          const inner = plan.slices.bySlice[slice] || [];
-          for (const f of inner) {
-            if (!f.required) continue;
-            const acc = `json${toPathAccessor(f.path)}`;
-            body.push(`    expect(${acc}).not.toBeUndefined();`);
-            if (!f.nullable) {
-              body.push(`    expect(${acc}).not.toBeNull();`);
-              body.push(...emitTypeAssertLines(acc, f.type || 'unknown'));
-            } else {
-              body.push(`    if (${acc} !== null) {`);
-              body.push(...emitTypeAssertLines(acc, f.type || 'unknown', '      '));
-              body.push(`    }`);
-            }
-          }
-        }
-      }
+      body.push(
+        `    await validateResponse({ path: ${JSON.stringify(step.pathTemplate)}, method: '${step.method.toUpperCase()}', status: '${step.expect.status}' }, ${varName}, { responsesFilePath: __responsesFile });`,
+      );
     }
     // Extraction
     if (step.extract?.length) {
-      // Avoid duplicate parsing if already parsed for final-step assertions above
-      if (!(isFinal && hasShape && !isErrorScenario)) {
-        body.push(`    const json = await ${varName}.json();`);
-      }
+      body.push(`    const json = await ${varName}.json();`);
       let exIdx = 0;
       for (const ex of step.extract) {
         const optAcc = toOptionalAccessor(ex.fieldPath);
@@ -412,24 +317,6 @@ function buildUrlExpression(pathTemplate: string): string {
     pathTemplate.replace(/\{([^}]+)\}/g, (_, p) => `\${ctx.${camelCase(p)}Var || '\${${p}}'}`) +
     '`'
   );
-}
-
-function toPathAccessor(fieldPath: string): string {
-  // Support paths like processes[0].bpmnProcessId or nested.simple
-  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(fieldPath)) return `.${fieldPath}`;
-  // Split on dots, preserve bracket indices
-  const parts = fieldPath.split('.');
-  return parts
-    .map((p) => {
-      const m = p.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(\[[0-9]+\])?$/);
-      if (m) {
-        const base = `.${m[1]}`;
-        const idx = m[2] || '';
-        return base + idx;
-      }
-      return `['${p.replace(/'/g, "\\'")}']`;
-    })
-    .join('');
 }
 
 function escapeQuotes(s: string): string {
@@ -455,32 +342,6 @@ function toOptionalAccessor(fieldPath: string): string {
       return `?.['${p.replace(/'/g, "\\'")}']`;
     })
     .join('');
-}
-
-// Emit lines asserting the runtime type of a value according to a simple type name
-function emitTypeAssertLines(accExpr: string, typeName: string, indent = '    '): string[] {
-  switch (typeName) {
-    case 'string':
-      return [`${indent}expect(typeof ${accExpr}).toBe('string');`];
-    case 'integer':
-      return [
-        `${indent}expect(typeof ${accExpr}).toBe('number');`,
-        `${indent}expect(Number.isInteger(${accExpr})).toBeTruthy();`,
-      ];
-    case 'number':
-      return [`${indent}expect(typeof ${accExpr}).toBe('number');`];
-    case 'boolean':
-      return [`${indent}expect(typeof ${accExpr}).toBe('boolean');`];
-    case 'array':
-      return [`${indent}expect(Array.isArray(${accExpr})).toBeTruthy();`];
-    case 'object':
-      return [
-        `${indent}expect(typeof ${accExpr}).toBe('object');`,
-        `${indent}expect(Array.isArray(${accExpr})).toBeFalsy();`,
-      ];
-    default:
-      return [`${indent}/* unknown type: ${typeName} */`];
-  }
 }
 
 // Produce a seeded value expression for a binding variable name (string generation focus).

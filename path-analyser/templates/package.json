@@ -5,7 +5,11 @@
   "type": "module",
   "description": "Generated Playwright integration suite produced by the api-test-generator path-analyser.",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "responses:regenerate": "assert-json-body extract"
+  },
+  "dependencies": {
+    "assert-json-body": "^1.7.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
