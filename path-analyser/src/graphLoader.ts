@@ -196,6 +196,11 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const producers: Record<string, string[]> = {};
     domainProducers = producers;
     const addProducer = (state: string, opId: string) => {
+      if (typeof state !== 'string' || state.length === 0) {
+        throw new Error(
+          `addProducer: invalid state key for opId="${opId}" (got ${JSON.stringify(state)})`,
+        );
+      }
       const list = producers[state] ?? [];
       list.push(opId);
       producers[state] = list;
@@ -222,6 +227,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     if (domain?.identifiers) {
       for (const [, spec] of Object.entries(domain.identifiers)) {
         const state = spec.validityState;
+        if (!state) continue;
         for (const opId of spec.boundBy ?? []) {
           if (operations[opId]) addProducer(state, opId);
         }
