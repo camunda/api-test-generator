@@ -54,13 +54,19 @@ describe.each(SUITES)('emitted $label suite typechecks under strict mode', ({
           `Run \`npm run testsuite:generate && npm run generate:request-validation\` to produce it before running this test.`,
       );
     }
-    const result = spawnSync('npx', ['tsc', '--noEmit', '-p', tsconfig], {
+    const result = spawnSync('npx', ['--no-install', 'tsc', '--noEmit', '-p', tsconfig], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
     });
+    if (result.error) {
+      throw new Error(
+        `Failed to launch tsc for ${label} suite: ${result.error.message}. ` +
+          `Ensure the repo's pinned \`typescript\` is installed (run \`npm ci\`).`,
+      );
+    }
     if (result.status !== 0) {
       throw new Error(
-        `tsc failed for ${label} suite (exit ${result.status}):\n${result.stdout}\n${result.stderr}`,
+        `tsc failed for ${label} suite (exit ${result.status === null ? 'null (process did not exit normally)' : result.status}):\n${result.stdout}\n${result.stderr}`,
       );
     }
     expect(result.status).toBe(0);
