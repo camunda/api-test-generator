@@ -128,4 +128,104 @@ describe('validateDomainSemantics', () => {
     const parsed: unknown = JSON.parse(raw);
     expect(validateDomainSemantics(parsed)).toEqual([]);
   });
+
+  // -------------------------------------------------------------------------
+  // globalContextSeeds: input-validation guards (#87 review)
+  //
+  // Every seed entry is interpolated directly into emitted TS source — these
+  // checks make config-driven code injection structurally impossible and
+  // pre-empt collisions in the emitted prologue / multipart strip branch.
+  // -------------------------------------------------------------------------
+
+  it('reports globalContextSeedBindingUnique when two seeds share a binding', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenantId', seedRule: 'tenantIdVar' },
+        { binding: 'tenantIdVar', fieldName: 'otherField', seedRule: 'tenantIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedBindingUnique');
+  });
+
+  it('reports globalContextSeedFieldNameUnique when two seeds share a fieldName', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenantId', seedRule: 'tenantIdVar' },
+        { binding: 'orgIdVar', fieldName: 'tenantId', seedRule: 'orgIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedFieldNameUnique');
+  });
+
+  it('reports globalContextSeedSafeIdentifier when binding is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenant-id', fieldName: 'tenantId', seedRule: 'tenantIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSafeIdentifier');
+  });
+
+  it('reports globalContextSeedSafeIdentifier when fieldName is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenant-id', seedRule: 'tenantIdVar' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSafeIdentifier');
+  });
+
+  it('reports globalContextSeedSafeIdentifier when seedRule is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        { binding: 'tenantIdVar', fieldName: 'tenantId', seedRule: 'rule with spaces' },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSafeIdentifier');
+  });
+
+  it('reports globalContextSeedSentinelSafe when defaultSentinel contains a single quote', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        {
+          binding: 'tenantIdVar',
+          fieldName: 'tenantId',
+          seedRule: 'tenantIdVar',
+          defaultSentinel: "it's broken",
+        },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSentinelSafe');
+  });
+
+  it('reports globalContextSeedSentinelSafe when defaultSentinel contains a newline', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        {
+          binding: 'tenantIdVar',
+          fieldName: 'tenantId',
+          seedRule: 'tenantIdVar',
+          defaultSentinel: 'line1\nline2',
+        },
+      ],
+    });
+    expect(errs.map((e) => e.invariant)).toContain('globalContextSeedSentinelSafe');
+  });
+
+  it('rejects unknown properties on a globalContextSeeds entry (.strict())', () => {
+    const errs = validateDomainSemantics({
+      globalContextSeeds: [
+        {
+          binding: 'tenantIdVar',
+          fieldName: 'tenantId',
+          seedRule: 'tenantIdVar',
+          unknownKey: 'oops', // typo or removed-but-still-in-config field
+        },
+      ],
+    });
+    // Strict-mode Zod surfaces a structural issue (not one of our named
+    // cross-ref invariants), so the error list is non-empty even though no
+    // cross-ref invariant fires.
+    expect(errs.length).toBeGreaterThan(0);
+  });
 });

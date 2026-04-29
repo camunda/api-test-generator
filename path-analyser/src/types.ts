@@ -270,10 +270,10 @@ export interface DomainSemantics {
 /**
  * One entry in {@link DomainSemantics.globalContextSeeds}. Drives the
  * Playwright emitter's per-scenario seed prologue: for every entry the
- * emitter writes a `ctx[<binding>] ??= seedBinding('<seedRule>')` line and,
- * when {@link defaultSentinel} + {@link stripFromMultipartWhenDefault} are
- * present, a multipart-loop branch that drops {@link fieldName} when the
- * binding equals the sentinel.
+ * emitter writes an `if (ctx['<binding>'] === undefined) { ctx['<binding>'] =
+ * seedBinding('<seedRule>'); }` guard and, when {@link defaultSentinel} +
+ * {@link stripFromMultipartWhenDefault} are present, a multipart-loop branch
+ * that drops {@link fieldName} when the binding equals the sentinel.
  */
 export interface GlobalContextSeed {
   /** ctx[<binding>] key the seed populates. */

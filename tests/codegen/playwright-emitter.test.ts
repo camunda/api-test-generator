@@ -302,7 +302,7 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
 //   3. Empty-seeds test: when no seeds are supplied, no universal-seed
 //      prologue is emitted and no multipart strip branch is inserted.
 describe('emitter: globalContextSeeds is the only source of universal-seed knowledge (#87)', () => {
-  test('emitter.ts source contains no hard-coded tenant bind names or sentinel strings', async () => {
+  test('emitter.ts source contains no hard-coded tenant bind names or sentinel strings (any quote style)', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const url = await import('node:url');
@@ -316,11 +316,17 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
       .split('\n')
       .map((l) => l.replace(/\/\/.*$/, ''))
       .join('\n');
-    for (const literal of ["'tenantIdVar'", "'tenantId'", "'<default>'", '__seededTenant']) {
-      expect(
-        codeOnly,
-        `emitter.ts must not contain the literal ${literal} (issue #87)`,
-      ).not.toContain(literal);
+    // Match any quote style (single, double, backtick) so re-introducing
+    // the same coupling via "tenantIdVar" or `tenantIdVar` is also caught.
+    const forbiddenPatterns = [
+      { label: 'quoted tenantIdVar', pattern: /['"`]tenantIdVar['"`]/ },
+      { label: 'quoted tenantId', pattern: /['"`]tenantId['"`]/ },
+      { label: 'quoted <default>', pattern: /['"`]<default>['"`]/ },
+      { label: 'bare __seededTenant', pattern: /\b__seededTenant\b/ },
+      { label: 'quoted __seededTenant', pattern: /['"`]__seededTenant['"`]/ },
+    ];
+    for (const { label, pattern } of forbiddenPatterns) {
+      expect(codeOnly, `emitter.ts must not contain ${label} (issue #87)`).not.toMatch(pattern);
     }
   });
 

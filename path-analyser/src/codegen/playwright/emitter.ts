@@ -212,6 +212,14 @@ function renderScenarioTest(
   // declare a defaultSentinel + stripFromMultipartWhenDefault also emit a
   // `__<fieldName>IsDefault` local that drives the multipart skip branch
   // below — this is the only place the emitter knows about the sentinel.
+  //
+  // Safety: `binding`, `fieldName`, `seedRule` are all required by the
+  // domain-semantics validator (#87) to match `/^[A-Za-z_$][A-Za-z0-9_$]*$/`,
+  // and `defaultSentinel` is required to contain no single quotes,
+  // backslashes, or line terminators. That lets us interpolate them
+  // directly into emitted single-quoted TS string literals without an
+  // escape pass and preserves byte identity with the pre-#87 hand-written
+  // strings.
   const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
   for (const seed of globalContextSeeds) {
     body.push(
@@ -220,12 +228,7 @@ function renderScenarioTest(
     if (seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined) {
       const local = `__${seed.fieldName}IsDefault`;
       sentinelLocals.set(seed.fieldName, local);
-      // Single-quoted, escape-only-the-single-quote rendering matches the
-      // pre-#87 hand-written `'<default>'` literal so emitted suites are
-      // byte-identical for sentinels that contain no embedded single quotes
-      // (which the schema strongly discourages anyway).
-      const sentinelLiteral = `'${seed.defaultSentinel.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
-      body.push(`  const ${local} = ctx['${seed.binding}'] === ${sentinelLiteral};`);
+      body.push(`  const ${local} = ctx['${seed.binding}'] === '${seed.defaultSentinel}';`);
     }
   }
   if (!s.requestPlan) {
