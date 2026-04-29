@@ -234,6 +234,22 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
       }
     }
+    // #56: surface sidecar-declared `produces` into the semantic-BFS-visible
+    // structures (op.produces and bySemanticProducer). Without this step the
+    // sidecar entry only updates `domainProduces` / `domainProducers`, which
+    // are used by the runtime-state planner but invisible to semantic BFS.
+    if (domain?.operationRequirements) {
+      for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
+        const node = operations[opId];
+        if (!node) continue;
+        for (const st of spec.produces ?? []) {
+          if (!node.produces.includes(st)) node.produces.push(st);
+          const list = bySemanticProducer[st] ?? [];
+          if (!list.includes(opId)) list.push(opId);
+          bySemanticProducer[st] = list;
+        }
+      }
+    }
   } catch {
     // ignore
   }
