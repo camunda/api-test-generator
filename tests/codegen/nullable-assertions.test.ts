@@ -84,17 +84,48 @@ describe('response shape assertions use validateResponse (replaces verbose per-f
     expect(suite).toContain('responsesFilePath: __responsesFile');
   });
 
-  test('__responsesFile constant is emitted once per suite file', () => {
+  test('__responsesFile constant is emitted once per suite file with response shapes', () => {
     const suite = renderPlaywrightSuite(
       makeCollection({ name: 'id', type: 'string', required: true, nullable: false }),
       { suiteName: 'getThing', mode: 'feature' },
     );
-    expect(suite).toContain(
-      "const __responsesFile = import.meta.dirname + '/json-body-assertions/responses.json';",
-    );
+    const expectedLine =
+      "const __responsesFile = import.meta.dirname + '/json-body-assertions/responses.json';";
+    expect(suite).toContain(expectedLine);
     // Should appear exactly once
-    const count = (suite.match(/__responsesFile\s*=/g) || []).length;
+    const count = suite.split(expectedLine).length - 1;
     expect(count).toBe(1);
+  });
+
+  test('__responsesFile constant and assert-json-body import are omitted for all-error suites', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'getThing', method: 'GET', path: '/things/{id}' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'not found',
+          operations: [{ operationId: 'getThing', method: 'GET', path: '/things/{id}' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          responseShapeFields: [{ name: 'id', type: 'string', required: true, nullable: false }],
+          expectedResult: { kind: 'error' },
+          requestPlan: [
+            {
+              operationId: 'getThing',
+              method: 'GET',
+              pathTemplate: '/things/{id}',
+              pathParams: [],
+              expect: { status: 404 },
+            },
+          ],
+        },
+      ],
+    };
+    const suite = renderPlaywrightSuite(collection, { suiteName: 'getThing', mode: 'feature' });
+    expect(suite).not.toContain("import { validateResponse } from 'assert-json-body';");
+    expect(suite).not.toContain('__responsesFile');
   });
 
   test('slice scenario emits validateResponse, not per-field assertions', () => {
@@ -174,36 +205,6 @@ describe('response shape assertions use validateResponse (replaces verbose per-f
     expect(suite).toContain('await validateResponse(');
     expect(suite).not.toContain('if (json.items[0].endDate !== null) {');
     expect(suite).not.toContain('expect(json.items[0].endDate).not.toBeNull();');
-  });
-
-  test('error scenario does NOT emit validateResponse', () => {
-    const collection: EndpointScenarioCollection = {
-      endpoint: { operationId: 'getThing', method: 'GET', path: '/things/{id}' },
-      requiredSemanticTypes: [],
-      optionalSemanticTypes: [],
-      scenarios: [
-        {
-          id: 'sc1',
-          name: 'not found',
-          operations: [{ operationId: 'getThing', method: 'GET', path: '/things/{id}' }],
-          producedSemanticTypes: [],
-          satisfiedSemanticTypes: [],
-          responseShapeFields: [{ name: 'id', type: 'string', required: true, nullable: false }],
-          expectedResult: { kind: 'error' },
-          requestPlan: [
-            {
-              operationId: 'getThing',
-              method: 'GET',
-              pathTemplate: '/things/{id}',
-              pathParams: [],
-              expect: { status: 404 },
-            },
-          ],
-        },
-      ],
-    };
-    const suite = renderPlaywrightSuite(collection, { suiteName: 'getThing', mode: 'feature' });
-    expect(suite).not.toContain('await validateResponse(');
   });
 
   // Class-scoped invariant over the real generated corpus: no generated spec

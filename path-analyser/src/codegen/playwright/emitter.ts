@@ -83,9 +83,21 @@ export const PlaywrightEmitter: Emitter = {
 function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOptions): string {
   const lines: string[] = [];
   const suiteName = opts.suiteName || collection.endpoint.operationId;
+
+  // Determine upfront whether any scenario will emit a validateResponse() call
+  // so we can conditionally include the import and constant.
+  const needsValidation = collection.scenarios.some(
+    (s) =>
+      Array.isArray(s.responseShapeFields) &&
+      s.responseShapeFields.length > 0 &&
+      !(s.expectedResult && s.expectedResult.kind === 'error'),
+  );
+
   // Import only test & expect; request fixture is provided per-test via parameters
   lines.push("import { test, expect } from '@playwright/test';");
-  lines.push("import { validateResponse } from 'assert-json-body';");
+  if (needsValidation) {
+    lines.push("import { validateResponse } from 'assert-json-body';");
+  }
   // Import vendored helpers from the suite-local ./support/ directory.
   // materializeSupport() copies these files alongside the emitted specs so
   // the generated suite has no dependency on this generator project.
@@ -93,12 +105,14 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   lines.push("import { seedBinding } from './support/seeding';");
   lines.push('');
-  // Resolve responses.json relative to this spec file so the suite is
-  // portable regardless of the working directory the test runner uses.
-  lines.push(
-    "const __responsesFile = import.meta.dirname + '/json-body-assertions/responses.json';",
-  );
-  lines.push('');
+  if (needsValidation) {
+    // Resolve responses.json relative to this spec file so the suite is
+    // portable regardless of the working directory the test runner uses.
+    lines.push(
+      "const __responsesFile = import.meta.dirname + '/json-body-assertions/responses.json';",
+    );
+    lines.push('');
+  }
   lines.push(`test.describe('${suiteName}', () => {`);
   for (const scenario of collection.scenarios) {
     lines.push(renderScenarioTest(scenario));
