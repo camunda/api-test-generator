@@ -1,0 +1,78 @@
+# Camunda vocabulary — instances + per-API extensions to the core ontology.
+#
+# This file names Camunda-specific concepts (BPMN processes, DMN
+# decisions, the Zeebe state machine) using the core ontology. Adding a
+# second API means writing a sibling .ttl file using its own namespace
+# (acmeApi:, github:, …) and loading it into the same store.
+#
+# Spike note: only enough instances to demonstrate the per-API <-> core
+# boundary. The adapters (../adapters/) emit the rest from
+# domain-semantics.json mechanically.
+
+@prefix camunda: <https://camunda.io/api-test-generator/camunda#> .
+@prefix core:    <https://camunda.io/api-test-generator/core#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+
+camunda: a owl:Ontology ;
+    rdfs:label "Camunda 8 Orchestration Cluster — vocabulary" ;
+    rdfs:comment "Per-API extensions and individuals layered onto the core ontology." .
+
+#
+# === Artifact kinds (instances of core:ArtifactKind) ======================
+#
+
+camunda:bpmnProcess  a core:ArtifactKind ; rdfs:label "BPMN process" .
+camunda:dmnDecision  a core:ArtifactKind ; rdfs:label "DMN decision" .
+camunda:form         a core:ArtifactKind ; rdfs:label "Form" .
+
+#
+# === Identifiers (instances of core:Identifier) ===========================
+#
+# Concrete identifiers from domain-semantics.json. Adapters emit the rest;
+# these few are pinned in TTL so the modelling boundary is visible.
+
+camunda:ProcessDefinitionId a core:Identifier ;
+    rdfs:label "Process definition ID" ;
+    core:validityState camunda:ProcessDefinitionDeployed .
+
+camunda:ProcessInstanceKey a core:Identifier ;
+    rdfs:label "Process instance key" ;
+    core:validityState camunda:ProcessInstanceExists .
+
+#
+# === Runtime states (instances of core:RuntimeState) ======================
+#
+
+camunda:ProcessDefinitionDeployed a core:RuntimeState ;
+    rdfs:label "Process definition deployed" ;
+    core:hasParameter "processDefinitionId" .
+
+camunda:ProcessInstanceExists a core:RuntimeState ;
+    rdfs:label "Process instance exists" ;
+    core:hasParameter "processInstanceKey" ;
+    core:dependsOn camunda:ProcessDefinitionDeployed .
+
+camunda:JobAvailableForActivation a core:RuntimeState ;
+    rdfs:label "Job available for activation" ;
+    core:dependsOn camunda:ProcessInstanceExists .
+
+#
+# === Capabilities (subclass of core:RuntimeState) =========================
+#
+
+camunda:ModelHasServiceTaskType a core:Capability ;
+    rdfs:label "Deployed model has a service task of a given job type" ;
+    core:hasParameter "jobType" ;
+    core:dependsOn camunda:ProcessDefinitionDeployed .
+
+#
+# === Vocabulary boundary check (informational) ============================
+#
+# Honest test for the abstraction (per the spike brief): the planner
+# must be writable referring only to terms in core:. Every term above is
+# either an instance of a core: class or a subclass of one. Nothing in
+# this file extends the core schema with new properties. If a future
+# requirement needs a new property here, that's the signal that the
+# core ontology is missing an abstraction.

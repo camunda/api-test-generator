@@ -1,0 +1,277 @@
+# Core ontology — API-agnostic
+#
+# This vocabulary names the entities and relations the api-test-generator
+# currently encodes as conventions inside procedural TS. It does NOT
+# mention any Camunda-specific term. The honest test of the abstraction
+# is that the planner can be written referring only to terms in this file.
+#
+# Spike: see ../README.md and ../../RECOMMENDATION.md
+
+@prefix core: <https://camunda.io/api-test-generator/core#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+core: a owl:Ontology ;
+    rdfs:label "API test generator — core vocabulary" ;
+    rdfs:comment "API-agnostic entities for modelling REST APIs with runtime state dependencies." .
+
+#
+# === Operations ============================================================
+#
+
+core:Operation a rdfs:Class ;
+    rdfs:label "Operation" ;
+    rdfs:comment "A single REST operation (operationId + method + path)." .
+
+core:operationId a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Stable identifier from the OpenAPI spec." .
+
+core:method a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range xsd:string .
+
+core:path a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range xsd:string .
+
+core:eventuallyConsistent a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "True when the operation's effects are not immediately observable." .
+
+core:successStatus a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range xsd:integer .
+
+#
+# === Semantic types ========================================================
+#
+# A SemanticType is a logical value class (e.g. ProcessInstanceKey) that
+# operations consume or produce. Distinct from the underlying scalar
+# (string/integer): two semantic types may share a primitive type but
+# differ in meaning.
+
+core:SemanticType a rdfs:Class ;
+    rdfs:label "Semantic type" .
+
+# Production / consumption edges between Operation and SemanticType.
+
+core:produces a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:SemanticType ;
+    rdfs:comment "Operation emits a value of this semantic type in its response." .
+
+core:requires a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:SemanticType ;
+    rdfs:comment "Operation needs a value of this semantic type as input (REQUIRED)." .
+
+core:requiresOptional a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:SemanticType ;
+    rdfs:comment "Operation accepts a value of this semantic type as input (OPTIONAL)." .
+
+core:authoritativeProducer a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:SemanticType ;
+    rdfs:comment """Marks this operation as the canonical producer for the given
+                   semantic type (corresponds to OpenAPI x-semantic-provider: true).
+                   Used by the planner to pick a preferred bootstrap step.""" .
+
+#
+# === Field paths ===========================================================
+#
+# A FieldPath localises a SemanticType to a concrete location in a
+# request or response payload. This is what makes value bindings
+# checkable: today the binding is a free-form string; here it points
+# to a node that either exists in the canonical schema or doesn't.
+
+core:FieldPath a rdfs:Class .
+
+core:fieldPath a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Dot/[]-notation path, e.g. deployments[].processDefinition.processDefinitionId" .
+
+core:jsonPointer a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range xsd:string ;
+    rdfs:comment "JSON Pointer form, e.g. /deployments/0/processDefinition/processDefinitionId" .
+
+core:scalarType a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range xsd:string ;
+    rdfs:comment "string | integer | object | array | boolean | number" .
+
+core:isRequiredField a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range xsd:boolean .
+
+core:locatesSemanticType a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range core:SemanticType ;
+    rdfs:comment "The FieldPath carries a value of this semantic type at runtime." .
+
+core:onResponseOf a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range core:Operation ;
+    rdfs:comment "FieldPath belongs to the response of this operation." .
+
+core:onRequestOf a rdf:Property ;
+    rdfs:domain core:FieldPath ;
+    rdfs:range core:Operation .
+
+#
+# === Runtime states & capabilities =========================================
+#
+# A RuntimeState is a fact about the system that becomes true after some
+# operation succeeds (e.g. ProcessDefinitionDeployed). A Capability is a
+# state-shaped requirement carried by an artifact (e.g.
+# ModelHasServiceTaskType).
+
+core:RuntimeState a rdfs:Class .
+
+core:Capability a rdfs:Class ;
+    rdfs:subClassOf core:RuntimeState .
+
+core:producesState a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:RuntimeState .
+
+core:requiresState a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:RuntimeState .
+
+core:implicitlyAdds a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:RuntimeState ;
+    rdfs:comment "State that becomes true on success even if not declared as 'produces'." .
+
+# Inverse traversal — supports SPARQL property paths to find
+# transitive prerequisites for a target state. Replaces
+# gatherDomainPrerequisites() in scenarioGenerator.ts.
+core:dependsOn a rdf:Property ;
+    rdfs:domain core:RuntimeState ;
+    rdfs:range core:RuntimeState ;
+    a owl:TransitiveProperty .
+
+core:hasParameter a rdf:Property ;
+    rdfs:domain core:RuntimeState ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Name of the parameter this state exposes (e.g. processDefinitionId)." .
+
+#
+# === Disjunctions ==========================================================
+#
+# operationRequirements.*.disjunctions: an operation may have multiple
+# alternative requirement sets ("either A and B, or C"). Reified as a
+# Disjunction node so SPARQL can ask 'which alternatives satisfy op X?'.
+
+core:Disjunction a rdfs:Class .
+
+core:disjunctionOf a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:Disjunction .
+
+core:hasAlternative a rdf:Property ;
+    rdfs:domain core:Disjunction ;
+    rdfs:range core:RuntimeState .
+
+#
+# === Value bindings ========================================================
+#
+# Today: a string-keyed map { "request.processDefinitionId":
+# "ProcessDefinitionDeployed.processDefinitionId" } resolved by string
+# splitting at scenario-bind time. Silent miss on typo.
+#
+# Here: a first-class node connecting a FieldPath to a (RuntimeState,
+# parameter) pair. SHACL shapes (../shapes/value-binding.shapes.ttl)
+# enforce that the FieldPath actually exists.
+
+core:ValueBinding a rdfs:Class .
+
+core:bindingOf a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:ValueBinding .
+
+core:bindingDirection a rdf:Property ;
+    rdfs:domain core:ValueBinding ;
+    rdfs:range xsd:string ;
+    rdfs:comment "request | response" .
+
+core:bindsFromFieldPath a rdf:Property ;
+    rdfs:domain core:ValueBinding ;
+    rdfs:range core:FieldPath .
+
+core:bindsToState a rdf:Property ;
+    rdfs:domain core:ValueBinding ;
+    rdfs:range core:RuntimeState .
+
+core:bindsToParameter a rdf:Property ;
+    rdfs:domain core:ValueBinding ;
+    rdfs:range xsd:string .
+
+#
+# === Artifacts =============================================================
+#
+# Some operations consume artifact content (e.g. a BPMN file) which itself
+# produces states once deployed. ArtifactKind is a class of artifacts; the
+# concrete identifiers are per-API (camunda:bpmnProcess etc.).
+
+core:ArtifactKind a rdfs:Class .
+
+core:producesStateViaArtifact a rdf:Property ;
+    rdfs:domain core:ArtifactKind ;
+    rdfs:range core:RuntimeState .
+
+core:producesSemanticViaArtifact a rdf:Property ;
+    rdfs:domain core:ArtifactKind ;
+    rdfs:range core:SemanticType .
+
+core:hasArtifactRule a rdf:Property ;
+    rdfs:domain core:Operation ;
+    rdfs:range core:ArtifactKind .
+
+#
+# === Identifiers ===========================================================
+#
+# An Identifier is a SemanticType subclass that uniquely names an entity
+# whose validity is governed by a RuntimeState (e.g. ProcessDefinitionId
+# is valid only while ProcessDefinitionDeployed holds).
+
+core:Identifier a rdfs:Class ;
+    rdfs:subClassOf core:SemanticType .
+
+core:validityState a rdf:Property ;
+    rdfs:domain core:Identifier ;
+    rdfs:range core:RuntimeState .
+
+#
+# === Scenarios (planner output, included for cross-cutting queries) =======
+#
+# Reified for the cross-tool coverage join discussed in the brief, even
+# though the planner itself stays in TS. Triples can be emitted at the
+# end of a generator run for downstream coverage queries.
+
+core:Scenario a rdfs:Class .
+
+core:satisfiedBy a rdf:Property ;
+    rdfs:domain core:Scenario ;
+    rdfs:range core:SemanticType .
+
+core:reachesState a rdf:Property ;
+    rdfs:domain core:Scenario ;
+    rdfs:range core:RuntimeState .
+
+core:targetsOperation a rdf:Property ;
+    rdfs:domain core:Scenario ;
+    rdfs:range core:Operation .
+
+core:hasStep a rdf:Property ;
+    rdfs:domain core:Scenario ;
+    rdfs:range core:Operation ;
+    rdfs:comment "Multi-valued; ordering carried separately if needed (rdf:List or step index)." .
