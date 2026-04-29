@@ -18,6 +18,7 @@
 // Keep SUPPORT_TEMPLATE_FILES in sync with
 // path-analyser/scripts/copy-support-templates.js.
 // ---------------------------------------------------------------------------
+import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,4 +128,77 @@ export async function materializeSupport(
   }
 
   return destDir;
+}
+
+/** Subdirectory created under the emitter's outDir to hold the
+ *  assert-json-body response-schema artifact (`responses.json`). */
+export const RESPONSE_SCHEMAS_DIR_NAME = 'json-body-assertions';
+
+/** Default location of the bundled OpenAPI spec that the response-schema
+ *  extractor reads. Resolved relative to the repo root. */
+const DEFAULT_SPEC_RELATIVE = 'spec/bundled/rest-api.bundle.json';
+
+/**
+ * Walk up from `startDir` looking for the bundled OpenAPI spec. Used so
+ * `materializeResponseSchemas` works regardless of whether the codegen is
+ * invoked from the repo root or from `path-analyser/`.
+ */
+function findDefaultSpecFile(startDir: string): string | undefined {
+  let dir = startDir;
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, DEFAULT_SPEC_RELATIVE);
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+/**
+ * Extract response schemas from the bundled OpenAPI spec into
+ * `<outDir>/json-body-assertions/responses.json` so the emitted suite's
+ * `validateResponse(...)` calls can resolve their schema source without
+ * depending on the surrounding generator project.
+ *
+ * Spawns the `assert-json-body` CLI (a devDependency of this repo and a
+ * runtime dependency declared in the standalone-suite template
+ * `templates/package.json`).
+ *
+ * @param outDir   Same directory passed to {@link materializeSupport}.
+ * @param specFile Optional explicit path to the bundled spec. Defaults to
+ *                 walking up from `outDir` looking for
+ *                 `spec/bundled/rest-api.bundle.json`.
+ */
+export async function materializeResponseSchemas(
+  outDir: string,
+  specFile?: string,
+): Promise<string> {
+  const resolvedSpec = specFile ?? findDefaultSpecFile(outDir);
+  if (!resolvedSpec) {
+    throw new Error(
+      `materializeResponseSchemas: could not locate bundled spec. ` +
+        `Pass an explicit specFile or ensure ${DEFAULT_SPEC_RELATIVE} exists ` +
+        `at or above ${outDir}.`,
+    );
+  }
+  const targetDir = path.join(outDir, RESPONSE_SCHEMAS_DIR_NAME);
+  await fs.mkdir(targetDir, { recursive: true });
+  const result = spawnSync(
+    'npx',
+    [
+      '--no-install',
+      'assert-json-body',
+      'extract',
+      `--specFile=${resolvedSpec}`,
+      `--outputDir=${targetDir}`,
+    ],
+    { stdio: 'inherit' },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `materializeResponseSchemas: assert-json-body extract exited with status ${result.status}`,
+    );
+  }
+  return targetDir;
 }

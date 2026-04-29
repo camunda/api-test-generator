@@ -6,7 +6,7 @@
   "description": "Generated Playwright integration suite produced by the api-test-generator path-analyser.",
   "scripts": {
     "test": "playwright test",
-    "responses:regenerate": "assert-json-body extract"
+    "responses:regenerate": "assert-json-body extract --specFile=./openapi.json --outputDir=./json-body-assertions"
   },
   "dependencies": {
     "assert-json-body": "^1.7.1"

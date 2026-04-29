@@ -303,7 +303,10 @@ function renderScenarioTest(s: EndpointScenario): string {
     // If this is the final step and scenario expects a success body, validate response shape
     const isErrorScenario = s.expectedResult && s.expectedResult.kind === 'error';
     if (isFinal && hasShape && !isErrorScenario) {
-      const routeSpec = `{ path: ${JSON.stringify(step.pathTemplate)}, method: '${step.method.toUpperCase()}', status: '${step.expect.status}' }`;
+      // Use JSON.stringify for every value so the emitted route spec is uniformly
+      // double-quoted (no mixed single/double quotes) and any special characters
+      // in the path template are correctly escaped.
+      const routeSpec = `{ path: ${JSON.stringify(step.pathTemplate)}, method: ${JSON.stringify(step.method.toUpperCase())}, status: ${JSON.stringify(String(step.expect.status))} }`;
       body.push(
         `    await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );

@@ -79,8 +79,8 @@ describe('response shape assertions use validateResponse (replaces verbose per-f
       { suiteName: 'getThing', mode: 'feature' },
     );
     expect(suite).toContain('path: "/things/{id}"');
-    expect(suite).toContain("method: 'GET'");
-    expect(suite).toContain("status: '200'");
+    expect(suite).toContain('method: "GET"');
+    expect(suite).toContain('status: "200"');
     expect(suite).toContain('responsesFilePath: __responsesFile');
   });
 
