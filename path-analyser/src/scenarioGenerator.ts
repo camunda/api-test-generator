@@ -771,8 +771,28 @@ function deferForMissingDomainPrereqs(
     // the authoritative set).
     const newProduced = new Set(state.produced);
     const newDomainStates = new Set(state.domainStates);
+    // applyArtifactRuleSelection mutates state.artifactsApplied,
+    // state.bindingsDraft, and state.modelsDraft (via
+    // ensureArtifactBindings). We iterate multiple candidate domain
+    // producers and may `continue` after the call, so passing the
+    // parent `state` directly would leak mutations into sibling
+    // candidates and into the parent BFS frame. Operate on a per-child
+    // working copy with shallow clones of the mutable collections, then
+    // hand those clones to the enqueued child state below if we accept
+    // the candidate.
+    const workingArtifactsApplied = state.artifactsApplied
+      ? [...state.artifactsApplied]
+      : undefined;
+    const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
+    const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+    const workingState: State = {
+      ...state,
+      artifactsApplied: workingArtifactsApplied,
+      bindingsDraft: workingBindingsDraft,
+      modelsDraft: workingModelsDraft,
+    };
     if (candidateOpId === 'createDeployment') {
-      applyArtifactRuleSelection(graph, candidateNode, state, newProduced, newDomainStates);
+      applyArtifactRuleSelection(graph, candidateNode, workingState, newProduced, newDomainStates);
     } else {
       candidateNode.produces.forEach((s) => {
         newProduced.add(s);
@@ -829,9 +849,10 @@ function deferForMissingDomainPrereqs(
     });
     // Mirror the semantic-producer branch's createDeployment seeding so
     // a deferred deployment step still surfaces a process-definition
-    // binding for downstream consumers.
-    let modelsDraft = state.modelsDraft;
-    const bindingsDraft = { ...(state.bindingsDraft || {}) };
+    // binding for downstream consumers. Operate on the working clones
+    // so the mutations stay scoped to this child state.
+    let modelsDraft = workingModelsDraft;
+    const bindingsDraft = workingBindingsDraft;
     if (candidateOpId === 'createDeployment' && !modelsDraft) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
       bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
@@ -854,9 +875,11 @@ function deferForMissingDomainPrereqs(
       // Propagate scenario-metadata bookkeeping from `state` and update
       // providerList for the candidate's produced semantics so later
       // scenario naming/description stays consistent with the semantic
-      // expansion branch.
+      // expansion branch. Use the working clone of artifactsApplied so
+      // sibling candidates and already-enqueued states aren't mutated
+      // by appends from applyArtifactRuleSelection.
       providerList: updateProviderList(state.providerList || {}, candidateNode, newProductionMap),
-      artifactsApplied: state.artifactsApplied,
+      artifactsApplied: workingArtifactsApplied,
     });
     enqueued = true;
   }
