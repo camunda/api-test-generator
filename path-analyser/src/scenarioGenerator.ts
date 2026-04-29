@@ -1152,8 +1152,13 @@ function updateProviderList(
     // (mirrors the productionMap gate).
     if (!newProduced.has(s)) return;
     const opId = producerNode.operationId;
+    // Avoid in-place mutation of inherited arrays: `{ ...existing }` is
+    // shallow, so `copy[s]` is the same array reference as the parent
+    // BFS state's providerList[s]. push()ing into it would leak the
+    // append into the parent (and any sibling state that inherited the
+    // same reference). Allocate a fresh array on every write.
     if (!copy[s]) copy[s] = [opId];
-    else if (!copy[s].includes(opId)) copy[s].push(opId);
+    else if (!copy[s].includes(opId)) copy[s] = [...copy[s], opId];
   });
   return copy;
 }
