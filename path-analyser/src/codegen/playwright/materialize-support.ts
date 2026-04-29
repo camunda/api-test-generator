@@ -8,8 +8,9 @@
 //
 // Two template sets are copied:
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
-//                seed-rules.json). Sources: path-analyser/src/codegen/support/,
-//                staged into dist/src/codegen/playwright/support-templates/ at
+//                fixtures.ts, seed-rules.json). Sources:
+//                path-analyser/src/codegen/support/, staged into
+//                dist/src/codegen/playwright/support-templates/ at
 //                build time.
 //   * project root — package.json, playwright.config.ts, tsconfig.json,
 //                    .env.example, README.md.
@@ -27,6 +28,7 @@ export const SUPPORT_TEMPLATE_FILES = [
   'env.ts',
   'recorder.ts',
   'seeding.ts',
+  'fixtures.ts',
   'seed-rules.json',
 ] as const;
 

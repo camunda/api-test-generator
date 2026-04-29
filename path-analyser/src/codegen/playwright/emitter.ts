@@ -138,6 +138,7 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   lines.push("import { extractInto, seedBinding } from './support/seeding';");
+  lines.push("import { resolveFixture } from './support/fixtures';");
   lines.push('');
   if (needsValidation) {
     // Resolve responses.json relative to this spec file so the suite is
@@ -325,26 +326,8 @@ function renderScenarioTest(
       body.push(`    }`);
       body.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
         if (typeof v === 'string' && v.startsWith('@@FILE:')) {
-          let p = v.slice('@@FILE:'.length);
-          // Resolve relative paths against likely fixture locations
-          const fsMod = await import('fs');
-          const pathMod = await import('path');
-          const candidates = [
-            p,
-            pathMod.resolve(process.cwd(), p),
-    // When running from path-analyser dir
-    pathMod.resolve(process.cwd(), 'fixtures', p),
-    // When running from repo root
-    pathMod.resolve(process.cwd(), 'path-analyser/fixtures', p),
-            // when running compiled tests from dist/generated-tests
-            typeof __dirname !== 'undefined' ? pathMod.resolve(__dirname, '../../fixtures', p) : undefined,
-            typeof __dirname !== 'undefined' ? pathMod.resolve(__dirname, '../fixtures', p) : undefined
-          ].filter(Boolean) as string[];
-          let buf: Buffer | undefined;
-          for (const cand of candidates) {
-            try { buf = await fsMod.promises.readFile(cand); break; } catch {}
-          }
-          if (!buf) { throw new Error('Fixture not found: ' + p); }
+          const p = v.slice('@@FILE:'.length);
+          const buf = await resolveFixture(p);
           const name = p.split('/').pop() || 'file';
           multipart[k] = { name, mimeType: 'application/octet-stream', buffer: buf };
         } else {
