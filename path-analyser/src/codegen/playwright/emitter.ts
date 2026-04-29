@@ -227,24 +227,33 @@ function renderScenarioTest(
     }
   }
   // Universal-seed prologue derived from domain-semantics.json#globalContextSeeds.
-  // Each entry emits an idempotent `=== undefined` guard so the bindings loop
-  // above (which may already have populated the binding from a literal value
-  // or from seedBinding for __PENDING__) is never overwritten. Entries that
-  // declare a defaultSentinel + stripFromMultipartWhenDefault also emit a
-  // `__<fieldName>IsDefault` local that drives the multipart skip branch
-  // below — this is the only place the emitter knows about the sentinel.
+  // Each entry emits a single nullish-coalesced assignment that is idempotent
+  // over all three bindings-loop outcomes above:
+  //   - literal binding (`ctx['<k>'] = "value";`) — `??` short-circuits, value preserved
+  //   - `__PENDING__` already seeded by the in-loop `=== undefined` guard — `??` short-circuits
+  //   - no bindings-loop assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
+  // This replaces the pre-#86 unconditional `if (ctx[...] === undefined) { ... }`
+  // form, which was dead code in the third case. `??` (not `=== undefined`) is
+  // intentional: null bindings are not produced by the planner today, and a
+  // null tenant would be semantically equivalent to "no tenant" anyway.
+  // Revisit before tightening to `=== undefined` if the planner ever starts
+  // emitting null literals in `s.bindings`.
+  //
+  // Entries that declare a defaultSentinel + stripFromMultipartWhenDefault
+  // also emit a `__<fieldName>IsDefault` local that drives the multipart
+  // skip branch below — this is the only place the emitter knows about the
+  // sentinel.
   //
   // Safety: `binding`, `fieldName`, `seedRule` are all required by the
   // domain-semantics validator (#87) to match `/^[A-Za-z_$][A-Za-z0-9_$]*$/`,
   // and `defaultSentinel` is required to contain no single quotes,
   // backslashes, or line terminators. That lets us interpolate them
   // directly into emitted single-quoted TS string literals without an
-  // escape pass and preserves byte identity with the pre-#87 hand-written
-  // strings.
+  // escape pass.
   const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
   for (const seed of globalContextSeeds) {
     body.push(
-      `  if (ctx['${seed.binding}'] === undefined) { ctx['${seed.binding}'] = seedBinding('${seed.seedRule}'); }`,
+      `  ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? seedBinding('${seed.seedRule}');`,
     );
     if (seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined) {
       const local = `__${seed.fieldName}IsDefault`;
