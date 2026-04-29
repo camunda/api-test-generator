@@ -259,6 +259,35 @@ export interface DomainSemantics {
   // semantic type T witnesses the existence of state `semanticTypes[T].witnesses`.
   // The loader uses this to populate producersByState from producersByType.
   semanticTypes?: Record<string, SemanticTypeSpec>;
+  // #87: bindings that every emitted scenario must seed before its request
+  // plan runs (e.g. the default-tenant identifier under single-tenant mode).
+  // The Playwright emitter consumes this list to derive its universal-seed
+  // logic so the codegen layer carries no hard-coded bind names or sentinel
+  // values.
+  globalContextSeeds?: GlobalContextSeed[];
+}
+
+/**
+ * One entry in {@link DomainSemantics.globalContextSeeds}. Drives the
+ * Playwright emitter's per-scenario seed prologue: for every entry the
+ * emitter writes a `ctx[<binding>] ??= seedBinding('<seedRule>')` line and,
+ * when {@link defaultSentinel} + {@link stripFromMultipartWhenDefault} are
+ * present, a multipart-loop branch that drops {@link fieldName} when the
+ * binding equals the sentinel.
+ */
+export interface GlobalContextSeed {
+  /** ctx[<binding>] key the seed populates. */
+  binding: string;
+  /** Request-body / multipart field name this binding maps to. */
+  fieldName: string;
+  /** Key passed to seedBinding() at runtime; must match a rule in seed-rules.json. */
+  seedRule: string;
+  /** Magic value that, when present in ctx[<binding>], triggers field-stripping in multipart bodies. */
+  defaultSentinel?: string;
+  /** If true, the emitter inserts a multipart-loop branch that drops {@link fieldName} when ctx[<binding>] equals {@link defaultSentinel}. */
+  stripFromMultipartWhenDefault?: boolean;
+  /** Free-form documentation for maintainers. */
+  rationale?: string;
 }
 
 export interface SemanticTypeSpec {

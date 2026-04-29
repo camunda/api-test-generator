@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { EndpointScenarioCollection } from '../types.js';
+import type { DomainSemantics, EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
@@ -20,6 +20,23 @@ registerEmitter(PlaywrightEmitter);
 function parseScenarioCollection(text: string): EndpointScenarioCollection {
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
   return JSON.parse(text) as EndpointScenarioCollection;
+}
+
+/**
+ * Load `globalContextSeeds` from `domain-semantics.json`. The full sidecar
+ * is validated by graphLoader during planning; here we only read the seeds
+ * to feed the emitter, so a missing or malformed file is non-fatal — the
+ * emitter simply won't write a universal-seed prologue.
+ */
+async function loadGlobalContextSeeds(baseDir: string): Promise<GlobalContextSeed[]> {
+  try {
+    const text = await fs.readFile(path.join(baseDir, 'domain-semantics.json'), 'utf8');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const parsed = JSON.parse(text) as DomainSemantics;
+    return parsed.globalContextSeeds ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function printUsage(): void {
@@ -75,6 +92,7 @@ async function run() {
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
+  const globalContextSeeds = await loadGlobalContextSeeds(baseDir);
 
   if (positional === '--all') {
     let count = 0;
@@ -87,6 +105,7 @@ async function run() {
           outDir,
           suiteName: parsed.endpoint.operationId,
           mode: 'feature',
+          globalContextSeeds,
         });
         count++;
       } catch (e) {
@@ -123,6 +142,7 @@ async function run() {
     outDir,
     suiteName: endpointOpId,
     mode: 'feature',
+    globalContextSeeds,
   });
   console.log('Generated test suite for', endpointOpId, 'at', outDir, `(target: ${emitter.id})`);
 }

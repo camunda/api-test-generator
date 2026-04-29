@@ -59,6 +59,23 @@
           "valueBindings": {"type": "object", "additionalProperties": {"type": "string"}}
         }
       }
+    },
+    "globalContextSeeds": {
+      "description": "Bindings that every emitted scenario must seed into ctx before its request plan runs (e.g. the default-tenant identifier under single-tenant mode). Drives the emitter's universal-seed logic so the codegen layer carries no hard-coded bind names or sentinel values.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["binding", "fieldName", "seedRule"],
+        "additionalProperties": false,
+        "properties": {
+          "binding": {"type": "string", "description": "ctx[<binding>] key the seed populates."},
+          "fieldName": {"type": "string", "description": "Request-body / multipart field name this binding maps to."},
+          "seedRule": {"type": "string", "description": "Key passed to seedBinding() at runtime; must match a rule in seed-rules.json."},
+          "defaultSentinel": {"type": "string", "description": "Magic value that, when present in ctx[<binding>], triggers field-stripping in multipart bodies."},
+          "stripFromMultipartWhenDefault": {"type": "boolean", "description": "If true, the emitter inserts a multipart-loop branch that drops the field when ctx[<binding>] equals the defaultSentinel."},
+          "rationale": {"type": "string"}
+        }
+      }
     }
   }
 }

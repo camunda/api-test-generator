@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { EndpointScenarioCollection } from '../types.js';
-import type { Emitter } from './emitter.js';
+import type { EmitContext, Emitter } from './emitter.js';
 
 /**
  * Write all files emitted by an {@link Emitter} into `outDir`. Centralising
@@ -13,7 +13,7 @@ import type { Emitter } from './emitter.js';
 export async function writeEmitted(
   emitter: Emitter,
   collection: EndpointScenarioCollection,
-  ctx: { outDir: string; suiteName: string; mode: 'feature' | 'integration' },
+  ctx: EmitContext,
 ): Promise<string[]> {
   const files = await emitter.emit(collection, ctx);
   const written: string[] = [];

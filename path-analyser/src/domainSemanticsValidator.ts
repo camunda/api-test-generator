@@ -56,6 +56,17 @@ const OperationDomainRequirementsSchema = z
   })
   .passthrough();
 
+const GlobalContextSeedSchema = z
+  .object({
+    binding: z.string().min(1),
+    fieldName: z.string().min(1),
+    seedRule: z.string().min(1),
+    defaultSentinel: z.string().optional(),
+    stripFromMultipartWhenDefault: z.boolean().optional(),
+    rationale: z.string().optional(),
+  })
+  .passthrough();
+
 // Top-level shape — `passthrough` so unrelated fields (operationArtifactRules,
 // artifactFileKinds, semanticTypeToArtifactKind, identifiers, version, $schema)
 // flow through unmodified.
@@ -66,6 +77,7 @@ const DomainSemanticsShape = z
     semanticTypes: z.record(z.string(), SemanticTypeSpecSchema).optional(),
     artifactKinds: z.record(z.string(), ArtifactKindSpecSchema).optional(),
     operationRequirements: z.record(z.string(), OperationDomainRequirementsSchema).optional(),
+    globalContextSeeds: z.array(GlobalContextSeedSchema).optional(),
   })
   .passthrough();
 
@@ -198,6 +210,33 @@ function checkDisjunctionMemberResolves(d: DomainSemanticsShape): CrossRefIssue[
   return issues;
 }
 
+// #87: every globalContextSeeds entry must have a unique `binding` so the
+// emitter's per-binding sentinel local (`__<fieldName>IsDefault`) and seed
+// line don't collide. Also reject `stripFromMultipartWhenDefault: true`
+// without a `defaultSentinel` — the strip branch needs something to compare
+// against, otherwise the emitter would have to choose a fallback sentinel
+// itself (re-introducing the very hard-coding this entry is meant to remove).
+function checkGlobalContextSeedsCoherent(d: DomainSemanticsShape): CrossRefIssue[] {
+  const issues: CrossRefIssue[] = [];
+  const seen = new Set<string>();
+  for (const seed of d.globalContextSeeds ?? []) {
+    if (seen.has(seed.binding)) {
+      issues.push({
+        code: 'globalContextSeedBindingUnique',
+        message: `globalContextSeeds contains duplicate binding "${seed.binding}"`,
+      });
+    }
+    seen.add(seed.binding);
+    if (seed.stripFromMultipartWhenDefault === true && seed.defaultSentinel === undefined) {
+      issues.push({
+        code: 'globalContextSeedStripRequiresSentinel',
+        message: `globalContextSeeds entry for binding "${seed.binding}" sets stripFromMultipartWhenDefault but has no defaultSentinel`,
+      });
+    }
+  }
+  return issues;
+}
+
 const CROSS_REF_CHECKS = [
   checkArtifactKindStateDeclared,
   checkArtifactKindWitnessDeclared,
@@ -205,6 +244,7 @@ const CROSS_REF_CHECKS = [
   checkSemanticBindingTargetResolves,
   checkDisjunctionNotWitnessRedundant,
   checkDisjunctionMemberResolves,
+  checkGlobalContextSeedsCoherent,
 ] as const;
 
 // Composed schema: structural shape + every cross-reference invariant.
