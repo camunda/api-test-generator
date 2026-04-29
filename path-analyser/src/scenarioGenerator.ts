@@ -707,9 +707,9 @@ function deferForMissingPrereqs(
 }
 
 // Issue #58: when an authoritative semantic producer is rejected because
-// its `domainRequiresAll` is unmet, schedule a domain producer for the
-// first missing state (transitive prereqs included) so the candidate can
-// be revisited on a subsequent BFS iteration.
+// its `domainRequiresAll` is unmet, schedule domain producers for any
+// missing state in the transitive closure (gatherDomainPrerequisites)
+// so the candidate can be revisited on a subsequent BFS iteration.
 //
 // Only authoritative providers (`providerMap[targetSemantic] === true`)
 // are deferred. Deferring incidental producers would generate spurious
@@ -844,8 +844,16 @@ function deferForMissingDomainPrereqs(
     });
     const newOps = [...state.ops, candidateOpId];
     const newProductionMap = new Map(state.productionMap);
+    // Only record productionMap entries for semantics that were actually
+    // added to `newProduced`. For createDeployment, applyArtifactRuleSelection
+    // intentionally limits the produced set based on the selected artifact
+    // bundle; using `candidateNode.produces` unconditionally would make
+    // productionMap claim semantics (Decision*/Form keys, etc.) the
+    // candidate didn't actually produce in this scenario.
     candidateNode.produces.forEach((s) => {
-      if (!newProductionMap.has(s)) newProductionMap.set(s, candidateOpId);
+      if (newProduced.has(s) && !newProductionMap.has(s)) {
+        newProductionMap.set(s, candidateOpId);
+      }
     });
     // Mirror the semantic-producer branch's createDeployment seeding so
     // a deferred deployment step still surfaces a process-definition
