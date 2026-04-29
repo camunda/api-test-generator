@@ -36,8 +36,20 @@ async function loadGlobalContextSeeds(baseDir: string): Promise<GlobalContextSee
   let text: string;
   try {
     text = await fs.readFile(path.join(baseDir, 'domain-semantics.json'), 'utf8');
-  } catch {
-    return [];
+  } catch (error) {
+    // Only treat a missing sidecar as non-fatal. EACCES, EISDIR, transient
+    // I/O errors, etc. all indicate a real operational problem and must
+    // surface so the build fails loudly rather than silently emitting a
+    // suite without its universal-seed prologue.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      Reflect.get(error, 'code') === 'ENOENT'
+    ) {
+      return [];
+    }
+    throw error;
   }
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
   const parsed = JSON.parse(text) as unknown;

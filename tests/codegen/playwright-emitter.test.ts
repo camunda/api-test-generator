@@ -423,3 +423,81 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
   });
 });
+
+// Boundary safety guards (#87 review): the public emitter entry points
+// re-validate `globalContextSeeds` so a programmatic caller that bypasses
+// the loader (codegen/index.ts) still cannot smuggle malformed input
+// through to the string-interpolation sites in the emitted suite.
+describe('emitter: boundary safety re-validation (#87 review)', () => {
+  test('rejects unsafe identifier in binding via PlaywrightEmitter.emit', async () => {
+    const badSeed = {
+      binding: 'tenant-id', // '-' is not safe-identifier syntax
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+    } satisfies GlobalContextSeed;
+    await expect(
+      PlaywrightEmitter.emit(COLLECTION, {
+        outDir: '/unused',
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [badSeed],
+      }),
+    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier/);
+  });
+
+  test('rejects duplicate fieldName via renderPlaywrightSuite', () => {
+    const seedA: GlobalContextSeed = {
+      binding: 'tenantIdVar',
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+    };
+    const seedB: GlobalContextSeed = {
+      binding: 'orgIdVar',
+      fieldName: 'tenantId', // duplicate
+      seedRule: 'orgIdVar',
+    };
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [seedA, seedB],
+      }),
+    ).toThrow(/globalContextSeedFieldNameUnique|duplicate fieldName/);
+  });
+
+  test('rejects unsafe sentinel (newline) via renderPlaywrightSuite', () => {
+    const badSeed: GlobalContextSeed = {
+      binding: 'tenantIdVar',
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+      defaultSentinel: 'line1\nline2',
+    };
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [badSeed],
+      }),
+    ).toThrow(/globalContextSeedSentinelSafe|line terminator|control char/);
+  });
+
+  test('accepts the production tenant seed shape', () => {
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [TENANT_SEED],
+      }),
+    ).not.toThrow();
+  });
+
+  test('empty seeds array is a no-op (no validation triggered)', () => {
+    expect(() =>
+      renderPlaywrightSuite(COLLECTION, {
+        suiteName: 'createWidget',
+        mode: 'feature',
+        globalContextSeeds: [],
+      }),
+    ).not.toThrow();
+  });
+});

@@ -348,3 +348,39 @@ export function validateDomainSemantics(raw: unknown): DomainSemanticsValidation
     return { invariant, message: issue.message };
   });
 }
+
+/**
+ * Boundary-level safety assertion for `globalContextSeeds`.
+ *
+ * The Playwright emitter interpolates `binding`, `fieldName`, `seedRule`,
+ * and `defaultSentinel` directly into emitted TS source as identifiers and
+ * single-quoted string literals (#87). The loader validates the seeds when
+ * reading `domain-semantics.json`, but the public emitter entry points
+ * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`)
+ * accept a `globalContextSeeds` argument from any caller. This helper
+ * re-validates at that boundary so a programmatic caller cannot bypass
+ * the loader's safety net and produce broken or injection-vulnerable
+ * generated suites.
+ *
+ * Throws on any structural issue (Zod `.strict()` schema) or any
+ * cross-seed coherence violation (uniqueness, identifier safety, sentinel
+ * char safety, strip-requires-sentinel). Returns silently on success.
+ *
+ * The validation is intentionally redundant with `validateDomainSemantics`
+ * — both surfaces use the same `GlobalContextSeedSchema` and
+ * `checkGlobalContextSeedsCoherent` so they cannot drift.
+ */
+export function assertSafeGlobalContextSeeds(seeds: readonly unknown[]): void {
+  const arrayResult = z.array(GlobalContextSeedSchema).safeParse(seeds);
+  if (!arrayResult.success) {
+    const formatted = arrayResult.error.issues
+      .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
+    throw new Error(`globalContextSeeds failed structural validation:\n${formatted}`);
+  }
+  const issues = checkGlobalContextSeedsCoherent({ globalContextSeeds: arrayResult.data });
+  if (issues.length > 0) {
+    const formatted = issues.map((i) => `  - [${i.code}] ${i.message}`).join('\n');
+    throw new Error(`globalContextSeeds failed coherence validation:\n${formatted}`);
+  }
+}

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { assertSafeGlobalContextSeeds } from '../../domainSemanticsValidator.js';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
@@ -98,6 +99,15 @@ export const PlaywrightEmitter: Emitter = {
 };
 
 function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOptions): string {
+  // Boundary safety re-check (#87 review): every public entry point —
+  // renderPlaywrightSuite, emitPlaywrightSuite, PlaywrightEmitter.emit —
+  // funnels through here. Re-validating means a programmatic caller that
+  // bypasses the loader cannot smuggle malformed seeds through to the
+  // string-interpolation sites below. The loader (codegen/index.ts) also
+  // validates, so this is intentionally redundant defense-in-depth.
+  if (opts.globalContextSeeds && opts.globalContextSeeds.length > 0) {
+    assertSafeGlobalContextSeeds(opts.globalContextSeeds);
+  }
   const lines: string[] = [];
   const suiteName = opts.suiteName || collection.endpoint.operationId;
 
