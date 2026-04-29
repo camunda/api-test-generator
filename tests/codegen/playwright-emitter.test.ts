@@ -120,8 +120,12 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
 // `__seededTenant` never appears anywhere in the output.
 describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? form, #86)', () => {
   const TENANT_FALLBACK = `ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`;
-  // The pre-#86 form. Must not reappear in the universal-seed prologue.
-  const PRE_86_TENANT_GUARD = `ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
+  // The pre-#86 universal-seed-prologue form. The bindings loop *also* emits
+  // exactly this string for a `__PENDING__` binding referenced by a template,
+  // so absence is asserted by counting occurrences (0 for every shape *except*
+  // __PENDING__-referenced-by-template, where the count is exactly 1 — proving
+  // the prologue did not also emit it).
+  const FULL_TENANT_GUARD = `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
 
   // Count occurrences of `needle` in `haystack` without regex escaping.
   function countOccurrences(haystack: string, needle: string): number {
@@ -186,7 +190,8 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).toContain(`ctx['tenantIdVar'] = "acme";`);
     expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     // The universal-seed prologue must not reintroduce the pre-#86 `=== undefined` guard.
-    expect(content).not.toContain(PRE_86_TENANT_GUARD);
+    // Bindings loop emits a literal here, not a guard, so the full guard count is 0.
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
@@ -197,9 +202,11 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     // The in-bindings-loop `=== undefined` guard for __PENDING__ is intentional —
     // it runs *before* the universal-seed prologue, and a duplicate seedBinding
     // call there would be wasted. The ?? line then short-circuits over it.
-    expect(content).toContain(
-      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
-    );
+    //
+    // Asserting exactly-one occurrence is a class-scoped guard against the
+    // emitter regressing and re-emitting the pre-#86 guard form in the
+    // universal-seed prologue as well (which would push the count to 2).
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(1);
     expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     expect(content).not.toMatch(/__seededTenant/);
   });
@@ -213,7 +220,9 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     );
     expect(content).not.toContain(`ctx['tenantIdVar'] = "ignored-because-extracted";`);
     expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
-    expect(content).not.toContain(PRE_86_TENANT_GUARD);
+    // Bindings loop skips this case (extraction wins); prologue must not
+    // re-emit the pre-#86 guard either.
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
@@ -221,7 +230,7 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     const content = await renderFirst(buildCollectionWithBindings({}));
     expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     // Pre-#86 dead-guard must not reappear when the bindings loop assigned nothing.
-    expect(content).not.toContain(PRE_86_TENANT_GUARD);
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
 });
