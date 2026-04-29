@@ -234,10 +234,11 @@ function renderScenarioTest(
   //   - no bindings-loop assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
   // This replaces the pre-#86 unconditional `if (ctx[...] === undefined) { ... }`
   // form, which was dead code in the third case. `??` (not `=== undefined`) is
-  // intentional: null bindings are not produced by the planner today, and a
-  // null tenant would be semantically equivalent to "no tenant" anyway.
-  // Revisit before tightening to `=== undefined` if the planner ever starts
-  // emitting null literals in `s.bindings`.
+  // intentional: any nullish binding value (`null` or `undefined`) is treated
+  // as missing and triggers seeding. The planner does not currently emit `null`
+  // literals in `s.bindings` for any global seed; revisit before tightening to
+  // `=== undefined` if a future seed ever needs `null` to remain distinct from
+  // "missing".
   //
   // Entries that declare a defaultSentinel + stripFromMultipartWhenDefault
   // also emit a `__<fieldName>IsDefault` local that drives the multipart
