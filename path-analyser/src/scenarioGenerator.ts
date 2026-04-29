@@ -479,7 +479,18 @@ export function generateScenariosForEndpoint(
           // Limited to authoritative producers (mirroring the
           // deferForMissingPrereqs rule) to avoid spurious incidental
           // chains.
-          if (deferForMissingDomainPrereqs(graph, producerNode, targetSemantic, state, seen, queue, endpointOpId)) continue;
+          if (
+            deferForMissingDomainPrereqs(
+              graph,
+              producerNode,
+              targetSemantic,
+              state,
+              seen,
+              queue,
+              endpointOpId,
+            )
+          )
+            continue;
           continue; // wait until domain states present
         }
       }

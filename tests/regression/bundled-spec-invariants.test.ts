@@ -278,9 +278,10 @@ describe('bundled-spec invariants: planner output', () => {
         );
       }
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      const raw = JSON.parse(
-        readFileSync(join(SCENARIOS_DIR, file), 'utf8'),
-      ) as { unsatisfied?: boolean; scenarios: unknown[] };
+      const raw = JSON.parse(readFileSync(join(SCENARIOS_DIR, file), 'utf8')) as {
+        unsatisfied?: boolean;
+        scenarios: unknown[];
+      };
       if (!scen.scenarios.length || raw.unsatisfied === true) {
         offenders.push({
           opId,
@@ -455,9 +456,7 @@ describe('bundled-spec invariants: planner output', () => {
           // `<placeholderName>Var`, the names never meet. Tracked separately
           // as a follow-up to #58 (BFS deferral); the class-scoped fix will
           // remove this carve-out and add a generic alias check.
-          const param = parameters.find(
-            (p) => p.name === ph && p.location === 'path',
-          );
+          const param = parameters.find((p) => p.name === ph && p.location === 'path');
           if (param?.semanticType) {
             const aliasVar = `${param.semanticType.charAt(0).toLowerCase()}${param.semanticType.slice(1)}Var`;
             if (isUsableBinding(bindings[aliasVar])) return false;
