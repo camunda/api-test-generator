@@ -152,3 +152,45 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
     expect(g.operations.opOne?.produces.filter((s) => s === 'Foo').length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Class-scoped guard: load-time "fail loud" invariant for an unreadable
+// or malformed domain-semantics.json. A missing sidecar (ENOENT) must
+// continue to disable domain analysis silently, but anything else — bad
+// JSON, permissions error, validator failure — must surface as a thrown
+// DomainSemanticsValidationFailure rather than be swallowed.
+// ---------------------------------------------------------------------------
+describe('graphLoader: domain-semantics.json fail-loud invariant', () => {
+  it('does not throw when domain-semantics.json is absent (ENOENT is tolerated)', async () => {
+    writeFileSync(
+      join(graphDir, 'operation-dependency-graph.json'),
+      JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
+    );
+    // intentionally do NOT write domain-semantics.json
+    await expect(loadGraph(baseDir)).resolves.toBeDefined();
+  });
+
+  it('throws DomainSemanticsValidationFailure when domain-semantics.json is malformed JSON', async () => {
+    writeFileSync(
+      join(graphDir, 'operation-dependency-graph.json'),
+      JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
+    );
+    writeFileSync(join(baseDir, 'domain-semantics.json'), '{ this is not valid json');
+    await expect(loadGraph(baseDir)).rejects.toThrow(/domain-semantics\.json is not valid JSON/);
+  });
+
+  it('throws DomainSemanticsValidationFailure when domain-semantics.json fails validation', async () => {
+    writeFileSync(
+      join(graphDir, 'operation-dependency-graph.json'),
+      JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
+    );
+    writeFileSync(
+      join(baseDir, 'domain-semantics.json'),
+      JSON.stringify({
+        runtimeStates: { Known: {} },
+        artifactKinds: { kindA: { producesStates: ['UndeclaredState'] } },
+      }),
+    );
+    await expect(loadGraph(baseDir)).rejects.toThrow(/artifactKindStateDeclared/);
+  });
+});
