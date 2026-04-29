@@ -98,15 +98,47 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   });
 });
 
-// Regression guard for PR #79 / issue #80: the emitter no longer declares or
-// writes a `__seededTenant` flag. The `tenantIdVar` fallback is now a single
-// idempotent `=== undefined` guard. These tests exercise the three shapes the
-// bindings loop can produce for `tenantIdVar` (literal value, __PENDING__
-// auto-seed, and extracted-by-an-earlier-step) plus a control with no
-// `tenantIdVar` binding at all, asserting the simplified guard appears
-// exactly once and `__seededTenant` never appears anywhere in the output.
-describe('emitter: tenantIdVar seeding (no __seededTenant flag, #79/#80)', () => {
-  const TENANT_FALLBACK = `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
+// Regression guard for PR #79 / issue #80 (no `__seededTenant` flag) and
+// issue #86 (universal-seed prologue collapsed to nullish-coalesce).
+//
+// The universal-seed prologue derived from globalContextSeeds emits one
+// idempotent line per seed:
+//   ctx['<binding>'] = ctx['<binding>'] ?? seedBinding('<seedRule>');
+// `??` short-circuits over both literal assignments from the bindings loop
+// and the `__PENDING__`-guarded auto-seed (which still uses `=== undefined`
+// in the bindings loop because it runs *before* the universal-seed prologue
+// and a duplicate seedBinding call there would be wasteful). When no
+// bindings-loop assignment exists for the seed, `??` falls through to
+// seedBinding(...). This replaces the pre-#86 unconditional `=== undefined`
+// guard, which was dead code in the no-assignment case.
+//
+// These tests exercise the three shapes the bindings loop can produce for
+// `tenantIdVar` (literal value, __PENDING__ auto-seed, extracted-by-an-
+// earlier-step) plus a control with no `tenantIdVar` binding at all,
+// asserting the `??` line appears exactly once, the universal-seed prologue
+// never re-emits the `=== undefined` form for that binding, and
+// `__seededTenant` never appears anywhere in the output.
+describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? form, #86)', () => {
+  const TENANT_FALLBACK = `ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`;
+  // The pre-#86 universal-seed-prologue form. The bindings loop *also* emits
+  // exactly this string for a `__PENDING__` binding referenced by a template,
+  // so absence is asserted by counting occurrences (0 for every shape *except*
+  // __PENDING__-referenced-by-template, where the count is exactly 1 — proving
+  // the prologue did not also emit it).
+  const FULL_TENANT_GUARD = `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
+
+  // Count occurrences of `needle` in `haystack` without regex escaping.
+  function countOccurrences(haystack: string, needle: string): number {
+    if (needle.length === 0) return 0;
+    let count = 0;
+    let from = 0;
+    while (true) {
+      const i = haystack.indexOf(needle, from);
+      if (i === -1) return count;
+      count += 1;
+      from = i + needle.length;
+    }
+  }
 
   function buildCollectionWithBindings(
     bindings: Record<string, unknown>,
@@ -153,25 +185,33 @@ describe('emitter: tenantIdVar seeding (no __seededTenant flag, #79/#80)', () =>
     return file.content;
   }
 
-  test('literal tenantIdVar binding seeds the value and emits the simplified fallback', async () => {
+  test('literal tenantIdVar binding seeds the value and emits the ?? fallback exactly once', async () => {
     const content = await renderFirst(buildCollectionWithBindings({ tenantIdVar: 'acme' }));
     expect(content).toContain(`ctx['tenantIdVar'] = "acme";`);
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
+    // The universal-seed prologue must not reintroduce the pre-#86 `=== undefined` guard.
+    // Bindings loop emits a literal here, not a guard, so the full guard count is 0.
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('__PENDING__ tenantIdVar referenced by a template emits a guarded auto-seed and the simplified fallback', async () => {
+  test('__PENDING__ tenantIdVar referenced by a template emits a guarded auto-seed and the ?? fallback exactly once', async () => {
     const content = await renderFirst(
       buildCollectionWithBindings({ tenantIdVar: '__PENDING__' }, { templateRefsTenant: true }),
     );
-    expect(content).toContain(
-      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
-    );
-    expect(content).toContain(TENANT_FALLBACK);
+    // The in-bindings-loop `=== undefined` guard for __PENDING__ is intentional —
+    // it runs *before* the universal-seed prologue, and a duplicate seedBinding
+    // call there would be wasted. The ?? line then short-circuits over it.
+    //
+    // Asserting exactly-one occurrence is a class-scoped guard against the
+    // emitter regressing and re-emitting the pre-#86 guard form in the
+    // universal-seed prologue as well (which would push the count to 2).
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(1);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('extractionVars tenantIdVar skips eager seeding but still emits the simplified fallback', async () => {
+  test('extractionVars tenantIdVar skips eager seeding but still emits the ?? fallback exactly once', async () => {
     const content = await renderFirst(
       buildCollectionWithBindings(
         { tenantIdVar: 'ignored-because-extracted' },
@@ -179,13 +219,18 @@ describe('emitter: tenantIdVar seeding (no __seededTenant flag, #79/#80)', () =>
       ),
     );
     expect(content).not.toContain(`ctx['tenantIdVar'] = "ignored-because-extracted";`);
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
+    // Bindings loop skips this case (extraction wins); prologue must not
+    // re-emit the pre-#86 guard either.
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('no tenantIdVar binding at all still emits the simplified fallback (control)', async () => {
+  test('no tenantIdVar binding at all emits the ?? fallback exactly once (#86: was previously a dead `=== undefined` guard)', async () => {
     const content = await renderFirst(buildCollectionWithBindings({}));
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
+    // Pre-#86 dead-guard must not reappear when the bindings loop assigned nothing.
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
 });
@@ -375,13 +420,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
       globalContextSeeds: [TENANT_SEED, orgSeed],
     });
     const c = file.content;
-    // Both seeds emit an idempotent ?? guard.
-    expect(c).toContain(
-      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
-    );
-    expect(c).toContain(
-      `if (ctx['orgIdVar'] === undefined) { ctx['orgIdVar'] = seedBinding('orgIdVar'); }`,
-    );
+    // Both seeds emit an idempotent ?? assignment in the universal-seed prologue (#86).
+    expect(c).toContain(`ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`);
+    expect(c).toContain(`ctx['orgIdVar'] = ctx['orgIdVar'] ?? seedBinding('orgIdVar');`);
     // Both seeds declare a sentinel local named after the field.
     expect(c).toContain(`const __tenantIdIsDefault = ctx['tenantIdVar'] === '<default>';`);
     expect(c).toContain(`const __orgIdIsDefault = ctx['orgIdVar'] === '<root>';`);
@@ -416,9 +457,7 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
       globalContextSeeds: [seedOnly],
     });
     const c = file.content;
-    expect(c).toContain(
-      `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
-    );
+    expect(c).toContain(`ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`);
     expect(c).not.toMatch(/__tenantIdIsDefault/);
     expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
   });
