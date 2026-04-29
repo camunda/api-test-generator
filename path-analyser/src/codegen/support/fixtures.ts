@@ -31,6 +31,9 @@ function errnoCode(err: unknown): string | undefined {
  * fixture issues isn't reduced to a generic "not found".
  */
 export async function resolveFixture(p: string): Promise<Buffer> {
+  if (typeof p !== 'string' || p.trim() === '') {
+    throw new Error('Fixture path missing after @@FILE:');
+  }
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates: string[] = [
     p,
