@@ -466,7 +466,32 @@ export function generateScenariosForEndpoint(
         const missingDomain = producerNode.domainRequiresAll.filter(
           (ds) => !state.domainStates.has(ds),
         );
-        if (missingDomain.length) continue; // wait until domain states present
+        if (missingDomain.length) {
+          // Issue #58: when an authoritative semantic producer is blocked
+          // solely by missing domain prereqs, defer it by scheduling the
+          // domain producers first. Without this branch BFS silently
+          // drops the candidate — the domain-progression branch above
+          // only fires when no semantic remains, so endpoints whose
+          // single authoritative producer is domain-gated would never
+          // receive a chain (cf. completeJob → activateJobs gated on
+          // ProcessInstanceExists+ModelHasServiceTaskType).
+          //
+          // Limited to authoritative producers (mirroring the
+          // deferForMissingPrereqs rule) to avoid spurious incidental
+          // chains. The helper's return value is informational; the
+          // semantic candidate is skipped either way (we wait until the
+          // domain states surface on a later iteration).
+          deferForMissingDomainPrereqs(
+            graph,
+            producerNode,
+            targetSemantic,
+            state,
+            seen,
+            queue,
+            endpointOpId,
+          );
+          continue; // wait until domain states present
+        }
       }
       // Issue #35: reject candidates whose own required semantic inputs
       // are not produced by an earlier step. Without this guard the
@@ -478,9 +503,34 @@ export function generateScenariosForEndpoint(
 
       const newProduced = new Set(state.produced);
       const newDomainStates = new Set(state.domainStates);
+      // applyArtifactRuleSelection / ensureArtifactBindings mutate
+      // state.artifactsApplied, state.bindingsDraft, and state.modelsDraft
+      // (and may allocate fresh arrays/objects via `state.x ||= …` when
+      // those fields are undefined). The producer-candidate loop iterates
+      // multiple producers against the same parent BFS frame, so passing
+      // the parent `state` directly leaks artifact/model mutations from
+      // one createDeployment candidate into sibling candidates evaluated
+      // later in the same loop. Only the createDeployment path triggers
+      // those mutations — clone artifactsApplied/modelsDraft only there
+      // to avoid extra allocations on the common non-deployment path.
+      // bindingsDraft is cloned unconditionally because the identifier
+      // heuristic below writes to it for every producer.
+      const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
+      let workingState: State;
       if (producerOpId === 'createDeployment') {
-        applyArtifactRuleSelection(graph, producerNode, state, newProduced, newDomainStates);
+        const workingArtifactsApplied = state.artifactsApplied
+          ? [...state.artifactsApplied]
+          : undefined;
+        const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+        workingState = {
+          ...state,
+          artifactsApplied: workingArtifactsApplied,
+          bindingsDraft: workingBindingsDraft,
+          modelsDraft: workingModelsDraft,
+        };
+        applyArtifactRuleSelection(graph, producerNode, workingState, newProduced, newDomainStates);
       } else {
+        workingState = { ...state, bindingsDraft: workingBindingsDraft };
         producerNode.produces.forEach((s) => {
           newProduced.add(s);
         });
@@ -528,14 +578,26 @@ export function generateScenariosForEndpoint(
       // arbitrary producer for them and inserts a spurious step.
       const newOps = [...state.ops, producerOpId];
       const newProductionMap = new Map(state.productionMap);
+      // Only record productionMap entries for semantics that actually
+      // landed in `newProduced`. For createDeployment, applyArtifactRuleSelection
+      // intentionally limits the produced set based on the selected
+      // artifact bundle; recording the full declared `producerNode.produces`
+      // would make productionMap claim semantics (Decision*/Form keys, etc.)
+      // that the candidate didn't actually produce in this scenario
+      // (mirrors the gate in deferForMissingDomainPrereqs).
       producerNode.produces.forEach((s) => {
-        if (!newProductionMap.has(s)) newProductionMap.set(s, producerOpId);
+        if (newProduced.has(s) && !newProductionMap.has(s)) {
+          newProductionMap.set(s, producerOpId);
+        }
       });
       // (newDomainStates already updated above)
 
-      // Draft models & bindings
-      let modelsDraft = state.modelsDraft;
-      const bindingsDraft = { ...(state.bindingsDraft || {}) };
+      // Draft models & bindings — read post-call from workingState so any
+      // models/bindings allocated by applyArtifactRuleSelection /
+      // ensureArtifactBindings (`state.x ||= …`) flow into the enqueued
+      // child without leaking into sibling candidates.
+      let modelsDraft = workingState.modelsDraft;
+      const bindingsDraft = workingState.bindingsDraft ?? {};
       if (producerOpId === 'createDeployment' && !modelsDraft) {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
@@ -567,8 +629,13 @@ export function generateScenariosForEndpoint(
         bootstrapFull: state.bootstrapFull,
         modelsDraft,
         bindingsDraft,
-        providerList: updateProviderList(state.providerList || {}, producerNode, newProductionMap),
-        artifactsApplied: state.artifactsApplied,
+        providerList: updateProviderList(
+          state.providerList || {},
+          producerNode,
+          newProductionMap,
+          newProduced,
+        ),
+        artifactsApplied: workingState.artifactsApplied,
       });
     }
   }
@@ -681,6 +748,205 @@ function deferForMissingPrereqs(
   return true;
 }
 
+// Issue #58: when an authoritative semantic producer is rejected because
+// its `domainRequiresAll` is unmet, schedule domain producers for any
+// missing state in the transitive closure (gatherDomainPrerequisites)
+// so the candidate can be revisited on a subsequent BFS iteration.
+//
+// Only authoritative providers (`providerMap[targetSemantic] === true`)
+// are deferred. Deferring incidental producers would generate spurious
+// scenarios where the incidental's output is unused, mirroring the
+// rationale in `deferForMissingPrereqs`.
+//
+// For each candidate domain producer we enqueue a state with that op
+// appended and the domain state added. Cycle detection and domain
+// prereq chains are handled identically to the dedicated
+// domain-progression branch.
+//
+// Returns true when at least one deferred state was enqueued (the
+// caller should `continue` either way; this is informational).
+function deferForMissingDomainPrereqs(
+  graph: OperationGraph,
+  producerNode: OperationNode,
+  targetSemantic: string | undefined,
+  state: State,
+  seen: Set<string>,
+  queue: State[],
+  endpointOpId: string,
+): boolean {
+  const isAuthoritative = !!targetSemantic && producerNode.providerMap?.[targetSemantic] === true;
+  if (!isAuthoritative) return false;
+  const directMissing = (producerNode.domainRequiresAll ?? []).filter(
+    (ds) => !state.domainStates.has(ds),
+  );
+  if (directMissing.length === 0) return false;
+  const missingAll = gatherDomainPrerequisites(graph, directMissing, state.domainStates);
+  const candidates = new Set<string>();
+  for (const ds of missingAll) {
+    for (const opId of graph.domainProducers?.[ds] ?? []) candidates.add(opId);
+  }
+  let enqueued = false;
+  for (const candidateOpId of candidates) {
+    if (candidateOpId === endpointOpId) continue;
+    const candidateNode = graph.operations[candidateOpId];
+    if (!candidateNode) continue;
+    const indexInPath = state.ops.indexOf(candidateOpId);
+    let nextCycle = state.cycle;
+    if (indexInPath !== -1) {
+      if (state.cycle) continue;
+      nextCycle = true;
+    }
+    // Candidate must have its own domain prereqs satisfied (transitive
+    // missing states are surfaced via `missingAll` so the *next* BFS
+    // iteration will reach them).
+    if (candidateNode.domainRequiresAll?.length) {
+      const missing = candidateNode.domainRequiresAll.filter((d) => !state.domainStates.has(d));
+      if (missing.length) continue;
+    }
+    if (!hasSatisfiedRequiredInputs(candidateNode, state.produced)) continue;
+    // Apply the same artifact-rule selection as the semantic-producer
+    // branch when the deferred domain producer is `createDeployment`,
+    // otherwise we'd treat *all* deployment-advertised semantics
+    // (Decision*/Form keys, etc.) as produced even when the selected
+    // artifact bundle wouldn't yield them. Non-createDeployment
+    // candidates take the unfiltered path (their `produces` is already
+    // the authoritative set).
+    const newProduced = new Set(state.produced);
+    const newDomainStates = new Set(state.domainStates);
+    // applyArtifactRuleSelection mutates state.artifactsApplied,
+    // state.bindingsDraft, and state.modelsDraft (via
+    // ensureArtifactBindings). Only the createDeployment branch
+    // triggers those mutations and the seeding fallback below \u2014
+    // clone the draft collections only on that path so non-deployment
+    // candidates avoid the extra allocations on every BFS iteration.
+    let workingState: State;
+    if (candidateOpId === 'createDeployment') {
+      const workingArtifactsApplied = state.artifactsApplied
+        ? [...state.artifactsApplied]
+        : undefined;
+      const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
+      const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+      workingState = {
+        ...state,
+        artifactsApplied: workingArtifactsApplied,
+        bindingsDraft: workingBindingsDraft,
+        modelsDraft: workingModelsDraft,
+      };
+      applyArtifactRuleSelection(graph, candidateNode, workingState, newProduced, newDomainStates);
+    } else {
+      workingState = state;
+      candidateNode.produces.forEach((s) => {
+        newProduced.add(s);
+      });
+      candidateNode.domainProduces?.forEach((d) => {
+        newDomainStates.add(d);
+      });
+      candidateNode.domainImplicitAdds?.forEach((d) => {
+        newDomainStates.add(d);
+      });
+    }
+    // Require this deferred step to make domain-state progress, else
+    // BFS would loop on the same `seen` signature with no benefit.
+    const domainAddedNow = [...newDomainStates].filter((d) => !state.domainStates.has(d));
+    if (domainAddedNow.length === 0) continue;
+    // Mirror the semantic-producer branch's transitive prereq check:
+    // a newly-added domain state must have its `runtimeStates.requires`
+    // and `capabilities.dependsOn` satisfied within `newDomainStates`,
+    // otherwise we'd mark a state satisfied while its transitive
+    // prerequisites are absent (e.g. `ProcessInstanceExists` requires
+    // `ProcessDefinitionDeployed`).
+    let prereqFailed = false;
+    for (const d of domainAddedNow) {
+      const rs = graph.domain?.runtimeStates?.[d];
+      if (rs?.requires) {
+        for (const req of rs.requires) {
+          if (!newDomainStates.has(req)) {
+            prereqFailed = true;
+            break;
+          }
+        }
+        if (prereqFailed) break;
+      }
+      const cap = graph.domain?.capabilities?.[d];
+      if (cap?.dependsOn) {
+        for (const dep of cap.dependsOn) {
+          if (!newDomainStates.has(dep)) {
+            prereqFailed = true;
+            break;
+          }
+        }
+        if (prereqFailed) break;
+      }
+    }
+    if (prereqFailed) continue;
+    const newNeeded = new Set(state.needed);
+    candidateNode.requires.required.forEach((s) => {
+      newNeeded.add(s);
+    });
+    const newOps = [...state.ops, candidateOpId];
+    const newProductionMap = new Map(state.productionMap);
+    // Only record productionMap entries for semantics that were actually
+    // added to `newProduced`. For createDeployment, applyArtifactRuleSelection
+    // intentionally limits the produced set based on the selected artifact
+    // bundle; using `candidateNode.produces` unconditionally would make
+    // productionMap claim semantics (Decision*/Form keys, etc.) the
+    // candidate didn't actually produce in this scenario.
+    candidateNode.produces.forEach((s) => {
+      if (newProduced.has(s) && !newProductionMap.has(s)) {
+        newProductionMap.set(s, candidateOpId);
+      }
+    });
+    // Mirror the semantic-producer branch's createDeployment seeding so
+    // a deferred deployment step still surfaces a process-definition
+    // binding for downstream consumers.
+    //
+    // Read modelsDraft/bindingsDraft/artifactsApplied from `workingState`
+    // (post-call), not from the pre-call locals. applyArtifactRuleSelection
+    // and ensureArtifactBindings use `state.x ||= …` to allocate new
+    // arrays/objects when their input was undefined; those allocations
+    // land on `workingState.x`, while the pre-call locals stay undefined.
+    // Reading from workingState preserves any artifact-selected
+    // models/bindings/artifactsApplied for the enqueued child state.
+    let modelsDraft = workingState.modelsDraft;
+    const bindingsDraft = workingState.bindingsDraft ?? {};
+    if (candidateOpId === 'createDeployment' && !modelsDraft) {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
+      bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
+      modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
+    }
+    const sig = signature(newOps, newProduced, newNeeded, nextCycle);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    queue.push({
+      produced: newProduced,
+      needed: newNeeded,
+      domainStates: newDomainStates,
+      ops: newOps,
+      cycle: nextCycle,
+      productionMap: newProductionMap,
+      bootstrapSequencesUsed: state.bootstrapSequencesUsed,
+      bootstrapFull: state.bootstrapFull,
+      modelsDraft,
+      bindingsDraft,
+      // Propagate scenario-metadata bookkeeping from `state` and update
+      // providerList for the candidate's produced semantics so later
+      // scenario naming/description stays consistent with the semantic
+      // expansion branch. Read artifactsApplied from `workingState` so
+      // any array allocated by applyArtifactRuleSelection (`state.x ||= []`)
+      // is preserved on the enqueued child without leaking into siblings.
+      providerList: updateProviderList(
+        state.providerList || {},
+        candidateNode,
+        newProductionMap,
+        newProduced,
+      ),
+      artifactsApplied: workingState.artifactsApplied,
+    });
+    enqueued = true;
+  }
+  return enqueued;
+}
+
 // Select minimal artifact rules for createDeployment based on unmet semantic needs.
 function applyArtifactRuleSelection(
   graph: OperationGraph,
@@ -710,22 +976,34 @@ function applyArtifactRuleSelection(
     const remaining = new Set(unmetNeeded);
     const applied: string[] = [];
     const rules = (ruleSpec.rules || []).slice();
+    // Helper: pick the minimal preferred artifact (BPMN, else first).
+    // Used both when no semantics drive coverage and as a fallback when
+    // the greedy loop fails to apply any rule (e.g. when this is invoked
+    // from `deferForMissingDomainPrereqs`, where the outer `state.needed`
+    // contains semantics that no createDeployment rule produces, but we
+    // still need *some* artifact selected so the deferred step makes
+    // domain-state progress (#58 follow-up). Falling back to the
+    // preferred minimal artifact keeps the Decision*/Form-flooding
+    // protection intact while still letting BFS advance.
+    const applyPreferred = () => {
+      const preferred =
+        (ruleSpec.rules || []).find((r) => r.artifactKind === 'bpmnProcess') ??
+        (ruleSpec.rules || [])[0];
+      if (!preferred) return;
+      const semantics = enumerateRuleSemantics(preferred, graph);
+      semantics.forEach((s) => {
+        newProduced.add(s);
+      });
+      const states = enumerateRuleStates(preferred, graph);
+      states.forEach((st) => {
+        newDomainStates.add(st);
+      });
+      ensureArtifactBindings(preferred, graph, state, semantics, states);
+      applied.push(preferred.id ?? preferred.artifactKind);
+    };
     if (remaining.size === 0) {
       // No required semantics drive coverage: pick a single minimal artifact (prefer BPMN) to avoid flooding with unused Decision*/Form semantics.
-      const preferred = rules.find((r) => r.artifactKind === 'bpmnProcess') || rules[0];
-      if (preferred) {
-        const semantics = enumerateRuleSemantics(preferred, graph);
-        semantics.forEach((s) => {
-          newProduced.add(s);
-        });
-        const states = enumerateRuleStates(preferred, graph);
-        states.forEach((st) => {
-          newDomainStates.add(st);
-        });
-        ensureArtifactBindings(preferred, graph, state, semantics, states);
-        if (preferred.id) applied.push(preferred.id);
-        else applied.push(preferred.artifactKind);
-      }
+      applyPreferred();
     } else {
       // Greedy until coverage or exhaustion
       while (remaining.size && rules.length) {
@@ -759,6 +1037,11 @@ function applyArtifactRuleSelection(
         else applied.push(best.artifactKind);
         ensureArtifactBindings(best, graph, state, adds, states);
       }
+      // Greedy exhausted without applying any rule (no rule covers any
+      // unmet `state.needed` semantic). Fall back to the preferred
+      // minimal artifact so the caller still observes a valid
+      // deployment artifact + ProcessDefinitionDeployed domain state.
+      if (applied.length === 0) applyPreferred();
     }
     if (applied.length) {
       state.artifactsApplied ||= [];
@@ -856,12 +1139,26 @@ function updateProviderList(
   existing: Record<string, string[]>,
   producerNode: OperationNode,
   _productionMap: Map<string, string>,
+  newProduced: Set<string>,
 ): Record<string, string[]> {
   const copy: Record<string, string[]> = { ...existing };
   producerNode.produces?.forEach((s: string) => {
+    // Only record providers for semantics that actually landed in
+    // newProduced. For createDeployment, applyArtifactRuleSelection
+    // intentionally limits the produced set based on the selected
+    // artifact bundle; recording the full declared `produces` would
+    // make providerList claim semantics (Decision*/Form keys, etc.)
+    // that the candidate didn't actually produce in this scenario
+    // (mirrors the productionMap gate).
+    if (!newProduced.has(s)) return;
     const opId = producerNode.operationId;
+    // Avoid in-place mutation of inherited arrays: `{ ...existing }` is
+    // shallow, so `copy[s]` is the same array reference as the parent
+    // BFS state's providerList[s]. push()ing into it would leak the
+    // append into the parent (and any sibling state that inherited the
+    // same reference). Allocate a fresh array on every write.
     if (!copy[s]) copy[s] = [opId];
-    else if (!copy[s].includes(opId)) copy[s].push(opId);
+    else if (!copy[s].includes(opId)) copy[s] = [...copy[s], opId];
   });
   return copy;
 }
