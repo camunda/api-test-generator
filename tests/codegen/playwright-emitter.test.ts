@@ -173,3 +173,101 @@ describe('emitter: tenantIdVar seeding (no __seededTenant flag, #79/#80)', () =>
     expect(content).not.toMatch(/__seededTenant/);
   });
 });
+
+// Regression guard for PR #84: the emitter collapses the per-extracted-field
+// `const val_N_M = json...; if (val_N_M !== undefined) { ctx[...] = val_N_M; }`
+// triple into a single `extractInto(ctx, '<bind>', json...)` call. The class-
+// scoped assertions here lock that shape in: any reintroduction of the old
+// `val_N_M` temporary or `!== undefined` ctx-assignment guard fails the test.
+describe('emitter: extractInto helper for response extraction (#84)', () => {
+  function buildCollectionWithExtracts(
+    extracts: { fieldPath: string; bind: string }[],
+  ): EndpointScenarioCollection {
+    return {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'extract case',
+          operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              expect: { status: 200 },
+              extract: extracts,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  async function renderFirst(collection: EndpointScenarioCollection): Promise<string> {
+    const [file] = await PlaywrightEmitter.emit(collection, {
+      outDir: '/unused',
+      suiteName: 'createWidget',
+      mode: 'feature',
+    });
+    return file.content;
+  }
+
+  test('imports extractInto alongside seedBinding from the vendored support module', async () => {
+    const content = await renderFirst(
+      buildCollectionWithExtracts([{ fieldPath: 'widgetKey', bind: 'widgetKeyVar' }]),
+    );
+    expect(content).toContain("import { extractInto, seedBinding } from './support/seeding';");
+  });
+
+  test('emits exactly one extractInto(ctx, ...) call per extract entry', async () => {
+    const content = await renderFirst(
+      buildCollectionWithExtracts([
+        { fieldPath: 'widgetKey', bind: 'widgetKeyVar' },
+        { fieldPath: 'tenantId', bind: 'tenantIdVar' },
+        { fieldPath: 'meta.createdBy', bind: 'createdByVar' },
+      ]),
+    );
+    expect(content).toContain(`extractInto(ctx, 'widgetKeyVar', json?.widgetKey);`);
+    expect(content).toContain(`extractInto(ctx, 'tenantIdVar', json?.tenantId);`);
+    expect(content).toContain(`extractInto(ctx, 'createdByVar', json?.meta?.createdBy);`);
+    const matches = content.match(/extractInto\(ctx, '/g) ?? [];
+    expect(matches).toHaveLength(3);
+  });
+
+  test('reads the response body once per step (single `const json = await ...json()`)', async () => {
+    const content = await renderFirst(
+      buildCollectionWithExtracts([
+        { fieldPath: 'a', bind: 'aVar' },
+        { fieldPath: 'b', bind: 'bVar' },
+      ]),
+    );
+    const jsonReads = content.match(/const json = await \w+\.json\(\);/g) ?? [];
+    expect(jsonReads).toHaveLength(1);
+  });
+
+  test('does not reintroduce the legacy val_N_M temporary or !== undefined ctx guard', async () => {
+    // Class-scoped guard: any reintroduction of the old shape — a
+    // `const val_N_M` temporary or an `if (val_N_M !== undefined) { ctx[...] = ... }`
+    // assignment guard — fails this test, regardless of which extract triggered it.
+    const content = await renderFirst(
+      buildCollectionWithExtracts([
+        { fieldPath: 'widgetKey', bind: 'widgetKeyVar' },
+        { fieldPath: 'tenantId', bind: 'tenantIdVar' },
+      ]),
+    );
+    expect(content).not.toMatch(/const val_\d+_\d+\s*=/);
+    expect(content).not.toMatch(/if\s*\(\s*val_\d+_\d+\s*!==\s*undefined\s*\)/);
+    expect(content).not.toMatch(/if\s*\([^)]+!==\s*undefined\s*\)\s*\{\s*ctx\[/);
+  });
+
+  test('omits the extract block entirely when step.extract is missing or empty', async () => {
+    const noExtracts = await renderFirst(buildCollectionWithExtracts([]));
+    expect(noExtracts).not.toContain('extractInto(');
+    expect(noExtracts).not.toContain('const json = await');
+  });
+});

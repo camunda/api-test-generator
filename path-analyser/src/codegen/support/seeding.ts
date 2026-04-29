@@ -216,3 +216,18 @@ export function seedBinding(varName: string, _opts?: SeedOptions): string {
 export function debugSeed(varName: string): string {
   return seedBinding(varName);
 }
+
+/**
+ * Conditionally bind an extracted response value into the scenario context.
+ *
+ * Preserves the existing binding when `value` is `undefined` so that:
+ *   - seeded values (from `seedBinding`) survive a missing response field
+ *   - earlier extracts in the same scenario aren't clobbered by later steps
+ *     whose response shape doesn't include the same field
+ *
+ * Note: `null` is treated as a real overwrite (matches the prior emitter
+ * semantics, which only guarded against `undefined`).
+ */
+export function extractInto(ctx: Record<string, unknown>, key: string, value: unknown): void {
+  if (value !== undefined) ctx[key] = value;
+}
