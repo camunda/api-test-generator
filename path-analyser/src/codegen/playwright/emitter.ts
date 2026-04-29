@@ -303,8 +303,9 @@ function renderScenarioTest(s: EndpointScenario): string {
     // If this is the final step and scenario expects a success body, validate response shape
     const isErrorScenario = s.expectedResult && s.expectedResult.kind === 'error';
     if (isFinal && hasShape && !isErrorScenario) {
+      const routeSpec = `{ path: ${JSON.stringify(step.pathTemplate)}, method: '${step.method.toUpperCase()}', status: '${step.expect.status}' }`;
       body.push(
-        `    await validateResponse({ path: ${JSON.stringify(step.pathTemplate)}, method: '${step.method.toUpperCase()}', status: '${step.expect.status}' }, ${varName}, { responsesFilePath: __responsesFile });`,
+        `    await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );
     }
     // Extraction
