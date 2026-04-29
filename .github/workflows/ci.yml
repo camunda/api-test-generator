@@ -72,6 +72,15 @@ jobs:
           npm run testsuite:generate
           npm run generate:request-validation
 
+      - name: Lint generated test suites (Biome)
+        # The generation pipeline runs biome --write --unsafe on the
+        # emitted suites before this step (see biome:fix-generated). This
+        # gate verifies that no diagnostics survived the autofix — any
+        # residual error means the emitter regressed and produced output
+        # biome cannot mechanically clean. See biome.generated.json for
+        # the rules applied to generated output.
+        run: npm run lint:generated
+
       - name: Run regression + unit tests
         run: npm test
 
