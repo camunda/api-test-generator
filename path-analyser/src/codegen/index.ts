@@ -4,7 +4,10 @@ import type { EndpointScenarioCollection } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
-import { materializeSupport } from './playwright/materialize-support.js';
+import {
+  materializeResponseSchemas,
+  materializeSupport,
+} from './playwright/materialize-support.js';
 import { getEmitter, listEmitters, registerEmitter } from './registry.js';
 
 // Built-in emitter registration. New emitters register themselves here.
@@ -59,6 +62,11 @@ async function run() {
   // so future targets that don't depend on these helpers don't pay the cost.
   if (emitter.id === 'playwright') {
     await materializeSupport(outDir);
+    // Also extract response-body schemas alongside the emitted specs so the
+    // generated `validateResponse(...)` calls have a schema source. Co-located
+    // here (rather than a separate npm script) so every codegen run produces
+    // a runnable suite as a single artifact.
+    await materializeResponseSchemas(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
