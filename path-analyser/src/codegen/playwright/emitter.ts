@@ -105,7 +105,6 @@ function renderScenarioTest(s: EndpointScenario): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
   body.push(`test('${title}', async ({ request }) => {`);
-  body.push(`  let __seededTenant = false;`);
   if (s.description) {
     const desc = String(s.description).trim();
     // Wrap long description lines at ~100 chars for readability
@@ -159,17 +158,17 @@ function renderScenarioTest(s: EndpointScenario): string {
         if (extractionVars.has(k)) continue; // Will be provided by extraction
         // Use centralized seeding util at runtime (generate inside test execution for deterministic mode support)
         body.push(`  if (ctx['${k}'] === undefined) { ctx['${k}'] = seedBinding('${k}'); }`);
-        if (k === 'tenantIdVar') body.push(`  __seededTenant = true;`);
         continue;
       }
       if (extractionVars.has(k)) continue;
       body.push(`  ctx['${k}'] = ${JSON.stringify(v)};`);
-      if (k === 'tenantIdVar') body.push(`  __seededTenant = true;`);
     }
   }
-  // Ensure tenantIdVar default sourced from seeding rules (configurable) only once
+  // Ensure tenantIdVar default sourced from seeding rules (configurable). Idempotent: the
+  // `=== undefined` guard means re-seeding never happens if the bindings loop above already
+  // populated tenantIdVar (whether from a literal value or from seedBinding for __PENDING__).
   body.push(
-    `  if (!__seededTenant && ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); __seededTenant = true; }`,
+    `  if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
   );
   body.push(`  const __tenantIdIsDefault = ctx['tenantIdVar'] === '<default>';`);
   if (!s.requestPlan) {
