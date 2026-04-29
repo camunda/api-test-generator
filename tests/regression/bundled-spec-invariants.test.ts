@@ -151,6 +151,34 @@ describe('bundled-spec invariants: extractor classification', () => {
 });
 
 describe('bundled-spec invariants: planner output', () => {
+  it('no scenario file references an operationId that is not in the dependency graph (stale-output guard)', () => {
+    // Class-scoped guard against a stale `path-analyser/dist/output/`:
+    // if a previous pipeline run left behind a `<verb>--<path>-scenarios.json`
+    // for an operationId that the current spec no longer defines, downstream
+    // invariants (notably the prereq guard above) silently break locally
+    // while CI stays green (CI checks out a fresh tree). Asserting that
+    // every emitted scenario file's `endpoint.operationId` exists in the
+    // current graph forces `npm run testsuite:generate` to keep its output
+    // directory in sync with the current spec.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    loadGraph();
+    const orphans: { file: string; operationId: string }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      const opId = file.endpoint?.operationId;
+      if (opId && !cachedOperationById?.has(opId)) {
+        orphans.push({ file: f, operationId: opId });
+      }
+    }
+    expect(orphans).toEqual([]);
+  });
+
   it('every createProcessInstance scenario starts with createDeployment as the first prerequisite (#32, #35)', () => {
     // Locks in #32 (PDK/PDI sourced from createDeployment) and #35
     // (no spurious intermediate steps): with prereq-checking and the
