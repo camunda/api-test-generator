@@ -359,11 +359,31 @@ npm run lint
 npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
 npx tsc --noEmit -p path-analyser/tsconfig.json
 npx tsc --noEmit -p request-validation/tsconfig.json
-npm run pipeline                      # only if your change affects pipeline output
+TEST_SEED=snapshot-baseline npm run testsuite:generate
+npm run generate:request-validation
 npm test
 ```
 
-For Layer-3 invariant changes you must run the pipeline first or the test
+> **`npm test` alone is not sufficient.** The Layer-3 invariants in
+> `tests/regression/bundled-spec-invariants.test.ts` read regenerated
+> pipeline output (per-endpoint scenario JSON, feature-output files,
+> emitted Playwright suites). If you skip the regen step you'll be testing
+> against stale output and CI will surface a regression you didn't see
+> locally — which is what happened on PR #62 (the L3 `#58` reproducer
+> only fails when the pipeline is regenerated against the current
+> `scenarioGenerator.ts`).
+>
+> Any change under `semantic-graph-extractor/`, `path-analyser/`,
+> `request-validation/`, `domain-semantics.json`, `filter-providers.json`,
+> or `request-defaults.json` requires the regen. When in doubt, regen.
+>
+> CI's "Regenerate pipeline outputs" step runs the same two commands
+> (`testsuite:generate` + `generate:request-validation`) under
+> `TEST_SEED=snapshot-baseline`. The `npm run pipeline` script also
+> works but additionally re-fetches the spec, which is slower and
+> usually unnecessary.
+
+For Layer-3 invariant changes you must run the regen step or the test
 file aborts with a "graph not found" / "scenarios directory not found"
 error.
 

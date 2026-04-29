@@ -892,22 +892,34 @@ function applyArtifactRuleSelection(
     const remaining = new Set(unmetNeeded);
     const applied: string[] = [];
     const rules = (ruleSpec.rules || []).slice();
+    // Helper: pick the minimal preferred artifact (BPMN, else first).
+    // Used both when no semantics drive coverage and as a fallback when
+    // the greedy loop fails to apply any rule (e.g. when this is invoked
+    // from `deferForMissingDomainPrereqs`, where the outer `state.needed`
+    // contains semantics that no createDeployment rule produces, but we
+    // still need *some* artifact selected so the deferred step makes
+    // domain-state progress (#58 follow-up). Falling back to the
+    // preferred minimal artifact keeps the Decision*/Form-flooding
+    // protection intact while still letting BFS advance.
+    const applyPreferred = () => {
+      const preferred =
+        (ruleSpec.rules || []).find((r) => r.artifactKind === 'bpmnProcess') ??
+        (ruleSpec.rules || [])[0];
+      if (!preferred) return;
+      const semantics = enumerateRuleSemantics(preferred, graph);
+      semantics.forEach((s) => {
+        newProduced.add(s);
+      });
+      const states = enumerateRuleStates(preferred, graph);
+      states.forEach((st) => {
+        newDomainStates.add(st);
+      });
+      ensureArtifactBindings(preferred, graph, state, semantics, states);
+      applied.push(preferred.id ?? preferred.artifactKind);
+    };
     if (remaining.size === 0) {
       // No required semantics drive coverage: pick a single minimal artifact (prefer BPMN) to avoid flooding with unused Decision*/Form semantics.
-      const preferred = rules.find((r) => r.artifactKind === 'bpmnProcess') || rules[0];
-      if (preferred) {
-        const semantics = enumerateRuleSemantics(preferred, graph);
-        semantics.forEach((s) => {
-          newProduced.add(s);
-        });
-        const states = enumerateRuleStates(preferred, graph);
-        states.forEach((st) => {
-          newDomainStates.add(st);
-        });
-        ensureArtifactBindings(preferred, graph, state, semantics, states);
-        if (preferred.id) applied.push(preferred.id);
-        else applied.push(preferred.artifactKind);
-      }
+      applyPreferred();
     } else {
       // Greedy until coverage or exhaustion
       while (remaining.size && rules.length) {
@@ -941,6 +953,11 @@ function applyArtifactRuleSelection(
         else applied.push(best.artifactKind);
         ensureArtifactBindings(best, graph, state, adds, states);
       }
+      // Greedy exhausted without applying any rule (no rule covers any
+      // unmet `state.needed` semantic). Fall back to the preferred
+      // minimal artifact so the caller still observes a valid
+      // deployment artifact + ProcessDefinitionDeployed domain state.
+      if (applied.length === 0) applyPreferred();
     }
     if (applied.length) {
       state.artifactsApplied ||= [];
