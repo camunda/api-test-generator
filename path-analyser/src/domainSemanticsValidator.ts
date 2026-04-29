@@ -7,9 +7,9 @@ import { z } from 'zod';
 //
 // The shape of `DomainSemantics` (in types.ts) describes *what* fields exist;
 // this module describes *which combinations of values are coherent* — the
-// cross-reference invariants between sections. Each invariant in the schema
-// is named (via `.refine(..., { params: { code } })`) so failures point
-// directly at the broken property rather than at a structural diff.
+// cross-reference invariants between sections. Each invariant is reported
+// from `superRefine` via `ctx.addIssue(..., { params: { invariant } })` so
+// failures point directly at the broken property rather than at a structural diff.
 //
 // Invariants encoded (all class-scoped — they reject the defect class, not
 // just one instance):
@@ -227,7 +227,10 @@ export interface DomainSemanticsValidationError {
 
 /**
  * Run all structural and cross-reference checks against `raw`. Returns the
- * empty array on success; otherwise returns one entry per violated invariant.
+ * empty array on success; otherwise returns one entry per Zod issue — a
+ * single invariant can produce multiple entries when several instances
+ * violate it (each entry carries the same `invariant` name but a distinct
+ * `message` identifying the offending property).
  *
  * The graphLoader calls this immediately after JSON.parse and throws if any
  * issues are returned. Tests can call it directly against synthetic

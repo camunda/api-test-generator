@@ -292,7 +292,17 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   } catch (err) {
     if (err instanceof DomainSemanticsValidationFailure) throw err;
-    // ignore: sidecar absent or unreadable — domain analysis disabled
+    if (err instanceof SyntaxError) {
+      throw new DomainSemanticsValidationFailure(
+        `domain-semantics.json is not valid JSON: ${err.message}`,
+      );
+    }
+    if (err instanceof Error && 'code' in err && err.code !== 'ENOENT') {
+      throw new DomainSemanticsValidationFailure(
+        `Failed to load domain-semantics.json: ${err.message}`,
+      );
+    }
+    // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
   return { operations, bySemanticProducer, bootstrapSequences, domain, domainProducers };

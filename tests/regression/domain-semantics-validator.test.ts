@@ -92,6 +92,9 @@ describe('validateDomainSemantics', () => {
   it('reports disjunctionNotWitnessRedundant when a disjunction contains both X and witnesses(X)', () => {
     const errs = validateDomainSemantics({
       runtimeStates: { ProcessDefinitionDeployed: {} },
+      // Declare ProcessDefinitionKey as a capability so disjunctionMemberResolves
+      // doesn't also fire — this fixture must violate exactly one invariant.
+      capabilities: { ProcessDefinitionKey: {} },
       semanticTypes: {
         ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' },
       },
@@ -102,6 +105,7 @@ describe('validateDomainSemantics', () => {
       },
     });
     expect(errs.map((e) => e.invariant)).toContain('disjunctionNotWitnessRedundant');
+    expect(errs.map((e) => e.invariant)).not.toContain('disjunctionMemberResolves');
   });
 
   it('reports disjunctionMemberResolves when a disjunction member is undeclared', () => {
