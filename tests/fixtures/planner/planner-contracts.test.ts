@@ -24,6 +24,8 @@ interface NodeOpts {
   optional?: string[];
   produces?: string[];
   providerMap?: Record<string, boolean>;
+  domainRequiresAll?: string[];
+  domainProduces?: string[];
 }
 
 function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
@@ -37,12 +39,15 @@ function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
     },
     produces: opts.produces ?? [],
     providerMap: opts.providerMap,
+    domainRequiresAll: opts.domainRequiresAll,
+    domainProduces: opts.domainProduces,
   };
 }
 
 function makeGraph(nodes: OperationNode[]): OperationGraph {
   const operations: Record<string, OperationNode> = {};
   const bySemanticProducer: Record<string, string[]> = {};
+  const domainProducers: Record<string, string[]> = {};
   for (const node of nodes) {
     operations[node.operationId] = node;
     for (const sem of node.produces) {
@@ -50,8 +55,13 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
       list.push(node.operationId);
       bySemanticProducer[sem] = list;
     }
+    for (const ds of node.domainProduces ?? []) {
+      const list = domainProducers[ds] ?? [];
+      list.push(node.operationId);
+      domainProducers[ds] = list;
+    }
   }
-  return { operations, bySemanticProducer };
+  return { operations, bySemanticProducer, domainProducers };
 }
 
 function plan(graph: OperationGraph, endpointOpId: string): EndpointScenarioCollection {
@@ -285,5 +295,54 @@ describe('planner contracts: spurious intermediate steps (#35)', () => {
     expect(collection.scenarios.length).toBeGreaterThan(0);
     const firstOps = opIdsOf(collection.scenarios[0]);
     expect(firstOps).toEqual(['produceX', 'produceTRequiringX', 'endpointRequiringT']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture G: domain-prereq-blocked authoritative producer (#58)
+// ---------------------------------------------------------------------------
+//
+// Endpoint `consumeFoo` requires `Foo`. The only authoritative producer
+// of `Foo` is `produceFoo`, which has `domainRequiresAll: ['BarReady']`.
+// `produceBar` is a domain producer for `BarReady` (via `domainProduces`)
+// and has no requirements. The planner must discover the chain
+// [produceBar, produceFoo, consumeFoo] rather than deadlocking.
+//
+// On main, BFS skips `produceFoo` outright when its `domainRequiresAll`
+// is unmet (semantic-target branch line ~466), and never enters the
+// domain-progression branch because semantic remaining > 0. Result:
+// scenarios.length === 0. This is the synthetic mirror of the
+// `completeJob → activateJobs → ProcessInstanceExists+ModelHasServiceTaskType`
+// deadlock observed on the bundled spec.
+const fixtureDomainBlockedAuthoritative: OperationGraph = makeGraph([
+  makeOp('produceBar', {
+    domainProduces: ['BarReady'],
+  }),
+  makeOp('produceFoo', {
+    produces: ['Foo'],
+    providerMap: { Foo: true },
+    domainRequiresAll: ['BarReady'],
+  }),
+  makeOp('consumeFoo', {
+    required: ['Foo'],
+  }),
+]);
+
+describe('planner contracts: domain-prereq-blocked authoritative producer (#58)', () => {
+  it('produces a chain that satisfies the authoritative producer\u2019s domain prereq', () => {
+    const collection = plan(fixtureDomainBlockedAuthoritative, 'consumeFoo');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+  });
+
+  it('chain order satisfies BarReady before invoking produceFoo', () => {
+    const collection = plan(fixtureDomainBlockedAuthoritative, 'consumeFoo');
+    const firstOps = opIdsOf(collection.scenarios[0]);
+    const barIdx = firstOps.indexOf('produceBar');
+    const fooIdx = firstOps.indexOf('produceFoo');
+    const endpointIdx = firstOps.indexOf('consumeFoo');
+    expect(barIdx, 'produceBar must appear in the chain').toBeGreaterThanOrEqual(0);
+    expect(fooIdx).toBeGreaterThan(barIdx);
+    expect(endpointIdx).toBeGreaterThan(fooIdx);
   });
 });

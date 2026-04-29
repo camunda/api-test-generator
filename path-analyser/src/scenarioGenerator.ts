@@ -466,7 +466,22 @@ export function generateScenariosForEndpoint(
         const missingDomain = producerNode.domainRequiresAll.filter(
           (ds) => !state.domainStates.has(ds),
         );
-        if (missingDomain.length) continue; // wait until domain states present
+        if (missingDomain.length) {
+          // Issue #58: when an authoritative semantic producer is blocked
+          // solely by missing domain prereqs, defer it by scheduling the
+          // domain producers first. Without this branch BFS silently
+          // drops the candidate — the domain-progression branch above
+          // only fires when no semantic remains, so endpoints whose
+          // single authoritative producer is domain-gated would never
+          // receive a chain (cf. completeJob → activateJobs gated on
+          // ProcessInstanceExists+ModelHasServiceTaskType).
+          //
+          // Limited to authoritative producers (mirroring the
+          // deferForMissingPrereqs rule) to avoid spurious incidental
+          // chains.
+          if (deferForMissingDomainPrereqs(graph, producerNode, targetSemantic, state, seen, queue, endpointOpId)) continue;
+          continue; // wait until domain states present
+        }
       }
       // Issue #35: reject candidates whose own required semantic inputs
       // are not produced by an earlier step. Without this guard the
@@ -679,6 +694,107 @@ function deferForMissingPrereqs(
     queue.push({ ...state, needed: deferredNeeded });
   }
   return true;
+}
+
+// Issue #58: when an authoritative semantic producer is rejected because
+// its `domainRequiresAll` is unmet, schedule a domain producer for the
+// first missing state (transitive prereqs included) so the candidate can
+// be revisited on a subsequent BFS iteration.
+//
+// Only authoritative providers (`providerMap[targetSemantic] === true`)
+// are deferred. Deferring incidental producers would generate spurious
+// scenarios where the incidental's output is unused, mirroring the
+// rationale in `deferForMissingPrereqs`.
+//
+// For each candidate domain producer we enqueue a state with that op
+// appended and the domain state added. Cycle detection and domain
+// prereq chains are handled identically to the dedicated
+// domain-progression branch.
+//
+// Returns true when at least one deferred state was enqueued (the
+// caller should `continue` either way; this is informational).
+function deferForMissingDomainPrereqs(
+  graph: OperationGraph,
+  producerNode: OperationNode,
+  targetSemantic: string | undefined,
+  state: State,
+  seen: Set<string>,
+  queue: State[],
+  endpointOpId: string,
+): boolean {
+  const isAuthoritative = !!targetSemantic && producerNode.providerMap?.[targetSemantic] === true;
+  if (!isAuthoritative) return false;
+  const directMissing = (producerNode.domainRequiresAll ?? []).filter(
+    (ds) => !state.domainStates.has(ds),
+  );
+  if (directMissing.length === 0) return false;
+  const missingAll = gatherDomainPrerequisites(graph, directMissing, state.domainStates);
+  const candidates = new Set<string>();
+  for (const ds of missingAll) {
+    for (const opId of graph.domainProducers?.[ds] ?? []) candidates.add(opId);
+  }
+  let enqueued = false;
+  for (const candidateOpId of candidates) {
+    if (candidateOpId === endpointOpId) continue;
+    const candidateNode = graph.operations[candidateOpId];
+    if (!candidateNode) continue;
+    const indexInPath = state.ops.indexOf(candidateOpId);
+    let nextCycle = state.cycle;
+    if (indexInPath !== -1) {
+      if (state.cycle) continue;
+      nextCycle = true;
+    }
+    // Candidate must have its own domain prereqs satisfied (transitive
+    // missing states are surfaced via `missingAll` so the *next* BFS
+    // iteration will reach them).
+    if (candidateNode.domainRequiresAll?.length) {
+      const missing = candidateNode.domainRequiresAll.filter((d) => !state.domainStates.has(d));
+      if (missing.length) continue;
+    }
+    if (!hasSatisfiedRequiredInputs(candidateNode, state.produced)) continue;
+    const newlyAdds = new Set<string>();
+    candidateNode.domainProduces?.forEach((d) => {
+      if (!state.domainStates.has(d)) newlyAdds.add(d);
+    });
+    candidateNode.domainImplicitAdds?.forEach((d) => {
+      if (!state.domainStates.has(d)) newlyAdds.add(d);
+    });
+    if (newlyAdds.size === 0) continue;
+    const newProduced = new Set(state.produced);
+    candidateNode.produces.forEach((s) => {
+      newProduced.add(s);
+    });
+    const newNeeded = new Set(state.needed);
+    candidateNode.requires.required.forEach((s) => {
+      newNeeded.add(s);
+    });
+    const newOps = [...state.ops, candidateOpId];
+    const newProductionMap = new Map(state.productionMap);
+    candidateNode.produces.forEach((s) => {
+      if (!newProductionMap.has(s)) newProductionMap.set(s, candidateOpId);
+    });
+    const newDomainStates = new Set(state.domainStates);
+    newlyAdds.forEach((d) => {
+      newDomainStates.add(d);
+    });
+    const sig = signature(newOps, newProduced, newNeeded, nextCycle);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    queue.push({
+      produced: newProduced,
+      needed: newNeeded,
+      domainStates: newDomainStates,
+      ops: newOps,
+      cycle: nextCycle,
+      productionMap: newProductionMap,
+      bootstrapSequencesUsed: state.bootstrapSequencesUsed,
+      bootstrapFull: state.bootstrapFull,
+      modelsDraft: state.modelsDraft,
+      bindingsDraft: state.bindingsDraft,
+    });
+    enqueued = true;
+  }
+  return enqueued;
 }
 
 // Select minimal artifact rules for createDeployment based on unmet semantic needs.

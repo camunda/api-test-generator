@@ -234,6 +234,64 @@ describe('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('authoritative semantic producers gated on satisfiable domain prerequisites emit ≥1 satisfied scenario (#58)', () => {
+    // Class-scoped regression guard for #58 (BFS deadlock when an
+    // authoritative semantic producer carries an unsatisfied
+    // `domainRequiresAll` whose missing states have known domain
+    // producers).
+    //
+    // Before the fix, the BFS semantic-target branch would silently
+    // `continue` on such producers because the domain-progression
+    // branch only fires when no required-semantic remains, and the
+    // semantic branch had no deferral path. Result: every endpoint
+    // that ultimately needs that producer (e.g. JobAvailableForActivation
+    // → activateJobs → jobKey → completeJob/failJob) emitted 0
+    // scenarios.
+    //
+    // The pinned reproducers below cover three distinct chain depths:
+    //   - activateJobs       (1 hop:  createDeployment → createProcessInstance → activateJobs)
+    //   - completeJob        (2 hops: …→ activateJobs → completeJob)
+    //   - failJob            (2 hops: …→ activateJobs → failJob)
+    //
+    // The abstract class invariant ("BFS must defer rather than drop a
+    // domain-prereq-blocked authoritative producer when a domain
+    // producer for the missing state exists") is enforced at fixture
+    // level by Fixture G in tests/fixtures/planner/planner-contracts.test.ts;
+    // this L3 guard pins the real-world surfacings.
+    const reproducers: { file: string; opId: string }[] = [
+      { file: 'post--jobs--activation-scenarios.json', opId: 'activateJobs' },
+      {
+        file: 'post--jobs--{jobKey}--completion-scenarios.json',
+        opId: 'completeJob',
+      },
+      {
+        file: 'post--jobs--{jobKey}--failure-scenarios.json',
+        opId: 'failJob',
+      },
+    ];
+    const offenders: { opId: string; scenarios: number; unsatisfied: boolean }[] = [];
+    for (const { file, opId } of reproducers) {
+      const scen = loadScenarioFile(file);
+      if (scen.endpoint.operationId !== opId) {
+        throw new Error(
+          `Pinned reproducer file ${file} no longer maps to operationId ${opId} (got ${scen.endpoint.operationId}). Update the pin.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const raw = JSON.parse(
+        readFileSync(join(SCENARIOS_DIR, file), 'utf8'),
+      ) as { unsatisfied?: boolean; scenarios: unknown[] };
+      if (!scen.scenarios.length || raw.unsatisfied === true) {
+        offenders.push({
+          opId,
+          scenarios: scen.scenarios.length,
+          unsatisfied: raw.unsatisfied === true,
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('every feature-output scenario binds or chains every {placeholder} whose path parameter has a recognised semanticType', () => {
     // Class-scoped guard for the "un-extracted ${var} in URL" defect family:
     // when an endpoint's response analyser produces no shape (typically for
@@ -391,6 +449,20 @@ describe('bundled-spec invariants: planner output', () => {
           const varName = placeholderVarName(ph);
           if (isUsableBinding(bindings[varName])) return false;
           if (producedByEarlierStep.has(varName)) return false;
+          // Out-of-scope: placeholder-name vs. semantic-type alias mismatch
+          // (issue #61). When a producer extracts under
+          // `<camelCase(semantic)>Var` but the URL template substitutes
+          // `<placeholderName>Var`, the names never meet. Tracked separately
+          // as a follow-up to #58 (BFS deferral); the class-scoped fix will
+          // remove this carve-out and add a generic alias check.
+          const param = parameters.find(
+            (p) => p.name === ph && p.location === 'path',
+          );
+          if (param?.semanticType) {
+            const aliasVar = `${param.semanticType.charAt(0).toLowerCase()}${param.semanticType.slice(1)}Var`;
+            if (isUsableBinding(bindings[aliasVar])) return false;
+            if (producedByEarlierStep.has(aliasVar)) return false;
+          }
           return true;
         });
         if (unsatisfied.length) {
