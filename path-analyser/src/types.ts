@@ -248,6 +248,18 @@ export interface DomainSemantics {
   semanticTypeToArtifactKind?: Record<string, string>;
   operationArtifactRules?: Record<string, OperationArtifactRuleSpec>;
   artifactFileKinds?: Record<string, string[]>; // extension -> artifactKind[]
+  // #70: declarative witness edges from semantic types (key-shaped values)
+  // to the runtime states or capabilities they imply. Producing a value of
+  // semantic type T witnesses the existence of state `semanticTypes[T].witnesses`.
+  // The loader uses this to populate domainProducers from bySemanticProducer.
+  semanticTypes?: Record<string, SemanticTypeSpec>;
+}
+
+export interface SemanticTypeSpec {
+  // Name of a runtimeStates or capabilities entry that this semantic type's
+  // value implies the existence of. Required for key-shaped semantic types
+  // (those listed in artifactKinds.*.producesSemantics).
+  witnesses?: string;
 }
 
 export interface IdentifierSpec {
