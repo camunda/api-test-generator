@@ -337,6 +337,10 @@ describe('planner contracts: domain-prereq-blocked authoritative producer (#58)'
 
   it('chain order satisfies BarReady before invoking produceFoo', () => {
     const collection = plan(fixtureDomainBlockedAuthoritative, 'consumeFoo');
+    expect(
+      collection.scenarios.length,
+      'expected at least one scenario before indexing scenarios[0]',
+    ).toBeGreaterThan(0);
     const firstOps = opIdsOf(collection.scenarios[0]);
     const barIdx = firstOps.indexOf('produceBar');
     const fooIdx = firstOps.indexOf('produceFoo');

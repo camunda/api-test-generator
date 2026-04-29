@@ -478,19 +478,18 @@ export function generateScenariosForEndpoint(
           //
           // Limited to authoritative producers (mirroring the
           // deferForMissingPrereqs rule) to avoid spurious incidental
-          // chains.
-          if (
-            deferForMissingDomainPrereqs(
-              graph,
-              producerNode,
-              targetSemantic,
-              state,
-              seen,
-              queue,
-              endpointOpId,
-            )
-          )
-            continue;
+          // chains. The helper's return value is informational; the
+          // semantic candidate is skipped either way (we wait until the
+          // domain states surface on a later iteration).
+          deferForMissingDomainPrereqs(
+            graph,
+            producerNode,
+            targetSemantic,
+            state,
+            seen,
+            queue,
+            endpointOpId,
+          );
           continue; // wait until domain states present
         }
       }
@@ -763,18 +762,62 @@ function deferForMissingDomainPrereqs(
       if (missing.length) continue;
     }
     if (!hasSatisfiedRequiredInputs(candidateNode, state.produced)) continue;
-    const newlyAdds = new Set<string>();
-    candidateNode.domainProduces?.forEach((d) => {
-      if (!state.domainStates.has(d)) newlyAdds.add(d);
-    });
-    candidateNode.domainImplicitAdds?.forEach((d) => {
-      if (!state.domainStates.has(d)) newlyAdds.add(d);
-    });
-    if (newlyAdds.size === 0) continue;
+    // Apply the same artifact-rule selection as the semantic-producer
+    // branch when the deferred domain producer is `createDeployment`,
+    // otherwise we'd treat *all* deployment-advertised semantics
+    // (Decision*/Form keys, etc.) as produced even when the selected
+    // artifact bundle wouldn't yield them. Non-createDeployment
+    // candidates take the unfiltered path (their `produces` is already
+    // the authoritative set).
     const newProduced = new Set(state.produced);
-    candidateNode.produces.forEach((s) => {
-      newProduced.add(s);
-    });
+    const newDomainStates = new Set(state.domainStates);
+    if (candidateOpId === 'createDeployment') {
+      applyArtifactRuleSelection(graph, candidateNode, state, newProduced, newDomainStates);
+    } else {
+      candidateNode.produces.forEach((s) => {
+        newProduced.add(s);
+      });
+      candidateNode.domainProduces?.forEach((d) => {
+        newDomainStates.add(d);
+      });
+      candidateNode.domainImplicitAdds?.forEach((d) => {
+        newDomainStates.add(d);
+      });
+    }
+    // Require this deferred step to make domain-state progress, else
+    // BFS would loop on the same `seen` signature with no benefit.
+    const domainAddedNow = [...newDomainStates].filter((d) => !state.domainStates.has(d));
+    if (domainAddedNow.length === 0) continue;
+    // Mirror the semantic-producer branch's transitive prereq check:
+    // a newly-added domain state must have its `runtimeStates.requires`
+    // and `capabilities.dependsOn` satisfied within `newDomainStates`,
+    // otherwise we'd mark a state satisfied while its transitive
+    // prerequisites are absent (e.g. `ProcessInstanceExists` requires
+    // `ProcessDefinitionDeployed`).
+    let prereqFailed = false;
+    for (const d of domainAddedNow) {
+      const rs = graph.domain?.runtimeStates?.[d];
+      if (rs?.requires) {
+        for (const req of rs.requires) {
+          if (!newDomainStates.has(req)) {
+            prereqFailed = true;
+            break;
+          }
+        }
+        if (prereqFailed) break;
+      }
+      const cap = graph.domain?.capabilities?.[d];
+      if (cap?.dependsOn) {
+        for (const dep of cap.dependsOn) {
+          if (!newDomainStates.has(dep)) {
+            prereqFailed = true;
+            break;
+          }
+        }
+        if (prereqFailed) break;
+      }
+    }
+    if (prereqFailed) continue;
     const newNeeded = new Set(state.needed);
     candidateNode.requires.required.forEach((s) => {
       newNeeded.add(s);
@@ -784,10 +827,16 @@ function deferForMissingDomainPrereqs(
     candidateNode.produces.forEach((s) => {
       if (!newProductionMap.has(s)) newProductionMap.set(s, candidateOpId);
     });
-    const newDomainStates = new Set(state.domainStates);
-    newlyAdds.forEach((d) => {
-      newDomainStates.add(d);
-    });
+    // Mirror the semantic-producer branch's createDeployment seeding so
+    // a deferred deployment step still surfaces a process-definition
+    // binding for downstream consumers.
+    let modelsDraft = state.modelsDraft;
+    const bindingsDraft = { ...(state.bindingsDraft || {}) };
+    if (candidateOpId === 'createDeployment' && !modelsDraft) {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
+      bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
+      modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
+    }
     const sig = signature(newOps, newProduced, newNeeded, nextCycle);
     if (seen.has(sig)) continue;
     seen.add(sig);
@@ -800,8 +849,14 @@ function deferForMissingDomainPrereqs(
       productionMap: newProductionMap,
       bootstrapSequencesUsed: state.bootstrapSequencesUsed,
       bootstrapFull: state.bootstrapFull,
-      modelsDraft: state.modelsDraft,
-      bindingsDraft: state.bindingsDraft,
+      modelsDraft,
+      bindingsDraft,
+      // Propagate scenario-metadata bookkeeping from `state` and update
+      // providerList for the candidate's produced semantics so later
+      // scenario naming/description stays consistent with the semantic
+      // expansion branch.
+      providerList: updateProviderList(state.providerList || {}, candidateNode, newProductionMap),
+      artifactsApplied: state.artifactsApplied,
     });
     enqueued = true;
   }
