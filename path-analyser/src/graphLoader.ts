@@ -249,7 +249,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         const state = spec.validityState;
         // Skip identifiers whose validityState is not declared in the sidecar.
         // Empty strings are invalid data and would surface as a malformed
-        // domainProducers key — the regression test in
+        // producersByState key — the regression test in
         // tests/regression/graph-loader-undefined-state-key.test.ts asserts
         // no such key is ever written. We use `state == null` per #65 review:
         // an empty string is not the same as "absent" and should not be

@@ -2,21 +2,22 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadGraph } from '../../path-analyser/src/graphLoader.ts';
 
-describe('graphLoader: domainProducers validation', () => {
-  it('does not write invalid keys to domainProducers', async () => {
+describe('graphLoader: producersByState validation', () => {
+  it('does not write invalid keys to producersByState', async () => {
     // Anchor paths off this test file so the test does not depend on process.cwd().
     const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
     const baseDir = path.join(REPO_ROOT, 'path-analyser');
     const graph = await loadGraph(baseDir);
 
-    expect(graph.domainProducers, 'domainProducers sidecar should be loaded').toBeDefined();
+    expect(graph.producersByState, 'producersByState sidecar should be loaded').toBeDefined();
 
-    const producers = graph.domainProducers;
+    const producers = graph.producersByState;
     const keys = Object.keys(producers ?? {});
 
-    expect(keys, 'domainProducers should not contain the literal string "undefined"').not.toContain(
-      'undefined',
-    );
+    expect(
+      keys,
+      'producersByState should not contain the literal string "undefined"',
+    ).not.toContain('undefined');
 
     for (const key of keys) {
       expect(typeof key, 'key should be a string').toBe('string');
