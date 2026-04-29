@@ -195,9 +195,18 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // Build domainProducers
     const producers: Record<string, string[]> = {};
     domainProducers = producers;
+    // Dedup at the writer: every callsite (runtimeStates.producedBy,
+    // capabilities.producedBy, identifiers.boundBy, operationRequirements.
+    // produces / implicitAdds, the #70 witness implication) funnels through
+    // here, so guarding once prevents duplicate (state, opId) pairs from any
+    // current or future caller. Without this, an opId that satisfies a state
+    // through more than one channel (e.g. createDeployment producing
+    // ProcessDefinitionDeployed both directly and via the
+    // ProcessDefinitionKey → ProcessDefinitionDeployed witness edge) would
+    // appear multiple times in domainProducers[state].
     const addProducer = (state: string, opId: string) => {
       const list = producers[state] ?? [];
-      list.push(opId);
+      if (!list.includes(opId)) list.push(opId);
       producers[state] = list;
       const node = operations[opId];
       if (node) {

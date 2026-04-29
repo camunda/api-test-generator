@@ -94,4 +94,31 @@ describe('domain-semantics.json — semanticTypes.witnesses relation (#70)', () 
       `valueBindings reference semanticTypes that are not declared: ${JSON.stringify(dangling, null, 2)}`,
     ).toEqual([]);
   });
+
+  // Class-scoped guard: no domainProducers[state] entry should contain duplicate
+  // opIds. The witness implication (semanticTypes[T].witnesses) re-adds every
+  // producer of T as a producer of the witnessed state, which previously
+  // double-counted any opId that already produced the witnessed state via
+  // runtimeStates.producedBy / capabilities.producedBy /
+  // operationRequirements.produces. addProducer() now dedups at the writer so
+  // every current AND future callsite is covered.
+  it('domainProducers contains no duplicate opIds per state (witness merge dedup)', async () => {
+    const { loadGraph } = await import('../../path-analyser/src/graphLoader.ts');
+    const baseDir = path.resolve(import.meta.dirname, '../../path-analyser');
+    const graph = await loadGraph(baseDir);
+
+    const dupes: { state: string; opId: string; count: number }[] = [];
+    for (const [state, opIds] of Object.entries(graph.domainProducers ?? {})) {
+      const counts = new Map<string, number>();
+      for (const opId of opIds) counts.set(opId, (counts.get(opId) ?? 0) + 1);
+      for (const [opId, count] of counts) {
+        if (count > 1) dupes.push({ state, opId, count });
+      }
+    }
+
+    expect(
+      dupes,
+      `domainProducers must not contain duplicate opIds per state: ${JSON.stringify(dupes, null, 2)}`,
+    ).toEqual([]);
+  });
 });
