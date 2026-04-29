@@ -35,13 +35,25 @@ export class SemanticGraphExtractor {
   async extractGraph(specPath: string): Promise<OperationDependencyGraph> {
     console.log(`Loading OpenAPI specification from: ${specPath}`);
 
-    // Load and parse the OpenAPI spec
+    // Load and parse the OpenAPI spec.
+    // The bundled output (rest-api.bundle.json) is plain JSON; YAML parsing
+    // is reserved for legacy .yaml / .yml sources. Unknown extensions are
+    // rejected explicitly so a typo'd path can't silently fall through to
+    // a parser that happens to tolerate the input.
     const specContent = fs.readFileSync(specPath, 'utf8');
-    // yaml.load() returns `unknown`; this is the runtime contract boundary
-    // where we trust the on-disk spec to conform to the OpenAPISpec interface.
-    // Downstream analyzers tolerate missing fields gracefully.
-    // biome-ignore lint/plugin: runtime contract boundary for parsed YAML
-    const spec = yaml.load(specContent) as OpenAPISpec;
+    const ext = path.extname(specPath).toLowerCase();
+    let parsed: unknown;
+    if (ext === '.json') {
+      parsed = JSON.parse(specContent);
+    } else if (ext === '.yaml' || ext === '.yml') {
+      parsed = yaml.load(specContent);
+    } else {
+      throw new Error(
+        `Unsupported spec file extension '${ext || '(none)'}' for ${specPath}; expected .json, .yaml, or .yml`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed input
+    const spec = parsed as OpenAPISpec;
 
     console.log(`Analyzing semantic types and operations...`);
 
