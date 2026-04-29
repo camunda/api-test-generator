@@ -528,16 +528,18 @@ function buildRequestBodyFromCanonical(
     }
   } catch {}
   const requiredFields = nodes.filter((n) => n.required && !n.path.includes('[]'));
-  // Bindings map from domain valueBindings (request.* -> state.parameter)
+  // Bindings map from domain valueBindings (request.* -> parameter name).
+  // Two RHS grammars are supported:
+  //   1. `state.parameter`        — legacy form; parameter name is the leaf of the RHS.
+  //   2. `semantic:<SemanticType>` — witness form (#70); parameter name is the leaf
+  //      of the LHS field-path, since the typed-dataflow lens replaces the
+  //      state.parameter pair.
   const opDom = graph.domain?.operationRequirements?.[opId];
   const bindingMap: Record<string, string> = {};
   if (opDom?.valueBindings) {
     for (const [k, v] of Object.entries<string>(opDom.valueBindings)) {
       if (k.startsWith('request.')) {
         const raw = k.slice('request.'.length);
-        // #70: under the new grammar `semantic:<SemanticType>`, the parameter
-        // name is derived from the LHS field-path leaf instead of from the
-        // RHS state.parameter pair.
         const param = v.startsWith('semantic:')
           ? (raw.split('.').pop() ?? '')
           : (v.split('.').pop() ?? '');
