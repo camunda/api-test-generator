@@ -55,6 +55,11 @@ async function run() {
     process.exit(1);
   }
 
+  // Wipe before write so emitted spec files left over from a previous spec
+  // version cannot survive into the current run. Without this, local
+  // pre-push validation can diverge from CI (which always sees a fresh tree).
+  // The support/ tree, README.md, and responses.json are re-materialised below.
+  await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(outDir, { recursive: true });
   // Vendor the runtime support helpers into <outDir>/support/ so the
   // emitted suite is self-contained (no imports back into this generator).

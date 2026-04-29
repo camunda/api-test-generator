@@ -1,5 +1,5 @@
 import fsSync from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
@@ -32,6 +32,13 @@ async function main() {
   const baseDir = cwd.endsWith(suffix) ? cwd : path.resolve(cwd, suffix);
   const outputDir = path.resolve(baseDir, 'dist/output');
   const featureDir = path.resolve(baseDir, 'dist/feature-output');
+  // Wipe before write so files left over from a previous spec version (e.g.
+  // an operationId that no longer exists upstream) cannot survive into the
+  // current run and silently break Layer-3 invariants. Without this, local
+  // pre-push validation can diverge from CI — CI checks out a fresh tree
+  // and never sees the stale files.
+  await rm(outputDir, { recursive: true, force: true });
+  await rm(featureDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   await mkdir(featureDir, { recursive: true });
 
