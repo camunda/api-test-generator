@@ -45,10 +45,10 @@ export interface OperationNode extends OperationRef {
 
 export interface OperationGraph {
   operations: Record<string, OperationNode>;
-  bySemanticProducer: Record<string, string[]>;
+  producersByType: Record<string, string[]>;
   bootstrapSequences?: BootstrapSequence[];
   domain?: DomainSemantics; // loaded sidecar
-  domainProducers?: Record<string, string[]>; // domain state -> operations
+  producersByState?: Record<string, string[]>; // domain state -> operations
 }
 
 export interface BootstrapSequence {
@@ -251,7 +251,7 @@ export interface DomainSemantics {
   // #70: declarative witness edges from semantic types (key-shaped values)
   // to the runtime states or capabilities they imply. Producing a value of
   // semantic type T witnesses the existence of state `semanticTypes[T].witnesses`.
-  // The loader uses this to populate domainProducers from bySemanticProducer.
+  // The loader uses this to populate producersByState from producersByType.
   semanticTypes?: Record<string, SemanticTypeSpec>;
 }
 

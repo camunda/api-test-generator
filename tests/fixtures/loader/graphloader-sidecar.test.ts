@@ -9,7 +9,7 @@
  *
  * The first fixture pins the regression for #56: a sidecar-declared
  * `domain.operationRequirements[opId].produces` must surface in
- * `bySemanticProducer` and `operations[opId].produces`, otherwise
+ * `producersByType` and `operations[opId].produces`, otherwise
  * semantic BFS cannot use it.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -48,7 +48,7 @@ function writeLayout(layout: SidecarLayout): void {
 // Fixture #56 — sidecar `produces` must surface in BFS-visible maps.
 // ---------------------------------------------------------------------------
 describe('graphLoader: sidecar-declared produces (#56)', () => {
-  it('registers sidecar produces in bySemanticProducer so semantic BFS can find them', async () => {
+  it('registers sidecar produces in producersByType so semantic BFS can find them', async () => {
     writeLayout({
       graph: {
         operations: [
@@ -73,10 +73,9 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
       },
     });
     const g = await loadGraph(baseDir);
-    expect(
-      g.bySemanticProducer.Foo,
-      'sidecar producer must be registered for semantic BFS',
-    ).toEqual(['producerOp']);
+    expect(g.producersByType.Foo, 'sidecar producer must be registered for semantic BFS').toEqual([
+      'producerOp',
+    ]);
   });
 
   it("registers sidecar produces on the operation's own produces list", async () => {
@@ -120,7 +119,7 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
       },
     });
     const g = await loadGraph(baseDir);
-    expect(g.bySemanticProducer.Foo).toEqual(
+    expect(g.producersByType.Foo).toEqual(
       expect.arrayContaining(['extractorProducer', 'sidecarProducer']),
     );
   });
@@ -148,7 +147,7 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
       },
     });
     const g = await loadGraph(baseDir);
-    expect(g.bySemanticProducer.Foo).toEqual(['opOne']);
+    expect(g.producersByType.Foo).toEqual(['opOne']);
     expect(g.operations.opOne?.produces.filter((s) => s === 'Foo').length).toBe(1);
   });
 });

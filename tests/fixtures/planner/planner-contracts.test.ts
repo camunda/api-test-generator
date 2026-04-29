@@ -46,22 +46,22 @@ function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
 
 function makeGraph(nodes: OperationNode[]): OperationGraph {
   const operations: Record<string, OperationNode> = {};
-  const bySemanticProducer: Record<string, string[]> = {};
-  const domainProducers: Record<string, string[]> = {};
+  const producersByType: Record<string, string[]> = {};
+  const producersByState: Record<string, string[]> = {};
   for (const node of nodes) {
     operations[node.operationId] = node;
     for (const sem of node.produces) {
-      const list = bySemanticProducer[sem] ?? [];
+      const list = producersByType[sem] ?? [];
       list.push(node.operationId);
-      bySemanticProducer[sem] = list;
+      producersByType[sem] = list;
     }
     for (const ds of node.domainProduces ?? []) {
-      const list = domainProducers[ds] ?? [];
+      const list = producersByState[ds] ?? [];
       list.push(node.operationId);
-      domainProducers[ds] = list;
+      producersByState[ds] = list;
     }
   }
-  return { operations, bySemanticProducer, domainProducers };
+  return { operations, producersByType, producersByState };
 }
 
 function plan(graph: OperationGraph, endpointOpId: string): EndpointScenarioCollection {

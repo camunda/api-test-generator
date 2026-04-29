@@ -144,12 +144,12 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
 
-  const bySemanticProducer: Record<string, string[]> = {};
+  const producersByType: Record<string, string[]> = {};
   for (const op of Object.values(operations)) {
     for (const st of op.produces) {
-      const list = bySemanticProducer[st] ?? [];
+      const list = producersByType[st] ?? [];
       list.push(op.operationId);
-      bySemanticProducer[st] = list;
+      producersByType[st] = list;
     }
   }
 
@@ -183,7 +183,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
 
   // Domain sidecar load (optional)
   let domain: DomainSemantics | undefined;
-  let domainProducers: Record<string, string[]> | undefined;
+  let producersByState: Record<string, string[]> | undefined;
   try {
     const domainPath = path.resolve(baseDir, 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
@@ -208,9 +208,9 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
       }
     }
-    // Build domainProducers
+    // Build producersByState
     const producers: Record<string, string[]> = {};
-    domainProducers = producers;
+    producersByState = producers;
     // Dedup at the writer: every callsite (runtimeStates.producedBy,
     // capabilities.producedBy, identifiers.boundBy, operationRequirements.
     // produces / implicitAdds, the #70 witness implication) funnels through
@@ -219,7 +219,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // through more than one channel (e.g. createDeployment producing
     // ProcessDefinitionDeployed both directly and via the
     // ProcessDefinitionKey → ProcessDefinitionDeployed witness edge) would
-    // appear multiple times in domainProducers[state].
+    // appear multiple times in producersByState[state].
     const addProducer = (state: string, opId: string) => {
       const list = producers[state] ?? [];
       if (!list.includes(opId)) list.push(opId);
@@ -260,8 +260,8 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       }
     }
     // #56: surface sidecar-declared `produces` into the semantic-BFS-visible
-    // structures (op.produces and bySemanticProducer). Without this step the
-    // sidecar entry only updates `domainProduces` / `domainProducers`, which
+    // structures (op.produces and producersByType). Without this step the
+    // sidecar entry only updates `domainProduces` / `producersByState`, which
     // are used by the runtime-state planner but invisible to semantic BFS.
     if (domain?.operationRequirements) {
       for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
@@ -269,22 +269,22 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         if (!node) continue;
         for (const st of spec.produces ?? []) {
           if (!node.produces.includes(st)) node.produces.push(st);
-          const list = bySemanticProducer[st] ?? [];
+          const list = producersByType[st] ?? [];
           if (!list.includes(opId)) list.push(opId);
-          bySemanticProducer[st] = list;
+          producersByType[st] = list;
         }
       }
     }
     // #70: witness implication. Producing a value of semantic type T
     // witnesses the existence of `semanticTypes[T].witnesses`. Surface
     // every operation that produces T as a producer of the witnessed
-    // state. This unifies the typed-dataflow lens (bySemanticProducer)
-    // with the runtime-state lens (domainProducers).
+    // state. This unifies the typed-dataflow lens (producersByType)
+    // with the runtime-state lens (producersByState).
     if (domain?.semanticTypes) {
       for (const [semanticType, spec] of Object.entries(domain.semanticTypes)) {
         const witnessed = spec.witnesses;
         if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
-        const producers = bySemanticProducer[semanticType] ?? [];
+        const producers = producersByType[semanticType] ?? [];
         for (const opId of producers) {
           if (operations[opId]) addProducer(witnessed, opId);
         }
@@ -305,7 +305,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
-  return { operations, bySemanticProducer, bootstrapSequences, domain, domainProducers };
+  return { operations, producersByType, bootstrapSequences, domain, producersByState };
 }
 
 function normalizeOp(opId: string, op: RawOp): OperationNode {
