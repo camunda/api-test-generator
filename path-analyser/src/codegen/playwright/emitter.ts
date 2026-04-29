@@ -311,14 +311,16 @@ function renderScenarioTest(s: EndpointScenario): string {
         `    await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );
     }
-    // Extraction
+    // Extraction. `extractInto` is the vendored helper from
+    // support/seeding.ts; it skips the assignment when the value is
+    // `undefined` so seeded bindings (e.g. tenantIdVar) and earlier
+    // extracts in the same scenario aren't clobbered by a later step
+    // whose response shape omits the field. See its JSDoc for the full
+    // preserve-on-undefined rationale.
     if (step.extract?.length) {
       body.push(`    const json = await ${varName}.json();`);
       for (const ex of step.extract) {
         const optAcc = toOptionalAccessor(ex.fieldPath);
-        // extractInto preserves the existing ctx binding when the response
-        // field is undefined — matters for seeded values (e.g. tenantIdVar)
-        // and for earlier extracts that later steps must not clobber.
         body.push(`    extractInto(ctx, '${ex.bind}', json${optAcc});`);
       }
     }
