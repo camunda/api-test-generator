@@ -250,6 +250,21 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         }
       }
     }
+    // #70: witness implication. Producing a value of semantic type T
+    // witnesses the existence of `semanticTypes[T].witnesses`. Surface
+    // every operation that produces T as a producer of the witnessed
+    // state. This unifies the typed-dataflow lens (bySemanticProducer)
+    // with the runtime-state lens (domainProducers).
+    if (domain?.semanticTypes) {
+      for (const [semanticType, spec] of Object.entries(domain.semanticTypes)) {
+        const witnessed = spec.witnesses;
+        if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
+        const producers = bySemanticProducer[semanticType] ?? [];
+        for (const opId of producers) {
+          if (operations[opId]) addProducer(witnessed, opId);
+        }
+      }
+    }
   } catch {
     // ignore
   }

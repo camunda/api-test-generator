@@ -60,9 +60,9 @@
       "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]],
       "implicitAdds": ["ProcessInstanceExists"],
       "valueBindings": {
-  "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
-  "request.processDefinitionKey": "ProcessDefinitionKey.processDefinitionKey",
-  "response.processInstanceKey": "ProcessInstanceExists.processInstanceKey"
+        "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
+        "request.processDefinitionKey": "semantic:ProcessDefinitionKey",
+        "response.processInstanceKey": "semantic:ProcessInstanceKey"
       }
     },
     "activateJobs": {
@@ -84,7 +84,7 @@
     "createDeployment": {
       "valueBindings": {
         "response.deployments[].processDefinition.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
-        "response.deployments[].processDefinition.processDefinitionKey": "ProcessDefinitionKey.processDefinitionKey",
+        "response.deployments[].processDefinition.processDefinitionKey": "semantic:ProcessDefinitionKey",
         "response.deployments[].form.formKey": "FormDeployed.formKey"
       }
     },
@@ -131,6 +131,14 @@
     "DecisionDefinitionKey": "dmnDecision",
     "DecisionRequirementsKey": "dmnDrd",
     "FormKey": "form"
+  },
+  "semanticTypes": {
+    "ProcessDefinitionKey": { "witnesses": "ProcessDefinitionDeployed" },
+    "ProcessInstanceKey": { "witnesses": "ProcessInstanceExists" },
+    "DecisionDefinitionKey": { "witnesses": "DecisionDefinitionDeployed" },
+    "DecisionRequirementsKey": { "witnesses": "DecisionRequirementsDeployed" },
+    "FormKey": { "witnesses": "FormDeployed" },
+    "JobKey": { "witnesses": "JobAvailableForActivation" }
   },
   "operationArtifactRules": {
     "createDeployment": {

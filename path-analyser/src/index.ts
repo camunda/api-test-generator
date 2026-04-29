@@ -329,9 +329,14 @@ function buildRequestPlan(
         if (!k.startsWith('response.')) continue; // only handle response mappings here
         const fieldPathRaw = k.slice('response.'.length); // canonical path with [] markers
         const norm = fieldPathRaw.replace(/\[\]/g, '[0]'); // first element access for arrays
-        // Determine target variable name based on parameter portion after last '.' in mapping (state.parameter)
+        // #70: under the new grammar `semantic:<SemanticType>`, the binding
+        // variable is derived from the LHS field-path leaf instead of from
+        // the RHS state.parameter pair (which the typed-dataflow lens replaces).
         const mapping = v;
-        const paramPart = mapping.split('.').pop() ?? '';
+        const isSemantic = mapping.startsWith('semantic:');
+        const paramPart = isSemantic
+          ? (fieldPathRaw.split('.').pop() ?? '')
+          : (mapping.split('.').pop() ?? '');
         let bind = `${camelCase(paramPart)}Var`;
         if (k.endsWith('$key')) {
           // explicit key semantic mapping
@@ -530,7 +535,13 @@ function buildRequestBodyFromCanonical(
     for (const [k, v] of Object.entries<string>(opDom.valueBindings)) {
       if (k.startsWith('request.')) {
         const raw = k.slice('request.'.length);
-        bindingMap[raw] = v.split('.').pop() ?? ''; // take parameter name
+        // #70: under the new grammar `semantic:<SemanticType>`, the parameter
+        // name is derived from the LHS field-path leaf instead of from the
+        // RHS state.parameter pair.
+        const param = v.startsWith('semantic:')
+          ? (raw.split('.').pop() ?? '')
+          : (v.split('.').pop() ?? '');
+        bindingMap[raw] = param;
       }
     }
   }
