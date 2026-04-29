@@ -629,7 +629,12 @@ export function generateScenariosForEndpoint(
         bootstrapFull: state.bootstrapFull,
         modelsDraft,
         bindingsDraft,
-        providerList: updateProviderList(state.providerList || {}, producerNode, newProductionMap),
+        providerList: updateProviderList(
+          state.providerList || {},
+          producerNode,
+          newProductionMap,
+          newProduced,
+        ),
         artifactsApplied: workingState.artifactsApplied,
       });
     }
@@ -929,7 +934,12 @@ function deferForMissingDomainPrereqs(
       // expansion branch. Read artifactsApplied from `workingState` so
       // any array allocated by applyArtifactRuleSelection (`state.x ||= []`)
       // is preserved on the enqueued child without leaking into siblings.
-      providerList: updateProviderList(state.providerList || {}, candidateNode, newProductionMap),
+      providerList: updateProviderList(
+        state.providerList || {},
+        candidateNode,
+        newProductionMap,
+        newProduced,
+      ),
       artifactsApplied: workingState.artifactsApplied,
     });
     enqueued = true;
@@ -1129,9 +1139,18 @@ function updateProviderList(
   existing: Record<string, string[]>,
   producerNode: OperationNode,
   _productionMap: Map<string, string>,
+  newProduced: Set<string>,
 ): Record<string, string[]> {
   const copy: Record<string, string[]> = { ...existing };
   producerNode.produces?.forEach((s: string) => {
+    // Only record providers for semantics that actually landed in
+    // newProduced. For createDeployment, applyArtifactRuleSelection
+    // intentionally limits the produced set based on the selected
+    // artifact bundle; recording the full declared `produces` would
+    // make providerList claim semantics (Decision*/Form keys, etc.)
+    // that the candidate didn't actually produce in this scenario
+    // (mirrors the productionMap gate).
+    if (!newProduced.has(s)) return;
     const opId = producerNode.operationId;
     if (!copy[s]) copy[s] = [opId];
     else if (!copy[s].includes(opId)) copy[s].push(opId);
