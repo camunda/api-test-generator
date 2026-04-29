@@ -11,6 +11,13 @@ import { fileURLToPath } from 'node:url';
 /**
  * Read a fixture identified by a `@@FILE:`-relative path. Throws if no
  * candidate location resolves.
+ *
+ * Candidate order is intentionally a superset of the previous inline
+ * resolver in the emitter. The previous code resolved relative to
+ * `__dirname` of each emitted spec; this helper resolves relative to its
+ * own `import.meta.url` (it lives under `<suite>/support/`) and also walks
+ * up an extra level so it finds `path-analyser/fixtures/` regardless of
+ * how the suite was vendored or invoked.
  */
 export async function resolveFixture(p: string): Promise<Buffer> {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +29,8 @@ export async function resolveFixture(p: string): Promise<Buffer> {
     // When running from repo root
     path.resolve(process.cwd(), 'path-analyser/fixtures', p),
     // Walk up from this helper (lives in <suite>/support/) looking for a
-    // sibling fixtures/ directory.
+    // sibling fixtures/ directory. Three levels covers the standalone
+    // vendored layout, dist/generated-tests/, and the repo-root layout.
     path.resolve(here, '..', 'fixtures', p),
     path.resolve(here, '..', '..', 'fixtures', p),
     path.resolve(here, '..', '..', '..', 'fixtures', p),

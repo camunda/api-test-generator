@@ -13,6 +13,7 @@
 //     env.ts
 //     recorder.ts
 //     seeding.ts
+//     fixtures.ts
 //     seed-rules.json
 // ---------------------------------------------------------------------------
 import { promises as fs } from 'node:fs';
