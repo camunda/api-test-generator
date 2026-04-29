@@ -35,6 +35,8 @@ interface RawOp {
   requires?: unknown;
   requiresSemanticTypes?: unknown;
   parameters?: Array<{
+    name?: string;
+    location?: string;
     schema?: { semanticType?: string };
     semanticType?: string;
     required?: boolean;
@@ -408,7 +410,24 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
     responseSemanticTypes: Object.keys(normalizedResponseSemanticTypes).length
       ? normalizedResponseSemanticTypes
       : undefined,
+    pathParameters: extractPathParameters(op),
   };
+}
+
+function extractPathParameters(op: RawOp): { name: string; semanticType?: string }[] | undefined {
+  if (!Array.isArray(op.parameters)) return undefined;
+  const out: { name: string; semanticType?: string }[] = [];
+  for (const p of op.parameters) {
+    if (!p || p.location !== 'path' || typeof p.name !== 'string') continue;
+    const semanticType =
+      typeof p.semanticType === 'string'
+        ? p.semanticType
+        : typeof p.schema?.semanticType === 'string'
+          ? p.schema.semanticType
+          : undefined;
+    out.push({ name: p.name, semanticType });
+  }
+  return out.length ? out : undefined;
 }
 
 function extractRequires(op: RawOp): { required: string[]; optional: string[] } {

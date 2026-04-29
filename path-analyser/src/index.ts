@@ -428,7 +428,59 @@ function buildRequestPlan(
       steps.push(dup);
     }
   }
+  // Issue #61: alias producer extracts under placeholder-derived var names.
+  // The Playwright emitter substitutes `{placeholder}` with
+  // `ctx.<camelCase(placeholder)>Var`, but producer steps bind under
+  // `<camelCase(semanticType)>Var`. When the OpenAPI path-param's name
+  // differs from its `x-semantic-type` (e.g. `{adHocSubProcessInstanceKey}`
+  // with semantic type `ElementInstanceKey`), the names never meet and the
+  // literal `${...}` leaks into the URL at runtime. For each path
+  // placeholder on the final step whose semantic type was already extracted
+  // by an earlier step under a differently-named bind, push an additional
+  // alias extract on that producer step bound to the placeholder-derived
+  // name. Keeps the emitter dumb and the alias visible in scenario JSON.
+  aliasProducerExtractsToPlaceholders(scenario, steps, graph);
   return steps;
+}
+
+function aliasProducerExtractsToPlaceholders(
+  scenario: EndpointScenario,
+  steps: RequestStep[],
+  graph: OperationGraph,
+): void {
+  if (steps.length < 2) return;
+  const finalStep = steps[steps.length - 1];
+  const placeholders = [...finalStep.pathTemplate.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+  if (placeholders.length === 0) return;
+  const finalNode = graph.operations[finalStep.operationId];
+  const pathParams = finalNode?.pathParameters ?? [];
+  for (const ph of placeholders) {
+    const param = pathParams.find((p) => p.name === ph);
+    const semanticType = param?.semanticType;
+    if (!semanticType) continue;
+    const placeholderVar = `${camelCase(ph)}Var`;
+    const semanticVar = `${camelCase(semanticType)}Var`;
+    if (placeholderVar === semanticVar) continue;
+    // Walk earlier steps to find an extract bound under the semanticType-
+    // derived var. Prefer the most recent such extract so the alias points
+    // at the freshest production in the chain.
+    for (let i = steps.length - 2; i >= 0; i--) {
+      const earlier = steps[i];
+      const sourceExtract = (earlier.extract ?? []).find((e) => e.bind === semanticVar);
+      if (!sourceExtract) continue;
+      const existingBinds = new Set((earlier.extract ?? []).map((e) => e.bind));
+      if (existingBinds.has(placeholderVar)) break;
+      earlier.extract = (earlier.extract ?? []).concat({
+        fieldPath: sourceExtract.fieldPath,
+        bind: placeholderVar,
+        semantic: sourceExtract.semantic,
+        note: 'placeholderAlias',
+      });
+      scenario.bindings ||= {};
+      if (!scenario.bindings[placeholderVar]) scenario.bindings[placeholderVar] = '__PENDING__';
+      break;
+    }
+  }
 }
 
 function determineExpectedStatus(

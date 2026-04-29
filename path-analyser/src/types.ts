@@ -41,6 +41,12 @@ export interface OperationNode extends OperationRef {
     string,
     { semanticType: string; fieldPath: string; required?: boolean }[]
   >;
+  // Path parameters with their declared `x-semantic-type`. Used by
+  // `buildRequestPlan` to alias producer extracts under the
+  // placeholder-derived var name when an OpenAPI path-param's name differs
+  // from its semanticType (issue #61). Populated in graphLoader from the
+  // raw operation node.
+  pathParameters?: { name: string; semanticType?: string }[];
 }
 
 export interface OperationGraph {
@@ -222,7 +228,7 @@ export interface RequestStep {
   bodyKind?: 'json' | 'multipart';
   multipartTemplate?: unknown; // object suitable for Playwright multipart option
   expect: { status: number };
-  extract?: { fieldPath: string; bind: string; semantic?: string }[];
+  extract?: { fieldPath: string; bind: string; semantic?: string; note?: string }[];
   notes?: string;
   // Optional: expected slices in deployments[] for createDeployment responses, derived from domain sidecar
   expectedDeploymentSlices?: string[];
