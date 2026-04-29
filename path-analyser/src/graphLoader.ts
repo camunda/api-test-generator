@@ -1,7 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { validateDomainSemantics } from './domainSemanticsValidator.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
+
+class DomainSemanticsValidationFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DomainSemanticsValidationFailure';
+  }
+}
 
 // Sibling semantic-graph-extractor package produces the operation dependency graph.
 const GRAPH_RELATIVE = '../semantic-graph-extractor/dist/output/operation-dependency-graph.json';
@@ -180,7 +188,15 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const domainPath = path.resolve(baseDir, 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
     // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
-    domain = JSON.parse(domainRaw) as DomainSemantics;
+    const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;
+    const issues = validateDomainSemantics(parsedDomain);
+    if (issues.length > 0) {
+      const detail = issues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+      throw new DomainSemanticsValidationFailure(
+        `domain-semantics.json failed validation:\n${detail}`,
+      );
+    }
+    domain = parsedDomain;
     // debug: domain semantics sidecar loaded
     if (domain?.operationRequirements) {
       for (const [opId, req] of Object.entries(domain.operationRequirements)) {
@@ -274,8 +290,9 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         }
       }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    if (err instanceof DomainSemanticsValidationFailure) throw err;
+    // ignore: sidecar absent or unreadable — domain analysis disabled
   }
 
   return { operations, bySemanticProducer, bootstrapSequences, domain, domainProducers };
