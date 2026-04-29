@@ -510,23 +510,27 @@ export function generateScenariosForEndpoint(
       // multiple producers against the same parent BFS frame, so passing
       // the parent `state` directly leaks artifact/model mutations from
       // one createDeployment candidate into sibling candidates evaluated
-      // later in the same loop. Operate on a per-candidate working clone
-      // (mirrors deferForMissingDomainPrereqs) and read the post-call
-      // collections back from `workingState` when enqueuing.
-      const workingArtifactsApplied = state.artifactsApplied
-        ? [...state.artifactsApplied]
-        : undefined;
+      // later in the same loop. Only the createDeployment path triggers
+      // those mutations — clone artifactsApplied/modelsDraft only there
+      // to avoid extra allocations on the common non-deployment path.
+      // bindingsDraft is cloned unconditionally because the identifier
+      // heuristic below writes to it for every producer.
       const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
-      const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
-      const workingState: State = {
-        ...state,
-        artifactsApplied: workingArtifactsApplied,
-        bindingsDraft: workingBindingsDraft,
-        modelsDraft: workingModelsDraft,
-      };
+      let workingState: State;
       if (producerOpId === 'createDeployment') {
+        const workingArtifactsApplied = state.artifactsApplied
+          ? [...state.artifactsApplied]
+          : undefined;
+        const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+        workingState = {
+          ...state,
+          artifactsApplied: workingArtifactsApplied,
+          bindingsDraft: workingBindingsDraft,
+          modelsDraft: workingModelsDraft,
+        };
         applyArtifactRuleSelection(graph, producerNode, workingState, newProduced, newDomainStates);
       } else {
+        workingState = { ...state, bindingsDraft: workingBindingsDraft };
         producerNode.produces.forEach((s) => {
           newProduced.add(s);
         });
@@ -574,8 +578,17 @@ export function generateScenariosForEndpoint(
       // arbitrary producer for them and inserts a spurious step.
       const newOps = [...state.ops, producerOpId];
       const newProductionMap = new Map(state.productionMap);
+      // Only record productionMap entries for semantics that actually
+      // landed in `newProduced`. For createDeployment, applyArtifactRuleSelection
+      // intentionally limits the produced set based on the selected
+      // artifact bundle; recording the full declared `producerNode.produces`
+      // would make productionMap claim semantics (Decision*/Form keys, etc.)
+      // that the candidate didn't actually produce in this scenario
+      // (mirrors the gate in deferForMissingDomainPrereqs).
       producerNode.produces.forEach((s) => {
-        if (!newProductionMap.has(s)) newProductionMap.set(s, producerOpId);
+        if (newProduced.has(s) && !newProductionMap.has(s)) {
+          newProductionMap.set(s, producerOpId);
+        }
       });
       // (newDomainStates already updated above)
 
@@ -797,27 +810,26 @@ function deferForMissingDomainPrereqs(
     const newDomainStates = new Set(state.domainStates);
     // applyArtifactRuleSelection mutates state.artifactsApplied,
     // state.bindingsDraft, and state.modelsDraft (via
-    // ensureArtifactBindings). We iterate multiple candidate domain
-    // producers and may `continue` after the call, so passing the
-    // parent `state` directly would leak mutations into sibling
-    // candidates and into the parent BFS frame. Operate on a per-child
-    // working copy with shallow clones of the mutable collections, then
-    // hand those clones to the enqueued child state below if we accept
-    // the candidate.
-    const workingArtifactsApplied = state.artifactsApplied
-      ? [...state.artifactsApplied]
-      : undefined;
-    const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
-    const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
-    const workingState: State = {
-      ...state,
-      artifactsApplied: workingArtifactsApplied,
-      bindingsDraft: workingBindingsDraft,
-      modelsDraft: workingModelsDraft,
-    };
+    // ensureArtifactBindings). Only the createDeployment branch
+    // triggers those mutations and the seeding fallback below \u2014
+    // clone the draft collections only on that path so non-deployment
+    // candidates avoid the extra allocations on every BFS iteration.
+    let workingState: State;
     if (candidateOpId === 'createDeployment') {
+      const workingArtifactsApplied = state.artifactsApplied
+        ? [...state.artifactsApplied]
+        : undefined;
+      const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
+      const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+      workingState = {
+        ...state,
+        artifactsApplied: workingArtifactsApplied,
+        bindingsDraft: workingBindingsDraft,
+        modelsDraft: workingModelsDraft,
+      };
       applyArtifactRuleSelection(graph, candidateNode, workingState, newProduced, newDomainStates);
     } else {
+      workingState = state;
       candidateNode.produces.forEach((s) => {
         newProduced.add(s);
       });
