@@ -450,12 +450,13 @@ describe('bundled-spec invariants: planner output', () => {
           const varName = placeholderVarName(ph);
           if (isUsableBinding(bindings[varName])) return false;
           if (producedByEarlierStep.has(varName)) return false;
-          // Out-of-scope: placeholder-name vs. semantic-type alias mismatch
-          // (issue #61). When a producer extracts under
+          // Temporary workaround for placeholder-name vs. semantic-type alias
+          // mismatch (issue #61). When a producer extracts under
           // `<camelCase(semantic)>Var` but the URL template substitutes
-          // `<placeholderName>Var`, the names never meet. Tracked separately
-          // as a follow-up to #58 (BFS deferral); the class-scoped fix will
-          // remove this carve-out and add a generic alias check.
+          // `<placeholderName>Var`, the names never meet, so we also check
+          // the semantic-type-derived alias here. Tracked separately as a
+          // follow-up to #58 (BFS deferral); remove this alias fallback once
+          // #61 fixes placeholder/semanticType binding.
           const param = parameters.find((p) => p.name === ph && p.location === 'path');
           if (param?.semanticType) {
             const aliasVar = `${param.semanticType.charAt(0).toLowerCase()}${param.semanticType.slice(1)}Var`;

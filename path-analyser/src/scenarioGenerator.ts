@@ -503,8 +503,29 @@ export function generateScenariosForEndpoint(
 
       const newProduced = new Set(state.produced);
       const newDomainStates = new Set(state.domainStates);
+      // applyArtifactRuleSelection / ensureArtifactBindings mutate
+      // state.artifactsApplied, state.bindingsDraft, and state.modelsDraft
+      // (and may allocate fresh arrays/objects via `state.x ||= …` when
+      // those fields are undefined). The producer-candidate loop iterates
+      // multiple producers against the same parent BFS frame, so passing
+      // the parent `state` directly leaks artifact/model mutations from
+      // one createDeployment candidate into sibling candidates evaluated
+      // later in the same loop. Operate on a per-candidate working clone
+      // (mirrors deferForMissingDomainPrereqs) and read the post-call
+      // collections back from `workingState` when enqueuing.
+      const workingArtifactsApplied = state.artifactsApplied
+        ? [...state.artifactsApplied]
+        : undefined;
+      const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
+      const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+      const workingState: State = {
+        ...state,
+        artifactsApplied: workingArtifactsApplied,
+        bindingsDraft: workingBindingsDraft,
+        modelsDraft: workingModelsDraft,
+      };
       if (producerOpId === 'createDeployment') {
-        applyArtifactRuleSelection(graph, producerNode, state, newProduced, newDomainStates);
+        applyArtifactRuleSelection(graph, producerNode, workingState, newProduced, newDomainStates);
       } else {
         producerNode.produces.forEach((s) => {
           newProduced.add(s);
@@ -558,9 +579,12 @@ export function generateScenariosForEndpoint(
       });
       // (newDomainStates already updated above)
 
-      // Draft models & bindings
-      let modelsDraft = state.modelsDraft;
-      const bindingsDraft = { ...(state.bindingsDraft || {}) };
+      // Draft models & bindings — read post-call from workingState so any
+      // models/bindings allocated by applyArtifactRuleSelection /
+      // ensureArtifactBindings (`state.x ||= …`) flow into the enqueued
+      // child without leaking into sibling candidates.
+      let modelsDraft = workingState.modelsDraft;
+      const bindingsDraft = workingState.bindingsDraft ?? {};
       if (producerOpId === 'createDeployment' && !modelsDraft) {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
@@ -593,7 +617,7 @@ export function generateScenariosForEndpoint(
         modelsDraft,
         bindingsDraft,
         providerList: updateProviderList(state.providerList || {}, producerNode, newProductionMap),
-        artifactsApplied: state.artifactsApplied,
+        artifactsApplied: workingState.artifactsApplied,
       });
     }
   }
