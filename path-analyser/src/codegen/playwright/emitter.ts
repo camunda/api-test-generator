@@ -143,7 +143,11 @@ function renderScenarioTest(s: EndpointScenario): string {
     for (const l of wrapped) body.push(`  // ${l}`);
   }
   body.push(`  const baseUrl = buildBaseUrl();`);
-  body.push(`  const ctx: Record<string, any> = {};`);
+  // `unknown` (not `any`) keeps the emitted suite biome-clean while still
+  // accepting the wide value space we shovel through ctx (string ids,
+  // numeric keys, structured response payloads). Reads from ctx flow into
+  // request bodies that are themselves untyped, so no narrowing is needed.
+  body.push(`  const ctx: Record<string, unknown> = {};`);
   // Collect extraction target variable names across all steps
   const extractionVars = new Set<string>();
   if (s.requestPlan) {
@@ -233,9 +237,15 @@ function renderScenarioTest(s: EndpointScenario): string {
     opts.push('headers: await authHeaders()');
     if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
     if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-      // Convert template to Playwright's expected multipart shape: a keyed object map
-      // Files are passed as { name, mimeType, buffer }
-      body.push(`    const multipart: Record<string, any> = {};`);
+      // Convert template to Playwright's expected multipart shape: a keyed object map.
+      // Field values are stringified (`String(v)`); file values are passed as
+      // `{ name, mimeType, buffer }`. The element type below mirrors the
+      // permissive subset of Playwright's `multipart` option that we actually
+      // emit, so the generated suite typechecks under `strict: true` when
+      // `request.post({ multipart })` is called.
+      body.push(
+        `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
+      );
       body.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
       body.push(`      if (k === 'tenantId' && __tenantIdIsDefault) continue;`);
       body.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
@@ -265,7 +275,7 @@ function renderScenarioTest(s: EndpointScenario): string {
           const name = p.split('/').pop() || 'file';
           multipart[k] = { name, mimeType: 'application/octet-stream', buffer: buf };
         } else {
-          multipart[k] = v;
+          multipart[k] = String(v);
         }
       }`);
       opts.push('multipart: multipart');
@@ -278,7 +288,11 @@ function renderScenarioTest(s: EndpointScenario): string {
     // Record observation for this step (best-effort). Only capture response shapes for 200 responses.
     body.push(`    try {`);
     body.push(`      const __status = ${varName}.status();`);
-    body.push(`      let bodyJson: any = undefined;`);
+    // `unknown` + assigned-or-stays-undefined; the subsequent
+    // `bodyJson !== undefined` guard before sanitizeBody() preserves the
+    // contract. Drops both the noExplicitAny error and the
+    // noUselessUndefinedInitialization info from the generated suite.
+    body.push(`      let bodyJson: unknown;`);
     body.push(
       `      if (__status === 200) { try { bodyJson = await ${varName}.json(); } catch {} }`,
     );
