@@ -123,6 +123,19 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
   // The pre-#86 form. Must not reappear in the universal-seed prologue.
   const PRE_86_TENANT_GUARD = `ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
 
+  // Count occurrences of `needle` in `haystack` without regex escaping.
+  function countOccurrences(haystack: string, needle: string): number {
+    if (needle.length === 0) return 0;
+    let count = 0;
+    let from = 0;
+    while (true) {
+      const i = haystack.indexOf(needle, from);
+      if (i === -1) return count;
+      count += 1;
+      from = i + needle.length;
+    }
+  }
+
   function buildCollectionWithBindings(
     bindings: Record<string, unknown>,
     extras: { templateRefsTenant?: boolean; extractsTenant?: boolean } = {},
@@ -168,16 +181,16 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     return file.content;
   }
 
-  test('literal tenantIdVar binding seeds the value and emits the ?? fallback', async () => {
+  test('literal tenantIdVar binding seeds the value and emits the ?? fallback exactly once', async () => {
     const content = await renderFirst(buildCollectionWithBindings({ tenantIdVar: 'acme' }));
     expect(content).toContain(`ctx['tenantIdVar'] = "acme";`);
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     // The universal-seed prologue must not reintroduce the pre-#86 `=== undefined` guard.
     expect(content).not.toContain(PRE_86_TENANT_GUARD);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('__PENDING__ tenantIdVar referenced by a template emits a guarded auto-seed and the ?? fallback', async () => {
+  test('__PENDING__ tenantIdVar referenced by a template emits a guarded auto-seed and the ?? fallback exactly once', async () => {
     const content = await renderFirst(
       buildCollectionWithBindings({ tenantIdVar: '__PENDING__' }, { templateRefsTenant: true }),
     );
@@ -187,11 +200,11 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).toContain(
       `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`,
     );
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('extractionVars tenantIdVar skips eager seeding but still emits the ?? fallback', async () => {
+  test('extractionVars tenantIdVar skips eager seeding but still emits the ?? fallback exactly once', async () => {
     const content = await renderFirst(
       buildCollectionWithBindings(
         { tenantIdVar: 'ignored-because-extracted' },
@@ -199,14 +212,14 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
       ),
     );
     expect(content).not.toContain(`ctx['tenantIdVar'] = "ignored-because-extracted";`);
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     expect(content).not.toContain(PRE_86_TENANT_GUARD);
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('no tenantIdVar binding at all emits the ?? fallback (#86: was previously a dead `=== undefined` guard)', async () => {
+  test('no tenantIdVar binding at all emits the ?? fallback exactly once (#86: was previously a dead `=== undefined` guard)', async () => {
     const content = await renderFirst(buildCollectionWithBindings({}));
-    expect(content).toContain(TENANT_FALLBACK);
+    expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     // Pre-#86 dead-guard must not reappear when the bindings loop assigned nothing.
     expect(content).not.toContain(PRE_86_TENANT_GUARD);
     expect(content).not.toMatch(/__seededTenant/);
