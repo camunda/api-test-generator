@@ -2,15 +2,19 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "domain-semantics.schema.json",
   "title": "Domain Semantics Sidecar",
+  "description": "Hand-maintained sidecar consumed by path-analyser. Cross-section invariants (e.g. artifactKindStateDeclared, semanticTypeWitnessTargetResolves) are enforced at load time by path-analyser/src/domainSemanticsValidator.ts and intentionally NOT re-encoded here — Draft-07 cannot express them.",
   "type": "object",
+  "additionalProperties": false,
   "required": ["identifiers","runtimeStates","operationRequirements","version"],
   "properties": {
-    "version": {"type": "integer"},
+    "$schema": {"type": "string"},
+    "version": {"type": "integer", "minimum": 1},
     "identifiers": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["kind","validityState","boundBy"],
+        "additionalProperties": false,
+        "required": ["kind","boundBy"],
         "properties": {
           "kind": {"const": "identifier"},
           "validityState": {"type": "string"},
@@ -24,6 +28,7 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["kind","parameter","producedBy"],
         "properties": {
           "kind": {"const": "capability"},
@@ -37,6 +42,7 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["kind","producedBy"],
         "properties": {
           "kind": {"const": "state"},
@@ -47,16 +53,91 @@
         }
       }
     },
+    "semanticTypes": {
+      "description": "Declarations of semantic identifier types (e.g. ProcessDefinitionKey). Each entry's `witnesses` names the runtimeStates/capabilities entry whose presence proves the semantic value exists. Cross-section resolution of `witnesses` is enforced at load time by domainSemanticsValidator.ts.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "witnesses": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "artifactKinds": {
+      "description": "Declarations of deployable artifact kinds (e.g. bpmnProcess). `producesStates` and `producesSemantics` cross-references are enforced at load time by domainSemanticsValidator.ts.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "producesStates": {"type": "array", "items": {"type": "string"}},
+          "producesSemantics": {"type": "array", "items": {"type": "string"}},
+          "identifierType": {"type": "string"},
+          "deploymentSlices": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "artifactFileKinds": {
+      "description": "Map of file extension (including leading dot, e.g. `.bpmn`) to the list of artifactKinds that file may contain.",
+      "type": "object",
+      "propertyNames": {"pattern": "^\\.[A-Za-z0-9._]+$"},
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1
+      }
+    },
+    "semanticTypeToArtifactKind": {
+      "description": "Map of semantic type name (e.g. ProcessDefinitionKey) to the artifactKind that produces it. Used by the planner to resolve which fixture kind satisfies a semantic prerequisite.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "operationArtifactRules": {
+      "description": "Per-operation rules describing how request fields map to deployable artifacts. Consumed by the planner to decompose composite deployment operations into per-artifact slices.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rules"],
+        "properties": {
+          "composable": {"type": "boolean"},
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "artifactKind"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "artifactKind": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    },
     "operationRequirements": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "requires": {"type": "array", "items": {"type": "string"}},
           "disjunctions": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
           "implicitAdds": {"type": "array", "items": {"type": "string"}},
           "produces": {"type": "array", "items": {"type": "string"}},
-          "valueBindings": {"type": "object", "additionalProperties": {"type": "string"}}
+          "valueBindings": {
+            "type": "object",
+            "description": "Field-name -> source binding. Each value is one of two grammars: `semantic:<TypeName>` (resolves a semanticTypes entry) or `<StateName>.<parameterName>` (resolves a runtimeStates/capabilities parameter). Cross-section resolution is enforced at load time by domainSemanticsValidator.ts.",
+            "additionalProperties": {
+              "type": "string",
+              "oneOf": [
+                {"pattern": "^semantic:[A-Za-z_][A-Za-z0-9_]*$"},
+                {"pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$"}
+              ]
+            }
+          }
         }
       }
     },
