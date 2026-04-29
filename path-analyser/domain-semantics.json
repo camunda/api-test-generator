@@ -57,7 +57,7 @@
   },
   "operationRequirements": {
     "createProcessInstance": {
-      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]],
+      "requires": ["ProcessDefinitionDeployed"],
       "implicitAdds": ["ProcessInstanceExists"],
       "valueBindings": {
         "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
@@ -89,7 +89,7 @@
       }
     },
     "searchProcessDefinitions": {
-      "disjunctions": [["ProcessDefinitionKey", "ProcessDefinitionDeployed"]]
+      "requires": ["ProcessDefinitionDeployed"]
     }
   },
   "artifactKinds": {
