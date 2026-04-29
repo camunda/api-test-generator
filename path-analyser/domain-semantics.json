@@ -38,6 +38,21 @@
       "parameters": ["jobType", "processDefinitionId"],
       "producedBy": ["activateJobs"],
       "requires": ["ProcessInstanceExists", "ModelHasServiceTaskType"]
+    },
+    "FormDeployed": {
+      "kind": "state",
+      "parameter": "formKey",
+      "producedBy": ["createDeployment"]
+    },
+    "DecisionDefinitionDeployed": {
+      "kind": "state",
+      "parameter": "decisionDefinitionId",
+      "producedBy": ["createDeployment"]
+    },
+    "DecisionRequirementsDeployed": {
+      "kind": "state",
+      "parameter": "decisionRequirementsId",
+      "producedBy": ["createDeployment"]
     }
   },
   "operationRequirements": {
