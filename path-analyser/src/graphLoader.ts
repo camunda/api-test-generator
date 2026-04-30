@@ -290,13 +290,29 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // every operation that produces T as a producer of the witnessed
     // state. This unifies the typed-dataflow lens (producersByType)
     // with the runtime-state lens (producersByState).
+    //
+    // #95: gate the implication on `providerMap[T] === true`. Without
+    // this gate, an op that carries T only as incidental response
+    // metadata (e.g. createDocument's 201 carries
+    // metadata.processInstanceKey with provider:false) is added to
+    // producersByState[witnessed]. The semantic-producer expansion in
+    // scenarioGenerator.ts then treats that op's `domainProduces`
+    // entry as a real production claim, and rejects the candidate
+    // when the witnessed state's transitive `requires` chain is unmet
+    // — silently dropping otherwise-valid chains (the getDocument →
+    // createDocument symptom in #95). Authoritative producers
+    // (`provider: true`) are still surfaced; that is the relation #70
+    // intended to capture.
     if (domain?.semanticTypes) {
       for (const [semanticType, spec] of Object.entries(domain.semanticTypes)) {
         const witnessed = spec.witnesses;
         if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
         const producers = producersByType[semanticType] ?? [];
         for (const opId of producers) {
-          if (operations[opId]) addProducer(witnessed, opId);
+          const op = operations[opId];
+          if (!op) continue;
+          if (op.providerMap?.[semanticType] !== true) continue;
+          addProducer(witnessed, opId);
         }
       }
     }
