@@ -649,9 +649,13 @@ describe('bundled-spec invariants: planner output', () => {
       opByEndpointKey.set(`${op.method.toUpperCase()} ${op.path}`, op);
       opByOperationId.set(op.operationId, op);
     }
-    // Authoritative producers per semantic type (provider:true only). This
-    // is the same signal `graphLoader.normalizeOp` uses to populate
-    // `producersByType`; we re-derive it here to avoid coupling the
+    // Authoritative producers per semantic type (provider:true only).
+    // Intentionally stricter than `producersByType`: `graphLoader.normalizeOp`
+    // currently falls back to treating every response semantic as a
+    // producer when an op has no provider flags at all (graphLoader.ts
+    // ~lines 372-381; tracked for removal in #97). The Bug-C diagnosis is
+    // about authoritative producers, not the fallback set, so we re-derive
+    // the strict authoritative-only relation here and avoid coupling the
     // invariant to internal planner state.
     const authoritativeProducersOf = new Map<string, string[]>();
     for (const op of graph.operations) {
@@ -667,9 +671,13 @@ describe('bundled-spec invariants: planner output', () => {
         }
       }
     }
-    // Required semantic-type inputs of an op (request body + path/query
-    // parameters with `required: true`). Mirrors `extractRequires` in
-    // graphLoader.ts.
+    // Required semantic-type inputs of an op (request body + every
+    // required parameter that carries a `semanticType`, regardless of
+    // location). Mirrors `extractRequires` in graphLoader.ts, which also
+    // does not filter parameters by `path`/`query`/`header`/`cookie` — a
+    // semanticType-tagged required header (rare in this spec, but
+    // possible) would gate chain assembly the same way as a path
+    // parameter, so the reachability model must include it.
     const requiredInputsOf = (opId: string): string[] => {
       const op = opByOperationId.get(opId);
       if (!op) return [];
@@ -755,9 +763,28 @@ describe('bundled-spec invariants: planner output', () => {
           `Missing dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f}. This indicates a graph/feature-output mismatch or endpoint-keying bug.`,
         );
       }
+      const pathParameters = (node.parameters ?? []).filter((p) => p.location === 'path');
+      // If the path has placeholders but the graph node has no path
+      // parameters at all, that is a graph/extractor bug — fail fast.
+      if (pathParameters.length === 0) {
+        throw new Error(
+          `Dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f} has path placeholders (${placeholders.join(', ')}) but no path parameters on the node. This indicates a graph extraction or endpoint-keying bug.`,
+        );
+      }
+      // A placeholder must have a matching `path` parameter entry on the
+      // graph node — otherwise the URL template references a name the
+      // graph never declared, which is also a graph/extractor bug.
+      const placeholdersMissingParam = placeholders.filter(
+        (ph) => !pathParameters.some((p) => p.name === ph),
+      );
+      if (placeholdersMissingParam.length) {
+        throw new Error(
+          `Dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f} is missing path parameter entries for placeholders: ${placeholdersMissingParam.join(', ')}. This indicates a graph extraction or endpoint-keying bug.`,
+        );
+      }
       const inScopeTypes = placeholders
         .map((ph) => {
-          const param = (node.parameters ?? []).find((p) => p.name === ph && p.location === 'path');
+          const param = pathParameters.find((p) => p.name === ph);
           return param?.semanticType;
         })
         .filter((st): st is string => Boolean(st));
