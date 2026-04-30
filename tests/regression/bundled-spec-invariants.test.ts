@@ -612,10 +612,10 @@ describe('bundled-spec invariants: planner output', () => {
     // `x-semantic-provider: true` producers in the bundled spec. List
     // endpoints (searchUserTasks, searchIncidents, searchAuditLogs,
     // searchVariables, searchDecisionInstances, searchGlobalTaskListeners)
-    // emit the entity keys with `provider: false`; the per-op gate in
-    // graphLoader.ts (#97 path) excludes them from `producersByType`,
-    // leaving the planner with no upstream producer to graft. The same
-    // gap also blocks two endpoints whose direct producer DOES exist
+    // emit the entity keys with `provider: false`; in this graph shape
+    // that leaves the planner with no authoritative upstream producer to
+    // graft for the affected chain. The same gap also blocks two
+    // endpoints whose direct producer DOES exist
     // (DecisionEvaluationInstanceKey/Key via evaluateDecision) because
     // evaluateDecision itself transitively requires DecisionDefinitionId,
     // which has zero authoritative producers.
@@ -644,8 +644,10 @@ describe('bundled-spec invariants: planner output', () => {
     }
     const graph = loadGraph();
     const opByEndpointKey = new Map<string, OperationNode>();
+    const opByOperationId = new Map<string, OperationNode>();
     for (const op of graph.operations) {
       opByEndpointKey.set(`${op.method.toUpperCase()} ${op.path}`, op);
+      opByOperationId.set(op.operationId, op);
     }
     // Authoritative producers per semantic type (provider:true only). This
     // is the same signal `graphLoader.normalizeOp` uses to populate
@@ -669,7 +671,7 @@ describe('bundled-spec invariants: planner output', () => {
     // parameters with `required: true`). Mirrors `extractRequires` in
     // graphLoader.ts.
     const requiredInputsOf = (opId: string): string[] => {
-      const op = graph.operations.find((o) => o.operationId === opId);
+      const op = opByOperationId.get(opId);
       if (!op) return [];
       const set = new Set<string>();
       for (const e of op.requestBodySemanticTypes ?? []) {
@@ -720,7 +722,17 @@ describe('bundled-spec invariants: planner output', () => {
     for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
       if (!f.endsWith('-scenarios.json')) continue;
       const plannerPath = join(SCENARIOS_DIR, f);
-      if (!existsSync(plannerPath)) continue;
+      // The pipeline emits one planner-scenarios file per feature-scenarios
+      // file (same normalised filename). A missing companion is a pipeline
+      // bug — fail fast rather than silently skip and mask it.
+      if (!existsSync(plannerPath)) {
+        throw new Error(
+          `Missing planner scenario file for feature scenario ${relative(
+            REPO_ROOT,
+            join(FEATURE_SCENARIOS_DIR, f),
+          )}; expected ${relative(REPO_ROOT, plannerPath)}`,
+        );
+      }
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
       const planner = JSON.parse(readFileSync(plannerPath, 'utf8')) as PlannerScenarioFile;
       const hasSatisfiedChain = (planner.scenarios ?? []).some(
@@ -735,7 +747,14 @@ describe('bundled-spec invariants: planner output', () => {
       if (!placeholders.length) continue;
       const endpointKey = `${file.endpoint.method.toUpperCase()} ${file.endpoint.path}`;
       const node = opByEndpointKey.get(endpointKey);
-      if (!node) continue;
+      // A missing dependency-graph node for an endpoint that has a
+      // feature-output file is a graph/feature-output mismatch (or an
+      // endpoint-keying bug) — fail fast rather than silently skip.
+      if (!node) {
+        throw new Error(
+          `Missing dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f}. This indicates a graph/feature-output mismatch or endpoint-keying bug.`,
+        );
+      }
       const inScopeTypes = placeholders
         .map((ph) => {
           const param = (node.parameters ?? []).find((p) => p.name === ph && p.location === 'path');
