@@ -367,6 +367,111 @@ describe('bundled-spec invariants: planner output', () => {
     expect(matchingScenario).toBeDefined();
   });
 
+  it('evaluateDecision is reachable via [createDeployment, evaluateDecision] once DecisionDefinitionId is annotated (camunda/camunda#52271)', () => {
+    // Self-healing guard for the array + allOf + nullable + provider-array
+    // inheritance combination — the most structurally complex shape any
+    // `x-semantic-provider` annotation in the upstream spec exercises.
+    //
+    // `createDeployment`'s 200 response is:
+    //   DeploymentResponse
+    //     .deployments[]                                  (array)
+    //       .decisionDefinition                           (nullable: true)
+    //         allOf:
+    //           - $ref: DeploymentDecisionResult
+    //             x-semantic-provider:
+    //               - decisionDefinitionId  <-- promoted by camunda/camunda#52271
+    //               - decisionRequirementsId
+    //               - decisionDefinitionKey  (already present pre-#52271)
+    //               - decisionRequirementsKey
+    //               - name
+    //               - version
+    //
+    // For the planner to discover `[createDeployment, evaluateDecision]`,
+    // the extractor's response walker must descend through (a) array
+    // `items`, (b) `allOf` wrappers, (c) propagate the parent object's
+    // `x-semantic-provider: [...]` array down to each named child via
+    // `inheritedProvider` — and emit `provider: true` on the resulting
+    // leaf. None of those branches are exercised by the simpler
+    // `getDocument` reproducer above (`DocumentReference` is a flat
+    // object directly under the response).
+    //
+    // Self-healing pattern (mirrors the #95 reproducer): assert the
+    // upstream-annotated branch only when the canonical signal is
+    // present on `createDeployment`'s response. While upstream is
+    // unannotated, assert the documented current state instead so a
+    // regression away from it (e.g. the dropped fallback re-introduced)
+    // still trips this guard. When camunda/camunda#52271 lands and the
+    // spec pin is bumped, the second branch becomes false, the first
+    // branch must hold, and any future regression to "no chain planned"
+    // fails the test loudly.
+    const REPO_ROOT = join(import.meta.dirname, '..', '..');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const rawGraph = JSON.parse(
+      readFileSync(
+        join(
+          REPO_ROOT,
+          'semantic-graph-extractor',
+          'dist',
+          'output',
+          'operation-dependency-graph.json',
+        ),
+        'utf8',
+      ),
+    ) as {
+      operations: Array<{
+        operationId: string;
+        responseSemanticTypes?: Record<
+          string,
+          Array<{ semanticType?: unknown; provider?: unknown; fieldPath?: unknown }>
+        >;
+      }>;
+    };
+    const createDeployment = rawGraph.operations.find((o) => o.operationId === 'createDeployment');
+    expect(createDeployment, 'createDeployment operation must exist in raw graph').toBeDefined();
+    const createDeploymentProvidesDecisionDefinitionId = Object.values(
+      createDeployment?.responseSemanticTypes ?? {},
+    ).some(
+      (arr) =>
+        Array.isArray(arr) &&
+        arr.some((e) => e?.semanticType === 'DecisionDefinitionId' && e?.provider === true),
+    );
+
+    const scen = loadScenarioFile('post--decision-definitions--evaluation-scenarios.json');
+
+    if (!createDeploymentProvidesDecisionDefinitionId) {
+      // Documented current-state branch: while upstream is missing the
+      // annotation, evaluateDecision's only producer chain is structurally
+      // unreachable and the planner emits the sentinel `unsatisfied`
+      // scenario. Assert that exact shape so a regression away from it
+      // (e.g. silent re-introduction of the fallback, or accidental
+      // demotion of the response walker) trips this guard.
+      expect(scen.scenarios.length).toBeGreaterThan(0);
+      const onlySentinel = scen.scenarios.every(
+        (s) =>
+          s.id === 'unsatisfied' || (s.missingSemanticTypes && s.missingSemanticTypes.length > 0),
+      );
+      expect(
+        onlySentinel,
+        'expected only an unsatisfied/missing-semantics scenario while createDeployment lacks provider:true on decisionDefinitionId (camunda/camunda#52271)',
+      ).toBe(true);
+      return;
+    }
+
+    // Upstream-annotated branch: positive assertion. Once #52271 lands
+    // and the spec pin is bumped, this is the durable regression guard
+    // against the array + allOf + nullable + inheritance combination
+    // breaking in the response walker.
+    expect(scen.scenarios.length).toBeGreaterThan(0);
+    const matchingScenario = scen.scenarios.find((scenario) => {
+      const chain = scenario.operations.map((o) => o.operationId);
+      return chain.includes('createDeployment') && chain[chain.length - 1] === 'evaluateDecision';
+    });
+    expect(
+      matchingScenario,
+      'expected a chain ending in evaluateDecision that includes createDeployment as a producer of DecisionDefinitionId',
+    ).toBeDefined();
+  });
+
   it('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', () => {
     // Class-scoped guard against the #35 defect family: BFS must not
     // insert any operation whose `requires.required` is not satisfied
