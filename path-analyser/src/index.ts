@@ -140,12 +140,60 @@ async function main() {
     if (featureCollection.scenarios.length > MAX_FEATURE_SCENARIOS) {
       featureCollection.scenarios = featureCollection.scenarios.slice(0, MAX_FEATURE_SCENARIOS);
     }
-    // Choose a representative integration scenario to supply dependency chain (shortest non-unsatisfied with >1 ops; fallback scenario-1)
+    // Choose a representative integration scenario to supply the
+    // dependency chain. Shortest non-`unsatisfied` chain with >1 ops,
+    // *gated on producer authority for the endpoint's required types*.
+    //
+    // The planner's `producersByType` index is intentionally permissive
+    // (it includes echo-only response fields so domain-progression and
+    // witness lenses stay connected — see graphLoader.ts #95). That
+    // means a chain like `createDocument -> cancelProcessInstance` can
+    // satisfy the BFS for ProcessInstanceKey even though createDocument
+    // merely echoes `metadata.processInstanceKey` (provider:false) from
+    // the request. If the selector picked that chain, the extracted
+    // value would be empty at runtime and the URL placeholder would
+    // leak.
+    //
+    // Resolution: among multi-op chains, prefer those whose prerequisite
+    // operations include at least one *authoritative* (provider:true)
+    // producer for every required semantic type. Fall back to the
+    // length-only sort when no such chain exists, so endpoints whose
+    // required types have no authoritative producer anywhere in the
+    // graph (an upstream-spec gap) are not regressed.
     const integrationCandidates = collection.scenarios.filter((sc) => sc.id !== 'unsatisfied');
+    const requiredTypes = collection.requiredSemanticTypes ?? [];
+    // Restrict the authoritative-producer check to required types that
+    // actually have an authoritative producer somewhere in the graph.
+    // If an endpoint requires types `[A, B]` and only `A` has an
+    // authoritative producer anywhere, requiring chains to authoritatively
+    // produce both would reject every candidate and force the fallback to
+    // length-only selection — at which point the chain might also miss
+    // the authoritative producer for `A`. Filtering first means we still
+    // gate on `A` while exempting `B` (an upstream-spec gap), matching
+    // the L3 invariant's exemption rule.
+    const requiredTypesWithAuthoritativeProducer = requiredTypes.filter((t) =>
+      (graph.producersByType[t] ?? []).some(
+        (opId) => graph.operations[opId]?.providerMap?.[t] === true,
+      ),
+    );
+    const isAuthoritativeChain = (sc: EndpointScenario): boolean => {
+      if (!requiredTypesWithAuthoritativeProducer.length) return true;
+      // Endpoint-self does not count: an op cannot bind its own URL
+      // placeholder from its own response.
+      const prereqOpIds = sc.operations.slice(0, -1).map((o) => o.operationId);
+      if (!prereqOpIds.length) return false;
+      return requiredTypesWithAuthoritativeProducer.every((t) =>
+        prereqOpIds.some((opId) => graph.operations[opId]?.providerMap?.[t] === true),
+      );
+    };
+    const multiOpCandidates = integrationCandidates.filter((sc) => sc.operations.length > 1);
+    const byLength = (a: EndpointScenario, b: EndpointScenario) =>
+      a.operations.length - b.operations.length;
+    const authoritativeMultiOp = multiOpCandidates.filter(isAuthoritativeChain);
     const chainSource =
-      integrationCandidates
-        .filter((sc) => sc.operations.length > 1)
-        .sort((a, b) => a.operations.length - b.operations.length)[0] || integrationCandidates[0];
+      [...authoritativeMultiOp].sort(byLength)[0] ||
+      [...multiOpCandidates].sort(byLength)[0] ||
+      integrationCandidates[0];
     // The chain-graft + requestPlan synthesis must run for every endpoint,
     // not just those with a response shape. Operations with a
     // 204 No-Content response (cancelProcessInstance, completeJob,
