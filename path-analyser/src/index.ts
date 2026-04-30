@@ -272,7 +272,12 @@ async function main() {
       unsatisfied: !!collection.unsatisfied,
       missingSemanticTypes: collection.scenarios.find((s) => s.id === 'unsatisfied')
         ?.missingSemanticTypes,
-      missingPathPlaceholders: collection.scenarios.find((s) => s.id === 'unsatisfied')
+      // `missingPathPlaceholders` is stamped on every scenario by the planner
+      // (it is a per-endpoint fact, not a per-scenario one), so read it from
+      // any scenario rather than only the `unsatisfied` one — the offenders
+      // we want to surface here are precisely those whose scenarios are
+      // satisfied but whose URL still leaks a literal `${placeholder}`.
+      missingPathPlaceholders: collection.scenarios.find((s) => s.missingPathPlaceholders?.length)
         ?.missingPathPlaceholders,
     });
     processed++;
@@ -297,6 +302,29 @@ async function main() {
   }
 
   console.log(`Generated scenario files for ${processed} endpoints.`);
+  // Surface endpoints whose URL contains a path placeholder no chain step or
+  // global seed can bind. The planner still emits these scenarios, but the
+  // rendered URL leaks a literal `${placeholder}` at runtime. The cure is
+  // upstream `x-semantic-type` tags (#53). Logging here gives a one-glance
+  // signal rather than requiring reviewers to grep summary JSON.
+  const blocked: { endpoint: string; placeholders: string[] }[] = [];
+  for (const e of summaryEntries) {
+    const collection = e;
+    if (collection.missingPathPlaceholders?.length) {
+      blocked.push({
+        endpoint: `${collection.method.toUpperCase()} ${collection.path}`,
+        placeholders: collection.missingPathPlaceholders,
+      });
+    }
+  }
+  if (blocked.length) {
+    console.log(
+      `\n${blocked.length} endpoint(s) have unbindable path placeholders (blocked on #53):`,
+    );
+    for (const b of blocked) {
+      console.log(`  ${b.endpoint}  →  {${b.placeholders.join(', ')}}`);
+    }
+  }
 }
 
 main().catch((err) => {
