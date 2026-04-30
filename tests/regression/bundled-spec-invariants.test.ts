@@ -893,6 +893,116 @@ describe('bundled-spec invariants: planner output', () => {
       'Planner returned an empty scenarios array while reporting unsatisfied=false. The BFS exhausted its queue without completing any chain (typically because every producer for the required semantic type self-cycles or has unreachable prereqs). The planner must mark these as unsatisfied — silent zero-scenario results break every downstream consumer that trusts unsatisfied=false.',
     ).toEqual([]);
   });
+
+  it('every feature scenario chain contains an authoritative producer for each requiredSemanticType', () => {
+    // Chain-selector correctness guard. The feature-output stage in
+    // `path-analyser/src/index.ts` chooses one integration scenario from
+    // the planner output to graft as the dependency chain in front of
+    // every feature scenario. The current selector picks the
+    // shortest non-`unsatisfied` chain with >1 operations and falls back
+    // to `scenarios[0]` — with no check that the producers in that chain
+    // are *authoritative* for the endpoint's required semantic types.
+    //
+    // Concrete example (current bundled spec):
+    //   POST /process-instances/{processInstanceKey}/cancellation
+    //     requiredSemanticTypes: [ProcessInstanceKey]
+    //   planner offers:
+    //     scenario-1: createDocument -> cancelProcessInstance      (length 2)
+    //     scenario-4: createDeployment -> createProcessInstance
+    //                 -> cancelProcessInstance                     (length 3)
+    //   selector picks scenario-1 because it is shorter.
+    //   But createDocument is NOT an authoritative producer for
+    //   ProcessInstanceKey: its 201 response carries
+    //   `metadata.processInstanceKey` with `provider: false` — it merely
+    //   echoes whatever metadata the request supplied. The "extracted"
+    //   key is empty at runtime and the URL renders with a literal
+    //   `${processInstanceKey}` placeholder.
+    //
+    // The planner's `producersByType` index is intentionally permissive
+    // (it includes echo fields so domain-progression and witness lenses
+    // stay connected — see graphLoader.ts #95). The chain selector is
+    // the right place to prefer authoritative providers, because it
+    // chooses which single chain becomes the test prefix.
+    //
+    // Invariant: for every feature scenario whose endpoint has a
+    // non-empty `requiredSemanticTypes`, every chain operation set must
+    // contain at least one operation whose response declares that
+    // semantic type with `provider: true`. If no authoritative producer
+    // for a required type exists *anywhere* in the graph, the type is
+    // exempt — that is an upstream-spec gap, not a selector bug.
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const graph = loadGraph();
+    const authoritativeProducers = new Map<string, Set<string>>();
+    for (const op of graph.operations) {
+      for (const [status, arr] of Object.entries(op.responseSemanticTypes ?? {})) {
+        if (!/^2\d\d$/.test(status)) continue;
+        for (const entry of arr) {
+          if (entry.provider !== true) continue;
+          let bucket = authoritativeProducers.get(entry.semanticType);
+          if (!bucket) {
+            bucket = new Set();
+            authoritativeProducers.set(entry.semanticType, bucket);
+          }
+          bucket.add(op.operationId);
+        }
+      }
+    }
+
+    interface FeatureScenarioFile {
+      endpoint: { method: string; path: string; operationId: string };
+      requiredSemanticTypes?: string[];
+      unsatisfied?: boolean;
+      scenarios: { id: string; operations: { operationId: string }[] }[];
+    }
+    const offenders: {
+      op: string;
+      scenarioId: string;
+      chain: string[];
+      missingAuthoritative: { type: string; authoritativeProducers: string[] }[];
+    }[] = [];
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const feat = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as FeatureScenarioFile;
+      if (feat.unsatisfied === true) continue;
+      const required = feat.requiredSemanticTypes ?? [];
+      if (!required.length) continue;
+      for (const sc of feat.scenarios ?? []) {
+        const chainOps = (sc.operations ?? []).map((o) => o.operationId);
+        // Endpoint-self does not count: an op cannot bind its own URL
+        // placeholder from its own response. Restrict the search to
+        // prerequisite steps (everything except the final endpoint op).
+        const prereqOps = chainOps.slice(0, -1);
+        if (prereqOps.length === 0) continue;
+        const missing: { type: string; authoritativeProducers: string[] }[] = [];
+        for (const t of required) {
+          const auth = authoritativeProducers.get(t);
+          if (!auth || auth.size === 0) continue; // upstream-spec gap, exempt
+          if (!prereqOps.some((opId) => auth.has(opId))) {
+            missing.push({ type: t, authoritativeProducers: [...auth].sort() });
+          }
+        }
+        if (missing.length) {
+          offenders.push({
+            op: feat.endpoint.operationId,
+            scenarioId: sc.id,
+            chain: chainOps,
+            missingAuthoritative: missing,
+          });
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Feature-output chain selector grafted a prerequisite chain whose producers are not authoritative for the endpoint\'s required semantic type. The selected chain extracts the type from an "echo" response field (e.g. createDocument\'s `metadata.processInstanceKey` with provider:false) instead of from a real producer (createProcessInstance with provider:true). At runtime the extracted variable is empty and the URL placeholder leaks. Prefer chains containing at least one `provider:true` producer per required type before falling back to the shortest chain.',
+    ).toEqual([]);
+  });
 });
 
 describe('bundled-spec invariants: emitted Playwright suite', () => {
