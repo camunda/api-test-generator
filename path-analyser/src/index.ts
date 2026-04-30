@@ -162,13 +162,27 @@ async function main() {
     // graph (an upstream-spec gap) are not regressed.
     const integrationCandidates = collection.scenarios.filter((sc) => sc.id !== 'unsatisfied');
     const requiredTypes = collection.requiredSemanticTypes ?? [];
+    // Restrict the authoritative-producer check to required types that
+    // actually have an authoritative producer somewhere in the graph.
+    // If an endpoint requires types `[A, B]` and only `A` has an
+    // authoritative producer anywhere, requiring chains to authoritatively
+    // produce both would reject every candidate and force the fallback to
+    // length-only selection — at which point the chain might also miss
+    // the authoritative producer for `A`. Filtering first means we still
+    // gate on `A` while exempting `B` (an upstream-spec gap), matching
+    // the L3 invariant's exemption rule.
+    const requiredTypesWithAuthoritativeProducer = requiredTypes.filter((t) =>
+      (graph.producersByType[t] ?? []).some(
+        (opId) => graph.operations[opId]?.providerMap?.[t] === true,
+      ),
+    );
     const isAuthoritativeChain = (sc: EndpointScenario): boolean => {
-      if (!requiredTypes.length) return true;
+      if (!requiredTypesWithAuthoritativeProducer.length) return true;
       // Endpoint-self does not count: an op cannot bind its own URL
       // placeholder from its own response.
       const prereqOpIds = sc.operations.slice(0, -1).map((o) => o.operationId);
       if (!prereqOpIds.length) return false;
-      return requiredTypes.every((t) =>
+      return requiredTypesWithAuthoritativeProducer.every((t) =>
         prereqOpIds.some((opId) => graph.operations[opId]?.providerMap?.[t] === true),
       );
     };
