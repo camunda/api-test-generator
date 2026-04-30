@@ -67,6 +67,7 @@ describe('graphLoader: produces fallback tightening (#97)', () => {
       'output',
       'operation-dependency-graph.json',
     );
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const rawGraph = JSON.parse(fs.readFileSync(rawGraphPath, 'utf8')) as {
       operations: Array<{
         operationId: string;

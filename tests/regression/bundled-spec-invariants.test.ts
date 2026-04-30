@@ -293,13 +293,73 @@ describe('bundled-spec invariants: planner output', () => {
     // (getDocument planning an empty scenario set because createDocument
     // was laundered into producersByState[ProcessInstanceExists]) rather
     // than at the abstract invariant.
+    //
+    // #97 update: dropping the permissive `produces` fallback in
+    // graphLoader means `createDocument` no longer appears in
+    // `producersByType[DocumentId]` until the upstream OpenAPI spec
+    // annotates `createDocument`'s `documentId` response field with
+    // `x-semantic-provider: true` (tracked in camunda/camunda#52169).
+    // Until that lands and the spec pin is bumped, this assertion is
+    // self-healing: it accepts either the original positive state
+    // (chain is planned) OR the documented current state (createDocument
+    // is not yet a canonical producer of DocumentId). When upstream
+    // lands, the second branch becomes false, the first branch must
+    // hold, and any future regression to "no chain planned" still
+    // fails the test loudly.
+    const REPO_ROOT = join(import.meta.dirname, '..', '..');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const rawGraph = JSON.parse(
+      readFileSync(
+        join(
+          REPO_ROOT,
+          'semantic-graph-extractor',
+          'dist',
+          'output',
+          'operation-dependency-graph.json',
+        ),
+        'utf8',
+      ),
+    ) as {
+      operations: Array<{
+        operationId: string;
+        responseSemanticTypes?: Record<
+          string,
+          Array<{ semanticType?: unknown; provider?: unknown }>
+        >;
+      }>;
+    };
+    const createDocument = rawGraph.operations.find((o) => o.operationId === 'createDocument');
+    expect(createDocument, 'createDocument operation must exist in raw graph').toBeDefined();
+    const createDocumentProvidesDocumentId = Object.values(
+      createDocument?.responseSemanticTypes ?? {},
+    ).some(
+      (arr) =>
+        Array.isArray(arr) &&
+        arr.some((e) => e?.semanticType === 'DocumentId' && e?.provider === true),
+    );
+
     const scen = loadScenarioFile('get--documents--{documentId}-scenarios.json');
+
+    if (!createDocumentProvidesDocumentId) {
+      // Documented current-state branch: while upstream is missing the
+      // annotation, getDocument's only producer chain is structurally
+      // unreachable and the planner emits the sentinel `unsatisfied`
+      // scenario. Assert that exact shape so a regression away from it
+      // (e.g. silent re-introduction of the fallback) trips this guard.
+      expect(scen.scenarios.length).toBeGreaterThan(0);
+      const onlySentinel = scen.scenarios.every(
+        (s) =>
+          s.id === 'unsatisfied' || (s.missingSemanticTypes && s.missingSemanticTypes.length > 0),
+      );
+      expect(
+        onlySentinel,
+        'expected only an unsatisfied/missing-semantics scenario while createDocument lacks provider:true on documentId (camunda/camunda#52169)',
+      ).toBe(true);
+      return;
+    }
+
+    // Upstream-annotated branch: original positive assertion.
     expect(scen.scenarios.length).toBeGreaterThan(0);
-    // Order-independent: any scenario that ends with getDocument and
-    // contains createDocument upstream proves the witness gate worked.
-    // We don't pin scenarios[0] because plausible future planner
-    // changes (e.g. createDocuments planned first) would shift order
-    // without invalidating the property we care about.
     const matchingScenario = scen.scenarios.find((scenario) => {
       const chain = scenario.operations.map((o) => o.operationId);
       return chain.includes('createDocument') && chain[chain.length - 1] === 'getDocument';
