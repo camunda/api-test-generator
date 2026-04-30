@@ -33,7 +33,19 @@ describe('graphLoader: witness implication gating (#95)', () => {
     const baseDir = path.join(REPO_ROOT, 'path-analyser');
     const graph = await loadGraph(baseDir);
 
+    // Guard against vacuous pass: if the domain sidecar fails to load,
+    // semanticTypes is empty and the loop below is a no-op. Assert the
+    // prerequisite shape so a missing sidecar fails the test loudly.
+    expect(graph.domain?.semanticTypes, 'domain.semanticTypes must load').toBeDefined();
+    expect(graph.producersByState, 'producersByState must be built').toBeDefined();
     const semanticTypes = graph.domain?.semanticTypes ?? {};
+    const witnessedSemantics = Object.values(semanticTypes).filter(
+      (s) => typeof s.witnesses === 'string' && s.witnesses.length > 0,
+    );
+    expect(
+      witnessedSemantics.length,
+      'at least one semanticType must declare a witness for this invariant to be meaningful',
+    ).toBeGreaterThan(0);
     const offenders: { opId: string; semanticType: string; witnessed: string }[] = [];
 
     for (const [semanticType, spec] of Object.entries(semanticTypes)) {
@@ -84,11 +96,16 @@ describe('graphLoader: witness implication gating (#95)', () => {
     const baseDir = path.join(REPO_ROOT, 'path-analyser');
     const graph = await loadGraph(baseDir);
 
-    const witnessProducers = graph.producersByState?.ProcessInstanceExists ?? [];
+    // Guard against vacuous pass: optional chaining + ?? [] would hide
+    // a missing producersByState or createDocument and still satisfy
+    // the not.toContain checks.
+    expect(graph.producersByState, 'producersByState must be built').toBeDefined();
+    const witnessProducers = graph.producersByState.ProcessInstanceExists ?? [];
     expect(witnessProducers).not.toContain('createDocument');
     expect(witnessProducers).not.toContain('createDocuments');
 
     const createDocument = graph.operations.createDocument;
-    expect(createDocument?.domainProduces ?? []).not.toContain('ProcessInstanceExists');
+    expect(createDocument, 'createDocument operation must exist').toBeDefined();
+    expect(createDocument.domainProduces ?? []).not.toContain('ProcessInstanceExists');
   });
 });

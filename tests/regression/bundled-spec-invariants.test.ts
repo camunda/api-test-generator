@@ -236,7 +236,13 @@ describe('bundled-spec invariants: planner output', () => {
         if (p.required && p.semanticType) required++;
       }
       requiredInputCount.set(op.operationId, required);
-      for (const entries of Object.values(op.responseSemanticTypes ?? {})) {
+      // Restrict to 2xx/3xx success responses: an authoritative provider
+      // annotation on a 4xx/5xx error response does not represent a
+      // producer the planner can rely on, and treating it as one would
+      // make this invariant overstrict.
+      for (const [statusCode, entries] of Object.entries(op.responseSemanticTypes ?? {})) {
+        const code = Number.parseInt(statusCode, 10);
+        if (!Number.isFinite(code) || code < 200 || code >= 400) continue;
         for (const e of entries) {
           if (!e.provider) continue;
           const list = authoritativeProducers.get(e.semanticType) ?? [];
