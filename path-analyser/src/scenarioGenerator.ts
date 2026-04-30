@@ -52,6 +52,27 @@ export function generateScenariosForEndpoint(
   const required = [...endpoint.requires.required];
   const optional = [...endpoint.requires.optional];
 
+  // Detect path placeholders that no chain step and no global context seed
+  // can bind. These are typically admin-entity IDs whose path parameter has
+  // no upstream `x-semantic-type` tag (issue #53). The BFS still plans
+  // chains for any *typed* requirements (so e.g. `tenantId` in
+  // `/tenants/{tenantId}/roles/{roleId}` is still chained from
+  // `createTenant`), but every emitted scenario is annotated with
+  // `missingPathPlaceholders` so downstream consumers — and the
+  // planner-correctness invariant in
+  // tests/regression/bundled-spec-invariants.test.ts — know the rendered
+  // URL will leak a literal `${placeholder}` at runtime.
+  const seededPlaceholderNames = new Set(
+    (graph.domain?.globalContextSeeds ?? []).map((s) => s.fieldName),
+  );
+  const unbindablePlaceholders = [...endpoint.path.matchAll(/\{([^}]+)\}/g)]
+    .map((m) => m[1])
+    .filter((ph) => {
+      if (seededPlaceholderNames.has(ph)) return false;
+      const param = (endpoint.pathParameters ?? []).find((p) => p.name === ph);
+      return !param?.semanticType;
+    });
+
   // Domain requirements flattening (for initial endpoint) - treat all domainRequiresAll as required states for ranking only (not gating existing logic yet)
   const domainRequiredStates = endpoint.domainRequiresAll ? [...endpoint.domainRequiresAll] : [];
   const domainDisjunctions = endpoint.domainDisjunctions ? [...endpoint.domainDisjunctions] : [];
@@ -73,6 +94,9 @@ export function generateScenariosForEndpoint(
       hasEventuallyConsistent: endpoint.eventuallyConsistent || undefined,
       eventuallyConsistentCount: endpoint.eventuallyConsistent ? 1 : undefined,
       domainStatesRequired: domainRequiredStates.length ? domainRequiredStates : undefined,
+      missingPathPlaceholders: unbindablePlaceholders.length
+        ? [...unbindablePlaceholders]
+        : undefined,
     };
     return {
       endpoint: toRef(endpoint),
@@ -101,6 +125,9 @@ export function generateScenariosForEndpoint(
       producedSemanticTypes: [...endpoint.produces],
       satisfiedSemanticTypes: endpoint.produces.filter((s) => initialNeeded.has(s)),
       missingSemanticTypes: missing,
+      missingPathPlaceholders: unbindablePlaceholders.length
+        ? [...unbindablePlaceholders]
+        : undefined,
       hasEventuallyConsistent: endpoint.eventuallyConsistent || undefined,
       eventuallyConsistentCount: endpoint.eventuallyConsistent ? 1 : undefined,
       domainStatesRequired: domainRequiredStates.length ? domainRequiredStates : undefined,
@@ -651,6 +678,16 @@ export function generateScenariosForEndpoint(
     if (aBoot !== bBoot) return bBoot - aBoot; // any bootstrap before none
     return a.operations.length - b.operations.length;
   });
+
+  // Annotate every emitted scenario with the unbindable-placeholder list so
+  // downstream consumers (codegen, the planner-correctness invariant) can
+  // see at scenario granularity that the URL will leak `${placeholder}` at
+  // runtime even though the typed semantic chain is satisfied.
+  if (unbindablePlaceholders.length) {
+    for (const s of scenarios) {
+      s.missingPathPlaceholders = [...unbindablePlaceholders];
+    }
+  }
 
   return {
     endpoint: toRef(endpoint),

@@ -272,6 +272,8 @@ async function main() {
       unsatisfied: !!collection.unsatisfied,
       missingSemanticTypes: collection.scenarios.find((s) => s.id === 'unsatisfied')
         ?.missingSemanticTypes,
+      missingPathPlaceholders: collection.scenarios.find((s) => s.id === 'unsatisfied')
+        ?.missingPathPlaceholders,
     });
     processed++;
   }

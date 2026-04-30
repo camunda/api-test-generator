@@ -72,6 +72,12 @@ export interface EndpointScenario {
   producedSemanticTypes: string[];
   satisfiedSemanticTypes: string[]; // semantic types endpoint needs
   missingSemanticTypes?: string[]; // only for unsatisfied scenario
+  // Path placeholders that could not be bound by any chain step or global
+  // context seed (e.g. an admin-entity ID whose parameter lacks an upstream
+  // `x-semantic-type` tag — issue #53). Set on the unsatisfied scenario
+  // emitted by `generateScenariosForEndpoint` when the placeholder would
+  // otherwise leak as a literal `${name}` into the rendered URL.
+  missingPathPlaceholders?: string[];
   cycleInvolved?: boolean;
   productionMap?: Record<string, string>; // semanticType -> operationId
   providerList?: Record<string, string[]>; // semanticType -> all producing opIds encountered
@@ -141,6 +147,7 @@ export interface GenerationSummaryEntry {
   scenarioCount: number;
   unsatisfied: boolean;
   missingSemanticTypes?: string[];
+  missingPathPlaceholders?: string[];
 }
 
 // Feature coverage variant spec (internal planning structure)

@@ -831,6 +831,112 @@ describe('bundled-spec invariants: planner output', () => {
     // Otherwise, every offender must be in the structural-OK bucket.
     expect(offenders.length).toBe(structuralOk.length);
   });
+
+  it('no planner scenario is marked satisfied while leaving a path placeholder unbindable', () => {
+    // Planner-correctness guard. The BFS only considers `requiredSemanticTypes`
+    // when deciding whether a scenario is satisfied. If a path placeholder's
+    // parameter has no `semanticType` upstream, the planner silently drops it
+    // from the requirement set and reports `unsatisfied: false`, even though
+    // the emitted URL will contain a literal `${placeholder}` at runtime
+    // (because no chain step extracts it and no global seed binds it).
+    //
+    // Concrete example (current bundled spec):
+    //   PUT /tenants/{tenantId}/roles/{roleId}
+    //   - tenantId: semanticType=TenantId (chained via createTenant)
+    //   - roleId:   no semanticType (issue #53 — admin-entity untyped)
+    //   Planner output: unsatisfied=false, satisfiedSemanticTypes=[TenantId]
+    //   Generated URL: /tenants/${ctx.tenantIdVar}/roles/${ctx.roleIdVar || '${roleId}'}
+    //   → ctx.roleIdVar is never set; URL leaks `${roleId}` literal at runtime.
+    //
+    // This is more dangerous than #53's single-placeholder case because the
+    // scenario *looks* satisfied to a reviewer scanning the planner output.
+    //
+    // Invariant: for every planner scenario marked satisfied (no
+    // `missingSemanticTypes`), every `{placeholder}` in the endpoint path
+    // must be bindable from at least one of:
+    //   (a) the placeholder's path parameter has a `semanticType` (the
+    //       existing chain machinery is responsible for binding it);
+    //   (b) the placeholder name matches a `globalContextSeeds[].fieldName`
+    //       in `path-analyser/domain-semantics.json` (e.g. `tenantId`).
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Planner scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const graph = loadGraph();
+    const opByEndpointKey = new Map<string, OperationNode>();
+    for (const op of graph.operations) {
+      opByEndpointKey.set(`${op.method.toUpperCase()} ${op.path}`, op);
+    }
+    interface DomainSemanticsFile {
+      globalContextSeeds?: { fieldName: string }[];
+    }
+    const domainPath = join(REPO_ROOT, 'path-analyser', 'domain-semantics.json');
+    if (!existsSync(domainPath)) {
+      throw new Error(`domain-semantics.json not found at ${domainPath}`);
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const domain = JSON.parse(readFileSync(domainPath, 'utf8')) as DomainSemanticsFile;
+    const seededPlaceholders = new Set((domain.globalContextSeeds ?? []).map((s) => s.fieldName));
+    interface PlannerScenarioFile {
+      endpoint: { method: string; path: string };
+      unsatisfied?: boolean;
+      scenarios: {
+        id: string;
+        missingSemanticTypes?: string[];
+        missingPathPlaceholders?: string[];
+      }[];
+    }
+    const offenders: { file: string; endpoint: string; unbindable: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const planner = JSON.parse(
+        readFileSync(join(SCENARIOS_DIR, f), 'utf8'),
+      ) as PlannerScenarioFile;
+      if (planner.unsatisfied === true) continue;
+      const placeholders = [...planner.endpoint.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+      if (!placeholders.length) continue;
+      const endpointKey = `${planner.endpoint.method.toUpperCase()} ${planner.endpoint.path}`;
+      const node = opByEndpointKey.get(endpointKey);
+      if (!node) {
+        throw new Error(
+          `Missing dependency-graph node for endpoint ${endpointKey} referenced by planner file ${f}.`,
+        );
+      }
+      const pathParams = (node.parameters ?? []).filter((p) => p.location === 'path');
+      // A placeholder is independently bindable iff its path parameter has a
+      // semanticType (the chain machinery is responsible for binding it) OR
+      // its name matches a global context seed. This check does not consult
+      // the planner's `missingPathPlaceholders` annotation — that is what
+      // we are validating — so the invariant catches a regression where the
+      // planner stops annotating these scenarios.
+      const unbindable = placeholders.filter((ph) => {
+        if (seededPlaceholders.has(ph)) return false;
+        const param = pathParams.find((p) => p.name === ph);
+        return !param?.semanticType;
+      });
+      if (!unbindable.length) continue;
+      // A scenario is "fully claimed satisfied" iff both `missingSemanticTypes`
+      // and `missingPathPlaceholders` are empty. The presence of
+      // `missingPathPlaceholders` (set by `generateScenariosForEndpoint`) is
+      // the planner's signal that the URL will leak a literal placeholder.
+      // If any scenario claims full satisfaction while the endpoint has an
+      // unbindable placeholder, the planner is silently lying.
+      const hasFullySatisfied = (planner.scenarios ?? []).some(
+        (s) =>
+          (!s.missingSemanticTypes || s.missingSemanticTypes.length === 0) &&
+          (!s.missingPathPlaceholders || s.missingPathPlaceholders.length === 0),
+      );
+      if (hasFullySatisfied) {
+        offenders.push({ file: f, endpoint: endpointKey, unbindable });
+      }
+    }
+    expect(
+      offenders,
+      'Planner reported satisfied scenarios for endpoints whose URL has unbindable path placeholders. Either upstream must add an x-semantic-type tag (issue #53), or the planner must annotate the scenario with `missingPathPlaceholders` so the broken URL is not silently emitted.',
+    ).toEqual([]);
+  });
 });
 
 describe('bundled-spec invariants: emitted Playwright suite', () => {
