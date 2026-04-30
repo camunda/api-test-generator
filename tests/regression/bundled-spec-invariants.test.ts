@@ -274,9 +274,16 @@ describe('bundled-spec invariants: planner output', () => {
     // than at the abstract invariant.
     const scen = loadScenarioFile('get--documents--{documentId}-scenarios.json');
     expect(scen.scenarios.length).toBeGreaterThan(0);
-    const firstChain = scen.scenarios[0].operations.map((o) => o.operationId);
-    expect(firstChain).toContain('createDocument');
-    expect(firstChain[firstChain.length - 1]).toBe('getDocument');
+    // Order-independent: any scenario that ends with getDocument and
+    // contains createDocument upstream proves the witness gate worked.
+    // We don't pin scenarios[0] because plausible future planner
+    // changes (e.g. createDocuments planned first) would shift order
+    // without invalidating the property we care about.
+    const matchingScenario = scen.scenarios.find((scenario) => {
+      const chain = scenario.operations.map((o) => o.operationId);
+      return chain.includes('createDocument') && chain[chain.length - 1] === 'getDocument';
+    });
+    expect(matchingScenario).toBeDefined();
   });
 
   it('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', () => {
