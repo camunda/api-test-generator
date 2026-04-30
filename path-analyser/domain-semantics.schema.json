@@ -79,9 +79,9 @@
       }
     },
     "artifactFileKinds": {
-      "description": "Map of file extension (including leading dot, e.g. `.bpmn`) to the list of artifactKinds that file may contain.",
+      "description": "Map of single file extensions as returned by `path.extname()` (including leading dot, e.g. `.bpmn` or `.xml`) to the list of artifactKinds that file may contain. Multi-dot suffixes such as `.bpmn20.xml` are intentionally NOT allowed: runtime consumers in path-analyser/src/index.ts resolve only the final extension via `path.extname(...)`, so multi-dot keys never match at runtime and would be silently dead config.",
       "type": "object",
-      "propertyNames": {"pattern": "^\\.[A-Za-z0-9._]+$"},
+      "propertyNames": {"pattern": "^\\.[A-Za-z0-9_]+$"},
       "additionalProperties": {
         "type": "array",
         "items": {"type": "string"},
@@ -94,12 +94,11 @@
       "additionalProperties": {"type": "string"}
     },
     "operationArtifactRules": {
-      "description": "Per-operation rules describing how request fields map to deployable artifacts. Consumed by the planner to decompose composite deployment operations into per-artifact slices.",
+      "description": "Per-operation rules describing how request fields map to deployable artifacts. Consumed by the planner to decompose composite deployment operations into per-artifact slices. Field shape mirrors `ArtifactRule` and `OperationArtifactRuleSpec` in path-analyser/src/types.ts — keep them in sync.",
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rules"],
         "properties": {
           "composable": {"type": "boolean"},
           "rules": {
@@ -107,10 +106,19 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["id", "artifactKind"],
+              "required": ["artifactKind"],
               "properties": {
                 "id": {"type": "string", "minLength": 1},
-                "artifactKind": {"type": "string", "minLength": 1}
+                "artifactKind": {"type": "string", "minLength": 1},
+                "priority": {"type": "integer"},
+                "producesSemantics": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                },
+                "producesStates": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
               }
             }
           }
