@@ -596,12 +596,12 @@ describe('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('every Bug-C feature scenario (placeholder has semanticType but no satisfied chain) traces to a missing upstream x-semantic-provider annotation (#54)', () => {
-    // Issue #54 — strict complement of the Bug A invariant inside the
-    // `semanticType`-known subset. A "Bug C" offender is a feature scenario
-    // whose endpoint path has `{placeholders}` whose path parameter has a
+  it('every feature scenario whose placeholder has a known semanticType but no satisfied chain traces to a missing upstream x-semantic-provider annotation (#54)', () => {
+    // Issue #54 — strict complement of the #52 invariant inside the
+    // `semanticType`-known subset. An offender is a feature scenario whose
+    // endpoint path has `{placeholders}` whose path parameter has a
     // recognised `semanticType` AND no planner scenario assembled a
-    // fully-satisfied chain. The Bug A invariant (above) silently filters
+    // fully-satisfied chain. The #52 invariant (above) silently filters
     // these out via `if (!hasSatisfiedChain) continue;`; this invariant
     // re-surfaces them and asserts they all share the same root cause.
     //
@@ -629,9 +629,11 @@ describe('bundled-spec invariants: planner output', () => {
     // here, the structural-cause check fails and this test fails loudly.
     //
     // Out of scope:
-    //  - Bug A (fixed in #52, guarded by the invariant above).
-    //  - Bug B (placeholder lacks `semanticType` upstream — #53), filtered
-    //    out by the `param?.semanticType` gate.
+    //  - #52 (planner dropped chains for endpoints that DID have
+    //    authoritative producers — fixed and guarded by the invariant
+    //    above).
+    //  - #53 (placeholder parameter lacks an upstream `semanticType` tag
+    //    altogether) — filtered out by the `param?.semanticType` gate.
     if (!existsSync(FEATURE_SCENARIOS_DIR)) {
       throw new Error(
         `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
@@ -653,7 +655,7 @@ describe('bundled-spec invariants: planner output', () => {
     // Intentionally stricter than `producersByType`: `graphLoader.normalizeOp`
     // currently falls back to treating every response semantic as a
     // producer when an op has no provider flags at all (graphLoader.ts
-    // ~lines 372-381; tracked for removal in #97). The Bug-C diagnosis is
+    // ~lines 372-381; tracked for removal in #97). The #54 diagnosis is
     // about authoritative producers, not the fallback set, so we re-derive
     // the strict authoritative-only relation here and avoid coupling the
     // invariant to internal planner state.
@@ -815,7 +817,7 @@ describe('bundled-spec invariants: planner output', () => {
     // chains for endpoints that should have been planned.
     expect(
       structuralViolations,
-      'Bug C offenders that DO have authoritatively-reachable placeholder semantic types — the planner should have planned these chains. Investigate the BFS rather than upstream.',
+      '#54 offenders that DO have authoritatively-reachable placeholder semantic types — the planner should have planned these chains. Investigate the BFS rather than upstream.',
     ).toEqual([]);
     // Self-healing upper bound: if every offender drops out (upstream
     // closed the gap), the bucket is empty and the test still passes
