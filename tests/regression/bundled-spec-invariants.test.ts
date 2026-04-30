@@ -203,6 +203,82 @@ describe('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('every endpoint whose only required semantic has a self-sufficient authoritative producer plans at least one chain (#95)', () => {
+    // Class-scoped guard against the #95 defect family: the witness
+    // implication in graphLoader must not turn an authoritative producer
+    // candidate into a dead end by laundering an incidental response
+    // semantic into a phantom domain-state production claim. The
+    // observable symptom of #95 was `getDocument` (single required
+    // semantic `DocumentId`, two authoritative producers `createDocument`
+    // / `createDocuments` with no further required inputs) emitting
+    // `scenarios: []` — every BFS candidate dropped at the prereq gate.
+    //
+    // Scope: endpoints with exactly one required semantic type T, where
+    // at least one authoritative producer of T has no required inputs
+    // of its own (i.e. is self-sufficient). Endpoints whose authoritative
+    // producers have unmet upstream requirements are out of scope here
+    // — those are separate planner gaps tracked elsewhere.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    loadGraph();
+    // Build authoritative producers and their required-input counts.
+    const authoritativeProducers = new Map<string, OperationNode[]>();
+    const requiredInputCount = new Map<string, number>();
+    for (const op of cachedGraph?.operations ?? []) {
+      let required = 0;
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required) required++;
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType) required++;
+      }
+      requiredInputCount.set(op.operationId, required);
+      for (const entries of Object.values(op.responseSemanticTypes ?? {})) {
+        for (const e of entries) {
+          if (!e.provider) continue;
+          const list = authoritativeProducers.get(e.semanticType) ?? [];
+          list.push(op);
+          authoritativeProducers.set(e.semanticType, list);
+        }
+      }
+    }
+    const offenders: { file: string; endpoint: string; required: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      const required = file.requiredSemanticTypes ?? [];
+      if (required.length !== 1) continue;
+      const t = required[0];
+      const producers = authoritativeProducers.get(t) ?? [];
+      const endpointId = file.endpoint?.operationId;
+      const externalSelfSufficient = producers.filter(
+        (p) => p.operationId !== endpointId && (requiredInputCount.get(p.operationId) ?? 0) === 0,
+      );
+      if (externalSelfSufficient.length === 0) continue;
+      if (file.scenarios.length === 0) {
+        offenders.push({ file: f, endpoint: endpointId, required });
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('getDocument emits at least one non-trivial integration-path scenario (#95 reproducer)', () => {
+    // Concrete instance the class-scoped invariant above subsumes. Kept
+    // as a focused reproducer so a regression points at the exact symptom
+    // (getDocument planning an empty scenario set because createDocument
+    // was laundered into producersByState[ProcessInstanceExists]) rather
+    // than at the abstract invariant.
+    const scen = loadScenarioFile('get--documents--{documentId}-scenarios.json');
+    expect(scen.scenarios.length).toBeGreaterThan(0);
+    const firstChain = scen.scenarios[0].operations.map((o) => o.operationId);
+    expect(firstChain).toContain('createDocument');
+    expect(firstChain[firstChain.length - 1]).toBe('getDocument');
+  });
+
   it('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', () => {
     // Class-scoped guard against the #35 defect family: BFS must not
     // insert any operation whose `requires.required` is not satisfied
