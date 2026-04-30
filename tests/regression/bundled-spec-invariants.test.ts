@@ -595,6 +595,194 @@ describe('bundled-spec invariants: planner output', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('every Bug-C feature scenario (placeholder has semanticType but no satisfied chain) traces to a missing upstream x-semantic-provider annotation (#54)', () => {
+    // Issue #54 — strict complement of the Bug A invariant inside the
+    // `semanticType`-known subset. A "Bug C" offender is a feature scenario
+    // whose endpoint path has `{placeholders}` whose path parameter has a
+    // recognised `semanticType` AND no planner scenario assembled a
+    // fully-satisfied chain. The Bug A invariant (above) silently filters
+    // these out via `if (!hasSatisfiedChain) continue;`; this invariant
+    // re-surfaces them and asserts they all share the same root cause.
+    //
+    // Diagnosis on the pinned bundled spec (2b2b962a…): all 21 offenders
+    // bottom out in the upstream-spec gap tracked at camunda/camunda#52169
+    // — the placeholder's `semanticType`, or a type transitively required
+    // to satisfy any authoritative producer of it, has zero
+    // `x-semantic-provider: true` producers in the bundled spec. List
+    // endpoints (searchUserTasks, searchIncidents, searchAuditLogs,
+    // searchVariables, searchDecisionInstances, searchGlobalTaskListeners)
+    // emit the entity keys with `provider: false`; the per-op gate in
+    // graphLoader.ts (#97 path) excludes them from `producersByType`,
+    // leaving the planner with no upstream producer to graft. The same
+    // gap also blocks two endpoints whose direct producer DOES exist
+    // (DecisionEvaluationInstanceKey/Key via evaluateDecision) because
+    // evaluateDecision itself transitively requires DecisionDefinitionId,
+    // which has zero authoritative producers.
+    //
+    // Self-healing semantics: when upstream lands an
+    // `x-semantic-provider: true` annotation that breaks the chain open
+    // for one of these endpoints, that endpoint drops out of the offender
+    // list; the assertion still passes because every remaining offender
+    // continues to satisfy the structural-cause check. If the planner
+    // regresses such that an endpoint with a satisfiable chain ends up
+    // here, the structural-cause check fails and this test fails loudly.
+    //
+    // Out of scope:
+    //  - Bug A (fixed in #52, guarded by the invariant above).
+    //  - Bug B (placeholder lacks `semanticType` upstream — #53), filtered
+    //    out by the `param?.semanticType` gate.
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Planner scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const graph = loadGraph();
+    const opByEndpointKey = new Map<string, OperationNode>();
+    for (const op of graph.operations) {
+      opByEndpointKey.set(`${op.method.toUpperCase()} ${op.path}`, op);
+    }
+    // Authoritative producers per semantic type (provider:true only). This
+    // is the same signal `graphLoader.normalizeOp` uses to populate
+    // `producersByType`; we re-derive it here to avoid coupling the
+    // invariant to internal planner state.
+    const authoritativeProducersOf = new Map<string, string[]>();
+    for (const op of graph.operations) {
+      const surfaced = new Set<string>();
+      for (const entries of Object.values(op.responseSemanticTypes ?? {})) {
+        for (const e of entries) {
+          if (e.provider === true && !surfaced.has(e.semanticType)) {
+            surfaced.add(e.semanticType);
+            const list = authoritativeProducersOf.get(e.semanticType) ?? [];
+            list.push(op.operationId);
+            authoritativeProducersOf.set(e.semanticType, list);
+          }
+        }
+      }
+    }
+    // Required semantic-type inputs of an op (request body + path/query
+    // parameters with `required: true`). Mirrors `extractRequires` in
+    // graphLoader.ts.
+    const requiredInputsOf = (opId: string): string[] => {
+      const op = graph.operations.find((o) => o.operationId === opId);
+      if (!op) return [];
+      const set = new Set<string>();
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required) set.add(e.semanticType);
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType) set.add(p.semanticType);
+      }
+      return [...set];
+    };
+    // Transitively-unauthoritative: a semantic type T such that every
+    // path to producing T bottoms out in a type with zero authoritative
+    // producers. Computed as a least fixpoint: T is unauthoritative if it
+    // has no authoritative producer, or every authoritative producer
+    // requires (transitively) at least one unauthoritative type. The
+    // dual — `authoritativeReachable` — is what the BFS would converge
+    // on if we ran it; we compute its complement on the same edges.
+    const authoritativelyReachable = new Set<string>();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [semType, producers] of authoritativeProducersOf) {
+        if (authoritativelyReachable.has(semType)) continue;
+        const reachable = producers.some((opId) =>
+          requiredInputsOf(opId).every((req) => authoritativelyReachable.has(req)),
+        );
+        if (reachable) {
+          authoritativelyReachable.add(semType);
+          changed = true;
+        }
+      }
+    }
+    interface FeatureScenarioFile {
+      endpoint: { method: string; path: string };
+      scenarios: { id: string }[];
+    }
+    interface PlannerScenarioFile {
+      scenarios: { missingSemanticTypes?: string[] }[];
+    }
+    interface OffenderRecord {
+      file: string;
+      endpoint: string;
+      placeholderSemanticTypes: string[];
+    }
+    const offenders: OffenderRecord[] = [];
+    const structuralOk: OffenderRecord[] = [];
+    const structuralViolations: OffenderRecord[] = [];
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const plannerPath = join(SCENARIOS_DIR, f);
+      if (!existsSync(plannerPath)) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const planner = JSON.parse(readFileSync(plannerPath, 'utf8')) as PlannerScenarioFile;
+      const hasSatisfiedChain = (planner.scenarios ?? []).some(
+        (s) => !s.missingSemanticTypes || s.missingSemanticTypes.length === 0,
+      );
+      if (hasSatisfiedChain) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as FeatureScenarioFile;
+      const placeholders = [...file.endpoint.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+      if (!placeholders.length) continue;
+      const endpointKey = `${file.endpoint.method.toUpperCase()} ${file.endpoint.path}`;
+      const node = opByEndpointKey.get(endpointKey);
+      if (!node) continue;
+      const inScopeTypes = placeholders
+        .map((ph) => {
+          const param = (node.parameters ?? []).find((p) => p.name === ph && p.location === 'path');
+          return param?.semanticType;
+        })
+        .filter((st): st is string => Boolean(st));
+      if (!inScopeTypes.length) continue;
+      const record: OffenderRecord = {
+        file: f,
+        endpoint: endpointKey,
+        placeholderSemanticTypes: [...new Set(inScopeTypes)],
+      };
+      offenders.push(record);
+      // Structural-cause check: at least one placeholder type must be
+      // unreachable via authoritative producers (i.e. NOT in
+      // `authoritativelyReachable`). If every placeholder type IS
+      // reachable, the planner has unjustified residual logic and the
+      // test fails loudly — that is the regression we want to catch.
+      const allReachable = record.placeholderSemanticTypes.every((st) =>
+        authoritativelyReachable.has(st),
+      );
+      if (allReachable) structuralViolations.push(record);
+      else structuralOk.push(record);
+    }
+    // Documented current-state sanity: the bucket is non-empty (the
+    // upstream gap is unresolved) but every offender's structural cause
+    // checks out. Both halves are necessary — an empty bucket would mean
+    // the upstream gap closed and this guard should be retired in favour
+    // of the strict empty-set assertion (see #54 acceptance criteria);
+    // a non-empty `structuralViolations` means the planner is dropping
+    // chains for endpoints that should have been planned.
+    expect(
+      structuralViolations,
+      'Bug C offenders that DO have authoritatively-reachable placeholder semantic types — the planner should have planned these chains. Investigate the BFS rather than upstream.',
+    ).toEqual([]);
+    // Self-healing upper bound: if every offender drops out (upstream
+    // closed the gap), the bucket is empty and the test still passes
+    // — at which point the structural-cause infrastructure becomes
+    // redundant and the test should be replaced with `expect(offenders)
+    // .toEqual([])` (the strict form from #54).
+    if (offenders.length === 0) {
+      // Nothing to assert; documented as a TODO via comment above.
+      return;
+    }
+    // Otherwise, every offender must be in the structural-OK bucket.
+    expect(offenders.length).toBe(structuralOk.length);
+  });
 });
 
 describe('bundled-spec invariants: emitted Playwright suite', () => {
