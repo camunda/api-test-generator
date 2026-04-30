@@ -120,9 +120,7 @@
   },
   "artifactFileKinds": {
     ".bpmn": ["bpmnProcess"],
-    ".bpmn20.xml": ["bpmnProcess"],
     ".dmn": ["dmnDecision", "dmnDrd"],
-    ".dmn11.xml": ["dmnDecision", "dmnDrd"],
     ".form": ["form"],
     ".json": ["form"]
   },
