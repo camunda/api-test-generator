@@ -595,6 +595,242 @@ describe('bundled-spec invariants: planner output', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('every feature scenario whose placeholder has a known semanticType but no satisfied chain traces to a missing upstream x-semantic-provider annotation (#54)', () => {
+    // Issue #54 — strict complement of the #52 invariant inside the
+    // `semanticType`-known subset. An offender is a feature scenario whose
+    // endpoint path has `{placeholders}` whose path parameter has a
+    // recognised `semanticType` AND no planner scenario assembled a
+    // fully-satisfied chain. The #52 invariant (above) silently filters
+    // these out via `if (!hasSatisfiedChain) continue;`; this invariant
+    // re-surfaces them and asserts they all share the same root cause.
+    //
+    // Diagnosis on the pinned bundled spec (2b2b962a…): all 21 offenders
+    // bottom out in the upstream-spec gap tracked at camunda/camunda#52169
+    // — the placeholder's `semanticType`, or a type transitively required
+    // to satisfy any authoritative producer of it, has zero
+    // `x-semantic-provider: true` producers in the bundled spec. List
+    // endpoints (searchUserTasks, searchIncidents, searchAuditLogs,
+    // searchVariables, searchDecisionInstances, searchGlobalTaskListeners)
+    // emit the entity keys with `provider: false`; in this graph shape
+    // that leaves the planner with no authoritative upstream producer to
+    // graft for the affected chain. The same gap also blocks two
+    // endpoints whose direct producer DOES exist
+    // (DecisionEvaluationInstanceKey/Key via evaluateDecision) because
+    // evaluateDecision itself transitively requires DecisionDefinitionId,
+    // which has zero authoritative producers.
+    //
+    // Self-healing semantics: when upstream lands an
+    // `x-semantic-provider: true` annotation that breaks the chain open
+    // for one of these endpoints, that endpoint drops out of the offender
+    // list; the assertion still passes because every remaining offender
+    // continues to satisfy the structural-cause check. If the planner
+    // regresses such that an endpoint with a satisfiable chain ends up
+    // here, the structural-cause check fails and this test fails loudly.
+    //
+    // Out of scope:
+    //  - #52 (planner dropped chains for endpoints that DID have
+    //    authoritative producers — fixed and guarded by the invariant
+    //    above).
+    //  - #53 (placeholder parameter lacks an upstream `semanticType` tag
+    //    altogether) — filtered out by the `param?.semanticType` gate.
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Planner scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const graph = loadGraph();
+    const opByEndpointKey = new Map<string, OperationNode>();
+    const opByOperationId = new Map<string, OperationNode>();
+    for (const op of graph.operations) {
+      opByEndpointKey.set(`${op.method.toUpperCase()} ${op.path}`, op);
+      opByOperationId.set(op.operationId, op);
+    }
+    // Authoritative producers per semantic type (provider:true only).
+    // Intentionally stricter than `producersByType`: `graphLoader.normalizeOp`
+    // currently falls back to treating every response semantic as a
+    // producer when an op has no provider flags at all (graphLoader.ts
+    // ~lines 372-381; tracked for removal in #97). The #54 diagnosis is
+    // about authoritative producers, not the fallback set, so we re-derive
+    // the strict authoritative-only relation here and avoid coupling the
+    // invariant to internal planner state.
+    const authoritativeProducersOf = new Map<string, string[]>();
+    for (const op of graph.operations) {
+      const surfaced = new Set<string>();
+      for (const entries of Object.values(op.responseSemanticTypes ?? {})) {
+        for (const e of entries) {
+          if (e.provider === true && !surfaced.has(e.semanticType)) {
+            surfaced.add(e.semanticType);
+            const list = authoritativeProducersOf.get(e.semanticType) ?? [];
+            list.push(op.operationId);
+            authoritativeProducersOf.set(e.semanticType, list);
+          }
+        }
+      }
+    }
+    // Required semantic-type inputs of an op (request body + every
+    // required parameter that carries a `semanticType`, regardless of
+    // location). Mirrors `extractRequires` in graphLoader.ts, which also
+    // does not filter parameters by `path`/`query`/`header`/`cookie` — a
+    // semanticType-tagged required header (rare in this spec, but
+    // possible) would gate chain assembly the same way as a path
+    // parameter, so the reachability model must include it.
+    const requiredInputsOf = (opId: string): string[] => {
+      const op = opByOperationId.get(opId);
+      if (!op) return [];
+      const set = new Set<string>();
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required) set.add(e.semanticType);
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType) set.add(p.semanticType);
+      }
+      return [...set];
+    };
+    // Transitively-unauthoritative: a semantic type T such that every
+    // path to producing T bottoms out in a type with zero authoritative
+    // producers. Computed as a least fixpoint: T is unauthoritative if it
+    // has no authoritative producer, or every authoritative producer
+    // requires (transitively) at least one unauthoritative type. The
+    // dual — `authoritativeReachable` — is what the BFS would converge
+    // on if we ran it; we compute its complement on the same edges.
+    const authoritativelyReachable = new Set<string>();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [semType, producers] of authoritativeProducersOf) {
+        if (authoritativelyReachable.has(semType)) continue;
+        const reachable = producers.some((opId) =>
+          requiredInputsOf(opId).every((req) => authoritativelyReachable.has(req)),
+        );
+        if (reachable) {
+          authoritativelyReachable.add(semType);
+          changed = true;
+        }
+      }
+    }
+    interface FeatureScenarioFile {
+      endpoint: { method: string; path: string };
+      scenarios: { id: string }[];
+    }
+    interface PlannerScenarioFile {
+      scenarios: { missingSemanticTypes?: string[] }[];
+    }
+    interface OffenderRecord {
+      file: string;
+      endpoint: string;
+      placeholderSemanticTypes: string[];
+    }
+    const offenders: OffenderRecord[] = [];
+    const structuralOk: OffenderRecord[] = [];
+    const structuralViolations: OffenderRecord[] = [];
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const plannerPath = join(SCENARIOS_DIR, f);
+      // The pipeline emits one planner-scenarios file per feature-scenarios
+      // file (same normalised filename). A missing companion is a pipeline
+      // bug — fail fast rather than silently skip and mask it.
+      if (!existsSync(plannerPath)) {
+        throw new Error(
+          `Missing planner scenario file for feature scenario ${relative(
+            REPO_ROOT,
+            join(FEATURE_SCENARIOS_DIR, f),
+          )}; expected ${relative(REPO_ROOT, plannerPath)}`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const planner = JSON.parse(readFileSync(plannerPath, 'utf8')) as PlannerScenarioFile;
+      const hasSatisfiedChain = (planner.scenarios ?? []).some(
+        (s) => !s.missingSemanticTypes || s.missingSemanticTypes.length === 0,
+      );
+      if (hasSatisfiedChain) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as FeatureScenarioFile;
+      const placeholders = [...file.endpoint.path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+      if (!placeholders.length) continue;
+      const endpointKey = `${file.endpoint.method.toUpperCase()} ${file.endpoint.path}`;
+      const node = opByEndpointKey.get(endpointKey);
+      // A missing dependency-graph node for an endpoint that has a
+      // feature-output file is a graph/feature-output mismatch (or an
+      // endpoint-keying bug) — fail fast rather than silently skip.
+      if (!node) {
+        throw new Error(
+          `Missing dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f}. This indicates a graph/feature-output mismatch or endpoint-keying bug.`,
+        );
+      }
+      const pathParameters = (node.parameters ?? []).filter((p) => p.location === 'path');
+      // If the path has placeholders but the graph node has no path
+      // parameters at all, that is a graph/extractor bug — fail fast.
+      if (pathParameters.length === 0) {
+        throw new Error(
+          `Dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f} has path placeholders (${placeholders.join(', ')}) but no path parameters on the node. This indicates a graph extraction or endpoint-keying bug.`,
+        );
+      }
+      // A placeholder must have a matching `path` parameter entry on the
+      // graph node — otherwise the URL template references a name the
+      // graph never declared, which is also a graph/extractor bug.
+      const placeholdersMissingParam = placeholders.filter(
+        (ph) => !pathParameters.some((p) => p.name === ph),
+      );
+      if (placeholdersMissingParam.length) {
+        throw new Error(
+          `Dependency-graph node for endpoint ${endpointKey} referenced by feature scenario ${f} is missing path parameter entries for placeholders: ${placeholdersMissingParam.join(', ')}. This indicates a graph extraction or endpoint-keying bug.`,
+        );
+      }
+      const inScopeTypes = placeholders
+        .map((ph) => {
+          const param = pathParameters.find((p) => p.name === ph);
+          return param?.semanticType;
+        })
+        .filter((st): st is string => Boolean(st));
+      if (!inScopeTypes.length) continue;
+      const record: OffenderRecord = {
+        file: f,
+        endpoint: endpointKey,
+        placeholderSemanticTypes: [...new Set(inScopeTypes)],
+      };
+      offenders.push(record);
+      // Structural-cause check: at least one placeholder type must be
+      // unreachable via authoritative producers (i.e. NOT in
+      // `authoritativelyReachable`). If every placeholder type IS
+      // reachable, the planner has unjustified residual logic and the
+      // test fails loudly — that is the regression we want to catch.
+      const allReachable = record.placeholderSemanticTypes.every((st) =>
+        authoritativelyReachable.has(st),
+      );
+      if (allReachable) structuralViolations.push(record);
+      else structuralOk.push(record);
+    }
+    // Documented current-state sanity: the bucket is non-empty (the
+    // upstream gap is unresolved) but every offender's structural cause
+    // checks out. Both halves are necessary — an empty bucket would mean
+    // the upstream gap closed and this guard should be retired in favour
+    // of the strict empty-set assertion (see #54 acceptance criteria);
+    // a non-empty `structuralViolations` means the planner is dropping
+    // chains for endpoints that should have been planned.
+    expect(
+      structuralViolations,
+      '#54 offenders that DO have authoritatively-reachable placeholder semantic types — the planner should have planned these chains. Investigate the BFS rather than upstream.',
+    ).toEqual([]);
+    // Self-healing upper bound: if every offender drops out (upstream
+    // closed the gap), the bucket is empty and the test still passes
+    // — at which point the structural-cause infrastructure becomes
+    // redundant and the test should be replaced with `expect(offenders)
+    // .toEqual([])` (the strict form from #54).
+    if (offenders.length === 0) {
+      // Nothing to assert; documented as a TODO via comment above.
+      return;
+    }
+    // Otherwise, every offender must be in the structural-OK bucket.
+    expect(offenders.length).toBe(structuralOk.length);
+  });
 });
 
 describe('bundled-spec invariants: emitted Playwright suite', () => {
