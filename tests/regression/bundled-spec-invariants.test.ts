@@ -831,6 +831,68 @@ describe('bundled-spec invariants: planner output', () => {
     // Otherwise, every offender must be in the structural-OK bucket.
     expect(offenders.length).toBe(structuralOk.length);
   });
+
+  it('no planner result has zero scenarios while reporting unsatisfied=false', () => {
+    // Planner-correctness guard. The BFS in `generateScenariosForEndpoint`
+    // exits the search loop after exhausting its queue and unconditionally
+    // returns `unsatisfied: false` regardless of whether any scenario was
+    // actually completed. When an endpoint's required semantic type has
+    // producers, but every producer either self-cycles (e.g. `getUserTask`
+    // requires UserTaskKey to produce UserTaskKey) or its own prerequisites
+    // are unreachable, the BFS exhausts the queue with zero completed
+    // chains and the result is `{ scenarios: [], unsatisfied: false }`.
+    //
+    // Concrete example (current bundled spec):
+    //   POST /user-tasks/{userTaskKey}/assignment  requires UserTaskKey
+    //   producersByType[UserTaskKey] = [getUserTask, getAuditLog]
+    //   - getUserTask requires UserTaskKey itself (self-cycle)
+    //   - getAuditLog requires AuditLogKey, whose only producer also
+    //     self-cycles
+    //   Planner output: { scenarios: [], unsatisfied: false }
+    //   Generated test: POST `${baseUrl}/user-tasks/${ctx.userTaskKeyVar
+    //                          || '${userTaskKey}'}/assignment`
+    //   → URL leaks `${userTaskKey}` literal at runtime.
+    //
+    // This is structurally the same broken-URL shape covered by the
+    // unbindable-placeholder cases (45 endpoints blocked on upstream #53),
+    // but the cause is internal to the planner: a producer exists, the BFS
+    // just cannot use it. The result is silent — `unsatisfied: false` is
+    // the strongest possible "this endpoint is fine" signal in the planner
+    // output, and downstream code (orchestrator logs, the codegen, every
+    // Layer-3 invariant) trusts it.
+    //
+    // Invariant: for every planner result, if `scenarios.length === 0` then
+    // `unsatisfied` must be `true`. The planner is allowed to give up; it
+    // is not allowed to give up silently.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Planner scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    interface PlannerResultFile {
+      endpoint: { method: string; path: string; operationId: string };
+      requiredSemanticTypes?: string[];
+      scenarios: unknown[];
+      unsatisfied?: boolean;
+    }
+    const offenders: { op: string; endpoint: string; required: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const planner = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as PlannerResultFile;
+      if (!Array.isArray(planner.scenarios) || planner.scenarios.length > 0) continue;
+      if (planner.unsatisfied === true) continue;
+      offenders.push({
+        op: planner.endpoint.operationId,
+        endpoint: `${planner.endpoint.method.toUpperCase()} ${planner.endpoint.path}`,
+        required: planner.requiredSemanticTypes ?? [],
+      });
+    }
+    expect(
+      offenders,
+      'Planner returned an empty scenarios array while reporting unsatisfied=false. The BFS exhausted its queue without completing any chain (typically because every producer for the required semantic type self-cycles or has unreachable prereqs). The planner must mark these as unsatisfied — silent zero-scenario results break every downstream consumer that trusts unsatisfied=false.',
+    ).toEqual([]);
+  });
 });
 
 describe('bundled-spec invariants: emitted Playwright suite', () => {

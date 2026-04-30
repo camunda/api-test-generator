@@ -652,6 +652,44 @@ export function generateScenariosForEndpoint(
     return a.operations.length - b.operations.length;
   });
 
+  // BFS-give-up guard: if the search loop exhausted its queue without
+  // completing any scenario (typically because every producer for a
+  // required semantic type self-cycles or its own prerequisites are
+  // unreachable), surface that as `unsatisfied: true` rather than a
+  // silent `{ scenarios: [], unsatisfied: false }` — the latter would
+  // mislead every downstream consumer that trusts `unsatisfied: false`
+  // (orchestrator logs, codegen, Layer-3 invariants). The early return
+  // above only catches the simpler case where `producersByType` is
+  // empty for a required type; this branch covers "producers exist but
+  // BFS cannot reach a terminal state from them". Mirror the early
+  // return's shape so downstream code paths handle both uniformly.
+  if (scenarios.length === 0) {
+    scenarios.push({
+      id: 'unsatisfied',
+      operations: [toRef(endpoint)],
+      producedSemanticTypes: [...endpoint.produces],
+      satisfiedSemanticTypes: [],
+      // Report every required semantic type as missing — including any
+      // the endpoint self-produces. The early-return branch above filters
+      // out endpoint-self-produced types because they will exist after
+      // the call for downstream consumers; here we are signalling the
+      // BFS could not build a *prerequisite* chain, and an endpoint
+      // cannot be its own prerequisite (it cannot bind its own URL
+      // placeholder from its own response).
+      missingSemanticTypes: [...initialNeeded],
+      hasEventuallyConsistent: endpoint.eventuallyConsistent || undefined,
+      eventuallyConsistentCount: endpoint.eventuallyConsistent ? 1 : undefined,
+      domainStatesRequired: domainRequiredStates.length ? domainRequiredStates : undefined,
+    });
+    return {
+      endpoint: toRef(endpoint),
+      requiredSemanticTypes: required,
+      optionalSemanticTypes: optional,
+      scenarios,
+      unsatisfied: true,
+    };
+  }
+
   return {
     endpoint: toRef(endpoint),
     requiredSemanticTypes: required,
