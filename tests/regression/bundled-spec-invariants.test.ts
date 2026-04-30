@@ -58,7 +58,12 @@ interface DependencyGraph {
 interface ScenarioFile {
   endpoint: { operationId: string };
   requiredSemanticTypes: string[];
-  scenarios: { id: string; operations: { operationId: string }[] }[];
+  unsatisfied?: boolean;
+  scenarios: {
+    id: string;
+    operations: { operationId: string }[];
+    missingSemanticTypes?: string[];
+  }[];
 }
 
 let cachedGraph: DependencyGraph | undefined;
@@ -265,7 +270,17 @@ describe('bundled-spec invariants: planner output', () => {
         (p) => p.operationId !== endpointId && (requiredInputCount.get(p.operationId) ?? 0) === 0,
       );
       if (externalSelfSufficient.length === 0) continue;
-      if (file.scenarios.length === 0) {
+      // A planned chain means at least one scenario that is neither the
+      // sentinel "unsatisfied" entry nor flagged with missingSemanticTypes.
+      // `scenarios.length > 0` alone is insufficient: the planner emits a
+      // single sentinel scenario when nothing satisfies the requirements,
+      // which would otherwise mask the regression this invariant guards.
+      const realScenarios = (file.scenarios ?? []).filter(
+        (s) =>
+          s.id !== 'unsatisfied' &&
+          (!s.missingSemanticTypes || s.missingSemanticTypes.length === 0),
+      );
+      if (file.unsatisfied === true || realScenarios.length === 0) {
         offenders.push({ file: f, endpoint: endpointId, required });
       }
     }
