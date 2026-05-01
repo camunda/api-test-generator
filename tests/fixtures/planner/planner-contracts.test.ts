@@ -71,6 +71,10 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
       producersByState[ds] = list;
     }
     for (const leaf of node.responseSemanticLeaves ?? []) {
+      // Mirror graphLoader's success-status filter: only 2xx/3xx leaves
+      // populate the inclusive index. A leaf surfaced only in a 4xx/5xx
+      // response must NOT be discoverable as a variant producer.
+      if (!/^[23]/.test(leaf.status)) continue;
       const list = responseProducersByType[leaf.semantic] ?? [];
       if (!list.includes(node.operationId)) list.push(node.operationId);
       responseProducersByType[leaf.semantic] = list;
@@ -444,5 +448,128 @@ describe('planner contracts: optional sub-shape variants (#37)', () => {
       expect(opIdsOf(s)).not.toContain('searchProducts');
     }
     expect(opIdsOf(base.scenarios[0])).toEqual(['mintOrderId', 'createOrder']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture I: variant planner ignores producers whose only response leaf
+// is in a 4xx/5xx response (#51 review)
+// ---------------------------------------------------------------------------
+//
+// Endpoint `placeOrder` produces `OrderInstanceKey` and has an optional
+// sub-shape `addons[].productId : ProductId`.
+//
+// `errorEcho` emits `ProductId` ONLY in a 4xx error envelope (e.g. an
+// "invalid product" response that echoes the offending id back). It is
+// not a real producer of `ProductId` — a runtime call would never
+// satisfy a downstream consumer.
+//
+// Class-scoped guarantee: `responseProducersByType` must not surface
+// any operation whose ProductId leaf comes only from a non-2xx/3xx
+// status. The variant planner therefore has no candidate and emits
+// zero variants, rather than constructing a chain that goes through
+// `errorEcho` and silently produces no actual id at runtime.
+const fixtureErrorOnlyProducer: OperationGraph = makeGraph([
+  makeOp('errorEcho', {
+    optional: ['OrderInstanceKey'],
+    responseSemanticLeaves: [
+      // 4xx-only — must be filtered out of the inclusive index.
+      { semantic: 'ProductId', fieldPath: 'errors[].productId', status: '400', provider: false },
+    ],
+  }),
+  makeOp('placeOrder', {
+    produces: ['OrderInstanceKey'],
+    providerMap: { OrderInstanceKey: true },
+    optionalSubShapes: [
+      {
+        rootPath: 'addons[]',
+        leaves: [{ fieldPath: 'addons[].productId', semantic: 'ProductId' }],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: variant planner respects success-status producer filter (#51 review)', () => {
+  it('does not surface 4xx-only response leaves in responseProducersByType', () => {
+    expect(fixtureErrorOnlyProducer.responseProducersByType?.ProductId).toBeUndefined();
+  });
+
+  it('emits zero variants when the only candidate producer surfaces the leaf in a 4xx response', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureErrorOnlyProducer, 'placeOrder', {
+      maxScenarios: 10,
+    });
+    expect(variants.scenarios).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture J: variant planner caps emission at opts.maxScenarios (#51 review)
+// ---------------------------------------------------------------------------
+//
+// Endpoint `bulkCreate` has THREE semantic-typed optional leaves under
+// the same sub-shape. Without the cap, the planner emits one variant
+// per leaf (3 variants). With `maxScenarios: 2`, only the first 2 are
+// emitted.
+//
+// Class-scoped guarantee: a future endpoint with N semantic-typed
+// optional leaves cannot produce more than `opts.maxScenarios` variant
+// scenario files.
+const fixtureMaxVariantsCap: OperationGraph = makeGraph([
+  makeOp('mintFoo', {
+    produces: ['Foo'],
+    providerMap: { Foo: true },
+  }),
+  makeOp('searchA', {
+    optional: ['BulkOutKey'],
+    produces: ['SemA'],
+    providerMap: { SemA: true },
+  }),
+  makeOp('searchB', {
+    optional: ['BulkOutKey'],
+    produces: ['SemB'],
+    providerMap: { SemB: true },
+  }),
+  makeOp('searchC', {
+    optional: ['BulkOutKey'],
+    produces: ['SemC'],
+    providerMap: { SemC: true },
+  }),
+  makeOp('bulkCreate', {
+    required: ['Foo'],
+    produces: ['BulkOutKey'],
+    providerMap: { BulkOutKey: true },
+    optionalSubShapes: [
+      {
+        rootPath: 'items[]',
+        leaves: [
+          { fieldPath: 'items[].a', semantic: 'SemA' },
+          { fieldPath: 'items[].b', semantic: 'SemB' },
+          { fieldPath: 'items[].c', semantic: 'SemC' },
+        ],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: variant emission respects maxScenarios cap (#51 review)', () => {
+  it('uncapped (maxScenarios = 10) emits one variant per semantic leaf', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
+      maxScenarios: 10,
+    });
+    expect(variants.scenarios.length).toBe(3);
+  });
+
+  it('caps emission at maxScenarios = 2', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
+      maxScenarios: 2,
+    });
+    expect(variants.scenarios.length).toBe(2);
+  });
+
+  it('caps emission at maxScenarios = 0 (emit nothing)', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
+      maxScenarios: 0,
+    });
+    expect(variants.scenarios).toEqual([]);
   });
 });

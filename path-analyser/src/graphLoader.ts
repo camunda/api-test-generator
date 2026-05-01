@@ -395,6 +395,16 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
           if (entry?.provider) providerMap[st] = true;
           const fp = typeof entry?.fieldPath === 'string' ? entry.fieldPath : undefined;
           if (fp) {
+            // Only catalogue success/redirect (2xx/3xx) leaves into the
+            // inclusive response index. Mirrors the extractor's
+            // `getProducedSemanticTypes` filter
+            // (semantic-graph-extractor/graph-builder.ts) and the
+            // success-status filter applied to authoritative producers.
+            // Without this, a semantic surfaced only in a 4xx error body
+            // would land in `responseProducersByType` and the variant
+            // planner could pick a producer that never satisfies the
+            // semantic at runtime.
+            if (!/^[23]/.test(status)) continue;
             responseLeaves.push({
               semantic: st,
               fieldPath: fp,

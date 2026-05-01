@@ -1381,9 +1381,18 @@ export function generateOptionalSubShapeVariants(
   const subShapes = endpoint.optionalSubShapes ?? [];
   const collectionScenarios: EndpointScenario[] = [];
   const seenVariantKeys = new Set<string>();
+  // Cap total variants emitted per endpoint at `opts.maxScenarios`. The
+  // inner `generateScenariosForEndpoint` call below intentionally pins
+  // its own `maxScenarios: 1` (one chain per variant), so the outer
+  // cap is what bounds variant count for endpoints with many
+  // semantic-typed optional leaves. Without this cap, a future spec
+  // change could blow up `dist/variant-output/` with one file per
+  // (subShape × leaf) pair.
+  const maxVariants = Math.max(0, opts.maxScenarios | 0);
 
-  for (const subShape of subShapes) {
+  outer: for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
+      if (collectionScenarios.length >= maxVariants) break outer;
       // Resolve producer candidates: prefer authoritative (provider:true)
       // producers from `producersByType`, but fall back to the
       // inclusive index that includes provider:false response leaves
