@@ -594,9 +594,9 @@ function mergePopulatesSubShapeIntoFinalBody(
 function setLeafPlaceholder(root: Record<string, unknown>, path: string, value: string): void {
   // Tokenise: each segment is either `name` or `name[]`.
   const segments = path.split('.');
-  // current is the container we mutate; for array segments we descend
-  // into element [0]. Track parent + key so we can rewrite after type
-  // coercion when needed.
+  // `cursor` is the current container being mutated in place; for array
+  // segments, we ensure `cursor[key]` is an array and then descend into
+  // element [0].
   let cursor: unknown = root;
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
