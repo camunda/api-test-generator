@@ -536,6 +536,7 @@ function deriveOptionalSubShapes(op: RawOp): NonNullable<OperationNode['optional
 //   "filter.processInstanceKey"      -> "filter"
 //   "filter.elementId.$eq"           -> null  (operator object)
 //   "tags[]"                          -> null  (scalar array, no leaf segment)
+//   "filter.tags[]"                   -> null  (nested scalar array)
 //   "tenantId"                        -> null  (top-level scalar)
 function subShapeRootOf(fieldPath: string): string | null {
   // Split into dot-separated segments.
@@ -545,6 +546,14 @@ function subShapeRootOf(fieldPath: string): string | null {
   // Operator-object syntax (filter.x.$eq, .$in[], etc.) — not a real
   // populated-vs-omitted sub-shape.
   if (lastSegment.startsWith('$')) return null;
+  // Scalar-array item leaves (`tags[]`, `filter.tags[]`, etc.) — the
+  // extractor surfaces array items with a trailing `[]`. A scalar-array
+  // leaf is the same flavour of "set a primitive collection or omit it"
+  // exclusion as the top-level `tags[]` case; grouping it under its
+  // parent (`filter`) would produce a sub-shape whose only leaf is a
+  // scalar collection, which is not a populated-vs-omitted object shape
+  // worth a sibling positive-coverage scenario.
+  if (lastSegment.endsWith('[]')) return null;
   return segments.slice(0, -1).join('.');
 }
 
