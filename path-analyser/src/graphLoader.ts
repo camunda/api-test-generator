@@ -41,7 +41,12 @@ interface RawOp {
     semanticType?: string;
     required?: boolean;
   }>;
-  requestBodySemanticTypes?: Array<{ semanticType?: string; required?: boolean }>;
+  requestBodySemanticTypes?: Array<{
+    semanticType?: string;
+    required?: boolean;
+    fieldPath?: string;
+    schema?: { type?: string; format?: string };
+  }>;
   edges?: string[];
   outgoingEdges?: string[];
   dependencies?: string[];
@@ -147,11 +152,27 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   }
 
   const producersByType: Record<string, string[]> = {};
+  const responseProducersByType: Record<string, string[]> = {};
   for (const op of Object.values(operations)) {
     for (const st of op.produces) {
       const list = producersByType[st] ?? [];
       list.push(op.operationId);
       producersByType[st] = list;
+    }
+    // Issue #37: inclusive index — every response semantic leaf, even
+    // provider:false ones, becomes a discoverable producer for variant
+    // planning (where we need e.g. searchElementInstances → ElementId
+    // even though that op is not authoritative for ElementId).
+    //
+    // Note: distinct from `producersByType` after #98. `producersByType`
+    // is now `provider:true` only (authoritative producers). This index
+    // intentionally includes provider:false leaves so variant planning
+    // can use search-style ops as warm-up triggers without re-introducing
+    // the dropped fallback into base planning.
+    for (const leaf of op.responseSemanticLeaves ?? []) {
+      const list = responseProducersByType[leaf.semantic] ?? [];
+      if (!list.includes(op.operationId)) list.push(op.operationId);
+      responseProducersByType[leaf.semantic] = list;
     }
   }
 
@@ -331,7 +352,14 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
-  return { operations, producersByType, bootstrapSequences, domain, producersByState };
+  return {
+    operations,
+    producersByType,
+    responseProducersByType,
+    bootstrapSequences,
+    domain,
+    producersByState,
+  };
 }
 
 function normalizeOp(opId: string, op: RawOp): OperationNode {
@@ -356,14 +384,33 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
   // First pass: derive providerMap & candidate semantics from responseSemanticTypes
   const responseDerived: string[] = [];
   const providerMap: Record<string, boolean> = {};
+  const responseLeaves: NonNullable<OperationNode['responseSemanticLeaves']> = [];
   if (op.responseSemanticTypes && typeof op.responseSemanticTypes === 'object') {
-    for (const arr of Object.values(op.responseSemanticTypes)) {
-      if (Array.isArray(arr)) {
-        for (const entry of arr) {
-          const st: unknown = entry?.semanticType;
-          if (st && typeof st === 'string') {
-            responseDerived.push(st);
-            if (entry?.provider) providerMap[st] = true;
+    for (const [status, arr] of Object.entries(op.responseSemanticTypes)) {
+      if (!Array.isArray(arr)) continue;
+      // Only success/redirect (2xx/3xx) responses contribute to authoritative
+      // producers, the inclusive response-leaf index, and `produces` (via
+      // `responseDerived`). Mirrors the extractor's `getProducedSemanticTypes`
+      // filter (semantic-graph-extractor/graph-builder.ts). Without this,
+      // a semantic surfaced only in a 4xx error body would (a) land in
+      // `providerMap` / `producersByType` if marked `provider: true` on
+      // the error envelope, and (b) land in `responseProducersByType` and
+      // let the variant planner pick a producer that never satisfies the
+      // semantic at runtime.
+      if (!/^[23]/.test(status)) continue;
+      for (const entry of arr) {
+        const st: unknown = entry?.semanticType;
+        if (st && typeof st === 'string') {
+          responseDerived.push(st);
+          if (entry?.provider) providerMap[st] = true;
+          const fp = typeof entry?.fieldPath === 'string' ? entry.fieldPath : undefined;
+          if (fp) {
+            responseLeaves.push({
+              semantic: st,
+              fieldPath: fp,
+              status,
+              provider: !!entry?.provider,
+            });
           }
         }
       }
@@ -386,6 +433,7 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
   });
 
   const { required, optional } = extractRequires(op);
+  const optionalSubShapes = deriveOptionalSubShapes(op);
 
   // providerMap already built above; if still empty leave as undefined later
 
@@ -432,6 +480,8 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
       ? normalizedResponseSemanticTypes
       : undefined,
     pathParameters: extractPathParameters(op),
+    optionalSubShapes: optionalSubShapes.length ? optionalSubShapes : undefined,
+    responseSemanticLeaves: responseLeaves.length ? responseLeaves : undefined,
   };
 }
 
@@ -449,6 +499,62 @@ function extractPathParameters(op: RawOp): { name: string; semanticType?: string
     out.push({ name: p.name, semanticType });
   }
   return out.length ? out : undefined;
+}
+
+// Issue #37: derive optional sub-shape grouping from request-body leaf
+// fieldPaths. A leaf is "in an optional sub-shape" iff:
+//   - it is itself optional (`required === false` upstream), AND
+//   - its `fieldPath` has a deepest object/array-of-object ancestor
+//     (i.e. it lives under `parent.x` or `parent[].x`, not at the top
+//     level).
+//
+// Top-level optional scalars (e.g. `tenantId`), scalar arrays (e.g.
+// `tags[]` — fieldPath ends with `[]` and has no ancestor), and
+// operator-syntax keys (e.g. `filter.x.$eq`) are excluded — they don't
+// correspond to a populated-vs-omitted object/array shape that warrants
+// a sibling positive-coverage scenario.
+function deriveOptionalSubShapes(op: RawOp): NonNullable<OperationNode['optionalSubShapes']> {
+  const groups = new Map<string, Array<{ fieldPath: string; semantic: string }>>();
+  if (!Array.isArray(op.requestBodySemanticTypes)) return [];
+  for (const entry of op.requestBodySemanticTypes) {
+    if (!entry || entry.required === true) continue;
+    const semantic = entry.semanticType;
+    const fieldPath = entry.fieldPath;
+    if (typeof semantic !== 'string' || typeof fieldPath !== 'string') continue;
+    const root = subShapeRootOf(fieldPath);
+    if (!root) continue;
+    const list = groups.get(root) ?? [];
+    list.push({ fieldPath, semantic });
+    groups.set(root, list);
+  }
+  return [...groups.entries()].map(([rootPath, leaves]) => ({ rootPath, leaves }));
+}
+
+// Strip the trailing leaf segment from a fieldPath to get its sub-shape
+// root, or `null` if no proper object/array-of-object ancestor exists.
+//   "startInstructions[].elementId" -> "startInstructions[]"
+//   "filter.processInstanceKey"      -> "filter"
+//   "filter.elementId.$eq"           -> null  (operator object)
+//   "tags[]"                          -> null  (scalar array, no leaf segment)
+//   "filter.tags[]"                   -> null  (nested scalar array)
+//   "tenantId"                        -> null  (top-level scalar)
+function subShapeRootOf(fieldPath: string): string | null {
+  // Split into dot-separated segments.
+  const segments = fieldPath.split('.');
+  if (segments.length < 2) return null;
+  const lastSegment = segments[segments.length - 1];
+  // Operator-object syntax (filter.x.$eq, .$in[], etc.) — not a real
+  // populated-vs-omitted sub-shape.
+  if (lastSegment.startsWith('$')) return null;
+  // Scalar-array item leaves (`tags[]`, `filter.tags[]`, etc.) — the
+  // extractor surfaces array items with a trailing `[]`. A scalar-array
+  // leaf is the same flavour of "set a primitive collection or omit it"
+  // exclusion as the top-level `tags[]` case; grouping it under its
+  // parent (`filter`) would produce a sub-shape whose only leaf is a
+  // scalar collection, which is not a populated-vs-omitted object shape
+  // worth a sibling positive-coverage scenario.
+  if (lastSegment.endsWith('[]')) return null;
+  return segments.slice(0, -1).join('.');
 }
 
 function extractRequires(op: RawOp): { required: string[]; optional: string[] } {

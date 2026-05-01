@@ -30,6 +30,7 @@ const GRAPH_PATH = join(
 );
 const SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'output');
 const FEATURE_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'feature-output');
+const VARIANT_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'variant-output');
 const GENERATED_TESTS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'generated-tests');
 
 interface SemanticTypeEntry {
@@ -64,6 +65,18 @@ interface ScenarioFile {
     operations: { operationId: string }[];
     missingSemanticTypes?: string[];
   }[];
+}
+
+interface VariantScenario {
+  id: string;
+  variantKey?: string;
+  hasEventuallyConsistent?: boolean;
+  populatesSubShape?: { rootPath: string; leafPaths: string[]; leafSemantics?: string[] };
+  operations: { operationId: string }[];
+}
+interface VariantScenarioFile {
+  endpoint: { operationId: string };
+  scenarios: VariantScenario[];
 }
 
 let cachedGraph: DependencyGraph | undefined;
@@ -197,10 +210,13 @@ describe('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('no createProcessInstance scenario calls searchElementInstances (#31)', () => {
+  it('no createProcessInstance BASE scenario calls searchElementInstances (#31)', () => {
     // The original symptom of #31: the planner inserted a search-step
     // chain because ElementId was wrongly required. Ancestor-required
-    // tracking removed that branch.
+    // tracking removed that branch from BASE scenarios. Variant
+    // scenarios (#37) explicitly DO call searchElementInstances when
+    // populating optional sub-shapes — they live in dist/variant-output/
+    // and are exempt from this invariant.
     const scen = loadScenarioFile('post--process-instances-scenarios.json');
     const offenders = scen.scenarios
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
@@ -1170,6 +1186,86 @@ describe('bundled-spec invariants: planner output', () => {
   });
 });
 
+describe('bundled-spec invariants: planner variant output (#37)', () => {
+  function loadVariantFile(filename: string): VariantScenarioFile {
+    const p = join(VARIANT_SCENARIOS_DIR, filename);
+    if (!existsSync(p)) {
+      throw new Error(
+        `Variant scenario file not found at ${p}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    return JSON.parse(readFileSync(p, 'utf8')) as VariantScenarioFile;
+  }
+
+  it('createProcessInstance has a variant populating startInstructions[].elementId with the canonical chain (#37)', () => {
+    // Acceptance criteria from #37:
+    //  - At least one scenario populates startInstructions[].elementId
+    //  - Chain has a warm-up createProcessInstance before the final one
+    //  - Chain has searchElementInstances between warm-up and final
+    //  - Scenario marked eventuallyConsistent: true
+    const file = loadVariantFile('post--process-instances-scenarios.json');
+    const startInstrVariants = file.scenarios.filter(
+      (s) => s.populatesSubShape?.rootPath === 'startInstructions[]',
+    );
+    expect(startInstrVariants.length).toBeGreaterThan(0);
+
+    const canonical = startInstrVariants.find((s) => {
+      const ops = s.operations.map((o) => o.operationId);
+      const cpiCount = ops.filter((o) => o === 'createProcessInstance').length;
+      const seiIdx = ops.indexOf('searchElementInstances');
+      const lastCpiIdx = ops.lastIndexOf('createProcessInstance');
+      const firstCpiIdx = ops.indexOf('createProcessInstance');
+      return (
+        cpiCount >= 2 &&
+        seiIdx > -1 &&
+        seiIdx > firstCpiIdx &&
+        seiIdx < lastCpiIdx &&
+        s.hasEventuallyConsistent === true
+      );
+    });
+    expect(canonical).toBeDefined();
+  });
+
+  it('every step in every variant scenario has its required semantic inputs satisfied (#37)', () => {
+    // Mirror of the base-scenario prereq invariant, scoped to variant
+    // scenarios. This only checks that each step's required semantic
+    // inputs are satisfied by semantics produced earlier in the chain;
+    // it does not assert that optional inputs (for example
+    // overlap-heuristic triggers on search steps) are present.
+    if (!existsSync(VARIANT_SCENARIOS_DIR)) return; // no variants generated yet
+    const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantScenarioFile;
+      for (const sc of file.scenarios) {
+        const produced = new Set<string>();
+        for (const ref of sc.operations) {
+          const opNode = findOperation(ref.operationId);
+          const req = (opNode.requestBodySemanticTypes ?? [])
+            .filter((e) => e.required)
+            .map((e) => e.semanticType);
+          for (const p of opNode.parameters ?? []) {
+            if (p.required && p.semanticType) req.push(p.semanticType);
+          }
+          const missing = req.filter((s) => !produced.has(s));
+          if (missing.length) {
+            offenders.push({ file: f, scenario: sc.id, step: ref.operationId, missing });
+          }
+          for (const [statusCode, entries] of Object.entries(opNode.responseSemanticTypes ?? {})) {
+            if (!statusCode.startsWith('2') && !statusCode.startsWith('3')) continue;
+            for (const e of entries) produced.add(e.semanticType);
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('bundled-spec invariants: emitted Playwright suite', () => {
   it('no generated test contains a stray __invalidEnum sentinel object (#39)', () => {
     // Layer-3 mirror of the targeted enum-violation test in
@@ -1189,5 +1285,91 @@ describe('bundled-spec invariants: emitted Playwright suite', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('every eventually-consistent read step is wrapped with awaitEventually (#106)', () => {
+    // Class-scoped guarantee: for every emitted spec file, the count of
+    // `awaitEventually(` calls equals the count of read-shape steps
+    // (GET or POST .../search) whose operation is flagged
+    // `eventuallyConsistent` and which expect a 200, summed across all
+    // scenarios in the matching feature/output JSON. Mismatches mean
+    // the emitter's wrap heuristic has regressed.
+    if (!existsSync(GENERATED_TESTS_DIR) || !existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(`Generated artifacts not found. Run 'npm run testsuite:generate' first.`);
+    }
+
+    interface RequestStepLite {
+      operationId: string;
+      method: string;
+      pathTemplate: string;
+      expect: { status: number };
+    }
+    interface OperationRefLite {
+      operationId: string;
+      eventuallyConsistent?: boolean;
+    }
+    interface ScenarioLite {
+      operations: OperationRefLite[];
+      requestPlan?: RequestStepLite[];
+    }
+    interface CollectionLite {
+      endpoint: { operationId: string };
+      scenarios: ScenarioLite[];
+    }
+
+    function isReadShape(method: string, pathTemplate: string): boolean {
+      const m = method.toUpperCase();
+      return m === 'GET' || (m === 'POST' && /\/search\/?$/.test(pathTemplate));
+    }
+
+    function expectedWraps(coll: CollectionLite): number {
+      let n = 0;
+      for (const s of coll.scenarios) {
+        if (!s.requestPlan) continue;
+        const ec = new Set<string>();
+        for (const op of s.operations) {
+          if (op.eventuallyConsistent) ec.add(op.operationId);
+        }
+        if (ec.size === 0) continue;
+        for (const step of s.requestPlan) {
+          if (!ec.has(step.operationId)) continue;
+          if (step.expect.status !== 200) continue;
+          if (!isReadShape(step.method, step.pathTemplate)) continue;
+          n++;
+        }
+      }
+      return n;
+    }
+
+    let totalExpected = 0;
+    let totalActual = 0;
+    let suitesWithEc = 0;
+
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const raw = readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8');
+      // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary; shape locally typed as CollectionLite
+      const coll = JSON.parse(raw) as CollectionLite;
+      if (!coll || typeof coll !== 'object') continue;
+      const expected = expectedWraps(coll);
+      if (expected === 0) continue;
+      suitesWithEc++;
+      totalExpected += expected;
+
+      const specName = `${coll.endpoint.operationId}.feature.spec.ts`;
+      const specPath = join(GENERATED_TESTS_DIR, specName);
+      if (!existsSync(specPath)) {
+        throw new Error(`expected emitted spec ${specName} not found`);
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const actual = (src.match(/awaitEventually\(/g) ?? []).length;
+      totalActual += actual;
+      expect(actual, `${specName}: awaitEventually wrap count`).toBe(expected);
+    }
+
+    // Sanity: the bundled spec exercises this pattern non-trivially.
+    expect(suitesWithEc).toBeGreaterThan(0);
+    expect(totalExpected).toBeGreaterThan(0);
+    expect(totalActual).toBe(totalExpected);
   });
 });

@@ -19,7 +19,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-const SUPPORT_FILES = ['env.ts', 'recorder.ts', 'seeding.ts', 'fixtures.ts', 'seed-rules.json'];
+const SUPPORT_FILES = [
+  'env.ts',
+  'recorder.ts',
+  'seeding.ts',
+  'fixtures.ts',
+  'seed-rules.json',
+  'await-eventually.ts',
+];
 
 async function main() {
   const root = process.cwd();
