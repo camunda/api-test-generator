@@ -388,6 +388,16 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
   if (op.responseSemanticTypes && typeof op.responseSemanticTypes === 'object') {
     for (const [status, arr] of Object.entries(op.responseSemanticTypes)) {
       if (!Array.isArray(arr)) continue;
+      // Only success/redirect (2xx/3xx) responses contribute to authoritative
+      // producers, the inclusive response-leaf index, and `produces` (via
+      // `responseDerived`). Mirrors the extractor's `getProducedSemanticTypes`
+      // filter (semantic-graph-extractor/graph-builder.ts). Without this,
+      // a semantic surfaced only in a 4xx error body would (a) land in
+      // `providerMap` / `producersByType` if marked `provider: true` on
+      // the error envelope, and (b) land in `responseProducersByType` and
+      // let the variant planner pick a producer that never satisfies the
+      // semantic at runtime.
+      if (!/^[23]/.test(status)) continue;
       for (const entry of arr) {
         const st: unknown = entry?.semanticType;
         if (st && typeof st === 'string') {
@@ -395,16 +405,6 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
           if (entry?.provider) providerMap[st] = true;
           const fp = typeof entry?.fieldPath === 'string' ? entry.fieldPath : undefined;
           if (fp) {
-            // Only catalogue success/redirect (2xx/3xx) leaves into the
-            // inclusive response index. Mirrors the extractor's
-            // `getProducedSemanticTypes` filter
-            // (semantic-graph-extractor/graph-builder.ts) and the
-            // success-status filter applied to authoritative producers.
-            // Without this, a semantic surfaced only in a 4xx error body
-            // would land in `responseProducersByType` and the variant
-            // planner could pick a producer that never satisfies the
-            // semantic at runtime.
-            if (!/^[23]/.test(status)) continue;
             responseLeaves.push({
               semantic: st,
               fieldPath: fp,

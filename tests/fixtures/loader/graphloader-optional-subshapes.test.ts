@@ -1,5 +1,5 @@
 /**
- * Loader fixtures for `deriveOptionalSubShapes` in graphLoader — PR #51 review.
+ * Loader fixtures for `deriveOptionalSubShapes` in graphLoader (#37).
  *
  * `subShapeRootOf` strips the trailing leaf segment from a request-body
  * `fieldPath` to obtain the sub-shape root, returning `null` for paths

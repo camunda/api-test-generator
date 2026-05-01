@@ -1410,25 +1410,46 @@ export function generateOptionalSubShapeVariants(
       );
       if (!producerCandidates.length) continue;
       // Try each candidate producer; pick the first that yields a valid
-      // variant. The first authoritative producer often won't (e.g.
-      // `getElementInstance` requires `ElementInstanceKey` which the
-      // endpoint doesn't produce, so no warm-up is forced). A search-style
-      // producer (e.g. `searchElementInstances`) is usually the one whose
-      // optional filters overlap the endpoint's outputs.
-      let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
-      for (const candidateOpId of producerCandidates) {
-        const candidate = graph.operations[candidateOpId];
-        if (!candidate) continue;
+      // variant. Two passes:
+      //   1. Prefer producers whose required + opportunistic-optional inputs
+      //      overlap the endpoint's outputs. This forces a warm-up call to
+      //      the endpoint (e.g. createProcessInstance → searchElementInstances
+      //      → createProcessInstance) — the canonical "look up the entity
+      //      we just created" chain.
+      //   2. Fall back to non-overlap producers (independent producers that
+      //      need nothing from the endpoint). The variant chain is then a
+      //      simple `producer → endpoint` shape with no warm-up.
+      // Without the fallback, optional sub-shapes whose leaf semantics are
+      // produced by independent ops (e.g. a standalone `mintFoo` for an
+      // optional `foo` field) would receive zero variant coverage.
+      const buildAdditional = (candidate: OperationNode): Set<string> => {
         const additional = new Set<string>();
         for (const opt of candidate.requires.optional) {
           if (endpoint.produces.includes(opt)) additional.add(opt);
         }
         for (const req of candidate.requires.required) additional.add(req);
         additional.add(leaf.semantic);
+        return additional;
+      };
+      let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
+      // Pass 1: overlap-based (warm-up forced).
+      for (const candidateOpId of producerCandidates) {
+        const candidate = graph.operations[candidateOpId];
+        if (!candidate) continue;
+        const additional = buildAdditional(candidate);
         const overlapsEndpoint = [...additional].some((s) => endpoint.produces.includes(s));
         if (!overlapsEndpoint) continue;
         chosenProducer = { node: candidate, additional };
         break;
+      }
+      // Pass 2: non-overlap fallback (no warm-up).
+      if (!chosenProducer) {
+        for (const candidateOpId of producerCandidates) {
+          const candidate = graph.operations[candidateOpId];
+          if (!candidate) continue;
+          chosenProducer = { node: candidate, additional: buildAdditional(candidate) };
+          break;
+        }
       }
       if (!chosenProducer) continue;
       const { additional } = chosenProducer;
