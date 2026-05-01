@@ -1373,3 +1373,78 @@ describe('bundled-spec invariants: emitted Playwright suite', () => {
     expect(totalActual).toBe(totalExpected);
   });
 });
+
+describe('bundled-spec invariants: emitted Playwright variant suite (#105)', () => {
+  it('every variant scenario file is materialised as a *.variant.spec.ts (#105)', () => {
+    // Class-scoped guard for Phase 3 of #105: the codegen pipeline must
+    // consume every JSON file under dist/variant-output/ and emit a
+    // matching `<operationId>.variant.spec.ts` under dist/generated-tests/.
+    // A regression that drops the variant-output scan would silently
+    // strip every populated-sub-shape test from CI; this invariant
+    // forces the failure to surface at the suite level rather than as
+    // missing coverage.
+    if (!existsSync(VARIANT_SCENARIOS_DIR) || !existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(`Generated artifacts not found. Run 'npm run testsuite:generate' first.`);
+    }
+    const missing: string[] = [];
+    let variantFilesSeen = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const coll = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantScenarioFile;
+      if (!coll.scenarios?.length) continue;
+      variantFilesSeen++;
+      const specName = `${coll.endpoint.operationId}.variant.spec.ts`;
+      if (!existsSync(join(GENERATED_TESTS_DIR, specName))) {
+        missing.push(specName);
+      }
+    }
+    expect(variantFilesSeen).toBeGreaterThan(0); // sanity: pipeline produced variants
+    expect(missing).toEqual([]);
+  });
+
+  it('every variant scenario populating startInstructions[] emits a body with startInstructions: [{...}] (#105)', () => {
+    // Class-scoped acceptance test for Phase 3 of #105: every variant
+    // whose `populatesSubShape.rootPath === "startInstructions[]"` must
+    // produce a generated test whose body literal contains
+    // `startInstructions:` and a nested `elementId:` reference. We
+    // grep the spec source rather than parse it because the literal is
+    // emitted with `ctx[...]` substitutions for placeholders.
+    if (!existsSync(VARIANT_SCENARIOS_DIR) || !existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(`Generated artifacts not found. Run 'npm run testsuite:generate' first.`);
+    }
+    const offenders: { spec: string; reason: string }[] = [];
+    let assertionsRun = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const coll = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantScenarioFile;
+      const startInstrVariants = coll.scenarios.filter(
+        (s) => s.populatesSubShape?.rootPath === 'startInstructions[]',
+      );
+      if (startInstrVariants.length === 0) continue;
+      const specName = `${coll.endpoint.operationId}.variant.spec.ts`;
+      const specPath = join(GENERATED_TESTS_DIR, specName);
+      if (!existsSync(specPath)) {
+        offenders.push({ spec: specName, reason: 'spec file missing' });
+        continue;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      if (!src.includes('startInstructions:')) {
+        offenders.push({ spec: specName, reason: 'no startInstructions: literal in body' });
+        continue;
+      }
+      if (!src.includes('elementId:')) {
+        offenders.push({ spec: specName, reason: 'no elementId: literal in startInstructions' });
+        continue;
+      }
+      assertionsRun++;
+    }
+    expect(assertionsRun).toBeGreaterThan(0); // sanity: at least one variant exercises the path
+    expect(offenders).toEqual([]);
+  });
+});
