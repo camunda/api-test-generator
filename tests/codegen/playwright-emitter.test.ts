@@ -540,3 +540,272 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
     ).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #106 — eventual-consistency wrapping
+// ---------------------------------------------------------------------------
+//
+// Class-scoped guarantee: a request step is wrapped with awaitEventually()
+// iff its operation is flagged `eventuallyConsistent` AND it is a read
+// shape (GET or POST .../search) AND it expects a 200. Write steps that
+// are themselves EC are NOT wrapped — the indexer lag manifests on the
+// next read, not on the write call. Error scenarios (non-200 expected)
+// are NOT wrapped.
+
+function ecCollection(
+  scenarios: EndpointScenarioCollection['scenarios'],
+): EndpointScenarioCollection {
+  return {
+    endpoint: { operationId: 'searchWidgets', method: 'POST', path: '/widgets/search' },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios,
+  };
+}
+
+describe('PlaywrightEmitter — eventual-consistency wrapping (#106)', () => {
+  test('imports awaitEventually only when at least one step needs wrapping', () => {
+    const withEc = renderPlaywrightSuite(
+      ecCollection([
+        {
+          id: 'sc1',
+          operations: [
+            {
+              operationId: 'searchWidgets',
+              method: 'POST',
+              path: '/widgets/search',
+              eventuallyConsistent: true,
+            },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'searchWidgets',
+              method: 'POST',
+              pathTemplate: '/widgets/search',
+              expect: { status: 200 },
+            },
+          ],
+        },
+      ]),
+      { suiteName: 'searchWidgets', mode: 'feature' },
+    );
+    expect(withEc).toContain("import { awaitEventually } from './support/await-eventually';");
+    expect(withEc).toContain('await awaitEventually(');
+
+    const withoutEc = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+    });
+    expect(withoutEc).not.toContain('awaitEventually');
+  });
+
+  test('wraps POST .../search reads when eventuallyConsistent', () => {
+    const src = renderPlaywrightSuite(
+      ecCollection([
+        {
+          id: 'sc1',
+          operations: [
+            {
+              operationId: 'searchWidgets',
+              method: 'POST',
+              path: '/widgets/search',
+              eventuallyConsistent: true,
+            },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'searchWidgets',
+              method: 'POST',
+              pathTemplate: '/widgets/search',
+              expect: { status: 200 },
+            },
+          ],
+        },
+      ]),
+      { suiteName: 'searchWidgets', mode: 'feature' },
+    );
+    expect(src).toContain("operationId: 'searchWidgets'");
+    expect(src).toMatch(/await awaitEventually\(/);
+    expect(src).toContain("method: 'POST'");
+  });
+
+  test('wraps GET reads when eventuallyConsistent', () => {
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'getWidget', method: 'GET', path: '/widgets/{key}' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [
+              {
+                operationId: 'getWidget',
+                method: 'GET',
+                path: '/widgets/{key}',
+                eventuallyConsistent: true,
+              },
+            ],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'getWidget',
+                method: 'GET',
+                pathTemplate: '/widgets/{key}',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'getWidget', mode: 'feature' },
+    );
+    expect(src).toMatch(/await awaitEventually\(/);
+    expect(src).toContain("method: 'GET'");
+  });
+
+  test('does NOT wrap write steps even when flagged eventuallyConsistent', () => {
+    // createDeployment is itself EC (indexing), but POST /deployments is
+    // a write, not a read. Wrapping it would never satisfy the default
+    // items.length predicate.
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                path: '/deployments',
+                eventuallyConsistent: true,
+              },
+            ],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'createDeployment', mode: 'feature' },
+    );
+    expect(src).not.toContain('awaitEventually');
+  });
+
+  test('does NOT wrap error scenarios (non-200 expected status)', () => {
+    const src = renderPlaywrightSuite(
+      ecCollection([
+        {
+          id: 'sc1',
+          operations: [
+            {
+              operationId: 'searchWidgets',
+              method: 'POST',
+              path: '/widgets/search',
+              eventuallyConsistent: true,
+            },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          expectedResult: { kind: 'error' },
+          requestPlan: [
+            {
+              operationId: 'searchWidgets',
+              method: 'POST',
+              pathTemplate: '/widgets/search',
+              expect: { status: 400 },
+            },
+          ],
+        },
+      ]),
+      { suiteName: 'searchWidgets', mode: 'feature' },
+    );
+    expect(src).not.toContain('awaitEventually');
+  });
+
+  test('only wraps the read step in a multi-step write-then-read chain', () => {
+    // Chain: createDeployment (write, EC) → createProcessInstance (write) →
+    // searchProcessInstances (read, EC). Only the search must be wrapped.
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: {
+          operationId: 'searchProcessInstances',
+          method: 'POST',
+          path: '/process-instances/search',
+        },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                path: '/deployments',
+                eventuallyConsistent: true,
+              },
+              { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
+              {
+                operationId: 'searchProcessInstances',
+                method: 'POST',
+                path: '/process-instances/search',
+                eventuallyConsistent: true,
+              },
+            ],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+              },
+              {
+                operationId: 'createProcessInstance',
+                method: 'POST',
+                pathTemplate: '/process-instances',
+                expect: { status: 200 },
+                bodyKind: 'json',
+                bodyTemplate: {},
+              },
+              {
+                operationId: 'searchProcessInstances',
+                method: 'POST',
+                pathTemplate: '/process-instances/search',
+                expect: { status: 200 },
+                bodyKind: 'json',
+                bodyTemplate: {},
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'searchProcessInstances', mode: 'feature' },
+    );
+    // Exactly one wrap, on the search read.
+    const matches = src.match(/awaitEventually\(/g) ?? [];
+    expect(matches.length).toBe(1);
+    expect(src).toContain("operationId: 'searchProcessInstances'");
+  });
+});

@@ -127,6 +127,13 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
       !(s.expectedResult && s.expectedResult.kind === 'error'),
   );
 
+  // Determine upfront whether any scenario will wrap a step with
+  // awaitEventually() so we can conditionally include the import. A step
+  // is wrapped when its operationId appears in `eventualConsistencyOps`
+  // and the step expects a 200 (we never await a step that's expected to
+  // produce an error response).
+  const needsAwaitEventually = collection.scenarios.some((s) => stepNeedsAwait(s).length > 0);
+
   // Import only test & expect; request fixture is provided per-test via parameters
   lines.push("import { test, expect } from '@playwright/test';");
   if (needsValidation) {
@@ -139,6 +146,9 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   lines.push("import { extractInto, seedBinding } from './support/seeding';");
   lines.push("import { resolveFixture } from './support/fixtures';");
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from './support/await-eventually';");
+  }
   lines.push('');
   if (needsValidation) {
     // Resolve responses.json relative to this spec file so the suite is
@@ -269,6 +279,7 @@ function renderScenarioTest(
     return body.join('\n');
   }
   const requestPlan = s.requestPlan;
+  const awaitStepIndices = new Set(stepNeedsAwait(s));
   requestPlan.forEach((step: RequestStep, idx: number) => {
     const varName = `resp${idx + 1}`;
     const urlExpr = buildUrlExpression(step.pathTemplate);
@@ -336,7 +347,21 @@ function renderScenarioTest(
       }`);
       opts.push('multipart: multipart');
     }
-    body.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
+    // (#106) Eventually-consistent reads are wrapped with awaitEventually(),
+    // which retries the same request within a budget until the response is
+    // observably consistent (default predicate for POST .../search:
+    // `body.items.length > 0`; for GET: any 200) and returns the final
+    // APIResponse. Non-EC steps go straight through `request.${method}`.
+    if (awaitStepIndices.has(idx)) {
+      body.push(`    const ${varName} = await awaitEventually(`);
+      body.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
+      body.push(
+        `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
+      );
+      body.push(`    );`);
+    } else {
+      body.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
+    }
     body.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
     body.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
     body.push(`    }`);
@@ -414,6 +439,52 @@ function escapeQuotes(s: string): string {
 }
 function camelCase(s: string) {
   return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+/**
+ * Decide which request steps in a scenario should be wrapped with
+ * `awaitEventually(...)`. A step is wrapped iff:
+ *
+ *   1. its `operationId` is listed in `scenario.eventualConsistencyOps`
+ *      (the planner marks ops whose authoritative outputs land in
+ *      Operate/Tasklist secondary storage with indexing lag); AND
+ *   2. it is a *read* step — `GET` or `POST .../search` — because the
+ *      poller's retry semantics (404-on-GET, items.length predicate)
+ *      apply to reads, not to writes. A write that is itself flagged
+ *      EC returns 200 quickly; the lag manifests on the *next* read; AND
+ *   3. it expects a `200` (we never poll an error scenario).
+ *
+ * Returns the set of step indices the emitter should wrap. Exposed
+ * (un-exported, file-local) so the import-needed check at the top of
+ * `buildSuiteSource` and the per-step wrap decision share one
+ * predicate — they cannot drift.
+ */
+function stepNeedsAwait(s: EndpointScenario): number[] {
+  if (!s.requestPlan) return [];
+  // Source of truth: each `s.operations[].eventuallyConsistent` (a flag the
+  // extractor stamps from the `x-eventually-consistent` vendor extension).
+  // The `s.eventualConsistencyOps`/`s.hasEventuallyConsistent` fields are
+  // *summaries* the planner computes for some scenario kinds (multi-step
+  // chains, trivial scenarios) but not all (featureCoverage scenarios
+  // leave them undefined). Reading the per-op flag directly avoids that
+  // gap.
+  const ecOps = new Set<string>();
+  for (const op of s.operations) {
+    if (op.eventuallyConsistent) ecOps.add(op.operationId);
+  }
+  if (ecOps.size === 0) return [];
+  const out: number[] = [];
+  for (let i = 0; i < s.requestPlan.length; i++) {
+    const step = s.requestPlan[i];
+    if (!ecOps.has(step.operationId)) continue;
+    if (step.expect.status !== 200) continue;
+    const method = step.method.toUpperCase();
+    const isReadShape =
+      method === 'GET' || (method === 'POST' && /\/search\/?$/.test(step.pathTemplate));
+    if (!isReadShape) continue;
+    out.push(i);
+  }
+  return out;
 }
 
 // Build an accessor using optional chaining for nested/array paths, e.g. a.b[0].c -> ?.a?.b?.[0]?.c

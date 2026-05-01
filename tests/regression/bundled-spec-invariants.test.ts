@@ -1285,4 +1285,90 @@ describe('bundled-spec invariants: emitted Playwright suite', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('every eventually-consistent read step is wrapped with awaitEventually (#106)', () => {
+    // Class-scoped guarantee: for every emitted spec file, the count of
+    // `awaitEventually(` calls equals the count of read-shape steps
+    // (GET or POST .../search) whose operation is flagged
+    // `eventuallyConsistent` and which expect a 200, summed across all
+    // scenarios in the matching feature/output JSON. Mismatches mean
+    // the emitter's wrap heuristic has regressed.
+    if (!existsSync(GENERATED_TESTS_DIR) || !existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(`Generated artifacts not found. Run 'npm run testsuite:generate' first.`);
+    }
+
+    interface RequestStepLite {
+      operationId: string;
+      method: string;
+      pathTemplate: string;
+      expect: { status: number };
+    }
+    interface OperationRefLite {
+      operationId: string;
+      eventuallyConsistent?: boolean;
+    }
+    interface ScenarioLite {
+      operations: OperationRefLite[];
+      requestPlan?: RequestStepLite[];
+    }
+    interface CollectionLite {
+      endpoint: { operationId: string };
+      scenarios: ScenarioLite[];
+    }
+
+    function isReadShape(method: string, pathTemplate: string): boolean {
+      const m = method.toUpperCase();
+      return m === 'GET' || (m === 'POST' && /\/search\/?$/.test(pathTemplate));
+    }
+
+    function expectedWraps(coll: CollectionLite): number {
+      let n = 0;
+      for (const s of coll.scenarios) {
+        if (!s.requestPlan) continue;
+        const ec = new Set<string>();
+        for (const op of s.operations) {
+          if (op.eventuallyConsistent) ec.add(op.operationId);
+        }
+        if (ec.size === 0) continue;
+        for (const step of s.requestPlan) {
+          if (!ec.has(step.operationId)) continue;
+          if (step.expect.status !== 200) continue;
+          if (!isReadShape(step.method, step.pathTemplate)) continue;
+          n++;
+        }
+      }
+      return n;
+    }
+
+    let totalExpected = 0;
+    let totalActual = 0;
+    let suitesWithEc = 0;
+
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const raw = readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8');
+      // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary; shape locally typed as CollectionLite
+      const coll = JSON.parse(raw) as CollectionLite;
+      if (!coll || typeof coll !== 'object') continue;
+      const expected = expectedWraps(coll);
+      if (expected === 0) continue;
+      suitesWithEc++;
+      totalExpected += expected;
+
+      const specName = `${coll.endpoint.operationId}.feature.spec.ts`;
+      const specPath = join(GENERATED_TESTS_DIR, specName);
+      if (!existsSync(specPath)) {
+        throw new Error(`expected emitted spec ${specName} not found`);
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const actual = (src.match(/awaitEventually\(/g) ?? []).length;
+      totalActual += actual;
+      expect(actual, `${specName}: awaitEventually wrap count`).toBe(expected);
+    }
+
+    // Sanity: the bundled spec exercises this pattern non-trivially.
+    expect(suitesWithEc).toBeGreaterThan(0);
+    expect(totalExpected).toBeGreaterThan(0);
+    expect(totalActual).toBe(totalExpected);
+  });
 });
