@@ -129,9 +129,10 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
 
   // Determine upfront whether any scenario will wrap a step with
   // awaitEventually() so we can conditionally include the import. A step
-  // is wrapped when its operationId appears in `eventualConsistencyOps`
-  // and the step expects a 200 (we never await a step that's expected to
-  // produce an error response).
+  // is wrapped when `stepNeedsAwait()` identifies it as belonging to an
+  // eventually consistent operation (derived from
+  // `s.operations[].eventuallyConsistent`) and the step expects a 200
+  // (we never await a step that's expected to produce an error response).
   const needsAwaitEventually = collection.scenarios.some((s) => stepNeedsAwait(s).length > 0);
 
   // Import only test & expect; request fixture is provided per-test via parameters

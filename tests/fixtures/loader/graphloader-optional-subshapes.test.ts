@@ -50,13 +50,13 @@ function writeLayout(layout: Layout): void {
 
 // ---------------------------------------------------------------------------
 // Fixture K — `subShapeRootOf` rejects scalar-array item leaves at any depth
-// (PR #51 review).
+// (#37).
 // ---------------------------------------------------------------------------
 //
 // Class-scoped: any optional fieldPath whose terminal segment ends with
 // `[]` (i.e. the leaf IS the scalar-array item) is excluded from
 // `optionalSubShapes` regardless of nesting depth.
-describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at any depth (#51 review)', () => {
+describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at any depth (#37)', () => {
   it('does not group `filter.tags[]` (nested scalar array) under a sub-shape root', async () => {
     writeLayout({
       graph: {

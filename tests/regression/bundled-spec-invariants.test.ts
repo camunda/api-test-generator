@@ -1229,9 +1229,10 @@ describe('bundled-spec invariants: planner variant output (#37)', () => {
 
   it('every step in every variant scenario has its required semantic inputs satisfied (#37)', () => {
     // Mirror of the base-scenario prereq invariant, scoped to variant
-    // scenarios. The variant family lifts the OUT-as-producer guard, so
-    // we want explicit confirmation that the warm-up endpoint truly
-    // produces the semantics the search-step then consumes.
+    // scenarios. This only checks that each step's required semantic
+    // inputs are satisfied by semantics produced earlier in the chain;
+    // it does not assert that optional inputs (for example
+    // overlap-heuristic triggers on search steps) are present.
     if (!existsSync(VARIANT_SCENARIOS_DIR)) return; // no variants generated yet
     const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
     for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
