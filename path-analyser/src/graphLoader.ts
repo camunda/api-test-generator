@@ -369,16 +369,21 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
       }
     }
   }
-  // If any provider flags exist, restrict produced semantics to only provider:true; else, include all response-derived
-  if (Object.keys(providerMap).length) {
-    responseDerived.forEach((st) => {
-      if (providerMap[st]) produces.push(st);
-    });
-  } else {
-    responseDerived.forEach((st) => {
-      produces.push(st);
-    });
-  }
+  // Only `provider: true` response semantics flow into `produces`. The
+  // canonical signal for "this op authoritatively produces a value of
+  // semantic type T in its response" is `x-semantic-provider: true` on
+  // the response field schema. Earlier, when no field on a response
+  // carried `provider: true`, every response semantic was promoted into
+  // `produces` as a fallback — which laundered incidental response
+  // metadata (e.g. `createDocument`'s `metadata.processInstanceKey`)
+  // into `producersByType[T]` and downstream into BFS candidate sets.
+  // That fallback was the upstream cause of #95 and is removed in #97.
+  // Operations whose specs are not yet annotated with
+  // `x-semantic-provider` will stop appearing in `producersByType` for
+  // their response fields; tracked upstream as camunda/camunda#52169.
+  responseDerived.forEach((st) => {
+    if (providerMap[st]) produces.push(st);
+  });
 
   const { required, optional } = extractRequires(op);
 
