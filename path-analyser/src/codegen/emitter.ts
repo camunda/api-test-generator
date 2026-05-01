@@ -12,8 +12,8 @@ export interface EmitContext {
   outDir: string;
   /** Suite name used for test naming (for example, `describe()` blocks) and optionally for file names, depending on the emitter. */
   suiteName: string;
-  /** Generation mode — `feature` is the default for path-analyser scenarios. */
-  mode: 'feature' | 'integration';
+  /** Generation mode — `feature` is the default for path-analyser scenarios. `variant` is used for optional sub-shape variant suites (#37 / #105). */
+  mode: 'feature' | 'integration' | 'variant';
   /**
    * Bindings that every emitted scenario must seed before its request plan
    * runs (e.g. the default-tenant identifier under single-tenant mode).

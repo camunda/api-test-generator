@@ -327,10 +327,16 @@ async function main() {
       const variantCollection = generateOptionalSubShapeVariants(graph, op.operationId, {
         maxScenarios: 20,
       });
-      // Augment with response shape so downstream codegen has the same
-      // metadata as base/feature scenarios.
-      if (resp) {
-        for (const s of variantCollection.scenarios) {
+      // Augment with response shape (when available) so downstream codegen
+      // has the same metadata as base/feature scenarios. The requestPlan
+      // call is intentionally unconditional — variant scenarios for
+      // 204/no-response endpoints (e.g. modifyProcessInstance) still need
+      // a plan so the emitter renders runnable test bodies. Without this,
+      // those tests would render an empty body that fails biome's
+      // unused-`request`-param lint after `dist/generated-tests` is
+      // formatted (#105).
+      for (const s of variantCollection.scenarios) {
+        if (resp) {
           s.responseShapeSemantics = resp.producedSemantics || undefined;
           s.responseShapeFields = resp.fields.map((f) => ({
             name: f.name,
@@ -341,15 +347,15 @@ async function main() {
           }));
           if (resp.nestedSlices) s.responseNestedSlices = resp.nestedSlices;
           if (resp.nestedItems) s.responseArrayItemFields = resp.nestedItems;
-          s.requestPlan = buildRequestPlan(
-            s,
-            resp,
-            graph,
-            canonical,
-            requestIndex.byOperation,
-            successStatusByOp,
-          );
         }
+        s.requestPlan = buildRequestPlan(
+          s,
+          resp,
+          graph,
+          canonical,
+          requestIndex.byOperation,
+          successStatusByOp,
+        );
       }
       if (variantCollection.scenarios.length) {
         await writeFile(
@@ -530,6 +536,15 @@ function buildRequestPlan(
       steps.push(dup);
     }
   }
+  // Issue #105 (Phase 3): for variant scenarios, deep-merge the populated
+  // sub-shape into the FINAL step's bodyTemplate. The planner stamps
+  // `populatesSubShape` on each variant scenario; the emitter expects the
+  // `${semanticVar}` placeholders to already be present in the body so it
+  // can substitute them via its standard `"${var}"` → `ctx["var"]` rewrite.
+  // Producer extracts for each leaf semantic are populated by the
+  // non-final-step block above (responseSemanticTypes), so the placeholders
+  // resolve at runtime to values pulled from the prerequisite chain.
+  mergePopulatesSubShapeIntoFinalBody(scenario, steps);
   // Issue #61: alias producer extracts under placeholder-derived var names.
   // The Playwright emitter substitutes `{placeholder}` with
   // `ctx.<camelCase(placeholder)>Var`, but producer steps bind under
@@ -543,6 +558,89 @@ function buildRequestPlan(
   // name. Keeps the emitter dumb and the alias visible in scenario JSON.
   aliasProducerExtractsToPlaceholders(scenario, steps, graph);
   return steps;
+}
+
+function mergePopulatesSubShapeIntoFinalBody(
+  scenario: EndpointScenario,
+  steps: RequestStep[],
+): void {
+  const sub = scenario.populatesSubShape;
+  if (!sub || !sub.leafPaths?.length) return;
+  if (!steps.length) return;
+  const finalStep = steps[steps.length - 1];
+  if (finalStep.bodyKind !== 'json') return;
+  const body: Record<string, unknown> = isPlainRecord(finalStep.bodyTemplate)
+    ? { ...finalStep.bodyTemplate }
+    : {};
+  const leafSemantics = sub.leafSemantics ?? [];
+  for (let i = 0; i < sub.leafPaths.length; i++) {
+    const leafPath = sub.leafPaths[i];
+    const semantic = leafSemantics[i];
+    if (!semantic) continue;
+    const bind = `${camelCase(semantic)}Var`;
+    setLeafPlaceholder(body, leafPath, `\${${bind}}`);
+    scenario.bindings ||= {};
+    if (!scenario.bindings[bind]) scenario.bindings[bind] = '__PENDING__';
+  }
+  finalStep.bodyTemplate = body;
+}
+
+/**
+ * Walks `path` (e.g. `startInstructions[].elementId`, or
+ * `filter.processInstanceKey`) and inserts `value` at the leaf, creating
+ * intermediate objects/arrays as needed. `[]` segments coerce the parent
+ * to a single-element array.
+ */
+function setLeafPlaceholder(root: Record<string, unknown>, path: string, value: string): void {
+  // Tokenise: each segment is either `name` or `name[]`.
+  const segments = path.split('.');
+  // current is the container we mutate; for array segments we descend
+  // into element [0]. Track parent + key so we can rewrite after type
+  // coercion when needed.
+  let cursor: unknown = root;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const isArray = seg.endsWith('[]');
+    const key = isArray ? seg.slice(0, -2) : seg;
+    const isLast = i === segments.length - 1;
+    if (!isPlainRecord(cursor)) return; // defensive: malformed input
+    if (isArray) {
+      // Ensure cursor[key] is an array with at least one element object.
+      const existing = cursor[key];
+      let arr: unknown[];
+      if (Array.isArray(existing)) {
+        arr = existing;
+      } else {
+        arr = [];
+        cursor[key] = arr;
+      }
+      if (arr.length === 0 || !isPlainRecord(arr[0])) {
+        arr[0] = {};
+      }
+      if (isLast) {
+        // Leaf is itself an array root with no further segment; treat as
+        // scalar slot at index 0. (The planner currently only emits
+        // sub-shapes whose leaf is a deeper field, so this branch is a
+        // safety net for future leaf-as-root variants.)
+        arr[0] = value;
+        return;
+      }
+      cursor = arr[0];
+      continue;
+    }
+    if (isLast) {
+      cursor[key] = value;
+      return;
+    }
+    const next = cursor[key];
+    if (isPlainRecord(next)) {
+      cursor = next;
+    } else {
+      const created: Record<string, unknown> = {};
+      cursor[key] = created;
+      cursor = created;
+    }
+  }
 }
 
 function aliasProducerExtractsToPlaceholders(

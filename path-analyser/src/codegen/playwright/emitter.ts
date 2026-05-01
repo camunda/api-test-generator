@@ -13,7 +13,7 @@ import { materializeSupport } from './materialize-support.js';
 interface EmitOptions {
   outDir: string;
   suiteName?: string;
-  mode?: 'feature' | 'integration';
+  mode?: 'feature' | 'integration' | 'variant';
   /**
    * See {@link EmitContext.globalContextSeeds}. Forwarded verbatim from the
    * orchestrator so this entry point and {@link PlaywrightEmitter.emit}
@@ -28,7 +28,7 @@ interface EmitOptions {
  */
 export function playwrightSuiteFileName(
   collection: EndpointScenarioCollection,
-  mode: 'feature' | 'integration',
+  mode: 'feature' | 'integration' | 'variant',
 ): string {
   return `${collection.endpoint.operationId}.${mode}.spec.ts`;
 }
@@ -42,7 +42,7 @@ export function renderPlaywrightSuite(
   collection: EndpointScenarioCollection,
   opts: {
     suiteName?: string;
-    mode?: 'feature' | 'integration';
+    mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
   },
 ): string {

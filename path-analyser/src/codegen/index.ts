@@ -82,6 +82,7 @@ async function run() {
     ? process.cwd()
     : path.resolve(process.cwd(), 'path-analyser');
   const featureDir = path.join(baseDir, 'dist/feature-output');
+  const variantDir = path.join(baseDir, 'dist/variant-output');
   const outDir = path.join(baseDir, 'dist/generated-tests');
 
   if (help || !positional) {
@@ -140,8 +141,42 @@ async function run() {
         console.warn('Skipping file (parse/emission failed):', f, msg);
       }
     }
+    // Issue #105: also materialise optional sub-shape variant scenarios
+    // (#37) into Playwright tests. The variant-output directory is
+    // populated by the planner only for endpoints with at least one
+    // optional sub-shape; emit nothing when the directory is absent so
+    // local runs that scope to feature scenarios still succeed.
+    let variantCount = 0;
+    let variantFiles: string[] = [];
+    try {
+      variantFiles = (await fs.readdir(variantDir)).filter((f) => f.endsWith('-scenarios.json'));
+    } catch (e) {
+      if (
+        !(typeof e === 'object' && e !== null && 'code' in e && Reflect.get(e, 'code') === 'ENOENT')
+      ) {
+        throw e;
+      }
+    }
+    for (const f of variantFiles) {
+      try {
+        const content = await fs.readFile(path.join(variantDir, f), 'utf8');
+        const parsed = parseScenarioCollection(content);
+        if (!parsed.endpoint?.operationId) continue;
+        if (!parsed.scenarios?.length) continue;
+        await writeEmitted(emitter, parsed, {
+          outDir,
+          suiteName: parsed.endpoint.operationId,
+          mode: 'variant',
+          globalContextSeeds,
+        });
+        variantCount++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn('Skipping variant file (parse/emission failed):', f, msg);
+      }
+    }
     console.log(
-      `Generated test suites for ${count} endpoints in ${outDir} (target: ${emitter.id})`,
+      `Generated test suites for ${count} endpoints (+${variantCount} variant suites) in ${outDir} (target: ${emitter.id})`,
     );
     return;
   }
