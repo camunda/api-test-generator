@@ -1,0 +1,12 @@
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/bin/Debug/net8.0/Camunda.Orchestration.RestSdk.deps.json
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/bin/Debug/net8.0/Camunda.Orchestration.RestSdk.dll
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/bin/Debug/net8.0/Camunda.Orchestration.RestSdk.pdb
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.GeneratedMSBuildEditorConfig.editorconfig
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.AssemblyInfoInputs.cache
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.AssemblyInfo.cs
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.csproj.CoreCompileInputs.cache
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.sourcelink.json
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.dll
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/refint/Camunda.Orchestration.RestSdk.dll
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/Camunda.Orchestration.RestSdk.pdb
+/home/muhamad/API-Test/api-test-generator/csharp-sdk/src/Camunda.Orchestration.RestSdk/obj/Debug/net8.0/ref/Camunda.Orchestration.RestSdk.dll

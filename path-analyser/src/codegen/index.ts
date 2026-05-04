@@ -21,6 +21,8 @@ import {
 } from './python-sdk/sdk-mapping.js';
 import { materializePythonSupport } from './python-sdk/materialize-support.js';
 import { writeEmitted } from './orchestrator.js';
+import { createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { loadCsharpOperationMap } from './csharp-sdk/operation-map.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
   materializeResponseSchemas,
@@ -160,6 +162,9 @@ async function run() {
       createPythonSdkEmitter(pythonSdkMapping ?? createDefaultPythonOperationMapSource()),
     );
   }
+
+  const csharpOperationMap = await loadCsharpOperationMap(baseDir);
+  registerEmitter(createCsharpEmitter(csharpOperationMap));
 
   if (help || !positional) {
     printUsage();
