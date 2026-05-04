@@ -710,20 +710,45 @@ export function generateScenariosForEndpoint(
       // from the chain, not values minted here.
       let establisherBindingSemantics = workingState.establisherBindingSemantics;
       if (producerNode.establishes && producerNode.establishes.shape !== 'edge') {
+        // Pre-flight: for each *body* identifier, the request-body
+        // builder (`buildRequestBodyFromCanonical` in path-analyser/
+        // src/index.ts) emits `${${camelCase(name)}Var}` from the raw
+        // field name with no per-step override. If a previously
+        // chained establisher already minted a different semantic at
+        // that exact var name, the second establisher's request body
+        // would render with the FIRST establisher's value — silently
+        // wrong. Numeric-suffix disambiguation (below) only saves the
+        // URL path because aliasing covers placeholder lookup; the
+        // body builder has no equivalent hook. Skip the candidate
+        // wholesale rather than emit a broken test. Path-only
+        // identifiers don't share this hazard because the placeholder-
+        // alias loop below threads the value under every placeholder
+        // name the URL emitter uses.
+        let bodyBindingClash = false;
+        for (const id of producerNode.establishes.identifiedBy) {
+          if (id.in !== 'body') continue;
+          const bodyVar = `${camelLower(id.name)}Var`;
+          const existingSemantic = establisherBindingSemantics?.[bodyVar];
+          if (existingSemantic && existingSemantic !== id.semanticType) {
+            bodyBindingClash = true;
+            break;
+          }
+        }
+        if (bodyBindingClash) continue;
         for (const id of producerNode.establishes.identifiedBy) {
           const baseVar = `${camelLower(id.name)}Var`;
-          // Find a key whose minted semanticType matches (reuse) or is
-          // free (mint). Always tracks via establisherBindingSemantics
-          // — bindingsDraft alone can't distinguish a value minted by
-          // an establisher from one minted by a producer extract.
+          // For BODY identifiers we never suffix — see clash check
+          // above. For PATH identifiers the URL emitter goes through
+          // the alias loop, so a numeric suffix is safe.
           let primaryVar = baseVar;
-          let suffix = 2;
-          while (
-            establisherBindingSemantics &&
-            establisherBindingSemantics[primaryVar] &&
-            establisherBindingSemantics[primaryVar] !== id.semanticType
-          ) {
-            primaryVar = `${baseVar}${suffix++}`;
+          if (id.in === 'path') {
+            let suffix = 2;
+            while (
+              establisherBindingSemantics?.[primaryVar] &&
+              establisherBindingSemantics[primaryVar] !== id.semanticType
+            ) {
+              primaryVar = `${baseVar}${suffix++}`;
+            }
           }
           const value =
             bindingsDraft[primaryVar] ??

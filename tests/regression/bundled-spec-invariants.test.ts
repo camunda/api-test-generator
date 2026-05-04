@@ -1554,34 +1554,65 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
     ).toBe(specAnnotatedCount);
 
     if (establishersByType.size === 0) {
-      // Pre-annotation branch: nothing further to assert at the chain
-      // level. The parity check above is the live regression guard
-      // until the spec pin is bumped; the positive branch below takes
-      // over once `x-semantic-establishes` lands upstream.
+      // Pre-annotation branch: the parity check above
+      // (`specAnnotatedCount === graphAnnotatedCount`) is the active
+      // regression guard for the extractor surface. Two further
+      // sentinels protect the chain-level guarantees while the
+      // upstream spec carries no `x-semantic-establishes`:
+      //
+      // 1. The graph's `establishersByType` map MUST be absent or
+      //    empty — a non-empty map without source annotations would
+      //    indicate either a fixture leaked into the bundled spec or
+      //    the extractor is fabricating establisher entries from a
+      //    different annotation. Either is a defect.
+      const rawEstablishersByType = Reflect.get(rawGraph, 'establishersByType');
+      const fabricatedEstablishersByType =
+        rawEstablishersByType && typeof rawEstablishersByType === 'object'
+          ? Object.keys(rawEstablishersByType)
+          : [];
+      expect(
+        fabricatedEstablishersByType,
+        'pre-annotation sentinel: graph carries establishersByType entries despite the bundled spec having no x-semantic-establishes annotations',
+      ).toEqual([]);
+
+      // 2. No operation in the graph should carry a non-empty
+      //    `establishes` field — this is the per-operation analogue of
+      //    sentinel #1. If a single op surfaces `establishes` despite
+      //    the spec having no annotations, the extractor's intake or
+      //    the graph normalizer is fabricating it.
+      const fabricatedEstablishesOps = rawGraph.operations
+        .filter((o) => o.establishes && (o.establishes.identifiedBy?.length ?? 0) > 0)
+        .map((o) => o.operationId);
+      expect(
+        fabricatedEstablishesOps,
+        'pre-annotation sentinel: operations carry `establishes` despite the bundled spec having no x-semantic-establishes annotations',
+      ).toEqual([]);
       return;
     }
 
     // Post-annotation branch: every consumer endpoint that requires a
     // semantic with a non-edge establisher must (a) plan at least one
-    // satisfied chain, AND (b) for EACH established requirement, *some*
-    // satisfied scenario in the file must include one of that
-    // requirement's registered establishers. (a) on its own is too
-    // weak — an unrelated heuristic could still satisfy the chain via
-    // a different producer path, hiding a regression where
-    // x-semantic-establishes stops being consumed at all.
+    // satisfied chain, AND (b) at least one satisfied scenario must
+    // cover ALL of the endpoint's established requirements
+    // simultaneously, with each requirement routed through a
+    // registered establisher in that same chain. (a) on its own is
+    // too weak — an unrelated heuristic could still satisfy the chain
+    // via a different producer path. A weaker per-requirement check
+    // (each requirement covered by *some* satisfied scenario, not
+    // necessarily the same one) would also be inadequate: an endpoint
+    // that needs `[A, B]` could pass with one chain establishing only
+    // `A` and a second chain establishing only `B`, even though
+    // neither chain on its own gives the consumer the composite
+    // entity it needs.
     //
-    // We check per requirement (not the union across all requirements)
-    // because endpoints with multiple established requirements would
-    // otherwise pass when only one is routed through an establisher.
-    // We also iterate every satisfied scenario in the file (not just
-    // the first one) because endpoints commonly have both
-    // producer-driven and establisher-driven satisfied chains, and
-    // picking the first would be brittle if their order changes.
+    // We iterate every satisfied scenario (not just the first) because
+    // endpoints commonly have both producer-driven and establisher-
+    // driven satisfied chains, and the order is not stable.
     const files = readdirSync(SCENARIOS_DIR).filter((f) => f.endsWith('-scenarios.json'));
     const offenders: Array<{
       endpoint: string;
       missing: string[];
-      reason: 'no-satisfied-scenario' | 'no-establisher-in-chain';
+      reason: 'no-satisfied-scenario' | 'no-single-chain-covers-all';
     }> = [];
     let assertionsRun = 0;
     for (const file of files) {
@@ -1612,23 +1643,22 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
           selfEstablished.add(sem);
         }
       }
-      const unsatisfiedRequirements: string[] = [];
-      for (const sem of establishedRequirements) {
-        if (selfEstablished.has(sem)) continue;
-        const expected = new Set(establishersByType.get(sem) ?? []);
-        const usedByAnyScenario = satisfiedScenarios.some((s) => {
-          for (const op of s.operations) {
-            if (expected.has(op.operationId)) return true;
-          }
-          return false;
+      const requirementsToCover = establishedRequirements.filter((s) => !selfEstablished.has(s));
+      if (requirementsToCover.length === 0) continue;
+      // Look for at least one satisfied scenario whose operation set
+      // covers every required semantic via a registered establisher.
+      const anyChainCoversAll = satisfiedScenarios.some((s) => {
+        const chainOps = new Set(s.operations.map((o) => o.operationId));
+        return requirementsToCover.every((sem) => {
+          const expected = establishersByType.get(sem) ?? [];
+          return expected.some((opId) => chainOps.has(opId));
         });
-        if (!usedByAnyScenario) unsatisfiedRequirements.push(sem);
-      }
-      if (unsatisfiedRequirements.length) {
+      });
+      if (!anyChainCoversAll) {
         offenders.push({
           endpoint: scen.endpoint.operationId,
-          missing: unsatisfiedRequirements,
-          reason: 'no-establisher-in-chain',
+          missing: requirementsToCover,
+          reason: 'no-single-chain-covers-all',
         });
       }
     }

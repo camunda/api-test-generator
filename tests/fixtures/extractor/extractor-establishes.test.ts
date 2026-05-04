@@ -237,4 +237,34 @@ describe('extractor x-semantic-establishes (#104)', () => {
     const op = extractOp(fixtureNoAnnotation, 'createThingNoAnnotation');
     expect(op.establishes).toBeUndefined();
   });
+
+  it('rejects the WHOLE annotation when `shape` is an unknown string', () => {
+    // Class-scoped strictness: any `shape` value other than the known
+    // set (`'edge'` or undefined) must reject the whole annotation.
+    // Without this, a typo (e.g. `'edeg'`) would degrade silently to
+    // non-edge behaviour, the planner would treat the entries as
+    // VALUES MINTED (instead of pre-existing components consumed from
+    // the chain), and the test suite would render with the wrong
+    // shape of test data.
+    // biome-ignore lint/plugin: intentional malformed annotation for negative-test fixture
+    const fixtureUnknownShape = {
+      openapi: '3.0.3',
+      info: { title: 'fixture-establishes-unknown-shape', version: '0.0.0' },
+      paths: {
+        '/things': {
+          post: {
+            operationId: 'createThingUnknownShape',
+            'x-semantic-establishes': {
+              kind: 'Thing',
+              shape: 'edeg', // typo of 'edge'
+              identifiedBy: [{ in: 'body', name: 'name', semanticType: 'ThingName' }],
+            },
+            responses: { '201': { description: 'created' } },
+          },
+        },
+      },
+    } as unknown as OpenAPISpec;
+    const op = extractOp(fixtureUnknownShape, 'createThingUnknownShape');
+    expect(op.establishes).toBeUndefined();
+  });
 });

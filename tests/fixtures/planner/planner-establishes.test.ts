@@ -167,6 +167,87 @@ const fixtureEdgeRequiresComponentChains: OperationGraph = makeGraph([
   }),
 ]);
 
+// Placeholder-name mismatch: establisher mints `username` (body), but
+// the consumer's URL uses a *different* placeholder name (`{userKey}`)
+// that maps to the same semanticType `Username`. The planner must
+// alias the establisher's value under the consumer-derived var name
+// (`userKeyVar`) so the URL emitter resolves it directly.
+const fixturePlaceholderNameMismatch: OperationGraph = makeGraph([
+  makeOp('createUser', 'POST', '/users', {
+    produces: ['Username'],
+    establishes: {
+      kind: 'User',
+      identifiedBy: [{ in: 'body', name: 'username', semanticType: 'Username' }],
+    },
+  }),
+  makeOp('getUserByKey', 'GET', '/users/{userKey}', {
+    required: ['Username'],
+    pathParameters: [{ name: 'userKey', semanticType: 'Username' }],
+  }),
+]);
+
+// Same-name body collision across two different semanticTypes: both
+// establishers mint a body identifier called `name`, but one is
+// `ThingName` and the other is `WidgetName`. The body builder
+// (path-analyser/src/index.ts) emits `${nameVar}` from the raw field
+// name with no per-step override, so silently sharing one binding
+// would feed the second establisher the first's value. The planner
+// must skip the second candidate rather than emit a broken test.
+const fixtureBodyCollisionSameName: OperationGraph = makeGraph([
+  makeOp('createThing', 'POST', '/things', {
+    produces: ['ThingName'],
+    establishes: {
+      kind: 'Thing',
+      identifiedBy: [{ in: 'body', name: 'name', semanticType: 'ThingName' }],
+    },
+  }),
+  makeOp('createWidget', 'POST', '/widgets', {
+    produces: ['WidgetName'],
+    establishes: {
+      kind: 'Widget',
+      identifiedBy: [{ in: 'body', name: 'name', semanticType: 'WidgetName' }],
+    },
+  }),
+  // Consumer that needs both — planner has to chain both establishers,
+  // but their body-field collision must be detected and the second
+  // candidate skipped.
+  makeOp('linkThingToWidget', 'POST', '/links', {
+    required: ['ThingName', 'WidgetName'],
+  }),
+]);
+
+// Same-name PATH collision across two different semanticTypes: both
+// establishers mint a *path* identifier called `id`, but one is
+// `ThingId` and the other is `WidgetId`. Unlike body collisions, the
+// URL emitter goes through the alias loop, so the planner can
+// numerically suffix the second binding (`idVar2`) and the consumer
+// resolves correctly via its own placeholder names.
+const fixturePathSuffixSameName: OperationGraph = makeGraph([
+  makeOp('createThingViaPath', 'PUT', '/things/{id}', {
+    produces: ['ThingId'],
+    pathParameters: [{ name: 'id', semanticType: 'ThingId' }],
+    establishes: {
+      kind: 'Thing',
+      identifiedBy: [{ in: 'path', name: 'id', semanticType: 'ThingId' }],
+    },
+  }),
+  makeOp('createWidgetViaPath', 'PUT', '/widgets/{id}', {
+    produces: ['WidgetId'],
+    pathParameters: [{ name: 'id', semanticType: 'WidgetId' }],
+    establishes: {
+      kind: 'Widget',
+      identifiedBy: [{ in: 'path', name: 'id', semanticType: 'WidgetId' }],
+    },
+  }),
+  makeOp('linkThingToWidgetByIds', 'POST', '/links/{thingId}/{widgetId}', {
+    required: ['ThingId', 'WidgetId'],
+    pathParameters: [
+      { name: 'thingId', semanticType: 'ThingId' },
+      { name: 'widgetId', semanticType: 'WidgetId' },
+    ],
+  }),
+]);
+
 describe('planner contracts: x-semantic-establishes (#104)', () => {
   describe('simple establisher chain (createUser → getUser)', () => {
     it('produces a satisfied chain whose first step is the establisher', () => {
@@ -258,6 +339,71 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       expect(fixtureEdgeRequiresComponentChains.establishersByType?.Username).toEqual([
         'createUser',
       ]);
+    });
+  });
+
+  describe('placeholder-name mismatch (establisher mints `username`, consumer uses `{userKey}`)', () => {
+    it('aliases the establisher value under the consumer-derived path-placeholder var', () => {
+      const result = generateScenariosForEndpoint(fixturePlaceholderNameMismatch, 'getUserByKey', {
+        maxScenarios: 10,
+      });
+      expect(result.unsatisfied).toBeFalsy();
+      expect(result.scenarios.length).toBeGreaterThan(0);
+      const scenario = result.scenarios[0];
+      expect(opIdsOf(scenario)).toEqual(['createUser', 'getUserByKey']);
+      const bindings = scenario.bindings ?? {};
+      // Both names point at the same value — the URL emitter looks up
+      // by placeholder name (`userKeyVar`), the establisher minted
+      // under its identifier name (`usernameVar`). Without the alias
+      // loop the URL would render with a literal `${userKeyVar}`.
+      expect(bindings.usernameVar).toBeDefined();
+      expect(bindings.userKeyVar).toBeDefined();
+      expect(bindings.userKeyVar).toBe(bindings.usernameVar);
+    });
+  });
+
+  describe('same-name body collision across different semanticTypes', () => {
+    it('does NOT chain two body-identifier establishers under the same body field name', () => {
+      // Class-scoped guard for the body-builder limitation: when the
+      // body builder cannot disambiguate `${nameVar}` per step, the
+      // planner must refuse to chain a second establisher whose body
+      // identifier collides with an already-minted different-semantic
+      // binding. The consumer becomes unreachable rather than getting
+      // a silently-wrong test.
+      const result = generateScenariosForEndpoint(
+        fixtureBodyCollisionSameName,
+        'linkThingToWidget',
+        { maxScenarios: 10 },
+      );
+      // No satisfied chain should contain BOTH establishers — that
+      // would imply they shared the `nameVar` slot.
+      const offending = result.scenarios.filter((s) => {
+        const ops = opIdsOf(s);
+        return ops.includes('createThing') && ops.includes('createWidget');
+      });
+      expect(offending).toEqual([]);
+    });
+  });
+
+  describe('same-name path collision across different semanticTypes', () => {
+    it('numerically suffixes the second binding so both path values survive', () => {
+      const result = generateScenariosForEndpoint(
+        fixturePathSuffixSameName,
+        'linkThingToWidgetByIds',
+        { maxScenarios: 10 },
+      );
+      expect(result.unsatisfied).toBeFalsy();
+      const scenario = result.scenarios.find((s) => {
+        const ops = opIdsOf(s);
+        return ops.includes('createThingViaPath') && ops.includes('createWidgetViaPath');
+      });
+      expect(scenario).toBeDefined();
+      const bindings = scenario?.bindings ?? {};
+      // Both establishers minted under `idVar`/`idVar2`; the alias
+      // loop mirrors them under the consumer's placeholder names.
+      expect(bindings.thingIdVar).toBeDefined();
+      expect(bindings.widgetIdVar).toBeDefined();
+      expect(bindings.thingIdVar).not.toBe(bindings.widgetIdVar);
     });
   });
 });

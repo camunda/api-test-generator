@@ -575,9 +575,19 @@ function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
     if (typeof e.semanticType !== 'string' || e.semanticType.length === 0) return undefined;
     identifiedBy.push({ in: e.in, name: e.name, semanticType: e.semanticType });
   }
+  // Same `shape` restriction as the extractor: an unknown string would
+  // silently degrade to non-edge behaviour and `normalizeOp` would push
+  // the components into `produces` and strip them from `requires` —
+  // the exact opposite of the intended edge semantics. Reject unknown
+  // shapes wholesale.
+  const rawShape = r.shape;
+  const KNOWN_SHAPES = new Set<string>(['edge']);
+  const shapeValid =
+    rawShape === undefined || (typeof rawShape === 'string' && KNOWN_SHAPES.has(rawShape));
+  if (!shapeValid) return undefined;
   return {
     kind: r.kind,
-    shape: typeof r.shape === 'string' ? r.shape : undefined,
+    shape: typeof rawShape === 'string' ? rawShape : undefined,
     identifiedBy,
   };
 }

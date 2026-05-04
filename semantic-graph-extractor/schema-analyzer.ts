@@ -253,11 +253,25 @@ export class SchemaAnalyzer {
         }
       }
       if (allValid && identifiedBy.length === rawEstablishes.identifiedBy.length) {
-        establishes = {
-          kind: rawEstablishes.kind,
-          shape: typeof rawEstablishes.shape === 'string' ? rawEstablishes.shape : undefined,
-          identifiedBy,
-        };
+        // `shape` changes the meaning of `identifiedBy`: edges treat
+        // entries as PRE-EXISTING components consumed from the chain;
+        // non-edges treat them as VALUES MINTED by the establisher.
+        // Accepting any string `shape` would silently treat a typo
+        // (e.g. `'edeg'`) as a non-edge establisher and the planner
+        // would mint client-side values for what should be component
+        // inputs. Reject unknown shapes by dropping the whole
+        // annotation rather than falling back to the non-edge path.
+        const rawShape = rawEstablishes.shape;
+        const KNOWN_SHAPES = new Set<string>(['edge']);
+        const shapeValid =
+          rawShape === undefined || (typeof rawShape === 'string' && KNOWN_SHAPES.has(rawShape));
+        if (shapeValid) {
+          establishes = {
+            kind: rawEstablishes.kind,
+            shape: typeof rawShape === 'string' ? rawShape : undefined,
+            identifiedBy,
+          };
+        }
       }
     }
 
