@@ -194,6 +194,38 @@ describe('extractor x-semantic-establishes (#104)', () => {
     expect(op.establishes).toBeUndefined();
   });
 
+  it('rejects the WHOLE annotation when any identifiedBy member is invalid', () => {
+    // Class-scoped strictness: a composite identifier with one valid
+    // entry and one invalid `in` value must NOT degrade to a
+    // single-identifier establisher. Surfacing the partial subset would
+    // silently mislead the planner into minting only one binding for
+    // what should be a composite identifier (e.g. tenant cluster
+    // variable losing its `name` half).
+    const fixturePartialMalformed: OpenAPISpec = {
+      openapi: '3.0.3',
+      info: { title: 'fixture-establishes-partial-malformed', version: '0.0.0' },
+      paths: {
+        '/tenants/{tenantId}/things': {
+          post: {
+            operationId: 'createPartialMalformed',
+            'x-semantic-establishes': {
+              kind: 'Thing',
+              identifiedBy: [
+                { in: 'path', name: 'tenantId', semanticType: 'TenantId' },
+                // Invalid `in` value — the whole annotation must be
+                // rejected, not silently dropped to the first entry.
+                { in: 'query', name: 'name', semanticType: 'ThingName' },
+              ],
+            },
+            responses: { '201': { description: 'created' } },
+          },
+        },
+      },
+    };
+    const op = extractOp(fixturePartialMalformed, 'createPartialMalformed');
+    expect(op.establishes).toBeUndefined();
+  });
+
   it('leaves `establishes` undefined on operations without the annotation', () => {
     const op = extractOp(fixtureNoAnnotation, 'createThingNoAnnotation');
     expect(op.establishes).toBeUndefined();

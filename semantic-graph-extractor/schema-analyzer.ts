@@ -225,9 +225,16 @@ export class SchemaAnalyzer {
       rawEstablishes &&
       typeof rawEstablishes === 'object' &&
       typeof rawEstablishes.kind === 'string' &&
-      Array.isArray(rawEstablishes.identifiedBy)
+      Array.isArray(rawEstablishes.identifiedBy) &&
+      rawEstablishes.identifiedBy.length > 0
     ) {
+      // Strict validation: any invalid member rejects the *whole*
+      // annotation. Surfacing a partial subset would silently mislead
+      // the planner — e.g. a composite (path+body) identifier with one
+      // malformed `in` value would degrade to a single-identifier
+      // establisher and start producing wrong chains.
       const identifiedBy: EstablishesIdentifier[] = [];
+      let allValid = true;
       for (const id of rawEstablishes.identifiedBy) {
         if (
           id &&
@@ -237,9 +244,12 @@ export class SchemaAnalyzer {
           typeof id.semanticType === 'string'
         ) {
           identifiedBy.push({ in: id.in, name: id.name, semanticType: id.semanticType });
+        } else {
+          allValid = false;
+          break;
         }
       }
-      if (identifiedBy.length) {
+      if (allValid && identifiedBy.length === rawEstablishes.identifiedBy.length) {
         establishes = {
           kind: rawEstablishes.kind,
           shape: typeof rawEstablishes.shape === 'string' ? rawEstablishes.shape : undefined,

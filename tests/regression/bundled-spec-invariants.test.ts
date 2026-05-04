@@ -1502,44 +1502,91 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
       }
     }
 
+    // Cross-check the extractor surface against the bundled spec:
+    // every `x-semantic-establishes` annotation in the source must
+    // produce a corresponding `establishes` entry in the operation
+    // graph. This guards against the "annotation surface disappeared"
+    // failure mode (an extractor or loader regression that strips the
+    // field) which a vacuous existence assertion would not catch —
+    // and runs in *both* the pre- and post-annotation states.
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const bundledSpec = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'spec', 'bundled', 'rest-api.bundle.json'), 'utf8'),
+    ) as {
+      paths?: Record<
+        string,
+        Record<string, { operationId?: string; 'x-semantic-establishes'?: unknown }>
+      >;
+    };
+    let specAnnotatedCount = 0;
+    for (const methods of Object.values(bundledSpec.paths ?? {})) {
+      for (const op of Object.values(methods)) {
+        if (op && typeof op === 'object' && op['x-semantic-establishes']) specAnnotatedCount++;
+      }
+    }
+    const graphAnnotatedCount = rawGraph.operations.filter((o) => o.establishes).length;
+    expect(
+      graphAnnotatedCount,
+      `extractor surface drift: bundled spec carries ${specAnnotatedCount} x-semantic-establishes annotations but only ${graphAnnotatedCount} reached the operation graph`,
+    ).toBe(specAnnotatedCount);
+
     if (establishersByType.size === 0) {
-      // Pre-annotation branch: the upstream spec carries no
-      // `x-semantic-establishes` annotations yet. There is nothing for
-      // this invariant to assert at the chain level — the existing
-      // `Key`-suffix / provider heuristics already satisfy several of
-      // the candidate consumer endpoints (e.g. getTenant via
-      // createTenant), and re-asserting that here would just duplicate
-      // existing invariants. The positive branch below carries the
-      // class-scoped regression guard once the spec pin is bumped.
-      // We still record that the branch was executed so a later silent
-      // disappearance of the annotation surface (e.g. a graphLoader
-      // regression that strips `establishes` before it reaches the
-      // planner) is visible in the test signal.
-      expect(rawGraph.operations.length).toBeGreaterThan(0);
+      // Pre-annotation branch: nothing further to assert at the chain
+      // level. The parity check above is the live regression guard
+      // until the spec pin is bumped; the positive branch below takes
+      // over once `x-semantic-establishes` lands upstream.
       return;
     }
 
     // Post-annotation branch: every consumer endpoint that requires a
-    // semantic with a non-edge establisher must plan a satisfied chain.
-    // Class-scoped: the offender list must be empty across the whole
-    // bundled spec, not just for one endpoint.
+    // semantic with a non-edge establisher must (a) plan a satisfied
+    // chain, AND (b) that satisfied chain must include one of the
+    // registered establishers for at least one of its established
+    // requirements. (a) on its own is too weak — an unrelated heuristic
+    // could still satisfy the chain via a different producer path,
+    // hiding a regression where x-semantic-establishes stops being
+    // consumed at all.
     const files = readdirSync(SCENARIOS_DIR).filter((f) => f.endsWith('-scenarios.json'));
-    const offenders: Array<{ endpoint: string; missing: string[] }> = [];
+    const offenders: Array<{
+      endpoint: string;
+      missing: string[];
+      reason: 'no-satisfied-scenario' | 'no-establisher-in-chain';
+    }> = [];
     let assertionsRun = 0;
     for (const file of files) {
       const scen = loadScenarioFile(file);
       const required = scen.requiredSemanticTypes ?? [];
       const establishedRequirements = required.filter((s) => establishersByType.has(s));
       if (establishedRequirements.length === 0) continue;
+      // Skip if the endpoint is itself an establisher of all of its
+      // established requirements — its `requires` already had those
+      // dropped at load time, so the scenario stands on its own.
+      const expectedEstablishers = new Set<string>();
+      for (const sem of establishedRequirements) {
+        for (const opId of establishersByType.get(sem) ?? []) {
+          expectedEstablishers.add(opId);
+        }
+      }
       assertionsRun++;
-      // The endpoint itself may be the establisher (e.g. createTenant) —
-      // its `requires` already had the established semantic dropped, so
-      // this loop only fires for downstream consumers.
       const satisfied = scen.scenarios.find(
         (s) => !s.missingSemanticTypes || s.missingSemanticTypes.length === 0,
       );
       if (!satisfied) {
-        offenders.push({ endpoint: scen.endpoint.operationId, missing: establishedRequirements });
+        offenders.push({
+          endpoint: scen.endpoint.operationId,
+          missing: establishedRequirements,
+          reason: 'no-satisfied-scenario',
+        });
+        continue;
+      }
+      const chainOps = new Set(satisfied.operations.map((o) => o.operationId));
+      const usesEstablisher = [...expectedEstablishers].some((e) => chainOps.has(e));
+      if (!usesEstablisher && !expectedEstablishers.has(scen.endpoint.operationId)) {
+        offenders.push({
+          endpoint: scen.endpoint.operationId,
+          missing: establishedRequirements,
+          reason: 'no-establisher-in-chain',
+        });
       }
     }
     expect(assertionsRun).toBeGreaterThan(0);

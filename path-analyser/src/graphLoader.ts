@@ -156,7 +156,28 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   const responseProducersByType: Record<string, string[]> = {};
   const establishersByType: Record<string, string[]> = {};
   for (const op of Object.values(operations)) {
+    // `producersByType` is the authoritative-producer index after #98:
+    // membership means "this op returns or witnesses an authoritative
+    // value for semantic T in its response (or via a sidecar produces
+    // declaration)". Establishers do NOT meet that contract — they
+    // register a *client-minted* value at request time, not a
+    // server-authoritative one. Keep the two indexes semantically
+    // distinct so variant planning, provider preference, and
+    // missing-producer signals continue to mean what they say.
+    //
+    // The synthesised entry stays on `op.produces` so the BFS produced-
+    // set propagation (many sites in scenarioGenerator) still marks
+    // the establisher's identifier semantics as satisfied after the
+    // op is scheduled. Skipping it only here keeps the *global* index
+    // clean while preserving per-op satisfaction tracking.
+    const synthesisedFromEstablishes = new Set<string>();
+    if (op.establishes && op.establishes.shape !== 'edge') {
+      for (const id of op.establishes.identifiedBy) {
+        synthesisedFromEstablishes.add(id.semanticType);
+      }
+    }
     for (const st of op.produces) {
+      if (synthesisedFromEstablishes.has(st)) continue;
       const list = producersByType[st] ?? [];
       list.push(op.operationId);
       producersByType[st] = list;

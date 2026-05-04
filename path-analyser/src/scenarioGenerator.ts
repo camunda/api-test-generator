@@ -446,6 +446,26 @@ export function generateScenariosForEndpoint(
     const targetSemantic = remaining[0];
     let producers: string[] = targetSemantic ? graph.producersByType[targetSemantic] || [] : [];
 
+    // #104: establishers are kept out of `producersByType` to preserve
+    // the "authoritative-producer only" contract that the rest of the
+    // analyser (variant planning, provider preference, missing-producer
+    // diagnostics) reads from that map. Augment the BFS candidate set
+    // here, where the planner explicitly needs a satisfier — the
+    // produced-set propagation downstream still works because the
+    // establisher's `op.produces` carries the synthesised semantic.
+    if (targetSemantic) {
+      const establishers = graph.establishersByType?.[targetSemantic];
+      if (establishers?.length) {
+        const seenIds = new Set(producers);
+        for (const e of establishers) {
+          if (!seenIds.has(e)) {
+            producers.push(e);
+            seenIds.add(e);
+          }
+        }
+      }
+    }
+
     // Provider preference & incidental suppression
     if (targetSemantic) {
       const providerSet = new Set<string>();
