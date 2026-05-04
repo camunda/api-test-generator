@@ -99,6 +99,24 @@ async function main() {
       });
       op.requires.optional = [...optReq];
     }
+    // Issue #104: re-apply the establisher self-satisfaction drop here.
+    // graphLoader's `normalizeOp` already strips established semantics
+    // from `requires`, but `loadOpenApiSemanticHints` walks the raw
+    // OpenAPI request schema independently and re-adds the same
+    // semantics back via the `x-semantic-type` annotations on the
+    // identifier fields the establisher mints. Without this second
+    // drop, self-establishing endpoints like `createUser` are
+    // regenerated as needing their own `Username`, BFS skips them as
+    // their own producer (`producerOpId === endpointOpId`), and the
+    // endpoint plans an unsatisfied scenario instead of the trivial
+    // "establisher alone" chain. Edge establishers (`shape: 'edge'`)
+    // are skipped — their `identifiedBy` components are pre-existing
+    // inputs and the hint-derived `requires` for them is correct.
+    if (op.establishes && op.establishes.shape !== 'edge') {
+      const established = new Set(op.establishes.identifiedBy.map((i) => i.semanticType));
+      op.requires.required = op.requires.required.filter((s) => !established.has(s));
+      op.requires.optional = op.requires.optional.filter((s) => !established.has(s));
+    }
   }
 
   const summaryEntries: GenerationSummaryEntry[] = [];

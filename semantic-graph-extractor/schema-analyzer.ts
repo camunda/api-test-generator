@@ -225,6 +225,7 @@ export class SchemaAnalyzer {
       rawEstablishes &&
       typeof rawEstablishes === 'object' &&
       typeof rawEstablishes.kind === 'string' &&
+      rawEstablishes.kind.length > 0 &&
       Array.isArray(rawEstablishes.identifiedBy) &&
       rawEstablishes.identifiedBy.length > 0
     ) {
@@ -241,7 +242,9 @@ export class SchemaAnalyzer {
           typeof id === 'object' &&
           (id.in === 'body' || id.in === 'path') &&
           typeof id.name === 'string' &&
-          typeof id.semanticType === 'string'
+          id.name.length > 0 &&
+          typeof id.semanticType === 'string' &&
+          id.semanticType.length > 0
         ) {
           identifiedBy.push({ in: id.in, name: id.name, semanticType: id.semanticType });
         } else {

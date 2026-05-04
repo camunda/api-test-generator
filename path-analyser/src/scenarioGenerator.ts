@@ -41,6 +41,13 @@ interface State {
   bootstrapFull?: boolean; // this state derives from a single bootstrap that covers all required
   modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
   bindingsDraft?: Record<string, string>; // variable bindings
+  // Issue #104: side index recording which semanticType each
+  // establisher-minted binding key was issued for. Lets the BFS
+  // detect collisions when two establishers in the same chain share
+  // a generic identifier `name` (e.g. `name`, `id`) but mint values
+  // for *different* semantic types — without it the second
+  // establisher would silently reuse the first establisher's value.
+  establisherBindingSemantics?: Record<string, string>;
   providerList?: Record<string, string[]>; // semantic -> all providers
   artifactsApplied?: string[]; // artifact rule ids used so far
 }
@@ -662,16 +669,32 @@ export function generateScenariosForEndpoint(
         }
       }
       // Issue #104: when the producer is an establisher, mint a fresh
-      // client-minted binding for each `identifiedBy` entry. The varName
-      // matches what the request-body builder computes for a body field
-      // of the same `name` (`${camelCase(name)}Var`) AND what the
-      // emitter computes for a path placeholder of the same `name`
-      // (`buildUrlExpression`: `{name}` → `ctx.${camelCase(name)}Var`).
+      // client-minted binding for each `identifiedBy` entry. The primary
+      // varName matches what the request-body builder computes for a
+      // body field of the same `name` (`${camelCase(name)}Var`) AND
+      // what the emitter computes for a path placeholder of the same
+      // `name` (`buildUrlExpression`: `{name}` → `ctx.${camelCase(name)}Var`).
       // That single shared key threads the same value into the
       // establisher's request and into any downstream consumer's URL
       // without any extract step. Pre-populating bindingsDraft is
       // sufficient because the body builder only writes a placeholder
       // when the binding key is absent.
+      //
+      // Disambiguation: when two establishers in the same chain share
+      // a generic identifier `name` (e.g. `name`, `id`) but mint
+      // values for *different* semantic types, blindly reusing the
+      // existing binding would silently hand the second resource the
+      // first resource's identifier. Track the semanticType minted
+      // under each varName in `establisherBindingSemantics`; on
+      // collision with a different semantic, mint under a numerically
+      // suffixed name (`nameVar2`, `nameVar3`, …). The suffixed key
+      // ensures the *value* is unique and is correctly threaded
+      // through the URL alias loop below for any consumer placeholder
+      // that resolves by `semanticType` rather than by `name`. (The
+      // request-body builder still resolves placeholders by raw field
+      // name and may reuse the primary key for the second establisher
+      // — that's a separate body-builder limitation tracked
+      // independently and out of scope for #104.)
       //
       // Establishers don't produce a response extract, so the alias
       // mechanism in `aliasProducerExtractsToPlaceholders` (issue #61)
@@ -685,13 +708,31 @@ export function generateScenariosForEndpoint(
       // Edge establishers (`shape: 'edge'`) are skipped — their
       // `identifiedBy` entries are pre-existing components consumed
       // from the chain, not values minted here.
+      let establisherBindingSemantics = workingState.establisherBindingSemantics;
       if (producerNode.establishes && producerNode.establishes.shape !== 'edge') {
         for (const id of producerNode.establishes.identifiedBy) {
-          const primaryVar = `${camelLower(id.name)}Var`;
+          const baseVar = `${camelLower(id.name)}Var`;
+          // Find a key whose minted semanticType matches (reuse) or is
+          // free (mint). Always tracks via establisherBindingSemantics
+          // — bindingsDraft alone can't distinguish a value minted by
+          // an establisher from one minted by a producer extract.
+          let primaryVar = baseVar;
+          let suffix = 2;
+          while (
+            establisherBindingSemantics &&
+            establisherBindingSemantics[primaryVar] &&
+            establisherBindingSemantics[primaryVar] !== id.semanticType
+          ) {
+            primaryVar = `${baseVar}${suffix++}`;
+          }
           const value =
             bindingsDraft[primaryVar] ??
             `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${primaryVar}`)}`;
           if (!bindingsDraft[primaryVar]) bindingsDraft[primaryVar] = value;
+          establisherBindingSemantics = {
+            ...(establisherBindingSemantics ?? {}),
+            [primaryVar]: id.semanticType,
+          };
           // Mirror the binding under every other placeholder-derived
           // var name used by any operation in the graph for this same
           // semanticType. Cheap one-time scan per identifier; harmless
@@ -701,7 +742,17 @@ export function generateScenariosForEndpoint(
               if (param.semanticType !== id.semanticType) continue;
               const aliasVar = `${camelLower(param.name)}Var`;
               if (aliasVar === primaryVar) continue;
-              if (!bindingsDraft[aliasVar]) bindingsDraft[aliasVar] = value;
+              // Only alias when the slot is free OR was previously
+              // minted by an establisher for this same semanticType.
+              const existingSemantic = establisherBindingSemantics?.[aliasVar];
+              if (existingSemantic && existingSemantic !== id.semanticType) continue;
+              if (!bindingsDraft[aliasVar]) {
+                bindingsDraft[aliasVar] = value;
+                establisherBindingSemantics = {
+                  ...establisherBindingSemantics,
+                  [aliasVar]: id.semanticType,
+                };
+              }
             }
           }
         }
@@ -722,6 +773,7 @@ export function generateScenariosForEndpoint(
         bootstrapFull: state.bootstrapFull,
         modelsDraft,
         bindingsDraft,
+        establisherBindingSemantics,
         providerList: updateProviderList(
           state.providerList || {},
           producerNode,

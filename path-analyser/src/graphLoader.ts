@@ -554,21 +554,27 @@ function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
   if (!raw || typeof raw !== 'object') return undefined;
   // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
   const r = raw as { kind?: unknown; shape?: unknown; identifiedBy?: unknown };
-  if (typeof r.kind !== 'string' || !Array.isArray(r.identifiedBy)) return undefined;
+  if (typeof r.kind !== 'string' || r.kind.length === 0) return undefined;
+  if (!Array.isArray(r.identifiedBy) || r.identifiedBy.length === 0) return undefined;
+  // Strict validation mirrors the extractor (semantic-graph-extractor/
+  // schema-analyzer.ts): any invalid `identifiedBy` member rejects the
+  // *whole* annotation. Silently dropping individual entries would
+  // reintroduce the partial-state hazard #112 is meant to close —
+  // e.g. a composite (path+body) identifier with one malformed `in`
+  // value would degrade to a single-identifier establisher and start
+  // producing wrong chains. This path runs against
+  // OPERATION_GRAPH_PATH overrides too, so a hand-edited or
+  // upstream-malformed graph JSON gets the same treatment as the spec.
   const identifiedBy: NonNullable<OperationNode['establishes']>['identifiedBy'] = [];
   for (const id of r.identifiedBy) {
-    if (!id || typeof id !== 'object') continue;
+    if (!id || typeof id !== 'object') return undefined;
     // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
     const e = id as { in?: unknown; name?: unknown; semanticType?: unknown };
-    if (
-      (e.in === 'body' || e.in === 'path') &&
-      typeof e.name === 'string' &&
-      typeof e.semanticType === 'string'
-    ) {
-      identifiedBy.push({ in: e.in, name: e.name, semanticType: e.semanticType });
-    }
+    if (e.in !== 'body' && e.in !== 'path') return undefined;
+    if (typeof e.name !== 'string' || e.name.length === 0) return undefined;
+    if (typeof e.semanticType !== 'string' || e.semanticType.length === 0) return undefined;
+    identifiedBy.push({ in: e.in, name: e.name, semanticType: e.semanticType });
   }
-  if (!identifiedBy.length) return undefined;
   return {
     kind: r.kind,
     shape: typeof r.shape === 'string' ? r.shape : undefined,
