@@ -4,6 +4,8 @@ import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
+import { createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { loadCsharpOperationMap } from './csharp-sdk/operation-map.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
   materializeResponseSchemas,
@@ -84,6 +86,9 @@ async function run() {
   const featureDir = path.join(baseDir, 'dist/feature-output');
   const variantDir = path.join(baseDir, 'dist/variant-output');
   const outDir = path.join(baseDir, 'dist/generated-tests');
+
+  const csharpOperationMap = await loadCsharpOperationMap(baseDir);
+  registerEmitter(createCsharpEmitter(csharpOperationMap));
 
   if (help || !positional) {
     printUsage();

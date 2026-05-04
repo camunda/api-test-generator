@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "Camunda.Orchestration.RestSdk/1.0.0": {
+        "runtime": {
+          "Camunda.Orchestration.RestSdk.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Camunda.Orchestration.RestSdk/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

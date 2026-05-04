@@ -1,0 +1,44 @@
+{
+	"createDeployment": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "CreateDeploymentAsync",
+			"label": "Deploy resources"
+		}
+	],
+	"createProcessInstance": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "CreateProcessInstanceAsync",
+			"label": "Create process instance"
+		}
+	],
+	"searchProcessInstances": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "SearchProcessInstancesAsync",
+			"label": "Search process instances"
+		}
+	],
+	"activateJobs": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "ActivateJobsAsync",
+			"label": "Activate jobs"
+		}
+	],
+	"completeJob": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "CompleteJobAsync",
+			"label": "Complete job"
+		}
+	],
+	"cancelProcessInstance": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "CancelProcessInstanceAsync",
+			"label": "Cancel process instance"
+		}
+	]
+}
