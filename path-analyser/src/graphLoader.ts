@@ -54,6 +54,7 @@ interface RawOp {
   eventuallyConsistent?: boolean;
   operationMetadata?: OperationNode['operationMetadata'];
   conditionalIdempotency?: OperationNode['conditionalIdempotency'];
+  establishes?: OperationNode['establishes'];
   'x-eventually-consistent'?: boolean;
 }
 
@@ -153,11 +154,40 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
 
   const producersByType: Record<string, string[]> = {};
   const responseProducersByType: Record<string, string[]> = {};
+  const establishersByType: Record<string, string[]> = {};
   for (const op of Object.values(operations)) {
+    // `producersByType` is the authoritative-producer index after #98:
+    // membership means "this op returns or witnesses an authoritative
+    // value for semantic T in its response (or via a sidecar produces
+    // declaration)". Establishers do NOT meet that contract — they
+    // register a *client-minted* value at request time, not a
+    // server-authoritative one. Keep the two indexes semantically
+    // distinct so variant planning, provider preference, and
+    // missing-producer signals continue to mean what they say.
+    //
+    // The synthesised entry stays on `op.produces` so the BFS produced-
+    // set propagation (many sites in scenarioGenerator) still marks
+    // the establisher's identifier semantics as satisfied after the
+    // op is scheduled. Skipping it only here keeps the *global* index
+    // clean while preserving per-op satisfaction tracking.
+    const synthesisedFromEstablishes = new Set<string>();
+    if (op.establishes && op.establishes.shape !== 'edge') {
+      for (const id of op.establishes.identifiedBy) {
+        synthesisedFromEstablishes.add(id.semanticType);
+      }
+    }
     for (const st of op.produces) {
+      if (synthesisedFromEstablishes.has(st)) continue;
       const list = producersByType[st] ?? [];
       list.push(op.operationId);
       producersByType[st] = list;
+    }
+    if (op.establishes && op.establishes.shape !== 'edge') {
+      for (const id of op.establishes.identifiedBy) {
+        const list = establishersByType[id.semanticType] ?? [];
+        if (!list.includes(op.operationId)) list.push(op.operationId);
+        establishersByType[id.semanticType] = list;
+      }
     }
     // Issue #37: inclusive index — every response semantic leaf, even
     // provider:false ones, becomes a discoverable producer for variant
@@ -359,6 +389,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     bootstrapSequences,
     domain,
     producersByState,
+    establishersByType: Object.keys(establishersByType).length ? establishersByType : undefined,
   };
 }
 
@@ -464,12 +495,45 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
     }
   }
 
+  // Issue #104: x-semantic-establishes contributes synthetic produced
+  // semantic types so BFS can schedule the establisher as a satisfier
+  // for any consumer that needs the same identifier. Establishers are
+  // intentionally NOT added to providerMap — they don't return an
+  // authoritative server value, they register a client-minted one — so
+  // the provider-preference filter in scenarioGenerator still reaches
+  // for true producers first when both kinds exist.
+  //
+  // Edge establishers (`shape: 'edge'`) are the membership operations
+  // — their `identifiedBy` entries enumerate the *components* of the
+  // composite identifier (e.g. {GroupId, Username}), which are
+  // *consumed* prerequisites, not values established by this op. The
+  // edge itself has no semantic type the planner can chain on, so we
+  // don't touch `produces` for edges.
+  const establishes = normalizeEstablishes(op.establishes);
+  const establishedSemantics = new Set<string>();
+  if (establishes && establishes.shape !== 'edge') {
+    for (const id of establishes.identifiedBy) {
+      produces.push(id.semanticType);
+      establishedSemantics.add(id.semanticType);
+    }
+  }
+
   return {
     operationId: op.operationId ?? op.id ?? op.name ?? opId,
     method: (op.method ?? op.httpMethod ?? op.verb ?? 'GET').toUpperCase(),
     path: op.path ?? op.route ?? op.url ?? '',
     produces: unique(produces),
-    requires: { required, optional },
+    // Issue #104: a non-edge establisher self-satisfies the identifier
+    // it mints, so drop the established semantic types from `requires`
+    // — otherwise BFS would chase a producer for a value the endpoint
+    // itself is going to mint and write into its own request body.
+    // Edge establishers don't enter this branch (no entries in
+    // `establishedSemantics`) because their `identifiedBy` components
+    // are pre-existing inputs that legitimately need a chain.
+    requires: {
+      required: required.filter((s) => !establishedSemantics.has(s)),
+      optional: optional.filter((s) => !establishedSemantics.has(s)),
+    },
     edges: op.edges ?? op.outgoingEdges ?? op.dependencies ?? op.deps ?? [],
     providerMap: Object.keys(providerMap).length ? providerMap : undefined,
     eventuallyConsistent:
@@ -482,6 +546,49 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
     pathParameters: extractPathParameters(op),
     optionalSubShapes: optionalSubShapes.length ? optionalSubShapes : undefined,
     responseSemanticLeaves: responseLeaves.length ? responseLeaves : undefined,
+    establishes,
+  };
+}
+
+function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
+  if (!raw || typeof raw !== 'object') return undefined;
+  // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
+  const r = raw as { kind?: unknown; shape?: unknown; identifiedBy?: unknown };
+  if (typeof r.kind !== 'string' || r.kind.length === 0) return undefined;
+  if (!Array.isArray(r.identifiedBy) || r.identifiedBy.length === 0) return undefined;
+  // Strict validation mirrors the extractor (semantic-graph-extractor/
+  // schema-analyzer.ts): any invalid `identifiedBy` member rejects the
+  // *whole* annotation. Silently dropping individual entries would
+  // reintroduce the partial-state hazard #112 is meant to close —
+  // e.g. a composite (path+body) identifier with one malformed `in`
+  // value would degrade to a single-identifier establisher and start
+  // producing wrong chains. This path runs against
+  // OPERATION_GRAPH_PATH overrides too, so a hand-edited or
+  // upstream-malformed graph JSON gets the same treatment as the spec.
+  const identifiedBy: NonNullable<OperationNode['establishes']>['identifiedBy'] = [];
+  for (const id of r.identifiedBy) {
+    if (!id || typeof id !== 'object') return undefined;
+    // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
+    const e = id as { in?: unknown; name?: unknown; semanticType?: unknown };
+    if (e.in !== 'body' && e.in !== 'path') return undefined;
+    if (typeof e.name !== 'string' || e.name.length === 0) return undefined;
+    if (typeof e.semanticType !== 'string' || e.semanticType.length === 0) return undefined;
+    identifiedBy.push({ in: e.in, name: e.name, semanticType: e.semanticType });
+  }
+  // Same `shape` restriction as the extractor: an unknown string would
+  // silently degrade to non-edge behaviour and `normalizeOp` would push
+  // the components into `produces` and strip them from `requires` —
+  // the exact opposite of the intended edge semantics. Reject unknown
+  // shapes wholesale.
+  const rawShape = r.shape;
+  const KNOWN_SHAPES = new Set<string>(['edge']);
+  const shapeValid =
+    rawShape === undefined || (typeof rawShape === 'string' && KNOWN_SHAPES.has(rawShape));
+  if (!shapeValid) return undefined;
+  return {
+    kind: r.kind,
+    shape: typeof rawShape === 'string' ? rawShape : undefined,
+    identifiedBy,
   };
 }
 

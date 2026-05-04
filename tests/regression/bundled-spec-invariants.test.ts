@@ -1448,3 +1448,221 @@ describe('bundled-spec invariants: emitted Playwright variant suite (#105)', () 
     expect(offenders).toEqual([]);
   });
 });
+
+describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
+  // Self-healing pattern (mirrors the camunda/camunda#52271 evaluateDecision
+  // guard). While the upstream spec carries no `x-semantic-establishes`
+  // annotations, the consumer endpoints (`getTenant`, `getUser`, `getGroup`,
+  // …) are structurally unreachable and the planner emits the sentinel
+  // `unsatisfied` scenario. Once the annotation lands and the spec pin is
+  // bumped, every endpoint whose required semantics has an establisher must
+  // plan a satisfied chain that ends in the establisher + endpoint pair.
+  //
+  // The bundled spec is loaded directly so we can detect both annotation
+  // presence (sentinel-vs-positive switch) and reachability (the chain
+  // shape the planner produces).
+  it('every consumer of an established semantic plans a chain through its establisher', () => {
+    const REPO_ROOT = join(import.meta.dirname, '..', '..');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const rawGraph = JSON.parse(
+      readFileSync(
+        join(
+          REPO_ROOT,
+          'semantic-graph-extractor',
+          'dist',
+          'output',
+          'operation-dependency-graph.json',
+        ),
+        'utf8',
+      ),
+    ) as {
+      operations: Array<{
+        operationId: string;
+        path?: string;
+        establishes?: {
+          kind?: string;
+          shape?: string;
+          identifiedBy?: Array<{ in?: string; name?: string; semanticType?: string }>;
+        };
+      }>;
+    };
+
+    // Build establishersByType from the raw graph (same rule as
+    // graphLoader: skip shape:'edge' entries; their identifiedBy is
+    // pre-existing components, not values minted here).
+    const establishersByType = new Map<string, string[]>();
+    for (const op of rawGraph.operations) {
+      const est = op.establishes;
+      if (!est || !Array.isArray(est.identifiedBy) || est.shape === 'edge') continue;
+      for (const id of est.identifiedBy) {
+        if (typeof id?.semanticType !== 'string') continue;
+        const list = establishersByType.get(id.semanticType) ?? [];
+        if (!list.includes(op.operationId)) list.push(op.operationId);
+        establishersByType.set(id.semanticType, list);
+      }
+    }
+
+    // Cross-check the extractor surface against the bundled spec:
+    // every *valid* `x-semantic-establishes` annotation in the source
+    // must produce a corresponding `establishes` entry in the operation
+    // graph. This guards against the "annotation surface disappeared"
+    // failure mode (an extractor or loader regression that strips the
+    // field) which a vacuous existence assertion would not catch —
+    // and runs in *both* the pre- and post-annotation states.
+    //
+    // The extractor intentionally drops malformed annotations whole
+    // (kind not a string, identifiedBy not an array, any member with a
+    // wrong `in`/missing `name`/missing `semanticType`). Counting the
+    // raw spec field would falsely fail the moment upstream landed a
+    // malformed annotation; mirror the extractor's validity rule here
+    // so the parity check stays meaningful.
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const bundledSpec = JSON.parse(
+      readFileSync(join(REPO_ROOT, 'spec', 'bundled', 'rest-api.bundle.json'), 'utf8'),
+    ) as {
+      paths?: Record<
+        string,
+        Record<string, { operationId?: string; 'x-semantic-establishes'?: unknown }>
+      >;
+    };
+    const isRecord = (v: unknown): v is Record<string, unknown> =>
+      !!v && typeof v === 'object' && !Array.isArray(v);
+    const isValidEstablishes = (raw: unknown): boolean => {
+      if (!isRecord(raw)) return false;
+      if (typeof raw.kind !== 'string') return false;
+      if (!Array.isArray(raw.identifiedBy) || raw.identifiedBy.length === 0) return false;
+      for (const id of raw.identifiedBy) {
+        if (!isRecord(id)) return false;
+        if (id.in !== 'body' && id.in !== 'path') return false;
+        if (typeof id.name !== 'string' || !id.name) return false;
+        if (typeof id.semanticType !== 'string' || !id.semanticType) return false;
+      }
+      return true;
+    };
+    let specAnnotatedCount = 0;
+    for (const methods of Object.values(bundledSpec.paths ?? {})) {
+      for (const op of Object.values(methods)) {
+        if (op && typeof op === 'object' && isValidEstablishes(op['x-semantic-establishes'])) {
+          specAnnotatedCount++;
+        }
+      }
+    }
+    const graphAnnotatedCount = rawGraph.operations.filter((o) => o.establishes).length;
+    expect(
+      graphAnnotatedCount,
+      `extractor surface drift: bundled spec carries ${specAnnotatedCount} valid x-semantic-establishes annotations but only ${graphAnnotatedCount} reached the operation graph`,
+    ).toBe(specAnnotatedCount);
+
+    if (establishersByType.size === 0) {
+      // Pre-annotation branch: the parity check above
+      // (`specAnnotatedCount === graphAnnotatedCount`) is the active
+      // regression guard for the extractor surface. Two further
+      // sentinels protect the chain-level guarantees while the
+      // upstream spec carries no `x-semantic-establishes`:
+      //
+      // 1. The graph's `establishersByType` map MUST be absent or
+      //    empty — a non-empty map without source annotations would
+      //    indicate either a fixture leaked into the bundled spec or
+      //    the extractor is fabricating establisher entries from a
+      //    different annotation. Either is a defect.
+      const rawEstablishersByType = Reflect.get(rawGraph, 'establishersByType');
+      const fabricatedEstablishersByType =
+        rawEstablishersByType && typeof rawEstablishersByType === 'object'
+          ? Object.keys(rawEstablishersByType)
+          : [];
+      expect(
+        fabricatedEstablishersByType,
+        'pre-annotation sentinel: graph carries establishersByType entries despite the bundled spec having no x-semantic-establishes annotations',
+      ).toEqual([]);
+
+      // 2. No operation in the graph should carry a non-empty
+      //    `establishes` field — this is the per-operation analogue of
+      //    sentinel #1. If a single op surfaces `establishes` despite
+      //    the spec having no annotations, the extractor's intake or
+      //    the graph normalizer is fabricating it.
+      const fabricatedEstablishesOps = rawGraph.operations
+        .filter((o) => o.establishes && (o.establishes.identifiedBy?.length ?? 0) > 0)
+        .map((o) => o.operationId);
+      expect(
+        fabricatedEstablishesOps,
+        'pre-annotation sentinel: operations carry `establishes` despite the bundled spec having no x-semantic-establishes annotations',
+      ).toEqual([]);
+      return;
+    }
+
+    // Post-annotation branch: every consumer endpoint that requires a
+    // semantic with a non-edge establisher must (a) plan at least one
+    // satisfied chain, AND (b) at least one satisfied scenario must
+    // cover ALL of the endpoint's established requirements
+    // simultaneously, with each requirement routed through a
+    // registered establisher in that same chain. (a) on its own is
+    // too weak — an unrelated heuristic could still satisfy the chain
+    // via a different producer path. A weaker per-requirement check
+    // (each requirement covered by *some* satisfied scenario, not
+    // necessarily the same one) would also be inadequate: an endpoint
+    // that needs `[A, B]` could pass with one chain establishing only
+    // `A` and a second chain establishing only `B`, even though
+    // neither chain on its own gives the consumer the composite
+    // entity it needs.
+    //
+    // We iterate every satisfied scenario (not just the first) because
+    // endpoints commonly have both producer-driven and establisher-
+    // driven satisfied chains, and the order is not stable.
+    const files = readdirSync(SCENARIOS_DIR).filter((f) => f.endsWith('-scenarios.json'));
+    const offenders: Array<{
+      endpoint: string;
+      missing: string[];
+      reason: 'no-satisfied-scenario' | 'no-single-chain-covers-all';
+    }> = [];
+    let assertionsRun = 0;
+    for (const file of files) {
+      const scen = loadScenarioFile(file);
+      const required = scen.requiredSemanticTypes ?? [];
+      const establishedRequirements = required.filter((s) => establishersByType.has(s));
+      if (establishedRequirements.length === 0) continue;
+      assertionsRun++;
+      const satisfiedScenarios = scen.scenarios.filter(
+        (s) => !s.missingSemanticTypes || s.missingSemanticTypes.length === 0,
+      );
+      if (satisfiedScenarios.length === 0) {
+        offenders.push({
+          endpoint: scen.endpoint.operationId,
+          missing: establishedRequirements,
+          reason: 'no-satisfied-scenario',
+        });
+        continue;
+      }
+      // The endpoint itself may be the establisher for some of its own
+      // requirements (graphLoader drops those from `requires` at load
+      // time, but the spec-side `requiredSemanticTypes` we read here
+      // can still surface them for self-establishing endpoints). Treat
+      // those as trivially satisfied at the per-requirement level.
+      const selfEstablished = new Set<string>();
+      for (const sem of establishedRequirements) {
+        if (establishersByType.get(sem)?.includes(scen.endpoint.operationId)) {
+          selfEstablished.add(sem);
+        }
+      }
+      const requirementsToCover = establishedRequirements.filter((s) => !selfEstablished.has(s));
+      if (requirementsToCover.length === 0) continue;
+      // Look for at least one satisfied scenario whose operation set
+      // covers every required semantic via a registered establisher.
+      const anyChainCoversAll = satisfiedScenarios.some((s) => {
+        const chainOps = new Set(s.operations.map((o) => o.operationId));
+        return requirementsToCover.every((sem) => {
+          const expected = establishersByType.get(sem) ?? [];
+          return expected.some((opId) => chainOps.has(opId));
+        });
+      });
+      if (!anyChainCoversAll) {
+        offenders.push({
+          endpoint: scen.endpoint.operationId,
+          missing: requirementsToCover,
+          reason: 'no-single-chain-covers-all',
+        });
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+});

@@ -1,5 +1,7 @@
 import {
   type ConditionalIdempotencySpec,
+  type EstablishesIdentifier,
+  type EstablishesSpec,
   type FieldSchema,
   type MediaTypeObject,
   type OpenAPISpec,
@@ -210,6 +212,69 @@ export class SchemaAnalyzer {
       }
     }
 
+    // Extract x-semantic-establishes (camunda/api-test-generator#104).
+    // The annotation is on the operation object and declares the entity
+    // kind plus the request inputs that carry the client-minted
+    // identifier(s). Each `identifiedBy` entry pairs an OpenAPI
+    // parameter (path or body) with the semantic type the planner can
+    // satisfy from a fresh binding shared between the establisher and
+    // any downstream consumer.
+    const rawEstablishes = operation['x-semantic-establishes'];
+    let establishes: EstablishesSpec | undefined;
+    if (
+      rawEstablishes &&
+      typeof rawEstablishes === 'object' &&
+      typeof rawEstablishes.kind === 'string' &&
+      rawEstablishes.kind.length > 0 &&
+      Array.isArray(rawEstablishes.identifiedBy) &&
+      rawEstablishes.identifiedBy.length > 0
+    ) {
+      // Strict validation: any invalid member rejects the *whole*
+      // annotation. Surfacing a partial subset would silently mislead
+      // the planner — e.g. a composite (path+body) identifier with one
+      // malformed `in` value would degrade to a single-identifier
+      // establisher and start producing wrong chains.
+      const identifiedBy: EstablishesIdentifier[] = [];
+      let allValid = true;
+      for (const id of rawEstablishes.identifiedBy) {
+        if (
+          id &&
+          typeof id === 'object' &&
+          (id.in === 'body' || id.in === 'path') &&
+          typeof id.name === 'string' &&
+          id.name.length > 0 &&
+          typeof id.semanticType === 'string' &&
+          id.semanticType.length > 0
+        ) {
+          identifiedBy.push({ in: id.in, name: id.name, semanticType: id.semanticType });
+        } else {
+          allValid = false;
+          break;
+        }
+      }
+      if (allValid && identifiedBy.length === rawEstablishes.identifiedBy.length) {
+        // `shape` changes the meaning of `identifiedBy`: edges treat
+        // entries as PRE-EXISTING components consumed from the chain;
+        // non-edges treat them as VALUES MINTED by the establisher.
+        // Accepting any string `shape` would silently treat a typo
+        // (e.g. `'edeg'`) as a non-edge establisher and the planner
+        // would mint client-side values for what should be component
+        // inputs. Reject unknown shapes by dropping the whole
+        // annotation rather than falling back to the non-edge path.
+        const rawShape = rawEstablishes.shape;
+        const KNOWN_SHAPES = new Set<string>(['edge']);
+        const shapeValid =
+          rawShape === undefined || (typeof rawShape === 'string' && KNOWN_SHAPES.has(rawShape));
+        if (shapeValid) {
+          establishes = {
+            kind: rawEstablishes.kind,
+            shape: typeof rawShape === 'string' ? rawShape : undefined,
+            identifiedBy,
+          };
+        }
+      }
+    }
+
     return {
       operationId: operation.operationId,
       method: method.toUpperCase(),
@@ -226,6 +291,7 @@ export class SchemaAnalyzer {
       cacheable: this.isCacheable(method, operation),
       operationMetadata,
       conditionalIdempotency,
+      establishes,
     };
   }
 

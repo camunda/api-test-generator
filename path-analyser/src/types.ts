@@ -71,6 +71,20 @@ export interface OperationNode extends OperationRef {
     status: string;
     provider: boolean;
   }>;
+  // Issue #104: x-semantic-establishes annotation passthrough. When
+  // present, the operation establishes an entity whose identifiers are
+  // client-minted via the listed request inputs. The planner schedules
+  // this op as a satisfier for each `identifiedBy[].semanticType` with
+  // a fresh shared binding written into both this step's request body /
+  // path param and any downstream consumer that reads the same
+  // semantic. Distinct from `producersByType` semantics: an establisher
+  // does not authoritatively *return* a value, it merely registers an
+  // identifier the client supplied.
+  establishes?: {
+    kind: string;
+    shape?: string;
+    identifiedBy: Array<{ in: 'body' | 'path'; name: string; semanticType: string }>;
+  };
 }
 
 export interface OperationGraph {
@@ -86,6 +100,19 @@ export interface OperationGraph {
   bootstrapSequences?: BootstrapSequence[];
   domain?: DomainSemantics; // loaded sidecar
   producersByState?: Record<string, string[]>; // domain state -> operations
+  // Issue #104: parallel index of operations that *establish* a semantic
+  // type via x-semantic-establishes (i.e. the value is client-minted
+  // and written into the request rather than returned in the response).
+  // Establishers are intentionally KEPT OUT of `producersByType` so that
+  // index continues to mean "authoritative producer only" (the contract
+  // variant planning, provider preference, and missing-producer
+  // diagnostics rely on after #98). Planner code that needs to schedule
+  // an establisher as a satisfier consults `establishersByType` directly
+  // — see `scenarioGenerator.generateScenariosForEndpoint`. Per-op
+  // satisfaction tracking still works because the synthesised semantic
+  // remains on `OperationNode.produces`, which BFS reads to mark the
+  // identifier semantic satisfied once the establisher is scheduled.
+  establishersByType?: Record<string, string[]>;
 }
 
 export interface BootstrapSequence {

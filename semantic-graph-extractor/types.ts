@@ -64,6 +64,38 @@ export interface OperationObject {
   'x-eventually-consistent'?: boolean;
   'x-operation-kind'?: OperationMetadata | OperationMetadata[];
   'x-conditional-idempotency'?: ConditionalIdempotencySpec;
+  'x-semantic-establishes'?: EstablishesSpec;
+}
+
+// `x-semantic-establishes` declares that running this operation establishes a
+// (typically configuration-entity) instance whose identifier(s) are minted by
+// the client and supplied as request inputs. After the operation returns,
+// downstream `getX(id)` / `searchX` / `updateX(id)` operations on the same
+// entity become satisfiable using the same client-minted value(s). This is
+// the planning primitive that closes the gap left by `x-semantic-provider`,
+// which only applies when the response carries an authoritative value (see
+// camunda/api-test-generator#104, camunda/camunda#52272).
+export interface EstablishesSpec {
+  kind: string;
+  // Optional shape hint — `'edge'` for membership operations whose
+  // identifier is the composite of two existing entities (e.g.
+  // RoleUserMembership). The planner treats edges DIFFERENTLY from
+  // regular establishers: `graphLoader` skips them when populating
+  // `producersByType` / `establishersByType` and does not drop their
+  // `identifiedBy` semantics from `requires` (the components are
+  // pre-existing inputs that must be satisfied by their own
+  // non-edge establishers), and `scenarioGenerator` skips them when
+  // pre-populating client-minted bindings. Non-edge establishers
+  // self-satisfy the identifier they mint and contribute it to
+  // `establishersByType`.
+  shape?: string;
+  identifiedBy: EstablishesIdentifier[];
+}
+
+export interface EstablishesIdentifier {
+  in: 'body' | 'path';
+  name: string;
+  semanticType: string;
 }
 
 export interface Schema {
@@ -252,6 +284,12 @@ export interface Operation {
   operationMetadata?: OperationMetadata;
   // Conditional idempotency extension (x-conditional-idempotency)
   conditionalIdempotency?: ConditionalIdempotencySpec;
+  // Establisher annotation passthrough (x-semantic-establishes). When
+  // present, the operation establishes an entity whose identifier(s) are
+  // client-minted via the listed request inputs. The planner uses this to
+  // schedule the operation as a satisfier for the named `semanticType`s
+  // with a fresh shared binding (camunda/api-test-generator#104).
+  establishes?: EstablishesSpec;
 }
 
 export enum OperationType {
