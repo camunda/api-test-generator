@@ -633,6 +633,30 @@ export function generateScenariosForEndpoint(
               `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
         }
       }
+      // Issue #104: when the producer is an establisher, mint a fresh
+      // client-minted binding for each `identifiedBy` entry. The varName
+      // matches what the request-body builder computes for a body field
+      // of the same `name` (`${camelCase(name)}Var`) AND what the
+      // emitter computes for a path placeholder of the same `name`
+      // (`buildUrlExpression`: `{name}` → `ctx.${camelCase(name)}Var`).
+      // That single shared key threads the same value into the
+      // establisher's request and into any downstream consumer's URL
+      // without any extract step. Pre-populating bindingsDraft is
+      // sufficient because the body builder only writes a placeholder
+      // when the binding key is absent.
+      //
+      // Edge establishers (`shape: 'edge'`) are skipped — their
+      // `identifiedBy` entries are pre-existing components consumed
+      // from the chain, not values minted here.
+      if (producerNode.establishes && producerNode.establishes.shape !== 'edge') {
+        for (const id of producerNode.establishes.identifiedBy) {
+          const varName = `${camelLower(id.name)}Var`;
+          if (!bindingsDraft[varName]) {
+            bindingsDraft[varName] =
+              `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${varName}`)}`;
+          }
+        }
+      }
 
       const sig = signature(newOps, newProduced, newNeeded, nextCycle);
       if (seen.has(sig)) continue;

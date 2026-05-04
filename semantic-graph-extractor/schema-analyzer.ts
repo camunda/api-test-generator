@@ -1,5 +1,7 @@
 import {
   type ConditionalIdempotencySpec,
+  type EstablishesIdentifier,
+  type EstablishesSpec,
   type FieldSchema,
   type MediaTypeObject,
   type OpenAPISpec,
@@ -210,6 +212,42 @@ export class SchemaAnalyzer {
       }
     }
 
+    // Extract x-semantic-establishes (camunda/api-test-generator#104).
+    // The annotation is on the operation object and declares the entity
+    // kind plus the request inputs that carry the client-minted
+    // identifier(s). Each `identifiedBy` entry pairs an OpenAPI
+    // parameter (path or body) with the semantic type the planner can
+    // satisfy from a fresh binding shared between the establisher and
+    // any downstream consumer.
+    const rawEstablishes = operation['x-semantic-establishes'];
+    let establishes: EstablishesSpec | undefined;
+    if (
+      rawEstablishes &&
+      typeof rawEstablishes === 'object' &&
+      typeof rawEstablishes.kind === 'string' &&
+      Array.isArray(rawEstablishes.identifiedBy)
+    ) {
+      const identifiedBy: EstablishesIdentifier[] = [];
+      for (const id of rawEstablishes.identifiedBy) {
+        if (
+          id &&
+          typeof id === 'object' &&
+          (id.in === 'body' || id.in === 'path') &&
+          typeof id.name === 'string' &&
+          typeof id.semanticType === 'string'
+        ) {
+          identifiedBy.push({ in: id.in, name: id.name, semanticType: id.semanticType });
+        }
+      }
+      if (identifiedBy.length) {
+        establishes = {
+          kind: rawEstablishes.kind,
+          shape: typeof rawEstablishes.shape === 'string' ? rawEstablishes.shape : undefined,
+          identifiedBy,
+        };
+      }
+    }
+
     return {
       operationId: operation.operationId,
       method: method.toUpperCase(),
@@ -226,6 +264,7 @@ export class SchemaAnalyzer {
       cacheable: this.isCacheable(method, operation),
       operationMetadata,
       conditionalIdempotency,
+      establishes,
     };
   }
 

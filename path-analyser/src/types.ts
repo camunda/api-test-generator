@@ -71,6 +71,20 @@ export interface OperationNode extends OperationRef {
     status: string;
     provider: boolean;
   }>;
+  // Issue #104: x-semantic-establishes annotation passthrough. When
+  // present, the operation establishes an entity whose identifiers are
+  // client-minted via the listed request inputs. The planner schedules
+  // this op as a satisfier for each `identifiedBy[].semanticType` with
+  // a fresh shared binding written into both this step's request body /
+  // path param and any downstream consumer that reads the same
+  // semantic. Distinct from `producersByType` semantics: an establisher
+  // does not authoritatively *return* a value, it merely registers an
+  // identifier the client supplied.
+  establishes?: {
+    kind: string;
+    shape?: string;
+    identifiedBy: Array<{ in: 'body' | 'path'; name: string; semanticType: string }>;
+  };
 }
 
 export interface OperationGraph {
@@ -86,6 +100,13 @@ export interface OperationGraph {
   bootstrapSequences?: BootstrapSequence[];
   domain?: DomainSemantics; // loaded sidecar
   producersByState?: Record<string, string[]>; // domain state -> operations
+  // Issue #104: parallel index of operations that *establish* a semantic
+  // type via x-semantic-establishes (i.e. the value is client-minted
+  // and written into the request rather than returned in the response).
+  // Establishers are also included in `producersByType` so existing BFS
+  // candidate selection finds them, but this index lets consumers
+  // distinguish establish-style satisfiers from producer-style ones.
+  establishersByType?: Record<string, string[]>;
 }
 
 export interface BootstrapSequence {
