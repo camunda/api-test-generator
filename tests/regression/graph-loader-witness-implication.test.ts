@@ -100,6 +100,7 @@ describe('graphLoader: witness implication gating (#95)', () => {
     // a missing producersByState or createDocument and still satisfy
     // the not.toContain checks.
     expect(graph.producersByState, 'producersByState must be built').toBeDefined();
+    if (!graph.producersByState) throw new Error('unreachable: assertion above');
     const witnessProducers = graph.producersByState.ProcessInstanceExists ?? [];
     expect(witnessProducers).not.toContain('createDocument');
     expect(witnessProducers).not.toContain('createDocuments');

@@ -110,7 +110,7 @@ describe('request-validation: allOf-wrapped primitive raw exposure (#113)', () =
         },
         ['required'],
       );
-      const baseline = buildBaselineBody(op) as Record<string, unknown> | undefined;
+      const baseline = buildBaselineBody(op);
       expect(baseline).toBeDefined();
       // Defect: optional materialisation reads child.raw.enum (= undefined on
       // the wrapper), so `color` is silently omitted from the baseline body.
@@ -130,7 +130,7 @@ describe('request-validation: allOf-wrapped primitive raw exposure (#113)', () =
         },
         ['required'],
       );
-      const baseline = buildBaselineBody(op) as Record<string, unknown> | undefined;
+      const baseline = buildBaselineBody(op);
       expect(baseline).toHaveProperty('deploymentKey');
     });
 
@@ -147,7 +147,7 @@ describe('request-validation: allOf-wrapped primitive raw exposure (#113)', () =
         },
         ['required'],
       );
-      const baseline = buildBaselineBody(op) as Record<string, unknown> | undefined;
+      const baseline = buildBaselineBody(op);
       expect(baseline).toHaveProperty('amount');
     });
   });
@@ -174,10 +174,7 @@ describe('request-validation: allOf-wrapped primitive raw exposure (#113)', () =
       const op = makeOp(
         {
           amount: {
-            allOf: [
-              { type: 'integer', multipleOf: 5 },
-              { description: 'A discrete amount.' },
-            ],
+            allOf: [{ type: 'integer', multipleOf: 5 }, { description: 'A discrete amount.' }],
           },
         },
         ['amount'],
@@ -202,7 +199,7 @@ describe('request-validation: allOf-wrapped primitive raw exposure (#113)', () =
         },
         ['required'],
       );
-      const scenarios = generateConstraintViolations([op]);
+      const scenarios = generateConstraintViolations([op], {});
       const tenantIdScenarios = scenarios.filter((s) => s.target === 'tenantId');
       expect(tenantIdScenarios.length).toBeGreaterThan(0);
     });
