@@ -79,9 +79,15 @@ export interface EstablishesSpec {
   kind: string;
   // Optional shape hint — `'edge'` for membership operations whose
   // identifier is the composite of two existing entities (e.g.
-  // RoleUserMembership). The planner currently treats edges identically
-  // to regular establishers; the field is preserved for downstream
-  // consumers that may distinguish them.
+  // RoleUserMembership). The planner treats edges DIFFERENTLY from
+  // regular establishers: `graphLoader` skips them when populating
+  // `producersByType` / `establishersByType` and does not drop their
+  // `identifiedBy` semantics from `requires` (the components are
+  // pre-existing inputs that must be satisfied by their own
+  // non-edge establishers), and `scenarioGenerator` skips them when
+  // pre-populating client-minted bindings. Non-edge establishers
+  // self-satisfy the identifier they mint and contribute it to
+  // `establishersByType`.
   shape?: string;
   identifiedBy: EstablishesIdentifier[];
 }

@@ -47,7 +47,23 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
   const establishersByType: Record<string, string[]> = {};
   for (const node of nodes) {
     operations[node.operationId] = node;
+    // Mirror graphLoader after #104: synthesised semantics from
+    // `establishes.identifiedBy` stay on `node.produces` (so BFS
+    // produced-set propagation still marks them satisfied once the
+    // establisher is scheduled), but are EXCLUDED from the global
+    // `producersByType` index — the authoritative-producer contract.
+    // Without this exclusion these fixtures would expose establishers
+    // as ordinary producers, and the tests would stay green even if
+    // `scenarioGenerator` stopped consulting `establishersByType` —
+    // exactly the regression they are supposed to guard.
+    const synthesisedFromEstablishes = new Set<string>();
+    if (node.establishes && node.establishes.shape !== 'edge') {
+      for (const id of node.establishes.identifiedBy) {
+        synthesisedFromEstablishes.add(id.semanticType);
+      }
+    }
     for (const sem of node.produces) {
+      if (synthesisedFromEstablishes.has(sem)) continue;
       const list = producersByType[sem] ?? [];
       list.push(node.operationId);
       producersByType[sem] = list;

@@ -103,9 +103,15 @@ export interface OperationGraph {
   // Issue #104: parallel index of operations that *establish* a semantic
   // type via x-semantic-establishes (i.e. the value is client-minted
   // and written into the request rather than returned in the response).
-  // Establishers are also included in `producersByType` so existing BFS
-  // candidate selection finds them, but this index lets consumers
-  // distinguish establish-style satisfiers from producer-style ones.
+  // Establishers are intentionally KEPT OUT of `producersByType` so that
+  // index continues to mean "authoritative producer only" (the contract
+  // variant planning, provider preference, and missing-producer
+  // diagnostics rely on after #98). Planner code that needs to schedule
+  // an establisher as a satisfier consults `establishersByType` directly
+  // — see `scenarioGenerator.generateScenariosForEndpoint`. Per-op
+  // satisfaction tracking still works because the synthesised semantic
+  // remains on `OperationNode.produces`, which BFS reads to mark the
+  // identifier semantic satisfied once the establisher is scheduled.
   establishersByType?: Record<string, string[]>;
 }
 

@@ -673,15 +673,36 @@ export function generateScenariosForEndpoint(
       // sufficient because the body builder only writes a placeholder
       // when the binding key is absent.
       //
+      // Establishers don't produce a response extract, so the alias
+      // mechanism in `aliasProducerExtractsToPlaceholders` (issue #61)
+      // can't help when the consumer's path placeholder name differs
+      // from the establisher's identifier `name` (e.g. establisher
+      // mints `username` but consumer uses `/users/{userKey}` with
+      // semanticType `Username`). Pre-populate the same value under
+      // every distinct placeholder name found in the graph for the
+      // same semanticType so the URL emitter resolves it directly.
+      //
       // Edge establishers (`shape: 'edge'`) are skipped — their
       // `identifiedBy` entries are pre-existing components consumed
       // from the chain, not values minted here.
       if (producerNode.establishes && producerNode.establishes.shape !== 'edge') {
         for (const id of producerNode.establishes.identifiedBy) {
-          const varName = `${camelLower(id.name)}Var`;
-          if (!bindingsDraft[varName]) {
-            bindingsDraft[varName] =
-              `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${varName}`)}`;
+          const primaryVar = `${camelLower(id.name)}Var`;
+          const value =
+            bindingsDraft[primaryVar] ??
+            `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${primaryVar}`)}`;
+          if (!bindingsDraft[primaryVar]) bindingsDraft[primaryVar] = value;
+          // Mirror the binding under every other placeholder-derived
+          // var name used by any operation in the graph for this same
+          // semanticType. Cheap one-time scan per identifier; harmless
+          // if the consumer ends up not being chained.
+          for (const consumer of Object.values(graph.operations)) {
+            for (const param of consumer.pathParameters ?? []) {
+              if (param.semanticType !== id.semanticType) continue;
+              const aliasVar = `${camelLower(param.name)}Var`;
+              if (aliasVar === primaryVar) continue;
+              if (!bindingsDraft[aliasVar]) bindingsDraft[aliasVar] = value;
+            }
           }
         }
       }
