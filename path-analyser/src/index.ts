@@ -565,7 +565,7 @@ function mergePopulatesSubShapeIntoFinalBody(
   steps: RequestStep[],
 ): void {
   const sub = scenario.populatesSubShape;
-  if (!sub || !sub.leafPaths?.length) return;
+  if (!sub?.leafPaths?.length) return;
   if (!steps.length) return;
   const finalStep = steps[steps.length - 1];
   if (finalStep.bodyKind !== 'json') return;
