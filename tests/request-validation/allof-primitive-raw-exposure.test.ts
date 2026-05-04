@@ -202,7 +202,7 @@ describe('request-validation: allOf-wrapped primitive raw exposure (#113)', () =
         },
         ['required'],
       );
-      const scenarios = generateConstraintViolations([op], { maxPerField: 4 });
+      const scenarios = generateConstraintViolations([op]);
       const tenantIdScenarios = scenarios.filter((s) => s.target === 'tenantId');
       expect(tenantIdScenarios.length).toBeGreaterThan(0);
     });
