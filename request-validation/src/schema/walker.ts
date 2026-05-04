@@ -73,7 +73,17 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
         }
       }
     }
-    if (!hasObject) return schema; // fallback
+    if (!hasObject) {
+      // Leaf-primitive allOf case: when every typed branch resolves to the
+      // same primitive type (e.g. `allOf: [{$ref: TenantId}, {description}]`
+      // dereferences to `allOf: [{type: 'string', minLength: 22, ...}, {description}]`),
+      // flatten into a synthetic schema so per-field mutation analysers
+      // (`bodyTypeMismatch`, `constraintViolations`, `enumViolations`) can
+      // see the resolved type and constraints. Without this, the wrapped
+      // field looks typeless and silently drops out of negative coverage —
+      // see camunda/api-test-generator#110.
+      return mergePrimitiveAllOf(schema);
+    }
     // Merge host schema's own direct properties/required (outside allOf) so we don't lose them
     if (schema.properties) {
       for (const [k, v] of Object.entries(schema.properties)) {
@@ -139,4 +149,59 @@ function extractConstraints(schema: SchemaFragment): Record<string, unknown> {
     if (schema[k] !== undefined) out[k] = schema[k];
   }
   return out;
+}
+
+const PRIMITIVE_TYPES = new Set(['string', 'integer', 'number', 'boolean']);
+const PRIMITIVE_CONSTRAINT_KEYS = [
+  'format',
+  'minLength',
+  'maxLength',
+  'pattern',
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+];
+
+/**
+ * Flatten an `allOf` whose branches resolve to a single primitive type into
+ * a synthetic schema fragment carrying the resolved `type`, format, enum,
+ * and primitive constraints. Branches without a `type` (e.g. description-only
+ * partials) are tolerated and merged in for their constraint keys. Mixed
+ * primitive types (e.g. `[{type: 'string'}, {type: 'integer'}]`) are not
+ * flattened — they fall back to the original schema so downstream consumers
+ * are not misled.
+ *
+ * The host schema's own primitive constraints (declared alongside `allOf`)
+ * win on conflict so authors can override at the use site.
+ */
+function mergePrimitiveAllOf(schema: SchemaFragment): SchemaFragment {
+  if (!Array.isArray(schema.allOf)) return schema;
+  let resolvedType: string | undefined;
+  for (const part of schema.allOf) {
+    if (!part || typeof part !== 'object') continue;
+    const t = Array.isArray(part.type) ? part.type[0] : part.type;
+    if (typeof t !== 'string') continue;
+    if (!PRIMITIVE_TYPES.has(t)) return schema; // not a primitive-leaf allOf
+    if (resolvedType && resolvedType !== t) return schema; // mixed primitives — bail
+    resolvedType = t;
+  }
+  if (!resolvedType) return schema;
+  const merged: SchemaFragment = { type: resolvedType };
+  // Branch contributions first, then host overrides.
+  for (const part of schema.allOf) {
+    if (!part || typeof part !== 'object') continue;
+    for (const k of PRIMITIVE_CONSTRAINT_KEYS) {
+      if (part[k] !== undefined && merged[k] === undefined) merged[k] = part[k];
+    }
+    if (Array.isArray(part.enum) && !Array.isArray(merged.enum)) {
+      merged.enum = part.enum.slice();
+    }
+  }
+  for (const k of PRIMITIVE_CONSTRAINT_KEYS) {
+    if (schema[k] !== undefined) merged[k] = schema[k];
+  }
+  if (Array.isArray(schema.enum)) merged.enum = schema.enum.slice();
+  return merged;
 }
