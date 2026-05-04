@@ -141,7 +141,7 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
   }
 
   function buildCollectionWithBindings(
-    bindings: Record<string, unknown>,
+    bindings: Record<string, string>,
     extras: { templateRefsTenant?: boolean; extractsTenant?: boolean } = {},
   ): EndpointScenarioCollection {
     return {

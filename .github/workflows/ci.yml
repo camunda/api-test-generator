@@ -58,6 +58,18 @@ jobs:
       - name: Typecheck (request-validation)
         run: npx tsc --noEmit -p request-validation/tsconfig.json
 
+      - name: Typecheck (tests)
+        # The workspace tsconfigs only include `src` (and `scripts`),
+        # so test files are not type-checked by them. Without this gate
+        # bugs like the one in PR #114 — passing `{ maxPerField: 4 }`
+        # to `generateConstraintViolations` whose Opts only accepts
+        # `{ onlyOperations, capPerOperation }` — silently slip through
+        # to review. (`maxPerField` is a valid key on a *different*
+        # analyser, `generateBodyTypeMismatch`, which is what made the
+        # mistake easy to miss in code review.) See tests/tsconfig.json
+        # for the include set.
+        run: npx tsc --noEmit -p tests/tsconfig.json
+
       - name: Fetch pinned OpenAPI spec
         env:
           SPEC_REF: ${{ steps.pin.outputs.spec_ref }}
