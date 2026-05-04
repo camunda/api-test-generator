@@ -100,10 +100,18 @@ export function generateScenariosForEndpoint(
     };
   }
 
-  // Determine impossible semantic types (no producer anywhere, excluding endpoint self-production)
+  // Determine impossible semantic types (no producer anywhere, excluding endpoint self-production).
+  // A semantic counts as reachable if EITHER a producersByType entry exists (authoritative
+  // server-returned values) OR an establishersByType entry exists (client-minted values guaranteed
+  // by an x-semantic-establishes annotation). Without the establishersByType branch this early
+  // gate would short-circuit endpoints whose required semantic is only mintable via an establisher
+  // (e.g. getUser/getTenant after the spec is annotated), and the BFS augmentation downstream
+  // would never run.
   const missing: string[] = [];
   for (const st of initialNeeded) {
-    if (!graph.producersByType[st] || graph.producersByType[st].length === 0) {
+    const hasProducer = graph.producersByType[st]?.length;
+    const hasEstablisher = graph.establishersByType?.[st]?.length;
+    if (!hasProducer && !hasEstablisher) {
       if (!endpoint.produces.includes(st)) missing.push(st);
     }
   }
