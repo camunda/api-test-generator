@@ -132,7 +132,13 @@ const fixtureCompositeIdentifier: OpenAPISpec = {
 };
 
 // Malformed annotation: missing identifiedBy. Must NOT surface establishes.
-const fixtureMalformedNoIdentifiers: OpenAPISpec = {
+// The cast intentionally bypasses the OpenAPISpec contract — the whole
+// point of this fixture is to feed the extractor a malformed annotation
+// and assert it is rejected. The runtime extractor is the boundary under
+// test; the type cast simulates an upstream spec that violates the
+// contract.
+// biome-ignore lint/plugin: intentional malformed annotation for negative-test fixture
+const fixtureMalformedNoIdentifiers = {
   openapi: '3.0.3',
   info: { title: 'fixture-establishes-malformed', version: '0.0.0' },
   paths: {
@@ -144,7 +150,7 @@ const fixtureMalformedNoIdentifiers: OpenAPISpec = {
       },
     },
   },
-};
+} as unknown as OpenAPISpec;
 
 // Operation without the annotation — must remain `establishes: undefined`.
 const fixtureNoAnnotation: OpenAPISpec = {
@@ -201,7 +207,8 @@ describe('extractor x-semantic-establishes (#104)', () => {
     // silently mislead the planner into minting only one binding for
     // what should be a composite identifier (e.g. tenant cluster
     // variable losing its `name` half).
-    const fixturePartialMalformed: OpenAPISpec = {
+    // biome-ignore lint/plugin: intentional malformed annotation for negative-test fixture
+    const fixturePartialMalformed = {
       openapi: '3.0.3',
       info: { title: 'fixture-establishes-partial-malformed', version: '0.0.0' },
       paths: {
@@ -221,7 +228,7 @@ describe('extractor x-semantic-establishes (#104)', () => {
           },
         },
       },
-    };
+    } as unknown as OpenAPISpec;
     const op = extractOp(fixturePartialMalformed, 'createPartialMalformed');
     expect(op.establishes).toBeUndefined();
   });
