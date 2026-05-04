@@ -101,6 +101,14 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
   }
   function visit(schema: SchemaFragment, pointer: string, key?: string): WalkNode {
     const effective = mergeAllOf(schema);
+    // For allOf-wrapped primitives we expose the *merged* fragment via `raw`
+    // so downstream code that reads `node.raw.{format,multipleOf,enum,…}`
+    // sees the resolved primitive metadata instead of the unmerged wrapper.
+    // For object/array nodes we keep `raw: schema` because consumers of
+    // composite raw (discriminator detection, oneOf walkers, etc.) rely on
+    // observing the original wrapper. See camunda/api-test-generator#113.
+    const isComposite = effective.type === 'object' || effective.type === 'array';
+    const raw = isComposite ? schema : effective;
     const node: WalkNode = {
       pointer,
       key,
@@ -108,7 +116,7 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
       required: Array.isArray(effective.required) ? effective.required.slice() : undefined,
       enum: Array.isArray(effective.enum) ? effective.enum.slice() : undefined,
       constraints: extractConstraints(effective),
-      raw: schema,
+      raw,
     };
     byPointer.set(pointer, node);
     if (effective.type === 'object' && effective.properties) {
