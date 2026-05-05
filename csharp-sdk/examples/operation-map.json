@@ -40,5 +40,26 @@
 			"region": "CancelProcessInstanceAsync",
 			"label": "Cancel process instance"
 		}
+	],
+	"getProcessInstance": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "GetProcessInstanceAsync",
+			"label": "Get process instance"
+		}
+	],
+	"searchJobs": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "SearchJobsAsync",
+			"label": "Search jobs"
+		}
+	],
+	"failJob": [
+		{
+			"file": "Client/OrchestrationClusterClient.cs",
+			"region": "FailJobAsync",
+			"label": "Fail job"
+		}
 	]
 }
