@@ -77,6 +77,34 @@ const PROCESS_INSTANCE_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+const SEARCH_JOBS_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'happy path',
+      operations: [{ operationId: 'searchJobs', method: 'POST', path: '/jobs/search' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      requestPlan: [
+        {
+          operationId: 'searchJobs',
+          method: 'POST',
+          pathTemplate: '/jobs/search',
+          bodyKind: 'json',
+          bodyTemplate: {
+            page: { limit: 5 },
+            filter: { type: 'payment' },
+          },
+          expect: { status: 200 },
+        },
+      ],
+    },
+  ],
+};
+
 describe('C# SDK emitter (Emitter contract)', () => {
   test('id and name are stable identifiers', () => {
     const emitter = createCsharpEmitter({});
@@ -129,5 +157,17 @@ describe('C# SDK emitter (Emitter contract)', () => {
     expect(content).toContain('var instanceRequest = FromTemplate<CreateProcessInstanceRequest>');
     expect(content).toContain('client.CreateProcessInstanceAsync');
     expect(content).toContain("ApplyExtract(ctx, createProcessInstanceResponse, 'processInstanceKey', 'processInstanceKeyVar');");
+  });
+
+  test('emits SDK call scaffolding for searchJobs', async () => {
+    const emitter = createCsharpEmitter({});
+    const files = await emitter.emit(SEARCH_JOBS_COLLECTION, {
+      outDir: '/unused',
+      suiteName: 'searchJobs',
+      mode: 'feature',
+    });
+    const content = files[0].content;
+    expect(content).toContain('var searchRequest = FromTemplate<JobSearchRequest>');
+    expect(content).toContain('client.SearchJobsAsync');
   });
 });

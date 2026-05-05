@@ -259,10 +259,24 @@ function emitStep(
     emitExtracts(lines, responseVar, step.extract);
     return;
   }
+  if (opId === 'getProcessInstance') {
+    const pathVar = step.pathParams?.find((p) => p.name === 'processInstanceKey')?.var;
+    const processInstanceKey = pathVar ? `GetRequiredString(ctx, "${pathVar}")` : 'string.Empty';
+    lines.push(`        var ${responseVar} = await client.${methodName}(${processInstanceKey});`);
+    emitExtracts(lines, responseVar, step.extract);
+    return;
+  }
   if (opId === 'activateJobs') {
     lines.push('        var activationTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
     lines.push('        var activationRequest = FromTemplate<ActivateJobsRequest>(ResolveTemplate(activationTemplate, ctx));');
     lines.push(`        var ${responseVar} = await client.${methodName}(activationRequest);`);
+    emitExtracts(lines, responseVar, step.extract);
+    return;
+  }
+  if (opId === 'searchJobs') {
+    lines.push('        var searchTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
+    lines.push('        var searchRequest = FromTemplate<JobSearchRequest>(ResolveTemplate(searchTemplate, ctx));');
+    lines.push(`        var ${responseVar} = await client.${methodName}(searchRequest);`);
     emitExtracts(lines, responseVar, step.extract);
     return;
   }
@@ -272,6 +286,22 @@ function emitStep(
     lines.push('        var completionTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
     lines.push('        var completionRequest = FromTemplate<CompleteJobRequest>(ResolveTemplate(completionTemplate, ctx));');
     lines.push(`        await client.${methodName}(${jobKey}, completionRequest);`);
+    return;
+  }
+  if (opId === 'failJob') {
+    const pathVar = step.pathParams?.find((p) => p.name === 'jobKey')?.var;
+    const jobKey = pathVar ? `GetRequiredString(ctx, "${pathVar}")` : 'string.Empty';
+    lines.push('        var failureTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
+    lines.push('        var resolvedFailure = ResolveTemplate(failureTemplate, ctx);');
+    lines.push('        if (resolvedFailure is null)');
+    lines.push('        {');
+    lines.push(`            await client.${methodName}(${jobKey});`);
+    lines.push('        }');
+    lines.push('        else');
+    lines.push('        {');
+    lines.push('            var failureRequest = FromTemplate<JobFailRequest>(resolvedFailure);');
+    lines.push(`            await client.${methodName}(${jobKey}, failureRequest);`);
+    lines.push('        }');
     return;
   }
   if (opId === 'cancelProcessInstance') {
@@ -325,7 +355,10 @@ const DEFAULT_METHOD_BY_OP_ID: Record<string, string> = {
   createDeployment: 'CreateDeploymentAsync',
   createProcessInstance: 'CreateProcessInstanceAsync',
   searchProcessInstances: 'SearchProcessInstancesAsync',
+  getProcessInstance: 'GetProcessInstanceAsync',
   activateJobs: 'ActivateJobsAsync',
+  searchJobs: 'SearchJobsAsync',
   completeJob: 'CompleteJobAsync',
+  failJob: 'FailJobAsync',
   cancelProcessInstance: 'CancelProcessInstanceAsync',
 };

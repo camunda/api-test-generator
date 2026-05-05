@@ -92,12 +92,31 @@ public sealed class OrchestrationClusterClient
             cancellationToken);
     }
 
+    public async Task<ProcessInstanceResult> GetProcessInstanceAsync(
+        ProcessInstanceKey processInstanceKey,
+        CancellationToken cancellationToken = default)
+    {
+        return await GetJsonAsync<ProcessInstanceResult>(
+            $"/process-instances/{processInstanceKey}",
+            cancellationToken);
+    }
+
     public async Task<ActivateJobsResponse> ActivateJobsAsync(
         ActivateJobsRequest request,
         CancellationToken cancellationToken = default)
     {
         return await PostJsonAsync<ActivateJobsRequest, ActivateJobsResponse>(
             "/jobs/activation",
+            request,
+            cancellationToken);
+    }
+
+    public async Task<JobSearchResponse> SearchJobsAsync(
+        JobSearchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return await PostJsonAsync<JobSearchRequest, JobSearchResponse>(
+            "/jobs/search",
             request,
             cancellationToken);
     }
@@ -116,6 +135,20 @@ public sealed class OrchestrationClusterClient
         await PostJsonNoResponseAsync(path, request, cancellationToken);
     }
 
+    public async Task FailJobAsync(
+        JobKey jobKey,
+        JobFailRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        var path = $"/jobs/{jobKey}/failure";
+        if (request is null)
+        {
+            await PostNoContentAsync(path, cancellationToken);
+            return;
+        }
+        await PostJsonNoResponseAsync(path, request, cancellationToken);
+    }
+
     private async Task<TResponse> PostJsonAsync<TRequest, TResponse>(
         string path,
         TRequest request,
@@ -124,6 +157,16 @@ public sealed class OrchestrationClusterClient
         var json = JsonSerializer.Serialize(request, JsonOptions);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
         var response = await httpClient.PostAsync(BuildUri(path), content, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        return Deserialize<TResponse>(body);
+    }
+
+    private async Task<TResponse> GetJsonAsync<TResponse>(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var response = await httpClient.GetAsync(BuildUri(path), cancellationToken);
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         return Deserialize<TResponse>(body);
