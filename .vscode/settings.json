@@ -1,0 +1,10 @@
+{
+  "terminal.integrated.profiles.windows": {
+    "WSL2 (Ubuntu-22.04)": {
+      "path": "wsl.exe",
+      "args": ["-d", "Ubuntu-22.04"],
+      "icon": "terminal-linux"
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "WSL2 (Ubuntu-22.04)"
+}
