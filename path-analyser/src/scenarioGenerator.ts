@@ -41,6 +41,33 @@ interface State {
   bootstrapFull?: boolean; // this state derives from a single bootstrap that covers all required
   modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
   bindingsDraft?: Record<string, string>; // variable bindings
+  // Issue #104: side index recording which semanticType each
+  // establisher-minted PRIMARY binding key was issued for. Lets the
+  // BFS detect collisions when two establishers in the same chain
+  // share a generic identifier `name` (e.g. `name`, `id`) but mint
+  // values for *different* semantic types — without it the second
+  // establisher would silently reuse the first establisher's value.
+  //
+  // Strictly tracks **primary** mints (the slot the establisher
+  // itself writes to). Cross-endpoint placeholder aliases live in
+  // `establisherAliasSemantics` below — they must not pollute this
+  // map because the body-collision guard reads only this map and an
+  // unrelated endpoint's alias would otherwise abort a legitimate
+  // body-id establisher whose primary slot collides with the alias
+  // name (PR #112 reviewer thread on scenarioGenerator.ts:769).
+  establisherBindingSemantics?: Record<string, string>;
+  // Issue #104 / PR #112: side index of placeholder-name aliases
+  // mirrored from establisher primaries onto every other path
+  // placeholder name in the graph that carries the same
+  // semanticType. Kept SEPARATE from `establisherBindingSemantics`
+  // so the body-collision guard at the top of the establisher
+  // bookkeeping block (which reserves only primaries against
+  // future body-id establishers) does not see alias slots reserved
+  // for endpoints the current chain may never visit. Consulted
+  // (alongside primaries) only by the alias-overwrite check inside
+  // the alias loop, to avoid stomping a slot already aliased for a
+  // different semantic.
+  establisherAliasSemantics?: Record<string, string>;
   providerList?: Record<string, string[]>; // semantic -> all providers
   artifactsApplied?: string[]; // artifact rule ids used so far
 }
@@ -100,10 +127,18 @@ export function generateScenariosForEndpoint(
     };
   }
 
-  // Determine impossible semantic types (no producer anywhere, excluding endpoint self-production)
+  // Determine impossible semantic types (no producer anywhere, excluding endpoint self-production).
+  // A semantic counts as reachable if EITHER a producersByType entry exists (authoritative
+  // server-returned values) OR an establishersByType entry exists (client-minted values guaranteed
+  // by an x-semantic-establishes annotation). Without the establishersByType branch this early
+  // gate would short-circuit endpoints whose required semantic is only mintable via an establisher
+  // (e.g. getUser/getTenant after the spec is annotated), and the BFS augmentation downstream
+  // would never run.
   const missing: string[] = [];
   for (const st of initialNeeded) {
-    if (!graph.producersByType[st] || graph.producersByType[st].length === 0) {
+    const hasProducer = graph.producersByType[st]?.length;
+    const hasEstablisher = graph.establishersByType?.[st]?.length;
+    if (!hasProducer && !hasEstablisher) {
       if (!endpoint.produces.includes(st)) missing.push(st);
     }
   }
@@ -444,7 +479,37 @@ export function generateScenariosForEndpoint(
 
     // Choose a semantic type to target next
     const targetSemantic = remaining[0];
-    let producers: string[] = targetSemantic ? graph.producersByType[targetSemantic] || [] : [];
+    // Shallow-copy the producer list before any local augmentation —
+    // `graph.producersByType[targetSemantic]` is the shared
+    // authoritative-producer index and must remain immutable across
+    // BFS candidate evaluation and across `generateScenariosForEndpoint`
+    // calls. Direct-reference + push() pollutes the index with
+    // establishers (#104) or any future locally-added candidates and
+    // leaks across endpoints, breaking the "producersByType is
+    // authoritative only" contract.
+    let producers: string[] = targetSemantic
+      ? [...(graph.producersByType[targetSemantic] ?? [])]
+      : [];
+
+    // #104: establishers are kept out of `producersByType` to preserve
+    // the "authoritative-producer only" contract that the rest of the
+    // analyser (variant planning, provider preference, missing-producer
+    // diagnostics) reads from that map. Augment the BFS candidate set
+    // here, where the planner explicitly needs a satisfier — the
+    // produced-set propagation downstream still works because the
+    // establisher's `op.produces` carries the synthesised semantic.
+    if (targetSemantic) {
+      const establishers = graph.establishersByType?.[targetSemantic];
+      if (establishers?.length) {
+        const seenIds = new Set(producers);
+        for (const e of establishers) {
+          if (!seenIds.has(e)) {
+            producers.push(e);
+            seenIds.add(e);
+          }
+        }
+      }
+    }
 
     // Provider preference & incidental suppression
     if (targetSemantic) {
@@ -633,6 +698,161 @@ export function generateScenariosForEndpoint(
               `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
         }
       }
+      // Issue #104: when the producer is an establisher, mint a fresh
+      // client-minted binding for each `identifiedBy` entry. The primary
+      // varName matches what the request-body builder computes for a
+      // body field of the same `name` (`${camelCase(name)}Var`) AND
+      // what the emitter computes for a path placeholder of the same
+      // `name` (`buildUrlExpression`: `{name}` → `ctx.${camelCase(name)}Var`).
+      // That single shared key threads the same value into the
+      // establisher's request and into any downstream consumer's URL
+      // without any extract step. Pre-populating bindingsDraft is
+      // sufficient because the body builder only writes a placeholder
+      // when the binding key is absent.
+      //
+      // Disambiguation: when two establishers in the same chain share
+      // a generic identifier `name` (e.g. `name`, `id`) but mint
+      // values for *different* semantic types, blindly reusing the
+      // existing binding would silently hand the second resource the
+      // first resource's identifier. Track the semanticType minted
+      // under each varName in `establisherBindingSemantics`; on
+      // collision with a different semantic, mint under a numerically
+      // suffixed name (`nameVar2`, `nameVar3`, …). The suffixed key
+      // ensures the *value* is unique and is correctly threaded
+      // through the URL alias loop below for any consumer placeholder
+      // that resolves by `semanticType` rather than by `name`. (The
+      // request-body builder still resolves placeholders by raw field
+      // name and may reuse the primary key for the second establisher
+      // — that's a separate body-builder limitation tracked
+      // independently and out of scope for #104.)
+      //
+      // Establishers don't produce a response extract, so the alias
+      // mechanism in `aliasProducerExtractsToPlaceholders` (issue #61)
+      // can't help when the consumer's path placeholder name differs
+      // from the establisher's identifier `name` (e.g. establisher
+      // mints `username` but consumer uses `/users/{userKey}` with
+      // semanticType `Username`). Pre-populate the same value under
+      // every distinct placeholder name found in the graph for the
+      // same semanticType so the URL emitter resolves it directly.
+      //
+      // Edge establishers (`shape: 'edge'`) are skipped — their
+      // `identifiedBy` entries are pre-existing components consumed
+      // from the chain, not values minted here.
+      let establisherBindingSemantics = workingState.establisherBindingSemantics;
+      let establisherAliasSemantics = workingState.establisherAliasSemantics;
+      if (producerNode.establishes && producerNode.establishes.shape !== 'edge') {
+        // Pre-flight: for each *body* identifier, the request-body
+        // builder (`buildRequestBodyFromCanonical` in path-analyser/
+        // src/index.ts) emits `${${camelCase(name)}Var}` from the raw
+        // field name with no per-step override. If a previously
+        // chained establisher already minted a different semantic at
+        // that exact var name, the second establisher's request body
+        // would render with the FIRST establisher's value — silently
+        // wrong. Numeric-suffix disambiguation (below) only saves the
+        // URL path because aliasing covers placeholder lookup; the
+        // body builder has no equivalent hook. Skip the candidate
+        // wholesale rather than emit a broken test. Path-only
+        // identifiers don't share this hazard because the placeholder-
+        // alias loop below threads the value under every placeholder
+        // name the URL emitter uses.
+        let bodyBindingClash = false;
+        for (const id of producerNode.establishes.identifiedBy) {
+          if (id.in !== 'body') continue;
+          const bodyVar = `${camelLower(id.name)}Var`;
+          const existingSemantic = establisherBindingSemantics?.[bodyVar];
+          if (existingSemantic && existingSemantic !== id.semanticType) {
+            bodyBindingClash = true;
+            break;
+          }
+        }
+        if (bodyBindingClash) continue;
+        for (const id of producerNode.establishes.identifiedBy) {
+          const baseVar = `${camelLower(id.name)}Var`;
+          // For BODY identifiers we never suffix — see clash check
+          // above. For PATH identifiers the URL emitter goes through
+          // the alias loop, so a numeric suffix is safe.
+          let primaryVar = baseVar;
+          if (id.in === 'path') {
+            let suffix = 2;
+            while (
+              establisherBindingSemantics?.[primaryVar] &&
+              establisherBindingSemantics[primaryVar] !== id.semanticType
+            ) {
+              primaryVar = `${baseVar}${suffix++}`;
+            }
+          }
+          const value =
+            bindingsDraft[primaryVar] ??
+            `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${primaryVar}`)}`;
+          // A primary mint always wins over a stale alias that an
+          // earlier establisher in the same chain reserved for a
+          // *different* semanticType. Without this overwrite the
+          // alias value (e.g. a Username minted under `nameVar` for
+          // some unrelated endpoint) would silently bleed into the
+          // primary slot of a later body-id establisher whose own
+          // raw field is also `name` but for a different semantic
+          // (e.g. RoleName) — exactly the defect class guarded by
+          // the cross-endpoint alias-pollution fixture.
+          const aliasSemanticAtPrimary = establisherAliasSemantics?.[primaryVar];
+          const staleAlias =
+            aliasSemanticAtPrimary !== undefined && aliasSemanticAtPrimary !== id.semanticType;
+          if (staleAlias) {
+            const fresh = `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${primaryVar}`)}`;
+            bindingsDraft[primaryVar] = fresh;
+            const { [primaryVar]: _drop, ...rest } = establisherAliasSemantics ?? {};
+            establisherAliasSemantics = rest;
+          } else if (!bindingsDraft[primaryVar]) {
+            bindingsDraft[primaryVar] = value;
+          }
+          // Re-read the primary value AFTER the stale-alias overwrite
+          // so the alias-mirroring loop below propagates the freshly-
+          // minted value rather than the stale alias value captured
+          // pre-overwrite. Otherwise an unrelated endpoint elsewhere
+          // in the graph that aliased `primaryVar` for a different
+          // semanticType would bleed its value into the new
+          // semantic's other placeholder aliases — see PR #112
+          // reviewer thread on the stale-alias overwrite branch.
+          const aliasValue = bindingsDraft[primaryVar];
+          establisherBindingSemantics = {
+            ...(establisherBindingSemantics ?? {}),
+            [primaryVar]: id.semanticType,
+          };
+          // Mirror the binding under every other placeholder-derived
+          // var name used by any operation in the graph for this same
+          // semanticType. Cheap one-time scan per identifier; harmless
+          // if the consumer ends up not being chained.
+          //
+          // Aliases write to `establisherAliasSemantics` rather than
+          // `establisherBindingSemantics`. The body-collision guard
+          // (above) consults only the latter, so an alias reserved
+          // here for an unrelated endpoint cannot abort a future
+          // body-id establisher in the same chain whose primary slot
+          // collides with the alias name — see PR #112 reviewer
+          // thread on this file. The overwrite check below still
+          // consults BOTH maps so we don't stomp a slot already
+          // aliased for a different semanticType.
+          for (const consumer of Object.values(graph.operations)) {
+            for (const param of consumer.pathParameters ?? []) {
+              if (param.semanticType !== id.semanticType) continue;
+              const aliasVar = `${camelLower(param.name)}Var`;
+              if (aliasVar === primaryVar) continue;
+              // Only alias when the slot is free OR was previously
+              // recorded (primary or alias) for this same
+              // semanticType.
+              const existingSemantic =
+                establisherBindingSemantics?.[aliasVar] ?? establisherAliasSemantics?.[aliasVar];
+              if (existingSemantic && existingSemantic !== id.semanticType) continue;
+              if (!bindingsDraft[aliasVar]) {
+                bindingsDraft[aliasVar] = aliasValue;
+                establisherAliasSemantics = {
+                  ...(establisherAliasSemantics ?? {}),
+                  [aliasVar]: id.semanticType,
+                };
+              }
+            }
+          }
+        }
+      }
 
       const sig = signature(newOps, newProduced, newNeeded, nextCycle);
       if (seen.has(sig)) continue;
@@ -649,6 +869,8 @@ export function generateScenariosForEndpoint(
         bootstrapFull: state.bootstrapFull,
         modelsDraft,
         bindingsDraft,
+        establisherBindingSemantics,
+        establisherAliasSemantics,
         providerList: updateProviderList(
           state.providerList || {},
           producerNode,
