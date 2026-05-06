@@ -267,4 +267,110 @@ describe('extractor x-semantic-establishes (#104)', () => {
     const op = extractOp(fixtureUnknownShape, 'createThingUnknownShape');
     expect(op.establishes).toBeUndefined();
   });
+
+  // Issue #134: bimodal entity sources — `acceptsExternal: true` on an
+  // edge's `identifiedBy` member declares that the component may be
+  // satisfied by either an in-API producer (the canonical local entity)
+  // or an externally-minted ID (BYOG / OIDC IdP-supplied IDs). The
+  // extractor must round-trip the flag verbatim so the planner can
+  // decide chaining policy at scenario time. Strictness mirrors the
+  // rest of the annotation: any invalid value rejects the WHOLE
+  // annotation rather than degrading silently.
+  it('round-trips `acceptsExternal: true` on a single edge identifier', () => {
+    const fixtureBimodalEdge: OpenAPISpec = {
+      openapi: '3.0.3',
+      info: { title: 'fixture-establishes-bimodal-edge', version: '0.0.0' },
+      paths: {
+        '/roles/{roleId}/groups/{groupId}': {
+          put: {
+            operationId: 'assignGroupToRoleLike',
+            'x-semantic-establishes': {
+              kind: 'RoleGroupMembership',
+              shape: 'edge',
+              identifiedBy: [
+                { in: 'path', name: 'roleId', semanticType: 'RoleId' },
+                {
+                  in: 'path',
+                  name: 'groupId',
+                  semanticType: 'GroupId',
+                  acceptsExternal: true,
+                },
+              ],
+            },
+            parameters: [
+              {
+                name: 'roleId',
+                in: 'path',
+                required: true,
+                schema: { type: 'string', 'x-semantic-type': 'RoleId' },
+              },
+              {
+                name: 'groupId',
+                in: 'path',
+                required: true,
+                schema: { type: 'string', 'x-semantic-type': 'GroupId' },
+              },
+            ],
+            responses: { '204': { description: 'no-content' } },
+          },
+        },
+      },
+    };
+    const op = extractOp(fixtureBimodalEdge, 'assignGroupToRoleLike');
+    expect(op.establishes?.identifiedBy).toEqual([
+      { in: 'path', name: 'roleId', semanticType: 'RoleId' },
+      {
+        in: 'path',
+        name: 'groupId',
+        semanticType: 'GroupId',
+        acceptsExternal: true,
+      },
+    ]);
+  });
+
+  it('omits `acceptsExternal` from the surfaced entry when the spec omits it (no implicit false)', () => {
+    // Class-scoped: the planner reads `acceptsExternal === true` as the
+    // bimodal trigger. The extractor MUST NOT inject a `false` default
+    // — that would noise the on-disk graph JSON and obscure the rare
+    // bimodal sites in diff review.
+    const op = extractOp(fixtureEdgeMembership, 'assignUserToGroupLike');
+    for (const id of op.establishes?.identifiedBy ?? []) {
+      expect(Object.hasOwn(id, 'acceptsExternal')).toBe(false);
+    }
+  });
+
+  it('rejects the WHOLE annotation when `acceptsExternal` is a non-boolean value', () => {
+    // Class-scoped strictness: a stringy "true" or any other type must
+    // reject the whole annotation. Silently coercing would let an
+    // upstream typo enable bimodal fallback at sites that intended a
+    // hard chain — undermining the producer-preference contract.
+    // biome-ignore lint/plugin: intentional malformed annotation for negative-test fixture
+    const fixtureBadAcceptsExternal = {
+      openapi: '3.0.3',
+      info: { title: 'fixture-establishes-bad-acceptsExternal', version: '0.0.0' },
+      paths: {
+        '/roles/{roleId}/groups/{groupId}': {
+          put: {
+            operationId: 'assignGroupToRoleBadFlag',
+            'x-semantic-establishes': {
+              kind: 'RoleGroupMembership',
+              shape: 'edge',
+              identifiedBy: [
+                { in: 'path', name: 'roleId', semanticType: 'RoleId' },
+                {
+                  in: 'path',
+                  name: 'groupId',
+                  semanticType: 'GroupId',
+                  acceptsExternal: 'true',
+                },
+              ],
+            },
+            responses: { '204': { description: 'no-content' } },
+          },
+        },
+      },
+    } as unknown as OpenAPISpec;
+    const op = extractOp(fixtureBadAcceptsExternal, 'assignGroupToRoleBadFlag');
+    expect(op.establishes).toBeUndefined();
+  });
 });

@@ -143,6 +143,73 @@ export function generateScenariosForEndpoint(
     }
   }
 
+  // Issue #134 / camunda/camunda#52322 (per-tuple) AND
+  // camunda/camunda#52320 (kind-scoped): treat an `identifiedBy`
+  // component as automatically client-mintable when EITHER:
+  //   (a) the tuple has `acceptsExternal: true` (per-tuple opt-in,
+  //       e.g. `assignGroupToRole.groupId`), OR
+  //   (b) the component's semantic type is owned by a kind whose
+  //       registry shape is `external-entity` (e.g. `ClientId` is
+  //       owned by `Client { shape: "external-entity" }` — minted
+  //       outside the API by Console / OIDC IdP, no producer by
+  //       design).
+  // Producer-preference still wins: this block only runs after the
+  // early reachability check has classified the semantic as missing
+  // (no producer, no establisher). When a producer DOES exist BFS
+  // chains it and this block is a no-op.
+  const externalEntitySites: string[] = [];
+  const externalBindings: Record<string, string> = {};
+  if (missing.length > 0) {
+    const stillMissing: string[] = [];
+    for (const st of missing) {
+      // Per-tuple `acceptsExternal: true` only applies on edge
+      // establishers. Look it up via the endpoint's own `establishes`.
+      const isEdgeEstablisher =
+        endpoint.establishes !== undefined && endpoint.establishes.shape === 'edge';
+      const idEntry: NonNullable<OperationNode['establishes']>['identifiedBy'][number] | undefined =
+        isEdgeEstablisher
+          ? endpoint.establishes?.identifiedBy.find(
+              (i) => i.semanticType === st && i.acceptsExternal === true,
+            )
+          : undefined;
+      const isKindScopedExternal = graph.externalEntityIdentifiers?.has(st) === true;
+      if (idEntry || isKindScopedExternal) {
+        // Var-name resolution:
+        //   - edge with identifiedBy entry → use that entry's `name`
+        //     (matches the edge's request body / path placeholder).
+        //   - otherwise (consumer or non-edge), look up the path
+        //     parameter on this endpoint whose `semanticType === st`.
+        let baseName: string | undefined = idEntry?.name;
+        if (!baseName) {
+          const param = endpoint.pathParameters?.find((p) => p.semanticType === st);
+          baseName = param?.name;
+        }
+        if (!baseName) {
+          // No path parameter binds this semantic — without a name to
+          // bind to we cannot mint usefully. Leave it on missing so the
+          // unsatisfied branch fires (better diagnostic than silently
+          // pretending to satisfy).
+          stillMissing.push(st);
+          continue;
+        }
+        const varName = `${camelLower(baseName)}Var`;
+        const kindHint = endpoint.establishes?.kind ?? st;
+        externalBindings[varName] = `${camelLower(kindHint)}_${deterministicSuffix(
+          `external:${endpointOpId}:${st}:${varName}`,
+        )}`;
+        externalEntitySites.push(st);
+        initialNeeded.delete(st);
+      } else {
+        stillMissing.push(st);
+      }
+    }
+    // Replace the missing list with whatever the fallback could not
+    // cover. If every missing semantic was external-mintable, the
+    // unsatisfied branch below MUST NOT fire.
+    missing.length = 0;
+    missing.push(...stillMissing);
+  }
+
   const scenarios: EndpointScenario[] = [];
   const max = opts.maxScenarios;
 
@@ -176,6 +243,12 @@ export function generateScenariosForEndpoint(
     bootstrapSequencesUsed: [],
     providerList: {},
     artifactsApplied: [],
+    // Issue #134: pre-seed bindingsDraft with the client-minted IDs
+    // synthesised for every bimodal `acceptsExternal` fallback above.
+    // The body builder and URL emitter look up by the same key
+    // (`${camelLower(name)}Var`), so the seeded value flows through
+    // without any per-step override.
+    bindingsDraft: Object.keys(externalBindings).length ? { ...externalBindings } : undefined,
   };
 
   const queue: State[] = [initial];
@@ -351,6 +424,7 @@ export function generateScenariosForEndpoint(
           eventualConsistencyOps: eventuallyConsistentOps
             ? opRefs.filter((o) => o.eventuallyConsistent).map((o) => o.operationId)
             : undefined,
+          externalEntitySites: externalEntitySites.length ? [...externalEntitySites] : undefined,
         };
         completed.set(key, scenario);
         scenarios.push(scenario);

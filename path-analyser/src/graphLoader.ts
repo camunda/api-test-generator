@@ -68,6 +68,13 @@ interface RawGraphRoot {
   bootstrapSequences?: RawBootstrapSeq[];
   bootstrap_sequences?: RawBootstrapSeq[];
   sequences?: RawBootstrapSeq[];
+  // Issue #134 / camunda/camunda#52320: upstream `semantic-kinds.json`
+  // payload, attached by the extractor. Lets the planner identify
+  // semantic types owned by an `external-entity` kind without
+  // reaching back to the spec source.
+  kindRegistry?: {
+    kinds?: Array<{ name?: string; shape?: string; identifiers?: string[] }>;
+  };
 }
 
 interface RawBootstrapSeq {
@@ -382,6 +389,27 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
+  // Issue #134 / camunda/camunda#52320: build the external-entity
+  // identifier set from the kindRegistry payload (if any). Each kind
+  // with `shape: "external-entity"` contributes its `identifiers`
+  // (e.g. Client → ClientId) — the planner treats these as
+  // automatically client-mintable.
+  let externalEntityIdentifiers: Set<string> | undefined;
+  if (!Array.isArray(parsed)) {
+    const registry = parsed.kindRegistry;
+    if (registry && Array.isArray(registry.kinds)) {
+      const set = new Set<string>();
+      for (const k of registry.kinds) {
+        if (k && k.shape === 'external-entity' && Array.isArray(k.identifiers)) {
+          for (const id of k.identifiers) {
+            if (typeof id === 'string' && id.length > 0) set.add(id);
+          }
+        }
+      }
+      if (set.size > 0) externalEntityIdentifiers = set;
+    }
+  }
+
   return {
     operations,
     producersByType,
@@ -390,6 +418,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     domain,
     producersByState,
     establishersByType: Object.keys(establishersByType).length ? establishersByType : undefined,
+    externalEntityIdentifiers,
   };
 }
 
@@ -569,11 +598,29 @@ function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
   for (const id of r.identifiedBy) {
     if (!id || typeof id !== 'object') return undefined;
     // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
-    const e = id as { in?: unknown; name?: unknown; semanticType?: unknown };
+    const e = id as {
+      in?: unknown;
+      name?: unknown;
+      semanticType?: unknown;
+      acceptsExternal?: unknown;
+    };
     if (e.in !== 'body' && e.in !== 'path') return undefined;
     if (typeof e.name !== 'string' || e.name.length === 0) return undefined;
     if (typeof e.semanticType !== 'string' || e.semanticType.length === 0) return undefined;
-    identifiedBy.push({ in: e.in, name: e.name, semanticType: e.semanticType });
+    // Issue #134: `acceptsExternal` is optional; if present MUST be a
+    // boolean. Mirrors the extractor's strict gate — silently coercing
+    // a stringy "true" would let an upstream typo enable bimodal
+    // fallback at sites that intended a hard chain.
+    if (e.acceptsExternal !== undefined && typeof e.acceptsExternal !== 'boolean') {
+      return undefined;
+    }
+    const entry: (typeof identifiedBy)[number] = {
+      in: e.in,
+      name: e.name,
+      semanticType: e.semanticType,
+    };
+    if (e.acceptsExternal === true) entry.acceptsExternal = true;
+    identifiedBy.push(entry);
   }
   // Same `shape` restriction as the extractor: an unknown string would
   // silently degrade to non-edge behaviour and `normalizeOp` would push

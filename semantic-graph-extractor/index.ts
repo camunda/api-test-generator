@@ -140,6 +140,14 @@ export class SemanticGraphExtractor {
         : undefined,
       rootDependencyAnalysis: graph.rootDependencyAnalysis,
       crossContaminationMap: graph.crossContaminationMap,
+      // Issue #134 / camunda/camunda#52320: emit the upstream
+      // `semantic-kinds.json` registry alongside the dependency graph so
+      // the planner can consult kind-shape data (specifically:
+      // `external-entity` identifiers must be client-minted, never
+      // chained from a producer). The registry sits next to the bundled
+      // spec source; absent registry → undefined and the planner skips
+      // the kind-scoped fallback.
+      kindRegistry: loadKindRegistry(),
     };
 
     fs.writeFileSync(outputPath, JSON.stringify(serializedGraph, null, 2));
@@ -169,6 +177,55 @@ export class SemanticGraphExtractor {
       edges: data.edges,
     };
   }
+}
+
+// Issue #134 / camunda/camunda#52320: load the upstream
+// `semantic-kinds.json` registry so the planner can recognise
+// `external-entity` kinds (whose identifiers are minted outside the
+// Camunda REST API and have no in-API producer by design). Probes a
+// short list of well-known locations relative to repo root: first the
+// bundled spec dir (in case a future bundler copies it next to the
+// bundle), then the upstream clone path used by camunda-schema-bundler.
+// Returns `undefined` when the file is missing — older spec pins that
+// predate the registry remain compatible (planner skips kind-scoped
+// fallback when no registry is present).
+function loadKindRegistry():
+  | { kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> }
+  | undefined {
+  const candidates = [
+    path.join(__dirname, '../../spec/bundled/semantic-kinds.json'),
+    path.join(
+      __dirname,
+      '../../external-spec/upstream/zeebe/gateway-protocol/src/main/proto/v2/semantic-kinds.json',
+    ),
+  ];
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    try {
+      const raw = fs.readFileSync(candidate, 'utf8');
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON registry
+      const parsed = JSON.parse(raw) as {
+        kinds?: Array<{ name?: unknown; shape?: unknown; identifiers?: unknown }>;
+      };
+      if (!parsed || !Array.isArray(parsed.kinds)) return undefined;
+      const kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> = [];
+      for (const k of parsed.kinds) {
+        if (!k || typeof k.name !== 'string') continue;
+        const entry: { name: string; shape?: string; identifiers?: string[] } = { name: k.name };
+        if (typeof k.shape === 'string') entry.shape = k.shape;
+        if (Array.isArray(k.identifiers)) {
+          entry.identifiers = k.identifiers.filter((i): i is string => typeof i === 'string');
+        }
+        kinds.push(entry);
+      }
+      return { kinds };
+    } catch {
+      // Malformed registry → treat as absent; the planner falls back
+      // to the strict-chain default (no kind-scoped client-mint).
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 // Main execution when run directly

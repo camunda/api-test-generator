@@ -102,6 +102,15 @@ export interface EstablishesIdentifier {
   in: 'body' | 'path';
   name: string;
   semanticType: string;
+  // Issue #134 / camunda/camunda#52322: bimodal entity sources.
+  // When `true`, this identifier component may be satisfied by either
+  // an in-API producer (the canonical local entity) OR an externally-
+  // minted ID (BYOG / OIDC IdP-supplied IDs). The planner prefers an
+  // in-graph producer when reachable and falls back to a client-minted
+  // ID otherwise. Strict round-trip: the extractor only emits the
+  // field when it appears on the spec (no implicit false default) so
+  // the rare bimodal sites stay visible in diff review.
+  acceptsExternal?: boolean;
 }
 
 export interface Schema {
