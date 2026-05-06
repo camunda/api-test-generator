@@ -198,7 +198,6 @@ export function generateScenariosForEndpoint(
           `external:${endpointOpId}:${st}:${varName}`,
         )}`;
         externalEntitySites.push(st);
-        initialNeeded.delete(st);
       } else {
         stillMissing.push(st);
       }
@@ -209,6 +208,18 @@ export function generateScenariosForEndpoint(
     missing.length = 0;
     missing.push(...stillMissing);
   }
+
+  // BFS planning state subtracts the external-mintable semantics from
+  // `initialNeeded` because they are pre-satisfied by the seeded
+  // bindings. `initialNeeded` itself stays immutable so downstream
+  // reporting (`satisfiedSemanticTypes`) still reflects everything
+  // the endpoint required — a scenario that satisfied a need via
+  // external mint is not the same as a scenario that did not need
+  // it. See PR #140 reviewer thread on initialNeeded mutation.
+  const planningNeeded =
+    externalEntitySites.length === 0
+      ? initialNeeded
+      : new Set([...initialNeeded].filter((s) => !externalEntitySites.includes(s)));
 
   const scenarios: EndpointScenario[] = [];
   const max = opts.maxScenarios;
@@ -235,7 +246,7 @@ export function generateScenariosForEndpoint(
 
   const initial: State = {
     produced: new Set(),
-    needed: new Set(initialNeeded),
+    needed: new Set(planningNeeded),
     domainStates: new Set(),
     ops: [],
     cycle: false,
@@ -270,8 +281,8 @@ export function generateScenariosForEndpoint(
         produced.add(s);
       });
       // Only enqueue if it helps satisfy at least one needed semantic type (or endpoint has none -> still useful as canonical setup)
-      const helps = [...initialNeeded].some((s) => produced.has(s));
-      if (helps || initialNeeded.size === 0) {
+      const helps = [...planningNeeded].some((s) => produced.has(s));
+      if (helps || planningNeeded.size === 0) {
         const productionMap = new Map<string, string>();
         for (const opId of seq.operations) {
           graph.operations[opId].produces.forEach((s) => {
@@ -282,7 +293,7 @@ export function generateScenariosForEndpoint(
         const bootstrapFull = [...required].every((r) => produced.has(r));
         queue.push({
           produced,
-          needed: new Set(initialNeeded),
+          needed: new Set(planningNeeded),
           domainStates: new Set(),
           ops: [...seq.operations],
           cycle: false,
@@ -312,7 +323,7 @@ export function generateScenariosForEndpoint(
             hasEventuallyConsistent: evCount > 0 || undefined,
             eventuallyConsistentCount: evCount || undefined,
           });
-        } else if (initialNeeded.size === 0) {
+        } else if (planningNeeded.size === 0) {
           // For endpoints with no requirements we still include a bootstrap variant for reference
           const producedSemanticTypes = new Set<string>(produced);
           endpoint.produces.forEach((s) => {
@@ -394,13 +405,13 @@ export function generateScenariosForEndpoint(
             completed.size + 1,
             state,
             opRefs.length - 1,
-            initialNeeded.size,
+            planningNeeded.size,
           ),
           description: buildIntegrationScenarioDescription(
             endpoint,
             state,
             opRefs.length - 1,
-            initialNeeded.size,
+            planningNeeded.size,
           ),
           operations: opRefs,
           producedSemanticTypes: [...producedSemanticTypes],

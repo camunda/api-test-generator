@@ -129,10 +129,22 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     ? parsed
     : (parsed.operationsById ?? parsed.operations ?? parsed.nodes ?? parsed.operationNodes ?? null);
 
+  // Track the root object that ultimately yielded `candidateOps` so
+  // sibling fields like `kindRegistry` are sourced from the same
+  // nesting level (top-level vs `parsed.graph` vs `parsed.data`).
+  // Otherwise a graph file using the nested shape would silently lose
+  // its kind registry and disable kind-scoped external-entity minting.
+  let opsRoot: RawGraphRoot | null = Array.isArray(parsed)
+    ? null
+    : candidateOps !== null
+      ? parsed
+      : null;
+
   if (!candidateOps && !Array.isArray(parsed)) {
     const g = parsed.graph || parsed.data;
     if (g) {
       candidateOps = Array.isArray(g) ? g : (g.operations ?? g.nodes ?? null);
+      if (candidateOps && !Array.isArray(g)) opsRoot = g;
     }
   }
 
@@ -393,10 +405,13 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // identifier set from the kindRegistry payload (if any). Each kind
   // with `shape: "external-entity"` contributes its `identifiers`
   // (e.g. Client → ClientId) — the planner treats these as
-  // automatically client-mintable.
+  // automatically client-mintable. Source the registry from the same
+  // root that yielded `candidateOps` so nested-graph layouts
+  // (`parsed.graph` / `parsed.data`) are handled consistently with
+  // the top-level layout.
   let externalEntityIdentifiers: Set<string> | undefined;
-  if (!Array.isArray(parsed)) {
-    const registry = parsed.kindRegistry;
+  if (opsRoot) {
+    const registry = opsRoot.kindRegistry;
     if (registry && Array.isArray(registry.kinds)) {
       const set = new Set<string>();
       for (const k of registry.kinds) {

@@ -185,9 +185,15 @@ export interface EndpointScenario {
   syntheticBindings?: string[]; // variables created without a producing op
   // Issue #134: semantic types whose value was client-minted at scenario-
   // construction time because the endpoint's `x-semantic-establishes`
-  // identifiedBy member carried `acceptsExternal: true` and no in-API
-  // producer existed for them. Empty/undefined means every required
-  // semantic was satisfied by an in-graph producer or establisher.
+  // identifiedBy member carried `acceptsExternal: true` (per-tuple
+  // bimodality, e.g. `assignGroupToRole.groupId`) OR because the
+  // member's semantic type is owned by a kind whose registry shape is
+  // `external-entity` (kind-scoped fallback, e.g. `ClientId` is owned
+  // by `Client { shape: "external-entity" }`). In both cases no
+  // in-API producer exists by design and the planner seeds a
+  // client-minted value into the scenario bindings. Empty/undefined
+  // means every required semantic was satisfied by an in-graph
+  // producer or establisher.
   // Downstream consumers (e.g. negative-suite) read this to skip
   // "unknown identifier ⇒ 404" assertions for the listed semantics.
   externalEntitySites?: string[];
