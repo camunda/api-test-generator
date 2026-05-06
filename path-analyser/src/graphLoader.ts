@@ -581,13 +581,11 @@ function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
   // the exact opposite of the intended edge semantics. Reject unknown
   // shapes wholesale.
   const rawShape = r.shape;
-  const KNOWN_SHAPES = new Set<string>(['edge']);
-  const shapeValid =
-    rawShape === undefined || (typeof rawShape === 'string' && KNOWN_SHAPES.has(rawShape));
+  const shapeValid = rawShape === undefined || rawShape === 'edge';
   if (!shapeValid) return undefined;
   return {
     kind: r.kind,
-    shape: typeof rawShape === 'string' ? rawShape : undefined,
+    shape: rawShape === 'edge' ? 'edge' : undefined,
     identifiedBy,
   };
 }

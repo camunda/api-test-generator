@@ -1594,17 +1594,26 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
       // the graph loader — so the assertion was vacuous and could
       // not detect the fabrication mode it claimed to guard.)
       //
-      // No operation in the graph should carry a non-empty
-      // `establishes` field — if a single op surfaces `establishes`
-      // despite the spec having no non-edge annotations, the
-      // extractor's intake or the graph normalizer is fabricating
-      // it.
+      // No operation in the graph should carry a non-empty *non-edge*
+      // `establishes` field — if a single op surfaces a non-edge
+      // `establishes` despite the spec having no non-edge
+      // annotations, the extractor's intake or the graph normalizer
+      // is fabricating it. Edge establishers are excluded from this
+      // sentinel because the branch above gates on the *non-edge*
+      // count: a spec carrying only valid `shape: 'edge'` annotations
+      // legitimately surfaces edge `establishes` entries that this
+      // pre-annotation branch must NOT flag as fabricated.
       const fabricatedEstablishesOps = rawGraph.operations
-        .filter((o) => o.establishes && (o.establishes.identifiedBy?.length ?? 0) > 0)
+        .filter(
+          (o) =>
+            o.establishes &&
+            o.establishes.shape !== 'edge' &&
+            (o.establishes.identifiedBy?.length ?? 0) > 0,
+        )
         .map((o) => o.operationId);
       expect(
         fabricatedEstablishesOps,
-        'pre-annotation sentinel: operations carry `establishes` despite the bundled spec having no non-edge x-semantic-establishes annotations',
+        'pre-annotation sentinel: operations carry non-edge `establishes` despite the bundled spec having no non-edge x-semantic-establishes annotations',
       ).toEqual([]);
       return;
     }

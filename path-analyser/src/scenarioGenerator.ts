@@ -479,7 +479,17 @@ export function generateScenariosForEndpoint(
 
     // Choose a semantic type to target next
     const targetSemantic = remaining[0];
-    let producers: string[] = targetSemantic ? graph.producersByType[targetSemantic] || [] : [];
+    // Shallow-copy the producer list before any local augmentation —
+    // `graph.producersByType[targetSemantic]` is the shared
+    // authoritative-producer index and must remain immutable across
+    // BFS candidate evaluation and across `generateScenariosForEndpoint`
+    // calls. Direct-reference + push() pollutes the index with
+    // establishers (#104) or any future locally-added candidates and
+    // leaks across endpoints, breaking the "producersByType is
+    // authoritative only" contract.
+    let producers: string[] = targetSemantic
+      ? [...(graph.producersByType[targetSemantic] ?? [])]
+      : [];
 
     // #104: establishers are kept out of `producersByType` to preserve
     // the "authoritative-producer only" contract that the rest of the

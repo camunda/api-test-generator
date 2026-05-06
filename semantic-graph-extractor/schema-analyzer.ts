@@ -262,13 +262,11 @@ export class SchemaAnalyzer {
         // inputs. Reject unknown shapes by dropping the whole
         // annotation rather than falling back to the non-edge path.
         const rawShape = rawEstablishes.shape;
-        const KNOWN_SHAPES = new Set<string>(['edge']);
-        const shapeValid =
-          rawShape === undefined || (typeof rawShape === 'string' && KNOWN_SHAPES.has(rawShape));
+        const shapeValid = rawShape === undefined || rawShape === 'edge';
         if (shapeValid) {
           establishes = {
             kind: rawEstablishes.kind,
-            shape: typeof rawShape === 'string' ? rawShape : undefined,
+            shape: rawShape === 'edge' ? 'edge' : undefined,
             identifiedBy,
           };
         }

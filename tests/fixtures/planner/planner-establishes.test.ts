@@ -523,4 +523,24 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       expect(bindings.roleNameVar).not.toBe(bindings.usernameVar);
     });
   });
+
+  describe('producersByType immutability across planning (#112)', () => {
+    it('does not push establishers into the shared producersByType index', () => {
+      // Class-scoped guard for PR #112 review thread on
+      // scenarioGenerator.ts:482. The planner used to bind `producers`
+      // as a direct reference to `graph.producersByType[targetSemantic]`
+      // and then `push()` establishers into it, polluting the global
+      // authoritative-producer index across BFS iterations and across
+      // calls. The contract for `producersByType` is "authoritative
+      // producers only" — establishers must stay in `establishersByType`.
+      const graph = fixtureSimpleEstablisherChain;
+      const beforeUsername = [...(graph.producersByType['Username'] ?? [])];
+      generateScenariosForEndpoint(graph, 'getUser', { maxScenarios: 10 });
+      const afterUsername = graph.producersByType['Username'] ?? [];
+      // The establisher (`createUser`) must NOT have leaked into the
+      // global producer index for Username.
+      expect(afterUsername).toEqual(beforeUsername);
+      expect(afterUsername).not.toContain('createUser');
+    });
+  });
 });

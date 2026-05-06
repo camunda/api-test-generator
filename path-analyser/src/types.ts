@@ -82,7 +82,12 @@ export interface OperationNode extends OperationRef {
   // identifier the client supplied.
   establishes?: {
     kind: string;
-    shape?: string;
+    // Narrowed to the literal `'edge'` to match the extractor's
+    // strict shape gate and `graphLoader.normalizeEstablishes`
+    // (which drops any other shape wholesale). Downstream code
+    // (`scenarioGenerator`, the L3 invariants) compares `shape ===
+    // 'edge'` directly and can rely on this contract.
+    shape?: 'edge';
     identifiedBy: Array<{ in: 'body' | 'path'; name: string; semanticType: string }>;
   };
 }

@@ -88,7 +88,13 @@ export interface EstablishesSpec {
   // pre-populating client-minted bindings. Non-edge establishers
   // self-satisfy the identifier they mint and contribute it to
   // `establishersByType`.
-  shape?: string;
+  //
+  // Narrowed to the literal `'edge'`: the extractor's strict shape
+  // gate (`semantic-graph-extractor/schema-analyzer.ts`) drops any
+  // annotation whose `shape` is not `undefined` or exactly `'edge'`,
+  // so callers downstream of the extractor can rely on this contract
+  // without re-checking arbitrary string values.
+  shape?: 'edge';
   identifiedBy: EstablishesIdentifier[];
 }
 
