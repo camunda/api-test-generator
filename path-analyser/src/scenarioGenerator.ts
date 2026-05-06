@@ -794,6 +794,15 @@ export function generateScenariosForEndpoint(
           } else if (!bindingsDraft[primaryVar]) {
             bindingsDraft[primaryVar] = value;
           }
+          // Re-read the primary value AFTER the stale-alias overwrite
+          // so the alias-mirroring loop below propagates the freshly-
+          // minted value rather than the stale alias value captured
+          // pre-overwrite. Otherwise an unrelated endpoint elsewhere
+          // in the graph that aliased `primaryVar` for a different
+          // semanticType would bleed its value into the new
+          // semantic's other placeholder aliases — see PR #112
+          // reviewer thread on the stale-alias overwrite branch.
+          const aliasValue = bindingsDraft[primaryVar];
           establisherBindingSemantics = {
             ...(establisherBindingSemantics ?? {}),
             [primaryVar]: id.semanticType,
@@ -824,7 +833,7 @@ export function generateScenariosForEndpoint(
                 establisherBindingSemantics?.[aliasVar] ?? establisherAliasSemantics?.[aliasVar];
               if (existingSemantic && existingSemantic !== id.semanticType) continue;
               if (!bindingsDraft[aliasVar]) {
-                bindingsDraft[aliasVar] = value;
+                bindingsDraft[aliasVar] = aliasValue;
                 establisherAliasSemantics = {
                   ...(establisherAliasSemantics ?? {}),
                   [aliasVar]: id.semanticType,

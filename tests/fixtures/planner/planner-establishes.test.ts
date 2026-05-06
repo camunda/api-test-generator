@@ -493,5 +493,34 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       expect(bindings.nameVar).toBeDefined();
       expect(bindings.usernameVar).not.toBe(bindings.nameVar);
     });
+
+    it('mirrors the freshly-minted RoleName value into roleNameVar, not the stale Username alias', () => {
+      // Class-scoped guard for PR #112 review thread on
+      // scenarioGenerator.ts:833 (stale-alias overwrite branch). When
+      // a body-id establisher overwrites a primary slot that was
+      // previously held as an alias for a *different* semanticType,
+      // the alias-mirroring loop must propagate the FRESH primary
+      // value to other placeholder aliases for the new semanticType —
+      // not the stale value captured before the overwrite. Otherwise
+      // the consumer's URL placeholder for the new semantic (here
+      // `{roleName}` → roleNameVar for RoleName) would render with
+      // the old Username value, silently breaking the test.
+      const result = generateScenariosForEndpoint(
+        fixtureAliasPollutionAcrossEndpoints,
+        'assignUserToRole',
+        { maxScenarios: 20 },
+      );
+      const satisfied = result.scenarios.find((s) => {
+        const ops = opIdsOf(s);
+        return ops.includes('createUser') && ops.includes('createRole');
+      });
+      const bindings = satisfied?.bindings ?? {};
+      // The RoleName alias on the consumer's path placeholder must
+      // mirror the RoleName primary, not the previously-aliased
+      // Username value at the same slot name.
+      expect(bindings.roleNameVar).toBeDefined();
+      expect(bindings.roleNameVar).toBe(bindings.nameVar);
+      expect(bindings.roleNameVar).not.toBe(bindings.usernameVar);
+    });
   });
 });
