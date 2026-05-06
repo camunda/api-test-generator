@@ -42,12 +42,32 @@ interface State {
   modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
   bindingsDraft?: Record<string, string>; // variable bindings
   // Issue #104: side index recording which semanticType each
-  // establisher-minted binding key was issued for. Lets the BFS
-  // detect collisions when two establishers in the same chain share
-  // a generic identifier `name` (e.g. `name`, `id`) but mint values
-  // for *different* semantic types — without it the second
+  // establisher-minted PRIMARY binding key was issued for. Lets the
+  // BFS detect collisions when two establishers in the same chain
+  // share a generic identifier `name` (e.g. `name`, `id`) but mint
+  // values for *different* semantic types — without it the second
   // establisher would silently reuse the first establisher's value.
+  //
+  // Strictly tracks **primary** mints (the slot the establisher
+  // itself writes to). Cross-endpoint placeholder aliases live in
+  // `establisherAliasSemantics` below — they must not pollute this
+  // map because the body-collision guard reads only this map and an
+  // unrelated endpoint's alias would otherwise abort a legitimate
+  // body-id establisher whose primary slot collides with the alias
+  // name (PR #112 reviewer thread on scenarioGenerator.ts:769).
   establisherBindingSemantics?: Record<string, string>;
+  // Issue #104 / PR #112: side index of placeholder-name aliases
+  // mirrored from establisher primaries onto every other path
+  // placeholder name in the graph that carries the same
+  // semanticType. Kept SEPARATE from `establisherBindingSemantics`
+  // so the body-collision guard at the top of the establisher
+  // bookkeeping block (which reserves only primaries against
+  // future body-id establishers) does not see alias slots reserved
+  // for endpoints the current chain may never visit. Consulted
+  // (alongside primaries) only by the alias-overwrite check inside
+  // the alias loop, to avoid stomping a slot already aliased for a
+  // different semantic.
+  establisherAliasSemantics?: Record<string, string>;
   providerList?: Record<string, string[]>; // semantic -> all providers
   artifactsApplied?: string[]; // artifact rule ids used so far
 }
@@ -709,6 +729,7 @@ export function generateScenariosForEndpoint(
       // `identifiedBy` entries are pre-existing components consumed
       // from the chain, not values minted here.
       let establisherBindingSemantics = workingState.establisherBindingSemantics;
+      let establisherAliasSemantics = workingState.establisherAliasSemantics;
       if (producerNode.establishes && producerNode.establishes.shape !== 'edge') {
         // Pre-flight: for each *body* identifier, the request-body
         // builder (`buildRequestBodyFromCanonical` in path-analyser/
@@ -753,7 +774,26 @@ export function generateScenariosForEndpoint(
           const value =
             bindingsDraft[primaryVar] ??
             `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${primaryVar}`)}`;
-          if (!bindingsDraft[primaryVar]) bindingsDraft[primaryVar] = value;
+          // A primary mint always wins over a stale alias that an
+          // earlier establisher in the same chain reserved for a
+          // *different* semanticType. Without this overwrite the
+          // alias value (e.g. a Username minted under `nameVar` for
+          // some unrelated endpoint) would silently bleed into the
+          // primary slot of a later body-id establisher whose own
+          // raw field is also `name` but for a different semantic
+          // (e.g. RoleName) — exactly the defect class guarded by
+          // the cross-endpoint alias-pollution fixture.
+          const aliasSemanticAtPrimary = establisherAliasSemantics?.[primaryVar];
+          const staleAlias =
+            aliasSemanticAtPrimary !== undefined && aliasSemanticAtPrimary !== id.semanticType;
+          if (staleAlias) {
+            const fresh = `${camelLower(producerNode.establishes.kind)}_${deterministicSuffix(`establish:${producerNode.operationId}:${id.semanticType}:${primaryVar}`)}`;
+            bindingsDraft[primaryVar] = fresh;
+            const { [primaryVar]: _drop, ...rest } = establisherAliasSemantics ?? {};
+            establisherAliasSemantics = rest;
+          } else if (!bindingsDraft[primaryVar]) {
+            bindingsDraft[primaryVar] = value;
+          }
           establisherBindingSemantics = {
             ...(establisherBindingSemantics ?? {}),
             [primaryVar]: id.semanticType,
@@ -762,19 +802,31 @@ export function generateScenariosForEndpoint(
           // var name used by any operation in the graph for this same
           // semanticType. Cheap one-time scan per identifier; harmless
           // if the consumer ends up not being chained.
+          //
+          // Aliases write to `establisherAliasSemantics` rather than
+          // `establisherBindingSemantics`. The body-collision guard
+          // (above) consults only the latter, so an alias reserved
+          // here for an unrelated endpoint cannot abort a future
+          // body-id establisher in the same chain whose primary slot
+          // collides with the alias name — see PR #112 reviewer
+          // thread on this file. The overwrite check below still
+          // consults BOTH maps so we don't stomp a slot already
+          // aliased for a different semanticType.
           for (const consumer of Object.values(graph.operations)) {
             for (const param of consumer.pathParameters ?? []) {
               if (param.semanticType !== id.semanticType) continue;
               const aliasVar = `${camelLower(param.name)}Var`;
               if (aliasVar === primaryVar) continue;
               // Only alias when the slot is free OR was previously
-              // minted by an establisher for this same semanticType.
-              const existingSemantic = establisherBindingSemantics?.[aliasVar];
+              // recorded (primary or alias) for this same
+              // semanticType.
+              const existingSemantic =
+                establisherBindingSemantics?.[aliasVar] ?? establisherAliasSemantics?.[aliasVar];
               if (existingSemantic && existingSemantic !== id.semanticType) continue;
               if (!bindingsDraft[aliasVar]) {
                 bindingsDraft[aliasVar] = value;
-                establisherBindingSemantics = {
-                  ...establisherBindingSemantics,
+                establisherAliasSemantics = {
+                  ...(establisherAliasSemantics ?? {}),
                   [aliasVar]: id.semanticType,
                 };
               }
@@ -799,6 +851,7 @@ export function generateScenariosForEndpoint(
         modelsDraft,
         bindingsDraft,
         establisherBindingSemantics,
+        establisherAliasSemantics,
         providerList: updateProviderList(
           state.providerList || {},
           producerNode,

@@ -1540,10 +1540,23 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
       return true;
     };
     let specAnnotatedCount = 0;
+    let specNonEdgeAnnotatedCount = 0;
     for (const methods of Object.values(bundledSpec.paths ?? {})) {
       for (const op of Object.values(methods)) {
         if (op && typeof op === 'object' && isValidEstablishes(op['x-semantic-establishes'])) {
           specAnnotatedCount++;
+          // Switch the pre-/post-annotation branch on the *non-edge*
+          // count, mirroring the graph-loader rule that drops edge
+          // entries from `establishersByType`. Equating
+          // `establishersByType.size === 0` with "no annotations at
+          // all" would fall into the pre-annotation branch the moment
+          // upstream lands a spec carrying ONLY `shape: 'edge'`
+          // annotations — and would then flag those legitimate edge
+          // `establishes` entries as fabricated.
+          const rawEstablishes = isRecord(op) ? op['x-semantic-establishes'] : undefined;
+          if (!isRecord(rawEstablishes) || rawEstablishes.shape !== 'edge') {
+            specNonEdgeAnnotatedCount++;
+          }
         }
       }
     }
@@ -1553,39 +1566,35 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
       `extractor surface drift: bundled spec carries ${specAnnotatedCount} valid x-semantic-establishes annotations but only ${graphAnnotatedCount} reached the operation graph`,
     ).toBe(specAnnotatedCount);
 
-    if (establishersByType.size === 0) {
+    if (specNonEdgeAnnotatedCount === 0) {
       // Pre-annotation branch: the parity check above
       // (`specAnnotatedCount === graphAnnotatedCount`) is the active
-      // regression guard for the extractor surface. Two further
-      // sentinels protect the chain-level guarantees while the
-      // upstream spec carries no `x-semantic-establishes`:
+      // regression guard for the extractor surface. The branch is
+      // gated on the *non-edge* spec count rather than
+      // `establishersByType.size` so that a spec carrying only valid
+      // `shape: 'edge'` annotations does NOT fall into this branch
+      // and flag those legitimate `establishes` entries as
+      // fabricated. The remaining sentinel below protects the
+      // chain-level guarantee while the upstream spec carries no
+      // *non-edge* `x-semantic-establishes`.
       //
-      // 1. The graph's `establishersByType` map MUST be absent or
-      //    empty — a non-empty map without source annotations would
-      //    indicate either a fixture leaked into the bundled spec or
-      //    the extractor is fabricating establisher entries from a
-      //    different annotation. Either is a defect.
-      const rawEstablishersByType = Reflect.get(rawGraph, 'establishersByType');
-      const fabricatedEstablishersByType =
-        rawEstablishersByType && typeof rawEstablishersByType === 'object'
-          ? Object.keys(rawEstablishersByType)
-          : [];
-      expect(
-        fabricatedEstablishersByType,
-        'pre-annotation sentinel: graph carries establishersByType entries despite the bundled spec having no x-semantic-establishes annotations',
-      ).toEqual([]);
-
-      // 2. No operation in the graph should carry a non-empty
-      //    `establishes` field — this is the per-operation analogue of
-      //    sentinel #1. If a single op surfaces `establishes` despite
-      //    the spec having no annotations, the extractor's intake or
-      //    the graph normalizer is fabricating it.
+      // (A previous sentinel on a top-level `establishersByType`
+      // field of the raw extractor JSON was removed: the extractor
+      // does not serialize that field — it is built at runtime by
+      // the graph loader — so the assertion was vacuous and could
+      // not detect the fabrication mode it claimed to guard.)
+      //
+      // No operation in the graph should carry a non-empty
+      // `establishes` field — if a single op surfaces `establishes`
+      // despite the spec having no non-edge annotations, the
+      // extractor's intake or the graph normalizer is fabricating
+      // it.
       const fabricatedEstablishesOps = rawGraph.operations
         .filter((o) => o.establishes && (o.establishes.identifiedBy?.length ?? 0) > 0)
         .map((o) => o.operationId);
       expect(
         fabricatedEstablishesOps,
-        'pre-annotation sentinel: operations carry `establishes` despite the bundled spec having no x-semantic-establishes annotations',
+        'pre-annotation sentinel: operations carry `establishes` despite the bundled spec having no non-edge x-semantic-establishes annotations',
       ).toEqual([]);
       return;
     }

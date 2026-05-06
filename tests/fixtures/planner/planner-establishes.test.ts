@@ -248,6 +248,62 @@ const fixturePathSuffixSameName: OperationGraph = makeGraph([
   }),
 ]);
 
+// Cross-endpoint alias-pollution defect class (PR #112 reviewer thread,
+// scenarioGenerator.ts:769). When establisher A mints a body identifier
+// and the alias loop mirrors the binding under every placeholder name in
+// the *entire graph* for that semanticType, the recorded alias slots
+// must NOT participate in the body-collision check that gates a *later*
+// establisher in the same chain. Otherwise an unrelated endpoint's path
+// placeholder name (here: `unrelatedListUsersByName` using `{name}` for
+// `Username`) reserves `nameVar` against the Username semantic, and a
+// subsequent body-identifier establisher for `RoleName` whose own raw
+// body field is also `name` is wrongly skipped — even though the chain
+// the BFS is exploring never visits the unrelated endpoint.
+const fixtureAliasPollutionAcrossEndpoints: OperationGraph = makeGraph([
+  // Body-identifier establisher #1: mints Username via body field
+  // `username`, so the primary slot it reserves is `usernameVar`. The
+  // alias loop will additionally mirror this value under any other
+  // placeholder name carrying semanticType=Username — including the
+  // unrelated endpoint below, whose `{name}` path param maps to
+  // `Username`, reserving `nameVar`.
+  makeOp('createUser', 'POST', '/users', {
+    produces: ['Username'],
+    establishes: {
+      kind: 'User',
+      identifiedBy: [{ in: 'body', name: 'username', semanticType: 'Username' }],
+    },
+  }),
+  // Unrelated endpoint that the consumer below never needs. It exists
+  // ONLY to bait the alias loop into reserving `nameVar` for Username.
+  makeOp('unrelatedListUsersByName', 'GET', '/users/by-name/{name}', {
+    required: ['Username'],
+    pathParameters: [{ name: 'name', semanticType: 'Username' }],
+  }),
+  // Body-identifier establisher #2: mints RoleName via body field
+  // `name` → primary slot `nameVar`, semantic RoleName. With the
+  // pre-fix behaviour, `nameVar` is already occupied by Username from
+  // the alias loop above; the body-collision guard then aborts this
+  // candidate and the consumer becomes unreachable.
+  makeOp('createRole', 'POST', '/roles', {
+    produces: ['RoleName'],
+    establishes: {
+      kind: 'Role',
+      identifiedBy: [{ in: 'body', name: 'name', semanticType: 'RoleName' }],
+    },
+  }),
+  // Consumer needs both Username (path: `userKey`) and RoleName (path:
+  // `roleName`). Crucially, neither path placeholder is named `name`,
+  // so the consumer itself does not exercise the polluted slot — only
+  // the unrelated endpoint above does.
+  makeOp('assignUserToRole', 'PUT', '/roles/{roleName}/users/{userKey}', {
+    required: ['Username', 'RoleName'],
+    pathParameters: [
+      { name: 'roleName', semanticType: 'RoleName' },
+      { name: 'userKey', semanticType: 'Username' },
+    ],
+  }),
+]);
+
 describe('planner contracts: x-semantic-establishes (#104)', () => {
   describe('simple establisher chain (createUser → getUser)', () => {
     it('produces a satisfied chain whose first step is the establisher', () => {
@@ -404,6 +460,38 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       expect(bindings.thingIdVar).toBeDefined();
       expect(bindings.widgetIdVar).toBeDefined();
       expect(bindings.thingIdVar).not.toBe(bindings.widgetIdVar);
+    });
+  });
+
+  describe('cross-endpoint alias pollution does not gate body-collision check', () => {
+    it('chains both body-id establishers when only an unrelated endpoint exposes the colliding placeholder name', () => {
+      // Class-scoped guard for the alias-pollution defect identified in
+      // PR #112 review (scenarioGenerator.ts:769). The alias loop must
+      // not write into the same map the body-collision guard consults
+      // — otherwise an unrelated endpoint elsewhere in the graph using
+      // `{name}` for one semanticType reserves `nameVar` against that
+      // semantic and silently aborts a later body-id establisher whose
+      // own raw body field happens to be `name` for a different
+      // semantic, even though the chain the BFS is exploring never
+      // visits the unrelated endpoint.
+      const result = generateScenariosForEndpoint(
+        fixtureAliasPollutionAcrossEndpoints,
+        'assignUserToRole',
+        { maxScenarios: 20 },
+      );
+      expect(result.unsatisfied).toBeFalsy();
+      const satisfied = result.scenarios.find((s) => {
+        const ops = opIdsOf(s);
+        return ops.includes('createUser') && ops.includes('createRole');
+      });
+      expect(satisfied).toBeDefined();
+      const bindings = satisfied?.bindings ?? {};
+      // Both primary slots must be present and hold distinct values —
+      // the body builder will read `usernameVar` for createUser and
+      // `nameVar` for createRole at codegen time.
+      expect(bindings.usernameVar).toBeDefined();
+      expect(bindings.nameVar).toBeDefined();
+      expect(bindings.usernameVar).not.toBe(bindings.nameVar);
     });
   });
 });
