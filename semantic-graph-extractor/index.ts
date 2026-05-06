@@ -182,25 +182,17 @@ export class SemanticGraphExtractor {
 // Issue #134 / camunda/camunda#52320: load the upstream
 // `semantic-kinds.json` registry so the planner can recognise
 // `external-entity` kinds (whose identifiers are minted outside the
-// Camunda REST API and have no in-API producer by design). Probes a
-// short list of well-known locations relative to repo root: first the
-// bundled spec dir (in case a future bundler copies it next to the
-// bundle), then the upstream clone path used by camunda-schema-bundler.
+// Camunda REST API and have no in-API producer by design). The
+// registry is emitted by `camunda-schema-bundler` (>=2.3.0) via the
+// `--output-semantic-kinds` flag (see camunda-schema-bundler#29).
 // Returns `undefined` when the file is missing — older spec pins that
-// predate the registry remain compatible (planner skips kind-scoped
-// fallback when no registry is present).
+// predate camunda/camunda#52322 don't ship the registry, and the
+// planner skips kind-scoped fallback in that case.
 function loadKindRegistry():
   | { kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> }
   | undefined {
-  const candidates = [
-    path.join(__dirname, '../../spec/bundled/semantic-kinds.json'),
-    path.join(
-      __dirname,
-      '../../external-spec/upstream/zeebe/gateway-protocol/src/main/proto/v2/semantic-kinds.json',
-    ),
-  ];
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
+  const candidate = path.join(__dirname, '../../spec/bundled/semantic-kinds.json');
+  if (fs.existsSync(candidate)) {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON registry
