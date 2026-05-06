@@ -1529,7 +1529,17 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
       !!v && typeof v === 'object' && !Array.isArray(v);
     const isValidEstablishes = (raw: unknown): boolean => {
       if (!isRecord(raw)) return false;
-      if (typeof raw.kind !== 'string') return false;
+      // Mirror the extractor's strict rules in
+      // `semantic-graph-extractor/schema-analyzer.ts`: `kind` must be
+      // a non-empty string; `shape`, if present, must be exactly
+      // `'edge'` (the only currently-known op-level shape — anything
+      // else, including a typo like `'edeg'`, is dropped wholesale by
+      // the extractor); `identifiedBy` must be a non-empty array and
+      // every member must validate. Counting an upstream annotation
+      // the extractor would intentionally reject would make the
+      // parity check fail for the wrong reason.
+      if (typeof raw.kind !== 'string' || raw.kind.length === 0) return false;
+      if (raw.shape !== undefined && raw.shape !== 'edge') return false;
       if (!Array.isArray(raw.identifiedBy) || raw.identifiedBy.length === 0) return false;
       for (const id of raw.identifiedBy) {
         if (!isRecord(id)) return false;
