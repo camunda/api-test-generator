@@ -1660,24 +1660,19 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
         });
         continue;
       }
-      // The endpoint itself may be the establisher for some of its own
-      // requirements (graphLoader drops those from `requires` at load
-      // time, but the spec-side `requiredSemanticTypes` we read here
-      // can still surface them for self-establishing endpoints). Treat
-      // those as trivially satisfied at the per-requirement level.
-      const selfEstablished = new Set<string>();
-      for (const sem of establishedRequirements) {
-        if (establishersByType.get(sem)?.includes(scen.endpoint.operationId)) {
-          selfEstablished.add(sem);
-        }
-      }
-      const requirementsToCover = establishedRequirements.filter((s) => !selfEstablished.has(s));
-      if (requirementsToCover.length === 0) continue;
+      // `requiredSemanticTypes` reaches us already filtered: graphLoader's
+      // `normalizeOp` strips self-established semantics from
+      // `op.requires.required` at load time, and the second-pass drop in
+      // `path-analyser/src/index.ts` re-applies the same filter after
+      // `loadOpenApiSemanticHints` re-introduces them from request-body
+      // `x-semantic-type` annotations. So a self-establishing endpoint's
+      // own minted semantic never appears in this list, and we can fold
+      // it directly into the chain-coverage check below.
       // Look for at least one satisfied scenario whose operation set
       // covers every required semantic via a registered establisher.
       const anyChainCoversAll = satisfiedScenarios.some((s) => {
         const chainOps = new Set(s.operations.map((o) => o.operationId));
-        return requirementsToCover.every((sem) => {
+        return establishedRequirements.every((sem) => {
           const expected = establishersByType.get(sem) ?? [];
           return expected.some((opId) => chainOps.has(opId));
         });
@@ -1685,7 +1680,7 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
       if (!anyChainCoversAll) {
         offenders.push({
           endpoint: scen.endpoint.operationId,
-          missing: requirementsToCover,
+          missing: establishedRequirements,
           reason: 'no-single-chain-covers-all',
         });
       }
