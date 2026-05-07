@@ -204,8 +204,12 @@ Playwright tests, validation tests). The regression strategy is **layered**
 - **Layer 2 — planner contract fixtures** ([tests/fixtures/planner/](tests/fixtures/planner)).
   Tiny dependency-graph fixtures paired with chain-shape assertions on
   `generateScenariosForEndpoint`.
-- **Layer 3 — bundled-spec invariants** ([tests/regression/bundled-spec-invariants.test.ts](tests/regression/bundled-spec-invariants.test.ts)).
+- **Layer 3 — bundled-spec invariants** ([configs/camunda-oca/regression-invariants.test.ts](configs/camunda-oca/regression-invariants.test.ts)).
   Named, human-readable invariants over the real bundled spec output.
+  Per-config (#128 PR 3): each named config under `configs/<name>/`
+  owns its own `regression-invariants.test.ts`; vitest's `describe.skipIf`
+  scopes each file to its config so a CI matrix leg only runs the
+  invariants for the active CONFIG.
 
 There is no Layer 4 end-to-end snapshot. The previous SHA-256 manifest
 guard was retired in favour of the layered strategy: a 412-file diff is

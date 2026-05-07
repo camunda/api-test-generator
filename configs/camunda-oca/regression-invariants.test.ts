@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  getActiveConfigName,
   getFeatureOutputDir,
   getGraphDir,
   getPlaywrightSuiteDir,
@@ -29,6 +30,15 @@ import {
  */
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
+// Per-config invariants (#128 PR 3): this file lives under
+// configs/camunda-oca/ and only runs when the active CONFIG is
+// camunda-oca. Vitest's `describe.skipIf` collects the file but skips
+// the inner suites for any other config, so a CI matrix leg targeting
+// a different config (e.g. camunda-hub) silently no-ops here and runs
+// its own configs/<that-config>/regression-invariants.test.ts file.
+const CONFIG_NAME = 'camunda-oca';
+const ACTIVE_CONFIG = getActiveConfigName(REPO_ROOT);
+const describeForThisConfig = describe.skipIf(ACTIVE_CONFIG !== CONFIG_NAME);
 // Per-config layout (#128 PR 2): all generator outputs live under
 // generated/<config>/. Resolved via the same configResolver helpers used
 // by the production code so any path drift surfaces in one place.
@@ -135,7 +145,7 @@ function loadScenarioFile(filename: string): ScenarioFile {
   return JSON.parse(readFileSync(p, 'utf8')) as ScenarioFile;
 }
 
-describe('bundled-spec invariants: extractor classification', () => {
+describeForThisConfig('bundled-spec invariants: extractor classification', () => {
   it('createProcessInstance required semantic types are exactly {ProcessDefinitionId, ProcessDefinitionKey} (#31/#32)', () => {
     // Locks in ancestor-required tracking: ElementId nested under the
     // optional `startInstructions[]` parent must NOT be required.
@@ -175,7 +185,7 @@ describe('bundled-spec invariants: extractor classification', () => {
   });
 });
 
-describe('bundled-spec invariants: planner output', () => {
+describeForThisConfig('bundled-spec invariants: planner output', () => {
   it('no scenario file references an operationId that is not in the dependency graph (stale-output guard)', () => {
     // Class-scoped guard against a stale `path-analyser/dist/output/`:
     // if a previous pipeline run left behind a `<verb>--<path>-scenarios.json`
@@ -1175,7 +1185,7 @@ describe('bundled-spec invariants: planner output', () => {
   });
 });
 
-describe('bundled-spec invariants: planner variant output (#37)', () => {
+describeForThisConfig('bundled-spec invariants: planner variant output (#37)', () => {
   function loadVariantFile(filename: string): VariantScenarioFile {
     const p = join(VARIANT_SCENARIOS_DIR, filename);
     if (!existsSync(p)) {
@@ -1260,7 +1270,7 @@ describe('bundled-spec invariants: planner variant output (#37)', () => {
   });
 });
 
-describe('bundled-spec invariants: emitted Playwright suite', () => {
+describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () => {
   it('no generated test contains a stray __invalidEnum sentinel object (#39)', () => {
     // Layer-3 mirror of the targeted enum-violation test in
     // tests/request-validation/. Catches any future analyser that
@@ -1368,7 +1378,7 @@ describe('bundled-spec invariants: emitted Playwright suite', () => {
   });
 });
 
-describe('bundled-spec invariants: emitted Playwright variant suite (#105)', () => {
+describeForThisConfig('bundled-spec invariants: emitted Playwright variant suite (#105)', () => {
   it('every variant scenario file is materialised as a *.variant.spec.ts (#105)', () => {
     // Class-scoped guard for Phase 3 of #105: the codegen pipeline must
     // consume every JSON file under dist/variant-output/ and emit a
@@ -1443,7 +1453,7 @@ describe('bundled-spec invariants: emitted Playwright variant suite (#105)', () 
   });
 });
 
-describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
+describeForThisConfig('bundled-spec invariants: x-semantic-establishes (#104)', () => {
   // Self-healing pattern (mirrors the camunda/camunda#52271 evaluateDecision
   // guard). While the upstream spec carries no `x-semantic-establishes`
   // annotations, the consumer endpoints (`getTenant`, `getUser`, `getGroup`,

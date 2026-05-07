@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'configs/*/regression-invariants.test.ts'],
     // Spec-pin precondition: aborts the run before any test file is
     // collected if the bundled spec hash drifted from the pin. See
     // tests/regression/spec-pin.setup.ts.

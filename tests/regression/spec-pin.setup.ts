@@ -84,7 +84,7 @@ export default function setup(): void {
         `  3. Update configs/${ACTIVE_CONFIG}/spec-pin.json: set specRef to the\n` +
         `     resolved 40-char commit SHA and expectedSpecHash to the\n` +
         `     value printed in spec/${ACTIVE_CONFIG}/bundled/spec-metadata.json\n` +
-        `  4. Update any invariants in tests/regression/bundled-spec-invariants.test.ts\n` +
+        `  4. Update any invariants in configs/${ACTIVE_CONFIG}/regression-invariants.test.ts\n` +
         `     whose values legitimately changed.\n` +
         `  5. Commit configs/${ACTIVE_CONFIG}/spec-pin.json alongside the invariant updates.\n`,
     );
