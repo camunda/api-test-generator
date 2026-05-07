@@ -11,7 +11,7 @@ malformed-request scenario kinds.
 ```
 ┌──────────────────────────┐
 │  camunda-schema-bundler  │  Fetches & bundles the upstream multi-file OpenAPI spec
-│  (devDependency)         │  → spec/bundled/rest-api.bundle.json
+│  (devDependency)         │  → spec/<config>/bundled/rest-api.bundle.json
 └────────────┬─────────────┘
              │
              ├──────────────────────────────────────────┐
@@ -23,14 +23,15 @@ malformed-request scenario kinds.
 │ extracts semantic types  │               │ Synthesizes ~24 kinds of │
 │ & operations             │               │ malformed-request tests  │
 │ → operation-dependency-  │               │ expecting HTTP 400       │
-│   graph.json             │               │ → request-validation/    │
-└────────────┬─────────────┘               │   generated/*.spec.ts    │
+│   graph.json             │               │ → generated/<config>/    │
+└────────────┬─────────────┘               │   request-validation/    │
+             │                             │   *.spec.ts              │
              │                             └──────────────────────────┘
              ▼
 ┌──────────────────────────┐
 │     path-analyser        │  Reads graph + spec, generates positive scenarios
 │                          │  per endpoint, emits Playwright test suites
-│                          │  → path-analyser/dist/generated-tests/*.spec.ts
+│                          │  → generated/<config>/playwright/*.spec.ts
 └──────────────────────────┘
 ```
 
@@ -258,7 +259,7 @@ npm run generate:request-validation
 
 # 3. Update configs/camunda-oca/spec-pin.json:
 #    - specRef:          the resolved 40-char commit SHA (NOT the branch/tag)
-#    - expectedSpecHash: the `specHash` printed in spec/bundled/spec-metadata.json
+#    - expectedSpecHash: the `specHash` printed in spec/<config>/bundled/spec-metadata.json
 # 4. Update any invariants whose values legitimately changed, then commit
 #    spec-pin.json alongside the invariant updates.
 ```
@@ -296,7 +297,7 @@ SPEC_REF=stable/8.9 npm run fetch-spec:ref
 npx camunda-schema-bundler --help
 ```
 
-The output lands in `spec/bundled/` (gitignored).
+The output lands in `spec/<config>/bundled/` (gitignored).
 
 ### Using a Custom Spec
 
@@ -372,7 +373,7 @@ npm run generate:request-validation          # all supported scenario kinds (dee
 npm run generate:request-validation:shallow  # only missing-required, type-mismatch, union
 ```
 
-Output lands in `request-validation/generated/`:
+Output lands in `generated/<config>/request-validation/`:
 
 | File | Description |
 |------|-------------|

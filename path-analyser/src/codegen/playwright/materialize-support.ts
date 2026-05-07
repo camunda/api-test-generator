@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getSpecBundleDir } from '../../configResolver.js';
 
 export const SUPPORT_TEMPLATE_FILES = [
   'env.ts',
@@ -137,20 +138,21 @@ export async function materializeSupport(
  *  assert-json-body response-schema artifact (`responses.json`). */
 export const RESPONSE_SCHEMAS_DIR_NAME = 'json-body-assertions';
 
-/** Default location of the bundled OpenAPI spec that the response-schema
- *  extractor reads. Resolved relative to the repo root. */
-const DEFAULT_SPEC_RELATIVE = 'spec/bundled/rest-api.bundle.json';
-
 /**
- * Walk up from `startDir` looking for the bundled OpenAPI spec. Used so
+ * Walk up from `startDir` looking for the bundled OpenAPI spec under the
+ * active config's spec directory (#128 PR 2). Used so
  * `materializeResponseSchemas` works regardless of whether the codegen is
- * invoked from the repo root or from `path-analyser/`.
+ * invoked from the repo root or from `path-analyser/`. Returns undefined
+ * if no repo root (one containing `configs.json`) is found.
  */
 function findDefaultSpecFile(startDir: string): string | undefined {
   let dir = startDir;
   for (let i = 0; i < 6; i++) {
-    const candidate = path.join(dir, DEFAULT_SPEC_RELATIVE);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(path.join(dir, 'configs.json'))) {
+      const candidate = path.join(getSpecBundleDir(dir), 'rest-api.bundle.json');
+      if (existsSync(candidate)) return candidate;
+      return undefined;
+    }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -181,8 +183,10 @@ export async function materializeResponseSchemas(
   if (!resolvedSpec) {
     throw new Error(
       `materializeResponseSchemas: could not locate bundled spec. ` +
-        `Pass an explicit specFile or ensure ${DEFAULT_SPEC_RELATIVE} exists ` +
-        `at or above ${outDir}.`,
+        `findDefaultSpecFile walks up from ${outDir} looking for a repo root ` +
+        `(one containing configs.json) and then resolves the active config ` +
+        `via $CONFIG / configs.json default to spec/<config>/bundled/rest-api.bundle.json. ` +
+        `Either run from within the api-test-generator repo, or pass specFile explicitly.`,
     );
   }
   const targetDir = path.join(outDir, RESPONSE_SCHEMAS_DIR_NAME);

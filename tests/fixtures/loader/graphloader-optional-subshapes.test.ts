@@ -27,7 +27,7 @@ let configDir: string;
 beforeEach(() => {
   workdir = mkdtempSync(join(tmpdir(), 'graphloader-subshape-fixture-'));
   baseDir = join(workdir, 'path-analyser');
-  graphDir = join(workdir, 'semantic-graph-extractor', 'dist', 'output');
+  graphDir = join(workdir, 'generated', 'camunda-oca', 'graph');
   configDir = join(workdir, 'configs', 'camunda-oca');
   mkdirSync(baseDir, { recursive: true });
   mkdirSync(graphDir, { recursive: true });

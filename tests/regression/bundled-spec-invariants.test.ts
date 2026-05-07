@@ -1,6 +1,14 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  getFeatureOutputDir,
+  getGraphDir,
+  getPlaywrightSuiteDir,
+  getScenariosDir,
+  getSpecBundleDir,
+  getVariantOutputDir,
+} from '../../path-analyser/src/configResolver.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -21,17 +29,14 @@ import { describe, expect, it } from 'vitest';
  */
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
-const GRAPH_PATH = join(
-  REPO_ROOT,
-  'semantic-graph-extractor',
-  'dist',
-  'output',
-  'operation-dependency-graph.json',
-);
-const SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'output');
-const FEATURE_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'feature-output');
-const VARIANT_SCENARIOS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'variant-output');
-const GENERATED_TESTS_DIR = join(REPO_ROOT, 'path-analyser', 'dist', 'generated-tests');
+// Per-config layout (#128 PR 2): all generator outputs live under
+// generated/<config>/. Resolved via the same configResolver helpers used
+// by the production code so any path drift surfaces in one place.
+const GRAPH_PATH = join(getGraphDir(REPO_ROOT), 'operation-dependency-graph.json');
+const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
+const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
+const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
+const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
 
 interface SemanticTypeEntry {
   semanticType: string;
@@ -324,20 +329,8 @@ describe('bundled-spec invariants: planner output', () => {
     // lands, the second branch becomes false, the first branch must
     // hold, and any future regression to "no chain planned" still
     // fails the test loudly.
-    const REPO_ROOT = join(import.meta.dirname, '..', '..');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const rawGraph = JSON.parse(
-      readFileSync(
-        join(
-          REPO_ROOT,
-          'semantic-graph-extractor',
-          'dist',
-          'output',
-          'operation-dependency-graph.json',
-        ),
-        'utf8',
-      ),
-    ) as {
+    const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{
         operationId: string;
         responseSemanticTypes?: Record<
@@ -422,20 +415,8 @@ describe('bundled-spec invariants: planner output', () => {
     // spec pin is bumped, the second branch becomes false, the first
     // branch must hold, and any future regression to "no chain planned"
     // fails the test loudly.
-    const REPO_ROOT = join(import.meta.dirname, '..', '..');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const rawGraph = JSON.parse(
-      readFileSync(
-        join(
-          REPO_ROOT,
-          'semantic-graph-extractor',
-          'dist',
-          'output',
-          'operation-dependency-graph.json',
-        ),
-        'utf8',
-      ),
-    ) as {
+    const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{
         operationId: string;
         responseSemanticTypes?: Record<
@@ -1475,20 +1456,8 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
   // presence (sentinel-vs-positive switch) and reachability (the chain
   // shape the planner produces).
   it('every consumer of an established semantic plans a chain through its establisher', () => {
-    const REPO_ROOT = join(import.meta.dirname, '..', '..');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const rawGraph = JSON.parse(
-      readFileSync(
-        join(
-          REPO_ROOT,
-          'semantic-graph-extractor',
-          'dist',
-          'output',
-          'operation-dependency-graph.json',
-        ),
-        'utf8',
-      ),
-    ) as {
+    const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{
         operationId: string;
         path?: string;
@@ -1531,7 +1500,7 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
     // so the parity check stays meaningful.
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const bundledSpec = JSON.parse(
-      readFileSync(join(REPO_ROOT, 'spec', 'bundled', 'rest-api.bundle.json'), 'utf8'),
+      readFileSync(join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json'), 'utf8'),
     ) as {
       paths?: Record<
         string,

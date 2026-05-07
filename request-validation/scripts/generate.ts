@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import fs from 'node:fs';
 import path from 'node:path';
+import { findRepoRoot, getActiveConfigName } from '../src/active-config.js';
 import { generateAdditionalPropsViolations } from '../src/analysis/additionalProps.js';
 import { generateUniversalAdditionalProp } from '../src/analysis/additionalPropUniversal.js';
 import {
@@ -50,6 +51,22 @@ interface CliOptions {
   deep?: boolean; // include deep missing & body type mismatches
 }
 
+// Default output directory: <repoRoot>/generated/<config>/request-validation.
+// The active config is validated against configs.json (allowlist + safe-name
+// regex), so a typo in CONFIG fails loud rather than silently writing into
+// a phantom directory.
+function defaultOutDir(): string {
+  const repoRoot = findRepoRoot(process.cwd());
+  if (!repoRoot) {
+    throw new Error(
+      `[generate] Could not locate configs.json starting from ${process.cwd()}. ` +
+        'Run from inside the api-test-generator repository, or pass --out-dir explicitly.',
+    );
+  }
+  const config = getActiveConfigName(repoRoot);
+  return path.join(repoRoot, 'generated', config, 'request-validation');
+}
+
 function parseArgs(): CliOptions {
   const args = process.argv.slice(2);
   // Support both `--flag value` and `--flag=value` syntaxes
@@ -74,7 +91,10 @@ function parseArgs(): CliOptions {
   const get = (k: string) => kv[k];
   const onlyRaw = get('--only');
   const only = onlyRaw ? new Set(onlyRaw.split(',').map((s) => s.trim())) : undefined;
-  const outDir = get('--out-dir') || 'generated';
+  // Per-config layout (#128 PR 2): default outDir lives under the repo
+  // root at generated/<config>/request-validation. cwd here is
+  // request-validation/ when invoked via the workspace npm script.
+  const outDir = get('--out-dir') || defaultOutDir();
   const importDepth = get('--qa-import-depth');
   const qaImportDepth = importDepth ? parseInt(importDepth, 10) : 4;
   const maxMissing = get('--max-missing');

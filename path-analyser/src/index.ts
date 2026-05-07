@@ -3,7 +3,12 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
-import { getActiveConfigDir } from './configResolver.js';
+import {
+  getActiveConfigDir,
+  getFeatureOutputDir,
+  getScenariosDir,
+  getVariantOutputDir,
+} from './configResolver.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
@@ -34,9 +39,12 @@ async function main() {
   const cwd = process.cwd();
   const suffix = 'path-analyser';
   const baseDir = cwd.endsWith(suffix) ? cwd : path.resolve(cwd, suffix);
-  const outputDir = path.resolve(baseDir, 'dist/output');
-  const featureDir = path.resolve(baseDir, 'dist/feature-output');
-  const variantDir = path.resolve(baseDir, 'dist/variant-output');
+  const repoRoot = path.resolve(baseDir, '..');
+  // Per-config layout (#128 PR 2): scenario JSON + feature output land
+  // under generated/<config>/, not inside the path-analyser workspace.
+  const outputDir = getScenariosDir(repoRoot);
+  const featureDir = getFeatureOutputDir(repoRoot);
+  const variantDir = getVariantOutputDir(repoRoot);
   // Wipe before write so files left over from a previous spec version (e.g.
   // an operationId that no longer exists upstream) cannot survive into the
   // current run and silently break Layer-3 invariants. Without this, local

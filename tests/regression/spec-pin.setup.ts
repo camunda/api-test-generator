@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getActiveConfigName } from '../../path-analyser/src/configResolver.js';
+import { getActiveConfigName, getSpecBundleDir } from '../../path-analyser/src/configResolver.js';
 
 /**
  * Vitest globalSetup — runs once before any test file is collected.
@@ -29,7 +29,7 @@ const REPO_ROOT = resolve(dirname(__filename), '..', '..');
 // silently reading an unexpected path. See #128.
 const ACTIVE_CONFIG = getActiveConfigName(REPO_ROOT);
 const PIN_PATH = join(REPO_ROOT, 'configs', ACTIVE_CONFIG, 'spec-pin.json');
-const METADATA_PATH = join(REPO_ROOT, 'spec', 'bundled', 'spec-metadata.json');
+const METADATA_PATH = join(getSpecBundleDir(REPO_ROOT), 'spec-metadata.json');
 
 interface SpecPin {
   specRef: string;
@@ -83,7 +83,7 @@ export default function setup(): void {
         `  2. npm run testsuite:generate && npm run generate:request-validation\n` +
         `  3. Update configs/${ACTIVE_CONFIG}/spec-pin.json: set specRef to the\n` +
         `     resolved 40-char commit SHA and expectedSpecHash to the\n` +
-        `     value printed in spec/bundled/spec-metadata.json\n` +
+        `     value printed in spec/${ACTIVE_CONFIG}/bundled/spec-metadata.json\n` +
         `  4. Update any invariants in tests/regression/bundled-spec-invariants.test.ts\n` +
         `     whose values legitimately changed.\n` +
         `  5. Commit configs/${ACTIVE_CONFIG}/spec-pin.json alongside the invariant updates.\n`,

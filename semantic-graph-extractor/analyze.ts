@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { getActiveConfigName } from './active-config';
 import { GraphBuilder } from './graph-builder';
 import { SemanticGraphExtractor } from './index';
 
@@ -11,8 +12,13 @@ async function generateAnalysisReport() {
   const graphBuilder = new GraphBuilder();
 
   try {
-    // Load the previously generated graph
-    const graphPath = path.join(__dirname, 'output/operation-dependency-graph.json');
+    // Load the previously generated graph from the per-config layout
+    // (#128 PR 2): __dirname is semantic-graph-extractor/dist/ when
+    // compiled, so ../.. reaches the repo root.
+    const repoRoot = path.resolve(__dirname, '../..');
+    const config = getActiveConfigName(repoRoot);
+    const graphDir = path.join(repoRoot, 'generated', config, 'graph');
+    const graphPath = path.join(graphDir, 'operation-dependency-graph.json');
     const graph = await extractor.loadGraph(graphPath);
 
     console.log('Generating analysis report...');
@@ -21,7 +27,7 @@ async function generateAnalysisReport() {
     const summary = graphBuilder.generateSummary(graph);
 
     // Save the summary to a file
-    const summaryPath = path.join(__dirname, 'output/dependency-graph-analysis.md');
+    const summaryPath = path.join(graphDir, 'dependency-graph-analysis.md');
     fs.writeFileSync(summaryPath, summary);
 
     console.log(`Analysis report saved to: ${summaryPath}`);

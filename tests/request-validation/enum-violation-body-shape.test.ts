@@ -1,6 +1,10 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { getSpecBundleDir } from '../../path-analyser/src/configResolver.js';
 import { generateEnumViolations } from '../../request-validation/src/analysis/enumViolations.js';
 import { loadSpec } from '../../request-validation/src/spec/loader.js';
+
+const SPEC_PATH = join(getSpecBundleDir(process.cwd()), 'rest-api.bundle.json');
 
 /**
  * Regression guard for the enum-violation body shape (issue #39).
@@ -20,7 +24,7 @@ import { loadSpec } from '../../request-validation/src/spec/loader.js';
  */
 describe('request-validation: enum-violation body shape', () => {
   it('emits no `__invalidEnum` marker objects in any generated body', async () => {
-    const m = await loadSpec(`${process.cwd()}/spec/bundled/rest-api.bundle.json`);
+    const m = await loadSpec(SPEC_PATH);
     const scenarios = generateEnumViolations(m.operations, {});
     expect(scenarios.length).toBeGreaterThan(0);
     const offenders = scenarios.filter((s) =>
@@ -32,7 +36,7 @@ describe('request-validation: enum-violation body shape', () => {
   });
 
   it('shapes array-index path segments as arrays, not numeric-keyed objects', async () => {
-    const m = await loadSpec(`${process.cwd()}/spec/bundled/rest-api.bundle.json`);
+    const m = await loadSpec(SPEC_PATH);
     const scenarios = generateEnumViolations(m.operations, {});
     // Find scenarios whose target traverses an array index (e.g. `sort.0.field`).
     const arrayIndexScenarios = scenarios.filter((s) => /\.\d+\./.test(s.target ?? ''));

@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { getActiveConfigName } from './active-config';
 import { SemanticGraphExtractor } from './index';
 import type { DependencyEdge, OperationParameter, SemanticTypeReference } from './types';
 
@@ -9,8 +10,18 @@ async function validateExtraction() {
   const extractor = new SemanticGraphExtractor();
 
   try {
-    // Load the graph
-    const graphPath = path.join(__dirname, 'output/operation-dependency-graph.json');
+    // Load the graph from the per-config layout (#128 PR 2). __dirname
+    // is semantic-graph-extractor/dist/ when compiled, so ../.. reaches
+    // the repo root.
+    const repoRoot = path.resolve(__dirname, '../..');
+    const config = getActiveConfigName(repoRoot);
+    const graphPath = path.join(
+      repoRoot,
+      'generated',
+      config,
+      'graph',
+      'operation-dependency-graph.json',
+    );
     const graph = await extractor.loadGraph(graphPath);
 
     console.log('=== Semantic Graph Validation ===\n');

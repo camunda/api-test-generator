@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getActiveConfigName } from '../src/active-config.js';
 
 async function rmDir(dir: string) {
   if (!fs.existsSync(dir)) return;
@@ -30,8 +31,13 @@ async function main() {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const repoRoot = path.resolve(__dirname, '..', '..');
-  const generatorRoot = path.resolve(__dirname, '..');
-  const generatedDir = path.join(generatorRoot, 'generated');
+  // Per-config layout (#128 PR 2): the generated request-validation suite
+  // lives at <repoRoot>/generated/<config>/request-validation. The active
+  // config is validated against configs.json (allowlist + safe-name regex)
+  // so a typo fails loud rather than silently copying from/to a phantom
+  // directory.
+  const config = getActiveConfigName(repoRoot);
+  const generatedDir = path.join(repoRoot, 'generated', config, 'request-validation');
   const qaTestsDir = path.join(repoRoot, 'tests', 'api', 'v2', 'request-validation');
 
   if (!fs.existsSync(generatedDir)) {

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { getActiveConfigName } from './active-config';
 import { CrossContaminationAnalyzer } from './cross-contamination-analyzer';
 import { GraphBuilder } from './graph-builder';
 import { RootDependencyAnalyzer } from './root-dependency-analyzer';
@@ -191,7 +192,12 @@ export class SemanticGraphExtractor {
 function loadKindRegistry():
   | { kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> }
   | undefined {
-  const candidate = path.join(__dirname, '../../spec/bundled/semantic-kinds.json');
+  // __dirname is semantic-graph-extractor/dist/ when compiled, so ../..
+  // reaches the repo root. The registry now lives under the active
+  // config's spec directory (#128 PR 2).
+  const repoRoot = path.resolve(__dirname, '../..');
+  const config = getActiveConfigName(repoRoot);
+  const candidate = path.join(repoRoot, 'spec', config, 'bundled', 'semantic-kinds.json');
   if (fs.existsSync(candidate)) {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
@@ -225,13 +231,22 @@ async function main() {
   const extractor = new SemanticGraphExtractor();
 
   try {
-    // Get path from command line arguments, env var, or use default
-    // __dirname is semantic-graph-extractor/dist/ when compiled, so ../../ reaches repo root
+    // __dirname is semantic-graph-extractor/dist/ when compiled, so ../..
+    // reaches the repo root. Spec input + graph output are both
+    // partitioned by config (#128 PR 2).
+    const repoRoot = path.resolve(__dirname, '../..');
+    const config = getActiveConfigName(repoRoot);
     const specPath =
       process.argv[2] ||
       process.env.OPENAPI_SPEC_PATH ||
-      path.join(__dirname, '../../spec/bundled/rest-api.bundle.json');
-    const outputPath = path.join(__dirname, 'output/operation-dependency-graph.json');
+      path.join(repoRoot, 'spec', config, 'bundled', 'rest-api.bundle.json');
+    const outputPath = path.join(
+      repoRoot,
+      'generated',
+      config,
+      'graph',
+      'operation-dependency-graph.json',
+    );
 
     // Extract the dependency graph
     const graph = await extractor.extractGraph(specPath);

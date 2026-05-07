@@ -15,16 +15,14 @@
   },
   "files": {
     "includes": [
-      "path-analyser/dist/generated-tests/**/*.ts",
-      "request-validation/generated/**/*.ts",
+      "generated/**/*.ts",
       "!**/node_modules/**"
     ]
   },
   "linter": {
     "enabled": true,
     "includes": [
-      "path-analyser/dist/generated-tests/**/*.ts",
-      "request-validation/generated/**/*.ts",
+      "generated/**/*.ts",
       "!**/node_modules/**"
     ],
     "rules": {

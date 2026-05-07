@@ -18,7 +18,7 @@ Scenario JSON key fields:
 - `requestPlan` – ordered steps, each with status expectation, body/multipart templates, optional `extract` bindings.
 - `responseShapeFields` / `responseShapeSemantics` – drive final step assertions.
 
-Examples: See `dist/feature-output/post--messages--publication-scenarios.json` (conditional idempotent duplicate) and `post--tenants-scenarios.json` (conflict duplicate).
+Examples: See `generated/<config>/feature-output/post--messages--publication-scenarios.json` (conditional idempotent duplicate) and `post--tenants-scenarios.json` (conflict duplicate).
 
 ## Install
 
@@ -32,12 +32,12 @@ npm install
 npm start   # shorthand for: npm run build && npm run generate:scenarios
 ```
 
-This produces JSON files under `dist/feature-output/` (feature coverage enriched scenarios) and legacy raw scenario files (graph based) under `dist/output/`.
+This produces JSON files under `generated/<config>/feature-output/` (feature coverage enriched scenarios) and legacy raw scenario files (graph based) under `generated/<config>/scenarios/`.
 
 Structure:
 
-- `dist/feature-output/<method>--<path>-scenarios.json` – scenario collection for a single endpoint (feature coverage + metadata like `requestPlan`, `responseShapeFields`, oneOf variants, negative union variants, etc.).
-- `dist/output/index.json` – summary of processed endpoints.
+- `generated/<config>/feature-output/<method>--<path>-scenarios.json` – scenario collection for a single endpoint (feature coverage + metadata like `requestPlan`, `responseShapeFields`, oneOf variants, negative union variants, etc.).
+- `generated/<config>/scenarios/index.json` – summary of processed endpoints.
 
 Constraints / heuristics:
 
@@ -56,7 +56,7 @@ npm run codegen:playwright -- searchProcessInstances
 npm run codegen:playwright:all
 ```
 
-Outputs go to `dist/generated-tests/`:
+Outputs go to `generated/<config>/playwright/`:
 
 - `<operationId>.feature.spec.ts` – One test per scenario. Assertions include:
   - Status code.
@@ -67,7 +67,7 @@ Outputs go to `dist/generated-tests/`:
 
 ### Running the Generated Tests
 
-The emitted suite at `dist/generated-tests/` is now a self-contained, runnable Playwright project. Each codegen run materializes:
+The emitted suite at `generated/<config>/playwright/` is now a self-contained, runnable Playwright project. Each codegen run materializes:
 
 - `package.json` (declares the `test` script and `@playwright/test` devDep)
 - `playwright.config.ts`
@@ -79,7 +79,7 @@ The emitted suite at `dist/generated-tests/` is now a self-contained, runnable P
 So you can install and run the suite in place against any reachable Camunda cluster:
 
 ```bash
-cd dist/generated-tests
+cd generated/<config>/playwright
 npm install
 API_BASE_URL=http://localhost:8080/v2 npm test
 ```
@@ -87,13 +87,13 @@ API_BASE_URL=http://localhost:8080/v2 npm test
 Alternatively you can still execute a single spec via the parent project's already-installed Playwright:
 
 ```bash
-npx playwright test dist/generated-tests/searchProcessInstances.feature.spec.ts
+npx playwright test generated/<config>/playwright/searchProcessInstances.feature.spec.ts
 ```
 
 Or run all generated specs from the parent project:
 
 ```bash
-npx playwright test dist/generated-tests
+npx playwright test generated/<config>/playwright
 ```
 
 Note: multipart endpoints (e.g., createDeployment) use a small fixture located under `fixtures/` by default. Adjust paths or variables as needed. Multipart requests are emitted using Playwright's keyed `multipart` object with `FilePayload` entries (`{ name, mimeType, buffer }`).
@@ -110,7 +110,7 @@ Note: multipart endpoints (e.g., createDeployment) use a small fixture located u
     - Optional `parameters` can seed scenario bindings (e.g., `{ jobType: "sampleJobType" }`).
   - Example entries are provided for BPMN, Form, and DMN.
 
-- Output manifest (read-only, regenerated): `api-test/path-analyser/dist/output/deployment-artifacts.manifest.json`
+- Output manifest (read-only, regenerated): `api-test/generated/<config>/scenarios/deployment-artifacts.manifest.json`
   - Purpose: machine-readable list of artifacts referenced by generated scenarios/tests.
   - Shape: `{ artifacts: [{ kind, path, description? }] }`
   - Use this file to build artifacts programmatically for a CI test environment or pre-seed step.
@@ -130,7 +130,7 @@ Example:
 
 ```bash
 API_BASE_URL=https://api.example.com API_TOKEN=abc123 \
-  npx playwright test dist/generated-tests/searchProcessInstances.feature.spec.ts
+  npx playwright test generated/<config>/playwright/searchProcessInstances.feature.spec.ts
 ```
 
 ## Response Shape Recorder
@@ -159,7 +159,7 @@ Usage
 
 ```bash
 npm run codegen:playwright -- <operationId>
-npx playwright test dist/generated-tests/<operationId>.feature.spec.ts
+npx playwright test generated/<config>/playwright/<operationId>.feature.spec.ts
 ```
 
 2) Aggregate observations into a per-operation summary:
@@ -242,7 +242,7 @@ Auto-seeding occurs only if:
 - `src/codegen/support/seed-rules.json` – seeding patterns.
 - `domain-semantics.json` / `.schema.json` – domain semantic definitions.
 - `fixtures/deployment-artifacts.json` – deployment artifact registry.
-- `dist/feature-output/*-scenarios.json` – generated scenario collections.
+- `generated/<config>/feature-output/*-scenarios.json` – generated scenario collections.
 
 ## Regeneration Shortcut
 
@@ -260,7 +260,7 @@ Rebuild TypeScript before generating scenarios or code:
 npm run build
 ```
 
-Then regenerate scenarios & tests as needed. The code generator scans `dist/feature-output/` for a file whose `endpoint.operationId` matches the provided argument.
+Then regenerate scenarios & tests as needed. The code generator scans `generated/<config>/feature-output/` for a file whose `endpoint.operationId` matches the provided argument.
 
 ---
 

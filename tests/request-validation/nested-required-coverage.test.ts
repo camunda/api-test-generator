@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { getSpecBundleDir } from '../../path-analyser/src/configResolver.js';
 import { generateDeepMissingRequired } from '../../request-validation/src/analysis/deepMissingRequired.js';
 import { loadSpec } from '../../request-validation/src/spec/loader.js';
 
@@ -22,7 +24,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 describe('request-validation: nested-required negative coverage', () => {
   it('every nested-required leaf is covered by a deep missing-required scenario', async () => {
-    const m = await loadSpec(`${process.cwd()}/spec/bundled/rest-api.bundle.json`);
+    const m = await loadSpec(join(getSpecBundleDir(process.cwd()), 'rest-api.bundle.json'));
 
     // Discover every (operationId, dotted-leaf-path) pair where the leaf
     // lives strictly below the request-body root. We deliberately skip

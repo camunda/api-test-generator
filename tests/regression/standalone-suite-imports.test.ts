@@ -1,6 +1,10 @@
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import {
+  getPlaywrightSuiteDir,
+  getRequestValidationSuiteDir,
+} from '../../path-analyser/src/configResolver.js';
 
 /**
  * Class-of-defect guard test.
@@ -26,11 +30,11 @@ interface Suite {
 const SUITES: readonly Suite[] = [
   {
     label: 'request-validation',
-    root: path.join(REPO_ROOT, 'request-validation', 'generated'),
+    root: getRequestValidationSuiteDir(REPO_ROOT),
   },
   {
     label: 'path-analyser',
-    root: path.join(REPO_ROOT, 'path-analyser', 'dist', 'generated-tests'),
+    root: getPlaywrightSuiteDir(REPO_ROOT),
   },
 ];
 

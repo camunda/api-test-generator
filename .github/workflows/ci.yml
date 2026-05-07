@@ -103,10 +103,7 @@ jobs:
         with:
           name: pipeline-outputs
           path: |
-            semantic-graph-extractor/dist/output
-            path-analyser/dist/output
-            path-analyser/dist/generated-tests
-            request-validation/generated
-            spec/bundled/spec-metadata.json
+            generated
+            spec
           if-no-files-found: warn
           retention-days: 7

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
+import { getSpecBundleDir } from './configResolver.js';
 import type {
   ExtractedRequestVariantsIndex,
   RequestOneOfGroupSummary,
@@ -53,9 +54,12 @@ interface ResponseObject {
 }
 
 export async function extractResponseAndRequestVariants(baseDir: string, semanticTypes: string[]) {
-  // baseDir points to path-analyser; spec lives at repo root under spec/bundled/
+  // baseDir points to path-analyser; spec lives under the active
+  // config's spec/<config>/bundled/ directory at the repo root
+  // (#128 PR 2).
+  const repoRoot = path.resolve(baseDir, '..');
   const specPath =
-    process.env.OPENAPI_SPEC_PATH || path.resolve(baseDir, '../spec/bundled/rest-api.bundle.json');
+    process.env.OPENAPI_SPEC_PATH || path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json');
   const raw = await fs.readFile(specPath, 'utf8');
   // biome-ignore lint/plugin: YAML.parse returns unknown; this is the single boundary where the parsed spec is narrowed to its known top-level shape.
   const doc = YAML.parse(raw) as OpenAPISchemaObject;

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { getActiveConfigDir } from './configResolver.js';
+import { getActiveConfigDir, getGraphDir, getSpecBundleDir } from './configResolver.js';
 import { validateDomainSemantics } from './domainSemanticsValidator.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
@@ -12,10 +12,16 @@ class DomainSemanticsValidationFailure extends Error {
   }
 }
 
-// Sibling semantic-graph-extractor package produces the operation dependency graph.
-const GRAPH_RELATIVE = '../semantic-graph-extractor/dist/output/operation-dependency-graph.json';
-// The bundled OpenAPI spec lives at the repo root under spec/bundled/.
-const OPENAPI_SPEC = '../spec/bundled/rest-api.bundle.json';
+// Per-config layout helpers (#128 PR 2). The graph + bundled OpenAPI
+// spec live under generated/<config>/graph/ and spec/<config>/bundled/
+// respectively, resolved at call time so the active CONFIG env var
+// takes effect even after the planner module is cached.
+function graphPathFor(repoRoot: string): string {
+  return path.join(getGraphDir(repoRoot), 'operation-dependency-graph.json');
+}
+function openApiSpecPathFor(repoRoot: string): string {
+  return path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json');
+}
 
 // ---- Raw shapes for permissive JSON ingestion ----
 interface RawOp {
@@ -108,9 +114,11 @@ interface RawOpenApiDoc {
 }
 
 export async function loadGraph(baseDir: string): Promise<OperationGraph> {
-  // Allow override via env vars (relative to baseDir or absolute)
+  // Allow override via env vars (absolute path or relative to baseDir).
+  // baseDir points to the path-analyser workspace; the repo root is one level up.
+  const repoRoot = path.resolve(baseDir, '..');
   const overrideGraph = process.env.OPERATION_GRAPH_PATH;
-  const graphPath = path.resolve(baseDir, overrideGraph || GRAPH_RELATIVE);
+  const graphPath = overrideGraph ? path.resolve(baseDir, overrideGraph) : graphPathFor(repoRoot);
   const raw = await readFile(graphPath, 'utf8');
   let parsed: RawGraphRoot | RawOp[];
   try {
@@ -788,8 +796,11 @@ function asReqLike(v: unknown): { required?: unknown; optional?: unknown } | und
 export async function loadOpenApiSemanticHints(
   baseDir: string,
 ): Promise<Record<string, { required: string[]; optional: string[] }>> {
+  const repoRoot = path.resolve(baseDir, '..');
   const overrideSpec = process.env.OPENAPI_SPEC_PATH;
-  const specPath = path.resolve(baseDir, overrideSpec || OPENAPI_SPEC);
+  const specPath = overrideSpec
+    ? path.resolve(baseDir, overrideSpec)
+    : openApiSpecPathFor(repoRoot);
   let raw: string;
   try {
     raw = await readFile(specPath, 'utf8');

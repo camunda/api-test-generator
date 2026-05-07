@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { getGraphDir } from '../../path-analyser/src/configResolver.ts';
 import { loadGraph } from '../../path-analyser/src/graphLoader.ts';
 
 /**
@@ -60,13 +61,7 @@ describe('graphLoader: produces fallback tightening (#97)', () => {
     // `producesSemanticTypes` declarations, since `normalizeOp` collapses
     // them into the same `produces` array as the response-derived ones.
     const fs = await import('node:fs');
-    const rawGraphPath = path.join(
-      REPO_ROOT,
-      'semantic-graph-extractor',
-      'dist',
-      'output',
-      'operation-dependency-graph.json',
-    );
+    const rawGraphPath = path.join(getGraphDir(REPO_ROOT), 'operation-dependency-graph.json');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const rawGraph = JSON.parse(fs.readFileSync(rawGraphPath, 'utf8')) as {
       operations: Array<{
