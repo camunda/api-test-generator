@@ -492,6 +492,209 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       expect(bindings.usernameVar).toBeDefined();
       expect(bindings.nameVar).toBeDefined();
       expect(bindings.usernameVar).not.toBe(bindings.nameVar);
+      // After the stale-alias overwrite at the primary slot, any alias
+      // mirrored from the same identifier (here: `roleNameVar` from
+      // the consumer's path placeholder for RoleName) must hold the
+      // FRESH primary value — not the stale `value` that was computed
+      // from `bindingsDraft[primaryVar]` *before* the overwrite. A
+      // mismatch means the URL emitter would render the consumer's
+      // `{roleName}` placeholder with the polluted Username value.
+      expect(bindings.roleNameVar).toBe(bindings.nameVar);
+    });
+  });
+
+  // Issue #134 / camunda/camunda#52322: bimodal entity sources. An edge
+  // endpoint whose `identifiedBy` member carries `acceptsExternal: true`
+  // may be satisfied by a client-minted ID when no in-API producer is
+  // reachable. Class-scoped properties:
+  //   1. Producer-preference is preserved when a producer DOES exist
+  //      (no regression for today's `createGroup → assignGroupToRole`).
+  //   2. When the producer is missing AND the component is bimodal,
+  //      the planner mints a deterministic ID, satisfies the chain,
+  //      and tags `externalEntitySites` with the semantic so the
+  //      negative-suite can suppress unknown-id assertions.
+  //   3. Partial bimodality (one component bimodal, one not) still
+  //      surfaces the non-bimodal component as missing.
+  describe('bimodal edge — acceptsExternal client-mint fallback (#134)', () => {
+    // Edge endpoint requires GroupId+RoleId; only the GroupId tuple is
+    // bimodal. createRole exists; createGroup does NOT — so GroupId is
+    // unreachable via producer/establisher. The planner must fall
+    // back to a client-minted GroupId.
+    const fixtureBimodalNoProducer: OperationGraph = makeGraph([
+      makeOp('createRole', 'POST', '/roles', {
+        produces: ['RoleId'],
+        establishes: {
+          kind: 'Role',
+          identifiedBy: [{ in: 'body', name: 'roleId', semanticType: 'RoleId' }],
+        },
+      }),
+      makeOp('assignGroupToRole', 'PUT', '/roles/{roleId}/groups/{groupId}', {
+        required: ['RoleId', 'GroupId'],
+        pathParameters: [
+          { name: 'roleId', semanticType: 'RoleId' },
+          { name: 'groupId', semanticType: 'GroupId' },
+        ],
+        establishes: {
+          kind: 'RoleGroupMembership',
+          shape: 'edge',
+          identifiedBy: [
+            { in: 'path', name: 'roleId', semanticType: 'RoleId' },
+            { in: 'path', name: 'groupId', semanticType: 'GroupId', acceptsExternal: true },
+          ],
+        },
+      }),
+    ]);
+
+    // Same shape, but with createGroup present in the graph. Producer-
+    // preference must win — no fallback, no externalEntitySites tag.
+    const fixtureBimodalWithProducer: OperationGraph = makeGraph([
+      makeOp('createGroup', 'POST', '/groups', {
+        produces: ['GroupId'],
+        establishes: {
+          kind: 'Group',
+          identifiedBy: [{ in: 'body', name: 'groupId', semanticType: 'GroupId' }],
+        },
+      }),
+      makeOp('createRole', 'POST', '/roles', {
+        produces: ['RoleId'],
+        establishes: {
+          kind: 'Role',
+          identifiedBy: [{ in: 'body', name: 'roleId', semanticType: 'RoleId' }],
+        },
+      }),
+      makeOp('assignGroupToRole', 'PUT', '/roles/{roleId}/groups/{groupId}', {
+        required: ['RoleId', 'GroupId'],
+        pathParameters: [
+          { name: 'roleId', semanticType: 'RoleId' },
+          { name: 'groupId', semanticType: 'GroupId' },
+        ],
+        establishes: {
+          kind: 'RoleGroupMembership',
+          shape: 'edge',
+          identifiedBy: [
+            { in: 'path', name: 'roleId', semanticType: 'RoleId' },
+            { in: 'path', name: 'groupId', semanticType: 'GroupId', acceptsExternal: true },
+          ],
+        },
+      }),
+    ]);
+
+    // Edge requires Username (not bimodal) AND GroupId (bimodal). No
+    // producer for either. Username must still surface as missing —
+    // the bimodal fallback must NOT silently extend to non-bimodal
+    // components.
+    const fixturePartialBimodalNoProducers: OperationGraph = makeGraph([
+      makeOp('assignUserToGroup', 'PUT', '/groups/{groupId}/users/{username}', {
+        required: ['GroupId', 'Username'],
+        pathParameters: [
+          { name: 'groupId', semanticType: 'GroupId' },
+          { name: 'username', semanticType: 'Username' },
+        ],
+        establishes: {
+          kind: 'GroupUserMembership',
+          shape: 'edge',
+          identifiedBy: [
+            { in: 'path', name: 'groupId', semanticType: 'GroupId', acceptsExternal: true },
+            { in: 'path', name: 'username', semanticType: 'Username' },
+          ],
+        },
+      }),
+    ]);
+
+    it('mints a client-side GroupId and tags externalEntitySites when no producer exists', () => {
+      const result = generateScenariosForEndpoint(fixtureBimodalNoProducer, 'assignGroupToRole', {
+        maxScenarios: 10,
+      });
+      expect(result.unsatisfied).toBeFalsy();
+      const scenario = result.scenarios[0];
+      expect(opIdsOf(scenario)).toEqual(['createRole', 'assignGroupToRole']);
+      const bindings = scenario.bindings ?? {};
+      expect(bindings.groupIdVar).toBeDefined();
+      expect(typeof bindings.groupIdVar).toBe('string');
+      expect(bindings.groupIdVar).not.toBe('__PENDING__');
+      expect(scenario.externalEntitySites).toContain('GroupId');
+    });
+
+    it('prefers the in-graph producer when one exists (no regression, no externalEntitySites tag)', () => {
+      const result = generateScenariosForEndpoint(fixtureBimodalWithProducer, 'assignGroupToRole', {
+        maxScenarios: 10,
+      });
+      expect(result.unsatisfied).toBeFalsy();
+      const scenario = result.scenarios[0];
+      const ops = opIdsOf(scenario);
+      // Class-scoped: createGroup MUST appear in every satisfied chain
+      // for the bimodal-with-producer case. The fallback path must
+      // never short-circuit a reachable producer.
+      expect(ops).toContain('createGroup');
+      expect(ops).toContain('createRole');
+      expect(ops[ops.length - 1]).toBe('assignGroupToRole');
+      expect(scenario.externalEntitySites ?? []).not.toContain('GroupId');
+    });
+
+    it('does not extend the bimodal fallback to non-bimodal components', () => {
+      const result = generateScenariosForEndpoint(
+        fixturePartialBimodalNoProducers,
+        'assignUserToGroup',
+        { maxScenarios: 10 },
+      );
+      // Username has no producer/establisher AND is not flagged
+      // bimodal — the scenario must be unsatisfied with Username
+      // (only) in missingSemanticTypes.
+      expect(result.unsatisfied).toBe(true);
+      const missing = result.scenarios[0].missingSemanticTypes ?? [];
+      expect(missing).toContain('Username');
+      expect(missing).not.toContain('GroupId');
+    });
+
+    // Issue #134 / camunda/camunda#52320 (kind-scoped). When the
+    // missing semantic is owned by a kind whose registry shape is
+    // `external-entity` (e.g. `ClientId` is owned by
+    // `Client { shape: "external-entity" }`), the planner falls back
+    // to a client-minted ID even though no per-tuple
+    // `acceptsExternal: true` flag is present. Class-scoped: this is
+    // the source-of-truth for "no in-API producer by design"; a
+    // future identifier added to any external-entity kind must be
+    // auto-mintable without an extractor or planner change.
+    it('mints a client-side ClientId for external-entity-owned identifiers (kind-scoped)', () => {
+      const fixtureKindScoped: OperationGraph = {
+        ...makeGraph([
+          makeOp('createRole', 'POST', '/roles', {
+            produces: ['RoleId'],
+            establishes: {
+              kind: 'Role',
+              identifiedBy: [{ in: 'body', name: 'roleId', semanticType: 'RoleId' }],
+            },
+          }),
+          makeOp('assignRoleToClient', 'PUT', '/roles/{roleId}/clients/{clientId}', {
+            required: ['RoleId', 'ClientId'],
+            pathParameters: [
+              { name: 'roleId', semanticType: 'RoleId' },
+              { name: 'clientId', semanticType: 'ClientId' },
+            ],
+            establishes: {
+              kind: 'RoleClientMembership',
+              shape: 'edge',
+              identifiedBy: [
+                { in: 'path', name: 'roleId', semanticType: 'RoleId' },
+                // Note: NO acceptsExternal on this tuple. The fallback
+                // must trigger via the kind registry alone.
+                { in: 'path', name: 'clientId', semanticType: 'ClientId' },
+              ],
+            },
+          }),
+        ]),
+        externalEntityIdentifiers: new Set(['ClientId']),
+      };
+      const result = generateScenariosForEndpoint(fixtureKindScoped, 'assignRoleToClient', {
+        maxScenarios: 10,
+      });
+      expect(result.unsatisfied).toBeFalsy();
+      const scenario = result.scenarios[0];
+      expect(opIdsOf(scenario)).toEqual(['createRole', 'assignRoleToClient']);
+      const bindings = scenario.bindings ?? {};
+      expect(bindings.clientIdVar).toBeDefined();
+      expect(typeof bindings.clientIdVar).toBe('string');
+      expect(scenario.externalEntitySites).toContain('ClientId');
     });
 
     it('mirrors the freshly-minted RoleName value into roleNameVar, not the stale Username alias', () => {

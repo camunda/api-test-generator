@@ -143,6 +143,84 @@ export function generateScenariosForEndpoint(
     }
   }
 
+  // Issue #134 / camunda/camunda#52322 (per-tuple) AND
+  // camunda/camunda#52320 (kind-scoped): treat an `identifiedBy`
+  // component as automatically client-mintable when EITHER:
+  //   (a) the tuple has `acceptsExternal: true` (per-tuple opt-in,
+  //       e.g. `assignGroupToRole.groupId`), OR
+  //   (b) the component's semantic type is owned by a kind whose
+  //       registry shape is `external-entity` (e.g. `ClientId` is
+  //       owned by `Client { shape: "external-entity" }` — minted
+  //       outside the API by Console / OIDC IdP, no producer by
+  //       design).
+  // Producer-preference still wins: this block only runs after the
+  // early reachability check has classified the semantic as missing
+  // (no producer, no establisher). When a producer DOES exist BFS
+  // chains it and this block is a no-op.
+  const externalEntitySites: string[] = [];
+  const externalBindings: Record<string, string> = {};
+  if (missing.length > 0) {
+    const stillMissing: string[] = [];
+    for (const st of missing) {
+      // Per-tuple `acceptsExternal: true` only applies on edge
+      // establishers. Look it up via the endpoint's own `establishes`.
+      const isEdgeEstablisher =
+        endpoint.establishes !== undefined && endpoint.establishes.shape === 'edge';
+      const idEntry: NonNullable<OperationNode['establishes']>['identifiedBy'][number] | undefined =
+        isEdgeEstablisher
+          ? endpoint.establishes?.identifiedBy.find(
+              (i) => i.semanticType === st && i.acceptsExternal === true,
+            )
+          : undefined;
+      const isKindScopedExternal = graph.externalEntityIdentifiers?.has(st) === true;
+      if (idEntry || isKindScopedExternal) {
+        // Var-name resolution:
+        //   - edge with identifiedBy entry → use that entry's `name`
+        //     (matches the edge's request body / path placeholder).
+        //   - otherwise (consumer or non-edge), look up the path
+        //     parameter on this endpoint whose `semanticType === st`.
+        let baseName: string | undefined = idEntry?.name;
+        if (!baseName) {
+          const param = endpoint.pathParameters?.find((p) => p.semanticType === st);
+          baseName = param?.name;
+        }
+        if (!baseName) {
+          // No path parameter binds this semantic — without a name to
+          // bind to we cannot mint usefully. Leave it on missing so the
+          // unsatisfied branch fires (better diagnostic than silently
+          // pretending to satisfy).
+          stillMissing.push(st);
+          continue;
+        }
+        const varName = `${camelLower(baseName)}Var`;
+        const kindHint = endpoint.establishes?.kind ?? st;
+        externalBindings[varName] = `${camelLower(kindHint)}_${deterministicSuffix(
+          `external:${endpointOpId}:${st}:${varName}`,
+        )}`;
+        externalEntitySites.push(st);
+      } else {
+        stillMissing.push(st);
+      }
+    }
+    // Replace the missing list with whatever the fallback could not
+    // cover. If every missing semantic was external-mintable, the
+    // unsatisfied branch below MUST NOT fire.
+    missing.length = 0;
+    missing.push(...stillMissing);
+  }
+
+  // BFS planning state subtracts the external-mintable semantics from
+  // `initialNeeded` because they are pre-satisfied by the seeded
+  // bindings. `initialNeeded` itself stays immutable so downstream
+  // reporting (`satisfiedSemanticTypes`) still reflects everything
+  // the endpoint required — a scenario that satisfied a need via
+  // external mint is not the same as a scenario that did not need
+  // it. See PR #140 reviewer thread on initialNeeded mutation.
+  const planningNeeded =
+    externalEntitySites.length === 0
+      ? initialNeeded
+      : new Set([...initialNeeded].filter((s) => !externalEntitySites.includes(s)));
+
   const scenarios: EndpointScenario[] = [];
   const max = opts.maxScenarios;
 
@@ -167,8 +245,15 @@ export function generateScenariosForEndpoint(
   }
 
   const initial: State = {
-    produced: new Set(),
-    needed: new Set(initialNeeded),
+    // Issue #134: seed `produced` with the externally-minted
+    // semantics so producer ops whose own `requires.required`
+    // includes one of them (consulted by `hasSatisfiedRequiredInputs`
+    // / `deferForMissingPrereqs` via `state.produced`) are not
+    // wrongly rejected. Externally-minted semantics are satisfied
+    // by the seeded binding the same way establisher-minted
+    // semantics are.
+    produced: new Set(externalEntitySites),
+    needed: new Set(planningNeeded),
     domainStates: new Set(),
     ops: [],
     cycle: false,
@@ -176,6 +261,12 @@ export function generateScenariosForEndpoint(
     bootstrapSequencesUsed: [],
     providerList: {},
     artifactsApplied: [],
+    // Issue #134: pre-seed bindingsDraft with the client-minted IDs
+    // synthesised for every bimodal `acceptsExternal` fallback above.
+    // The body builder and URL emitter look up by the same key
+    // (`${camelLower(name)}Var`), so the seeded value flows through
+    // without any per-step override.
+    bindingsDraft: Object.keys(externalBindings).length ? { ...externalBindings } : undefined,
   };
 
   const queue: State[] = [initial];
@@ -186,7 +277,7 @@ export function generateScenariosForEndpoint(
     for (const seq of graph.bootstrapSequences) {
       const seqOpsValid = seq.operations.every((opId) => graph.operations[opId]);
       if (!seqOpsValid) continue;
-      const produced = new Set<string>();
+      const produced = new Set<string>(externalEntitySites);
       for (const opId of seq.operations) {
         graph.operations[opId].produces.forEach((s) => {
           produced.add(s);
@@ -197,8 +288,8 @@ export function generateScenariosForEndpoint(
         produced.add(s);
       });
       // Only enqueue if it helps satisfy at least one needed semantic type (or endpoint has none -> still useful as canonical setup)
-      const helps = [...initialNeeded].some((s) => produced.has(s));
-      if (helps || initialNeeded.size === 0) {
+      const helps = [...planningNeeded].some((s) => produced.has(s));
+      if (helps || planningNeeded.size === 0) {
         const productionMap = new Map<string, string>();
         for (const opId of seq.operations) {
           graph.operations[opId].produces.forEach((s) => {
@@ -209,13 +300,19 @@ export function generateScenariosForEndpoint(
         const bootstrapFull = [...required].every((r) => produced.has(r));
         queue.push({
           produced,
-          needed: new Set(initialNeeded),
+          needed: new Set(planningNeeded),
           domainStates: new Set(),
           ops: [...seq.operations],
           cycle: false,
           productionMap,
           bootstrapSequencesUsed: [seq.name],
           bootstrapFull,
+          // Issue #134: carry the external-mint bindings into
+          // bootstrap-seeded states so scenarios that start from a
+          // bootstrap sequence still emit bound path/body variables
+          // for the external-mintable semantics that
+          // `planningNeeded` already removed from `needed`.
+          bindingsDraft: initial.bindingsDraft ? { ...initial.bindingsDraft } : undefined,
         });
         // Emit explicit bootstrap scenario if it alone satisfies all required semantic types
         if (bootstrapFull) {
@@ -239,7 +336,7 @@ export function generateScenariosForEndpoint(
             hasEventuallyConsistent: evCount > 0 || undefined,
             eventuallyConsistentCount: evCount || undefined,
           });
-        } else if (initialNeeded.size === 0) {
+        } else if (planningNeeded.size === 0) {
           // For endpoints with no requirements we still include a bootstrap variant for reference
           const producedSemanticTypes = new Set<string>(produced);
           endpoint.produces.forEach((s) => {
@@ -321,13 +418,13 @@ export function generateScenariosForEndpoint(
             completed.size + 1,
             state,
             opRefs.length - 1,
-            initialNeeded.size,
+            planningNeeded.size,
           ),
           description: buildIntegrationScenarioDescription(
             endpoint,
             state,
             opRefs.length - 1,
-            initialNeeded.size,
+            planningNeeded.size,
           ),
           operations: opRefs,
           producedSemanticTypes: [...producedSemanticTypes],
@@ -351,6 +448,7 @@ export function generateScenariosForEndpoint(
           eventualConsistencyOps: eventuallyConsistentOps
             ? opRefs.filter((o) => o.eventuallyConsistent).map((o) => o.operationId)
             : undefined,
+          externalEntitySites: externalEntitySites.length ? [...externalEntitySites] : undefined,
         };
         completed.set(key, scenario);
         scenarios.push(scenario);

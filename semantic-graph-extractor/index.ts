@@ -140,6 +140,14 @@ export class SemanticGraphExtractor {
         : undefined,
       rootDependencyAnalysis: graph.rootDependencyAnalysis,
       crossContaminationMap: graph.crossContaminationMap,
+      // Issue #134 / camunda/camunda#52320: emit the upstream
+      // `semantic-kinds.json` registry alongside the dependency graph so
+      // the planner can consult kind-shape data (specifically:
+      // `external-entity` identifiers must be client-minted, never
+      // chained from a producer). The registry sits next to the bundled
+      // spec source; absent registry → undefined and the planner skips
+      // the kind-scoped fallback.
+      kindRegistry: loadKindRegistry(),
     };
 
     fs.writeFileSync(outputPath, JSON.stringify(serializedGraph, null, 2));
@@ -169,6 +177,47 @@ export class SemanticGraphExtractor {
       edges: data.edges,
     };
   }
+}
+
+// Issue #134 / camunda/camunda#52320: load the upstream
+// `semantic-kinds.json` registry so the planner can recognise
+// `external-entity` kinds (whose identifiers are minted outside the
+// Camunda REST API and have no in-API producer by design). The
+// registry is emitted by `camunda-schema-bundler` (>=2.3.0) via the
+// `--output-semantic-kinds` flag (see camunda-schema-bundler#29).
+// Returns `undefined` when the file is missing — older spec pins that
+// predate camunda/camunda#52322 don't ship the registry, and the
+// planner skips kind-scoped fallback in that case.
+function loadKindRegistry():
+  | { kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> }
+  | undefined {
+  const candidate = path.join(__dirname, '../../spec/bundled/semantic-kinds.json');
+  if (fs.existsSync(candidate)) {
+    try {
+      const raw = fs.readFileSync(candidate, 'utf8');
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON registry
+      const parsed = JSON.parse(raw) as {
+        kinds?: Array<{ name?: unknown; shape?: unknown; identifiers?: unknown }>;
+      };
+      if (!parsed || !Array.isArray(parsed.kinds)) return undefined;
+      const kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> = [];
+      for (const k of parsed.kinds) {
+        if (!k || typeof k.name !== 'string') continue;
+        const entry: { name: string; shape?: string; identifiers?: string[] } = { name: k.name };
+        if (typeof k.shape === 'string') entry.shape = k.shape;
+        if (Array.isArray(k.identifiers)) {
+          entry.identifiers = k.identifiers.filter((i): i is string => typeof i === 'string');
+        }
+        kinds.push(entry);
+      }
+      return { kinds };
+    } catch {
+      // Malformed registry → treat as absent; the planner falls back
+      // to the strict-chain default (no kind-scoped client-mint).
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 // Main execution when run directly

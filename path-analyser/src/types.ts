@@ -88,7 +88,16 @@ export interface OperationNode extends OperationRef {
     // (`scenarioGenerator`, the L3 invariants) compares `shape ===
     // 'edge'` directly and can rely on this contract.
     shape?: 'edge';
-    identifiedBy: Array<{ in: 'body' | 'path'; name: string; semanticType: string }>;
+    identifiedBy: Array<{
+      in: 'body' | 'path';
+      name: string;
+      semanticType: string;
+      // Issue #134: bimodal entity sources. When `true`, the planner
+      // is permitted to fall back to a client-minted ID for this
+      // component if no in-API producer is reachable. Default
+      // (omitted) preserves the existing strict-chain behaviour.
+      acceptsExternal?: boolean;
+    }>;
   };
 }
 
@@ -118,6 +127,18 @@ export interface OperationGraph {
   // remains on `OperationNode.produces`, which BFS reads to mark the
   // identifier semantic satisfied once the establisher is scheduled.
   establishersByType?: Record<string, string[]>;
+  // Issue #134 / camunda/camunda#52320: identifiers (semantic types)
+  // owned by a kind whose registry shape is `external-entity` — e.g.
+  // `ClientId` is owned by `Client { shape: "external-entity" }` so
+  // it is minted outside the Camunda REST API (Console / OIDC IdP)
+  // and has no in-API producer by design. The planner treats every
+  // entry here as automatically client-mintable on ANY endpoint that
+  // would otherwise classify it as missing (not edges-only): the
+  // fallback resolves the binding name via the endpoint's own
+  // `pathParameters` when no `identifiedBy` entry matches. This is
+  // the kind-scoped sibling of the per-tuple `acceptsExternal: true`
+  // flag. Empty/undefined means no registry was loaded.
+  externalEntityIdentifiers?: Set<string>;
 }
 
 export interface BootstrapSequence {
@@ -164,6 +185,20 @@ export interface EndpointScenario {
   };
   filtersUsed?: string[]; // semantic / parameter filters applied
   syntheticBindings?: string[]; // variables created without a producing op
+  // Issue #134: semantic types whose value was client-minted at scenario-
+  // construction time because the endpoint's `x-semantic-establishes`
+  // identifiedBy member carried `acceptsExternal: true` (per-tuple
+  // bimodality, e.g. `assignGroupToRole.groupId`) OR because the
+  // member's semantic type is owned by a kind whose registry shape is
+  // `external-entity` (kind-scoped fallback, e.g. `ClientId` is owned
+  // by `Client { shape: "external-entity" }`). In both cases no
+  // in-API producer exists by design and the planner seeds a
+  // client-minted value into the scenario bindings. Empty/undefined
+  // means every required semantic was satisfied by an in-graph
+  // producer or establisher.
+  // Downstream consumers (e.g. negative-suite) read this to skip
+  // "unknown identifier ⇒ 404" assertions for the listed semantics.
+  externalEntitySites?: string[];
   // Request variant / filter coverage enrichments
   requestVariants?: { groupId: string; variant: string; richness: 'minimal' | 'rich' }[];
   filtersDetail?: FilterDetail[]; // structured filter dimension info

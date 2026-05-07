@@ -244,9 +244,29 @@ export class SchemaAnalyzer {
           typeof id.name === 'string' &&
           id.name.length > 0 &&
           typeof id.semanticType === 'string' &&
-          id.semanticType.length > 0
+          id.semanticType.length > 0 &&
+          // Issue #134: `acceptsExternal` is optional, but if present
+          // MUST be a boolean. A stringy "true" or any other type
+          // rejects the whole annotation (mirrors the strict gate on
+          // `in` / `shape`) — silently coercing would let an upstream
+          // typo enable bimodal fallback at sites that intended a
+          // hard chain, undermining producer-preference.
+          (id.acceptsExternal === undefined || typeof id.acceptsExternal === 'boolean')
         ) {
-          identifiedBy.push({ in: id.in, name: id.name, semanticType: id.semanticType });
+          const entry: EstablishesIdentifier = {
+            in: id.in,
+            name: id.name,
+            semanticType: id.semanticType,
+          };
+          // Emit `acceptsExternal` only when the spec sets it
+          // explicitly to `true`. Explicit `false` is dropped and
+          // treated identically to omission — the field's absence
+          // already means "no bimodal fallback", so emitting `false`
+          // would add diff noise without changing planner behaviour.
+          // Only the rare bimodal sites stay visible in the
+          // generated graph JSON.
+          if (id.acceptsExternal === true) entry.acceptsExternal = true;
+          identifiedBy.push(entry);
         } else {
           allValid = false;
           break;
