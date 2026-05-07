@@ -50,6 +50,25 @@ interface CliOptions {
   deep?: boolean; // include deep missing & body type mismatches
 }
 
+// Inline CONFIG resolver (#128 PR 2) — mirrors path-analyser/src/configResolver.ts.
+const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+function activeConfig(): string {
+  const raw = process.env.CONFIG ?? 'camunda-oca';
+  if (!CONFIG_SAFE_NAME.test(raw)) {
+    throw new Error(
+      `Invalid CONFIG value: ${JSON.stringify(raw)} (expected lowercase alphanumeric + hyphens)`,
+    );
+  }
+  return raw;
+}
+
+// Default output directory: <repoRoot>/generated/<config>/request-validation.
+// cwd is request-validation/ when invoked via the workspace `generate` script,
+// so '..' resolves to the repo root.
+function defaultOutDir(): string {
+  return path.resolve(process.cwd(), '..', 'generated', activeConfig(), 'request-validation');
+}
+
 function parseArgs(): CliOptions {
   const args = process.argv.slice(2);
   // Support both `--flag value` and `--flag=value` syntaxes
@@ -74,7 +93,10 @@ function parseArgs(): CliOptions {
   const get = (k: string) => kv[k];
   const onlyRaw = get('--only');
   const only = onlyRaw ? new Set(onlyRaw.split(',').map((s) => s.trim())) : undefined;
-  const outDir = get('--out-dir') || 'generated';
+  // Per-config layout (#128 PR 2): default outDir lives under the repo
+  // root at generated/<config>/request-validation-suite. cwd here is
+  // request-validation/ when invoked via the workspace npm script.
+  const outDir = get('--out-dir') || defaultOutDir();
   const importDepth = get('--qa-import-depth');
   const qaImportDepth = importDepth ? parseInt(importDepth, 10) : 4;
   const maxMissing = get('--max-missing');

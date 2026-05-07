@@ -1,14 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Inline CONFIG resolver (#128 PR 2). Mirrors the safe-name rule applied
+// centrally in path-analyser/src/configResolver.ts. This workspace
+// compiles independently and cannot import from path-analyser.
+const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+function getActiveConfigName(): string {
+  const raw = process.env.CONFIG ?? 'camunda-oca';
+  if (!CONFIG_SAFE_NAME.test(raw)) {
+    throw new Error(
+      `Invalid CONFIG value: ${JSON.stringify(raw)} (expected lowercase alphanumeric + hyphens)`,
+    );
+  }
+  return raw;
+}
+
 /**
  * Resolves the spec path + provenance string for the request validation generator.
  *
  * Resolution order:
  *  1. `REQUEST_VALIDATION_SPEC` env var (absolute or relative path to a JSON/YAML spec).
  *  2. Bundled spec produced by the api-test-generator root pipeline:
- *     `<repoRoot>/spec/bundled/rest-api.bundle.json` (with provenance from
- *     `spec/bundled/spec-metadata.json` `specHash`).
+ *     `<repoRoot>/spec/<config>/bundled/rest-api.bundle.json` (with provenance from
+ *     `spec/<config>/bundled/spec-metadata.json` `specHash`).
  *  3. Legacy in-package cache: `cache/rest-api.yaml` (+ `cache/spec-commit.txt`)
  *     — retained so the generator still runs standalone if relocated.
  *
@@ -28,9 +42,10 @@ export function resolveSpecSource(cwd: string = process.cwd()): {
     return { specPath: abs, source: 'env' };
   }
 
-  // 2. Look for the bundled spec produced by the root workspace pipeline.
-  // We walk up from cwd looking for a `spec/bundled/rest-api.bundle.json`.
-  const bundled = findUpwards(cwd, path.join('spec', 'bundled', 'rest-api.bundle.json'));
+  // 2. Look for the bundled spec produced by the root workspace pipeline,
+  // partitioned by active config (#128 PR 2).
+  const config = getActiveConfigName();
+  const bundled = findUpwards(cwd, path.join('spec', config, 'bundled', 'rest-api.bundle.json'));
   if (bundled) {
     const metaPath = path.join(path.dirname(bundled), 'spec-metadata.json');
     let provenance: string | undefined;

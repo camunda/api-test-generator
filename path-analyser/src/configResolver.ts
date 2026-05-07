@@ -79,3 +79,47 @@ export function getActiveConfigName(repoRoot: string): string {
 export function getActiveConfigDir(repoRoot: string): string {
   return path.resolve(repoRoot, 'configs', getActiveConfigName(repoRoot));
 }
+
+/**
+ * Per-config layout helpers (#128 PR 2 — output partitioning).
+ *
+ * Convention:
+ *   spec/<config>/bundled/      ← bundled OpenAPI + spec-metadata + semantic-kinds
+ *   generated/<config>/graph/             ← semantic-graph-extractor output
+ *   generated/<config>/scenarios/         ← path-analyser scenario JSON
+ *   generated/<config>/feature-output/    ← path-analyser feature coverage JSON
+ *   generated/<config>/playwright/        ← path-analyser emitted Playwright suite
+ *   generated/<config>/request-validation/ ← request-validation emitted negative suite
+ *
+ * Keeping the layout in one module lets consumers (loaders, codegen,
+ * tests, CI artefact paths) ask for the right directory by name rather
+ * than concatenating string literals; renaming a partition is a single
+ * edit here.
+ */
+export function getSpecBundleDir(repoRoot: string): string {
+  return path.resolve(repoRoot, 'spec', getActiveConfigName(repoRoot), 'bundled');
+}
+
+export function getGeneratedDir(repoRoot: string): string {
+  return path.resolve(repoRoot, 'generated', getActiveConfigName(repoRoot));
+}
+
+export function getGraphDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'graph');
+}
+
+export function getScenariosDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'scenarios');
+}
+
+export function getFeatureOutputDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'feature-output');
+}
+
+export function getPlaywrightSuiteDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'playwright');
+}
+
+export function getRequestValidationSuiteDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'request-validation');
+}

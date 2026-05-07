@@ -81,7 +81,7 @@ This will:
 1. Parse `rest-api.domain.yaml`
 2. Extract semantic types and operations
 3. Build the dependency graph
-4. Save to `dist/output/operation-dependency-graph.json`
+4. Save to `generated/<config>/scenarios/operation-dependency-graph.json`
 
 ### Generate Analysis Report
 
@@ -92,7 +92,7 @@ npm run analyze-graph
 This will:
 1. Load the previously generated graph
 2. Perform analysis to find entry points, sinks, clusters
-3. Generate `dist/output/dependency-graph-analysis.md`
+3. Generate `generated/<config>/scenarios/dependency-graph-analysis.md`
 4. Display key statistics in the console
 
 ## Example Dependencies

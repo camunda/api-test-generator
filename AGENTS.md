@@ -46,7 +46,8 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/camunda-oca/spec-pin.json` | Pinned upstream `specRef` + `expectedSpecHash` for the camunda-oca config |
 | `configs/camunda-oca/{domain-semantics,filter-providers,request-defaults}.json` | Domain rules, value providers, and request-body defaults for camunda-oca |
 | `configs.json` | Index of named configs (default + per-config metadata) |
-| `spec/bundled/` | Gitignored bundled-spec output |
+| `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
+| `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
 | `dist/`, `**/generated/` | Gitignored generator output (built each CI run) |
 | `plugins/no-unsafe-type-assertion.grit` | Custom Biome lint banning `as T` |
 | `.github/workflows/ci.yml` | Single CI workflow (lint, typecheck, pipeline, tests) |
@@ -122,13 +123,13 @@ To bump:
    <https://github.com/camunda/camunda/commits/main>) and confirm it with
    `git ls-remote` as above.
 2. `SPEC_REF=<that-sha> npm run fetch-spec:ref` — the bundler resolves any
-   branch/tag/SHA to a SHA and writes `spec/bundled/spec-metadata.json`.
+   branch/tag/SHA to a SHA and writes `spec/<config>/bundled/spec-metadata.json`.
 3. `npm run testsuite:generate && npm run generate:request-validation`
 4. Update `configs/<active>/spec-pin.json`:
    - `specRef`: the **resolved 40-char commit SHA** from
-     `spec/bundled/spec-metadata.json` (never a branch — branches drift,
+     `spec/<config>/bundled/spec-metadata.json` (never a branch — branches drift,
      and never this repo's own SHA — see the callout above)
-   - `expectedSpecHash`: the `specHash` printed in `spec/bundled/spec-metadata.json`
+   - `expectedSpecHash`: the `specHash` printed in `spec/<config>/bundled/spec-metadata.json`
 5. Update any invariants whose values legitimately changed; commit together.
 
 ## Code style & lint (Biome)

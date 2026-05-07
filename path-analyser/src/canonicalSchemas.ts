@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
+import { getSpecBundleDir } from './configResolver.js';
 
 export interface CanonicalNodeMeta {
   path: string; // dot + [] notation
@@ -52,8 +53,12 @@ interface OpenAPIDocument {
 export async function buildCanonicalShapes(
   specRootDir: string,
 ): Promise<Record<string, OperationCanonicalShapes>> {
+  // specRootDir = repo root. Bundled spec lives under the active config's
+  // spec/<config>/bundled/ directory (#128 PR 2). Resolved lazily so the
+  // CONFIG env var takes effect even after this module is cached.
   const specPath =
-    process.env.OPENAPI_SPEC_PATH || path.resolve(specRootDir, 'spec/bundled/rest-api.bundle.json');
+    process.env.OPENAPI_SPEC_PATH ||
+    path.join(getSpecBundleDir(specRootDir), 'rest-api.bundle.json');
   const raw = await fs.readFile(specPath, 'utf8');
   // biome-ignore lint/plugin: YAML.parse returns `unknown`; the OpenAPI bundle is the runtime contract.
   const doc = YAML.parse(raw) as OpenAPIDocument;

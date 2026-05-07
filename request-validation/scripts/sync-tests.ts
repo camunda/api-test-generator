@@ -30,8 +30,16 @@ async function main() {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const repoRoot = path.resolve(__dirname, '..', '..');
-  const generatorRoot = path.resolve(__dirname, '..');
-  const generatedDir = path.join(generatorRoot, 'generated');
+  // Per-config layout (#128 PR 2): the generated request-validation suite
+  // lives at <repoRoot>/generated/<config>/request-validation-suite.
+  const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+  const rawConfig = process.env.CONFIG ?? 'camunda-oca';
+  if (!CONFIG_SAFE_NAME.test(rawConfig)) {
+    throw new Error(
+      `Invalid CONFIG value: ${JSON.stringify(rawConfig)} (expected lowercase alphanumeric + hyphens)`,
+    );
+  }
+  const generatedDir = path.join(repoRoot, 'generated', rawConfig, 'request-validation');
   const qaTestsDir = path.join(repoRoot, 'tests', 'api', 'v2', 'request-validation');
 
   if (!fs.existsSync(generatedDir)) {

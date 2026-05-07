@@ -8,6 +8,23 @@ import { SchemaAnalyzer } from './schema-analyzer';
 import { SemanticTypeLibraryBuilder } from './semantic-type-library-builder';
 import type { OpenAPISpec, Operation, OperationDependencyGraph, SemanticType } from './types';
 
+// ---- Inline CONFIG resolver (#128 PR 2) -----------------------------
+// This workspace compiles to CommonJS while path-analyser/configResolver.ts
+// is ESM (NodeNext). Cross-workspace import is therefore not possible.
+// The resolver is intentionally tiny and mirrors the safe-name validation
+// applied centrally in path-analyser/src/configResolver.ts. Keep the two
+// in sync.
+const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+function getActiveConfigName(): string {
+  const raw = process.env.CONFIG ?? 'camunda-oca';
+  if (!CONFIG_SAFE_NAME.test(raw)) {
+    throw new Error(
+      `Invalid CONFIG value: ${JSON.stringify(raw)} (expected lowercase alphanumeric + hyphens)`,
+    );
+  }
+  return raw;
+}
+
 /**
  * Semantic Graph Extractor for OpenAPI specifications
  *
@@ -191,7 +208,12 @@ export class SemanticGraphExtractor {
 function loadKindRegistry():
   | { kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> }
   | undefined {
-  const candidate = path.join(__dirname, '../../spec/bundled/semantic-kinds.json');
+  // __dirname is semantic-graph-extractor/dist/ when compiled, so ../..
+  // reaches the repo root. The registry now lives under the active
+  // config's spec directory (#128 PR 2).
+  const repoRoot = path.resolve(__dirname, '../..');
+  const config = getActiveConfigName();
+  const candidate = path.join(repoRoot, 'spec', config, 'bundled', 'semantic-kinds.json');
   if (fs.existsSync(candidate)) {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
@@ -225,13 +247,22 @@ async function main() {
   const extractor = new SemanticGraphExtractor();
 
   try {
-    // Get path from command line arguments, env var, or use default
-    // __dirname is semantic-graph-extractor/dist/ when compiled, so ../../ reaches repo root
+    // __dirname is semantic-graph-extractor/dist/ when compiled, so ../..
+    // reaches the repo root. Spec input + graph output are both
+    // partitioned by config (#128 PR 2).
+    const repoRoot = path.resolve(__dirname, '../..');
+    const config = getActiveConfigName();
     const specPath =
       process.argv[2] ||
       process.env.OPENAPI_SPEC_PATH ||
-      path.join(__dirname, '../../spec/bundled/rest-api.bundle.json');
-    const outputPath = path.join(__dirname, 'output/operation-dependency-graph.json');
+      path.join(repoRoot, 'spec', config, 'bundled', 'rest-api.bundle.json');
+    const outputPath = path.join(
+      repoRoot,
+      'generated',
+      config,
+      'graph',
+      'operation-dependency-graph.json',
+    );
 
     // Extract the dependency graph
     const graph = await extractor.extractGraph(specPath);

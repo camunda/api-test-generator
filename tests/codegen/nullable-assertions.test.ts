@@ -212,7 +212,8 @@ describe('response shape assertions use validateResponse (replaces verbose per-f
   test('no generated test file contains old per-field assertion patterns', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
-    const dir = path.resolve('path-analyser/dist/generated-tests');
+    const { getPlaywrightSuiteDir } = await import('../../path-analyser/src/configResolver.js');
+    const dir = getPlaywrightSuiteDir(path.resolve('.'));
     if (!fs.existsSync(dir)) {
       throw new Error(
         `Missing generated test artifacts at ${dir}. Run \`npm run testsuite:generate\` before running this invariant test.`,

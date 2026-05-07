@@ -81,7 +81,17 @@ function main() {
   const repoRoot = process.cwd().endsWith('optional-responses')
     ? path.resolve(process.cwd(), '..')
     : process.cwd();
-  const specPath = process.env.OPENAPI_SPEC_PATH || path.resolve(repoRoot, 'spec/bundled/rest-api.bundle.json');
+  // Per-config layout (#128 PR 2): bundled spec lives under
+  // spec/<config>/bundled/. CONFIG defaults to camunda-oca and is
+  // validated against the same safe-name regex used by path-analyser's
+  // configResolver.
+  const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+  const config = process.env.CONFIG || 'camunda-oca';
+  if (!CONFIG_SAFE_NAME.test(config)) {
+    throw new Error(`Invalid CONFIG value: ${JSON.stringify(config)}`);
+  }
+  const specPath = process.env.OPENAPI_SPEC_PATH
+    || path.resolve(repoRoot, 'spec', config, 'bundled', 'rest-api.bundle.json');
   const doc = readYaml(specPath);
   const paths = doc.paths || {};
 

@@ -1,6 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { getActiveConfigDir } from '../configResolver.js';
+import {
+  getActiveConfigDir,
+  getFeatureOutputDir,
+  getGeneratedDir,
+  getPlaywrightSuiteDir,
+} from '../configResolver.js';
 import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
@@ -89,9 +94,12 @@ async function run() {
   const baseDir = process.cwd().endsWith('path-analyser')
     ? process.cwd()
     : path.resolve(process.cwd(), 'path-analyser');
-  const featureDir = path.join(baseDir, 'dist/feature-output');
-  const variantDir = path.join(baseDir, 'dist/variant-output');
-  const outDir = path.join(baseDir, 'dist/generated-tests');
+  const repoRoot = path.resolve(baseDir, '..');
+  // Per-config output partition (#128 PR 2): scenario inputs and the
+  // emitted Playwright suite all live under generated/<config>/.
+  const featureDir = getFeatureOutputDir(repoRoot);
+  const variantDir = path.join(getGeneratedDir(repoRoot), 'variant-output');
+  const outDir = getPlaywrightSuiteDir(repoRoot);
 
   if (help || !positional) {
     printUsage();

@@ -2,9 +2,9 @@
  * Loader fixtures for graphLoader sidecar handling — issue #56.
  *
  * Each fixture builds a tiny on-disk layout mimicking the path-analyser
- * baseDir contract (a sibling `semantic-graph-extractor/dist/output/`
- * directory holding the dependency graph, plus a `domain-semantics.json`
- * inside the active config directory at the repo root — (see #128), then
+ * baseDir contract (a `generated/<config>/graph/` directory at the repo
+ * root holding the dependency graph, plus a `domain-semantics.json`
+ * inside the active config directory at the repo root — see #128), then
  * calls `loadGraph()` and asserts on the returned `OperationGraph`.
  *
  * The first fixture pins the regression for #56: a sidecar-declared
@@ -31,7 +31,9 @@ let configDir: string;
 beforeEach(() => {
   workdir = mkdtempSync(join(tmpdir(), 'graphloader-fixture-'));
   baseDir = join(workdir, 'path-analyser');
-  graphDir = join(workdir, 'semantic-graph-extractor', 'dist', 'output');
+  // Per-config layout (#128 PR 2): the dependency graph now lives
+  // under generated/<config>/graph/ at the repo root.
+  graphDir = join(workdir, 'generated', 'camunda-oca', 'graph');
   configDir = join(workdir, 'configs', 'camunda-oca');
   mkdirSync(baseDir, { recursive: true });
   mkdirSync(graphDir, { recursive: true });

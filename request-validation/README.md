@@ -59,7 +59,7 @@ npm run generate:request-validation
 c8ctl cluster start 8.9
 
 # 3. Install + run the generated suite in place.
-cd request-validation/generated
+cd generated/<config>/request-validation
 npm install
 CORE_APPLICATION_URL=http://localhost:8080 npm test
 ```
@@ -85,7 +85,7 @@ it vendors its runtime helpers and project scaffolding so it can run in place
 with no external dependency other than a running Camunda server:
 
 ```
-cd request-validation/generated
+cd generated/<config>/request-validation
 npm install
 CORE_APPLICATION_URL=http://localhost:8080 npm test
 ```
