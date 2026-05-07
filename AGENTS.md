@@ -188,7 +188,7 @@ fixtures and named invariants point directly at the broken property.
 |---|---|---|
 | 1 — extractor constructs | `tests/fixtures/extractor/extractor-constructs.test.ts` | One OpenAPI construct → one extractor property (`required`, `provider`, `fieldPath`, …) |
 | 2 — planner contracts | `tests/fixtures/planner/planner-contracts.test.ts` | Hand-built minimal `OperationGraph` → chain-shape assertion on `generateScenariosForEndpoint` |
-| 3 — bundled-spec invariants | `tests/regression/bundled-spec-invariants.test.ts` | Named, human-readable invariant over real pipeline output (requires `npm run pipeline` first) |
+| 3 — bundled-spec invariants | `configs/<config>/regression-invariants.test.ts` (e.g. `configs/camunda-oca/regression-invariants.test.ts`) | Per-config (#128 PR 3) named, human-readable invariants over real pipeline output (requires `npm run pipeline` first). Each file `describe.skipIf`-guards itself to its own CONFIG so the CI matrix only runs the active config's invariants. |
 
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
@@ -368,7 +368,7 @@ npm test
 ```
 
 > **`npm test` alone is not sufficient.** The Layer-3 invariants in
-> `tests/regression/bundled-spec-invariants.test.ts` read regenerated
+> `configs/<config>/regression-invariants.test.ts` read regenerated
 > pipeline output (per-endpoint scenario JSON, feature-output files,
 > emitted Playwright suites). If you skip the regen step you'll be testing
 > against stale output and CI will surface a regression you didn't see

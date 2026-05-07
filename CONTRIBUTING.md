@@ -22,7 +22,7 @@ they fail.
 
 2. **Add an invariant if the property is observable at the chain or graph
    level on the real bundled spec.** Add it to
-   [tests/regression/bundled-spec-invariants.test.ts](tests/regression/bundled-spec-invariants.test.ts).
+   [configs/camunda-oca/regression-invariants.test.ts](configs/camunda-oca/regression-invariants.test.ts).
    Use a named, human-readable assertion ("`createDeployment` provides
    the full `{...}` provider set"), not a generic structural diff.
 
