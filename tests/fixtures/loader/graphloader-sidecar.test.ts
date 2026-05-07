@@ -4,7 +4,7 @@
  * Each fixture builds a tiny on-disk layout mimicking the path-analyser
  * baseDir contract (a sibling `semantic-graph-extractor/dist/output/`
  * directory holding the dependency graph, plus a `domain-semantics.json`
- * inside the active config directory at the repo root — see #128), then
+ * inside the active config directory at the repo root — (see #128), then
  * calls `loadGraph()` and asserts on the returned `OperationGraph`.
  *
  * The first fixture pins the regression for #56: a sidecar-declared
