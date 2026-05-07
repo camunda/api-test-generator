@@ -183,8 +183,10 @@ export async function materializeResponseSchemas(
   if (!resolvedSpec) {
     throw new Error(
       `materializeResponseSchemas: could not locate bundled spec. ` +
-        `Pass an explicit specFile or ensure spec/<config>/bundled/rest-api.bundle.json exists ` +
-        `at or above ${outDir}.`,
+        `findDefaultSpecFile walks up from ${outDir} looking for a repo root ` +
+        `(one containing configs.json) and then resolves the active config ` +
+        `via $CONFIG / configs.json default to spec/<config>/bundled/rest-api.bundle.json. ` +
+        `Either run from within the api-test-generator repo, or pass specFile explicitly.`,
     );
   }
   const targetDir = path.join(outDir, RESPONSE_SCHEMAS_DIR_NAME);
