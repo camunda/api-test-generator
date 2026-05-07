@@ -258,9 +258,13 @@ export class SchemaAnalyzer {
             name: id.name,
             semanticType: id.semanticType,
           };
-          // Only attach when explicitly set on the spec (no implicit
-          // `false` default) so the rare bimodal sites stay visible
-          // in diff review of the generated graph JSON.
+          // Emit `acceptsExternal` only when the spec sets it
+          // explicitly to `true`. Explicit `false` is dropped and
+          // treated identically to omission — the field's absence
+          // already means "no bimodal fallback", so emitting `false`
+          // would add diff noise without changing planner behaviour.
+          // Only the rare bimodal sites stay visible in the
+          // generated graph JSON.
           if (id.acceptsExternal === true) entry.acceptsExternal = true;
           identifiedBy.push(entry);
         } else {

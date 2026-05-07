@@ -300,6 +300,12 @@ export function generateScenariosForEndpoint(
           productionMap,
           bootstrapSequencesUsed: [seq.name],
           bootstrapFull,
+          // Issue #134: carry the external-mint bindings into
+          // bootstrap-seeded states so scenarios that start from a
+          // bootstrap sequence still emit bound path/body variables
+          // for the external-mintable semantics that
+          // `planningNeeded` already removed from `needed`.
+          bindingsDraft: initial.bindingsDraft ? { ...initial.bindingsDraft } : undefined,
         });
         // Emit explicit bootstrap scenario if it alone satisfies all required semantic types
         if (bootstrapFull) {
