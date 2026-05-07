@@ -245,7 +245,14 @@ export function generateScenariosForEndpoint(
   }
 
   const initial: State = {
-    produced: new Set(),
+    // Issue #134: seed `produced` with the externally-minted
+    // semantics so producer ops whose own `requires.required`
+    // includes one of them (consulted by `hasSatisfiedRequiredInputs`
+    // / `deferForMissingPrereqs` via `state.produced`) are not
+    // wrongly rejected. Externally-minted semantics are satisfied
+    // by the seeded binding the same way establisher-minted
+    // semantics are.
+    produced: new Set(externalEntitySites),
     needed: new Set(planningNeeded),
     domainStates: new Set(),
     ops: [],
@@ -270,7 +277,7 @@ export function generateScenariosForEndpoint(
     for (const seq of graph.bootstrapSequences) {
       const seqOpsValid = seq.operations.every((opId) => graph.operations[opId]);
       if (!seqOpsValid) continue;
-      const produced = new Set<string>();
+      const produced = new Set<string>(externalEntitySites);
       for (const opId of seq.operations) {
         graph.operations[opId].produces.forEach((s) => {
           produced.add(s);

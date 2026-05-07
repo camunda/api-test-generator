@@ -132,10 +132,12 @@ export interface OperationGraph {
   // `ClientId` is owned by `Client { shape: "external-entity" }` so
   // it is minted outside the Camunda REST API (Console / OIDC IdP)
   // and has no in-API producer by design. The planner treats every
-  // entry here as automatically client-mintable when an edge endpoint
-  // would otherwise classify it as missing — same fallback path as
-  // the per-tuple `acceptsExternal: true` flag, but at the kind
-  // scope. Empty/undefined means no registry was loaded.
+  // entry here as automatically client-mintable on ANY endpoint that
+  // would otherwise classify it as missing (not edges-only): the
+  // fallback resolves the binding name via the endpoint's own
+  // `pathParameters` when no `identifiedBy` entry matches. This is
+  // the kind-scoped sibling of the per-tuple `acceptsExternal: true`
+  // flag. Empty/undefined means no registry was loaded.
   externalEntityIdentifiers?: Set<string>;
 }
 

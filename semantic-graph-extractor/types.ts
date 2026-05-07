@@ -107,9 +107,11 @@ export interface EstablishesIdentifier {
   // an in-API producer (the canonical local entity) OR an externally-
   // minted ID (BYOG / OIDC IdP-supplied IDs). The planner prefers an
   // in-graph producer when reachable and falls back to a client-minted
-  // ID otherwise. Strict round-trip: the extractor only emits the
-  // field when it appears on the spec (no implicit false default) so
-  // the rare bimodal sites stay visible in diff review.
+  // ID otherwise. Round-trip contract: the extractor only emits the
+  // field when the spec sets it explicitly to `true`. Explicit `false`
+  // is dropped (treated identically to omission, since absence already
+  // means "no bimodal fallback") so the rare bimodal sites stay
+  // visible in diff review without adding noise to every other site.
   acceptsExternal?: boolean;
 }
 
