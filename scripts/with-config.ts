@@ -83,6 +83,9 @@ function main(): void {
     stdio: 'inherit',
     env,
     cwd: REPO_ROOT,
+    // On Windows, common shims (npm, npx, tsx) are .cmd files; node's
+    // spawn does not auto-resolve them without a shell.
+    shell: process.platform === 'win32',
   });
   child.on('exit', (code, signal) => {
     if (signal !== null) {

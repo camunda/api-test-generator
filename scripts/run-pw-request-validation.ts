@@ -20,6 +20,9 @@ const config = join(getRequestValidationSuiteDir(REPO_ROOT), 'playwright.config.
 const child = spawn('npx', ['playwright', 'test', '-c', config, ...process.argv.slice(2)], {
   stdio: 'inherit',
   cwd: REPO_ROOT,
+  // On Windows, npx is npx.cmd; node's spawn does not auto-resolve
+  // .cmd shims unless a shell is used.
+  shell: process.platform === 'win32',
 });
 child.on('exit', (code, signal) => {
   if (signal !== null) {

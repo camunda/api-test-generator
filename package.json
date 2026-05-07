@@ -32,9 +32,9 @@
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "lint:generated": "biome check --config-path=biome.generated.json generated",
-    "biome:fix-generated": "npm run biome:fix-generated:codegen && npm run biome:fix-generated:request-validation",
-    "biome:fix-generated:codegen": "biome check --config-path=biome.generated.json --write --unsafe generated",
-    "biome:fix-generated:request-validation": "biome check --config-path=biome.generated.json --write --unsafe generated",
+    "biome:fix-generated": "biome check --config-path=biome.generated.json --write --unsafe generated",
+    "biome:fix-generated:codegen": "npm run biome:fix-generated",
+    "biome:fix-generated:request-validation": "npm run biome:fix-generated",
     "format": "biome format --write",
     "test": "vitest run",
     "test:watch": "vitest"

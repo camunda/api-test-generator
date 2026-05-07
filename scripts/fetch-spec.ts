@@ -49,6 +49,9 @@ function main(): void {
   const child = spawn('npx', ['camunda-schema-bundler', ...args], {
     stdio: 'inherit',
     cwd: REPO_ROOT,
+    // On Windows, npx is npx.cmd; node's spawn does not auto-resolve
+    // .cmd shims unless a shell is used.
+    shell: process.platform === 'win32',
   });
   child.on('exit', (code, signal) => {
     if (signal !== null) {
