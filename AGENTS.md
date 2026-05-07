@@ -37,8 +37,6 @@ npm workspaces monorepo. Node `>=22`.
 | `semantic-graph-extractor/` | Parses bundled spec, emits `operation-dependency-graph.json` |
 | `path-analyser/` | BFS scenario planner + Playwright codegen (positive suite) |
 | `path-analyser/src/scenarioGenerator.ts` | Core BFS planner — `generateScenariosForEndpoint()` |
-| `path-analyser/domain-semantics.json` | Domain rules (artifact kinds, runtime states, capabilities) |
-| `path-analyser/filter-providers.json` | Field → value-provider map |
 | `request-validation/` | Negative-test generator (HTTP 400 suite) |
 | `optional-responses/` | Optional response field analyser |
 | `tests/fixtures/extractor/` | Layer-1 hand-curated OpenAPI snippets |

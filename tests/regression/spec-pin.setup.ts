@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getActiveConfigName } from '../../path-analyser/src/configResolver.js';
 
 /**
  * Vitest globalSetup — runs once before any test file is collected.
@@ -21,10 +22,12 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), '..', '..');
-// Active config name comes from the CONFIG env var (default: camunda-oca).
-// See #128 — the spec pin lives under the per-config directory so each
-// configured target API has its own pinned upstream content fingerprint.
-const ACTIVE_CONFIG = process.env.CONFIG?.trim() || 'camunda-oca';
+// Active config name comes from the CONFIG env var (default: from
+// configs.json). Resolution + validation (allowlist, safe pattern) is
+// shared with the runtime loaders via getActiveConfigName so an invalid
+// CONFIG fails fast here with the same actionable error rather than
+// silently reading an unexpected path. See #128.
+const ACTIVE_CONFIG = getActiveConfigName(REPO_ROOT);
 const PIN_PATH = join(REPO_ROOT, 'configs', ACTIVE_CONFIG, 'spec-pin.json');
 const METADATA_PATH = join(REPO_ROOT, 'spec', 'bundled', 'spec-metadata.json');
 

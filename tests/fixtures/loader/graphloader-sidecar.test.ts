@@ -36,6 +36,12 @@ beforeEach(() => {
   mkdirSync(baseDir, { recursive: true });
   mkdirSync(graphDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
+  // configResolver requires a configs.json at the repo root with the
+  // active config declared in its allowlist (see #128).
+  writeFileSync(
+    join(workdir, 'configs.json'),
+    JSON.stringify({ default: 'camunda-oca', configs: { 'camunda-oca': {} } }),
+  );
 });
 
 afterEach(() => {

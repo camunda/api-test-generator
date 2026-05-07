@@ -1115,13 +1115,14 @@ function loadRequestDefaults(): RequestDefaults {
   if (requestDefaultsCache) return requestDefaultsCache;
   // Sidecar lives under the active config directory at the repo root
   // (see #128). Probe both repo-root and path-analyser-relative cwds
-  // so the script keeps working from either invocation site.
-  const candidates = [
-    path.resolve(getActiveConfigDir(process.cwd()), 'request-defaults.json'),
-    path.resolve(getActiveConfigDir(path.resolve(process.cwd(), '..')), 'request-defaults.json'),
-  ];
-  for (const p of candidates) {
+  // so the script keeps working from either invocation site. Each
+  // candidate is computed lazily because getActiveConfigDir reads
+  // configs.json and throws when it is absent (e.g. the parent of the
+  // repo root).
+  const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  for (const root of repoRootCandidates) {
     try {
+      const p = path.resolve(getActiveConfigDir(root), 'request-defaults.json');
       const data = fsSync.readFileSync(p, 'utf8');
       // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for request-defaults.json.
       const json = JSON.parse(data) as RequestDefaults;
@@ -1154,13 +1155,14 @@ function loadProviderConfig(): ProviderConfig {
   if (providerConfigCache) return providerConfigCache;
   // Sidecar lives under the active config directory at the repo root
   // (see #128). Probe both repo-root and path-analyser-relative cwds
-  // so the script keeps working from either invocation site.
-  const candidates = [
-    path.resolve(getActiveConfigDir(process.cwd()), 'filter-providers.json'),
-    path.resolve(getActiveConfigDir(path.resolve(process.cwd(), '..')), 'filter-providers.json'),
-  ];
-  for (const p of candidates) {
+  // so the script keeps working from either invocation site. Each
+  // candidate is computed lazily because getActiveConfigDir reads
+  // configs.json and throws when it is absent (e.g. the parent of the
+  // repo root).
+  const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  for (const root of repoRootCandidates) {
     try {
+      const p = path.resolve(getActiveConfigDir(root), 'filter-providers.json');
       const data = fsSync.readFileSync(p, 'utf8');
       // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for filter-providers.json.
       providerConfigCache = JSON.parse(data) as ProviderConfig;
