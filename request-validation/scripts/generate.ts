@@ -92,7 +92,7 @@ function parseArgs(): CliOptions {
   const onlyRaw = get('--only');
   const only = onlyRaw ? new Set(onlyRaw.split(',').map((s) => s.trim())) : undefined;
   // Per-config layout (#128 PR 2): default outDir lives under the repo
-  // root at generated/<config>/request-validation-suite. cwd here is
+  // root at generated/<config>/request-validation. cwd here is
   // request-validation/ when invoked via the workspace npm script.
   const outDir = get('--out-dir') || defaultOutDir();
   const importDepth = get('--qa-import-depth');

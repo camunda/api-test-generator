@@ -9,10 +9,14 @@
  *   tsx scripts/with-config.ts --config=oca -- npm run testsuite:generate
  *
  * Resolution:
- *   1. The first --config=<name> flag (anywhere before `--`) sets CONFIG.
+ *   1. If --config=<name> is passed, the *last* occurrence wins (matches
+ *      typical CLI override semantics) and is exported as CONFIG.
  *   2. Otherwise the existing CONFIG env var is preserved.
- *   3. Otherwise CONFIG is left unset and downstream loaders fall back to
- *      the default declared in configs.json.
+ *   3. Otherwise the default declared in configs.json is used.
+ *
+ * In every case the resolved value is written back into the child
+ * environment so downstream consumers — including those that don't read
+ * configs.json themselves — see the same name we validated and logged.
  *
  * The name is validated up front (safe pattern + configs.json allowlist)
  * via path-analyser/src/configResolver.ts so a typo or path-traversal
