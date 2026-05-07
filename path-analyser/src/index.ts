@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
+import { getActiveConfigDir } from './configResolver.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
@@ -1112,12 +1113,16 @@ type RequestDefaults = {
 let requestDefaultsCache: RequestDefaults | null = null;
 function loadRequestDefaults(): RequestDefaults {
   if (requestDefaultsCache) return requestDefaultsCache;
-  const candidates = [
-    path.resolve(process.cwd(), 'request-defaults.json'),
-    path.resolve(process.cwd(), 'path-analyser', 'request-defaults.json'),
-  ];
-  for (const p of candidates) {
+  // Sidecar lives under the active config directory at the repo root
+  // (see #128). Probe both repo-root and path-analyser-relative cwds
+  // so the script keeps working from either invocation site. Each
+  // candidate is computed lazily because getActiveConfigDir reads
+  // configs.json and throws when it is absent (e.g. the parent of the
+  // repo root).
+  const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  for (const root of repoRootCandidates) {
     try {
+      const p = path.resolve(getActiveConfigDir(root), 'request-defaults.json');
       const data = fsSync.readFileSync(p, 'utf8');
       // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for request-defaults.json.
       const json = JSON.parse(data) as RequestDefaults;
@@ -1148,12 +1153,16 @@ type ProviderConfig = {
 let providerConfigCache: ProviderConfig | null = null;
 function loadProviderConfig(): ProviderConfig {
   if (providerConfigCache) return providerConfigCache;
-  const candidates = [
-    path.resolve(process.cwd(), 'filter-providers.json'),
-    path.resolve(process.cwd(), 'path-analyser', 'filter-providers.json'),
-  ];
-  for (const p of candidates) {
+  // Sidecar lives under the active config directory at the repo root
+  // (see #128). Probe both repo-root and path-analyser-relative cwds
+  // so the script keeps working from either invocation site. Each
+  // candidate is computed lazily because getActiveConfigDir reads
+  // configs.json and throws when it is absent (e.g. the parent of the
+  // repo root).
+  const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  for (const root of repoRootCandidates) {
     try {
+      const p = path.resolve(getActiveConfigDir(root), 'filter-providers.json');
       const data = fsSync.readFileSync(p, 'utf8');
       // biome-ignore lint/plugin: JSON.parse returns `any`; the file shape is the runtime contract for filter-providers.json.
       providerConfigCache = JSON.parse(data) as ProviderConfig;

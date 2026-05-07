@@ -237,7 +237,7 @@ Any other non-empty value is treated as a custom deterministic seed.
 
 The bundled-spec invariants test the real upstream spec output, so it is
 only meaningful against a fixed upstream spec content.
-[tests/regression/spec-pin.json](tests/regression/spec-pin.json) records
+[configs/camunda-oca/spec-pin.json](configs/camunda-oca/spec-pin.json) records
 the `expectedSpecHash` plus the `specRef` CI fetches. A vitest
 `globalSetup` ([tests/regression/spec-pin.setup.ts](tests/regression/spec-pin.setup.ts))
 aborts the entire run with a single actionable error if the bundled spec
@@ -256,7 +256,7 @@ SPEC_REF=stable/8.10 npm run fetch-spec:ref
 npm run testsuite:generate
 npm run generate:request-validation
 
-# 3. Update tests/regression/spec-pin.json:
+# 3. Update configs/camunda-oca/spec-pin.json:
 #    - specRef:          the resolved 40-char commit SHA (NOT the branch/tag)
 #    - expectedSpecHash: the `specHash` printed in spec/bundled/spec-metadata.json
 # 4. Update any invariants whose values legitimately changed, then commit

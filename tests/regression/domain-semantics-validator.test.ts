@@ -123,10 +123,13 @@ describe('validateDomainSemantics', () => {
     expect(errs.map((e) => e.invariant)).toContain('disjunctionMemberResolves');
   });
 
-  it('accepts the real path-analyser/domain-semantics.json', async () => {
+  it('accepts the real configs/camunda-oca/domain-semantics.json', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
-    const file = path.resolve(import.meta.dirname, '../../path-analyser/domain-semantics.json');
+    const file = path.resolve(
+      import.meta.dirname,
+      '../../configs/camunda-oca/domain-semantics.json',
+    );
     const raw = await fs.readFile(file, 'utf8');
     const parsed: unknown = JSON.parse(raw);
     expect(validateDomainSemantics(parsed)).toEqual([]);

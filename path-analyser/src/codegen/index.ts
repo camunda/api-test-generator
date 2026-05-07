@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { getActiveConfigDir } from '../configResolver.js';
 import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
@@ -35,7 +36,14 @@ function parseScenarioCollection(text: string): EndpointScenarioCollection {
 async function loadGlobalContextSeeds(baseDir: string): Promise<GlobalContextSeed[]> {
   let text: string;
   try {
-    text = await fs.readFile(path.join(baseDir, 'domain-semantics.json'), 'utf8');
+    // domain-semantics.json lives under the active config directory at
+    // the repo root (see #128). `baseDir` is the path-analyser workspace,
+    // so the repo root is its parent.
+    const repoRoot = path.resolve(baseDir, '..');
+    text = await fs.readFile(
+      path.join(getActiveConfigDir(repoRoot), 'domain-semantics.json'),
+      'utf8',
+    );
   } catch (error) {
     // Only treat a missing sidecar as non-fatal. EACCES, EISDIR, transient
     // I/O errors, etc. all indicate a real operational problem and must

@@ -4,8 +4,8 @@
  * Each fixture builds a tiny on-disk layout mimicking the path-analyser
  * baseDir contract (a sibling `semantic-graph-extractor/dist/output/`
  * directory holding the dependency graph, plus a `domain-semantics.json`
- * inside the baseDir), then calls `loadGraph()` and asserts on the
- * returned `OperationGraph`.
+ * inside the active config directory at the repo root — (see #128), then
+ * calls `loadGraph()` and asserts on the returned `OperationGraph`.
  *
  * The first fixture pins the regression for #56: a sidecar-declared
  * `domain.operationRequirements[opId].produces` must surface in
@@ -26,13 +26,22 @@ interface SidecarLayout {
 let workdir: string;
 let baseDir: string;
 let graphDir: string;
+let configDir: string;
 
 beforeEach(() => {
   workdir = mkdtempSync(join(tmpdir(), 'graphloader-fixture-'));
   baseDir = join(workdir, 'path-analyser');
   graphDir = join(workdir, 'semantic-graph-extractor', 'dist', 'output');
+  configDir = join(workdir, 'configs', 'camunda-oca');
   mkdirSync(baseDir, { recursive: true });
   mkdirSync(graphDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  // configResolver requires a configs.json at the repo root with the
+  // active config declared in its allowlist (see #128).
+  writeFileSync(
+    join(workdir, 'configs.json'),
+    JSON.stringify({ default: 'camunda-oca', configs: { 'camunda-oca': {} } }),
+  );
 });
 
 afterEach(() => {
@@ -41,7 +50,7 @@ afterEach(() => {
 
 function writeLayout(layout: SidecarLayout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
-  writeFileSync(join(baseDir, 'domain-semantics.json'), JSON.stringify(layout.domain));
+  writeFileSync(join(configDir, 'domain-semantics.json'), JSON.stringify(layout.domain));
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +183,7 @@ describe('graphLoader: domain-semantics.json fail-loud invariant', () => {
       join(graphDir, 'operation-dependency-graph.json'),
       JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
     );
-    writeFileSync(join(baseDir, 'domain-semantics.json'), '{ this is not valid json');
+    writeFileSync(join(configDir, 'domain-semantics.json'), '{ this is not valid json');
     await expect(loadGraph(baseDir)).rejects.toThrow(/domain-semantics\.json is not valid JSON/);
   });
 
@@ -184,7 +193,7 @@ describe('graphLoader: domain-semantics.json fail-loud invariant', () => {
       JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
     );
     writeFileSync(
-      join(baseDir, 'domain-semantics.json'),
+      join(configDir, 'domain-semantics.json'),
       JSON.stringify({
         runtimeStates: { Known: {} },
         artifactKinds: { kindA: { producesStates: ['UndeclaredState'] } },
