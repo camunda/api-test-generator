@@ -35,6 +35,7 @@ import {
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
+import { loadRequestValidationConfig } from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
@@ -122,6 +123,16 @@ function parseArgs(): CliOptions {
 
 async function main() {
   const opts = parseArgs();
+  const repoRoot = findRepoRoot(process.cwd());
+  if (!repoRoot) {
+    throw new Error(`[generate] Could not locate configs.json starting from ${process.cwd()}.`);
+  }
+  const configName = getActiveConfigName(repoRoot);
+  const rvConfig = loadRequestValidationConfig(repoRoot, configName);
+  console.log(
+    `[generate] Active config: ${configName} ` +
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive})`,
+  );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
@@ -208,6 +219,7 @@ async function main() {
         ...generateEnumViolations(model.operations, {
           capPerOperation: undefined,
           onlyOperations: opts.onlyOperations,
+          enumCaseInsensitive: rvConfig.enumCaseInsensitive,
         }),
       );
     }

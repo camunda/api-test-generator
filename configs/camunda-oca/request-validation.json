@@ -1,0 +1,4 @@
+{
+  "$comment": "Per-config request-validation settings for camunda-oca. The Camunda 8 Orchestration Cluster API parser accepts string-enum values case-insensitively (camunda/camunda#52409), so case-only mutations would be false 400 expectations. See api-test-generator#129.",
+  "enumCaseInsensitive": true
+}

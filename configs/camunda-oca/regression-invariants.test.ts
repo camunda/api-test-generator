@@ -1682,3 +1682,101 @@ describeForThisConfig('bundled-spec invariants: x-semantic-establishes (#104)', 
     expect(offenders).toEqual([]);
   });
 });
+
+describeForThisConfig('bundled-spec invariants: emitted request-validation suite (#129)', () => {
+  it('emits zero case-only enum mutations when enumCaseInsensitive is true', () => {
+    // The camunda-oca config sets `enumCaseInsensitive: true` in
+    // configs/camunda-oca/request-validation.json because the upstream
+    // Camunda 8 OCA parser accepts string-enum values case-insensitively
+    // (camunda/camunda#52409). Class-scoped guard: scan every emitted
+    // enum-violation test block (across every operation in every spec
+    // file) and assert that no inlined string body value differs from a
+    // valid enum member only by ASCII case. Catches any future analyser
+    // (e.g. a sibling oneOf/anyOf walker) that re-introduces a case-only
+    // mutation.
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+
+    interface Spec {
+      paths?: unknown;
+      components?: unknown;
+    }
+    function isObject(v: unknown): v is Record<string, unknown> {
+      return typeof v === 'object' && v !== null && !Array.isArray(v);
+    }
+    const bundlePath = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
+    const rawSpec: unknown = JSON.parse(readFileSync(bundlePath, 'utf8'));
+    if (!isObject(rawSpec)) {
+      throw new Error(`Bundled spec at ${bundlePath} is not a JSON object.`);
+    }
+    // Build the universe of valid string-enum members from the bundled
+    // spec. Membership is by exact string; the lower-cased index drives
+    // the case-collision check.
+    const validMembers = new Set<string>();
+    const enumLowerSet = new Set<string>();
+    function walk(node: unknown): void {
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item);
+        return;
+      }
+      if (!isObject(node)) return;
+      const e = node.enum;
+      if (Array.isArray(e)) {
+        for (const member of e) {
+          if (typeof member === 'string') {
+            validMembers.add(member);
+            enumLowerSet.add(member.toLowerCase());
+          }
+        }
+      }
+      for (const v of Object.values(node)) walk(v);
+    }
+    walk(rawSpec);
+
+    function isCaseOnlyFalsePositive(value: string): boolean {
+      if (validMembers.has(value)) return false;
+      return enumLowerSet.has(value.toLowerCase());
+    }
+
+    // Locate each test block whose closing assertion has
+    // `scenarioKind: 'enum-violation'`. For each such block, extract
+    // every JSON-quoted string literal from the inlined `requestBody`
+    // and check it for case-only collision with a valid enum member.
+    // A regex pass is sufficient because the emitter inlines the body
+    // as a TypeScript object literal with double-quoted string values.
+    const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'enum-violation'[^]*?}\);/g;
+    const QUOTED_STRING = /"([^"\\\n]+)"/g;
+    const offenders: { file: string; sample: string }[] = [];
+    for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const src = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+      let block: RegExpExecArray | null;
+      TEST_BLOCK.lastIndex = 0;
+      while ((block = TEST_BLOCK.exec(src)) !== null) {
+        QUOTED_STRING.lastIndex = 0;
+        let q: RegExpExecArray | null;
+        while ((q = QUOTED_STRING.exec(block[0])) !== null) {
+          const candidate = q[1];
+          if (isCaseOnlyFalsePositive(candidate)) {
+            offenders.push({
+              file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),
+              sample: candidate,
+            });
+            break;
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

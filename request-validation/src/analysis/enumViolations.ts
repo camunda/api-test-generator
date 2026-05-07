@@ -6,6 +6,27 @@ import { makeId, setAtPath } from './common.js';
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /**
+   * When `true`, skip case-only enum mutations (issue #129). A mutation `m`
+   * for an enum with members `E` is "case-only" iff `m ∉ E` and
+   * `∃ e ∈ E. e.toLowerCase() === m.toLowerCase()`. Suffix mutations
+   * (`${value}_INVALID`) and totally unrelated values are still emitted.
+   */
+  enumCaseInsensitive?: boolean;
+}
+
+/**
+ * Test whether an invalid candidate `m` differs from any member of `members`
+ * only by ASCII case. The caller is responsible for ensuring `m ∉ members`
+ * (the membership check is the cheaper test and lives at the call site).
+ */
+function isCaseOnlyMutation(m: unknown, members: readonly unknown[]): boolean {
+  if (typeof m !== 'string') return false;
+  const lower = m.toLowerCase();
+  for (const e of members) {
+    if (typeof e === 'string' && e.toLowerCase() === lower) return true;
+  }
+  return false;
 }
 
 // Permissive subset of an OpenAPI schema fragment used by the oneOf fallback walker.
@@ -41,6 +62,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
           const invalids = buildInvalidVariants(node.enum[0]);
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= opts.capPerOperation) break;
+            if (opts.enumCaseInsensitive && isCaseOnlyMutation(inv, node.enum)) continue;
             const body = structuredClone(baseline);
             if (!setAtPath(body, path, inv)) continue;
             out.push(makeScenario(op, path.join('.'), body, produced));
@@ -73,6 +95,7 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
           const invalids = buildInvalidVariants(schema.enum[0]);
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
+            if (opts.enumCaseInsensitive && isCaseOnlyMutation(inv, schema.enum)) continue;
             const body = structuredClone(base);
             body[prop] = inv;
             out.push({
