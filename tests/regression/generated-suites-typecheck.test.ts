@@ -2,6 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import {
+  getPlaywrightSuiteDir,
+  getRequestValidationSuiteDir,
+} from '../../path-analyser/src/configResolver.ts';
 
 /**
  * Class-of-defect guard test (PR #89 review comment 2).
@@ -35,11 +39,11 @@ interface Suite {
 const SUITES: readonly Suite[] = [
   {
     label: 'path-analyser',
-    tsconfig: path.join(REPO_ROOT, 'path-analyser', 'dist', 'generated-tests', 'tsconfig.json'),
+    tsconfig: path.join(getPlaywrightSuiteDir(REPO_ROOT), 'tsconfig.json'),
   },
   {
     label: 'request-validation',
-    tsconfig: path.join(REPO_ROOT, 'request-validation', 'generated', 'tsconfig.json'),
+    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'tsconfig.json'),
   },
 ];
 

@@ -329,20 +329,8 @@ describe('bundled-spec invariants: planner output', () => {
     // lands, the second branch becomes false, the first branch must
     // hold, and any future regression to "no chain planned" still
     // fails the test loudly.
-    const REPO_ROOT = join(import.meta.dirname, '..', '..');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const rawGraph = JSON.parse(
-      readFileSync(
-        join(
-          REPO_ROOT,
-          'semantic-graph-extractor',
-          'dist',
-          'output',
-          'operation-dependency-graph.json',
-        ),
-        'utf8',
-      ),
-    ) as {
+    const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{
         operationId: string;
         responseSemanticTypes?: Record<
@@ -427,20 +415,8 @@ describe('bundled-spec invariants: planner output', () => {
     // spec pin is bumped, the second branch becomes false, the first
     // branch must hold, and any future regression to "no chain planned"
     // fails the test loudly.
-    const REPO_ROOT = join(import.meta.dirname, '..', '..');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const rawGraph = JSON.parse(
-      readFileSync(
-        join(
-          REPO_ROOT,
-          'semantic-graph-extractor',
-          'dist',
-          'output',
-          'operation-dependency-graph.json',
-        ),
-        'utf8',
-      ),
-    ) as {
+    const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{
         operationId: string;
         responseSemanticTypes?: Record<
@@ -1480,20 +1456,8 @@ describe('bundled-spec invariants: x-semantic-establishes (#104)', () => {
   // presence (sentinel-vs-positive switch) and reachability (the chain
   // shape the planner produces).
   it('every consumer of an established semantic plans a chain through its establisher', () => {
-    const REPO_ROOT = join(import.meta.dirname, '..', '..');
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const rawGraph = JSON.parse(
-      readFileSync(
-        join(
-          REPO_ROOT,
-          'semantic-graph-extractor',
-          'dist',
-          'output',
-          'operation-dependency-graph.json',
-        ),
-        'utf8',
-      ),
-    ) as {
+    const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{
         operationId: string;
         path?: string;
