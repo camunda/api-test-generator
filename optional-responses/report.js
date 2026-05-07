@@ -82,13 +82,34 @@ function main() {
     ? path.resolve(process.cwd(), '..')
     : process.cwd();
   // Per-config layout (#128 PR 2): bundled spec lives under
-  // spec/<config>/bundled/. CONFIG defaults to camunda-oca and is
-  // validated against the same safe-name regex used by path-analyser's
-  // configResolver.
+  // spec/<config>/bundled/. CONFIG (trimmed) overrides the default
+  // declared in configs.json; the resolved name must match the
+  // safe-name regex AND be present in configs.json's `configs` map
+  // (allowlist), so a typo in CONFIG fails loud rather than silently
+  // looking under spec/<unknown>/...
   const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
-  const config = process.env.CONFIG || 'camunda-oca';
+  const indexPath = path.resolve(repoRoot, 'configs.json');
+  const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    typeof parsed.default !== 'string' ||
+    !parsed.configs ||
+    typeof parsed.configs !== 'object' ||
+    Array.isArray(parsed.configs)
+  ) {
+    throw new Error(`Malformed configs.json at ${indexPath}`);
+  }
+  const fromEnv = (process.env.CONFIG || '').trim();
+  const config = fromEnv.length > 0 ? fromEnv : parsed.default;
   if (!CONFIG_SAFE_NAME.test(config)) {
     throw new Error(`Invalid CONFIG value: ${JSON.stringify(config)}`);
+  }
+  if (!Object.hasOwn(parsed.configs, config)) {
+    const known = Object.keys(parsed.configs).join(', ') || '(none)';
+    throw new Error(
+      `Unknown CONFIG ${JSON.stringify(config)}. Declared configs in configs.json: ${known}.`,
+    );
   }
   const specPath = process.env.OPENAPI_SPEC_PATH
     || path.resolve(repoRoot, 'spec', config, 'bundled', 'rest-api.bundle.json');

@@ -6,7 +6,7 @@ import { getPlaywrightSuiteDir } from './src/configResolver.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Per-config layout (#128 PR 2): emitted suite lives under
-// generated/<config>/playwright-suite at the repo root.
+// generated/<config>/playwright at the repo root.
 const repoRoot = resolve(__dirname, '..');
 
 export default defineConfig({

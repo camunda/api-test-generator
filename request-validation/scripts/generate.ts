@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import fs from 'node:fs';
 import path from 'node:path';
+import { findRepoRoot, getActiveConfigName } from '../src/active-config.js';
 import { generateAdditionalPropsViolations } from '../src/analysis/additionalProps.js';
 import { generateUniversalAdditionalProp } from '../src/analysis/additionalPropUniversal.js';
 import {
@@ -50,23 +51,20 @@ interface CliOptions {
   deep?: boolean; // include deep missing & body type mismatches
 }
 
-// Inline CONFIG resolver (#128 PR 2) — mirrors path-analyser/src/configResolver.ts.
-const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
-function activeConfig(): string {
-  const raw = process.env.CONFIG ?? 'camunda-oca';
-  if (!CONFIG_SAFE_NAME.test(raw)) {
+// Default output directory: <repoRoot>/generated/<config>/request-validation.
+// The active config is validated against configs.json (allowlist + safe-name
+// regex), so a typo in CONFIG fails loud rather than silently writing into
+// a phantom directory.
+function defaultOutDir(): string {
+  const repoRoot = findRepoRoot(process.cwd());
+  if (!repoRoot) {
     throw new Error(
-      `Invalid CONFIG value: ${JSON.stringify(raw)} (expected lowercase alphanumeric + hyphens)`,
+      `[generate] Could not locate configs.json starting from ${process.cwd()}. ` +
+        'Run from inside the api-test-generator repository, or pass --out-dir explicitly.',
     );
   }
-  return raw;
-}
-
-// Default output directory: <repoRoot>/generated/<config>/request-validation.
-// cwd is request-validation/ when invoked via the workspace `generate` script,
-// so '..' resolves to the repo root.
-function defaultOutDir(): string {
-  return path.resolve(process.cwd(), '..', 'generated', activeConfig(), 'request-validation');
+  const config = getActiveConfigName(repoRoot);
+  return path.join(repoRoot, 'generated', config, 'request-validation');
 }
 
 function parseArgs(): CliOptions {

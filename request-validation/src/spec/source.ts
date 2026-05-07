@@ -1,19 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-
-// Inline CONFIG resolver (#128 PR 2). Mirrors the safe-name rule applied
-// centrally in path-analyser/src/configResolver.ts. This workspace
-// compiles independently and cannot import from path-analyser.
-const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
-function getActiveConfigName(): string {
-  const raw = process.env.CONFIG ?? 'camunda-oca';
-  if (!CONFIG_SAFE_NAME.test(raw)) {
-    throw new Error(
-      `Invalid CONFIG value: ${JSON.stringify(raw)} (expected lowercase alphanumeric + hyphens)`,
-    );
-  }
-  return raw;
-}
+import { findRepoRoot, getActiveConfigName } from '../active-config.js';
 
 /**
  * Resolves the spec path + provenance string for the request validation generator.
@@ -22,7 +9,10 @@ function getActiveConfigName(): string {
  *  1. `REQUEST_VALIDATION_SPEC` env var (absolute or relative path to a JSON/YAML spec).
  *  2. Bundled spec produced by the api-test-generator root pipeline:
  *     `<repoRoot>/spec/<config>/bundled/rest-api.bundle.json` (with provenance from
- *     `spec/<config>/bundled/spec-metadata.json` `specHash`).
+ *     `spec/<config>/bundled/spec-metadata.json` `specHash`). The active config is
+ *     resolved against `<repoRoot>/configs.json` (allowlist + safe-name regex), so
+ *     a typo in `CONFIG` fails loudly instead of silently looking under a path that
+ *     doesn't exist.
  *  3. Legacy in-package cache: `cache/rest-api.yaml` (+ `cache/spec-commit.txt`)
  *     — retained so the generator still runs standalone if relocated.
  *
@@ -43,21 +33,26 @@ export function resolveSpecSource(cwd: string = process.cwd()): {
   }
 
   // 2. Look for the bundled spec produced by the root workspace pipeline,
-  // partitioned by active config (#128 PR 2).
-  const config = getActiveConfigName();
-  const bundled = findUpwards(cwd, path.join('spec', config, 'bundled', 'rest-api.bundle.json'));
-  if (bundled) {
-    const metaPath = path.join(path.dirname(bundled), 'spec-metadata.json');
-    let provenance: string | undefined;
-    if (fs.existsSync(metaPath)) {
-      try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        if (typeof meta.specHash === 'string') provenance = meta.specHash;
-      } catch {
-        /* ignore malformed metadata */
+  // partitioned by active config (#128 PR 2). Validate CONFIG against
+  // configs.json when we can locate it; otherwise (relocated package)
+  // fall through to the legacy cache.
+  const repoRoot = findRepoRoot(cwd);
+  if (repoRoot) {
+    const config = getActiveConfigName(repoRoot);
+    const bundled = path.join(repoRoot, 'spec', config, 'bundled', 'rest-api.bundle.json');
+    if (fs.existsSync(bundled)) {
+      const metaPath = path.join(path.dirname(bundled), 'spec-metadata.json');
+      let provenance: string | undefined;
+      if (fs.existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          if (typeof meta.specHash === 'string') provenance = meta.specHash;
+        } catch {
+          /* ignore malformed metadata */
+        }
       }
+      return { specPath: bundled, specProvenance: provenance, source: 'bundled' };
     }
-    return { specPath: bundled, specProvenance: provenance, source: 'bundled' };
   }
 
   // 3. Legacy in-package cache fallback.
@@ -81,16 +76,4 @@ export function resolveSpecSource(cwd: string = process.cwd()): {
       '  • set REQUEST_VALIDATION_SPEC=/path/to/openapi.(json|yaml), or\n' +
       '  • place a spec at cache/rest-api.yaml inside this package.',
   );
-}
-
-function findUpwards(startDir: string, relativeTarget: string): string | undefined {
-  let dir = startDir;
-  for (let i = 0; i < 8; i++) {
-    const candidate = path.join(dir, relativeTarget);
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return undefined;
 }

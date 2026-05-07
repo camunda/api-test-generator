@@ -1,29 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { getActiveConfigName } from './active-config';
 import { CrossContaminationAnalyzer } from './cross-contamination-analyzer';
 import { GraphBuilder } from './graph-builder';
 import { RootDependencyAnalyzer } from './root-dependency-analyzer';
 import { SchemaAnalyzer } from './schema-analyzer';
 import { SemanticTypeLibraryBuilder } from './semantic-type-library-builder';
 import type { OpenAPISpec, Operation, OperationDependencyGraph, SemanticType } from './types';
-
-// ---- Inline CONFIG resolver (#128 PR 2) -----------------------------
-// This workspace compiles to CommonJS while path-analyser/configResolver.ts
-// is ESM (NodeNext). Cross-workspace import is therefore not possible.
-// The resolver is intentionally tiny and mirrors the safe-name validation
-// applied centrally in path-analyser/src/configResolver.ts. Keep the two
-// in sync.
-const CONFIG_SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
-function getActiveConfigName(): string {
-  const raw = process.env.CONFIG ?? 'camunda-oca';
-  if (!CONFIG_SAFE_NAME.test(raw)) {
-    throw new Error(
-      `Invalid CONFIG value: ${JSON.stringify(raw)} (expected lowercase alphanumeric + hyphens)`,
-    );
-  }
-  return raw;
-}
 
 /**
  * Semantic Graph Extractor for OpenAPI specifications
@@ -212,7 +196,7 @@ function loadKindRegistry():
   // reaches the repo root. The registry now lives under the active
   // config's spec directory (#128 PR 2).
   const repoRoot = path.resolve(__dirname, '../..');
-  const config = getActiveConfigName();
+  const config = getActiveConfigName(repoRoot);
   const candidate = path.join(repoRoot, 'spec', config, 'bundled', 'semantic-kinds.json');
   if (fs.existsSync(candidate)) {
     try {
@@ -251,7 +235,7 @@ async function main() {
     // reaches the repo root. Spec input + graph output are both
     // partitioned by config (#128 PR 2).
     const repoRoot = path.resolve(__dirname, '../..');
-    const config = getActiveConfigName();
+    const config = getActiveConfigName(repoRoot);
     const specPath =
       process.argv[2] ||
       process.env.OPENAPI_SPEC_PATH ||

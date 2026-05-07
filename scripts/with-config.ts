@@ -63,11 +63,16 @@ function main(): void {
 
   // Validate up front so a typo / unsafe value fails before we spawn
   // anything. getActiveConfigName reads CONFIG from process.env, so
-  // assign first.
+  // assign first; then write the *resolved* (trimmed, allowlist-checked,
+  // default-if-unset) value back into the child env so downstream
+  // consumers — including those that don't read configs.json themselves
+  // — see the same value we logged here.
   if (env.CONFIG !== undefined) {
     process.env.CONFIG = env.CONFIG;
   }
   const resolved = getActiveConfigName(REPO_ROOT);
+  env.CONFIG = resolved;
+  process.env.CONFIG = resolved;
   console.error(`[with-config] CONFIG=${resolved}`);
 
   const child = spawn(cmd[0], cmd.slice(1), {
