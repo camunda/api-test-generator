@@ -3,11 +3,11 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getFeatureOutputDir,
-  getGeneratedDir,
   getGraphDir,
   getPlaywrightSuiteDir,
   getScenariosDir,
   getSpecBundleDir,
+  getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
 
 /**
@@ -35,7 +35,7 @@ const REPO_ROOT = join(import.meta.dirname, '..', '..');
 const GRAPH_PATH = join(getGraphDir(REPO_ROOT), 'operation-dependency-graph.json');
 const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
-const VARIANT_SCENARIOS_DIR = join(getGeneratedDir(REPO_ROOT), 'variant-output');
+const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
 
 interface SemanticTypeEntry {

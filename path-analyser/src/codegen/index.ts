@@ -3,8 +3,8 @@ import path from 'node:path';
 import {
   getActiveConfigDir,
   getFeatureOutputDir,
-  getGeneratedDir,
   getPlaywrightSuiteDir,
+  getVariantOutputDir,
 } from '../configResolver.js';
 import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
@@ -98,7 +98,7 @@ async function run() {
   // Per-config output partition (#128 PR 2): scenario inputs and the
   // emitted Playwright suite all live under generated/<config>/.
   const featureDir = getFeatureOutputDir(repoRoot);
-  const variantDir = path.join(getGeneratedDir(repoRoot), 'variant-output');
+  const variantDir = getVariantOutputDir(repoRoot);
   const outDir = getPlaywrightSuiteDir(repoRoot);
 
   if (help || !positional) {

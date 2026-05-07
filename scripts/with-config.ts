@@ -6,7 +6,7 @@
  *   "pipeline": "tsx scripts/with-config.ts -- npm run testsuite:generate"
  *
  * Usage (from the shell):
- *   tsx scripts/with-config.ts --config=oca -- npm run testsuite:generate
+ *   tsx scripts/with-config.ts --config=camunda-oca -- npm run testsuite:generate
  *
  * Resolution:
  *   1. If --config=<name> is passed, the *last* occurrence wins (matches

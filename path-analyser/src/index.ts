@@ -6,8 +6,8 @@ import { buildCanonicalShapes } from './canonicalSchemas.js';
 import {
   getActiveConfigDir,
   getFeatureOutputDir,
-  getGeneratedDir,
   getScenariosDir,
+  getVariantOutputDir,
 } from './configResolver.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
@@ -44,7 +44,7 @@ async function main() {
   // under generated/<config>/, not inside the path-analyser workspace.
   const outputDir = getScenariosDir(repoRoot);
   const featureDir = getFeatureOutputDir(repoRoot);
-  const variantDir = path.join(getGeneratedDir(repoRoot), 'variant-output');
+  const variantDir = getVariantOutputDir(repoRoot);
   // Wipe before write so files left over from a previous spec version (e.g.
   // an operationId that no longer exists upstream) cannot survive into the
   // current run and silently break Layer-3 invariants. Without this, local

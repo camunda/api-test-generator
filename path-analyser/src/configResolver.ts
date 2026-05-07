@@ -88,6 +88,7 @@ export function getActiveConfigDir(repoRoot: string): string {
  *   generated/<config>/graph/             ← semantic-graph-extractor output
  *   generated/<config>/scenarios/         ← path-analyser scenario JSON
  *   generated/<config>/feature-output/    ← path-analyser feature coverage JSON
+ *   generated/<config>/variant-output/    ← path-analyser per-variant scenario JSON
  *   generated/<config>/playwright/        ← path-analyser emitted Playwright suite
  *   generated/<config>/request-validation/ ← request-validation emitted negative suite
  *
@@ -114,6 +115,10 @@ export function getScenariosDir(repoRoot: string): string {
 
 export function getFeatureOutputDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'feature-output');
+}
+
+export function getVariantOutputDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'variant-output');
 }
 
 export function getPlaywrightSuiteDir(repoRoot: string): string {
