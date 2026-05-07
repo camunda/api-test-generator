@@ -1,0 +1,18 @@
+{
+  "name": "camunda-js-sdk-suite",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generated Vitest integration suite for the Camunda REST API (JS SDK target), produced by the api-test-generator path-analyser.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@camunda8/orchestration-cluster-api": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.0"
+  }
+}

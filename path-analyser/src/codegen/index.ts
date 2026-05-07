@@ -4,6 +4,9 @@ import { getActiveConfigDir } from '../configResolver.js';
 import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
+import { createJsSdkEmitter } from './js-sdk/emitter.js';
+import { materializeSdkSupport } from './js-sdk/materialize-support.js';
+import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -93,6 +96,28 @@ async function run() {
   const variantDir = path.join(baseDir, 'dist/variant-output');
   const outDir = path.join(baseDir, 'dist/generated-tests');
 
+  // Register the JS SDK emitter here (inside run()) so we have access to
+  // baseDir for locating the operation-map file, which is fetched at
+  // generation time by `npm run fetch-js-sdk-map` and lives in spec/.
+  // If the file is absent we fall back to using operationIds directly.
+  {
+    let jsSdkMapping: OperationMapJsonSource | undefined;
+    const mapCandidates = [
+      path.join(baseDir, '..', 'spec', 'js-sdk', 'operation-map.json'),
+      path.join(baseDir, 'spec', 'js-sdk', 'operation-map.json'),
+    ];
+    for (const candidate of mapCandidates) {
+      try {
+        const raw = await fs.readFile(candidate, 'utf8');
+        jsSdkMapping = OperationMapJsonSource.fromJson(raw);
+        break;
+      } catch {
+        // Try next candidate or fall through to fallback.
+      }
+    }
+    registerEmitter(createJsSdkEmitter(jsSdkMapping));
+  }
+
   if (help || !positional) {
     printUsage();
     process.exit(1);
@@ -125,6 +150,9 @@ async function run() {
     // here (rather than a separate npm script) so every codegen run produces
     // a runnable suite as a single artifact.
     await materializeResponseSchemas(outDir);
+  }
+  if (emitter.id === 'js-sdk') {
+    await materializeSdkSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
