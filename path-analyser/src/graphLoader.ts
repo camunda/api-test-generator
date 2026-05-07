@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { getActiveConfigDir } from './configResolver.js';
 import { validateDomainSemantics } from './domainSemanticsValidator.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
@@ -253,11 +254,14 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
 
-  // Domain sidecar load (optional)
+  // Domain sidecar load (optional). The file lives under the active
+  // config directory at the repo root (see #128). `baseDir` is the
+  // path-analyser workspace, so the repo root is its parent.
   let domain: DomainSemantics | undefined;
   let producersByState: Record<string, string[]> | undefined;
   try {
-    const domainPath = path.resolve(baseDir, 'domain-semantics.json');
+    const repoRoot = path.resolve(baseDir, '..');
+    const domainPath = path.resolve(getActiveConfigDir(repoRoot), 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
     // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
     const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;

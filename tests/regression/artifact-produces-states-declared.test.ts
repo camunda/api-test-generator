@@ -16,7 +16,10 @@ interface DomainSemantics {
 
 describe('domain-semantics.json — artifactKinds.producesStates declarations', () => {
   it('every state claimed by an artifact kind must be declared in runtimeStates or capabilities (#66 — FormDeployed defect class, also catches DMN)', async () => {
-    const file = path.resolve(import.meta.dirname, '../../path-analyser/domain-semantics.json');
+    const file = path.resolve(
+      import.meta.dirname,
+      '../../configs/camunda-oca/domain-semantics.json',
+    );
     const raw = await readFile(file, 'utf8');
     // biome-ignore lint/plugin: domain-semantics.json is the runtime contract.
     const domain = JSON.parse(raw) as DomainSemantics;

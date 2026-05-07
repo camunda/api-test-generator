@@ -22,13 +22,16 @@ import { loadGraph } from '../../../path-analyser/src/graphLoader.ts';
 let workdir: string;
 let baseDir: string;
 let graphDir: string;
+let configDir: string;
 
 beforeEach(() => {
   workdir = mkdtempSync(join(tmpdir(), 'graphloader-subshape-fixture-'));
   baseDir = join(workdir, 'path-analyser');
   graphDir = join(workdir, 'semantic-graph-extractor', 'dist', 'output');
+  configDir = join(workdir, 'configs', 'camunda-oca');
   mkdirSync(baseDir, { recursive: true });
   mkdirSync(graphDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
 });
 
 afterEach(() => {
@@ -43,7 +46,7 @@ interface Layout {
 function writeLayout(layout: Layout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
   writeFileSync(
-    join(baseDir, 'domain-semantics.json'),
+    join(configDir, 'domain-semantics.json'),
     JSON.stringify(layout.domain ?? { operationRequirements: {} }),
   );
 }

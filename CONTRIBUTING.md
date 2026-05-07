@@ -40,7 +40,7 @@ to `'snapshot-baseline'`. To opt out for live-broker exploration, set
 ## Spec pin
 
 The bundled-spec invariants are evaluated against a pinned upstream spec
-SHA recorded in [tests/regression/spec-pin.json](tests/regression/spec-pin.json).
+SHA recorded in [configs/camunda-oca/spec-pin.json](configs/camunda-oca/spec-pin.json).
 If the bundled spec content drifts from the pin, the vitest globalSetup
 in [tests/regression/spec-pin.setup.ts](tests/regression/spec-pin.setup.ts)
 aborts the entire run with an actionable re-pin message. See

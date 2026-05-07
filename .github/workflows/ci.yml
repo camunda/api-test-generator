@@ -39,10 +39,11 @@ jobs:
         id: pin
         # The bundled-spec invariants are evaluated against a specific
         # upstream spec content. We fetch that ref so unrelated upstream
-        # changes don't randomly fail PRs. See tests/regression/spec-pin.json
-        # for the bump procedure.
+        # changes don't randomly fail PRs. See configs/camunda-oca/spec-pin.json
+        # for the bump procedure (or configs/<config>/spec-pin.json once
+        # the CONFIG matrix lands — see #128).
         run: |
-          spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('tests/regression/spec-pin.json','utf8')).specRef)")
+          spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
           echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"
           echo "Pinned spec ref: ${spec_ref}"
 

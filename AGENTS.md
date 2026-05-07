@@ -44,7 +44,10 @@ npm workspaces monorepo. Node `>=22`.
 | `tests/fixtures/extractor/` | Layer-1 hand-curated OpenAPI snippets |
 | `tests/fixtures/planner/` | Layer-2 minimal `OperationGraph` chain assertions |
 | `tests/regression/` | Layer-3 invariants over the bundled-spec pipeline output |
-| `tests/regression/spec-pin.json` | Pinned upstream `specRef` + `expectedSpecHash` |
+| `configs/` | Per-target generator configs (one directory per named config) |
+| `configs/camunda-oca/spec-pin.json` | Pinned upstream `specRef` + `expectedSpecHash` for the camunda-oca config |
+| `configs/camunda-oca/{domain-semantics,filter-providers,request-defaults}.json` | Domain rules, value providers, and request-body defaults for camunda-oca |
+| `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/bundled/` | Gitignored bundled-spec output |
 | `dist/`, `**/generated/` | Gitignored generator output (built each CI run) |
 | `plugins/no-unsafe-type-assertion.grit` | Custom Biome lint banning `as T` |
@@ -96,7 +99,8 @@ CI passes `TEST_SEED=snapshot-baseline` explicitly.
 ## Spec pin (do not skip)
 
 Bundled-spec invariants are evaluated against a pinned upstream commit SHA
-in `tests/regression/spec-pin.json`. A vitest `globalSetup`
+in `configs/<active>/spec-pin.json` (active config selected via the `CONFIG`
+env var; default `camunda-oca`). A vitest `globalSetup`
 (`tests/regression/spec-pin.setup.ts`) aborts the entire run if the bundled
 spec content drifts.
 
@@ -122,7 +126,7 @@ To bump:
 2. `SPEC_REF=<that-sha> npm run fetch-spec:ref` — the bundler resolves any
    branch/tag/SHA to a SHA and writes `spec/bundled/spec-metadata.json`.
 3. `npm run testsuite:generate && npm run generate:request-validation`
-4. Update `spec-pin.json`:
+4. Update `configs/<active>/spec-pin.json`:
    - `specRef`: the **resolved 40-char commit SHA** from
      `spec/bundled/spec-metadata.json` (never a branch — branches drift,
      and never this repo's own SHA — see the callout above)
@@ -341,7 +345,7 @@ on every PR to `main` and every push to `main`.
 Steps (in order — match these locally before pushing):
 
 1. `npm ci`
-2. Read `tests/regression/spec-pin.json` → `specRef`
+2. Read `configs/camunda-oca/spec-pin.json` → `specRef`
 3. `npm run lint` — Biome
 4. `tsc --noEmit` for each workspace tsconfig
 5. `SPEC_REF=<pinned> npm run fetch-spec:ref`
@@ -374,8 +378,9 @@ npm test
 > `scenarioGenerator.ts`).
 >
 > Any change under `semantic-graph-extractor/`, `path-analyser/`,
-> `request-validation/`, `domain-semantics.json`, `filter-providers.json`,
-> or `request-defaults.json` requires the regen. When in doubt, regen.
+> `request-validation/`, or any file under `configs/<name>/` (notably
+> `domain-semantics.json`, `filter-providers.json`, `request-defaults.json`)
+> requires the regen. When in doubt, regen.
 >
 > CI's "Regenerate pipeline outputs" step runs the same two commands
 > (`testsuite:generate` + `generate:request-validation`) under
@@ -401,16 +406,16 @@ error.
 **Always:**
 - Follow the layered test strategy and the standing red/green/class-scoped
   rule for extractor and planner changes.
-- Treat `tests/regression/spec-pin.json` as the source of truth for which
-  upstream spec the invariants run against.
+- Treat `configs/<active>/spec-pin.json` (e.g. `configs/camunda-oca/spec-pin.json`)
+  as the source of truth for which upstream spec the invariants run against.
 - Keep fixtures tiny and named after the property they guard.
 
 **Ask first:**
 - Bumping the pinned upstream spec ref (it can ripple through many
   invariants).
-- Modifying `domain-semantics.json`, `filter-providers.json`, or
-  `request-defaults.json` — these are configuration, not code, and changes
-  shift many generated outputs at once.
+- Modifying any `configs/<name>/{domain-semantics,filter-providers,request-defaults}.json` —
+  these are configuration, not code, and changes shift many generated
+  outputs at once.
 - Adding a new emitter target (`path-analyser/src/codegen/emitter.ts`) —
   the contract is currently experimental.
 
@@ -429,4 +434,4 @@ them here:
 
 - [`camunda-schema-bundler`](https://github.com/camunda/camunda-schema-bundler) — bundles upstream multi-file spec
 - Upstream Camunda OpenAPI spec at `camunda/camunda` — pinned by
-  `tests/regression/spec-pin.json`
+  `configs/camunda-oca/spec-pin.json`

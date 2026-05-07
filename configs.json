@@ -1,0 +1,13 @@
+{
+  "$comment": "Named generator configurations for the api-test-generator. The active config is selected via the CONFIG env var (default: camunda-oca). Each configs/<name>/ directory holds the spec pin and the domain/filter/request-defaults files for that target API. This file is the source of truth for which configs exist and their metadata; loader code resolves the per-config files by convention from configs/<name>/. PR 1 of #128 establishes this layout; output partitioning under generated/<config>/ and CI matrix support land in follow-up PRs.",
+  "default": "camunda-oca",
+  "configs": {
+    "camunda-oca": {
+      "description": "Camunda 8 Orchestration Cluster API",
+      "spec": {
+        "source": "github:camunda/camunda",
+        "$comment": "Pinned ref + expected hash live in configs/camunda-oca/spec-pin.json (kept as a separate file to preserve the spec-pin bump procedure documented in tests/regression/spec-pin.setup.ts)."
+      }
+    }
+  }
+}

@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
+import { getActiveConfigDir } from './configResolver.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
@@ -1112,9 +1113,12 @@ type RequestDefaults = {
 let requestDefaultsCache: RequestDefaults | null = null;
 function loadRequestDefaults(): RequestDefaults {
   if (requestDefaultsCache) return requestDefaultsCache;
+  // Sidecar lives under the active config directory at the repo root
+  // (see #128). Probe both repo-root and path-analyser-relative cwds
+  // so the script keeps working from either invocation site.
   const candidates = [
-    path.resolve(process.cwd(), 'request-defaults.json'),
-    path.resolve(process.cwd(), 'path-analyser', 'request-defaults.json'),
+    path.resolve(getActiveConfigDir(process.cwd()), 'request-defaults.json'),
+    path.resolve(getActiveConfigDir(path.resolve(process.cwd(), '..')), 'request-defaults.json'),
   ];
   for (const p of candidates) {
     try {
@@ -1148,9 +1152,12 @@ type ProviderConfig = {
 let providerConfigCache: ProviderConfig | null = null;
 function loadProviderConfig(): ProviderConfig {
   if (providerConfigCache) return providerConfigCache;
+  // Sidecar lives under the active config directory at the repo root
+  // (see #128). Probe both repo-root and path-analyser-relative cwds
+  // so the script keeps working from either invocation site.
   const candidates = [
-    path.resolve(process.cwd(), 'filter-providers.json'),
-    path.resolve(process.cwd(), 'path-analyser', 'filter-providers.json'),
+    path.resolve(getActiveConfigDir(process.cwd()), 'filter-providers.json'),
+    path.resolve(getActiveConfigDir(path.resolve(process.cwd(), '..')), 'filter-providers.json'),
   ];
   for (const p of candidates) {
     try {

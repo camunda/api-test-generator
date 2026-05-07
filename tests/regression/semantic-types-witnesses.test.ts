@@ -21,7 +21,7 @@ interface DomainSemantics {
 }
 
 async function loadDomain(): Promise<DomainSemantics> {
-  const file = path.resolve(import.meta.dirname, '../../path-analyser/domain-semantics.json');
+  const file = path.resolve(import.meta.dirname, '../../configs/camunda-oca/domain-semantics.json');
   const raw = await readFile(file, 'utf8');
   // biome-ignore lint/plugin: domain-semantics.json is the runtime contract.
   return JSON.parse(raw) as DomainSemantics;

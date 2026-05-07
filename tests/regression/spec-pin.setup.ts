@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
  * Acts as a precondition gate for the regression suite: the
  * bundled-spec invariants are only meaningful against a fixed upstream
  * OpenAPI spec content. If the bundled spec drifts from the pin
- * recorded in `tests/regression/spec-pin.json`, throw here so Vitest
+ * recorded in `configs/<active>/spec-pin.json` (active config selected
+ * via the CONFIG env var; default `camunda-oca`), throw here so Vitest
  * aborts the entire run with a single actionable error before loading
  * the (now-misleading) invariant assertions.
  *
@@ -20,7 +21,11 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), '..', '..');
-const PIN_PATH = join(REPO_ROOT, 'tests', 'regression', 'spec-pin.json');
+// Active config name comes from the CONFIG env var (default: camunda-oca).
+// See #128 — the spec pin lives under the per-config directory so each
+// configured target API has its own pinned upstream content fingerprint.
+const ACTIVE_CONFIG = process.env.CONFIG?.trim() || 'camunda-oca';
+const PIN_PATH = join(REPO_ROOT, 'configs', ACTIVE_CONFIG, 'spec-pin.json');
 const METADATA_PATH = join(REPO_ROOT, 'spec', 'bundled', 'spec-metadata.json');
 
 interface SpecPin {
@@ -73,12 +78,12 @@ export default function setup(): void {
         `If the upstream spec changed intentionally, re-pin and re-run:\n` +
         `  1. SPEC_REF=<newSha> npm run fetch-spec:ref   (re-fetch the bundled spec)\n` +
         `  2. npm run testsuite:generate && npm run generate:request-validation\n` +
-        `  3. Update tests/regression/spec-pin.json: set specRef to the\n` +
+        `  3. Update configs/${ACTIVE_CONFIG}/spec-pin.json: set specRef to the\n` +
         `     resolved 40-char commit SHA and expectedSpecHash to the\n` +
         `     value printed in spec/bundled/spec-metadata.json\n` +
         `  4. Update any invariants in tests/regression/bundled-spec-invariants.test.ts\n` +
         `     whose values legitimately changed.\n` +
-        `  5. Commit spec-pin.json alongside the invariant updates.\n`,
+        `  5. Commit configs/${ACTIVE_CONFIG}/spec-pin.json alongside the invariant updates.\n`,
     );
   }
 }
