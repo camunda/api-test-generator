@@ -17,8 +17,9 @@ interface Opts {
 
 /**
  * Test whether an invalid candidate `m` differs from any member of `members`
- * only by ASCII case. The caller is responsible for ensuring `m ∉ members`
- * (the membership check is the cheaper test and lives at the call site).
+ * only by ASCII case. Callers filter `m ∉ members` before invoking this so
+ * that a mutation which happens to equal a valid member is rejected by the
+ * cheaper `Array.includes` check at the call site rather than re-walked here.
  */
 function isCaseOnlyMutation(m: unknown, members: readonly unknown[]): boolean {
   if (typeof m !== 'string') return false;
@@ -62,6 +63,11 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
           const invalids = buildInvalidVariants(node.enum[0]);
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= opts.capPerOperation) break;
+            // Defense in depth: if the synthesized "invalid" candidate is in fact
+            // a valid enum member (e.g. enum is `['Foo', 'foo']` so the lower-case
+            // mutation collides with a member, or a real enum literally contains
+            // `${first}_INVALID`), skip it — emitting it would be a false 400.
+            if (node.enum.includes(inv)) continue;
             if (opts.enumCaseInsensitive && isCaseOnlyMutation(inv, node.enum)) continue;
             const body = structuredClone(baseline);
             if (!setAtPath(body, path, inv)) continue;
@@ -95,6 +101,9 @@ export function generateEnumViolations(ops: OperationModel[], opts: Opts): Valid
           const invalids = buildInvalidVariants(schema.enum[0]);
           for (const inv of invalids) {
             if (opts.capPerOperation && produced >= (opts.capPerOperation ?? Infinity)) break;
+            // Same defense as the main walk: skip candidates that happen to be
+            // valid enum members of this oneOf-variant property.
+            if (schema.enum.includes(inv)) continue;
             if (opts.enumCaseInsensitive && isCaseOnlyMutation(inv, schema.enum)) continue;
             const body = structuredClone(base);
             body[prop] = inv;

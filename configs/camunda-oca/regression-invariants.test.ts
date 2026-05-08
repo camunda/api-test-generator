@@ -1749,23 +1749,34 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     }
 
     // Locate each test block whose closing assertion has
-    // `scenarioKind: 'enum-violation'`. For each such block, extract
-    // every JSON-quoted string literal from the inlined `requestBody`
-    // and check it for case-only collision with a valid enum member.
-    // A regex pass is sufficient because the emitter inlines the body
-    // as a TypeScript object literal with double-quoted string values.
+    // `scenarioKind: 'enum-violation'` (single quotes — emitter writes
+    // `JSON.stringify(s.type)` and prettier rewrites to single quotes during
+    // emission, see request-validation/src/emit/qaEmitter.ts). For each such
+    // block, scope extraction to the inlined `const requestBody = { ... };`
+    // literal so we don't pick up unrelated quoted strings (operationId,
+    // method, scenarioKind itself, etc.) and check every JSON-quoted string
+    // value for case-only collision with a valid enum member.
     const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'enum-violation'[^]*?}\);/g;
-    const QUOTED_STRING = /"([^"\\\n]+)"/g;
+    const REQUEST_BODY_LITERAL = /const requestBody\s*=\s*([\s\S]*?);\n/;
+    // Match `: "value"` so we capture string *values* in the body literal,
+    // not object keys (object keys are emitted unquoted by prettier for
+    // valid identifiers; this also skips any keys that happen to be quoted).
+    const STRING_VALUE = /:\s*"([^"\\\n]+)"/g;
     const offenders: { file: string; sample: string }[] = [];
+    let blocksScanned = 0;
     for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
       if (!f.endsWith('.spec.ts')) continue;
       const src = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
       let block: RegExpExecArray | null;
       TEST_BLOCK.lastIndex = 0;
       while ((block = TEST_BLOCK.exec(src)) !== null) {
-        QUOTED_STRING.lastIndex = 0;
+        blocksScanned++;
+        const bodyMatch = REQUEST_BODY_LITERAL.exec(block[0]);
+        if (!bodyMatch) continue;
+        const bodyLiteral = bodyMatch[1];
+        STRING_VALUE.lastIndex = 0;
         let q: RegExpExecArray | null;
-        while ((q = QUOTED_STRING.exec(block[0])) !== null) {
+        while ((q = STRING_VALUE.exec(bodyLiteral)) !== null) {
           const candidate = q[1];
           if (isCaseOnlyFalsePositive(candidate)) {
             offenders.push({
@@ -1777,6 +1788,11 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
         }
       }
     }
+    // Guard against the invariant becoming vacuously true (e.g. emitter
+    // changes the syntax of the assertion context). The camunda-oca suite
+    // currently emits 100+ enum-violation blocks; any non-zero baseline is
+    // sufficient to prove the regex still matches.
+    expect(blocksScanned).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 });

@@ -123,12 +123,23 @@ function parseArgs(): CliOptions {
 
 async function main() {
   const opts = parseArgs();
+  // Per-config request-validation settings live at <repoRoot>/configs/<name>/request-validation.json.
+  // If we can't find the repo root, this script is being run from outside the
+  // checkout (likely with --out-dir pointing somewhere bespoke). In that case,
+  // fall back to defaults rather than aborting — the previous --out-dir
+  // workflow did not require repoRoot for anything.
   const repoRoot = findRepoRoot(process.cwd());
-  if (!repoRoot) {
-    throw new Error(`[generate] Could not locate configs.json starting from ${process.cwd()}.`);
+  let configName = '(unknown)';
+  let rvConfig = { enumCaseInsensitive: false };
+  if (repoRoot) {
+    configName = getActiveConfigName(repoRoot);
+    rvConfig = loadRequestValidationConfig(repoRoot, configName);
+  } else {
+    console.warn(
+      `[generate] Could not locate configs.json from ${process.cwd()} — ` +
+        'using request-validation defaults. Pass --out-dir explicitly.',
+    );
   }
-  const configName = getActiveConfigName(repoRoot);
-  const rvConfig = loadRequestValidationConfig(repoRoot, configName);
   console.log(
     `[generate] Active config: ${configName} ` +
       `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive})`,
