@@ -1883,4 +1883,106 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     expect(pathParamSlotsScanned).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
+
+  it('emits zero URL-collapsing path-param values in param-constraint-violation tests (#147)', () => {
+    // Class-scoped guard for issue #147. Path-param constraint scenarios
+    // whose synthesised invalid value does not survive URL substitution
+    // as a single non-empty path segment never reach Camunda's request
+    // validator — Spring's router resolves the malformed URL as a
+    // different route and answers 404 from the static-resource handler.
+    // The expected 400 then fails for a reason unrelated to validation.
+    //
+    // Scan every emitted `param-constraint-violation` test block, parse
+    // its `buildUrl('/template', { param: 'value' })` call, and reject
+    // any value bound to a `{param}` token in the template that:
+    //   - is the empty string,
+    //   - is `.` or `..`,
+    //   - percent-encodes to contain `/` (`%2F`/`%2f`) or `\` (`%5C`/`%5c`).
+    //
+    // Catches not just the original `minLength: 1` empty-string emission
+    // (paramConstraintViolations.ts) but any sibling code path that
+    // synthesises a path-routing-significant violator in future.
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+
+    function isUrlCollapsingPathSegment(value: string): boolean {
+      if (value.length === 0) return true;
+      if (value === '.' || value === '..') return true;
+      const encoded = encodeURIComponent(value);
+      if (encoded.includes('%2F') || encoded.includes('%2f')) return true;
+      if (encoded.includes('%5C') || encoded.includes('%5c')) return true;
+      return false;
+    }
+
+    // Match the `buildUrl(...)` call inside a `param-constraint-violation`
+    // block. The emitter inlines path params as a single-line object
+    // literal; we capture the template string and the params literal.
+    const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'param-constraint-violation'[^]*?}\);/g;
+    const BUILD_URL = /buildUrl\(\s*'([^']+)'\s*,\s*(\{[^}]*\})\s*\)/;
+    // `: 'value'` — path-param values are always single-quoted strings in
+    // the emitted suite (prettier `singleQuote: true`). Defensive against
+    // double quotes in case prettier config drifts.
+    const PARAM_KV = /(\b[a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*(?:'([^'\\\n]*)'|"([^"\\\n]*)")/g;
+
+    interface Offender {
+      file: string;
+      param: string;
+      value: string;
+    }
+    const offenders: Offender[] = [];
+    let blocksScanned = 0;
+    let pathParamsScanned = 0;
+    for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const src = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+      let block: RegExpExecArray | null;
+      TEST_BLOCK.lastIndex = 0;
+      while ((block = TEST_BLOCK.exec(src)) !== null) {
+        blocksScanned++;
+        const urlMatch = BUILD_URL.exec(block[0]);
+        if (!urlMatch) continue;
+        const [, template, paramsLiteral] = urlMatch;
+        // Only path-param tokens — `{name}` substrings — are routing-
+        // significant. Query-only scenarios pass an empty `{}` and are
+        // ignored automatically.
+        const pathTokens = new Set<string>();
+        const tokenRe = /\{([^}]+)}/g;
+        let t: RegExpExecArray | null;
+        while ((t = tokenRe.exec(template)) !== null) pathTokens.add(t[1]);
+        if (pathTokens.size === 0) continue;
+        PARAM_KV.lastIndex = 0;
+        let kv: RegExpExecArray | null;
+        while ((kv = PARAM_KV.exec(paramsLiteral)) !== null) {
+          const [, key, sq, dq] = kv;
+          const value = sq ?? dq;
+          if (value === undefined) continue;
+          if (!pathTokens.has(key)) continue;
+          pathParamsScanned++;
+          if (isUrlCollapsingPathSegment(value)) {
+            offenders.push({
+              file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),
+              param: key,
+              value,
+            });
+          }
+        }
+      }
+    }
+    // Vacuous-truth guard: prove both regexes still match the emitted
+    // syntax. The camunda-oca suite has hundreds of param-constraint
+    // blocks with at least one path-param each.
+    expect(blocksScanned).toBeGreaterThan(0);
+    expect(pathParamsScanned).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
 });

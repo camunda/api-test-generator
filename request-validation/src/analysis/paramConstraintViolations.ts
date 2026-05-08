@@ -61,32 +61,59 @@ function buildValidValue(r: ResolvedParamSchema): string {
   return 'x';
 }
 
+/**
+ * Returns true if `value`, after URL substitution into a path template,
+ * would not survive as a single non-empty path segment — making any
+ * resulting 400 expectation noise (Spring's router resolves the request as
+ * a different route and returns 404 from a static-resource handler before
+ * the request validator runs).
+ *
+ * Class-scoped check: covers empty segment, `.`, `..`, and any value that
+ * percent-encodes to contain `/` or `\` (segment splitters). See issue #147.
+ */
+function isUrlCollapsingPathSegment(value: string): boolean {
+  if (value.length === 0) return true;
+  if (value === '.' || value === '..') return true;
+  const encoded = encodeURIComponent(value);
+  if (encoded.includes('%2F') || encoded.includes('%2f')) return true;
+  if (encoded.includes('%5C') || encoded.includes('%5c')) return true;
+  return false;
+}
+
 function buildViolations(
   p: ParameterModel,
   r: ResolvedParamSchema,
 ): { kind: string; invalid: string }[] {
   const out: { kind: string; invalid: string }[] = [];
+  const isPath = p.in === 'path';
+  const accept = (kind: string, invalid: string): void => {
+    // Path-param scenarios that collapse the URL never reach the validator
+    // (Spring routes them to a different handler and returns 404). Elide
+    // them so the 400 assertion isn't a noisy false-fail. See issue #147.
+    if (isPath && isUrlCollapsingPathSegment(invalid)) return;
+    out.push({ kind, invalid });
+  };
   // Pattern violation
   if (r.pattern) {
     const invalid = buildGuaranteedPatternMismatch(r.pattern, {
-      pathSegmentSafe: p.in === 'path',
+      pathSegmentSafe: isPath,
     });
-    if (invalid) out.push({ kind: 'pattern', invalid });
+    if (invalid) accept('pattern', invalid);
   }
   // Length violations
   if (typeof r.minLength === 'number' && r.minLength > 0) {
     const tooShort = ''.padEnd(Math.max(0, r.minLength - 1), '');
-    out.push({ kind: 'length-min', invalid: tooShort });
+    accept('length-min', tooShort);
   }
   if (typeof r.maxLength === 'number') {
     const tooLong = 'a'.repeat(r.maxLength + 10);
-    out.push({ kind: 'length-max', invalid: tooLong });
+    accept('length-max', tooLong);
   }
   // Enum violation (only if enum present)
   if (r.enumValues?.length) {
     let inval = `${String(r.enumValues[0])}_X`;
     if (r.pattern === '^-?[0-9]+$') inval = '9999999999999999999999999'; // excessively long number string
-    out.push({ kind: 'enum', invalid: inval });
+    accept('enum', inval);
   }
   return out;
 }
