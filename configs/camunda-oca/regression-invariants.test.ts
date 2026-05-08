@@ -1804,4 +1804,83 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     expect(stringValuesScanned).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
+
+  it('routes non-path-token params to the query slot of buildUrl (#127)', () => {
+    // Class-scoped guard for issue #127. `buildUrl(path, pathParams,
+    // queryParams)` only substitutes entries whose key matches a `{token}`
+    // in the path template; non-token keys passed in slot 2 are silently
+    // dropped from the request. Scan every emitted `param-*-violation`
+    // test in the request-validation suite, parse its `buildUrl(...)`
+    // call, and reject any second-arg key that is NOT a path token of the
+    // template.
+    //
+    // Catches the original `searchVariables - Param query.truncateValues
+    // wrong type` case (path `/variables/search` carrying `truncateValues`
+    // in slot 2) and any sibling emitter regression.
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+
+    // Match any param-* validation test block (type-mismatch, constraint-
+    // violation, enum-violation). The block ends at the closing `});` of
+    // the inner test arrow function call.
+    const TEST_BLOCK =
+      /test\([^]*?scenarioKind:\s*'param-(?:type-mismatch|constraint-violation|enum-violation)'[^]*?}\);/g;
+    const BUILD_URL = /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(\{[^}]*\}))?\s*\)/;
+    const PARAM_KEY = /(\b[a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g;
+
+    interface Offender {
+      file: string;
+      template: string;
+      orphanKey: string;
+    }
+    const offenders: Offender[] = [];
+    let blocksScanned = 0;
+    let pathParamSlotsScanned = 0;
+    for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const src = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+      let block: RegExpExecArray | null;
+      TEST_BLOCK.lastIndex = 0;
+      while ((block = TEST_BLOCK.exec(src)) !== null) {
+        blocksScanned++;
+        const urlMatch = BUILD_URL.exec(block[0]);
+        if (!urlMatch) continue;
+        const [, template, pathParamsLiteral] = urlMatch;
+        if (!pathParamsLiteral || pathParamsLiteral === 'undefined') continue;
+        pathParamSlotsScanned++;
+        const pathTokens = new Set<string>();
+        const tokenRe = /\{([^}]+)}/g;
+        let t: RegExpExecArray | null;
+        while ((t = tokenRe.exec(template)) !== null) pathTokens.add(t[1]);
+        PARAM_KEY.lastIndex = 0;
+        let kv: RegExpExecArray | null;
+        while ((kv = PARAM_KEY.exec(pathParamsLiteral)) !== null) {
+          const key = kv[1];
+          if (!pathTokens.has(key)) {
+            offenders.push({
+              file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),
+              template,
+              orphanKey: key,
+            });
+          }
+        }
+      }
+    }
+    // Vacuous-truth guards: prove both regexes still match the emitted
+    // syntax. The camunda-oca suite has hundreds of param-* blocks with
+    // at least one path-params slot.
+    expect(blocksScanned).toBeGreaterThan(0);
+    expect(pathParamSlotsScanned).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
 });

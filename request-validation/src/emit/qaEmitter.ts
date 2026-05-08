@@ -134,13 +134,35 @@ function buildFile(
   return lines.join('\n');
 }
 
+/**
+ * Test-only export of the per-scenario renderer. Used by Layer-2 fixtures
+ * (e.g. tests/request-validation/query-param-buildurl-slot.test.ts for
+ * issue #127) that need to assert on the emitted `buildUrl(...)` shape
+ * without spinning up the full file-emission pipeline.
+ */
+export function renderScenarioForTest(s: ValidationScenario, title: string): string {
+  return renderScenario(s, title, true);
+}
+
 function renderScenario(s: ValidationScenario, title: string, standalone: boolean): string {
   const lines: string[] = [];
   const fixtureArg = standalone ? '({request}, testInfo)' : '({request})';
   lines.push(`  test(${JSON.stringify(title)}, async ${fixtureArg} => {`);
-  const paramsLit = s.params ? JSON.stringify(s.params) : 'undefined';
+  // Split params into path-tokens vs everything-else (query/header keys).
+  // `buildUrl(path, pathParams, queryParams)` substitutes only entries whose
+  // key matches a `{token}` in the template; non-token keys passed in slot 2
+  // are silently dropped. Routing them to slot 3 makes them surface as a
+  // query string. See issue #127.
   const pathLit = JSON.stringify(s.path.replace(/\{([^}]+)}/g, '{$1}'));
-  const urlCall = `buildUrl(${pathLit}, ${paramsLit})`;
+  const { pathParams, queryParams } = splitParamsBySlot(s.path, s.params);
+  const pathArg = pathParams ? JSON.stringify(pathParams) : 'undefined';
+  const queryArg = queryParams ? JSON.stringify(queryParams) : undefined;
+  const urlCall =
+    queryArg !== undefined
+      ? `buildUrl(${pathLit}, ${pathArg}, ${queryArg})`
+      : pathParams
+        ? `buildUrl(${pathLit}, ${pathArg})`
+        : `buildUrl(${pathLit})`;
   lines.push(`    const url = ${urlCall};`);
   if (s.bodyEncoding === 'multipart' && s.multipartForm) {
     const formLit = JSON.stringify(s.multipartForm, null, 2);
@@ -195,6 +217,39 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
   }
   lines.push('  });');
   return lines.join('\n');
+}
+
+/**
+ * Split a flat `params` map into the two slots that `buildUrl` expects:
+ * keys matching a `{token}` in the path template go to the path-params
+ * slot, everything else goes to the query slot. Either side is `undefined`
+ * when empty so the emitter can drop unused arguments. See issue #127.
+ */
+function splitParamsBySlot(
+  path: string,
+  params: Record<string, string> | undefined,
+): {
+  pathParams: Record<string, string> | undefined;
+  queryParams: Record<string, string> | undefined;
+} {
+  if (!params) return { pathParams: undefined, queryParams: undefined };
+  const pathTokens = new Set<string>();
+  const tokenRe = /\{([^}]+)}/g;
+  let m: RegExpExecArray | null = tokenRe.exec(path);
+  while (m !== null) {
+    pathTokens.add(m[1]);
+    m = tokenRe.exec(path);
+  }
+  const pathParams: Record<string, string> = {};
+  const queryParams: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (pathTokens.has(k)) pathParams[k] = v;
+    else queryParams[k] = v;
+  }
+  return {
+    pathParams: Object.keys(pathParams).length ? pathParams : undefined,
+    queryParams: Object.keys(queryParams).length ? queryParams : undefined,
+  };
 }
 
 function methodFn(m: string): string {
