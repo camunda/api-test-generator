@@ -60,8 +60,8 @@ function isSuffixMutation(value: unknown, members: readonly string[]): boolean {
 
 function extractFlag(body: unknown): unknown {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
-  const rec: Record<string, unknown> = body;
-  return rec.flag;
+  if (!('flag' in body)) return undefined;
+  return body.flag;
 }
 
 describe('request-validation: enumCaseInsensitive flag (#129)', () => {
