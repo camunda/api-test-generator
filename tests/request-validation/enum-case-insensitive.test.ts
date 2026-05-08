@@ -58,9 +58,12 @@ function isSuffixMutation(value: unknown, members: readonly string[]): boolean {
   return typeof value === 'string' && members.some((m) => value === `${m}_INVALID`);
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function extractFlag(body: unknown): unknown {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
-  if (!('flag' in body)) return undefined;
+  if (!isPlainObject(body)) return undefined;
   return body.flag;
 }
 

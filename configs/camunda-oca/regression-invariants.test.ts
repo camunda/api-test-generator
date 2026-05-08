@@ -1754,16 +1754,20 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // emission, see request-validation/src/emit/qaEmitter.ts). For each such
     // block, scope extraction to the inlined `const requestBody = { ... };`
     // literal so we don't pick up unrelated quoted strings (operationId,
-    // method, scenarioKind itself, etc.) and check every JSON-quoted string
-    // value for case-only collision with a valid enum member.
+    // method, scenarioKind itself, etc.) and check every quoted string
+    // *value* for case-only collision with a valid enum member.
+    //
+    // Prettier is configured (or falls back to) `singleQuote: true`, so
+    // emitted body strings are single-quoted (`field: 'creationDate_INVALID'`).
+    // Match both styles defensively in case prettier config drifts.
     const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'enum-violation'[^]*?}\);/g;
     const REQUEST_BODY_LITERAL = /const requestBody\s*=\s*([\s\S]*?);\n/;
-    // Match `: "value"` so we capture string *values* in the body literal,
-    // not object keys (object keys are emitted unquoted by prettier for
-    // valid identifiers; this also skips any keys that happen to be quoted).
-    const STRING_VALUE = /:\s*"([^"\\\n]+)"/g;
+    // `: 'value'` or `: "value"` — captures the inner string regardless of
+    // quote style, but stays after the `:` so we don't pick up object keys.
+    const STRING_VALUE = /:\s*(?:'([^'\\\n]*)'|"([^"\\\n]*)")/g;
     const offenders: { file: string; sample: string }[] = [];
     let blocksScanned = 0;
+    let stringValuesScanned = 0;
     for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
       if (!f.endsWith('.spec.ts')) continue;
       const src = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
@@ -1777,7 +1781,9 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
         STRING_VALUE.lastIndex = 0;
         let q: RegExpExecArray | null;
         while ((q = STRING_VALUE.exec(bodyLiteral)) !== null) {
-          const candidate = q[1];
+          const candidate = q[1] ?? q[2];
+          if (candidate === undefined) continue;
+          stringValuesScanned++;
           if (isCaseOnlyFalsePositive(candidate)) {
             offenders.push({
               file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),
@@ -1789,10 +1795,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
       }
     }
     // Guard against the invariant becoming vacuously true (e.g. emitter
-    // changes the syntax of the assertion context). The camunda-oca suite
-    // currently emits 100+ enum-violation blocks; any non-zero baseline is
-    // sufficient to prove the regex still matches.
+    // changes the syntax of the assertion context, or prettier's quote
+    // style drifts and the value regex stops matching). The camunda-oca
+    // suite currently emits 100+ enum-violation blocks containing many
+    // string values; any non-zero baseline is enough to prove both
+    // regexes still match.
     expect(blocksScanned).toBeGreaterThan(0);
+    expect(stringValuesScanned).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 });
