@@ -35,6 +35,7 @@ import {
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
+import { loadRequestValidationConfig } from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
@@ -122,6 +123,27 @@ function parseArgs(): CliOptions {
 
 async function main() {
   const opts = parseArgs();
+  // Per-config request-validation settings live at <repoRoot>/configs/<name>/request-validation.json.
+  // If we can't find the repo root, this script is being run from outside the
+  // checkout (likely with --out-dir pointing somewhere bespoke). In that case,
+  // fall back to defaults rather than aborting — the previous --out-dir
+  // workflow did not require repoRoot for anything.
+  const repoRoot = findRepoRoot(process.cwd());
+  let configName = '(unknown)';
+  let rvConfig = { enumCaseInsensitive: false };
+  if (repoRoot) {
+    configName = getActiveConfigName(repoRoot);
+    rvConfig = loadRequestValidationConfig(repoRoot, configName);
+  } else {
+    console.warn(
+      `[generate] Could not locate configs.json from ${process.cwd()} — ` +
+        'using request-validation defaults. Pass --out-dir explicitly.',
+    );
+  }
+  console.log(
+    `[generate] Active config: ${configName} ` +
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive})`,
+  );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
@@ -208,6 +230,7 @@ async function main() {
         ...generateEnumViolations(model.operations, {
           capPerOperation: undefined,
           onlyOperations: opts.onlyOperations,
+          enumCaseInsensitive: rvConfig.enumCaseInsensitive,
         }),
       );
     }
