@@ -46,7 +46,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
     "assert-json-body": "^1.7.1",
-    "camunda-schema-bundler": "^2.3.0",
+    "camunda-schema-bundler": "^2.4.1",
     "js-yaml": "^4.1.0",
     "prettier": "^3.2.5",
     "rimraf": "^6.0.0",
