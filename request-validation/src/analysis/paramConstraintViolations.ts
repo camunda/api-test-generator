@@ -68,15 +68,36 @@ function buildValidValue(r: ResolvedParamSchema): string {
  * a different route and returns 404 from a static-resource handler before
  * the request validator runs).
  *
- * Class-scoped check: covers empty segment, `.`, `..`, and any value that
- * percent-encodes to contain `/` or `\` (segment splitters). See issue #147.
+ * `buildUrl()` substitutes path-param values raw (no encoding), so the
+ * predicate must reject any value that *literally* contains a routing-
+ * significant character, plus any value whose `encodeURIComponent` form
+ * contains an encoded segment splitter.
+ *
+ * Class-scoped check (issue #147 + PR #148 review):
+ *   - empty segment
+ *   - `.` / `..` (path traversal)
+ *   - raw `/` or `\` (forward / back slash)
+ *   - raw `?` or `#` (query / fragment delimiters)
+ *   - already-encoded `%2F` / `%5C` (case-insensitive) in the value as
+ *     supplied — the server may decode these to `/` or `\`
+ *   - any value whose `encodeURIComponent` form contains `%2F`/`%5C`
+ *     (catches values that contain raw separators not covered above —
+ *     defence in depth in case the rules above drift).
  */
 function isUrlCollapsingPathSegment(value: string): boolean {
   if (value.length === 0) return true;
   if (value === '.' || value === '..') return true;
+  // Raw routing-significant characters (no encoding by buildUrl).
+  if (/[/\\?#]/.test(value)) return true;
+  // Already-encoded separators in the supplied value — buildUrl substitutes
+  // the value as-is, and the server (or any intermediate proxy) may decode
+  // %2F / %5C back to / or \. `encodeURIComponent` would re-encode the `%`
+  // to `%25`, so check the raw value directly.
+  if (/%2f|%5c/i.test(value)) return true;
+  // Defence in depth: catch any value whose canonical encoding contains a
+  // segment splitter not flagged above.
   const encoded = encodeURIComponent(value);
-  if (encoded.includes('%2F') || encoded.includes('%2f')) return true;
-  if (encoded.includes('%5C') || encoded.includes('%5c')) return true;
+  if (/%2f|%5c/i.test(encoded)) return true;
   return false;
 }
 

@@ -1918,10 +1918,41 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     function isUrlCollapsingPathSegment(value: string): boolean {
       if (value.length === 0) return true;
       if (value === '.' || value === '..') return true;
+      // Mirror production `paramConstraintViolations.ts:isUrlCollapsingPathSegment`.
+      // `buildUrl` substitutes path-param values raw, so the predicate must
+      // reject any value that *literally* contains a routing-significant
+      // character or already-encoded segment splitter, in addition to the
+      // canonical-encoding check.
+      if (/[/\\?#]/.test(value)) return true;
+      if (/%2f|%5c/i.test(value)) return true;
       const encoded = encodeURIComponent(value);
-      if (encoded.includes('%2F') || encoded.includes('%2f')) return true;
-      if (encoded.includes('%5C') || encoded.includes('%5c')) return true;
+      if (/%2f|%5c/i.test(encoded)) return true;
       return false;
+    }
+
+    // Unescape a JavaScript string-literal body: collapse `\<char>` to `<char>`
+    // for the escapes we care about (`\\`, `\'`, `\"`, `\/`, `\n`, `\t`, `\r`,
+    // `\b`, `\f`). Hex/unicode escapes are not produced by the emitter, so we
+    // do not decode them; if they ever are, the predicate's raw-character
+    // checks remain conservative because the literal `\u` sequence is
+    // harmless on its own.
+    function unescapeJsString(s: string): string {
+      return s.replace(/\\(.)/g, (_m, c: string) => {
+        switch (c) {
+          case 'n':
+            return '\n';
+          case 't':
+            return '\t';
+          case 'r':
+            return '\r';
+          case 'b':
+            return '\b';
+          case 'f':
+            return '\f';
+          default:
+            return c; // \\, \', \", \/, etc.
+        }
+      });
     }
 
     // Match the `buildUrl(...)` call inside a `param-constraint-violation`
@@ -1929,10 +1960,18 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // literal; we capture the template string and the params literal.
     const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'param-constraint-violation'[^]*?}\);/g;
     const BUILD_URL = /buildUrl\(\s*'([^']+)'\s*,\s*(\{[^}]*\})\s*\)/;
-    // `: 'value'` — path-param values are always single-quoted strings in
-    // the emitted suite (prettier `singleQuote: true`). Defensive against
-    // double quotes in case prettier config drifts.
-    const PARAM_KV = /(\b[a-zA-Z_$][a-zA-Z0-9_$]*)\s*:\s*(?:'([^'\\\n]*)'|"([^"\\\n]*)")/g;
+    // `<key>: <value>` — key is either a bare identifier or a quoted
+    // string (in case prettier ever quotes a non-identifier key); value is
+    // a single- or double-quoted string literal that *may contain
+    // backslash escapes* (PR #148 review). Both halves capture the
+    // escape-aware body; the caller unescapes before predicate checks.
+    const STR_BODY_SQ = "'((?:\\\\.|[^'\\\\])*)'";
+    const STR_BODY_DQ = '"((?:\\\\.|[^"\\\\])*)"';
+    const KEY_BARE = '\\b[a-zA-Z_$][a-zA-Z0-9_$]*';
+    const PARAM_KV = new RegExp(
+      `(?:(${KEY_BARE})|${STR_BODY_SQ}|${STR_BODY_DQ})\\s*:\\s*(?:${STR_BODY_SQ}|${STR_BODY_DQ})`,
+      'g',
+    );
 
     interface Offender {
       file: string;
@@ -1963,11 +2002,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
         PARAM_KV.lastIndex = 0;
         let kv: RegExpExecArray | null;
         while ((kv = PARAM_KV.exec(paramsLiteral)) !== null) {
-          const [, key, sq, dq] = kv;
-          const value = sq ?? dq;
-          if (value === undefined) continue;
+          const [, bareKey, sqKey, dqKey, sqVal, dqVal] = kv;
+          const key = bareKey ?? sqKey ?? dqKey;
+          const rawValue = sqVal ?? dqVal;
+          if (key === undefined || rawValue === undefined) continue;
           if (!pathTokens.has(key)) continue;
           pathParamsScanned++;
+          const value = unescapeJsString(rawValue);
           if (isUrlCollapsingPathSegment(value)) {
             offenders.push({
               file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),

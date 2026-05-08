@@ -21,10 +21,13 @@ import type { OperationModel, ParameterModel } from '../../request-validation/sr
  * handler with `404 No static resource v2/roles/x/groups`.
  *
  * The class-scoped guard asserts that **no** emitted path-param constraint
- * scenario carries a value that collapses the URL — empty, `.`, `..`, or
- * containing a `/` (or `%2F`/`%2f`) after percent-encoding. This protects
- * against four sibling causes (length, slash-permitting pattern,
- * dot-permitting pattern, and encoded slash) with one assertion.
+ * scenario carries a value that would change the URL shape after raw
+ * substitution — empty, `.`, `..`, or containing any routing-significant
+ * character (`/`, `\`, `?`, `#`) or already-encoded separator (`%2F`,
+ * `%5C`). This protects against the four sibling causes (length, pattern,
+ * enum, and any future synthesiser) with one assertion. PR #148 review:
+ * the predicate must check the *raw* value as well, because `buildUrl()`
+ * substitutes path params without encoding.
  */
 
 function buildPathParam(name: string, schema: ParameterModel['schema']): ParameterModel {
@@ -45,9 +48,13 @@ function isUrlCollapsing(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   if (value.length === 0) return true;
   if (value === '.' || value === '..') return true;
+  // Raw routing-significant characters (no encoding by buildUrl).
+  if (/[/\\?#]/.test(value)) return true;
+  // Already-encoded segment splitters in the supplied value.
+  if (/%2f|%5c/i.test(value)) return true;
+  // Defence in depth: canonical encoding contains a separator.
   const encoded = encodeURIComponent(value);
-  if (encoded.includes('%2F') || encoded.includes('%2f')) return true;
-  if (encoded.includes('%5C') || encoded.includes('%5c')) return true;
+  if (/%2f|%5c/i.test(encoded)) return true;
   return false;
 }
 
@@ -72,11 +79,17 @@ describe('request-validation: path-param URL-collapse guard (#147)', () => {
 
   it('does not emit any URL-collapsing path-param violator across all constraint kinds', () => {
     // Class-scoped: covers length-min, length-max, pattern, and enum.
-    // The pattern below admits `/` (the inverted character class is a
-    // single non-`.` character; the pattern-mismatch helper is free to pick
-    // a slash). Likewise the enum is open-ended. The guard must filter any
-    // emitted invalid that, post-substitution, would not be a single
-    // non-empty path segment.
+    //
+    // Note that pattern-mismatch synthesis for `in: 'path'` already passes
+    // `pathSegmentSafe: true` to `buildGuaranteedPatternMismatch`, which
+    // filters `/` and `\` at the synthesis layer. The pattern cases here
+    // therefore exercise the helper boundary (the synthesiser may still
+    // legitimately pick `.` or `..` for `^[^.]+$`); the empty-string is
+    // produced by `length-min`. The `accept()` filter in
+    // `paramConstraintViolations` is the second line of defence and the
+    // one this guard locks in: any future synthesiser (or relaxed
+    // `pathSegmentSafe` setting) cannot emit a URL-collapsing value
+    // without this test failing.
     const op = buildOp('/v2/a/{slashy}/b/{dotty}/c/{lengthy}/d/{enummy}/e', [
       buildPathParam('slashy', { type: 'string', pattern: '^[^.]+$' }),
       buildPathParam('dotty', { type: 'string', pattern: '^[^/]+$' }),
