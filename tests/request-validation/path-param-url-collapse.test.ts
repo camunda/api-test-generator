@@ -133,4 +133,34 @@ describe('request-validation: path-param URL-collapse guard (#147)', () => {
     );
     expect(queryScenarios.length).toBeGreaterThan(0);
   });
+
+  it('emits genuinely-too-short values for minLength > 1 (PR #148 review)', () => {
+    // Class-scoped guard: previously `tooShort = ''.padEnd(N, '')` returned
+    // the empty string for ANY `minLength > 0`, because `padEnd` with an
+    // empty pad string is a no-op. That meant every `length-min` path-param
+    // scenario was elided by the URL-collapse filter, even when a non-empty
+    // shorter value existed (e.g. `'aa'` for `minLength: 3`). The fix
+    // synthesises `'a'.repeat(minLength - 1)` so we exercise the validator
+    // on a real shorter-than-allowed value; only `minLength: 1` (whose
+    // shorter value is `''`) remains elided.
+    //
+    // Assert both sides of the boundary: `minLength: 3` → `'aa'` survives;
+    // `minLength: 1` → `''` is correctly elided.
+    const op = buildOp('/v2/a/{three}/b/{one}', [
+      buildPathParam('three', { type: 'string', minLength: 3 }),
+      buildPathParam('one', { type: 'string', minLength: 1 }),
+    ]);
+
+    const scenarios = generateParamConstraintViolations([op], {});
+    const lengthMin = scenarios.filter(
+      (s) => s.type === 'param-constraint-violation' && s.constraintKind === 'length-min',
+    );
+
+    const threeScenarios = lengthMin.filter((s) => s.target === 'path.three');
+    expect(threeScenarios).toHaveLength(1);
+    expect(threeScenarios[0].params?.three).toBe('aa');
+
+    const oneScenarios = lengthMin.filter((s) => s.target === 'path.one');
+    expect(oneScenarios).toEqual([]);
+  });
 });

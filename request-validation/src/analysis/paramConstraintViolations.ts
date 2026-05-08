@@ -123,7 +123,15 @@ function buildViolations(
   }
   // Length violations
   if (typeof r.minLength === 'number' && r.minLength > 0) {
-    const tooShort = ''.padEnd(Math.max(0, r.minLength - 1), '');
+    // PR #148 review: previously `''.padEnd(N, '')` returned `''` for any
+    // `minLength > 0` because `padEnd` with an empty pad string is a no-op.
+    // Use a non-empty pad so we synthesise a genuinely-too-short value
+    // (length `minLength - 1`); for `minLength: 1` the result is still `''`
+    // (length 0), and `accept()` will elide that for path params via
+    // `isUrlCollapsingPathSegment`. For `minLength: 3` we now correctly
+    // emit `'aa'` instead of `''`, exercising the validator on a
+    // non-collapsing shorter value.
+    const tooShort = 'a'.repeat(r.minLength - 1);
     accept('length-min', tooShort);
   }
   if (typeof r.maxLength === 'number') {
