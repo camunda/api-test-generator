@@ -1883,4 +1883,166 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     expect(pathParamSlotsScanned).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
+
+  it('emits zero URL-collapsing path-param values in param-constraint-violation tests (#147)', () => {
+    // Class-scoped guard for issue #147. Path-param constraint scenarios
+    // whose synthesised invalid value does not survive URL substitution
+    // as a single non-empty path segment never reach Camunda's request
+    // validator — Spring's router resolves the malformed URL as a
+    // different route and answers 404 from the static-resource handler.
+    // The expected 400 then fails for a reason unrelated to validation.
+    //
+    // Scan every emitted `param-constraint-violation` test block, parse
+    // its `buildUrl('/template', { param: 'value' })` call, and reject
+    // any value bound to a `{param}` token in the template that:
+    //   - is the empty string,
+    //   - is `.` or `..`,
+    //   - literally contains a routing-significant `/`, `\`, `?`, or `#`,
+    //   - already contains encoded `/` (`%2F`/`%2f`) or `\` (`%5C`/`%5c`),
+    //   - or percent-encodes to contain `/` (`%2F`/`%2f`) or `\` (`%5C`/`%5c`).
+    //
+    // Catches not just the original `minLength: 1` empty-string emission
+    // (paramConstraintViolations.ts) but any sibling code path that
+    // synthesises a path-routing-significant violator in future.
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+
+    function isUrlCollapsingPathSegment(value: string): boolean {
+      if (value.length === 0) return true;
+      if (value === '.' || value === '..') return true;
+      // Mirror production `paramConstraintViolations.ts:isUrlCollapsingPathSegment`.
+      // `buildUrl` substitutes path-param values raw, so the predicate must
+      // reject any value that *literally* contains a routing-significant
+      // character or already-encoded segment splitter, in addition to the
+      // canonical-encoding check.
+      if (/[/\\?#]/.test(value)) return true;
+      if (/%2f|%5c/i.test(value)) return true;
+      const encoded = encodeURIComponent(value);
+      if (/%2f|%5c/i.test(encoded)) return true;
+      return false;
+    }
+
+    // Unescape a JavaScript string-literal body. The emitter writes path
+    // params via `JSON.stringify`, then prettier may re-quote the outer
+    // quotes (`singleQuote: true`). For correctness across the full set of
+    // JSON escapes (`\\`, `\"`, `\/`, `\n`, `\t`, `\r`, `\b`, `\f`, and
+    // `\uXXXX` — which can decode to routing-significant chars like `/` =
+    // `\u002F`), we round-trip through `JSON.parse`. PR #148 review: the
+    // previous hand-rolled `replace(/\\(.)/, ...)` returned just `<char>`
+    // for any `\<char>`, which would have decoded `\u002F` to `u002F` and
+    // hidden a real slash from the URL-collapsing predicate.
+    function unescapeJsString(rawBody: string, quote: "'" | '"'): string {
+      // Convert the captured body to a valid JSON string body. JSON requires
+      // double-quoted strings with `\"` for embedded quotes; it does not
+      // allow `\'` (a JS-only escape). For single-quoted source: unescape
+      // `\'` to `'`, then escape any unescaped `"` to `\"`.
+      let jsonBody: string;
+      if (quote === '"') {
+        jsonBody = rawBody;
+      } else {
+        jsonBody = rawBody
+          .replace(/\\'/g, "'")
+          .replace(/(^|[^\\])((?:\\\\)*)"/g, '$1$2\\"');
+      }
+      try {
+        const parsed: unknown = JSON.parse(`"${jsonBody}"`);
+        if (typeof parsed === 'string') return parsed;
+      } catch {
+        // Fall through to raw return below — predicate's raw-character
+        // checks (`/`, `\`, `?`, `#`, `%2f`, `%5c`) remain conservative
+        // even on un-decoded escape sequences.
+      }
+      return rawBody;
+    }
+
+    // Match the `buildUrl(...)` call inside a `param-constraint-violation`
+    // block. The emitter accepts both the 2-arg form
+    // `buildUrl(path, pathParams)` and the 3-arg form
+    // `buildUrl(path, pathParams, queryParams)` (#127). We only care about
+    // the path-params slot for this invariant; slot 3 is captured-and-
+    // discarded so the regex still matches when it exists. PR #148 review:
+    // the previous regex required exactly two args and silently skipped
+    // every block with a query-params slot, weakening coverage.
+    const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'param-constraint-violation'[^]*?}\);/g;
+    const BUILD_URL =
+      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))(?:\s*,\s*(?:\{[^}]*\}|undefined))?\s*\)/;
+    // `<key>: <value>` — key is either a bare identifier or a quoted
+    // string (in case prettier ever quotes a non-identifier key); value is
+    // a single- or double-quoted string literal that *may contain
+    // backslash escapes* (PR #148 review). Both halves capture the
+    // escape-aware body; the caller unescapes before predicate checks.
+    const STR_BODY_SQ = "'((?:\\\\.|[^'\\\\])*)'";
+    const STR_BODY_DQ = '"((?:\\\\.|[^"\\\\])*)"';
+    const KEY_BARE = '\\b[a-zA-Z_$][a-zA-Z0-9_$]*';
+    const PARAM_KV = new RegExp(
+      `(?:(${KEY_BARE})|${STR_BODY_SQ}|${STR_BODY_DQ})\\s*:\\s*(?:${STR_BODY_SQ}|${STR_BODY_DQ})`,
+      'g',
+    );
+
+    interface Offender {
+      file: string;
+      param: string;
+      value: string;
+    }
+    const offenders: Offender[] = [];
+    let blocksScanned = 0;
+    let pathParamsScanned = 0;
+    for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const src = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+      let block: RegExpExecArray | null;
+      TEST_BLOCK.lastIndex = 0;
+      while ((block = TEST_BLOCK.exec(src)) !== null) {
+        blocksScanned++;
+        const urlMatch = BUILD_URL.exec(block[0]);
+        if (!urlMatch) continue;
+        const [, template, paramsLiteral] = urlMatch;
+        // Only path-param tokens — `{name}` substrings — are routing-
+        // significant. Query-only scenarios pass `undefined` for slot 2
+        // (the 3-arg form, post-#127) or an empty `{}` (legacy 2-arg) and
+        // are ignored automatically.
+        if (!paramsLiteral || paramsLiteral === 'undefined') continue;
+        const pathTokens = new Set<string>();
+        const tokenRe = /\{([^}]+)}/g;
+        let t: RegExpExecArray | null;
+        while ((t = tokenRe.exec(template)) !== null) pathTokens.add(t[1]);
+        if (pathTokens.size === 0) continue;
+        PARAM_KV.lastIndex = 0;
+        let kv: RegExpExecArray | null;
+        while ((kv = PARAM_KV.exec(paramsLiteral)) !== null) {
+          const [, bareKey, sqKey, dqKey, sqVal, dqVal] = kv;
+          const key = bareKey ?? sqKey ?? dqKey;
+          const rawValue = sqVal ?? dqVal;
+          if (key === undefined || rawValue === undefined) continue;
+          if (!pathTokens.has(key)) continue;
+          pathParamsScanned++;
+          const quote: "'" | '"' = sqVal !== undefined ? "'" : '"';
+          const value = unescapeJsString(rawValue, quote);
+          if (isUrlCollapsingPathSegment(value)) {
+            offenders.push({
+              file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),
+              param: key,
+              value,
+            });
+          }
+        }
+      }
+    }
+    // Vacuous-truth guard: prove both regexes still match the emitted
+    // syntax. The camunda-oca suite has hundreds of param-constraint
+    // blocks with at least one path-param each.
+    expect(blocksScanned).toBeGreaterThan(0);
+    expect(pathParamsScanned).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
 });

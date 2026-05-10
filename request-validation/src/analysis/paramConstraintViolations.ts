@@ -61,32 +61,88 @@ function buildValidValue(r: ResolvedParamSchema): string {
   return 'x';
 }
 
+/**
+ * Returns true if `value`, after URL substitution into a path template,
+ * would not survive as a single non-empty path segment — making any
+ * resulting 400 expectation noise (Spring's router resolves the request as
+ * a different route and returns 404 from a static-resource handler before
+ * the request validator runs).
+ *
+ * `buildUrl()` substitutes path-param values raw (no encoding), so the
+ * predicate must reject any value that *literally* contains a routing-
+ * significant character, plus any value whose `encodeURIComponent` form
+ * contains an encoded segment splitter.
+ *
+ * Class-scoped check (issue #147 + PR #148 review):
+ *   - empty segment
+ *   - `.` / `..` (path traversal)
+ *   - raw `/` or `\` (forward / back slash)
+ *   - raw `?` or `#` (query / fragment delimiters)
+ *   - already-encoded `%2F` / `%5C` (case-insensitive) in the value as
+ *     supplied — the server may decode these to `/` or `\`
+ *   - any value whose `encodeURIComponent` form contains `%2F`/`%5C`
+ *     (catches values that contain raw separators not covered above —
+ *     defence in depth in case the rules above drift).
+ */
+function isUrlCollapsingPathSegment(value: string): boolean {
+  if (value.length === 0) return true;
+  if (value === '.' || value === '..') return true;
+  // Raw routing-significant characters (no encoding by buildUrl).
+  if (/[/\\?#]/.test(value)) return true;
+  // Already-encoded separators in the supplied value — buildUrl substitutes
+  // the value as-is, and the server (or any intermediate proxy) may decode
+  // %2F / %5C back to / or \. `encodeURIComponent` would re-encode the `%`
+  // to `%25`, so check the raw value directly.
+  if (/%2f|%5c/i.test(value)) return true;
+  // Defence in depth: catch any value whose canonical encoding contains a
+  // segment splitter not flagged above.
+  const encoded = encodeURIComponent(value);
+  if (/%2f|%5c/i.test(encoded)) return true;
+  return false;
+}
+
 function buildViolations(
   p: ParameterModel,
   r: ResolvedParamSchema,
 ): { kind: string; invalid: string }[] {
   const out: { kind: string; invalid: string }[] = [];
+  const isPath = p.in === 'path';
+  const accept = (kind: string, invalid: string): void => {
+    // Path-param scenarios that collapse the URL never reach the validator
+    // (Spring routes them to a different handler and returns 404). Elide
+    // them so the 400 assertion isn't a noisy false-fail. See issue #147.
+    if (isPath && isUrlCollapsingPathSegment(invalid)) return;
+    out.push({ kind, invalid });
+  };
   // Pattern violation
   if (r.pattern) {
     const invalid = buildGuaranteedPatternMismatch(r.pattern, {
-      pathSegmentSafe: p.in === 'path',
+      pathSegmentSafe: isPath,
     });
-    if (invalid) out.push({ kind: 'pattern', invalid });
+    if (invalid) accept('pattern', invalid);
   }
   // Length violations
   if (typeof r.minLength === 'number' && r.minLength > 0) {
-    const tooShort = ''.padEnd(Math.max(0, r.minLength - 1), '');
-    out.push({ kind: 'length-min', invalid: tooShort });
+    // PR #148 review: previously `''.padEnd(N, '')` returned `''` for any
+    // `minLength > 0` because `padEnd` with an empty pad string is a no-op.
+    // Use a non-empty pad so we synthesise a genuinely-too-short value
+    // (length `minLength - 1`); for `minLength: 1` the result is still `''`
+    // (length 0), and `accept()` will elide that for path params via
+    // `isUrlCollapsingPathSegment`. For `minLength: 3` we now correctly
+    // emit `'aa'` instead of `''`, exercising the validator on a
+    // non-collapsing shorter value.
+    const tooShort = 'a'.repeat(r.minLength - 1);
+    accept('length-min', tooShort);
   }
   if (typeof r.maxLength === 'number') {
     const tooLong = 'a'.repeat(r.maxLength + 10);
-    out.push({ kind: 'length-max', invalid: tooLong });
+    accept('length-max', tooLong);
   }
   // Enum violation (only if enum present)
   if (r.enumValues?.length) {
     let inval = `${String(r.enumValues[0])}_X`;
     if (r.pattern === '^-?[0-9]+$') inval = '9999999999999999999999999'; // excessively long number string
-    out.push({ kind: 'enum', invalid: inval });
+    accept('enum', inval);
   }
   return out;
 }
