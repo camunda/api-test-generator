@@ -15,10 +15,14 @@ import type { OperationModel, ParameterModel } from '../../request-validation/sr
  * is then unmet for a reason unrelated to validation, producing a noisy
  * false-fail.
  *
- * Concrete trigger: `minLength: 1` produces `tooShort = ''.padEnd(0)` = `''`.
- * Substituted into `/v2/roles/{roleId}/groups/{groupId}` you get
+ * Concrete trigger: `minLength: 1` produces `tooShort = 'a'.repeat(0)` =
+ * `''`. Substituted into `/v2/roles/{roleId}/groups/{groupId}` you get
  * `/v2/roles/x/groups/`, which Spring serves through the static-resource
- * handler with `404 No static resource v2/roles/x/groups`.
+ * handler with `404 No static resource v2/roles/x/groups`. (PR #148 review:
+ * the synthesis was previously `''.padEnd(N, '')`, which is a no-op for
+ * any `N`; it is now `'a'.repeat(N - 1)`, which still yields `''` for
+ * `minLength: 1` but produces a non-empty shorter value for
+ * `minLength > 1`.)
  *
  * The class-scoped guard asserts that **no** emitted path-param constraint
  * scenario carries a value that would change the URL shape after raw

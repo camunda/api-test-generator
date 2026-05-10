@@ -1930,36 +1930,50 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
       return false;
     }
 
-    // Unescape a JavaScript string-literal body: collapse `\<char>` to `<char>`
-    // for the escapes we care about (`\\`, `\'`, `\"`, `\/`, `\n`, `\t`, `\r`,
-    // `\b`, `\f`). Hex/unicode escapes are not produced by the emitter, so we
-    // do not decode them; if they ever are, the predicate's raw-character
-    // checks remain conservative because the literal `\u` sequence is
-    // harmless on its own.
-    function unescapeJsString(s: string): string {
-      return s.replace(/\\(.)/g, (_m, c: string) => {
-        switch (c) {
-          case 'n':
-            return '\n';
-          case 't':
-            return '\t';
-          case 'r':
-            return '\r';
-          case 'b':
-            return '\b';
-          case 'f':
-            return '\f';
-          default:
-            return c; // \\, \', \", \/, etc.
-        }
-      });
+    // Unescape a JavaScript string-literal body. The emitter writes path
+    // params via `JSON.stringify`, then prettier may re-quote the outer
+    // quotes (`singleQuote: true`). For correctness across the full set of
+    // JSON escapes (`\\`, `\"`, `\/`, `\n`, `\t`, `\r`, `\b`, `\f`, and
+    // `\uXXXX` — which can decode to routing-significant chars like `/` =
+    // `\u002F`), we round-trip through `JSON.parse`. PR #148 review: the
+    // previous hand-rolled `replace(/\\(.)/, ...)` returned just `<char>`
+    // for any `\<char>`, which would have decoded `\u002F` to `u002F` and
+    // hidden a real slash from the URL-collapsing predicate.
+    function unescapeJsString(rawBody: string, quote: "'" | '"'): string {
+      // Convert the captured body to a valid JSON string body. JSON requires
+      // double-quoted strings with `\"` for embedded quotes; it does not
+      // allow `\'` (a JS-only escape). For single-quoted source: unescape
+      // `\'` to `'`, then escape any unescaped `"` to `\"`.
+      let jsonBody: string;
+      if (quote === '"') {
+        jsonBody = rawBody;
+      } else {
+        jsonBody = rawBody
+          .replace(/\\'/g, "'")
+          .replace(/(^|[^\\])((?:\\\\)*)"/g, '$1$2\\"');
+      }
+      try {
+        const parsed: unknown = JSON.parse(`"${jsonBody}"`);
+        if (typeof parsed === 'string') return parsed;
+      } catch {
+        // Fall through to raw return below — predicate's raw-character
+        // checks (`/`, `\`, `?`, `#`, `%2f`, `%5c`) remain conservative
+        // even on un-decoded escape sequences.
+      }
+      return rawBody;
     }
 
     // Match the `buildUrl(...)` call inside a `param-constraint-violation`
-    // block. The emitter inlines path params as a single-line object
-    // literal; we capture the template string and the params literal.
+    // block. The emitter accepts both the 2-arg form
+    // `buildUrl(path, pathParams)` and the 3-arg form
+    // `buildUrl(path, pathParams, queryParams)` (#127). We only care about
+    // the path-params slot for this invariant; slot 3 is captured-and-
+    // discarded so the regex still matches when it exists. PR #148 review:
+    // the previous regex required exactly two args and silently skipped
+    // every block with a query-params slot, weakening coverage.
     const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'param-constraint-violation'[^]*?}\);/g;
-    const BUILD_URL = /buildUrl\(\s*'([^']+)'\s*,\s*(\{[^}]*\})\s*\)/;
+    const BUILD_URL =
+      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))(?:\s*,\s*(?:\{[^}]*\}|undefined))?\s*\)/;
     // `<key>: <value>` — key is either a bare identifier or a quoted
     // string (in case prettier ever quotes a non-identifier key); value is
     // a single- or double-quoted string literal that *may contain
@@ -1992,8 +2006,10 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
         if (!urlMatch) continue;
         const [, template, paramsLiteral] = urlMatch;
         // Only path-param tokens — `{name}` substrings — are routing-
-        // significant. Query-only scenarios pass an empty `{}` and are
-        // ignored automatically.
+        // significant. Query-only scenarios pass `undefined` for slot 2
+        // (the 3-arg form, post-#127) or an empty `{}` (legacy 2-arg) and
+        // are ignored automatically.
+        if (!paramsLiteral || paramsLiteral === 'undefined') continue;
         const pathTokens = new Set<string>();
         const tokenRe = /\{([^}]+)}/g;
         let t: RegExpExecArray | null;
@@ -2008,7 +2024,8 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
           if (key === undefined || rawValue === undefined) continue;
           if (!pathTokens.has(key)) continue;
           pathParamsScanned++;
-          const value = unescapeJsString(rawValue);
+          const quote: "'" | '"' = sqVal !== undefined ? "'" : '"';
+          const value = unescapeJsString(rawValue, quote);
           if (isUrlCollapsingPathSegment(value)) {
             offenders.push({
               file: relative(REPO_ROOT, join(REQUEST_VALIDATION_DIR, f)),
