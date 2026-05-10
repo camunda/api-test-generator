@@ -1897,7 +1897,9 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // any value bound to a `{param}` token in the template that:
     //   - is the empty string,
     //   - is `.` or `..`,
-    //   - percent-encodes to contain `/` (`%2F`/`%2f`) or `\` (`%5C`/`%5c`).
+    //   - literally contains a routing-significant `/`, `\`, `?`, or `#`,
+    //   - already contains encoded `/` (`%2F`/`%2f`) or `\` (`%5C`/`%5c`),
+    //   - or percent-encodes to contain `/` (`%2F`/`%2f`) or `\` (`%5C`/`%5c`).
     //
     // Catches not just the original `minLength: 1` empty-string emission
     // (paramConstraintViolations.ts) but any sibling code path that
