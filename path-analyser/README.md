@@ -74,7 +74,7 @@ The emitted suite at `generated/<config>/playwright/` is now a self-contained, r
 - `tsconfig.json`
 - `.env.example` (documents `API_BASE_URL`)
 - `README.md` (run instructions)
-- `support/` (vendored runtime helpers — `env.ts`, `recorder.ts`, `seeding.ts`, `seed-rules.json`)
+- `support/` (vendored runtime helpers — `env.ts`, `seeding.ts`, `seed-rules.json`, and `recorder.ts` when `recordResponses` is enabled — see "Response Shape Recorder" below)
 
 So you can install and run the suite in place against any reachable Camunda cluster:
 
@@ -140,7 +140,12 @@ Purpose
 - Capture real runtime responses from generated tests to inform schema defaults, error mappings, and which fields are actually present.
 - Persist a sanitized JSONL log you can aggregate into a compact summary.
 
-How it works
+Configuration
+
+- The recorder is gated by `configs.<name>.codegen.playwright.recordResponses` in [configs.json](../configs.json). Default when omitted: `true`. The active `camunda-oca` config sets it to `false`, so the SDK example workflows that consume the emitted suite do not pay for the recorder boilerplate they never aggregate. Set it back to `true` for a config (or branch) to re-enable.
+- When disabled, the emitter omits the `recordResponse`/`sanitizeBody` import, every per-step `recordResponse({...})` block, and the `recorder.ts` vendoring under `support/`.
+
+How it works (when enabled)
 
 - The Playwright emitter automatically logs every request via two helpers:
   - `recordResponse({...})` appends one JSON line per request to `dist/runtime-observations/responses.jsonl`.
@@ -155,7 +160,7 @@ Paths
 
 Usage
 
-1) Generate and run tests (recorder is built-in):
+1) Enable the recorder for the active config (set `configs.<name>.codegen.playwright.recordResponses` to `true` in `configs.json`), then generate and run tests:
 
 ```bash
 npm run codegen:playwright -- <operationId>
