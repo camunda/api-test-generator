@@ -20,6 +20,13 @@ interface EmitOptions {
    * produce identical output for the same inputs.
    */
   globalContextSeeds?: readonly GlobalContextSeed[];
+  /**
+   * See {@link EmitContext.recordResponses}. Default `true` (preserves
+   * pre-config behaviour); set to `false` to drop the per-step
+   * `recordResponse({...})` block and the `recorder` import from the
+   * emitted suite.
+   */
+  recordResponses?: boolean;
 }
 
 /**
@@ -44,6 +51,7 @@ export function renderPlaywrightSuite(
     suiteName?: string;
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
+    recordResponses?: boolean;
   },
 ): string {
   return buildSuiteSource(collection, {
@@ -51,6 +59,7 @@ export function renderPlaywrightSuite(
     suiteName: opts.suiteName,
     mode: opts.mode,
     globalContextSeeds: opts.globalContextSeeds,
+    recordResponses: opts.recordResponses,
   });
 }
 
@@ -69,7 +78,14 @@ export async function emitPlaywrightSuite(
   opts: EmitOptions,
 ) {
   await fs.mkdir(opts.outDir, { recursive: true });
-  await materializeSupport(opts.outDir);
+  // Keep the legacy entry point aligned with the new recordResponses contract:
+  // when the caller opts out of the recorder, the per-step block and the
+  // `recorder` import are already absent from the rendered source, so
+  // recorder.ts must also be absent from the vendored support/ directory.
+  // Default true (preserves pre-config behaviour, matching renderPlaywrightSuite).
+  const recordResponses = opts.recordResponses ?? true;
+  const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
+  await materializeSupport(opts.outDir, undefined, undefined, true, excludeSupportFiles);
   const file = path.join(opts.outDir, playwrightSuiteFileName(collection, opts.mode || 'feature'));
   const code = renderPlaywrightSuite(collection, opts);
   await fs.writeFile(file, code, 'utf8');
@@ -88,6 +104,7 @@ export const PlaywrightEmitter: Emitter = {
       suiteName: ctx.suiteName,
       mode: ctx.mode,
       globalContextSeeds: ctx.globalContextSeeds,
+      recordResponses: ctx.recordResponses,
     });
     return [
       {
@@ -135,6 +152,11 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // (we never await a step that's expected to produce an error response).
   const needsAwaitEventually = collection.scenarios.some((s) => stepNeedsAwait(s).length > 0);
 
+  // Default `recordResponses` to true so callers that omit the option keep
+  // the pre-config behaviour. Threaded down into renderScenarioTest so the
+  // per-step block tracks the same flag as the import statement.
+  const recordResponses = opts.recordResponses ?? true;
+
   // Import only test & expect; request fixture is provided per-test via parameters
   lines.push("import { test, expect } from '@playwright/test';");
   if (needsValidation) {
@@ -144,7 +166,9 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // materializeSupport() copies these files alongside the emitted specs so
   // the generated suite has no dependency on this generator project.
   lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
-  lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
+  if (recordResponses) {
+    lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
+  }
   lines.push("import { extractInto, seedBinding } from './support/seeding';");
   lines.push("import { resolveFixture } from './support/fixtures';");
   if (needsAwaitEventually) {
@@ -162,7 +186,7 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   lines.push(`test.describe('${suiteName}', () => {`);
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario, seeds));
+    lines.push(renderScenarioTest(scenario, seeds, recordResponses));
   }
   lines.push('});');
   return lines.join('\n');
@@ -171,6 +195,7 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
 function renderScenarioTest(
   s: EndpointScenario,
   globalContextSeeds: readonly GlobalContextSeed[],
+  recordResponses: boolean,
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
@@ -384,34 +409,36 @@ function renderScenarioTest(
     body.push(`    }`);
     body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
     // Record observation for this step (best-effort). Only capture response shapes for 200 responses.
-    body.push(`    try {`);
-    body.push(`      const __status = ${varName}.status();`);
-    // `unknown` + assigned-or-stays-undefined; the subsequent
-    // `bodyJson !== undefined` guard before sanitizeBody() preserves the
-    // contract. Drops both the noExplicitAny error and the
-    // noUselessUndefinedInitialization info from the generated suite.
-    body.push(`      let bodyJson: unknown;`);
-    body.push(
-      `      if (__status === 200) { try { bodyJson = await ${varName}.json(); } catch {} }`,
-    );
-    body.push(`      await recordResponse({`);
-    body.push(`        timestamp: new Date().toISOString(),`);
-    // Use the step's declared operationId instead of indexing scenario.operations (which may have fewer entries than request steps, e.g. duplicate tests)
-    body.push(`        operationId: '${step.operationId}',`);
-    body.push(`        scenarioId: '${s.id}',`);
-    body.push(`        scenarioName: ${JSON.stringify(s.name || '')},`);
-    body.push(`        stepIndex: ${idx},`);
-    body.push(`        isFinal: ${isFinal},`);
-    body.push(`        method: '${step.method}',`);
-    body.push(`        pathTemplate: ${JSON.stringify(step.pathTemplate)},`);
-    body.push(`        status: __status,`);
-    body.push(`        expectedStatus: ${step.expect.status},`);
-    body.push(`        errorScenario: ${s.expectedResult && s.expectedResult.kind === 'error'},`);
-    body.push(
-      `        bodyShape: (__status === 200 && bodyJson !== undefined) ? sanitizeBody(bodyJson) : undefined`,
-    );
-    body.push(`      });`);
-    body.push(`    } catch {}`);
+    if (recordResponses) {
+      body.push(`    try {`);
+      body.push(`      const __status = ${varName}.status();`);
+      // `unknown` + assigned-or-stays-undefined; the subsequent
+      // `bodyJson !== undefined` guard before sanitizeBody() preserves the
+      // contract. Drops both the noExplicitAny error and the
+      // noUselessUndefinedInitialization info from the generated suite.
+      body.push(`      let bodyJson: unknown;`);
+      body.push(
+        `      if (__status === 200) { try { bodyJson = await ${varName}.json(); } catch {} }`,
+      );
+      body.push(`      await recordResponse({`);
+      body.push(`        timestamp: new Date().toISOString(),`);
+      // Use the step's declared operationId instead of indexing scenario.operations (which may have fewer entries than request steps, e.g. duplicate tests)
+      body.push(`        operationId: '${step.operationId}',`);
+      body.push(`        scenarioId: '${s.id}',`);
+      body.push(`        scenarioName: ${JSON.stringify(s.name || '')},`);
+      body.push(`        stepIndex: ${idx},`);
+      body.push(`        isFinal: ${isFinal},`);
+      body.push(`        method: '${step.method}',`);
+      body.push(`        pathTemplate: ${JSON.stringify(step.pathTemplate)},`);
+      body.push(`        status: __status,`);
+      body.push(`        expectedStatus: ${step.expect.status},`);
+      body.push(`        errorScenario: ${s.expectedResult && s.expectedResult.kind === 'error'},`);
+      body.push(
+        `        bodyShape: (__status === 200 && bodyJson !== undefined) ? sanitizeBody(bodyJson) : undefined`,
+      );
+      body.push(`      });`);
+      body.push(`    } catch {}`);
+    }
     // If this is the final step and scenario expects a success body, validate response shape
     const isErrorScenario = s.expectedResult && s.expectedResult.kind === 'error';
     if (isFinal && hasShape && !isErrorScenario) {

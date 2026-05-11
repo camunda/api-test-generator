@@ -1376,6 +1376,37 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     expect(totalExpected).toBeGreaterThan(0);
     expect(totalActual).toBe(totalExpected);
   });
+
+  it('no emitted feature spec records responses (camunda-oca config has recordResponses=false)', () => {
+    // configs.json#configs.camunda-oca.codegen.playwright.recordResponses is
+    // intentionally `false`: SDK example workflows that consume the emitted
+    // suite do not run observe:aggregate, so the per-step recordResponse()
+    // block plus the recorder.ts vendoring are pure dead weight here. This
+    // invariant locks that choice — flipping the config back to true would
+    // re-introduce the boilerplate, and this assertion would catch it.
+    //
+    // The check is class-scoped: it asserts that *no* feature spec contains
+    // `recordResponse` anywhere (call site or import), not just the spec the
+    // change happened to touch. Catches partial-gating regressions (e.g. a
+    // future refactor that re-emits the import without the call, or vice
+    // versa) the same way the original direction did.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    for (const f of specs) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      if (src.includes('recordResponse')) {
+        offenders.push(relative(REPO_ROOT, join(GENERATED_TESTS_DIR, f)));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });
 
 describeForThisConfig('bundled-spec invariants: emitted Playwright variant suite (#105)', () => {

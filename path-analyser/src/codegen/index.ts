@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   getActiveConfigDir,
   getFeatureOutputDir,
+  getPlaywrightCodegenOptions,
   getPlaywrightSuiteDir,
   getVariantOutputDir,
 } from '../configResolver.js';
@@ -122,12 +123,23 @@ async function run() {
   // The support/ tree, README.md, and responses.json are re-materialised below.
   await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(outDir, { recursive: true });
+  // Per-config Playwright codegen options
+  // (configs.json#configs.<active>.codegen.playwright). Resolved INSIDE the
+  // emitter.id check so a malformed `codegen.playwright` block cannot fail
+  // codegen runs that target a non-Playwright emitter and don't consume
+  // these options. Declared with the wider scope so writeEmitted below can
+  // forward it; non-Playwright targets see `undefined`, which the
+  // EmitContext schema already treats as "use the default".
+  let recordResponses: boolean | undefined;
   // Vendor the runtime support helpers into <outDir>/support/ so the
   // emitted suite is self-contained (no imports back into this generator).
   // Only the Playwright emitter currently needs these; gate on the emitter id
   // so future targets that don't depend on these helpers don't pay the cost.
   if (emitter.id === 'playwright') {
-    await materializeSupport(outDir);
+    const codegenOpts = getPlaywrightCodegenOptions(repoRoot);
+    recordResponses = codegenOpts.recordResponses;
+    const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
+    await materializeSupport(outDir, undefined, undefined, true, excludeSupportFiles);
     // Also extract response-body schemas alongside the emitted specs so the
     // generated `validateResponse(...)` calls have a schema source. Co-located
     // here (rather than a separate npm script) so every codegen run produces
@@ -150,6 +162,7 @@ async function run() {
           suiteName: parsed.endpoint.operationId,
           mode: 'feature',
           globalContextSeeds,
+          recordResponses,
         });
         count++;
       } catch (e) {
@@ -184,6 +197,7 @@ async function run() {
           suiteName: parsed.endpoint.operationId,
           mode: 'variant',
           globalContextSeeds,
+          recordResponses,
         });
         variantCount++;
       } catch (e) {
@@ -221,6 +235,7 @@ async function run() {
     suiteName: endpointOpId,
     mode: 'feature',
     globalContextSeeds,
+    recordResponses,
   });
   console.log('Generated test suite for', endpointOpId, 'at', outDir, `(target: ${emitter.id})`);
 }

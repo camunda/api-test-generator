@@ -112,6 +112,42 @@ describe('materializeSupport', () => {
     }
   });
 
+  test('excludeSupportFiles skips listed files in support/ but keeps the rest', async () => {
+    // Exercises the gate behind configs.json#codegen.playwright.recordResponses=false:
+    // the call site drops recorder.ts when no recordResponse() call will be
+    // emitted into the suite. Other support files must remain — they're part
+    // of the suite's runtime contract regardless of the recorder option.
+    await materializeSupport(tmp, undefined, undefined, true, ['recorder.ts']);
+    const entries = (await fs.readdir(path.join(tmp, SUPPORT_DIR_NAME))).sort();
+    const expected = SUPPORT_TEMPLATE_FILES.filter((f) => f !== 'recorder.ts').sort();
+    expect(entries).toEqual(expected);
+  });
+
+  test('excludeSupportFiles removes a stale file left from a previous run', async () => {
+    // Review-comment guard (#156 review): production pipelines wipe outDir
+    // before materializing, but the legacy emitPlaywrightSuite entry point
+    // does not, and a hand-call against an existing suite must not silently
+    // ship a helper the caller meant to exclude. Materialize once with the
+    // recorder included, then re-materialize with it excluded and assert
+    // the stale recorder.ts is gone.
+    await materializeSupport(tmp);
+    expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'recorder.ts'))).toBe(true);
+    await materializeSupport(tmp, undefined, undefined, true, ['recorder.ts']);
+    expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'recorder.ts'))).toBe(false);
+    // And the non-excluded files are still present.
+    expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'seeding.ts'))).toBe(true);
+  });
+
+  test('excludeSupportFiles rejects names that are not in SUPPORT_TEMPLATE_FILES', async () => {
+    // Review-comment guard (#156 review): typos in excludeSupportFiles
+    // would otherwise silently no-op and the caller would keep shipping
+    // the helper they thought they were excluding. The validator surfaces
+    // the bad name in the error message so the fix site is obvious.
+    await expect(
+      materializeSupport(tmp, undefined, undefined, true, ['no-such-file.ts']),
+    ).rejects.toThrow(/excludeSupportFiles contains unknown name "no-such-file\.ts"/);
+  });
+
   test('fails with a clear filesystem error when a required support template is missing', async () => {
     const fakeSrc = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-support-src-'));
     try {

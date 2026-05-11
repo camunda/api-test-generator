@@ -48,16 +48,15 @@ function loadConfigsIndex(repoRoot: string): ConfigsIndex {
 }
 
 /**
- * Resolve the active config name. Reads `configs.json` at `repoRoot`
- * to:
- *   - look up the default name when `CONFIG` is unset
- *   - validate `CONFIG` against the declared allowlist
+ * Resolve the active config name against an already-loaded {@link ConfigsIndex}.
  *
- * @param repoRoot Absolute path to the api-test-generator repository
- *   root (the directory containing `configs.json`).
+ * Split out from {@link getActiveConfigName} so callers that also need other
+ * fields from the index (e.g. {@link getPlaywrightCodegenOptions}) can load
+ * `configs.json` exactly once per invocation. A second read could see a
+ * different on-disk snapshot (TOCTOU), validate against one and look up the
+ * config entry from another.
  */
-export function getActiveConfigName(repoRoot: string): string {
-  const index = loadConfigsIndex(repoRoot);
+function resolveActiveConfigName(index: ConfigsIndex): string {
   const fromEnv = process.env.CONFIG?.trim();
   const name = fromEnv && fromEnv.length > 0 ? fromEnv : index.default;
 
@@ -76,8 +75,90 @@ export function getActiveConfigName(repoRoot: string): string {
   return name;
 }
 
+/**
+ * Resolve the active config name. Reads `configs.json` at `repoRoot`
+ * to:
+ *   - look up the default name when `CONFIG` is unset
+ *   - validate `CONFIG` against the declared allowlist
+ *
+ * @param repoRoot Absolute path to the api-test-generator repository
+ *   root (the directory containing `configs.json`).
+ */
+export function getActiveConfigName(repoRoot: string): string {
+  return resolveActiveConfigName(loadConfigsIndex(repoRoot));
+}
+
 export function getActiveConfigDir(repoRoot: string): string {
   return path.resolve(repoRoot, 'configs', getActiveConfigName(repoRoot));
+}
+
+/**
+ * Options that control the Playwright emitter, sourced from
+ * `configs.json#configs.<active>.codegen.playwright`.
+ *
+ * Every field is optional in the on-disk schema and defaults to a value
+ * that preserves pre-config behaviour. Missing `codegen` / `codegen.playwright`
+ * blocks yield an all-defaults result without throwing.
+ */
+export interface PlaywrightCodegenOptions {
+  /**
+   * When true, every emitted scenario step appends a `recordResponse({...})`
+   * call (and the suite imports `recordResponse`/`sanitizeBody` from
+   * `./support/recorder`). When false, neither the call nor the import is
+   * emitted, and `recorder.ts` is not vendored into the suite's `support/`
+   * directory.
+   *
+   * Default: true (preserves the behaviour that existed before this option
+   * was introduced).
+   */
+  recordResponses: boolean;
+}
+
+/**
+ * Resolve the Playwright codegen options for the active config. Strict
+ * shape-checking on the `codegen.playwright` block — a non-object, or a
+ * non-boolean `recordResponses`, throws. Missing keys default.
+ */
+export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegenOptions {
+  // Single-pass: load configs.json exactly once and resolve the active
+  // config name against that same snapshot. Calling getActiveConfigName()
+  // here would re-read the file and could observe a different on-disk
+  // state from the one we then index into below.
+  const index = loadConfigsIndex(repoRoot);
+  const name = resolveActiveConfigName(index);
+  const entry = index.configs[name];
+  if (!isRecord(entry)) {
+    return { recordResponses: true };
+  }
+  if (!('codegen' in entry)) {
+    return { recordResponses: true };
+  }
+  const codegen = entry.codegen;
+  if (!isRecord(codegen)) {
+    throw new Error(
+      `Malformed configs.json: configs.${name}.codegen must be an object, got ${typeof codegen}.`,
+    );
+  }
+  if (!('playwright' in codegen)) {
+    return { recordResponses: true };
+  }
+  const playwright = codegen.playwright;
+  if (!isRecord(playwright)) {
+    throw new Error(
+      `Malformed configs.json: configs.${name}.codegen.playwright must be an object, got ${typeof playwright}.`,
+    );
+  }
+  let recordResponses = true;
+  if ('recordResponses' in playwright) {
+    const v = playwright.recordResponses;
+    if (typeof v !== 'boolean') {
+      throw new Error(
+        `Malformed configs.json: configs.${name}.codegen.playwright.recordResponses must be a boolean, got ${typeof v}.`,
+      );
+    }
+    recordResponses = v;
+  }
+  return { recordResponses };
 }
 
 /**

@@ -106,6 +106,18 @@ function defaultProjectTemplatesDir(): string {
  *                            written if they don't already exist. Support
  *                            files are always overwritten regardless.
  *                            Default: true.
+ * @param excludeSupportFiles Optional list of support-template file names to
+ *                            skip when copying into `<outDir>/support/`.
+ *                            Used by callers that have configured the emitter
+ *                            to drop a runtime helper (e.g. `recorder.ts`
+ *                            when `recordResponses=false`). Names must match
+ *                            entries in {@link SUPPORT_TEMPLATE_FILES} — unknown
+ *                            names throw to surface typos rather than silently
+ *                            no-op. When a name is excluded, any pre-existing
+ *                            file by the same name under `<outDir>/support/`
+ *                            is also removed, so re-running the materializer
+ *                            over an existing suite cannot leave a stale
+ *                            helper behind.
  * @returns                   Path to the support directory under `outDir`.
  */
 export async function materializeSupport(
@@ -113,14 +125,33 @@ export async function materializeSupport(
   templatesDir?: string,
   projectTemplatesDir?: string,
   overwriteRoot: boolean = true,
+  excludeSupportFiles?: readonly string[],
 ): Promise<string> {
   const srcDir = templatesDir ?? defaultTemplatesDir();
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
   await fs.mkdir(destDir, { recursive: true });
 
+  const validNames: ReadonlySet<string> = new Set(SUPPORT_TEMPLATE_FILES);
+  const exclude = new Set(excludeSupportFiles ?? []);
+  for (const name of exclude) {
+    if (!validNames.has(name)) {
+      throw new Error(
+        `materializeSupport: excludeSupportFiles contains unknown name ${JSON.stringify(name)}. ` +
+          `Allowed: ${[...validNames].join(', ')}.`,
+      );
+    }
+  }
   // Always overwrite support/ — these are part of the generator's contract.
+  // For excluded names, actively remove any pre-existing destination file
+  // so a previous run with the helper enabled does not leave a stale copy
+  // behind. `fs.rm({ force: true })` is a no-op when the file is absent.
   for (const name of SUPPORT_TEMPLATE_FILES) {
-    await fs.copyFile(path.join(srcDir, name), path.join(destDir, name));
+    const dest = path.join(destDir, name);
+    if (exclude.has(name)) {
+      await fs.rm(dest, { force: true });
+      continue;
+    }
+    await fs.copyFile(path.join(srcDir, name), dest);
   }
 
   // Project root scaffolding: overwritten by default; opt-out preserves user edits.
