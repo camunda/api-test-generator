@@ -198,19 +198,38 @@ function renderScenarioTest(
   // numeric keys, structured response payloads). Reads from ctx flow into
   // request bodies that are themselves untyped, so no narrowing is needed.
   body.push(`  const ctx: Record<string, unknown> = {};`);
-  // Issue #136: scenario.seedBindings is the planner's authoritative
-  // answer to "which bindings need a runtime seedBinding() call before
-  // step 0". Pre-#136 the emitter re-derived this from
-  // `bindings ∪ requestPlan` and skipped any PENDING binding that
-  // appeared as an extract target anywhere in the plan — which broke
-  // the establisher's own base scenario, where the body input is
-  // also extracted from the same step's response (extract runs AFTER
-  // the request body is built, so no seed → undefined → 400). We now
-  // trust the planner. The `bindings` loop below still emits literal
-  // (non-PENDING) values for compatibility with downstream lookup, but
-  // delegates "should this be seeded at runtime" entirely to
-  // `seedBindings`.
-  const seedBindingsList = s.seedBindings ?? [];
+  // Runtime seeding has two distinct sources, both of which must complete
+  // before step 0 begins:
+  //
+  //   1. Planner-driven (`scenario.seedBindings`, #136): the planner is
+  //      the authority on which bindings need a `seedBinding()` call
+  //      because a later step references them but no extract has
+  //      produced them yet. Pre-#136 the emitter re-derived this from
+  //      `bindings ∪ requestPlan` and skipped any PENDING binding that
+  //      appeared as an extract target anywhere in the plan — which broke
+  //      the establisher's own base scenario, where the body input is
+  //      also extracted from the same step's response (extract runs AFTER
+  //      the request body is built, so no seed → undefined → 400). We now
+  //      trust the planner's list verbatim.
+  //
+  //   2. Config-driven (`globalContextSeeds`, sourced from
+  //      `domain-semantics.json`): every emitted scenario must seed
+  //      certain universal bindings (e.g. the default-tenant identifier
+  //      under single-tenant mode). Handled by the "universal-seed
+  //      prologue" further down.
+  //
+  // When the same binding name appears in BOTH lists, the universal-seed
+  // prologue is authoritative (#157): its `??` form is strictly more
+  // defensive (covers `null` and `undefined`), uses the explicit
+  // `seedRule` from the config (which can differ from the binding name),
+  // and runs unconditionally before step 0. We therefore filter such
+  // names out of `seedBindingsList` so the redundant `=== undefined`
+  // guard isn't emitted. The `bindings` loop still emits literal
+  // (non-PENDING) values; the seedBindings list never contains literals
+  // (computeSeedBindings filters them out), so the loops are
+  // non-overlapping.
+  const globalSeedNames = new Set(globalContextSeeds.map((seed) => seed.binding));
+  const seedBindingsList = (s.seedBindings ?? []).filter((k) => !globalSeedNames.has(k));
   if (s.bindings && Object.keys(s.bindings).length) {
     body.push('  // Seed scenario bindings');
     for (const [k, v] of Object.entries(s.bindings)) {
@@ -239,8 +258,10 @@ function renderScenarioTest(
   // Each entry emits a single nullish-coalesced assignment that is idempotent
   // over both bindings-loop outcomes above:
   //   - literal binding (`ctx['<k>'] = "value";`) — `??` short-circuits, value preserved
-  //   - seedBindings entry already seeded by the `=== undefined` guard — `??` short-circuits
   //   - no assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
+  // The seedBindings loop above no longer overlaps with this prologue
+  // (#157 — globalContextSeeds names are filtered out of seedBindingsList),
+  // so this is the authoritative pre-step-0 seeder for every entry here.
   // `??` (not `=== undefined`) is intentional: any nullish binding value
   // (`null` or `undefined`) is treated as missing and triggers seeding.
   // The planner does not currently emit `null` literals in `s.bindings`

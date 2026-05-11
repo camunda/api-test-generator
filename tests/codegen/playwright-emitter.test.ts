@@ -201,24 +201,46 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('__PENDING__ tenantIdVar listed in seedBindings emits a guarded auto-seed and the ?? fallback exactly once', async () => {
+  test('__PENDING__ tenantIdVar in seedBindings emits only the ?? fallback when tenantIdVar is also a globalContextSeeds entry (#157)', async () => {
     const content = await renderFirst(
       buildCollectionWithBindings(
         { tenantIdVar: '__PENDING__' },
         { templateRefsTenant: true, seedBindings: ['tenantIdVar'] },
       ),
     );
-    // Issue #136: the planner-emitted seedBindings list is now the
-    // authority. The emitter's seedBindings prologue runs *before* the
-    // universal-seed prologue, so a duplicate seedBinding call there
-    // would be wasted. The `??` line then short-circuits over it.
+    // Issue #157: when the same binding name appears in BOTH scenario.seedBindings
+    // (planner output) and globalContextSeeds (config), the universal-seed
+    // prologue's `??` form is authoritative — it covers both `null` and
+    // `undefined`, uses the explicit `seedRule` from the config (which can
+    // differ from the binding name), and runs unconditionally before step 0.
+    // The seedBindings loop must skip the binding so the emitted suite has
+    // no `=== undefined` guard for it.
     //
-    // Asserting exactly-one occurrence is a class-scoped guard against the
-    // emitter regressing and re-emitting the pre-#86 guard form in the
-    // universal-seed prologue as well (which would push the count to 2).
-    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(1);
+    // Pre-#157 the emitter emitted both the guard and the `??` fallback for
+    // every overlapping binding — three lines of dead code per scenario step.
+    expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
     expect(content).not.toMatch(/__seededTenant/);
+  });
+
+  test('seedBindings entry NOT in globalContextSeeds still emits the `=== undefined` guard (#157 — pin both directions of the filter)', async () => {
+    // Class-scoped guard for the new filter. The fix in #157 must only
+    // drop bindings covered by globalContextSeeds; bindings that the
+    // planner needs seeded pre-step-0 but which have no domain-semantics
+    // entry must still produce the `=== undefined` guard form, because
+    // the universal-seed prologue won't cover them.
+    //
+    // A binding NOT in globalContextSeeds and listed in seedBindings:
+    const widgetKeyGuard = `if (ctx['widgetKeyVar'] === undefined) { ctx['widgetKeyVar'] = seedBinding('widgetKeyVar'); }`;
+    const content = await renderFirst(
+      buildCollectionWithBindings(
+        { widgetKeyVar: '__PENDING__' },
+        { seedBindings: ['widgetKeyVar'] },
+      ),
+    );
+    expect(countOccurrences(content, widgetKeyGuard)).toBe(1);
+    // And it does NOT receive a `??` line (because it's not in globalContextSeeds).
+    expect(content).not.toContain(`ctx['widgetKeyVar'] = ctx['widgetKeyVar'] ?? seedBinding(`);
   });
 
   test('literal tenantIdVar still seeds even when an extract targets the same binding (#136)', async () => {
