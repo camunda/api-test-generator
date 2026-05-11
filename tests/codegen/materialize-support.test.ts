@@ -112,6 +112,17 @@ describe('materializeSupport', () => {
     }
   });
 
+  test('excludeSupportFiles skips listed files in support/ but keeps the rest', async () => {
+    // Exercises the gate behind configs.json#codegen.playwright.recordResponses=false:
+    // the call site drops recorder.ts when no recordResponse() call will be
+    // emitted into the suite. Other support files must remain — they're part
+    // of the suite's runtime contract regardless of the recorder option.
+    await materializeSupport(tmp, undefined, undefined, true, ['recorder.ts']);
+    const entries = (await fs.readdir(path.join(tmp, SUPPORT_DIR_NAME))).sort();
+    const expected = SUPPORT_TEMPLATE_FILES.filter((f) => f !== 'recorder.ts').sort();
+    expect(entries).toEqual(expected);
+  });
+
   test('fails with a clear filesystem error when a required support template is missing', async () => {
     const fakeSrc = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-support-src-'));
     try {

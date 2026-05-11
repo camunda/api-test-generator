@@ -81,6 +81,71 @@ export function getActiveConfigDir(repoRoot: string): string {
 }
 
 /**
+ * Options that control the Playwright emitter, sourced from
+ * `configs.json#configs.<active>.codegen.playwright`.
+ *
+ * Every field is optional in the on-disk schema and defaults to a value
+ * that preserves pre-config behaviour. Missing `codegen` / `codegen.playwright`
+ * blocks yield an all-defaults result without throwing.
+ */
+export interface PlaywrightCodegenOptions {
+  /**
+   * When true, every emitted scenario step appends a `recordResponse({...})`
+   * call (and the suite imports `recordResponse`/`sanitizeBody` from
+   * `./support/recorder`). When false, neither the call nor the import is
+   * emitted, and `recorder.ts` is not vendored into the suite's `support/`
+   * directory.
+   *
+   * Default: true (preserves the behaviour that existed before this option
+   * was introduced).
+   */
+  recordResponses: boolean;
+}
+
+/**
+ * Resolve the Playwright codegen options for the active config. Strict
+ * shape-checking on the `codegen.playwright` block — a non-object, or a
+ * non-boolean `recordResponses`, throws. Missing keys default.
+ */
+export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegenOptions {
+  const index = loadConfigsIndex(repoRoot);
+  const name = getActiveConfigName(repoRoot);
+  const entry = index.configs[name];
+  if (!isRecord(entry)) {
+    return { recordResponses: true };
+  }
+  if (!('codegen' in entry)) {
+    return { recordResponses: true };
+  }
+  const codegen = entry.codegen;
+  if (!isRecord(codegen)) {
+    throw new Error(
+      `Malformed configs.json: configs.${name}.codegen must be an object, got ${typeof codegen}.`,
+    );
+  }
+  if (!('playwright' in codegen)) {
+    return { recordResponses: true };
+  }
+  const playwright = codegen.playwright;
+  if (!isRecord(playwright)) {
+    throw new Error(
+      `Malformed configs.json: configs.${name}.codegen.playwright must be an object, got ${typeof playwright}.`,
+    );
+  }
+  let recordResponses = true;
+  if ('recordResponses' in playwright) {
+    const v = playwright.recordResponses;
+    if (typeof v !== 'boolean') {
+      throw new Error(
+        `Malformed configs.json: configs.${name}.codegen.playwright.recordResponses must be a boolean, got ${typeof v}.`,
+      );
+    }
+    recordResponses = v;
+  }
+  return { recordResponses };
+}
+
+/**
  * Per-config layout helpers (#128 PR 2 — output partitioning).
  *
  * Convention:

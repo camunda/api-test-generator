@@ -23,6 +23,16 @@ export interface EmitContext {
    * universal-seed prologue and no multipart strip branches.
    */
   globalContextSeeds?: readonly GlobalContextSeed[];
+  /**
+   * Whether the emitted suite should record every response observation by
+   * calling `recordResponse({...})` (and importing it / `sanitizeBody` from
+   * `./support/recorder`). Sourced from
+   * `configs.json#configs.<active>.codegen.playwright.recordResponses`.
+   *
+   * Optional with a default of `true` — omitting the field preserves the
+   * pre-config behaviour. Only the Playwright emitter consumes this today.
+   */
+  recordResponses?: boolean;
 }
 
 /**

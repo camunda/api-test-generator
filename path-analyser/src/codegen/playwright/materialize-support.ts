@@ -106,6 +106,12 @@ function defaultProjectTemplatesDir(): string {
  *                            written if they don't already exist. Support
  *                            files are always overwritten regardless.
  *                            Default: true.
+ * @param excludeSupportFiles Optional list of support-template file names to
+ *                            skip when copying into `<outDir>/support/`.
+ *                            Used by callers that have configured the emitter
+ *                            to drop a runtime helper (e.g. `recorder.ts`
+ *                            when `recordResponses=false`). Names must match
+ *                            entries in {@link SUPPORT_TEMPLATE_FILES}.
  * @returns                   Path to the support directory under `outDir`.
  */
 export async function materializeSupport(
@@ -113,13 +119,16 @@ export async function materializeSupport(
   templatesDir?: string,
   projectTemplatesDir?: string,
   overwriteRoot: boolean = true,
+  excludeSupportFiles?: readonly string[],
 ): Promise<string> {
   const srcDir = templatesDir ?? defaultTemplatesDir();
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
   await fs.mkdir(destDir, { recursive: true });
 
+  const exclude = new Set(excludeSupportFiles ?? []);
   // Always overwrite support/ — these are part of the generator's contract.
   for (const name of SUPPORT_TEMPLATE_FILES) {
+    if (exclude.has(name)) continue;
     await fs.copyFile(path.join(srcDir, name), path.join(destDir, name));
   }
 

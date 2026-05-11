@@ -1376,6 +1376,33 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     expect(totalExpected).toBeGreaterThan(0);
     expect(totalActual).toBe(totalExpected);
   });
+
+  it('every emitted feature spec records responses (camunda-oca config has recordResponses=true)', () => {
+    // configs.json#configs.camunda-oca.codegen.playwright.recordResponses is
+    // intentionally `true` so the observe:aggregate workflow can consume
+    // dist/runtime-observations/responses.jsonl. This invariant locks that
+    // default — flipping it to false in configs.json would drop the per-step
+    // recordResponse() block from every emitted spec, and this assertion
+    // would catch it. The check is class-scoped: it asserts that *every*
+    // feature spec contains at least one `await recordResponse(`, not just
+    // the spec the change happened to touch.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    for (const f of specs) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      if (!src.includes('await recordResponse(')) {
+        offenders.push(relative(REPO_ROOT, join(GENERATED_TESTS_DIR, f)));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });
 
 describeForThisConfig('bundled-spec invariants: emitted Playwright variant suite (#105)', () => {
