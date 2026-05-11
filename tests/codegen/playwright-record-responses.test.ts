@@ -1,5 +1,9 @@
-import { describe, expect, test } from 'vitest';
+import { existsSync, promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  emitPlaywrightSuite,
   PlaywrightEmitter,
   renderPlaywrightSuite,
 } from '../../path-analyser/src/codegen/playwright/emitter.ts';
@@ -101,5 +105,50 @@ describe('emitter: recordResponses option gates recorder import + per-step call'
     });
     expect(off).not.toContain('recordResponse');
     expect(on).toContain('await recordResponse({');
+  });
+});
+
+// Review-comment guard (#156): the legacy filesystem-writing entry point
+// emitPlaywrightSuite() must keep the suite source and the vendored
+// support/ in sync with the recordResponses option. Pre-fix it always
+// called materializeSupport() without forwarding the option, so a caller
+// with recordResponses=false would get a suite without the import/call
+// but still ship recorder.ts on disk.
+describe('emitPlaywrightSuite legacy entry point keeps support/ in sync with recordResponses', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'emit-pw-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('recordResponses=false produces a suite whose support/ does not contain recorder.ts', async () => {
+    await emitPlaywrightSuite(COLLECTION_WITH_STEP, {
+      outDir: tmp,
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(existsSync(path.join(tmp, 'support', 'recorder.ts'))).toBe(false);
+    // Spec source must also be free of recorder references — the two
+    // halves of the gate (rendered source + vendored helpers) must move
+    // together.
+    const spec = await fs.readFile(path.join(tmp, 'createWidget.feature.spec.ts'), 'utf8');
+    expect(spec).not.toContain('recordResponse');
+  });
+
+  test('recordResponses=true (and default) still vendors recorder.ts alongside the spec', async () => {
+    await emitPlaywrightSuite(COLLECTION_WITH_STEP, {
+      outDir: tmp,
+      suiteName: 'createWidget',
+      mode: 'feature',
+      // recordResponses omitted — default-true path.
+    });
+    expect(existsSync(path.join(tmp, 'support', 'recorder.ts'))).toBe(true);
+    const spec = await fs.readFile(path.join(tmp, 'createWidget.feature.spec.ts'), 'utf8');
+    expect(spec).toContain('await recordResponse({');
   });
 });

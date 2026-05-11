@@ -78,7 +78,14 @@ export async function emitPlaywrightSuite(
   opts: EmitOptions,
 ) {
   await fs.mkdir(opts.outDir, { recursive: true });
-  await materializeSupport(opts.outDir);
+  // Keep the legacy entry point aligned with the new recordResponses contract:
+  // when the caller opts out of the recorder, the per-step block and the
+  // `recorder` import are already absent from the rendered source, so
+  // recorder.ts must also be absent from the vendored support/ directory.
+  // Default true (preserves pre-config behaviour, matching renderPlaywrightSuite).
+  const recordResponses = opts.recordResponses ?? true;
+  const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
+  await materializeSupport(opts.outDir, undefined, undefined, true, excludeSupportFiles);
   const file = path.join(opts.outDir, playwrightSuiteFileName(collection, opts.mode || 'feature'));
   const code = renderPlaywrightSuite(collection, opts);
   await fs.writeFile(file, code, 'utf8');

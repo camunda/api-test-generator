@@ -48,16 +48,15 @@ function loadConfigsIndex(repoRoot: string): ConfigsIndex {
 }
 
 /**
- * Resolve the active config name. Reads `configs.json` at `repoRoot`
- * to:
- *   - look up the default name when `CONFIG` is unset
- *   - validate `CONFIG` against the declared allowlist
+ * Resolve the active config name against an already-loaded {@link ConfigsIndex}.
  *
- * @param repoRoot Absolute path to the api-test-generator repository
- *   root (the directory containing `configs.json`).
+ * Split out from {@link getActiveConfigName} so callers that also need other
+ * fields from the index (e.g. {@link getPlaywrightCodegenOptions}) can load
+ * `configs.json` exactly once per invocation. A second read could see a
+ * different on-disk snapshot (TOCTOU), validate against one and look up the
+ * config entry from another.
  */
-export function getActiveConfigName(repoRoot: string): string {
-  const index = loadConfigsIndex(repoRoot);
+function resolveActiveConfigName(index: ConfigsIndex): string {
   const fromEnv = process.env.CONFIG?.trim();
   const name = fromEnv && fromEnv.length > 0 ? fromEnv : index.default;
 
@@ -74,6 +73,19 @@ export function getActiveConfigName(repoRoot: string): string {
     );
   }
   return name;
+}
+
+/**
+ * Resolve the active config name. Reads `configs.json` at `repoRoot`
+ * to:
+ *   - look up the default name when `CONFIG` is unset
+ *   - validate `CONFIG` against the declared allowlist
+ *
+ * @param repoRoot Absolute path to the api-test-generator repository
+ *   root (the directory containing `configs.json`).
+ */
+export function getActiveConfigName(repoRoot: string): string {
+  return resolveActiveConfigName(loadConfigsIndex(repoRoot));
 }
 
 export function getActiveConfigDir(repoRoot: string): string {
@@ -108,8 +120,12 @@ export interface PlaywrightCodegenOptions {
  * non-boolean `recordResponses`, throws. Missing keys default.
  */
 export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegenOptions {
+  // Single-pass: load configs.json exactly once and resolve the active
+  // config name against that same snapshot. Calling getActiveConfigName()
+  // here would re-read the file and could observe a different on-disk
+  // state from the one we then index into below.
   const index = loadConfigsIndex(repoRoot);
-  const name = getActiveConfigName(repoRoot);
+  const name = resolveActiveConfigName(index);
   const entry = index.configs[name];
   if (!isRecord(entry)) {
     return { recordResponses: true };
