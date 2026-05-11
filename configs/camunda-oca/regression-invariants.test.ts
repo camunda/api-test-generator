@@ -3006,3 +3006,114 @@ describeForThisConfig(
     }
   },
 );
+
+describeForThisConfig(
+  'bundled-spec invariants: multipart-only operations skip JSON-only mutations (#135)',
+  () => {
+    // Three negative-test mutation classes are nonsensical when wrapped
+    // as multipart form-data and produce 415s or false-positive 201s
+    // instead of 400s on the three multipart-only Camunda endpoints
+    // (createDeployment, createDocument, createDocuments):
+    //
+    //   1. body-top-type-mismatch — no JSON top-level type to invert.
+    //   2. type-mismatch on a `format: binary` part — any bytes satisfy
+    //      the schema.
+    //   3. constraint-violation on an array-typed part — array
+    //      mutations don't translate to multipart `files=...` repetition.
+    //
+    // The fix in request-validation/scripts/generate.ts drops these
+    // scenarios via shouldSkipForMultipart() rather than wrapping them.
+    // This invariant pins the observable result on the bundled spec
+    // (5 originally-emitted offenders → 0).
+    it('emits zero JSON-only mutations on multipart-only endpoints', () => {
+      const REQUEST_VALIDATION_DIR = join(
+        REPO_ROOT,
+        'generated',
+        CONFIG_NAME,
+        'request-validation',
+      );
+      if (!existsSync(REQUEST_VALIDATION_DIR)) {
+        throw new Error(
+          `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
+            `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+        );
+      }
+
+      // The three multipart-only endpoints in the camunda-oca bundled
+      // spec. If upstream introduces a JSON variant for any of these,
+      // the assertion still holds vacuously, but the floor below
+      // catches the case where these ops disappear entirely.
+      const MULTIPART_ONLY_OPS = ['createDeployment', 'createDocument', 'createDocuments'];
+
+      // Scenario kinds that are nonsensical on multipart-only ops.
+      // qaEmitter writes the scenario kind as `scenarioKind: '<type>'`
+      // (single-quoted) inside each test block; we match that exactly.
+      const FORBIDDEN_KINDS = [
+        'body-top-type-mismatch',
+        'type-mismatch',
+        'constraint-violation',
+      ];
+
+      // Match a single emitted `test('...', async (...) => { ... });`
+      // block. Captures the title (group 1) and the body (group 2).
+      const TEST_BLOCK = /test\('([^']*)',\s*async[^]*?scenarioKind:\s*'([^']+)'[^]*?}\);/g;
+
+      interface Offender {
+        file: string;
+        title: string;
+        operationId: string;
+        scenarioKind: string;
+      }
+      const offenders: Offender[] = [];
+      const sawByOp = new Map<string, number>();
+
+      for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+        if (!f.endsWith('-validation-api-tests.spec.ts')) continue;
+        const text = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+        for (const match of text.matchAll(TEST_BLOCK)) {
+          const title = match[1];
+          const scenarioKind = match[2];
+          // Title format: `<operationId> - <suffix>` (qaEmitter.ts).
+          const opMatch = title.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\s+-\s+/);
+          if (!opMatch) continue;
+          const operationId = opMatch[1];
+          if (!MULTIPART_ONLY_OPS.includes(operationId)) continue;
+          sawByOp.set(operationId, (sawByOp.get(operationId) ?? 0) + 1);
+          if (FORBIDDEN_KINDS.includes(scenarioKind)) {
+            // type-mismatch and constraint-violation are only forbidden
+            // when targeting binary or array multipart parts. We can't
+            // re-derive the schema from the spec text cheaply, so we
+            // rely on the operations' known shapes: createDeployment's
+            // only scalar non-binary part is `tenantId`; createDocument
+            // and createDocuments expose only binary/array parts at the
+            // top level. Anything not addressing tenantId is an
+            // offender for those two kinds.
+            if (scenarioKind === 'body-top-type-mismatch') {
+              offenders.push({ file: f, title, operationId, scenarioKind });
+              continue;
+            }
+            // Title for type-mismatch / constraint-violation is
+            // `<op> - Param <target> wrong type` /
+            // `<op> - Constraint violation <target> ...`
+            const targetMatch =
+              title.match(/Param\s+(\S+)\s+wrong type/) ??
+              title.match(/Constraint violation\s+(\S+)/);
+            const target = targetMatch?.[1] ?? '';
+            if (operationId === 'createDeployment' && target === 'tenantId') continue;
+            offenders.push({ file: f, title, operationId, scenarioKind });
+          }
+        }
+      }
+
+      // Sanity floor: every multipart-only op should still surface at
+      // least one negative scenario after the skip (e.g. missing-body,
+      // missing-required, additional-prop). A zero count signals the
+      // op vanished from the spec, the title format drifted, or the
+      // skip over-fires.
+      for (const op of MULTIPART_ONLY_OPS) {
+        expect(sawByOp.get(op) ?? 0, `expected ≥1 scenario for ${op}`).toBeGreaterThan(0);
+      }
+      expect(offenders).toEqual([]);
+    });
+  },
+);
