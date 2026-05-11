@@ -2095,10 +2095,12 @@ describeForThisConfig('bundled-spec invariants: scenario seed-binding completene
       scenarios: ScenarioLite[];
     }
 
+    // Mirrors path-analyser/src/codegen/playwright/emitter.ts:436 and
+    // path-analyser/src/seedBindings.ts: trivial lowercase-first-char
+    // only. Must stay aligned with the runtime emitter or this
+    // invariant will check the wrong *Var names.
     function camelCase(input: string): string {
-      return input
-        .replace(/[-_\s]+(.)?/g, (_, c) => (typeof c === "string" ? c.toUpperCase() : ""))
-        .replace(/^(.)/, (_, c) => (typeof c === "string" ? c.toLowerCase() : ""));
+      return input.charAt(0).toLowerCase() + input.slice(1);
     }
 
     function collectStringRefs(s: string, out: Set<string>): void {
@@ -2225,10 +2227,12 @@ describeForThisConfig('bundled-spec invariants: scenario seed-binding completene
       scenarios: ScenarioLite[];
     }
 
+    // Mirrors path-analyser/src/codegen/playwright/emitter.ts:436 and
+    // path-analyser/src/seedBindings.ts: trivial lowercase-first-char
+    // only. Must stay aligned with the runtime emitter or this
+    // invariant will check the wrong *Var names.
     function camelCase(input: string): string {
-      return input
-        .replace(/[-_\s]+(.)?/g, (_, c) => (typeof c === "string" ? c.toUpperCase() : ""))
-        .replace(/^(.)/, (_, c) => (typeof c === "string" ? c.toLowerCase() : ""));
+      return input.charAt(0).toLowerCase() + input.slice(1);
     }
 
     const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphLite;
