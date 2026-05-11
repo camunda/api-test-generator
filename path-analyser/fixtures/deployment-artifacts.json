@@ -1,10 +1,18 @@
 {
+  "$comment": "Fixture registry consumed by chooseFixtureFromRegistry() in path-analyser/src/index.ts. Each entry's `providesStates` lists the runtime characteristics this specific fixture provides BEYOND what its `kind` already guarantees in artifactKinds.<kind>.producesStates. The selector picks the entry whose effective providesStates (entry ∪ kind) covers the chain's required states; ties break by smallest providesStates set, then by array order here. See #159.",
   "artifacts": [
     {
       "kind": "bpmnProcess",
       "path": "bpmn/service-task.bpmn",
-      "description": "BPMN process with a service task and zeebe:taskDefinition type sampleJobType",
+      "description": "BPMN process with a service task and zeebe:taskDefinition type sampleJobType. Selected for chains whose consumer ops require ModelHasServiceTaskType (e.g. activateJobs, completeJob, failJob).",
+      "providesStates": ["ModelHasServiceTaskType"],
       "parameters": { "jobType": "sampleJobType" }
+    },
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/simple.bpmn",
+      "description": "Start → end only. An instance created from this BPMN reaches COMPLETED without external coordination (no service tasks, no user tasks, no timer events). Selected for chains whose consumer ops require ProcessInstanceCompleted (e.g. deleteProcessInstance).",
+      "providesStates": ["ProcessInstanceCompleted"]
     },
     {
       "kind": "form",

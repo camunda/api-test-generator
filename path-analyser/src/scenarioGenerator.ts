@@ -1497,10 +1497,16 @@ function enumerateRuleSemantics(rule: ArtifactRule, graph: OperationGraph): stri
 }
 
 function enumerateRuleStates(rule: ArtifactRule, graph: OperationGraph): string[] {
+  // Chain-feasibility view: a `createDeployment` step is treated as capable
+  // of producing any state listed at the kind level — including
+  // `producibleStates` (which only SOME fixture of this kind actually
+  // provides, #159). The selector picks the right fixture at emission
+  // time; the planner just needs to know the chain is reachable.
   const states: string[] = [];
   if (rule.producesStates) states.push(...rule.producesStates);
-  const domainProduces = graph.domain?.artifactKinds?.[rule.artifactKind]?.producesStates;
-  if (domainProduces) states.push(...domainProduces);
+  const spec = graph.domain?.artifactKinds?.[rule.artifactKind];
+  if (spec?.producesStates) states.push(...spec.producesStates);
+  if (spec?.producibleStates) states.push(...spec.producibleStates);
   return [...new Set(states)];
 }
 

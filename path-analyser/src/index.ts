@@ -18,6 +18,7 @@ import {
 } from './scenarioGenerator.js';
 import { computeSeedBindings } from './seedBindings.js';
 import type {
+  DomainSemantics,
   EndpointScenario,
   GenerationSummary,
   GenerationSummaryEntry,
@@ -1032,10 +1033,20 @@ function buildRequestBodyFromCanonical(
         dmnDecision: '@@FILE:dmn/decision.dmn',
         dmnDrd: '@@FILE:dmn/drd.dmn',
       };
-      // Prefer registry-defined artifact if available for this kind
-      // If downstream requires ModelHasServiceTaskType/JobType, prefer an entry carrying a jobType parameter
-      const preferJobType = true; // simple heuristic: jobs-related ops exist; could inspect scenario.operations
-      const regHit = chooseFixtureFromRegistry(kind, preferJobType);
+      // Pick the registry entry whose effective providesStates covers the
+      // states this createDeployment step must produce for the chain (#159).
+      // requiredStates is derived from operationRequirements.<op>.requires
+      // across the chain, minus states produced by non-deployment ops.
+      // The selector then filters registry entries by `kind` and effective
+      // providesStates (entry-level ∪ kind-level), tie-breaking by smallest
+      // entry.providesStates so a chain that doesn't impose any runtime
+      // characteristics on the fixture falls through to the most generic
+      // candidate.
+      const requiredStates = computeDeploymentRequiredStates(scenario, graph.domain);
+      const kindLevelProvides = new Set<string>(
+        kind ? (graph.domain?.artifactKinds?.[kind]?.producesStates ?? []) : [],
+      );
+      const regHit = chooseFixtureFromRegistry(kind, requiredStates, kindLevelProvides);
       const fileRef = regHit?.ref || defaultFixtures[kind || ''] || '@@FILE:bpmn/simple.bpmn';
       // If registry provides a jobType parameter, bind it for later request body use
       if (regHit?.params && typeof regHit.params.jobType === 'string') {
@@ -1085,6 +1096,13 @@ type ArtifactRegistryEntry = {
   path: string;
   description?: string;
   parameters?: Record<string, unknown>;
+  /**
+   * Runtime characteristics this specific fixture provides BEYOND what
+   * `artifactKinds.<kind>.producesStates` declares for the kind. The
+   * selector picks the entry whose effective providesStates (entry ∪
+   * kind) covers the chain's required states (#159).
+   */
+  providesStates?: string[];
 };
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
@@ -1109,6 +1127,7 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
         path: e.path,
         description: e.description,
         parameters: e.parameters,
+        providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
       }));
       return artifactsRegistryCache || [];
     } catch {}
@@ -1207,17 +1226,99 @@ function resolveProvider(opId: string, field: string, scenario: EndpointScenario
   }
 }
 
+/**
+ * Pick the fixture registry entry whose effective providesStates (per-entry ∪
+ * kind-level `artifactKinds.<kind>.producesStates`) covers `requiredStates`.
+ *
+ * Selection algorithm (#159, PR A):
+ *   1. Filter to entries whose `kind` matches.
+ *   2. Of those, keep entries whose effective providesStates is a superset of
+ *      `requiredStates`. An empty `requiredStates` matches every entry — so
+ *      chains that don't impose runtime characteristics on the fixture fall
+ *      through to step 3 with all candidates.
+ *   3. Tie-break: smallest |entry.providesStates| wins (most specific match;
+ *      fewer extra states the chain didn't ask for). Ties at that point
+ *      break by array order in the registry.
+ *
+ * Returns the chosen entry's `@@FILE:<path>` ref plus its parameters, or
+ * `undefined` when no entry of the right kind exists at all (the caller then
+ * falls back to a hard-coded default).
+ *
+ * When no entry of the right kind covers `requiredStates` (a real
+ * misconfiguration — the chain asked for a state nothing provides), the
+ * function still returns the first entry of that kind so the caller can
+ * emit a runnable suite; the diagnostic should be caught earlier by the
+ * fixture-registry validator or the bundled-spec invariants.
+ */
 function chooseFixtureFromRegistry(
-  kind?: string,
-  preferJobType = false,
+  kind: string | undefined,
+  requiredStates: ReadonlySet<string>,
+  kindLevelProvides: ReadonlySet<string>,
 ): { ref: string; params?: Record<string, unknown> } | undefined {
   if (!kind) return undefined;
-  const reg = getArtifactsRegistry();
-  let hit = reg.find(
-    (e) =>
-      e.kind === kind && preferJobType && e.parameters && typeof e.parameters.jobType === 'string',
-  );
-  if (!hit) hit = reg.find((e) => e.kind === kind);
-  if (hit?.path) return { ref: `@@FILE:${hit.path}`, params: hit.parameters };
-  return undefined;
+  const candidates = getArtifactsRegistry().filter((e) => e.kind === kind);
+  if (candidates.length === 0) return undefined;
+
+  const covers = candidates.filter((e) => {
+    const provides = new Set<string>(kindLevelProvides);
+    for (const s of e.providesStates ?? []) provides.add(s);
+    for (const r of requiredStates) {
+      if (!provides.has(r)) return false;
+    }
+    return true;
+  });
+
+  // Fall back to the first registered candidate when the requirement is
+  // unsatisfiable — the caller still gets a runnable suite, and the
+  // misconfiguration surfaces through the L3 invariant rather than as a
+  // generator crash. Skipping the tie-break here keeps fallback behaviour
+  // deterministic and matches the docstring.
+  if (covers.length === 0) {
+    const fallback = candidates[0];
+    return { ref: `@@FILE:${fallback.path}`, params: fallback.parameters };
+  }
+  const best = covers.reduce((acc, e) => {
+    const accSize = acc.providesStates?.length ?? 0;
+    const eSize = e.providesStates?.length ?? 0;
+    return eSize < accSize ? e : acc;
+  });
+  return { ref: `@@FILE:${best.path}`, params: best.parameters };
+}
+
+/**
+ * Compute the set of runtime states the `createDeployment` step in a chain
+ * must provide. Walks every operation in the scenario chain, accumulating
+ * required states from `operationRequirements.<op>.requires`, then subtracts
+ * states produced by any non-deployment op in the chain (those are
+ * satisfied by their own producer step, not by the deployment). The chain
+ * is BFS-ordered with producers before their consumers, so a simple
+ * unordered subtraction is equivalent to a left-to-right walk here.
+ *
+ * Returns the residual — states that have to come from the
+ * `createDeployment` step's fixture selection. An empty set means any
+ * fixture of the right kind is acceptable.
+ */
+function computeDeploymentRequiredStates(
+  scenario: { operations?: ReadonlyArray<{ operationId: string }> } | undefined,
+  domain: DomainSemantics | undefined,
+): Set<string> {
+  const result = new Set<string>();
+  if (!scenario?.operations || !domain?.operationRequirements) return result;
+  const opReqs = domain.operationRequirements;
+  for (const opRef of scenario.operations) {
+    const req = opReqs[opRef.operationId];
+    if (!req) continue;
+    for (const s of req.requires ?? []) result.add(s);
+  }
+  // States produced by non-deployment ops earlier in the chain are
+  // satisfied by their own producer step; the deployment doesn't need to
+  // provide them.
+  for (const opRef of scenario.operations) {
+    if (opRef.operationId === 'createDeployment') continue;
+    const req = opReqs[opRef.operationId];
+    if (!req) continue;
+    for (const s of req.produces ?? []) result.delete(s);
+    for (const s of req.implicitAdds ?? []) result.delete(s);
+  }
+  return result;
 }
