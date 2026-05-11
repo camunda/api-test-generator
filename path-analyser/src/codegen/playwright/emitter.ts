@@ -198,59 +198,54 @@ function renderScenarioTest(
   // numeric keys, structured response payloads). Reads from ctx flow into
   // request bodies that are themselves untyped, so no narrowing is needed.
   body.push(`  const ctx: Record<string, unknown> = {};`);
-  // Collect extraction target variable names across all steps
-  const extractionVars = new Set<string>();
-  if (s.requestPlan) {
-    for (const step of s.requestPlan) {
-      if (step.extract) {
-        for (const ex of step.extract) extractionVars.add(ex.bind);
-      }
-    }
-  }
+  // Issue #136: scenario.seedBindings is the planner's authoritative
+  // answer to "which bindings need a runtime seedBinding() call before
+  // step 0". Pre-#136 the emitter re-derived this from
+  // `bindings ∪ requestPlan` and skipped any PENDING binding that
+  // appeared as an extract target anywhere in the plan — which broke
+  // the establisher's own base scenario, where the body input is
+  // also extracted from the same step's response (extract runs AFTER
+  // the request body is built, so no seed → undefined → 400). We now
+  // trust the planner. The `bindings` loop below still emits literal
+  // (non-PENDING) values for compatibility with downstream lookup, but
+  // delegates "should this be seeded at runtime" entirely to
+  // `seedBindings`.
+  const seedBindingsList = s.seedBindings ?? [];
   if (s.bindings && Object.keys(s.bindings).length) {
     body.push('  // Seed scenario bindings');
-    // Collect vars referenced in body/multipart templates so we can auto-seed PENDING ones actually used.
-    const templateVars = new Set<string>();
-    function collectVarsFromTemplate(obj: unknown) {
-      if (!obj || typeof obj !== 'object') return;
-      for (const val of Object.values(obj)) {
-        if (typeof val === 'string') {
-          const m = val.match(/^\$\{([^}]+)\}$/); // "${varName}"
-          if (m) templateVars.add(m[1]);
-        } else if (typeof val === 'object') collectVarsFromTemplate(val);
-      }
-    }
-    if (s.requestPlan) {
-      for (const step of s.requestPlan) {
-        if (step.bodyTemplate) collectVarsFromTemplate(step.bodyTemplate);
-        if (step.multipartTemplate) collectVarsFromTemplate(step.multipartTemplate);
-      }
-    }
     for (const [k, v] of Object.entries(s.bindings)) {
-      if (v === '__PENDING__') {
-        if (!templateVars.has(k)) continue; // Not referenced in a template
-        if (extractionVars.has(k)) continue; // Will be provided by extraction
-        // Use centralized seeding util at runtime (generate inside test execution for deterministic mode support)
-        body.push(`  if (ctx['${k}'] === undefined) { ctx['${k}'] = seedBinding('${k}'); }`);
-        continue;
-      }
-      if (extractionVars.has(k)) continue;
+      if (v === '__PENDING__') continue; // handled by seedBindings below
+      // Literal bindings flow into ctx unconditionally so any later
+      // step (or the same step's body) can read the planner-minted
+      // value before any extract overwrites it. The seedBindings list
+      // never contains literals (computeSeedBindings filters them
+      // out), so emitting both is safe.
       body.push(`  ctx['${k}'] = ${JSON.stringify(v)};`);
+    }
+  }
+  if (seedBindingsList.length) {
+    if (!s.bindings || !Object.keys(s.bindings).length) {
+      body.push('  // Seed scenario bindings');
+    }
+    for (const k of seedBindingsList) {
+      // `=== undefined` (not `??`) so a literal-bound binding above
+      // that happens to share a name with a seedBindings entry — not
+      // possible today (computeSeedBindings filters literals) but
+      // belt-and-braces — does not get re-seeded.
+      body.push(`  if (ctx['${k}'] === undefined) { ctx['${k}'] = seedBinding('${k}'); }`);
     }
   }
   // Universal-seed prologue derived from domain-semantics.json#globalContextSeeds.
   // Each entry emits a single nullish-coalesced assignment that is idempotent
-  // over all three bindings-loop outcomes above:
+  // over both bindings-loop outcomes above:
   //   - literal binding (`ctx['<k>'] = "value";`) — `??` short-circuits, value preserved
-  //   - `__PENDING__` already seeded by the in-loop `=== undefined` guard — `??` short-circuits
-  //   - no bindings-loop assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
-  // This replaces the pre-#86 unconditional `if (ctx[...] === undefined) { ... }`
-  // form, which was dead code in the third case. `??` (not `=== undefined`) is
-  // intentional: any nullish binding value (`null` or `undefined`) is treated
-  // as missing and triggers seeding. The planner does not currently emit `null`
-  // literals in `s.bindings` for any global seed; revisit before tightening to
-  // `=== undefined` if a future seed ever needs `null` to remain distinct from
-  // "missing".
+  //   - seedBindings entry already seeded by the `=== undefined` guard — `??` short-circuits
+  //   - no assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
+  // `??` (not `=== undefined`) is intentional: any nullish binding value
+  // (`null` or `undefined`) is treated as missing and triggers seeding.
+  // The planner does not currently emit `null` literals in `s.bindings`
+  // for any global seed; revisit before tightening to `=== undefined`
+  // if a future seed ever needs `null` to remain distinct from "missing".
   //
   // Entries that declare a defaultSentinel + stripFromMultipartWhenDefault
   // also emit a `__<fieldName>IsDefault` local that drives the multipart

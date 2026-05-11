@@ -222,6 +222,15 @@ export interface EndpointScenario {
     { name: string; type: string; required?: boolean; nullable?: boolean }[]
   >;
   requestPlan?: RequestStep[]; // concrete request assembly plan per operation (ordered)
+  // Issue #136: ordered list of binding names that the scenario must seed
+  // (via a `seedBinding(name)` call) at scenario start, before step 0
+  // runs. Computed by the planner from `requestPlan` + `bindings` so every
+  // emitter renders the same prologue and no emitter has to re-derive
+  // "which inputs are unsatisfied at step N" from the bindings/extracts
+  // heuristic. Empty/absent means no PENDING bindings need seeding (all
+  // inputs are either literal in `bindings` or supplied by an extract
+  // before their first use).
+  seedBindings?: string[];
   // Duplicate invocation testing (for conditional idempotency / duplicatePolicy conflict)
   duplicateTest?: {
     mode: 'conditional' | 'conflict';

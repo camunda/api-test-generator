@@ -2046,3 +2046,270 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     expect(offenders).toEqual([]);
   });
 });
+
+describeForThisConfig('bundled-spec invariants: scenario seed-binding completeness (#136)', () => {
+  // Class-scoped invariant pinning the planner-side fix for #136.
+  //
+  // Defect class: a request-plan step references a binding (in its
+  // body, multipart payload, or path template) that has no value at
+  // the time the step runs. Pre-#136 the Playwright emitter swallowed
+  // body-only identifier bindings whose value was ALSO extracted from
+  // the same step's response (e.g. createUser sending
+  // `username: ctx.usernameVar` while extracting `usernameVar` from
+  // its own response) — the body went out as `undefined` and the
+  // broker rejected it 400. The planner now stamps `seedBindings`
+  // (path-analyser/src/seedBindings.ts) on every scenario; any
+  // emitter just iterates it.
+  //
+  // The invariant: for every feature-output scenario, every `${var}`
+  // referenced by step S must be resolvable at S's request time —
+  // either a literal in `bindings`, or extracted by a strictly
+  // earlier step, or listed in `scenario.seedBindings`. An offender
+  // means SOME emitter would render an unseeded variable; the
+  // contract is emitter-agnostic so this catches the bug class for
+  // every present and future emitter.
+  it('every step references only bindings that are literal, earlier-extracted, or in seedBindings', () => {
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    interface ExtractLite {
+      bind: string;
+    }
+    interface RequestStepLite {
+      operationId: string;
+      pathTemplate: string;
+      bodyTemplate?: unknown;
+      multipartTemplate?: unknown;
+      extract?: ExtractLite[];
+    }
+    interface ScenarioLite {
+      id: string;
+      bindings?: Record<string, string>;
+      seedBindings?: string[];
+      requestPlan?: RequestStepLite[];
+    }
+    interface CollectionLite {
+      endpoint: { operationId: string };
+      scenarios: ScenarioLite[];
+    }
+
+    // Mirrors path-analyser/src/codegen/playwright/emitter.ts:436 and
+    // path-analyser/src/seedBindings.ts: trivial lowercase-first-char
+    // only. Must stay aligned with the runtime emitter or this
+    // invariant will check the wrong *Var names.
+    function camelCase(input: string): string {
+      return input.charAt(0).toLowerCase() + input.slice(1);
+    }
+
+    function collectStringRefs(s: string, out: Set<string>): void {
+      for (const m of s.matchAll(/\$\{([^}]+)\}/g)) out.add(m[1]);
+    }
+    function walkTemplate(value: unknown, out: Set<string>): void {
+      if (typeof value === 'string') {
+        collectStringRefs(value, out);
+        return;
+      }
+      if (Array.isArray(value)) {
+        for (const v of value) walkTemplate(v, out);
+        return;
+      }
+      if (value && typeof value === 'object') {
+        for (const v of Object.values(value)) walkTemplate(v, out);
+      }
+    }
+    function readsOf(step: RequestStepLite): Set<string> {
+      const out = new Set<string>();
+      walkTemplate(step.bodyTemplate, out);
+      walkTemplate(step.multipartTemplate, out);
+      for (const m of step.pathTemplate.matchAll(/\{([^}]+)\}/g)) {
+        out.add(`${camelCase(m[1])}Var`);
+      }
+      return out;
+    }
+
+    interface Offender {
+      file: string;
+      scenarioId: string;
+      stepIndex: number;
+      operationId: string;
+      missing: string;
+    }
+    const offenders: Offender[] = [];
+    let scenariosScanned = 0;
+    let stepsScanned = 0;
+
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const collection = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as CollectionLite;
+      for (const scenario of collection.scenarios) {
+        if (!scenario.requestPlan?.length) continue;
+        scenariosScanned++;
+        const literals = new Set<string>();
+        for (const [k, v] of Object.entries(scenario.bindings ?? {})) {
+          if (v !== '__PENDING__') literals.add(k);
+        }
+        const seeds = new Set(scenario.seedBindings ?? []);
+        const extractedSoFar = new Set<string>();
+        for (let i = 0; i < scenario.requestPlan.length; i++) {
+          const step = scenario.requestPlan[i];
+          stepsScanned++;
+          for (const v of readsOf(step)) {
+            if (literals.has(v) || extractedSoFar.has(v) || seeds.has(v)) continue;
+            offenders.push({
+              file: f,
+              scenarioId: scenario.id,
+              stepIndex: i,
+              operationId: step.operationId,
+              missing: v,
+            });
+          }
+          for (const ex of step.extract ?? []) extractedSoFar.add(ex.bind);
+        }
+      }
+    }
+
+    // Vacuous-truth guard: the camunda-oca bundle has thousands of
+    // scenarios and tens of thousands of `${var}` reads. If either
+    // count is suspiciously low the invariant has stopped exercising
+    // the property.
+    expect(scenariosScanned).toBeGreaterThan(100);
+    expect(stepsScanned).toBeGreaterThan(scenariosScanned);
+    expect(offenders).toEqual([]);
+  });
+
+  // Narrower companion invariant pinning the exact #136 reproducer:
+  // an establisher operation whose endpoint scenario echoes a body
+  // identifier in its response. Pre-#136 every such operation was a
+  // live-broker 201→400 (46 of them in the issue's enumeration). Even
+  // if the broader invariant above is later relaxed, this one keeps
+  // the named defect class permanently red on regression.
+  it('every establisher endpoint scenario seeds its own body identifier bindings', () => {
+    if (!existsSync(FEATURE_SCENARIOS_DIR) || !existsSync(GRAPH_PATH)) {
+      throw new Error(
+        `Required pipeline output not found. Run 'npm run pipeline' first.`,
+      );
+    }
+    interface IdentifiedBy {
+      in: 'body' | 'path' | 'header' | 'query';
+      name: string;
+      semanticType: string;
+    }
+    interface EstablishesSpec {
+      kind: string;
+      shape?: 'edge' | 'aggregate';
+      identifiedBy: IdentifiedBy[];
+    }
+    interface OperationNodeLite {
+      operationId: string;
+      establishes?: EstablishesSpec;
+    }
+    interface GraphLite {
+      operations: OperationNodeLite[];
+    }
+    interface RequestStepLite {
+      operationId: string;
+      bodyTemplate?: unknown;
+      multipartTemplate?: unknown;
+    }
+    interface ScenarioLite {
+      id: string;
+      operations: { operationId: string }[];
+      bindings?: Record<string, string>;
+      seedBindings?: string[];
+      requestPlan?: RequestStepLite[];
+    }
+    interface CollectionLite {
+      endpoint: { operationId: string };
+      scenarios: ScenarioLite[];
+    }
+
+    // Mirrors path-analyser/src/codegen/playwright/emitter.ts:436 and
+    // path-analyser/src/seedBindings.ts: trivial lowercase-first-char
+    // only. Must stay aligned with the runtime emitter or this
+    // invariant will check the wrong *Var names.
+    function camelCase(input: string): string {
+      return input.charAt(0).toLowerCase() + input.slice(1);
+    }
+
+    const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphLite;
+    const opsById = new Map(graph.operations.map((o) => [o.operationId, o]));
+    interface Offender {
+      file: string;
+      scenarioId: string;
+      operationId: string;
+      bodyIdentifier: string;
+      missingBinding: string;
+    }
+    const offenders: Offender[] = [];
+    let establisherScenariosScanned = 0;
+
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      const collection = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as CollectionLite;
+      const endpointNode = opsById.get(collection.endpoint.operationId);
+      const establishes = endpointNode?.establishes;
+      if (!establishes || establishes.shape === 'edge') continue;
+      const bodyIdents = establishes.identifiedBy.filter((id) => id.in === 'body');
+      if (bodyIdents.length === 0) continue;
+
+      for (const scenario of collection.scenarios) {
+        if (!scenario.requestPlan?.length) continue;
+        const firstStep = scenario.requestPlan[0];
+        if (firstStep.operationId !== collection.endpoint.operationId) continue;
+        // Collect ${var} references actually emitted by the body /
+        // multipart template — that is the surface where #136 produced
+        // unbound reads. Body identifiers omitted from the body
+        // template entirely are an orthogonal body-builder defect and
+        // out of scope for this invariant.
+        const bodyRefs = new Set<string>();
+        const collectVarRefs = (node: unknown): void => {
+          if (typeof node === 'string') {
+            for (const m of node.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+              bodyRefs.add(m[1]);
+            }
+            return;
+          }
+          if (Array.isArray(node)) {
+            for (const item of node) collectVarRefs(item);
+            return;
+          }
+          if (node !== null && typeof node === 'object') {
+            for (const v of Object.values(node)) collectVarRefs(v);
+          }
+        };
+        collectVarRefs(firstStep.bodyTemplate);
+        collectVarRefs(firstStep.multipartTemplate);
+        establisherScenariosScanned++;
+        const literals = new Set<string>();
+        for (const [k, v] of Object.entries(scenario.bindings ?? {})) {
+          if (v !== '__PENDING__') literals.add(k);
+        }
+        const seeds = new Set(scenario.seedBindings ?? []);
+        for (const id of bodyIdents) {
+          const expectedVar = `${camelCase(id.name)}Var`;
+          if (!bodyRefs.has(expectedVar)) continue;
+          if (literals.has(expectedVar) || seeds.has(expectedVar)) continue;
+          offenders.push({
+            file: f,
+            scenarioId: scenario.id,
+            operationId: collection.endpoint.operationId,
+            bodyIdentifier: id.name,
+            missingBinding: expectedVar,
+          });
+        }
+      }
+    }
+    // Sanity floor: the bundled spec has multiple body-identifier
+    // establishers (createUser, createMappingRule, createRole,
+    // createGroup, createAdminUser, createAuthorization, …). If the
+    // count drops below this floor the invariant is silently vacuous.
+    expect(establisherScenariosScanned).toBeGreaterThanOrEqual(5);
+    expect(offenders).toEqual([]);
+  });
+});

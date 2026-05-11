@@ -16,6 +16,7 @@ import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
 } from './scenarioGenerator.js';
+import { computeSeedBindings } from './seedBindings.js';
 import type {
   EndpointScenario,
   GenerationSummary,
@@ -160,6 +161,7 @@ async function main() {
           requestIndex.byOperation,
           successStatusByOp,
         );
+        s.seedBindings = computeSeedBindings(s);
       }
     }
     const fileName = normalizeEndpointFileName(op.method, op.path);
@@ -272,6 +274,7 @@ async function main() {
         requestIndex.byOperation,
         successStatusByOp,
       );
+      s.seedBindings = computeSeedBindings(s);
       // Validation: for JSON requests with oneOf groups, non-negative scenarios must set exactly one variant's required keys
       try {
         const final = s.requestPlan?.[s.requestPlan.length - 1];
@@ -383,6 +386,7 @@ async function main() {
           requestIndex.byOperation,
           successStatusByOp,
         );
+        s.seedBindings = computeSeedBindings(s);
       }
       if (variantCollection.scenarios.length) {
         await writeFile(

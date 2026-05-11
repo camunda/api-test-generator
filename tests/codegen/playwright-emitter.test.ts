@@ -98,33 +98,34 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   });
 });
 
-// Regression guard for PR #79 / issue #80 (no `__seededTenant` flag) and
-// issue #86 (universal-seed prologue collapsed to nullish-coalesce).
+// Regression guard for PR #79 / issue #80 (no `__seededTenant` flag),
+// issue #86 (universal-seed prologue collapsed to nullish-coalesce), and
+// issue #136 (planner-authoritative seedBindings list).
 //
 // The universal-seed prologue derived from globalContextSeeds emits one
 // idempotent line per seed:
 //   ctx['<binding>'] = ctx['<binding>'] ?? seedBinding('<seedRule>');
 // `??` short-circuits over both literal assignments from the bindings loop
-// and the `__PENDING__`-guarded auto-seed (which still uses `=== undefined`
-// in the bindings loop because it runs *before* the universal-seed prologue
-// and a duplicate seedBinding call there would be wasteful). When no
-// bindings-loop assignment exists for the seed, `??` falls through to
-// seedBinding(...). This replaces the pre-#86 unconditional `=== undefined`
-// guard, which was dead code in the no-assignment case.
+// and the `=== undefined`-guarded auto-seed driven by
+// `scenario.seedBindings` (issue #136 — runs *before* the universal-seed
+// prologue so a duplicate seedBinding call there would be wasteful). When
+// neither shape applies, `??` falls through to seedBinding(...). This
+// replaces the pre-#86 unconditional `=== undefined` guard, which was
+// dead code in the no-assignment case.
 //
 // These tests exercise the three shapes the bindings loop can produce for
-// `tenantIdVar` (literal value, __PENDING__ auto-seed, extracted-by-an-
-// earlier-step) plus a control with no `tenantIdVar` binding at all,
-// asserting the `??` line appears exactly once, the universal-seed prologue
-// never re-emits the `=== undefined` form for that binding, and
-// `__seededTenant` never appears anywhere in the output.
-describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? form, #86)', () => {
+// `tenantIdVar` (literal value, __PENDING__-from-seedBindings auto-seed,
+// extracted-by-an-earlier-step) plus a control with no `tenantIdVar`
+// binding at all, asserting the `??` line appears exactly once, the
+// universal-seed prologue never re-emits the `=== undefined` form for
+// that binding, and `__seededTenant` never appears anywhere in the output.
+describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? form, #86; planner seedBindings, #136)', () => {
   const TENANT_FALLBACK = `ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`;
   // The pre-#86 universal-seed-prologue form. The bindings loop *also* emits
-  // exactly this string for a `__PENDING__` binding referenced by a template,
-  // so absence is asserted by counting occurrences (0 for every shape *except*
-  // __PENDING__-referenced-by-template, where the count is exactly 1 — proving
-  // the prologue did not also emit it).
+  // exactly this string for a `__PENDING__` binding listed in
+  // `scenario.seedBindings`, so absence is asserted by counting occurrences
+  // (0 for every shape *except* __PENDING__-with-seedBindings, where the
+  // count is exactly 1 — proving the prologue did not also emit it).
   const FULL_TENANT_GUARD = `if (ctx['tenantIdVar'] === undefined) { ctx['tenantIdVar'] = seedBinding('tenantIdVar'); }`;
 
   // Count occurrences of `needle` in `haystack` without regex escaping.
@@ -142,7 +143,11 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
 
   function buildCollectionWithBindings(
     bindings: Record<string, string>,
-    extras: { templateRefsTenant?: boolean; extractsTenant?: boolean } = {},
+    extras: {
+      templateRefsTenant?: boolean;
+      extractsTenant?: boolean;
+      seedBindings?: string[];
+    } = {},
   ): EndpointScenarioCollection {
     return {
       endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
@@ -156,6 +161,7 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
           producedSemanticTypes: [],
           satisfiedSemanticTypes: [],
           bindings,
+          seedBindings: extras.seedBindings,
           requestPlan: [
             {
               operationId: 'createWidget',
@@ -163,7 +169,7 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
               pathTemplate: '/widgets',
               expect: { status: 200 },
               bodyTemplate: extras.templateRefsTenant
-                ? { tenantId: '${' + 'tenantIdVar}' }
+                ? { tenantId: `${'$'}{tenantIdVar}` }
                 : { name: 'static' },
               extract: extras.extractsTenant
                 ? [{ fieldPath: 'tenantId', bind: 'tenantIdVar' }]
@@ -195,13 +201,17 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('__PENDING__ tenantIdVar referenced by a template emits a guarded auto-seed and the ?? fallback exactly once', async () => {
+  test('__PENDING__ tenantIdVar listed in seedBindings emits a guarded auto-seed and the ?? fallback exactly once', async () => {
     const content = await renderFirst(
-      buildCollectionWithBindings({ tenantIdVar: '__PENDING__' }, { templateRefsTenant: true }),
+      buildCollectionWithBindings(
+        { tenantIdVar: '__PENDING__' },
+        { templateRefsTenant: true, seedBindings: ['tenantIdVar'] },
+      ),
     );
-    // The in-bindings-loop `=== undefined` guard for __PENDING__ is intentional —
-    // it runs *before* the universal-seed prologue, and a duplicate seedBinding
-    // call there would be wasted. The ?? line then short-circuits over it.
+    // Issue #136: the planner-emitted seedBindings list is now the
+    // authority. The emitter's seedBindings prologue runs *before* the
+    // universal-seed prologue, so a duplicate seedBinding call there
+    // would be wasted. The `??` line then short-circuits over it.
     //
     // Asserting exactly-one occurrence is a class-scoped guard against the
     // emitter regressing and re-emitting the pre-#86 guard form in the
@@ -211,17 +221,24 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('extractionVars tenantIdVar skips eager seeding but still emits the ?? fallback exactly once', async () => {
+  test('literal tenantIdVar still seeds even when an extract targets the same binding (#136)', async () => {
+    // Pre-#136 the emitter skipped this literal assignment because
+    // `tenantIdVar` appeared in `extractionVars` — that was the defect.
+    // The extract runs AFTER the request body is built, so the body
+    // would have referenced an unseeded `ctx.tenantIdVar` (=
+    // undefined) and the broker would 400. The literal MUST be
+    // emitted; the extract just overwrites it post-response with
+    // whatever the server echoed.
     const content = await renderFirst(
       buildCollectionWithBindings(
-        { tenantIdVar: 'ignored-because-extracted' },
-        { extractsTenant: true },
+        { tenantIdVar: 'acme' },
+        { templateRefsTenant: true, extractsTenant: true },
       ),
     );
-    expect(content).not.toContain(`ctx['tenantIdVar'] = "ignored-because-extracted";`);
+    expect(content).toContain(`ctx['tenantIdVar'] = "acme";`);
     expect(countOccurrences(content, TENANT_FALLBACK)).toBe(1);
-    // Bindings loop skips this case (extraction wins); prologue must not
-    // re-emit the pre-#86 guard either.
+    // No `=== undefined` guard either: the literal already covers the
+    // pre-request need, and the universal-seed `??` short-circuits.
     expect(countOccurrences(content, FULL_TENANT_GUARD)).toBe(0);
     expect(content).not.toMatch(/__seededTenant/);
   });
