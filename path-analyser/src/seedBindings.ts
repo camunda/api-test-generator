@@ -24,15 +24,19 @@
  *
  * The returned list is ordered by first-read for stable output.
  */
-import type { EndpointScenario, RequestStep } from './types.ts';
+import type { EndpointScenario, RequestStep } from './types.js';
 
 const PLACEHOLDER_RE = /\$\{([^}]+)\}/g;
 const PATH_PLACEHOLDER_RE = /\{([^}]+)\}/g;
 
+// Mirror of camelCase() in path-analyser/src/index.ts and
+// codegen/playwright/emitter.ts. Kept intentionally trivial (lowercase
+// the first character only) so this helper produces exactly the same
+// binding names the emitter reads at runtime. Do not "improve" it to
+// fold `-`/`_`/spaces — that would diverge from the emitter and create
+// bindings the runtime never reads.
 function camelCase(input: string): string {
-  return input
-    .replace(/[-_\s]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ''))
-    .replace(/^(.)/, (_, c) => c.toLowerCase());
+  return input.charAt(0).toLowerCase() + input.slice(1);
 }
 
 function collectStringRefs(s: string, out: Set<string>): void {
