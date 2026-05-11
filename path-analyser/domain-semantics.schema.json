@@ -65,13 +65,14 @@
       }
     },
     "artifactKinds": {
-      "description": "Declarations of deployable artifact kinds (e.g. bpmnProcess). `producesStates` and `producesSemantics` cross-references are enforced at load time by domainSemanticsValidator.ts.",
+      "description": "Declarations of deployable artifact kinds (e.g. bpmnProcess). `producesStates`, `producibleStates`, and `producesSemantics` cross-references are enforced at load time by domainSemanticsValidator.ts.",
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "producesStates": {"type": "array", "items": {"type": "string"}},
+          "producibleStates": {"type": "array", "items": {"type": "string"}},
           "producesSemantics": {"type": "array", "items": {"type": "string"}},
           "identifierType": {"type": "string"},
           "deploymentSlices": {"type": "array", "items": {"type": "string"}}

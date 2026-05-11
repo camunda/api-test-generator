@@ -1271,9 +1271,13 @@ function chooseFixtureFromRegistry(
   // Fall back to the first registered candidate when the requirement is
   // unsatisfiable — the caller still gets a runnable suite, and the
   // misconfiguration surfaces through the L3 invariant rather than as a
-  // generator crash.
-  const ranked = covers.length > 0 ? covers : candidates;
-  const best = ranked.reduce((acc, e) => {
+  // generator crash. Skipping the tie-break here keeps fallback behaviour
+  // deterministic and matches the docstring.
+  if (covers.length === 0) {
+    const fallback = candidates[0];
+    return { ref: `@@FILE:${fallback.path}`, params: fallback.parameters };
+  }
+  const best = covers.reduce((acc, e) => {
     const accSize = acc.providesStates?.length ?? 0;
     const eSize = e.providesStates?.length ?? 0;
     return eSize < accSize ? e : acc;
@@ -1285,8 +1289,10 @@ function chooseFixtureFromRegistry(
  * Compute the set of runtime states the `createDeployment` step in a chain
  * must provide. Walks every operation in the scenario chain, accumulating
  * required states from `operationRequirements.<op>.requires`, then subtracts
- * states produced earlier in the chain by non-deployment ops (those are
- * satisfied by their own producer step, not by the deployment).
+ * states produced by any non-deployment op in the chain (those are
+ * satisfied by their own producer step, not by the deployment). The chain
+ * is BFS-ordered with producers before their consumers, so a simple
+ * unordered subtraction is equivalent to a left-to-right walk here.
  *
  * Returns the residual — states that have to come from the
  * `createDeployment` step's fixture selection. An empty set means any
