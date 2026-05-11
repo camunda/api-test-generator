@@ -42,6 +42,7 @@ const SemanticTypeSpecSchema = z
 const ArtifactKindSpecSchema = z
   .object({
     producesStates: z.array(z.string()).optional(),
+    producibleStates: z.array(z.string()).optional(),
     producesSemantics: z.array(z.string()).optional(),
   })
   .passthrough();
@@ -119,6 +120,18 @@ function checkArtifactKindStateDeclared(d: DomainSemanticsShape): CrossRefIssue[
         issues.push({
           code: 'artifactKindStateDeclared',
           message: `artifactKinds.${kind}.producesStates references "${state}", which is not declared in runtimeStates or capabilities`,
+        });
+      }
+    }
+    // #159: producibleStates carries the same cross-reference invariant
+    // as producesStates — the planner's chain-feasibility BFS reads both,
+    // so an undeclared state name would silently break the BFS rather
+    // than surface as a config error at load time.
+    for (const state of spec.producibleStates ?? []) {
+      if (!declared.has(state)) {
+        issues.push({
+          code: 'artifactKindStateDeclared',
+          message: `artifactKinds.${kind}.producibleStates references "${state}", which is not declared in runtimeStates or capabilities`,
         });
       }
     }

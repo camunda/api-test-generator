@@ -444,7 +444,25 @@ export interface OperationDomainRequirements {
 }
 
 export interface ArtifactKindSpec {
+  /**
+   * States that EVERY fixture of this kind deploys, regardless of fixture
+   * contents (e.g. `ProcessDefinitionDeployed` for `bpmnProcess`). Both the
+   * planner and the selector treat these as unconditional outputs of a
+   * successful `createDeployment` step.
+   */
   producesStates?: string[];
+  /**
+   * States that some fixture of this kind CAN provide, depending on which
+   * specific file the selector picks (#159). The planner reads this for
+   * chain-feasibility BFS — a chain is satisfiable if requires can be
+   * covered by `producesStates ∪ producibleStates`. The selector then
+   * matches the chain's required states against per-entry `providesStates`
+   * in `path-analyser/fixtures/deployment-artifacts.json` to choose the
+   * fitting file. Example: bpmnProcess can produce `ModelHasServiceTaskType`
+   * (via `service-task.bpmn`) or `ProcessInstanceCompleted` (via
+   * `simple.bpmn`), but neither is unconditional.
+   */
+  producibleStates?: string[];
   producesSemantics?: string[];
   identifierType?: string;
   deploymentSlices?: string[]; // e.g., ["processDefinition"] or ["decisionDefinition","decisionRequirements"]

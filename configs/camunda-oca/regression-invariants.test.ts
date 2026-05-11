@@ -1409,6 +1409,112 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
   });
 });
 
+describeForThisConfig('bundled-spec invariants: fixture selection by required state (#159)', () => {
+  // PR A of #159: fixture selection generalises the `preferJobType=true`
+  // hack into state-based matching. The chosen `*.bpmn` for each
+  // `createDeployment` step must satisfy the chain's effective requirement
+  // set — driven by the consumer ops' `operationRequirements.X.requires`.
+  //
+  // The two invariants below pin both directions:
+  //   1. deleteProcessInstance requires ProcessInstanceCompleted; only
+  //      bpmn/simple.bpmn provides it. The emitted spec MUST reference
+  //      simple.bpmn.
+  //   2. activateJobs requires ModelHasServiceTaskType; only
+  //      bpmn/service-task.bpmn provides it. The emitted spec MUST keep
+  //      referencing service-task.bpmn (regression guard for the move of
+  //      ModelHasServiceTaskType from artifactKinds-level to per-fixture).
+  // Together they prove the selector actually discriminates between
+  // fixtures — not just "always returns the first one".
+
+  it('deleteProcessInstance.feature.spec.ts deploys bpmn/simple.bpmn (requires ProcessInstanceCompleted)', () => {
+    const spec = join(GENERATED_TESTS_DIR, 'deleteProcessInstance.feature.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(src, 'deleteProcessInstance must deploy the instantly-completing fixture').toContain(
+      '@@FILE:bpmn/simple.bpmn',
+    );
+    expect(src, 'deleteProcessInstance must NOT deploy service-task.bpmn').not.toContain(
+      '@@FILE:bpmn/service-task.bpmn',
+    );
+  });
+
+  it('activateJobs.feature.spec.ts still deploys bpmn/service-task.bpmn (requires ModelHasServiceTaskType)', () => {
+    const spec = join(GENERATED_TESTS_DIR, 'activateJobs.feature.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(src, 'activateJobs must deploy the service-task fixture').toContain(
+      '@@FILE:bpmn/service-task.bpmn',
+    );
+  });
+
+  it('every entry in deployment-artifacts.json#providesStates is acknowledged by its kind (#159)', () => {
+    // Class-scoped coherence check between the fixture registry and
+    // domain-semantics. For every registry entry e, every state in
+    // e.providesStates MUST appear in either
+    // artifactKinds.<e.kind>.producibleStates or .producesStates — and
+    // be declared in runtimeStates ∪ capabilities. Catches typos and
+    // half-finished registry edits before they reach a codegen run.
+    interface RegistryEntry {
+      kind: string;
+      path: string;
+      providesStates?: string[];
+    }
+    interface ArtifactKindSpec {
+      producesStates?: string[];
+      producibleStates?: string[];
+    }
+    interface DomainSemanticsShape {
+      runtimeStates?: Record<string, unknown>;
+      capabilities?: Record<string, unknown>;
+      artifactKinds?: Record<string, ArtifactKindSpec>;
+    }
+    const registryPath = join(REPO_ROOT, 'path-analyser', 'fixtures', 'deployment-artifacts.json');
+    const registryRaw = readFileSync(registryPath, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const registry = JSON.parse(registryRaw) as { artifacts?: RegistryEntry[] };
+
+    const dsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
+    const dsRaw = readFileSync(dsPath, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const ds = JSON.parse(dsRaw) as DomainSemanticsShape;
+    const declaredStates = new Set<string>([
+      ...Object.keys(ds.runtimeStates ?? {}),
+      ...Object.keys(ds.capabilities ?? {}),
+    ]);
+
+    const offenders: { entry: string; state: string; reason: string }[] = [];
+    for (const e of registry.artifacts ?? []) {
+      for (const state of e.providesStates ?? []) {
+        if (!declaredStates.has(state)) {
+          offenders.push({
+            entry: e.path,
+            state,
+            reason: 'not declared in runtimeStates or capabilities',
+          });
+          continue;
+        }
+        const kindSpec = ds.artifactKinds?.[e.kind];
+        const ack = new Set<string>([
+          ...(kindSpec?.producesStates ?? []),
+          ...(kindSpec?.producibleStates ?? []),
+        ]);
+        if (!ack.has(state)) {
+          offenders.push({
+            entry: e.path,
+            state,
+            reason: `not in artifactKinds.${e.kind}.producibleStates or .producesStates`,
+          });
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describeForThisConfig('bundled-spec invariants: emitted Playwright variant suite (#105)', () => {
   it('every variant scenario file is materialised as a *.variant.spec.ts (#105)', () => {
     // Class-scoped guard for Phase 3 of #105: the codegen pipeline must
