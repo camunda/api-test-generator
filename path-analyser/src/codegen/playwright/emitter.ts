@@ -210,7 +210,17 @@ function renderScenarioTest(
   // (non-PENDING) values for compatibility with downstream lookup, but
   // delegates "should this be seeded at runtime" entirely to
   // `seedBindings`.
-  const seedBindingsList = s.seedBindings ?? [];
+  //
+  // Issue #157: when a binding name is also a globalContextSeeds entry,
+  // the universal-seed prologue below (`??` form) is authoritative —
+  // it covers both `null` and `undefined`, uses the explicit `seedRule`
+  // from domain-semantics (which can differ from the binding name), and
+  // runs unconditionally before step 0. The seedBindings loop's
+  // `=== undefined` form would be strictly redundant for those bindings,
+  // so we filter them out here. The seedBindings loop now handles only
+  // bindings the universal-seed prologue does NOT cover.
+  const globalSeedNames = new Set(globalContextSeeds.map((seed) => seed.binding));
+  const seedBindingsList = (s.seedBindings ?? []).filter((k) => !globalSeedNames.has(k));
   if (s.bindings && Object.keys(s.bindings).length) {
     body.push('  // Seed scenario bindings');
     for (const [k, v] of Object.entries(s.bindings)) {
@@ -239,8 +249,10 @@ function renderScenarioTest(
   // Each entry emits a single nullish-coalesced assignment that is idempotent
   // over both bindings-loop outcomes above:
   //   - literal binding (`ctx['<k>'] = "value";`) — `??` short-circuits, value preserved
-  //   - seedBindings entry already seeded by the `=== undefined` guard — `??` short-circuits
   //   - no assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
+  // The seedBindings loop above no longer overlaps with this prologue
+  // (#157 — globalContextSeeds names are filtered out of seedBindingsList),
+  // so this is the authoritative pre-step-0 seeder for every entry here.
   // `??` (not `=== undefined`) is intentional: any nullish binding value
   // (`null` or `undefined`) is treated as missing and triggers seeding.
   // The planner does not currently emit `null` literals in `s.bindings`
