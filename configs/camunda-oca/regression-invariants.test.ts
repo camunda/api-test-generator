@@ -2313,3 +2313,140 @@ describeForThisConfig('bundled-spec invariants: scenario seed-binding completene
     expect(offenders).toEqual([]);
   });
 });
+
+// #152: required body identifiers must always appear in the body
+// template. Pre-fix, `path-analyser/src/canonicalSchemas.ts:resolveSchema`
+// dropped wrapping-schema `properties`/`required` when an `allOf` was
+// present, so e.g. `MappingRuleCreateRequest.mappingRuleId` and
+// `GlobalTaskListenerCreateRequest.id` never reached the planner's
+// canonical request shape, and the body template was emitted without
+// them. Live broker rejected the request 400. This invariant is the
+// inverse of the #136 invariant above: not only must referenced
+// bindings be seeded, required body identifiers must also be referenced.
+describeForThisConfig(
+  'bundled-spec invariants: establisher body-identifier presence (#152)',
+  () => {
+    it('every establisher endpoint scenario references its required body identifiers', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR) || !existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Required pipeline output not found. Run 'npm run pipeline' first.`,
+        );
+      }
+      interface IdentifiedBy {
+        in: 'body' | 'path' | 'header' | 'query';
+        name: string;
+        semanticType: string;
+      }
+      interface EstablishesSpec {
+        kind: string;
+        shape?: 'edge' | 'aggregate';
+        identifiedBy: IdentifiedBy[];
+      }
+      interface RequestSemanticType {
+        fieldPath: string;
+        required?: boolean;
+      }
+      interface OperationNodeLite {
+        operationId: string;
+        establishes?: EstablishesSpec;
+        requestBodySemanticTypes?: RequestSemanticType[];
+      }
+      interface GraphLite {
+        operations: OperationNodeLite[];
+      }
+      interface RequestStepLite {
+        operationId: string;
+        bodyTemplate?: unknown;
+        multipartTemplate?: unknown;
+      }
+      interface ScenarioLite {
+        id: string;
+        operations: { operationId: string }[];
+        requestPlan?: RequestStepLite[];
+      }
+      interface CollectionLite {
+        endpoint: { operationId: string };
+        scenarios: ScenarioLite[];
+      }
+
+      function camelCase(input: string): string {
+        return input.charAt(0).toLowerCase() + input.slice(1);
+      }
+
+      function collectVarRefs(node: unknown, out: Set<string>): void {
+        if (typeof node === 'string') {
+          for (const m of node.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+            out.add(m[1]);
+          }
+          return;
+        }
+        if (Array.isArray(node)) {
+          for (const item of node) collectVarRefs(item, out);
+          return;
+        }
+        if (node !== null && typeof node === 'object') {
+          for (const v of Object.values(node)) collectVarRefs(v, out);
+        }
+      }
+
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphLite;
+      const opsById = new Map(graph.operations.map((o) => [o.operationId, o]));
+      interface Offender {
+        file: string;
+        scenarioId: string;
+        operationId: string;
+        bodyIdentifier: string;
+        missingVar: string;
+      }
+      const offenders: Offender[] = [];
+      let establisherScenariosScanned = 0;
+
+      for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        const collection = JSON.parse(
+          readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+        ) as CollectionLite;
+        const endpointNode = opsById.get(collection.endpoint.operationId);
+        const establishes = endpointNode?.establishes;
+        if (!establishes || establishes.shape === 'edge') continue;
+        const bodyIdents = establishes.identifiedBy.filter((id) => id.in === 'body');
+        if (bodyIdents.length === 0) continue;
+        // Only check identifiers that are actually required by the
+        // request body schema. An identifier the spec marks optional in
+        // the request body is out of scope for this invariant — the
+        // planner is free to omit it, and absence won't 400 at the broker.
+        const requiredBodyPaths = new Set(
+          (endpointNode?.requestBodySemanticTypes ?? [])
+            .filter((e) => e.required)
+            .map((e) => e.fieldPath),
+        );
+        const requiredIdents = bodyIdents.filter((id) => requiredBodyPaths.has(id.name));
+        if (requiredIdents.length === 0) continue;
+
+        for (const scenario of collection.scenarios) {
+          if (!scenario.requestPlan?.length) continue;
+          const firstStep = scenario.requestPlan[0];
+          if (firstStep.operationId !== collection.endpoint.operationId) continue;
+          establisherScenariosScanned++;
+          const refs = new Set<string>();
+          collectVarRefs(firstStep.bodyTemplate, refs);
+          collectVarRefs(firstStep.multipartTemplate, refs);
+          for (const id of requiredIdents) {
+            const expectedVar = `${camelCase(id.name)}Var`;
+            if (refs.has(expectedVar)) continue;
+            offenders.push({
+              file: f,
+              scenarioId: scenario.id,
+              operationId: collection.endpoint.operationId,
+              bodyIdentifier: id.name,
+              missingVar: expectedVar,
+            });
+          }
+        }
+      }
+      expect(establisherScenariosScanned).toBeGreaterThanOrEqual(5);
+      expect(offenders).toEqual([]);
+    });
+  },
+);
+

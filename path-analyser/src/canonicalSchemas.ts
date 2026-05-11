@@ -29,6 +29,10 @@ interface SchemaObject {
   anyOf?: SchemaObject[];
   oneOf?: SchemaObject[];
   'x-semantic-provider'?: boolean;
+  // Permissive escape hatch so the allOf merger can copy over arbitrary
+  // OpenAPI keywords (description, example, format, …) without per-key
+  // typing or unsafe casts.
+  [key: string]: unknown;
 }
 
 interface MediaObject {
@@ -194,6 +198,25 @@ function walkSchema(
   }
 }
 
+function mergeSchemaInto(acc: SchemaObject, part: SchemaObject): SchemaObject {
+  // Property-wise merge so two allOf branches both contributing
+  // `properties` don't lose each other's keys, and `required` is the
+  // union across branches. Other fields take last-write-wins, which
+  // matches the semantics we want when a branch overrides e.g. `type`.
+  if (part.properties) {
+    acc.properties = { ...(acc.properties ?? {}), ...part.properties };
+  }
+  if (part.required) {
+    const merged = new Set<string>([...(acc.required ?? []), ...part.required]);
+    acc.required = [...merged];
+  }
+  for (const k of Object.keys(part)) {
+    if (k === 'properties' || k === 'required') continue;
+    acc[k] = part[k];
+  }
+  return acc;
+}
+
 function resolveSchema(
   schema: SchemaObject,
   components: Record<string, SchemaObject>,
@@ -206,9 +229,17 @@ function resolveSchema(
     if (target) return resolveSchema(target, components, depth + 1);
   }
   if (schema.allOf && Array.isArray(schema.allOf)) {
+    // #152: the wrapping schema may declare its own `properties` /
+    // `required` alongside `allOf` (e.g. `MappingRuleCreateRequest`,
+    // `GlobalTaskListenerCreateRequest`). Seed the merge with the
+    // wrapping schema (minus `allOf` / `$ref` so we don't recurse) so
+    // those fields survive into the canonical shape.
+    const { allOf: _allOf, $ref: _ref, ...rest } = schema;
+    const seed: SchemaObject = {};
+    mergeSchemaInto(seed, rest);
     return schema.allOf.reduce<SchemaObject>(
-      (acc, part) => Object.assign(acc, resolveSchema(part, components, depth + 1)),
-      {},
+      (acc, part) => mergeSchemaInto(acc, resolveSchema(part, components, depth + 1)),
+      seed,
     );
   }
   return schema;
