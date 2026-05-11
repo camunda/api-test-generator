@@ -74,7 +74,7 @@ The emitted suite at `generated/<config>/playwright/` is now a self-contained, r
 - `tsconfig.json`
 - `.env.example` (documents `API_BASE_URL`)
 - `README.md` (run instructions)
-- `support/` (vendored runtime helpers — `env.ts`, `seeding.ts`, `seed-rules.json`, and `recorder.ts` when `recordResponses` is enabled — see "Response Shape Recorder" below)
+- `support/` (vendored runtime helpers — `env.ts`, `seeding.ts`, `fixtures.ts`, `seed-rules.json`, `await-eventually.ts`, and `recorder.ts` when `recordResponses` is enabled — see "Response Shape Recorder" below; the full list lives in `SUPPORT_TEMPLATE_FILES` in `materialize-support.ts`)
 
 So you can install and run the suite in place against any reachable Camunda cluster:
 
