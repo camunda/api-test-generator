@@ -479,9 +479,12 @@ function renderScenarioTest(
     // the producer's `{ ... }`) so its locals (`witnessUrl`, etc.) don't
     // collide with the producer's, and so the wait is visible at the same
     // indentation depth as the request steps it sits between in the source.
-    for (const wait of step.eventualWaitsAfter ?? []) {
-      body.push(...renderEventualWait(wait));
-    }
+    // The index is forwarded so the per-wait response variable
+    // (`witnessRespN`) stays unique when a single producer step has
+    // multiple eventual waits.
+    (step.eventualWaitsAfter ?? []).forEach((wait, waitIdx) => {
+      body.push(...renderEventualWait(wait, waitIdx));
+    });
   });
   body.push('});');
   return body.join('\n');
@@ -526,9 +529,10 @@ function camelCase(s: string) {
  * round-tripped through JSON.stringify, which produces a valid TS
  * literal for each of those scalar shapes.
  */
-function renderEventualWait(wait: EventualWaitSpec): string[] {
+function renderEventualWait(wait: EventualWaitSpec, idx: number): string[] {
   const out: string[] = [];
   const w = wait.witness;
+  const respVar = `witnessResp${idx + 1}`;
   out.push(`  // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
   out.push(`  {`);
   out.push(`    const witnessUrl = baseUrl + ${buildUrlExpression(w.pathTemplate)};`);
@@ -549,7 +553,15 @@ function renderEventualWait(wait: EventualWaitSpec): string[] {
         return v === ${JSON.stringify(w.predicate.equals)};
       }`);
   const method = w.method.toLowerCase();
-  out.push(`    await awaitEventually(`);
+  // Capture awaitEventually's return value and assert on the status the
+  // same way request-step blocks do. awaitEventually returns early
+  // (without throwing) on hard-fail statuses (400/401/403/409/422/5xx)
+  // so the caller can produce a useful diff via expect(...).toBe(200);
+  // ignoring the response (the pre-review shape) would let the scenario
+  // proceed to the consumer step and attribute the eventual failure to
+  // the wrong place. The 200 assertion below tags the failure to the
+  // witness wait. (#159 PR B review.)
+  out.push(`    const ${respVar} = await awaitEventually(`);
   out.push(`      async () => request.${method}(witnessUrl, { headers: await authHeaders() }),`);
   out.push(`      {`);
   for (let i = 0; i < optionFields.length; i++) {
@@ -558,6 +570,12 @@ function renderEventualWait(wait: EventualWaitSpec): string[] {
   }
   out.push(`      },`);
   out.push(`    );`);
+  out.push(`    if (${respVar}.status() !== 200) {`);
+  out.push(
+    `      try { console.error('Witness response body:', await ${respVar}.text()); } catch {}`,
+  );
+  out.push(`    }`);
+  out.push(`    expect(${respVar}.status()).toBe(200);`);
   out.push(`  }`);
   return out;
 }

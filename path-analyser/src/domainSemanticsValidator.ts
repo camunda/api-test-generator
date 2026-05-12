@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { OperationGraph } from './types.js';
 
 // ---------------------------------------------------------------------------
 // path-analyser/src/domainSemanticsValidator.ts
@@ -50,13 +51,19 @@ const ArtifactKindSpecSchema = z
 // #159 PR B: structured predicate shape. `path` must be a safe identifier
 // because the emitter renders it as a TS bracket-access key (`b['<path>']`)
 // without an escape pass; `equals` is constrained to primitives so the
-// emitter can JSON.stringify it directly.
-const WitnessPredicateSchema = z.object({
-  path: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
-    message: 'witness.predicate.path must match /^[A-Za-z_$][A-Za-z0-9_$]*$/',
-  }),
-  equals: z.union([z.string(), z.number(), z.boolean()]),
-});
+// emitter can JSON.stringify it directly. `.strict()` aligns this runtime
+// schema with the on-disk JSON schema's `additionalProperties: false` —
+// extra keys are almost always a typo (e.g. `equal` for `equals`) and
+// silently dropping them would mask the typo until the emitted predicate
+// misbehaved at runtime.
+const WitnessPredicateSchema = z
+  .object({
+    path: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
+      message: 'witness.predicate.path must match /^[A-Za-z_$][A-Za-z0-9_$]*$/',
+    }),
+    equals: z.union([z.string(), z.number(), z.boolean()]),
+  })
+  .strict();
 
 const WitnessSpecSchema = z
   .object({
@@ -460,4 +467,55 @@ export function assertSafeGlobalContextSeeds(seeds: unknown): void {
     const formatted = issues.map((i) => `  - [${i.code}] ${i.message}`).join('\n');
     throw new Error(`globalContextSeeds failed coherence validation:\n${formatted}`);
   }
+}
+
+/**
+ * Validate cross-references between `domain.runtimeStates[*].witness` and
+ * the loaded operation graph (#159 PR B review).
+ *
+ * The structural validator (`validateDomainSemantics`) can only see the
+ * domain-semantics sidecar in isolation — it has no visibility into the
+ * operation graph, so a witness `operationId` that doesn't resolve to a
+ * real operation slips through it. Pre-this-check the planner silently
+ * skipped unknown witnesses; the user got back an emitted suite missing
+ * the wait it expected, and the racing-broker symptom returned.
+ *
+ * Two invariants:
+ *   1. `witnessOperationResolves` — every eventual state's `witness.operationId`
+ *      must resolve to a real entry in `graph.operations`.
+ *   2. `witnessOperationIsGet` — PR B only supports GET-shape witnesses
+ *      (the emitter renders `request.get(...)` and `awaitEventually`'s
+ *      retry semantics assume a read). Non-GET witnesses are rejected
+ *      now so the gap is visible at load time rather than as an emitted
+ *      suite that calls `request.post(...)` against a witness URL with
+ *      no body.
+ *
+ * Returns the empty array on success. Designed to be called after
+ * `loadGraph` has assembled `graph.operations` and `graph.domain`.
+ */
+export function validateRuntimeStateWitnessGraphRefs(
+  graph: OperationGraph,
+): DomainSemanticsValidationError[] {
+  const issues: DomainSemanticsValidationError[] = [];
+  const states = graph.domain?.runtimeStates;
+  if (!states) return issues;
+  for (const [stateName, spec] of Object.entries(states)) {
+    if (spec.eventual !== true || !spec.witness) continue;
+    const witnessOp = graph.operations[spec.witness.operationId];
+    if (!witnessOp) {
+      issues.push({
+        invariant: 'witnessOperationResolves',
+        message: `runtimeStates.${stateName}.witness.operationId references "${spec.witness.operationId}", which does not resolve to a known operation in the bundled spec.`,
+      });
+      continue;
+    }
+    const method = witnessOp.method?.toUpperCase?.() ?? '';
+    if (method !== 'GET') {
+      issues.push({
+        invariant: 'witnessOperationIsGet',
+        message: `runtimeStates.${stateName}.witness.operationId "${spec.witness.operationId}" is ${method || 'an unknown method'}; PR B (#159) supports GET-shape witnesses only.`,
+      });
+    }
+  }
+  return issues;
 }

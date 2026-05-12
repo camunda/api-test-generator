@@ -612,9 +612,13 @@ function buildRequestPlan(
  *   - Duplicates are deduped per (producer step, state) — multiple
  *     downstream consumers that require the same eventual state collapse
  *     to a single wait.
- *   - Misconfigurations (eventual with no witness, unknown witness opId)
- *     are skipped silently here; the domain-semantics validator already
- *     catches them at load time.
+ *   - Misconfigurations (eventual with no witness, unknown witness opId,
+ *     non-GET witness method) are caught at load time:
+ *     `validateDomainSemantics` rejects the eventual-without-witness
+ *     shape, and `validateRuntimeStateWitnessGraphRefs` (called from
+ *     `loadGraph`) rejects unknown opIds and non-GET methods. The
+ *     defensive `continue` branches below are belt-and-braces for tests
+ *     that build partial graphs without going through the loader.
  */
 function annotateEventualWaits(steps: RequestStep[], graph: OperationGraph): void {
   const states = graph.domain?.runtimeStates;

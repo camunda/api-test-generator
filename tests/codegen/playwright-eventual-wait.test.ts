@@ -118,6 +118,24 @@ describe('emitter: eventual-state wait injection (#159 PR B)', () => {
     expect(src).toContain('return v === "READY";');
   });
 
+  test('captures the awaitEventually response and asserts its status (#159 PR B review)', () => {
+    // awaitEventually returns early (without throwing) on hard-fail
+    // statuses (401/403/422/5xx etc.) so callers can produce a useful
+    // expect-vs-actual diff. Pre-review the emitter ignored the return
+    // value — a 401 against the witness would silently let the scenario
+    // proceed and the failure would be misattributed to the consumer
+    // step. The new shape captures the response, logs the body on
+    // mismatch (mirroring the request-step pattern), and asserts 200.
+    const src = renderPlaywrightSuite(buildCollectionWithWait(), {
+      suiteName: 'deleteWidget',
+      mode: 'feature',
+    });
+    expect(src).toContain('const witnessResp1 = await awaitEventually(');
+    expect(src).toContain('if (witnessResp1.status() !== 200)');
+    expect(src).toContain("console.error('Witness response body:'");
+    expect(src).toContain('expect(witnessResp1.status()).toBe(200);');
+  });
+
   test('omits the wait block (and the await-eventually import gate) when no step has eventualWaitsAfter', () => {
     // Sanity guard: a collection without any wait annotation must NOT
     // emit the wait scaffolding. Catches a regression where the gate

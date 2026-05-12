@@ -2,7 +2,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { getActiveConfigDir, getGraphDir, getSpecBundleDir } from './configResolver.js';
-import { validateDomainSemantics } from './domainSemanticsValidator.js';
+import {
+  validateDomainSemantics,
+  validateRuntimeStateWitnessGraphRefs,
+} from './domainSemanticsValidator.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
 class DomainSemanticsValidationFailure extends Error {
@@ -437,7 +440,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
 
-  return {
+  const graph: OperationGraph = {
     operations,
     producersByType,
     responseProducersByType,
@@ -447,6 +450,22 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     establishersByType: Object.keys(establishersByType).length ? establishersByType : undefined,
     externalEntityIdentifiers,
   };
+  // #159 PR B (review): the structural domain-semantics validator can't
+  // see the graph, so a witness operationId that doesn't resolve (typo,
+  // renamed-upstream op, etc.) would slip through it and the planner
+  // would silently skip the wait — reintroducing the racing-broker bug.
+  // Run the graph-cross-ref check here, after the graph is fully
+  // assembled, and fail fast with the same exception type as the
+  // structural validator so the diagnostic surfaces with one well-known
+  // shape regardless of which check fired.
+  const witnessIssues = validateRuntimeStateWitnessGraphRefs(graph);
+  if (witnessIssues.length > 0) {
+    const detail = witnessIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+    throw new DomainSemanticsValidationFailure(
+      `domain-semantics.json failed cross-reference validation against the bundled spec:\n${detail}`,
+    );
+  }
+  return graph;
 }
 
 function normalizeOp(opId: string, op: RawOp): OperationNode {
