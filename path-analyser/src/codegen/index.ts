@@ -13,7 +13,12 @@ import { parseCliArgs } from './cli-args.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
-import { PythonSdkEmitter } from './python-sdk/emitter.js';
+import { createPythonSdkEmitter } from './python-sdk/emitter.js';
+import {
+  createOperationMapSource as createPythonOperationMapSource,
+  createDefaultOperationMapSource as createDefaultPythonOperationMapSource,
+  type OperationMapJsonSource as PythonOperationMapJsonSource,
+} from './python-sdk/sdk-mapping.js';
 import { materializePythonSupport } from './python-sdk/materialize-support.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
@@ -25,7 +30,6 @@ import { getEmitter, listEmitters, registerEmitter } from './registry.js';
 
 // Built-in emitter registration. New emitters register themselves here.
 registerEmitter(PlaywrightEmitter);
-registerEmitter(PythonSdkEmitter);
 
 // JSON.parse is a runtime contract boundary: the on-disk scenario files are
 // produced by the generator and conform structurally to EndpointScenarioCollection.
@@ -128,6 +132,33 @@ async function run() {
       }
     }
     registerEmitter(createJsSdkEmitter(jsSdkMapping));
+  }
+
+  // Register the Python SDK emitter with the fetched operation map (if available).
+  // Similar pattern to JS SDK: fetch-python-sdk-map populates spec/python-sdk/
+  // at generation time. Falls back to camelToSnake conversion if not available.
+  {
+    let pythonSdkMapping: PythonOperationMapJsonSource | undefined;
+    const mapCandidates = [
+      path.join(baseDir, '..', 'spec', 'python-sdk', 'operation-map.json'),
+      path.join(baseDir, 'spec', 'python-sdk', 'operation-map.json'),
+    ];
+    for (const candidate of mapCandidates) {
+      try {
+        const raw = await fs.readFile(candidate, 'utf8');
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const mapData = JSON.parse(raw) as Record<string, unknown>;
+        pythonSdkMapping = createPythonOperationMapSource(
+          mapData as Record<string, Array<{ region?: string }>>,
+        );
+        break;
+      } catch {
+        // Try next candidate or fall through to fallback.
+      }
+    }
+    registerEmitter(
+      createPythonSdkEmitter(pythonSdkMapping ?? createDefaultPythonOperationMapSource()),
+    );
   }
 
   if (help || !positional) {

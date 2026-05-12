@@ -6,16 +6,16 @@
  *
  * Design:
  *   - Pure: no filesystem access (orchestrator handles materialization)
- *   - One async def test_<operationId>_<variant>(client) per scenario
+ *   - One async def test_<scenario.id>(client) per scenario
  *   - SDK raises on non-2xx; plain assert result is not None
  *   - extract_into(ctx, 'bind', value) for response field extraction
  *   - Hard-fail on multipart (unsupported in Python SDK integration)
  */
 
 import type {
+  EndpointScenario,
   EndpointScenarioCollection,
   RequestStep,
-  GlobalContextSeed,
 } from '../../types.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 import {
@@ -30,40 +30,43 @@ import {
  * Pattern: <operationId>.python_sdk.spec.py
  */
 function pythonSdkFileName(operationId: string): string {
-  return `${operationId}.python_sdk.spec.py`;
+  return `${camelToSnake(operationId)}.python_sdk.spec.py`;
 }
 
 /**
  * Render a scenario as a Python async test function.
  *
  * Structure:
- *   - async def test_<operationId>_<variant>(client, ctx=None)
+ *   - async def test_<scenario.id>(client: CamundaAsyncClient) -> None
  *   - ctx initialization and seed binding
  *   - Request plan steps with await client.<method>() calls
  *   - extract_into() for response fields
  *   - Plain assert result is not None
  */
 function renderScenarioTest(
-  scenario: EndpointScenarioCollection['scenarios'][0],
+  scenario: EndpointScenario,
   operationMapSource: OperationMapJsonSource,
 ): string {
   const lines: string[] = [];
 
   // Function signature
-  const testName = scenario.id || 'test';
-  const testFuncName = `test_${camelToSnake(testName)}`;
-  lines.push(`@pytest.mark.asyncio`);
+  const testName = camelToSnake(scenario.id || 'test');
+  const testFuncName = `test_${testName}`;
+  lines.push('@pytest.mark.asyncio');
   lines.push(`async def ${testFuncName}(client: CamundaAsyncClient) -> None:`);
-  lines.push(`  """${scenario.description || scenario.name || 'Test scenario'}"""`);
+  if (scenario.description) {
+    lines.push(`  """${scenario.description}"""`);
+  } else if (scenario.name) {
+    lines.push(`  """${scenario.name}"""`);
+  }
   lines.push('');
 
   // Context dict initialization
   lines.push('  ctx: dict[str, Any] = {}');
   lines.push('');
 
-  // Seed bindings (from scenario.bindings and scenario.seedBindings)
+  // Seed bindings (from scenario.bindings)
   const bindings = scenario.bindings || {};
-  const seedBindings = scenario.seedBindings || [];
 
   // Emit literal bindings first
   if (Object.keys(bindings).length > 0) {
@@ -76,12 +79,10 @@ function renderScenarioTest(
   }
 
   // Emit seedBinding() calls for PENDING bindings
+  const seedBindings = scenario.seedBindings || [];
   if (seedBindings.length > 0) {
     lines.push('  # Seed runtime-generated bindings');
     for (const k of seedBindings) {
-      if (bindings[k] !== '__PENDING__' && bindings[k] !== undefined) {
-        continue; // Already emitted above as literal
-      }
       lines.push(`  if '${k}' not in ctx:`);
       lines.push(`    ctx['${k}'] = seedBinding('${k}')`);
     }
@@ -166,12 +167,15 @@ function renderScenarioTest(
  * Example:
  *   { type: "${workerType}", maxJobs: 1 }
  *   →
- *   { 'type': ctx['workerType'], 'maxJobs': 1 }
+ *   {
+ *     'type': ctx['workerType'],
+ *     'maxJobs': 1
+ *   }
  */
 function buildBodyDict(bodyTemplate: unknown): string {
   const json = JSON.stringify(bodyTemplate, null, 2);
-  // Replace "${varName}" with f-string interpolation
-  const withVars = json.replace(/"\\?\$\{([^}]+)\}"/g, (_, varName) => {
+  // Replace "${varName}" with ctx['varName']
+  const withVars = json.replace(/"(\$\{([^}]+)\})"/g, (_, _fullMatch, varName) => {
     return `ctx['${varName}']`;
   });
   return withVars;
@@ -249,29 +253,37 @@ function renderPythonTestSuite(
 }
 
 /**
+ * Factory: create a Python SDK emitter backed by the given operation map.
+ */
+export function createPythonSdkEmitter(
+  operationMapSource?: OperationMapJsonSource,
+): Emitter {
+  const source = operationMapSource ?? createDefaultOperationMapSource();
+  return {
+    id: 'python-sdk',
+    name: 'Python SDK (Async)',
+    async emit(
+      collection: EndpointScenarioCollection,
+      ctx: EmitContext,
+    ): Promise<EmittedFile[]> {
+      const content = renderPythonTestSuite(collection, source);
+      return [
+        {
+          relativePath: pythonSdkFileName(collection.endpoint.operationId),
+          content,
+        },
+      ];
+    },
+  };
+}
+
+/**
  * {@link Emitter} implementation for Python SDK tests.
  *
  * Pure: returns in-memory {@link EmittedFile} list, no filesystem access.
+ * Uses default operation map (fallback camelToSnake).
+ *
+ * For production use, consider using createPythonSdkEmitter() with a loaded
+ * operation-map.json source for more accurate method name resolution.
  */
-export const PythonSdkEmitter: Emitter = {
-  id: 'python-sdk',
-  name: 'Python SDK (Async)',
-
-  async emit(
-    collection: EndpointScenarioCollection,
-    ctx: EmitContext,
-  ): Promise<EmittedFile[]> {
-    // Use default operation map source (fallback camelToSnake)
-    // In production, this would load spec/python-sdk/operation-map.json
-    const operationMapSource = createDefaultOperationMapSource();
-
-    const content = renderPythonTestSuite(collection, operationMapSource);
-
-    return [
-      {
-        relativePath: pythonSdkFileName(collection.endpoint.operationId),
-        content,
-      },
-    ];
-  },
-};
+export const PythonSdkEmitter: Emitter = createPythonSdkEmitter();
