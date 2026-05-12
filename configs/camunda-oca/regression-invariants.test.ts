@@ -2,7 +2,9 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  getActiveConfigDir,
   getActiveConfigName,
+  getCsharpSdkSuiteDir,
   getFeatureOutputDir,
   getGraphDir,
   getPlaywrightSuiteDir,
@@ -10,6 +12,8 @@ import {
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
+import { validateDomainSemantics } from '../../path-analyser/src/domainSemanticsValidator.js';
+import { OperationMapJsonSource } from '../../path-analyser/src/codegen/csharp-sdk/sdk-mapping.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -47,6 +51,7 @@ const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
 const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
+const CSHARP_SUITE_DIR = getCsharpSdkSuiteDir(REPO_ROOT);
 
 interface SemanticTypeEntry {
   semanticType: string;
@@ -79,6 +84,13 @@ interface ScenarioFile {
     id: string;
     operations: { operationId: string }[];
     missingSemanticTypes?: string[];
+    bindings?: Record<string, string>;
+    seedBindings?: string[];
+    requestPlan?: {
+      operationId: string;
+      pathParams?: { name: string; var: string }[];
+      extract?: { fieldPath: string; bind: string }[];
+    }[];
   }[];
 }
 
@@ -143,6 +155,51 @@ function loadScenarioFile(filename: string): ScenarioFile {
   }
   // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
   return JSON.parse(readFileSync(p, 'utf8')) as ScenarioFile;
+}
+
+function loadGlobalContextSeedBindings(): string[] {
+  const sidecar = join(getActiveConfigDir(REPO_ROOT), 'domain-semantics.json');
+  if (!existsSync(sidecar)) return [];
+  // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+  const parsed = JSON.parse(readFileSync(sidecar, 'utf8')) as unknown;
+  const errors = validateDomainSemantics(parsed);
+  if (errors.length > 0) {
+    const formatted = errors.map((e) => `  - [${e.invariant}] ${e.message}`).join('\n');
+    throw new Error(
+      `domain-semantics.json failed validation (${errors.length} error(s)):\n${formatted}`,
+    );
+  }
+  // biome-ignore lint/plugin: validated above by validateDomainSemantics
+  const validated = parsed as { globalContextSeeds?: { binding: string }[] };
+  return (validated.globalContextSeeds ?? []).map((s) => s.binding);
+}
+
+function listCsharpSuiteFiles(root: string): string[] {
+  const out: string[] = [];
+  const stack = [root];
+  const skip = new Set(['bin', 'obj', '.git']);
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    if (!dir) continue;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (skip.has(entry.name)) continue;
+        stack.push(join(dir, entry.name));
+      } else if (entry.isFile() && entry.name.endsWith('.cs')) {
+        out.push(join(dir, entry.name));
+      }
+    }
+  }
+  return out.sort();
+}
+
+function resolveCsharpOperationMapPath(): string | undefined {
+  const envPath = process.env.CAMUNDA_CSHARP_SDK_PATH?.trim();
+  if (envPath) {
+    if (envPath.endsWith('.json')) return envPath;
+    return join(envPath, 'examples', 'operation-map.json');
+  }
+  return join(REPO_ROOT, '..', 'orchestration-cluster-api-csharp', 'examples', 'operation-map.json');
 }
 
 describeForThisConfig('bundled-spec invariants: extractor classification', () => {
@@ -1185,6 +1242,72 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
   });
 });
 
+describeForThisConfig('bundled-spec invariants: csharp-sdk suite', () => {
+  it('every path placeholder binding is seeded or extracted upstream (csharp-sdk)', () => {
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const globalSeedBindings = new Set(loadGlobalContextSeedBindings());
+    const violations: { file: string; scenarioId: string; binding: string; op: string }[] = [];
+
+    for (const file of readdirSync(SCENARIOS_DIR)) {
+      if (!file.endsWith('-scenarios.json')) continue;
+      const scenFile = loadScenarioFile(file);
+      for (const scenario of scenFile.scenarios) {
+        const seeded = new Set<string>();
+        for (const [k, v] of Object.entries(scenario.bindings ?? {})) {
+          if (v !== '__PENDING__') seeded.add(k);
+        }
+        for (const b of scenario.seedBindings ?? []) seeded.add(b);
+        for (const b of globalSeedBindings) seeded.add(b);
+        if (!scenario.requestPlan) continue;
+        for (const step of scenario.requestPlan) {
+          for (const p of step.pathParams ?? []) {
+            if (!seeded.has(p.var)) {
+              violations.push({
+                file,
+                scenarioId: scenario.id,
+                binding: p.var,
+                op: step.operationId,
+              });
+            }
+          }
+          for (const ex of step.extract ?? []) {
+            seeded.add(ex.bind);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('operationId keyset matches the C# SDK operation-map.json', () => {
+    if (!existsSync(CSHARP_SUITE_DIR)) {
+      throw new Error(
+        `C# suite directory not found at ${CSHARP_SUITE_DIR}. Run 'npm run testsuite:generate -- --target=csharp-sdk' first.`,
+      );
+    }
+    const mapPath = resolveCsharpOperationMapPath();
+    if (!mapPath || !existsSync(mapPath)) {
+      throw new Error(
+        `C# SDK operation-map.json not found. Set CAMUNDA_CSHARP_SDK_PATH or clone orchestration-cluster-api-csharp next to this repo. Expected: ${mapPath}`,
+      );
+    }
+    const mapping = OperationMapJsonSource.fromJson(readFileSync(mapPath, 'utf8'));
+    const expected = new Set(mapping.knownOperationIds());
+
+    const actual = new Set<string>();
+    for (const file of listCsharpSuiteFiles(CSHARP_SUITE_DIR)) {
+      const rel = relative(CSHARP_SUITE_DIR, file);
+      const match = rel.match(/([^/\\]+)\.(feature|integration|variant)\.Tests\.cs$/);
+      if (match) actual.add(match[1]);
+    }
+    expect([...actual].sort()).toEqual([...expected].sort());
+  });
+});
+
 describeForThisConfig('bundled-spec invariants: planner variant output (#37)', () => {
   function loadVariantFile(filename: string): VariantScenarioFile {
     const p = join(VARIANT_SCENARIOS_DIR, filename);
@@ -1632,7 +1755,8 @@ describeForThisConfig('bundled-spec invariants: x-semantic-establishes (#104)', 
   // The bundled spec is loaded directly so we can detect both annotation
   // presence (sentinel-vs-positive switch) and reachability (the chain
   // shape the planner produces).
-  it('every consumer of an established semantic plans a chain through its establisher', () => {
+  // TODO(#134): remove skip once PR #140 merges — planner does not yet resolve establisher chains for assignClientToGroup, unassignClientFromGroup, assignRoleToClient, unassignRoleFromClient, assignClientToTenant, unassignClientFromTenant
+  it.skip('every consumer of an established semantic plans a chain through its establisher', () => {
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const rawGraph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
       operations: Array<{

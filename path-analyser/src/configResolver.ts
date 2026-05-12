@@ -206,6 +206,14 @@ export function getPlaywrightSuiteDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'playwright');
 }
 
+export function getCsharpSdkSuiteDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'csharp-sdk');
+}
+
+export function getJsSdkSuiteDir(repoRoot: string): string {
+  return path.join(getGeneratedDir(repoRoot), 'js-sdk');
+}
+
 export function getRequestValidationSuiteDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'request-validation');
 }

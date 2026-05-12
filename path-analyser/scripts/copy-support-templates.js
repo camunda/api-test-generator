@@ -48,6 +48,12 @@ const SDK_PROJECT_FILES = [
   'README.md',
 ];
 
+const CSHARP_PROJECT_FILES = [
+  'CamundaIntegrationTests.csproj',
+  'TestFixtureBase.cs',
+  'README.md',
+];
+
 async function main() {
   const root = process.cwd();
   const supportSrcDir = path.join(root, 'src/codegen/support');
@@ -99,6 +105,25 @@ async function main() {
   }
   console.log(
     `[copy-support-templates] staged ${SDK_PROJECT_FILES.length} js-sdk project templates -> ${path.relative(root, sdkProjDestDir)}`,
+  );
+
+  // C# SDK project templates
+  const csharpProjSrcDir = path.join(root, 'src/codegen/csharp-sdk/project-templates');
+  const csharpProjDestDir = path.join(root, 'dist/src/codegen/csharp-sdk/project-templates');
+  await fs.mkdir(csharpProjDestDir, { recursive: true });
+  for (const name of CSHARP_PROJECT_FILES) {
+    const src = path.join(csharpProjSrcDir, name);
+    const dest = path.join(csharpProjDestDir, name);
+    try {
+      await fs.access(src);
+    } catch {
+      console.error('[copy-support-templates] source not found:', src);
+      process.exit(1);
+    }
+    await fs.copyFile(src, dest);
+  }
+  console.log(
+    `[copy-support-templates] staged ${CSHARP_PROJECT_FILES.length} csharp-sdk project templates -> ${path.relative(root, csharpProjDestDir)}`,
   );
 }
 

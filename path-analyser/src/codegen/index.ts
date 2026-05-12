@@ -2,7 +2,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   getActiveConfigDir,
+  getCsharpSdkSuiteDir,
   getFeatureOutputDir,
+  getJsSdkSuiteDir,
   getPlaywrightCodegenOptions,
   getPlaywrightSuiteDir,
   getVariantOutputDir,
@@ -10,6 +12,9 @@ import {
 import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
+import { createCsharpSdkEmitter } from './csharp-sdk/emitter.js';
+import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
+import { OperationMapJsonSource as CsharpOperationMapJsonSource } from './csharp-sdk/sdk-mapping.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
@@ -103,7 +108,12 @@ async function run() {
   // emitted Playwright suite all live under generated/<config>/.
   const featureDir = getFeatureOutputDir(repoRoot);
   const variantDir = getVariantOutputDir(repoRoot);
-  const outDir = getPlaywrightSuiteDir(repoRoot);
+  const outDir =
+    target === 'csharp-sdk'
+      ? getCsharpSdkSuiteDir(repoRoot)
+      : target === 'js-sdk'
+        ? getJsSdkSuiteDir(repoRoot)
+        : getPlaywrightSuiteDir(repoRoot);
 
   // Register the JS SDK emitter here (inside run()) so we have access to
   // baseDir for locating the operation-map file, which is fetched at
@@ -125,6 +135,38 @@ async function run() {
       }
     }
     registerEmitter(createJsSdkEmitter(jsSdkMapping));
+  }
+
+  {
+    let csharpSdkMapping: CsharpOperationMapJsonSource | undefined;
+    const envPath = process.env.CAMUNDA_CSHARP_SDK_PATH?.trim();
+    const mapCandidates: string[] = [];
+    if (envPath) {
+      if (envPath.endsWith('.json')) {
+        mapCandidates.push(envPath);
+      } else {
+        mapCandidates.push(path.join(envPath, 'examples', 'operation-map.json'));
+      }
+    }
+    mapCandidates.push(
+      path.join(
+        baseDir,
+        '..',
+        'orchestration-cluster-api-csharp',
+        'examples',
+        'operation-map.json',
+      ),
+    );
+    for (const candidate of mapCandidates) {
+      try {
+        const raw = await fs.readFile(candidate, 'utf8');
+        csharpSdkMapping = CsharpOperationMapJsonSource.fromJson(raw);
+        break;
+      } catch {
+        // Try next candidate or fall through to fallback.
+      }
+    }
+    registerEmitter(createCsharpSdkEmitter(csharpSdkMapping));
   }
 
   if (help || !positional) {
@@ -173,6 +215,9 @@ async function run() {
   }
   if (emitter.id === 'js-sdk') {
     await materializeSdkSupport(outDir);
+  }
+  if (emitter.id === 'csharp-sdk') {
+    await materializeCsharpSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));

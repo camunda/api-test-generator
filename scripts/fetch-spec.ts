@@ -8,7 +8,7 @@
  * Outputs:
  *   spec/<config>/bundled/rest-api.bundle.json
  *   spec/<config>/bundled/spec-metadata.json
- *   spec/<config>/bundled/semantic-kinds.json
+ *   spec/<config>/bundled/semantic-kinds.json (optional; only when supported)
  *
  * Spec ref: SPEC_REF env var (preserved). Optional --ref-required mode
  * for the `fetch-spec:ref` script that fails when SPEC_REF is unset.
@@ -42,7 +42,8 @@ function main(): void {
   }
   args.push('--output-spec', join(bundleDir, 'rest-api.bundle.json'));
   args.push('--output-metadata', join(bundleDir, 'spec-metadata.json'));
-  args.push('--output-semantic-kinds', join(bundleDir, 'semantic-kinds.json'));
+  // camunda-schema-bundler 2.4.x no longer supports --output-semantic-kinds.
+  // The planner treats the registry as optional when the file is absent.
 
   console.error(`[fetch-spec] writing to ${bundleDir}${ref ? ` (ref ${ref})` : ''}`);
 

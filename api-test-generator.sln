@@ -1,0 +1,41 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "path-analyser", "path-analyser", "{714A391C-5529-B0B9-CCFB-87FD7741A582}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{42A5BB2E-F738-7EBE-8DC9-2F524C868C2E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "codegen", "codegen", "{F69A9D40-04DE-335F-4BAC-1A1003FADD09}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-sdk", "csharp-sdk", "{B1414C18-861C-26F0-DA4E-B06EEF433100}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "project-templates", "project-templates", "{71192B84-03B3-A2A2-A0C4-1EACE1ACE71E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CamundaIntegrationTests", "path-analyser\src\codegen\csharp-sdk\project-templates\CamundaIntegrationTests.csproj", "{BD6B9C49-D86D-1C71-9000-5D0E2E00C3D3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BD6B9C49-D86D-1C71-9000-5D0E2E00C3D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BD6B9C49-D86D-1C71-9000-5D0E2E00C3D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BD6B9C49-D86D-1C71-9000-5D0E2E00C3D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BD6B9C49-D86D-1C71-9000-5D0E2E00C3D3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{42A5BB2E-F738-7EBE-8DC9-2F524C868C2E} = {714A391C-5529-B0B9-CCFB-87FD7741A582}
+		{F69A9D40-04DE-335F-4BAC-1A1003FADD09} = {42A5BB2E-F738-7EBE-8DC9-2F524C868C2E}
+		{B1414C18-861C-26F0-DA4E-B06EEF433100} = {F69A9D40-04DE-335F-4BAC-1A1003FADD09}
+		{71192B84-03B3-A2A2-A0C4-1EACE1ACE71E} = {B1414C18-861C-26F0-DA4E-B06EEF433100}
+		{BD6B9C49-D86D-1C71-9000-5D0E2E00C3D3} = {71192B84-03B3-A2A2-A0C4-1EACE1ACE71E}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {02F976FA-8ECA-4525-8410-D39B22059784}
+	EndGlobalSection
+EndGlobal
