@@ -631,8 +631,8 @@ describe('PlaywrightEmitter — request steps wrapped in test.step() (#118)', ()
       suiteName: 'deleteWidget',
       mode: 'feature',
     });
-    expect(src).toContain("await test.step('createWidget', async () => {");
-    expect(src).toContain("await test.step('deleteWidget', async () => {");
+    expect(src).toContain('await test.step("createWidget", async () => {');
+    expect(src).toContain('await test.step("deleteWidget", async () => {');
   });
 
   test('label is just the operationId — no "Step N:" prefix anywhere', () => {
@@ -667,6 +667,48 @@ describe('PlaywrightEmitter — request steps wrapped in test.step() (#118)', ()
     });
     const matches = src.match(/await test\.step\(/g) ?? [];
     expect(matches.length).toBe(2);
+  });
+
+  test('escapes operationIds that contain TS string metacharacters (Copilot PR #170 review)', () => {
+    // Class-scoped guard: the label argument to test.step() must be a
+    // syntactically valid TS string literal regardless of which
+    // characters the OpenAPI `operationId` contains. The OpenAPI spec
+    // does not formally restrict `operationId` to /[A-Za-z0-9_]+/, so an
+    // upstream rename that introduces a single quote, backslash, or
+    // newline must not produce an unparseable emitted suite (or, worse,
+    // allow code-injection into the emitted file). Using
+    // `JSON.stringify(operationId)` is the chokepoint that enforces this.
+    const hostile = "weird'op\\with\nnewline";
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: hostile, method: 'POST', path: '/x' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            name: 'hostile id',
+            operations: [{ operationId: hostile, method: 'POST', path: '/x' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: hostile,
+                method: 'POST',
+                pathTemplate: '/x',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'hostile', mode: 'feature' },
+    );
+    // The emitted label is JSON.stringify(operationId): double-quoted,
+    // with `'`, `\`, and `\n` escaped. The raw hostile string must NOT
+    // appear unescaped inside a single-quoted literal next to test.step().
+    expect(src).toContain(`await test.step(${JSON.stringify(hostile)}, async () => {`);
+    expect(src).not.toMatch(/test\.step\('[^']*'[^,]*\\?\n/);
   });
 });
 

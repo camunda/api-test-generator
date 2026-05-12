@@ -69,8 +69,8 @@ describe('emitter: eventual-state wait injection (#159 PR B)', () => {
     // consumer) doesn't fix the motivating case. Post-#118 the per-step
     // marker is `await test.step('<operationId>', ...)`, not a `// Step N`
     // comment.
-    const producerIdx = src.indexOf("test.step('createWidget'");
-    const consumerIdx = src.indexOf("test.step('deleteWidget'");
+    const producerIdx = src.indexOf('test.step("createWidget"');
+    const consumerIdx = src.indexOf('test.step("deleteWidget"');
     const waitIdx = src.indexOf('await awaitEventually(');
     expect(producerIdx).toBeGreaterThan(0);
     expect(consumerIdx).toBeGreaterThan(producerIdx);

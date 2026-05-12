@@ -351,7 +351,7 @@ function renderScenarioTest(
     // to the named step. Cross-step state flows through `ctx` declared in
     // the outer test scope; the per-step locals (resp/body/json) are still
     // confined to the callback, same as the pre-#118 bare-block scope.
-    body.push(`  await test.step('${step.operationId}', async () => {`);
+    body.push(`  await test.step(${JSON.stringify(step.operationId)}, async () => {`);
     body.push(`    const url = baseUrl + ${urlExpr};`);
     const bodyVar = `body${idx + 1}`;
     if (step.bodyKind === 'json' && step.bodyTemplate) {
