@@ -581,16 +581,15 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// #118 — wrap each request step in test.step()
+// Wrap each request step in test.step()
 // ---------------------------------------------------------------------------
 //
-// Pre-#118 the emitter delimited each request step with a `// Step N: <op>`
-// comment and a bare `{ ... }` block. Post-#118 each step is wrapped in
+// Each request step is wrapped in
 // `await test.step('<operationId>', async () => { ... });` so the step
 // appears as a labelled, collapsible group in the Playwright HTML report
 // and trace viewer. The label is just the operationId — no `Step N:`
-// prefix.
-describe('PlaywrightEmitter — request steps wrapped in test.step() (#118)', () => {
+// prefix and no `// Step N: <op>` comment.
+describe('PlaywrightEmitter — request steps wrapped in test.step()', () => {
   function multiStepCollection(): EndpointScenarioCollection {
     return {
       endpoint: { operationId: 'deleteWidget', method: 'POST', path: '/widgets/{id}/deletion' },
@@ -636,9 +635,9 @@ describe('PlaywrightEmitter — request steps wrapped in test.step() (#118)', ()
   });
 
   test('label is just the operationId — no "Step N:" prefix anywhere', () => {
-    // Class-scoped guard: the user's #118 request is to drop the
-    // step-index prefix entirely. Any reintroduction of `Step <n>:` —
-    // whether as a comment or inside a test.step label — fails this test.
+    // Class-scoped guard: the step-index prefix is intentionally absent.
+    // Any reintroduction of `Step <n>:` — whether as a comment or inside
+    // a test.step label — fails this test.
     const src = renderPlaywrightSuite(multiStepCollection(), {
       suiteName: 'deleteWidget',
       mode: 'feature',
@@ -648,11 +647,12 @@ describe('PlaywrightEmitter — request steps wrapped in test.step() (#118)', ()
   });
 
   test('does not reintroduce the legacy bare `{` step block', () => {
-    // Pre-#118 the emitter opened each step with a bare `{` (preceded by a
-    // `// Step N: <op>` comment). The new shape uses `await test.step(...)`,
+    // The legacy shape opened each step with a bare `{` preceded by a
+    // `// Step N: <op>` comment. The current shape uses `await test.step(...)`,
     // and the only emitted bare block now belongs to the eventual-wait
     // emitter (`{` immediately after a `// Wait for ...` comment). This
-    // guard targets the pre-#118 shape specifically — a `// Step N:` line.
+    // guard targets the legacy shape specifically — a `// Step N:` line
+    // immediately followed by a bare `{`.
     const src = renderPlaywrightSuite(multiStepCollection(), {
       suiteName: 'deleteWidget',
       mode: 'feature',

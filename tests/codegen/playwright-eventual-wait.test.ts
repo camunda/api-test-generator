@@ -66,9 +66,8 @@ describe('emitter: eventual-state wait injection (#159 PR B)', () => {
     // The wait must appear in the source AND sit between the producer
     // (createWidget) and the consumer (deleteWidget). Position is part of
     // the contract — a wait emitted before the producer (or after the
-    // consumer) doesn't fix the motivating case. Post-#118 the per-step
-    // marker is `await test.step('<operationId>', ...)`, not a `// Step N`
-    // comment.
+    // consumer) doesn't fix the motivating case. The per-step marker is
+    // `await test.step('<operationId>', ...)`.
     const producerIdx = src.indexOf('test.step("createWidget"');
     const consumerIdx = src.indexOf('test.step("deleteWidget"');
     const waitIdx = src.indexOf('await awaitEventually(');

@@ -345,12 +345,12 @@ function renderScenarioTest(
         step.bodyTemplate = { processDefinitionKey: '${processDefinitionKeyVar}' };
       }
     }
-    // (#118) Each request step is wrapped in `await test.step(...)` so it
-    // shows up as a labelled, collapsible group in the Playwright HTML
-    // report and trace viewer, with per-step timing and failure attribution
-    // to the named step. Cross-step state flows through `ctx` declared in
-    // the outer test scope; the per-step locals (resp/body/json) are still
-    // confined to the callback, same as the pre-#118 bare-block scope.
+    // Each request step is wrapped in `await test.step(...)` so it shows
+    // up as a labelled, collapsible group in the Playwright HTML report
+    // and trace viewer, with per-step timing and failure attribution to
+    // the named step. Cross-step state flows through `ctx` declared in
+    // the outer test scope; the per-step locals (resp/body/json) stay
+    // confined to the callback.
     body.push(`  await test.step(${JSON.stringify(step.operationId)}, async () => {`);
     body.push(`    const url = baseUrl + ${urlExpr};`);
     const bodyVar = `body${idx + 1}`;
