@@ -186,6 +186,11 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   const producersByType: Record<string, string[]> = {};
   const responseProducersByType: Record<string, string[]> = {};
   const establishersByType: Record<string, string[]> = {};
+  // #162 PR 2: per-semantic index of ops that ACCEPT this semantic in
+  // their request body. Parallel to producersByType (response side) and
+  // establishersByType (request side, identifier-shaped). Used by the
+  // planner to find setter sites for clientMintedAttribute semantics.
+  const requestSettersByType: Record<string, string[]> = {};
   for (const op of Object.values(operations)) {
     // `producersByType` is the authoritative-producer index after #98:
     // membership means "this op returns or witnesses an authoritative
@@ -234,6 +239,16 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       const list = responseProducersByType[leaf.semantic] ?? [];
       if (!list.includes(op.operationId)) list.push(op.operationId);
       responseProducersByType[leaf.semantic] = list;
+    }
+    // #162 PR 2: index every semantic-typed request-body leaf so the
+    // planner can ask "which ops accept this semantic in their body?"
+    // Dedup at the writer — an op with multiple leaves of the same
+    // semantic (e.g. `filter.tags[]` AND `filter.$or[].tags[]`) still
+    // appears once.
+    for (const leaf of op.requestBodySemantics ?? []) {
+      const list = requestSettersByType[leaf.semantic] ?? [];
+      if (!list.includes(op.operationId)) list.push(op.operationId);
+      requestSettersByType[leaf.semantic] = list;
     }
   }
 
@@ -449,6 +464,9 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     producersByState,
     establishersByType: Object.keys(establishersByType).length ? establishersByType : undefined,
     externalEntityIdentifiers,
+    requestSettersByType: Object.keys(requestSettersByType).length
+      ? requestSettersByType
+      : undefined,
   };
   // #159 PR B (review): the structural domain-semantics validator can't
   // see the graph, so a witness operationId that doesn't resolve (typo,
@@ -621,8 +639,33 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
     pathParameters: extractPathParameters(op),
     optionalSubShapes: optionalSubShapes.length ? optionalSubShapes : undefined,
     responseSemanticLeaves: responseLeaves.length ? responseLeaves : undefined,
+    requestBodySemantics: extractRequestBodySemantics(op),
     establishes,
   };
+}
+
+/**
+ * Surface every semantic-typed request-body leaf on the OperationNode
+ * so downstream consumers (the requestSettersByType index, the planner's
+ * clientMintedAttribute helper) can iterate without re-reading the raw
+ * graph JSON. Unlike `optionalSubShapes` this list is INCLUSIVE — it
+ * carries nested, top-level, scalar-array, and required leaves; the
+ * consumer filters as needed (#162 PR 2).
+ */
+function extractRequestBodySemantics(op: RawOp): OperationNode['requestBodySemantics'] {
+  if (!Array.isArray(op.requestBodySemanticTypes)) return undefined;
+  const out: NonNullable<OperationNode['requestBodySemantics']> = [];
+  for (const entry of op.requestBodySemanticTypes) {
+    if (!entry || typeof entry.semanticType !== 'string' || typeof entry.fieldPath !== 'string') {
+      continue;
+    }
+    out.push({
+      semantic: entry.semanticType,
+      fieldPath: entry.fieldPath,
+      required: entry.required === true,
+    });
+  }
+  return out.length ? out : undefined;
 }
 
 function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {

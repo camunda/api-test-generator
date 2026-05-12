@@ -164,6 +164,16 @@
     "JobType": {
       "kind": "modelDerived",
       "$comment": "zeebe:taskDefinition type is encoded in the BPMN model on each service-task element. Read out-of-band from the chosen fixture's providesValues. Subsumes the pre-#162 ad-hoc `parameters.jobType` handling in the registry."
+    },
+    "Tag": {
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Free-form label attached to an entity (createProcessInstance.tags[], searchProcessInstances.filter.tags[], etc.). No producer endpoint and no first-order entity retrievable by tag — the planner mints a deterministic value and threads it through setter and consumer sites in the chain. See #162 PR 2."
+    },
+    "BusinessId": {
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Free-form correlation identifier attached to a process instance (createProcessInstance.businessId, searchProcessInstances.filter.businessId, etc.). Like Tag: client-minted, no producer endpoint, no first-order entity retrievable by it. The planner mints a deterministic value at the setter site; filter-consumer reuse is deferred (see #168)."
     }
   },
   "operationArtifactRules": {

@@ -98,8 +98,12 @@
           "witnesses": {"type": "string", "minLength": 1},
           "kind": {
             "type": "string",
-            "enum": ["modelDerived"],
-            "description": "Value-source classification (#162 PR 1). When `modelDerived`, the planner reads values from the chain's createDeployment fixture's providesValues entry — no API round-trip required. Future PRs will add `attribute` for client-minted free-form labels."
+            "enum": ["modelDerived", "attribute"],
+            "description": "Value-source classification (#162). When `modelDerived` the planner reads values from the chain's createDeployment fixture's providesValues entry (PR 1). When `attribute` the value is a free-form label minted by the planner / client; requires `clientMinted: true` (PR 2)."
+          },
+          "clientMinted": {
+            "type": "boolean",
+            "description": "Whether values of this semantic are minted by the planner / client rather than returned by a producer endpoint (#162 PR 2). Currently only meaningful with `kind: 'attribute'` — the validator enforces the pairing."
           },
           "$comment": {"type": "string"}
         }

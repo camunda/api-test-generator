@@ -2845,3 +2845,158 @@ describeForThisConfig(
   },
 );
 
+describeForThisConfig(
+  'bundled-spec invariants: clientMintedAttribute setter sites (#162 PR 2)',
+  () => {
+    // PR 2 of #162: every semantic declared `kind: 'attribute',
+    // clientMinted: true` in domain-semantics is bound by the planner
+    // (deterministic minted value with the `fc:cma:<sem>:` prefix) at
+    // setter sites — operations whose request body accepts the
+    // semantic at a top-level path. The body materializer fills the
+    // setter field with `ctx.<sem>Var`.
+    //
+    // Class-scoped: derive the (semantic, setter-op) pairs from
+    // domain-semantics + the dependency graph, then assert the
+    // bindings + emitted body for every pair. Adding a new attribute
+    // semantic to domain-semantics (or upstream introducing a new
+    // setter operation for an existing attribute semantic) lights up
+    // the same assertions automatically.
+    //
+    // Filter-consumer sites (path begins with `filter.` / `filter[`)
+    // are intentionally excluded — they need setter-chain reuse to be
+    // meaningful (a setter step inserted before the filter step that
+    // tags an entity, with the same minted value threaded through).
+    // Tracked in #168 (the deferred follow-up to #162 PR 2).
+
+    interface SemanticTypeDecl {
+      kind?: string;
+      clientMinted?: boolean;
+    }
+    interface DomainSemantics {
+      semanticTypes?: Record<string, SemanticTypeDecl>;
+    }
+
+    function loadAttributeClientMintedSemantics(): string[] {
+      const path = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const domain = JSON.parse(readFileSync(path, 'utf8')) as DomainSemantics;
+      return Object.entries(domain.semanticTypes ?? {})
+        .filter(([, spec]) => spec?.kind === 'attribute' && spec?.clientMinted === true)
+        .map(([name]) => name)
+        .sort();
+    }
+
+    function camelCase(s: string): string {
+      return s.charAt(0).toLowerCase() + s.slice(1);
+    }
+
+    // Mirror the planner's setter-site predicate: top-level path or any
+    // non-`filter.*` parent. Filter paths are deferred (see comment
+    // above and `bindClientMintedAttribute` in path-analyser/src/index.ts).
+    function isSetterPath(fieldPath: string): boolean {
+      return !fieldPath.startsWith('filter.') && !fieldPath.startsWith('filter[');
+    }
+
+    function setterOpsFor(semantic: string): OperationNode[] {
+      const graph = loadGraph();
+      const ops: OperationNode[] = [];
+      for (const op of graph.operations) {
+        const leaves = op.requestBodySemanticTypes ?? [];
+        if (leaves.some((l) => l.semanticType === semantic && isSetterPath(l.fieldPath))) {
+          ops.push(op);
+        }
+      }
+      return ops;
+    }
+
+    // OpenAPI op → feature-output JSON file name. Mirrors the
+    // generator's normalizeEndpointFileName: lowercased method, path
+    // with `/` replaced by `--`, leading `--`, trailing `-scenarios.json`.
+    function featureFileFor(op: OperationNode): string {
+      const method = op.method.toLowerCase();
+      const pathPart = op.path.replace(/\//g, '--');
+      return `${method}${pathPart}-scenarios.json`;
+    }
+
+    const ATTRIBUTE_SEMANTICS = loadAttributeClientMintedSemantics();
+
+    it('domain-semantics declares at least one clientMintedAttribute semantic (PR 2 must not regress to zero)', () => {
+      expect(
+        ATTRIBUTE_SEMANTICS.length,
+        `expected at least one kind:'attribute' + clientMinted:true semantic in configs/${CONFIG_NAME}/domain-semantics.json`,
+      ).toBeGreaterThan(0);
+    });
+
+    for (const semantic of ATTRIBUTE_SEMANTICS) {
+      const setterOps = setterOpsFor(semantic);
+
+      it(`${semantic}: at least one setter operation declares the semantic at a top-level body path`, () => {
+        expect(
+          setterOps.length,
+          `expected at least one operation accepting ${semantic} at a non-filter body path`,
+        ).toBeGreaterThan(0);
+      });
+
+      for (const op of setterOps) {
+        const varName = `${camelCase(semantic)}Var`;
+        const expectedPrefix = `fc:cma:${camelCase(semantic)}:`;
+        const variantKey = `opt=${semantic}`;
+
+        it(`${semantic} :: ${op.operationId}: opt=${semantic} feature scenario binds ${varName} with the clientMintedAttribute prefix (#162 PR 2)`, () => {
+          const featureFile = join(FEATURE_SCENARIOS_DIR, featureFileFor(op));
+          if (!existsSync(featureFile)) {
+            throw new Error(
+              `expected feature-output JSON not found: ${featureFileFor(op)} — run 'npm run testsuite:generate'`,
+            );
+          }
+          const raw = readFileSync(featureFile, 'utf8');
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const parsed = JSON.parse(raw) as {
+            scenarios: Array<{ variantKey?: string; bindings?: Record<string, string> }>;
+          };
+          const scenario = parsed.scenarios.find((s) => s.variantKey === variantKey);
+          expect(
+            scenario,
+            `${op.operationId}: expected an ${variantKey} feature scenario`,
+          ).toBeDefined();
+          const binding = scenario?.bindings?.[varName];
+          expect(
+            binding,
+            `${op.operationId} ${variantKey}: must bind ${varName}`,
+          ).toBeDefined();
+          expect(
+            binding?.startsWith(expectedPrefix),
+            `${op.operationId} ${variantKey}: ${varName} binding must use the clientMintedAttribute prefix (${expectedPrefix}…); got '${binding}'`,
+          ).toBe(true);
+        });
+
+        it(`${semantic} :: ${op.operationId}: emitted with-${semantic} feature spec references ctx.${varName} (#162 PR 2)`, () => {
+          // Map operationId → emitted Playwright spec path. The
+          // generator names files by operationId (not method+path) for
+          // playwright suites, so this lookup is direct.
+          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.feature.spec.ts`);
+          if (!existsSync(spec)) {
+            throw new Error(
+              `expected emitted spec not found: ${op.operationId}.feature.spec.ts — run 'npm run testsuite:generate'`,
+            );
+          }
+          const src = readFileSync(spec, 'utf8');
+          // The variant title fragment the emitter writes for `opt=<X>`
+          // is `with <X>` (see featureCoverageGenerator title formatter).
+          const scenarioMarker = `with ${semantic}`;
+          const scenarioIdx = src.indexOf(scenarioMarker);
+          expect(
+            scenarioIdx,
+            `${op.operationId}: expected a scenario block titled '${scenarioMarker}'`,
+          ).toBeGreaterThan(0);
+          const nextTestIdx = src.indexOf("\n  test('", scenarioIdx + scenarioMarker.length);
+          const block = src.slice(scenarioIdx, nextTestIdx > 0 ? nextTestIdx : src.length);
+          expect(
+            block.includes(`ctx.${varName}`),
+            `${op.operationId} '${scenarioMarker}': body must reference ctx.${varName}`,
+          ).toBe(true);
+        });
+      }
+    }
+  },
+);

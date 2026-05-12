@@ -71,6 +71,18 @@ export interface OperationNode extends OperationRef {
     status: string;
     provider: boolean;
   }>;
+  // #162 PR 2: every semantic-typed request-body leaf, regardless of
+  // nesting or required flag. Surfaced separately from `optionalSubShapes`
+  // (which filters to nested-object-only) so the requestSettersByType
+  // index and the clientMintedAttribute planner helper can iterate
+  // scalar arrays (`tags[]`) and top-level scalars (`businessId`)
+  // alongside nested-object leaves. Empty/undefined when the operation
+  // has no semantic-typed request-body fields.
+  requestBodySemantics?: Array<{
+    semantic: string;
+    fieldPath: string;
+    required: boolean;
+  }>;
   // Issue #104: x-semantic-establishes annotation passthrough. When
   // present, the operation establishes an entity whose identifiers are
   // client-minted via the listed request inputs. The planner schedules
@@ -139,6 +151,22 @@ export interface OperationGraph {
   // the kind-scoped sibling of the per-tuple `acceptsExternal: true`
   // flag. Empty/undefined means no registry was loaded.
   externalEntityIdentifiers?: Set<string>;
+  /**
+   * Map of semantic type → operations that ACCEPT this semantic in their
+   * request body (#162 PR 2). Parallel to `producersByType` (response
+   * body) and `establishersByType` (request body, identifier-shaped).
+   * Used by the planner to find setter sites for client-minted attribute
+   * semantics — e.g. `createProcessInstance` is the only setter for
+   * `Tag` in the camunda-oca spec, accepting `tags[]` in its body.
+   *
+   * Includes every semantic-typed request-body leaf regardless of nesting
+   * or `required` flag, so the planner can discover both top-level
+   * (`tags[]`) and nested (`filter.tags[]`) setter locations. The
+   * setter-chain reuse pass (a follow-up to PR 2) will consume this
+   * to insert a setter step before a downstream consumer step that
+   * requires the same minted value.
+   */
+  requestSettersByType?: Record<string, string[]>;
 }
 
 export interface BootstrapSequence {
@@ -445,22 +473,37 @@ export interface SemanticTypeSpec {
   // (those listed in artifactKinds.*.producesSemantics).
   witnesses?: string;
   /**
-   * How the planner obtains a value for this semantic type (#162). Five
-   * classifications are envisioned; PR 1 adds `modelDerived`.
+   * How the planner obtains a value for this semantic type (#162). Two
+   * classifications land so far; the issue envisions five in total.
    *
-   *   - `modelDerived`: the value is read out-of-band from a deployment
-   *     artifact in the same chain. The planner looks the value up in the
-   *     `providesValues` entry of the fixture chosen for the chain's
-   *     `createDeployment` step. Examples: `ElementId`, `JobType` — these
-   *     values come from the BPMN model itself, not from a Camunda API
-   *     response.
+   *   - `modelDerived` (#162 PR 1): the value is read out-of-band from a
+   *     deployment artifact in the same chain. The planner looks the
+   *     value up in the `providesValues` entry of the fixture chosen for
+   *     the chain's `createDeployment` step. Examples: `ElementId`,
+   *     `JobType` — values come from the BPMN model itself, not from a
+   *     Camunda API response.
    *
-   * Future PRs will add `attribute` (free-form client-minted labels —
-   * `Tag`, `BusinessId`) under this same field. Absent `kind` means the
-   * planner falls back to its existing classification chain
-   * (producersByType / establishersByType / external-entity).
+   *   - `attribute` (#162 PR 2): the value is a free-form label attached
+   *     to another entity, with no first-order entity retrievable by it
+   *     and no producer in the API. The planner mints a deterministic
+   *     value and binds it; setter-chain reuse threads the same value
+   *     between a setter site and any downstream consumer in the same
+   *     scenario. Requires `clientMinted: true` on the same entry —
+   *     `attribute` is a structural shape, `clientMinted` says where the
+   *     value originates. Examples: `Tag`, `BusinessId`.
+   *
+   * Absent `kind` means the planner falls back to its existing
+   * classification chain (producersByType / establishersByType /
+   * external-entity / synthetic).
    */
-  kind?: 'modelDerived';
+  kind?: 'modelDerived' | 'attribute';
+  /**
+   * Whether values of this semantic are minted by the planner / client
+   * rather than returned by a producer endpoint (#162 PR 2). Only
+   * meaningful with `kind: 'attribute'`. Future PRs may extend
+   * client-minted semantics to identifier-shaped types as well.
+   */
+  clientMinted?: boolean;
 }
 
 export interface IdentifierSpec {

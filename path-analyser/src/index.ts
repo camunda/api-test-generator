@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
+import { deterministicSuffix } from './codegen/support/seeding.js';
 import {
   getActiveConfigDir,
   getFeatureOutputDir,
@@ -574,6 +575,12 @@ function buildRequestPlan(
   // (and so the binding has the fixture value rather than the
   // synthetic placeholder featureCoverageGenerator stamped earlier).
   bindModelDerivedFromFixture(scenario, steps, graph);
+  // #162 PR 2: bind clientMintedAttribute semantics with a deterministic
+  // minted value at setter sites in the same window (before the
+  // populatesSubShape merge). Independent of bindModelDerivedFromFixture
+  // — different value source (planner, not fixture) — but co-located so
+  // both feed the same downstream materialization.
+  bindClientMintedAttribute(scenario, steps, graph);
   // Issue #105 (Phase 3): for variant scenarios, deep-merge the populated
   // sub-shape into the FINAL step's bodyTemplate. The planner stamps
   // `populatesSubShape` on each variant scenario; the emitter expects the
@@ -781,6 +788,138 @@ function fixtureFromDeployStep(step: RequestStep): ArtifactRegistryEntry | undef
     }
   }
   return undefined;
+}
+
+/**
+ * #162 PR 2: bind values for `kind: 'attribute'` + `clientMinted: true`
+ * semantic types at SETTER sites in the chain. A setter site is an
+ * operation whose request body declares the semantic — the value
+ * originates from the planner (a deterministic minted token), not from
+ * any producer endpoint, and gets stamped into the body via the
+ * standard `populatesSubShape` materializer.
+ *
+ * Scope (PR 2):
+ *
+ *   - Runs ONLY for feature-coverage scenarios. Variant scenarios are
+ *     handled by their own dedicated planner path; the unified-dispatch
+ *     refactor is #162 PR 3.
+ *
+ *   - Setter-site only. If the endpoint accepts the semantic in its
+ *     request body, we mint + populate here. Filter-consumer endpoints
+ *     (search/batch ops where a tag is matched against existing
+ *     entities) need setter-chain reuse — insert a setter step BEFORE
+ *     the consumer step and thread the same minted value through — and
+ *     are deferred to a follow-up issue. Without that work, filter
+ *     scenarios would search for a non-existent value and return empty
+ *     results, failing the non-empty assertion.
+ *
+ *   - Walks `endpoint.requestBodySemantics` (the inclusive index added
+ *     in PR 2 for exactly this purpose) so scalar-array paths (`tags[]`)
+ *     and top-level scalars (`businessId`) are visible alongside
+ *     nested-object leaves. `optionalSubShapes` would miss them.
+ *
+ *   - The `fc:cma:<sem>:` prefix on the minted value tags the source
+ *     (`fc` = feature coverage, `cma` = client-minted attribute) so
+ *     a grep of the emitted output can distinguish it from
+ *     `fc:pos:<sem>:` (the pre-#162 synthetic) and from
+ *     producer-bound values.
+ *
+ * Side effects:
+ *
+ *   - Overrides any pre-existing binding (synthetic from
+ *     featureCoverageGenerator) with the new minted value. Override is
+ *     intentional — clientMintedAttribute values are authoritative over
+ *     the pre-classification synthetic.
+ *
+ *   - Adds a `populatesSubShape` entry for the leaf (even when the path
+ *     is top-level scalar or scalar-array) so the existing
+ *     `mergePopulatesSubShapeIntoFinalBody` materializer fills the body.
+ *     `setLeafPlaceholder` already handles scalar-array `[]` leaves
+ *     correctly — building `tags: ['${tagVar}']` for top-level
+ *     `tags[]` and `filter.tags: ['${tagVar}']` for nested
+ *     `filter.tags[]`.
+ */
+function bindClientMintedAttribute(
+  scenario: EndpointScenario,
+  steps: RequestStep[],
+  graph: OperationGraph,
+): void {
+  if (scenario.strategy !== 'featureCoverage') return;
+  const domain = graph.domain;
+  if (!domain?.semanticTypes) return;
+  if (!steps.length) return;
+  const finalStep = steps[steps.length - 1];
+  const endpoint = graph.operations[finalStep.operationId];
+  const bodySems = endpoint?.requestBodySemantics ?? [];
+  if (!bodySems.length) return;
+
+  for (const bodySem of bodySems) {
+    const spec = domain.semanticTypes[bodySem.semantic];
+    if (spec?.kind !== 'attribute' || spec.clientMinted !== true) continue;
+    // PR 2 narrowed scope: only fill at the endpoint that IS the setter
+    // (the final-step body accepts the semantic). Filter-consumer sites
+    // also have the semantic in their bodySemantics but need a separate
+    // setter-chain pass to make the value meaningful — deferred.
+    //
+    // Heuristic for "this is a setter site" vs "this is a filter
+    // consumer": filter consumers have the semantic under a path
+    // beginning with `filter.` or `filter[` (the bundled spec uses
+    // `filter.tags[]` and `filter.$or[].tags[]`); setters have the
+    // semantic at top-level or under a non-filter parent. This is a
+    // pragmatic shortcut for PR 2; the follow-up issue (#168) will use
+    // the requestSettersByType index to discover setters generically
+    // and prepend a setter step before each filter consumer.
+    if (bodySem.fieldPath.startsWith('filter.') || bodySem.fieldPath.startsWith('filter[')) {
+      continue;
+    }
+
+    const varName = `${camelCase(bodySem.semantic)}Var`;
+    const mintedValue = `fc:cma:${camelCase(bodySem.semantic)}:${deterministicSuffix(`fc:cma:${finalStep.operationId}:${bodySem.semantic}`)}`;
+    scenario.bindings ||= {};
+    scenario.bindings[varName] = mintedValue;
+
+    // Always plant a populatesSubShape entry so the body is filled by
+    // the existing materializer. setLeafPlaceholder handles all three
+    // shapes the planner emits: top-level scalar (`businessId`),
+    // top-level scalar array (`tags[]`), and nested scalar array
+    // (`filter.tags[]`, when setter-chain support lands).
+    const sub = scenario.populatesSubShape ?? {
+      rootPath: subShapeRootForFieldPath(bodySem.fieldPath),
+      leafPaths: [],
+      leafSemantics: [],
+    };
+    if (!sub.leafPaths.includes(bodySem.fieldPath)) {
+      sub.leafPaths.push(bodySem.fieldPath);
+      sub.leafSemantics ||= [];
+      sub.leafSemantics.push(bodySem.semantic);
+    }
+    if (!sub.rootPath) sub.rootPath = subShapeRootForFieldPath(bodySem.fieldPath);
+    scenario.populatesSubShape = sub;
+  }
+}
+
+/**
+ * Compute the sub-shape root for a fieldPath. Used by the
+ * clientMintedAttribute helper to seed `populatesSubShape.rootPath` for
+ * top-level scalar / scalar-array leaves where the graphLoader's
+ * `subShapeRootOf` returns null. Mirrors the simpler cases:
+ *
+ *   "tags[]"           → "tags[]"
+ *   "businessId"       → "businessId"
+ *   "filter.tags[]"    → "filter"  (deepest object/array-of-object
+ *                                   ancestor — but PR 2 skips this
+ *                                   branch since filter sites are
+ *                                   deferred)
+ *
+ * Single-segment paths return the segment itself rather than the empty
+ * string the graphLoader's stricter rule would yield — the rootPath
+ * is informational metadata on populatesSubShape and the merge logic
+ * doesn't actually read it.
+ */
+function subShapeRootForFieldPath(fieldPath: string): string {
+  const segments = fieldPath.split('.');
+  if (segments.length === 1) return segments[0];
+  return segments.slice(0, -1).join('.');
 }
 
 function mergePopulatesSubShapeIntoFinalBody(
