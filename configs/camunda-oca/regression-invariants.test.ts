@@ -3046,8 +3046,8 @@ describeForThisConfig(
       const MULTIPART_ONLY_OPS = ['createDeployment', 'createDocument', 'createDocuments'];
 
       // Scenario kinds that are nonsensical on multipart-only ops.
-      // qaEmitter writes the scenario kind as `scenarioKind: '<type>'`
-      // (single-quoted) inside each test block; we match that exactly.
+      // Match either quote style so this invariant is not coupled to the
+      // emitter's current Prettier/singleQuote output.
       const FORBIDDEN_KINDS = [
         'body-top-type-mismatch',
         'type-mismatch',
@@ -3055,8 +3055,10 @@ describeForThisConfig(
       ];
 
       // Match a single emitted `test('...', async (...) => { ... });`
-      // block. Captures the title (group 1) and the body (group 2).
-      const TEST_BLOCK = /test\('([^']*)',\s*async[^]*?scenarioKind:\s*'([^']+)'[^]*?}\);/g;
+      // or `test("...", async (...) => { ... });` block. Captures the
+      // title (group 2) and the scenario kind (group 4).
+      const TEST_BLOCK =
+        /test\((['"])([^'"]*)\1,\s*async[^]*?scenarioKind:\s*(['"])([^'"]+)\3[^]*?}\);/g;
 
       interface Offender {
         file: string;
@@ -3071,8 +3073,8 @@ describeForThisConfig(
         if (!f.endsWith('-validation-api-tests.spec.ts')) continue;
         const text = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
         for (const match of text.matchAll(TEST_BLOCK)) {
-          const title = match[1];
-          const scenarioKind = match[2];
+          const title = match[2];
+          const scenarioKind = match[4];
           // Title format: `<operationId> - <suffix>` (qaEmitter.ts).
           const opMatch = title.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\s+-\s+/);
           if (!opMatch) continue;
