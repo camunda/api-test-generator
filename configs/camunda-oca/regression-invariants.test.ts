@@ -2777,3 +2777,71 @@ describeForThisConfig(
   },
 );
 
+describeForThisConfig(
+  'bundled-spec invariants: jobType binds from chosen fixture (#163 review)',
+  () => {
+    // #163 review-comment guard: when the registry switched from
+    // `parameters.jobType` to `providesValues.JobType`, the planner code
+    // path that binds `jobTypeVar` (separate from
+    // `bindModelDerivedFromFixture`) almost regressed — it still read
+    // `regHit.params.jobType` and would have fallen through to
+    // `seedBinding('jobTypeVar')` at runtime once `parameters` was
+    // removed. The bridge in PR 1 now consults
+    // `providesValues.JobType[0]` first. This class-scoped invariant
+    // asserts every job-related endpoint's feature-1 (base) scenario
+    // binds `jobTypeVar = 'sampleJobType'` — the value `service-task.bpmn`
+    // declares — and not a synthetic, runtime-seeded, or absent binding.
+    //
+    // The invariant covers the class, not a single instance: any job-
+    // related endpoint whose chain deploys `service-task.bpmn` and whose
+    // request body / path needs JobType is in scope.
+
+    interface ScenarioWithBindings {
+      id?: string;
+      strategy?: string;
+      bindings?: Record<string, string>;
+    }
+    interface FeatureCollection {
+      endpoint: { operationId: string };
+      scenarios: ScenarioWithBindings[];
+    }
+
+    function loadCollection(filename: string): FeatureCollection {
+      const raw = readFileSync(join(FEATURE_SCENARIOS_DIR, filename), 'utf8');
+      // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+      return JSON.parse(raw) as FeatureCollection;
+    }
+
+    const targets: { endpoint: string; featureFile: string }[] = [
+      { endpoint: 'activateJobs', featureFile: 'post--jobs--activation-scenarios.json' },
+      { endpoint: 'completeJob', featureFile: 'post--jobs--{jobKey}--completion-scenarios.json' },
+      { endpoint: 'failJob', featureFile: 'post--jobs--{jobKey}--failure-scenarios.json' },
+      { endpoint: 'throwJobError', featureFile: 'post--jobs--{jobKey}--error-scenarios.json' },
+    ];
+
+    for (const t of targets) {
+      it(`${t.endpoint} :: feature scenarios bind jobTypeVar to the fixture's JobType (#163)`, () => {
+        const path = join(FEATURE_SCENARIOS_DIR, t.featureFile);
+        if (!existsSync(path)) {
+          throw new Error(
+            `expected feature-output JSON not found: ${t.featureFile} — run 'npm run testsuite:generate'`,
+          );
+        }
+        const collection = loadCollection(t.featureFile);
+        // Pick the base (feature-1) scenario as the witness — any chain
+        // that needs jobTypeVar will have it set; the base scenario is
+        // the most representative.
+        const base = collection.scenarios.find(
+          (s) => s.strategy === 'featureCoverage' && s.id === 'feature-1',
+        );
+        expect(base, `${t.endpoint}: feature-1 base scenario not found`).toBeDefined();
+        const jt = base?.bindings?.jobTypeVar;
+        expect(
+          jt,
+          `${t.endpoint}: feature-1 must bind jobTypeVar (chain deploys service-task.bpmn, which declares JobType in providesValues)`,
+        ).toBe('sampleJobType');
+      });
+    }
+  },
+);
+

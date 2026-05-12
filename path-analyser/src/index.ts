@@ -782,25 +782,6 @@ function fixtureFromDeployStep(step: RequestStep): ArtifactRegistryEntry | undef
   return undefined;
 }
 
-/**
- * Compute the sub-shape root segment for a given fieldPath. Mirrors the
- * (simpler) cases of `subShapeRootOf` in graphLoader; here we only need
- * the deepest object/array-of-object ancestor so the emitter's
- * `populatesSubShape` annotation has a non-empty root.
- *
- *   "startInstructions[].elementId"     → "startInstructions[]"
- *   "result.activateElements[].elementId" → "result.activateElements[]"
- *   "moveInstructions[].sourceElementId"  → "moveInstructions[]"
- *
- * Top-level scalars never reach this function — they go through the
- * existing flat-optional fill path in buildRequestBodyFromCanonical.
- */
-function subShapeRootForFieldPath(fieldPath: string): string {
-  const segments = fieldPath.split('.');
-  if (segments.length < 2) return '';
-  return segments.slice(0, -1).join('.');
-}
-
 function mergePopulatesSubShapeIntoFinalBody(
   scenario: EndpointScenario,
   steps: RequestStep[],
@@ -1257,11 +1238,25 @@ function buildRequestBodyFromCanonical(
       );
       const regHit = chooseFixtureFromRegistry(kind, requiredStates, kindLevelProvides);
       const fileRef = regHit?.ref || defaultFixtures[kind || ''] || '@@FILE:bpmn/simple.bpmn';
-      // If registry provides a jobType parameter, bind it for later request body use
-      if (regHit?.params && typeof regHit.params.jobType === 'string') {
+      // Bind jobType from the chosen fixture for later use in the request
+      // body (`activateJobs.type`, `completeJob`/`failJob`/`throwJobError`
+      // path params, etc.). #163 review: the canonical source is
+      // `providesValues.JobType[0]` (PR 1 of #162's data shape); the
+      // legacy `parameters.jobType` field on the registry entry is
+      // accepted as a fallback during the transition. #164 will retire
+      // the literal-field-name special-case in
+      // `buildRequestBodyFromCanonical` that pairs with this binding;
+      // until then both call sites must agree on the source of truth.
+      const jobTypeFromProvides = regHit?.providesValues?.JobType?.[0];
+      const jobTypeFromParams =
+        regHit?.params && typeof regHit.params.jobType === 'string'
+          ? regHit.params.jobType
+          : undefined;
+      const jobTypeValue = jobTypeFromProvides ?? jobTypeFromParams;
+      if (jobTypeValue !== undefined) {
         const varName = 'jobTypeVar';
         scenario.bindings ||= {};
-        if (!scenario.bindings[varName]) scenario.bindings[varName] = regHit.params.jobType;
+        if (!scenario.bindings[varName]) scenario.bindings[varName] = jobTypeValue;
       }
       template.files.resources = fileRef;
     }
@@ -1503,7 +1498,13 @@ function chooseFixtureFromRegistry(
   kind: string | undefined,
   requiredStates: ReadonlySet<string>,
   kindLevelProvides: ReadonlySet<string>,
-): { ref: string; params?: Record<string, unknown> } | undefined {
+):
+  | {
+      ref: string;
+      params?: Record<string, unknown>;
+      providesValues?: Record<string, string[]>;
+    }
+  | undefined {
   if (!kind) return undefined;
   const candidates = getArtifactsRegistry().filter((e) => e.kind === kind);
   if (candidates.length === 0) return undefined;
@@ -1524,14 +1525,22 @@ function chooseFixtureFromRegistry(
   // deterministic and matches the docstring.
   if (covers.length === 0) {
     const fallback = candidates[0];
-    return { ref: `@@FILE:${fallback.path}`, params: fallback.parameters };
+    return {
+      ref: `@@FILE:${fallback.path}`,
+      params: fallback.parameters,
+      providesValues: fallback.providesValues,
+    };
   }
   const best = covers.reduce((acc, e) => {
     const accSize = acc.providesStates?.length ?? 0;
     const eSize = e.providesStates?.length ?? 0;
     return eSize < accSize ? e : acc;
   });
-  return { ref: `@@FILE:${best.path}`, params: best.parameters };
+  return {
+    ref: `@@FILE:${best.path}`,
+    params: best.parameters,
+    providesValues: best.providesValues,
+  };
 }
 
 /**
