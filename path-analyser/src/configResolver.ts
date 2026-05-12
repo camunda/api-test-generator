@@ -96,8 +96,8 @@ export function getActiveConfigDir(repoRoot: string): string {
  * Options that control the Playwright emitter, sourced from
  * `configs.json#configs.<active>.codegen.playwright`.
  *
- * Every field is optional in the on-disk schema and defaults to a value
- * that preserves pre-config behaviour. Missing `codegen` / `codegen.playwright`
+ * Every field is optional in the on-disk schema and has an explicit
+ * default documented on the field. Missing `codegen` / `codegen.playwright`
  * blocks yield an all-defaults result without throwing.
  */
 export interface PlaywrightCodegenOptions {
