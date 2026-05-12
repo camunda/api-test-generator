@@ -1246,11 +1246,11 @@ function buildRequestBodyFromCanonical(
       // alongside ElementId). The legacy `parameters.jobType` field and
       // its `??`-fallback reader are gone.
       //
-      // The literal-field-name special-case at line 944
-      // (`name === 'type' && bindingMap.jobType`) that pairs the
-      // semantically-named `jobType` binding with the spec-named `type`
-      // field is intentionally left in place — that's a separate
-      // architectural cleanup tracked by #162 PR 3 (unified dispatch).
+      // The `jobType` → `type` mapping special-case elsewhere in
+      // `buildRequestBodyFromCanonical` (pairing the semantically-named
+      // `jobType` binding with the spec-named `type` field) is
+      // intentionally left in place — that's a separate architectural
+      // cleanup tracked by #162 PR 3 (unified dispatch).
       const jobTypeValue = regHit?.providesValues?.JobType?.[0];
       if (jobTypeValue !== undefined) {
         const varName = 'jobTypeVar';
@@ -1480,9 +1480,10 @@ function resolveProvider(opId: string, field: string, scenario: EndpointScenario
  *      fewer extra states the chain didn't ask for). Ties at that point
  *      break by array order in the registry.
  *
- * Returns the chosen entry's `@@FILE:<path>` ref plus its parameters, or
- * `undefined` when no entry of the right kind exists at all (the caller then
- * falls back to a hard-coded default).
+ * Returns the chosen entry's `@@FILE:<path>` ref plus its `providesValues`
+ * (the per-fixture modelDerived value source — #162 PR 1), or `undefined`
+ * when no entry of the right kind exists at all (the caller then falls
+ * back to a hard-coded default).
  *
  * When no entry of the right kind covers `requiredStates` (a real
  * misconfiguration — the chain asked for a state nothing provides), the
