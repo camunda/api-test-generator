@@ -34,19 +34,21 @@ describe('getPlaywrightCodegenOptions', () => {
     await fs.writeFile(path.join(tmp, 'configs.json'), JSON.stringify(content), 'utf8');
   }
 
-  test('defaults to recordResponses=true when the config has no codegen block', async () => {
+  // The recorder is opt-in tooling. Default is OFF so suites that
+  // don't consume responses.jsonl skip the boilerplate + per-step fs writes.
+  test('defaults to recordResponses=false when the config has no codegen block', async () => {
     await writeConfig({ description: 'test' });
-    expect(getPlaywrightCodegenOptions(tmp)).toEqual({ recordResponses: true });
+    expect(getPlaywrightCodegenOptions(tmp)).toEqual({ recordResponses: false });
   });
 
-  test('defaults to recordResponses=true when codegen has no playwright block', async () => {
+  test('defaults to recordResponses=false when codegen has no playwright block', async () => {
     await writeConfig({ codegen: {} });
-    expect(getPlaywrightCodegenOptions(tmp)).toEqual({ recordResponses: true });
+    expect(getPlaywrightCodegenOptions(tmp)).toEqual({ recordResponses: false });
   });
 
-  test('defaults to recordResponses=true when playwright omits recordResponses', async () => {
+  test('defaults to recordResponses=false when playwright omits recordResponses', async () => {
     await writeConfig({ codegen: { playwright: {} } });
-    expect(getPlaywrightCodegenOptions(tmp)).toEqual({ recordResponses: true });
+    expect(getPlaywrightCodegenOptions(tmp)).toEqual({ recordResponses: false });
   });
 
   test('returns recordResponses=true when explicitly set', async () => {

@@ -96,8 +96,8 @@ export function getActiveConfigDir(repoRoot: string): string {
  * Options that control the Playwright emitter, sourced from
  * `configs.json#configs.<active>.codegen.playwright`.
  *
- * Every field is optional in the on-disk schema and defaults to a value
- * that preserves pre-config behaviour. Missing `codegen` / `codegen.playwright`
+ * Every field is optional in the on-disk schema and has an explicit
+ * default documented on the field. Missing `codegen` / `codegen.playwright`
  * blocks yield an all-defaults result without throwing.
  */
 export interface PlaywrightCodegenOptions {
@@ -108,8 +108,10 @@ export interface PlaywrightCodegenOptions {
    * emitted, and `recorder.ts` is not vendored into the suite's `support/`
    * directory.
    *
-   * Default: true (preserves the behaviour that existed before this option
-   * was introduced).
+   * Default: false. The recorder is opt-in tooling for downstream
+   * response-shape diffing; suites that don't consume
+   * `dist/runtime-observations/responses.jsonl` get cleaner output and
+   * skip the per-step `fs.appendFile`.
    */
   recordResponses: boolean;
 }
@@ -128,10 +130,10 @@ export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegen
   const name = resolveActiveConfigName(index);
   const entry = index.configs[name];
   if (!isRecord(entry)) {
-    return { recordResponses: true };
+    return { recordResponses: false };
   }
   if (!('codegen' in entry)) {
-    return { recordResponses: true };
+    return { recordResponses: false };
   }
   const codegen = entry.codegen;
   if (!isRecord(codegen)) {
@@ -140,7 +142,7 @@ export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegen
     );
   }
   if (!('playwright' in codegen)) {
-    return { recordResponses: true };
+    return { recordResponses: false };
   }
   const playwright = codegen.playwright;
   if (!isRecord(playwright)) {
@@ -148,7 +150,7 @@ export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegen
       `Malformed configs.json: configs.${name}.codegen.playwright must be an object, got ${typeof playwright}.`,
     );
   }
-  let recordResponses = true;
+  let recordResponses = false;
   if ('recordResponses' in playwright) {
     const v = playwright.recordResponses;
     if (typeof v !== 'boolean') {

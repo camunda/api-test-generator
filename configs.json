@@ -9,7 +9,7 @@
         "$comment": "Pinned ref + expected hash live in configs/camunda-oca/spec-pin.json (kept as a separate file to preserve the spec-pin bump procedure documented in tests/regression/spec-pin.setup.ts)."
       },
       "codegen": {
-        "$comment": "Per-emitter codegen options. Resolved by getPlaywrightCodegenOptions() in path-analyser/src/configResolver.ts. Each subkey is the emitter id (see codegen/registry.ts). Missing keys default to behaviour that matches the pre-config baseline (recordResponses=true). camunda-oca opts out: the SDK example workflows that consume the emitted suite do not run observe:aggregate, so the recorder boilerplate is pure dead weight here. The aggregator workflow can be re-enabled by flipping this back to true.",
+        "$comment": "Per-emitter codegen options. Resolved by getPlaywrightCodegenOptions() in path-analyser/src/configResolver.ts. Each subkey is the emitter id (see codegen/registry.ts). Missing keys default to recordResponses=false (recorder is opt-in tooling for downstream response-shape diffing). camunda-oca pins it explicitly to false for self-documentation; the SDK example workflows that consume the emitted suite do not run observe:aggregate, so the recorder boilerplate is pure dead weight here. The aggregator workflow can be re-enabled by flipping this to true.",
         "playwright": {
           "recordResponses": false
         }
