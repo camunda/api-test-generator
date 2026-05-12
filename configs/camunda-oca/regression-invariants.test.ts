@@ -2736,7 +2736,7 @@ describeForThisConfig(
         ).toBeDefined();
         expect(
           binding,
-          `${t.endpoint}: ${t.varName} binding must NOT be the pre-PR-1 synthetic 'elementid_...' placeholder`,
+          `${t.endpoint}: ${t.varName} binding must NOT be the pre-PR-1 synthetic 'elementId_...' placeholder`,
         ).not.toMatch(SYNTHETIC_RE);
       });
 
