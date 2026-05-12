@@ -13,6 +13,8 @@ import { parseCliArgs } from './cli-args.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
+import { PythonSdkEmitter } from './python-sdk/emitter.js';
+import { materializePythonSupport } from './python-sdk/materialize-support.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -23,6 +25,7 @@ import { getEmitter, listEmitters, registerEmitter } from './registry.js';
 
 // Built-in emitter registration. New emitters register themselves here.
 registerEmitter(PlaywrightEmitter);
+registerEmitter(PythonSdkEmitter);
 
 // JSON.parse is a runtime contract boundary: the on-disk scenario files are
 // produced by the generator and conform structurally to EndpointScenarioCollection.
@@ -173,6 +176,9 @@ async function run() {
   }
   if (emitter.id === 'js-sdk') {
     await materializeSdkSupport(outDir);
+  }
+  if (emitter.id === 'python-sdk') {
+    await materializePythonSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
