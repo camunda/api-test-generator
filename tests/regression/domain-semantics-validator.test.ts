@@ -234,6 +234,79 @@ describe('validateDomainSemantics', () => {
     // cross-ref invariant fires.
     expect(errs.length).toBeGreaterThan(0);
   });
+
+  // #159 PR B: eventual + witness coherence.
+  it('rejects runtimeStates entries with eventual: true but no witness', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        SomeEventualState: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          // witness intentionally omitted
+        },
+      },
+    });
+    expect(errs.find((e) => e.invariant === 'eventualStateWitnessShape')?.message).toContain(
+      'eventual: true but has no witness',
+    );
+  });
+
+  it('rejects runtimeStates entries with a witness but eventual omitted (witness is dead config)', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        SomeState: {
+          kind: 'state',
+          producedBy: ['x'],
+          witness: {
+            operationId: 'get',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    });
+    expect(errs.find((e) => e.invariant === 'eventualStateWitnessShape')?.message).toContain(
+      'declares a witness but eventual is not true',
+    );
+  });
+
+  it('accepts a coherent eventual + witness entry', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        SomeEventualState: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getX',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    });
+    // No eventualStateWitnessShape issue for this entry.
+    expect(errs.find((e) => e.invariant === 'eventualStateWitnessShape')).toBeUndefined();
+  });
+
+  it('rejects witness.predicate.path that is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        S: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getX',
+            predicate: { path: 'state; drop table users', equals: 'READY' },
+          },
+        },
+      },
+    });
+    // Structural zod issue from WitnessPredicateSchema (regex mismatch),
+    // surfaces as `shape` rather than a named cross-ref invariant.
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs.some((e) => e.message.includes('predicate.path must match'))).toBe(true);
+  });
 });
 
 // Boundary chokepoint used by the emitter (renderPlaywrightSuite /

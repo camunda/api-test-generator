@@ -38,7 +38,15 @@
       "parameter": "processInstanceKey",
       "producedBy": ["createProcessInstance"],
       "requires": ["ProcessDefinitionDeployed"],
-      "$comment": "Holds when a created instance has reached COMPLETED without external coordination. Provided by deploying a BPMN model whose execution path reaches an end event with no service tasks / user tasks / external blockers (e.g. bpmn/simple.bpmn). PR A of #159 introduces this state and uses it for the fixture selector; PR B will mark it `eventual` and inject an awaitEventually(getProcessInstance, body.state === 'COMPLETED') wait between producer and consumer."
+      "$comment": "Holds when a created instance has reached COMPLETED without external coordination. Provided by deploying a BPMN model whose execution path reaches an end event with no service tasks / user tasks / external blockers (e.g. bpmn/simple.bpmn). PR B of #159 marks this state as `eventual` and declares the witness: the planner inserts an awaitEventually(getProcessInstance) wait between the createProcessInstance producer step and any consumer step that requires this state (e.g. deleteProcessInstance).",
+      "eventual": true,
+      "witness": {
+        "operationId": "getProcessInstance",
+        "predicate": {
+          "path": "state",
+          "equals": "COMPLETED"
+        }
+      }
     },
     "JobAvailableForActivation": {
       "kind": "state",

@@ -1451,6 +1451,36 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     );
   });
 
+  it('deleteProcessInstance.feature.spec.ts injects an awaitEventually wait between createProcessInstance and deleteProcessInstance (#159 PR B)', () => {
+    // PR B of #159: ProcessInstanceCompleted is declared `eventual: true`
+    // with a `witness` shape that polls getProcessInstance until
+    // `body.state === 'COMPLETED'`. The planner annotates the
+    // createProcessInstance step with `eventualWaitsAfter`; the emitter
+    // renders an `awaitEventually(...)` call immediately after that step
+    // and before the deleteProcessInstance step.
+    //
+    // Pre-PR-B the chain ran straight from create → delete with no wait,
+    // so the delete raced a still-ACTIVE instance and 4xx'd. The assertion
+    // pins the wait's POSITION (must be in the create→delete window) and
+    // its SHAPE (calls the witness operationId).
+    const spec = join(GENERATED_TESTS_DIR, 'deleteProcessInstance.feature.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
+    }
+    const src = readFileSync(spec, 'utf8');
+    const createIdx = src.indexOf('Step 2: createProcessInstance');
+    const deleteIdx = src.indexOf('Step 3: deleteProcessInstance');
+    expect(createIdx, 'createProcessInstance step marker not found').toBeGreaterThan(0);
+    expect(deleteIdx, 'deleteProcessInstance step marker not found').toBeGreaterThan(createIdx);
+    const between = src.slice(createIdx, deleteIdx);
+    expect(between, 'awaitEventually wait must appear between create and delete').toContain(
+      'awaitEventually(',
+    );
+    expect(between, 'wait must invoke the getProcessInstance witness').toContain(
+      "operationId: 'getProcessInstance'",
+    );
+  });
+
   it('every entry in deployment-artifacts.json#providesStates is acknowledged by its kind (#159)', () => {
     // Class-scoped coherence check between the fixture registry and
     // domain-semantics. For every registry entry e, every state in

@@ -47,6 +47,38 @@ const ArtifactKindSpecSchema = z
   })
   .passthrough();
 
+// #159 PR B: structured predicate shape. `path` must be a safe identifier
+// because the emitter renders it as a TS bracket-access key (`b['<path>']`)
+// without an escape pass; `equals` is constrained to primitives so the
+// emitter can JSON.stringify it directly.
+const WitnessPredicateSchema = z.object({
+  path: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
+    message: 'witness.predicate.path must match /^[A-Za-z_$][A-Za-z0-9_$]*$/',
+  }),
+  equals: z.union([z.string(), z.number(), z.boolean()]),
+});
+
+const WitnessSpecSchema = z
+  .object({
+    operationId: z.string().min(1),
+    predicate: WitnessPredicateSchema,
+    waitUpToMs: z.number().int().positive().optional(),
+    pollIntervalMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const RuntimeStateSpecSchema = z
+  .object({
+    kind: z.literal('state').optional(),
+    producedBy: z.array(z.string()).optional(),
+    parameter: z.string().optional(),
+    parameters: z.array(z.string()).optional(),
+    requires: z.array(z.string()).optional(),
+    eventual: z.boolean().optional(),
+    witness: WitnessSpecSchema.optional(),
+  })
+  .passthrough();
+
 const OperationDomainRequirementsSchema = z
   .object({
     requires: z.array(z.string()).optional(),
@@ -77,7 +109,7 @@ export const GlobalContextSeedSchema = z
 // flow through unmodified.
 const DomainSemanticsShape = z
   .object({
-    runtimeStates: z.record(z.string(), z.unknown()).optional(),
+    runtimeStates: z.record(z.string(), RuntimeStateSpecSchema).optional(),
     capabilities: z.record(z.string(), z.unknown()).optional(),
     semanticTypes: z.record(z.string(), SemanticTypeSpecSchema).optional(),
     artifactKinds: z.record(z.string(), ArtifactKindSpecSchema).optional(),
@@ -311,6 +343,32 @@ function checkGlobalContextSeedsCoherent(d: DomainSemanticsShape): CrossRefIssue
   return issues;
 }
 
+// #159 PR B: a runtimeState marked `eventual: true` must declare a
+// `witness` so the planner has something to wait on. Without this check,
+// flipping `eventual` true on a state without a witness would silently
+// produce a chain with no wait injected (and the consumer step would
+// still race the producer's projection lag).
+function checkEventualStateWitnessShape(d: DomainSemanticsShape): CrossRefIssue[] {
+  const issues: CrossRefIssue[] = [];
+  for (const [name, spec] of Object.entries(d.runtimeStates ?? {})) {
+    const eventual = spec.eventual === true;
+    const witness = spec.witness;
+    if (eventual && (witness === undefined || witness === null)) {
+      issues.push({
+        code: 'eventualStateWitnessShape',
+        message: `runtimeStates.${name} sets eventual: true but has no witness — the planner would inject no wait. Declare a witness { operationId, predicate } or unset eventual.`,
+      });
+    }
+    if (!eventual && witness !== undefined && witness !== null) {
+      issues.push({
+        code: 'eventualStateWitnessShape',
+        message: `runtimeStates.${name} declares a witness but eventual is not true — the witness will not be used. Set eventual: true or remove the witness.`,
+      });
+    }
+  }
+  return issues;
+}
+
 const CROSS_REF_CHECKS = [
   checkArtifactKindStateDeclared,
   checkArtifactKindWitnessDeclared,
@@ -319,6 +377,7 @@ const CROSS_REF_CHECKS = [
   checkDisjunctionNotWitnessRedundant,
   checkDisjunctionMemberResolves,
   checkGlobalContextSeedsCoherent,
+  checkEventualStateWitnessShape,
 ] as const;
 
 // Composed schema: structural shape + every cross-reference invariant.
