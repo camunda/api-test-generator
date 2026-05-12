@@ -589,7 +589,77 @@ function buildRequestPlan(
   // alias extract on that producer step bound to the placeholder-derived
   // name. Keeps the emitter dumb and the alias visible in scenario JSON.
   aliasProducerExtractsToPlaceholders(scenario, steps, graph);
+  // #159 PR B: for each consumer step whose requires names an eventual
+  // state, find the most recent earlier producer step in the chain and
+  // annotate it with `eventualWaitsAfter` so the emitter inserts an
+  // `awaitEventually(witness)` block between producer and consumer.
+  annotateEventualWaits(steps, graph);
   return steps;
+}
+
+/**
+ * Walk a built request plan and stamp `eventualWaitsAfter` on every
+ * producer step whose response advances an `eventual: true` state that a
+ * later step requires. The annotation is self-contained — it carries the
+ * witness's method + pathTemplate resolved against the graph here — so
+ * the emitter does not need to re-consult `graph.operations` at
+ * emission time (#159).
+ *
+ * Invariants:
+ *   - The wait is attached to the producer step (earliest event-shape
+ *     anchor), not the consumer, so emitter order is producer-block →
+ *     wait-block → consumer-block without lookahead.
+ *   - Duplicates are deduped per (producer step, state) — multiple
+ *     downstream consumers that require the same eventual state collapse
+ *     to a single wait.
+ *   - Misconfigurations (eventual with no witness, unknown witness opId,
+ *     non-GET witness method) are caught at load time:
+ *     `validateDomainSemantics` rejects the eventual-without-witness
+ *     shape, and `validateRuntimeStateWitnessGraphRefs` (called from
+ *     `loadGraph`) rejects unknown opIds and non-GET methods. The
+ *     defensive `continue` branches below are belt-and-braces for tests
+ *     that build partial graphs without going through the loader.
+ */
+function annotateEventualWaits(steps: RequestStep[], graph: OperationGraph): void {
+  const states = graph.domain?.runtimeStates;
+  const opReqs = graph.domain?.operationRequirements;
+  if (!states || !opReqs) return;
+  for (let i = 0; i < steps.length; i++) {
+    const consumerOp = steps[i].operationId;
+    const requires = opReqs[consumerOp]?.requires ?? [];
+    for (const stateName of requires) {
+      const state = states[stateName];
+      if (!state?.eventual || !state.witness) continue;
+      const producers = new Set(state.producedBy ?? []);
+      let producerIdx = -1;
+      for (let j = i - 1; j >= 0; j--) {
+        if (producers.has(steps[j].operationId)) {
+          producerIdx = j;
+          break;
+        }
+      }
+      if (producerIdx < 0) continue; // no producer earlier in the chain
+      const witnessOp = graph.operations[state.witness.operationId];
+      if (!witnessOp) continue; // unknown witness — validator should have caught
+      const producerStep = steps[producerIdx];
+      producerStep.eventualWaitsAfter ||= [];
+      if (producerStep.eventualWaitsAfter.some((w) => w.state === stateName)) continue;
+      producerStep.eventualWaitsAfter.push({
+        state: stateName,
+        witness: {
+          operationId: state.witness.operationId,
+          method: witnessOp.method,
+          pathTemplate: witnessOp.path,
+          predicate: {
+            path: state.witness.predicate.path,
+            equals: state.witness.predicate.equals,
+          },
+          waitUpToMs: state.witness.waitUpToMs,
+          pollIntervalMs: state.witness.pollIntervalMs,
+        },
+      });
+    }
+  }
 }
 
 function mergePopulatesSubShapeIntoFinalBody(

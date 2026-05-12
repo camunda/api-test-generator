@@ -49,7 +49,42 @@
           "parameter": {"type": "string"},
           "parameters": {"type": "array", "items": {"type": "string"}},
           "producedBy": {"type": "array", "items": {"type": "string"}},
-          "requires": {"type": "array", "items": {"type": "string"}}
+          "requires": {"type": "array", "items": {"type": "string"}},
+          "$comment": {"type": "string"},
+          "eventual": {
+            "type": "boolean",
+            "description": "When true, the state lags behind its producer's response. The planner inserts an awaitEventually(witness) wait between producer and consumer steps (#159 PR B). Requires `witness`."
+          },
+          "witness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operationId", "predicate"],
+            "description": "Witness used by the awaitEventually wait when `eventual === true`. Polls the named operation until the structured predicate holds.",
+            "properties": {
+              "operationId": {"type": "string", "minLength": 1},
+              "predicate": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "equals"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
+                    "description": "Single top-level field on the response body (PR B: no nested paths)."
+                  },
+                  "equals": {
+                    "oneOf": [
+                      {"type": "string"},
+                      {"type": "number"},
+                      {"type": "boolean"}
+                    ]
+                  }
+                }
+              },
+              "waitUpToMs": {"type": "integer", "minimum": 1},
+              "pollIntervalMs": {"type": "integer", "minimum": 1}
+            }
+          }
         }
       }
     },

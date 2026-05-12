@@ -347,6 +347,40 @@ export interface RequestStep {
   notes?: string;
   // Optional: expected slices in deployments[] for createDeployment responses, derived from domain sidecar
   expectedDeploymentSlices?: string[];
+  /**
+   * Eventual-state waits the emitter must render immediately after this
+   * step's request/expect block, before moving to the next step. Populated
+   * by the planner when this step produces an eventual state (one with
+   * `runtimeStates.<state>.eventual === true`) that a later step requires
+   * (#159 PR B). Each entry carries everything the emitter needs to
+   * render one `awaitEventually(...)` block without re-consulting the
+   * graph or the domain sidecar.
+   */
+  eventualWaitsAfter?: EventualWaitSpec[];
+}
+
+/**
+ * Single planner-annotated wait for an eventual state transition.
+ * Self-contained: includes the witness's resolved HTTP method and
+ * pathTemplate so the emitter doesn't need to look the witness operation
+ * up in the graph at emission time.
+ */
+export interface EventualWaitSpec {
+  /** The eventual state being waited for (used in the emitted comment). */
+  state: string;
+  /** Witness fetch details, resolved against the graph at plan time. */
+  witness: {
+    operationId: string;
+    /** HTTP method of the witness op (PR B: 'GET' only). */
+    method: string;
+    /** Path template of the witness op, with `{paramName}` placeholders
+     *  the emitter substitutes via the same ctx-binding rewrite used for
+     *  request URLs. */
+    pathTemplate: string;
+    predicate: WitnessPredicate;
+    waitUpToMs?: number;
+    pollIntervalMs?: number;
+  };
 }
 
 // Filter dimension details for feature coverage
@@ -433,6 +467,52 @@ export interface RuntimeStateSpec {
   parameter?: string; // single parameter name
   parameters?: string[]; // multi parameters
   requires?: string[]; // prerequisite states
+  /**
+   * When true, the state's external observability LAGS behind its producer's
+   * response — the broker accepts the write at 200 but the projected state
+   * (e.g. ProcessInstanceCompleted) only lands after asynchronous engine
+   * progression. The planner inserts an `awaitEventually(witness)` wait
+   * between the producer step and any consumer step that requires this state
+   * (#159 PR B). Requires `witness` to be set.
+   */
+  eventual?: boolean;
+  /**
+   * Witness used by the awaitEventually wait when `eventual === true`.
+   * The witness invokes a read-shape operation (today: GET-by-key only) and
+   * polls until the predicate holds against the response body.
+   */
+  witness?: WitnessSpec;
+}
+
+export interface WitnessSpec {
+  /** Operation invoked to observe the state. Must reference a real
+   *  operationId in the graph. PR B constrains this to GET-shape ops. */
+  operationId: string;
+  /** Predicate over the parsed response body that holds when the state is
+   *  observable. */
+  predicate: WitnessPredicate;
+  /** Optional total wait budget in ms; defaults to the awaitEventually
+   *  helper's built-in default (10_000). */
+  waitUpToMs?: number;
+  /** Optional poll interval in ms; defaults to the helper's built-in
+   *  default (500). */
+  pollIntervalMs?: number;
+}
+
+/**
+ * Structured predicate — the emitter generates a typed arrow function from
+ * this rather than interpolating a user-supplied string, so the on-disk
+ * config can't smuggle arbitrary code into the emitted suite. PR B only
+ * supports single-segment `path` (the response body's top-level field).
+ * Nested-path support can be added later as a separate field shape.
+ */
+export interface WitnessPredicate {
+  /** Top-level field on the response body. Must match
+   *  `/^[A-Za-z_$][A-Za-z0-9_$]*$/` so it can be safely emitted as a
+   *  bracket-access key (`b['<path>']`). */
+  path: string;
+  /** Expected scalar compared with `===`. */
+  equals: string | number | boolean;
 }
 
 export interface OperationDomainRequirements {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { OperationGraph } from './types.js';
 
 // ---------------------------------------------------------------------------
 // path-analyser/src/domainSemanticsValidator.ts
@@ -47,6 +48,44 @@ const ArtifactKindSpecSchema = z
   })
   .passthrough();
 
+// #159 PR B: structured predicate shape. `path` must be a safe identifier
+// because the emitter renders it as a TS bracket-access key (`b['<path>']`)
+// without an escape pass; `equals` is constrained to primitives so the
+// emitter can JSON.stringify it directly. `.strict()` aligns this runtime
+// schema with the on-disk JSON schema's `additionalProperties: false` —
+// extra keys are almost always a typo (e.g. `equal` for `equals`) and
+// silently dropping them would mask the typo until the emitted predicate
+// misbehaved at runtime.
+const WitnessPredicateSchema = z
+  .object({
+    path: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
+      message: 'witness.predicate.path must match /^[A-Za-z_$][A-Za-z0-9_$]*$/',
+    }),
+    equals: z.union([z.string(), z.number(), z.boolean()]),
+  })
+  .strict();
+
+const WitnessSpecSchema = z
+  .object({
+    operationId: z.string().min(1),
+    predicate: WitnessPredicateSchema,
+    waitUpToMs: z.number().int().positive().optional(),
+    pollIntervalMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const RuntimeStateSpecSchema = z
+  .object({
+    kind: z.literal('state').optional(),
+    producedBy: z.array(z.string()).optional(),
+    parameter: z.string().optional(),
+    parameters: z.array(z.string()).optional(),
+    requires: z.array(z.string()).optional(),
+    eventual: z.boolean().optional(),
+    witness: WitnessSpecSchema.optional(),
+  })
+  .passthrough();
+
 const OperationDomainRequirementsSchema = z
   .object({
     requires: z.array(z.string()).optional(),
@@ -77,7 +116,7 @@ export const GlobalContextSeedSchema = z
 // flow through unmodified.
 const DomainSemanticsShape = z
   .object({
-    runtimeStates: z.record(z.string(), z.unknown()).optional(),
+    runtimeStates: z.record(z.string(), RuntimeStateSpecSchema).optional(),
     capabilities: z.record(z.string(), z.unknown()).optional(),
     semanticTypes: z.record(z.string(), SemanticTypeSpecSchema).optional(),
     artifactKinds: z.record(z.string(), ArtifactKindSpecSchema).optional(),
@@ -311,6 +350,32 @@ function checkGlobalContextSeedsCoherent(d: DomainSemanticsShape): CrossRefIssue
   return issues;
 }
 
+// #159 PR B: a runtimeState marked `eventual: true` must declare a
+// `witness` so the planner has something to wait on. Without this check,
+// flipping `eventual` true on a state without a witness would silently
+// produce a chain with no wait injected (and the consumer step would
+// still race the producer's projection lag).
+function checkEventualStateWitnessShape(d: DomainSemanticsShape): CrossRefIssue[] {
+  const issues: CrossRefIssue[] = [];
+  for (const [name, spec] of Object.entries(d.runtimeStates ?? {})) {
+    const eventual = spec.eventual === true;
+    const witness = spec.witness;
+    if (eventual && (witness === undefined || witness === null)) {
+      issues.push({
+        code: 'eventualStateWitnessShape',
+        message: `runtimeStates.${name} sets eventual: true but has no witness — the planner would inject no wait. Declare a witness { operationId, predicate } or unset eventual.`,
+      });
+    }
+    if (!eventual && witness !== undefined && witness !== null) {
+      issues.push({
+        code: 'eventualStateWitnessShape',
+        message: `runtimeStates.${name} declares a witness but eventual is not true — the witness will not be used. Set eventual: true or remove the witness.`,
+      });
+    }
+  }
+  return issues;
+}
+
 const CROSS_REF_CHECKS = [
   checkArtifactKindStateDeclared,
   checkArtifactKindWitnessDeclared,
@@ -319,6 +384,7 @@ const CROSS_REF_CHECKS = [
   checkDisjunctionNotWitnessRedundant,
   checkDisjunctionMemberResolves,
   checkGlobalContextSeedsCoherent,
+  checkEventualStateWitnessShape,
 ] as const;
 
 // Composed schema: structural shape + every cross-reference invariant.
@@ -401,4 +467,55 @@ export function assertSafeGlobalContextSeeds(seeds: unknown): void {
     const formatted = issues.map((i) => `  - [${i.code}] ${i.message}`).join('\n');
     throw new Error(`globalContextSeeds failed coherence validation:\n${formatted}`);
   }
+}
+
+/**
+ * Validate cross-references between `domain.runtimeStates[*].witness` and
+ * the loaded operation graph (#159 PR B review).
+ *
+ * The structural validator (`validateDomainSemantics`) can only see the
+ * domain-semantics sidecar in isolation — it has no visibility into the
+ * operation graph, so a witness `operationId` that doesn't resolve to a
+ * real operation slips through it. Pre-this-check the planner silently
+ * skipped unknown witnesses; the user got back an emitted suite missing
+ * the wait it expected, and the racing-broker symptom returned.
+ *
+ * Two invariants:
+ *   1. `witnessOperationResolves` — every eventual state's `witness.operationId`
+ *      must resolve to a real entry in `graph.operations`.
+ *   2. `witnessOperationIsGet` — PR B only supports GET-shape witnesses
+ *      (the emitter renders `request.get(...)` and `awaitEventually`'s
+ *      retry semantics assume a read). Non-GET witnesses are rejected
+ *      now so the gap is visible at load time rather than as an emitted
+ *      suite that calls `request.post(...)` against a witness URL with
+ *      no body.
+ *
+ * Returns the empty array on success. Designed to be called after
+ * `loadGraph` has assembled `graph.operations` and `graph.domain`.
+ */
+export function validateRuntimeStateWitnessGraphRefs(
+  graph: OperationGraph,
+): DomainSemanticsValidationError[] {
+  const issues: DomainSemanticsValidationError[] = [];
+  const states = graph.domain?.runtimeStates;
+  if (!states) return issues;
+  for (const [stateName, spec] of Object.entries(states)) {
+    if (spec.eventual !== true || !spec.witness) continue;
+    const witnessOp = graph.operations[spec.witness.operationId];
+    if (!witnessOp) {
+      issues.push({
+        invariant: 'witnessOperationResolves',
+        message: `runtimeStates.${stateName}.witness.operationId references "${spec.witness.operationId}", which does not resolve to a known operation in the bundled spec.`,
+      });
+      continue;
+    }
+    const method = witnessOp.method?.toUpperCase?.() ?? '';
+    if (method !== 'GET') {
+      issues.push({
+        invariant: 'witnessOperationIsGet',
+        message: `runtimeStates.${stateName}.witness.operationId "${spec.witness.operationId}" is ${method || 'an unknown method'}; PR B (#159) supports GET-shape witnesses only.`,
+      });
+    }
+  }
+  return issues;
 }

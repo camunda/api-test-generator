@@ -4,6 +4,7 @@ import { assertSafeGlobalContextSeeds } from '../../domainSemanticsValidator.js'
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
+  EventualWaitSpec,
   GlobalContextSeed,
   RequestStep,
 } from '../../types.js';
@@ -145,12 +146,21 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   );
 
   // Determine upfront whether any scenario will wrap a step with
-  // awaitEventually() so we can conditionally include the import. A step
-  // is wrapped when `stepNeedsAwait()` identifies it as belonging to an
-  // eventually consistent operation (derived from
-  // `s.operations[].eventuallyConsistent`) and the step expects a 200
-  // (we never await a step that's expected to produce an error response).
-  const needsAwaitEventually = collection.scenarios.some((s) => stepNeedsAwait(s).length > 0);
+  // awaitEventually() so we can conditionally include the import. Two
+  // wrap-triggers fire today:
+  //   1. stepNeedsAwait() — a read-shape step belonging to an eventually
+  //      consistent operation (`s.operations[].eventuallyConsistent`,
+  //      from the `x-eventually-consistent` vendor extension).
+  //   2. eventualWaitsAfter — a producer step has been annotated with an
+  //      eventual-state wait by the planner (#159 PR B). The wait is
+  //      rendered as a standalone `awaitEventually(...)` block after the
+  //      producer's request/expect block; this trigger ensures the
+  //      import is present even when no step is itself an EC read.
+  const needsAwaitEventually = collection.scenarios.some(
+    (s) =>
+      stepNeedsAwait(s).length > 0 ||
+      (s.requestPlan ?? []).some((step) => (step.eventualWaitsAfter?.length ?? 0) > 0),
+  );
 
   // Default `recordResponses` to true so callers that omit the option keep
   // the pre-config behaviour. Threaded down into renderScenarioTest so the
@@ -464,6 +474,17 @@ function renderScenarioTest(
       }
     }
     body.push('  }');
+    // #159 PR B: render planner-annotated eventual-state waits AFTER the
+    // producer step's block. Emitted as a sibling block (not nested inside
+    // the producer's `{ ... }`) so its locals (`witnessUrl`, etc.) don't
+    // collide with the producer's, and so the wait is visible at the same
+    // indentation depth as the request steps it sits between in the source.
+    // The index is forwarded so the per-wait response variable
+    // (`witnessRespN`) stays unique when a single producer step has
+    // multiple eventual waits.
+    (step.eventualWaitsAfter ?? []).forEach((wait, waitIdx) => {
+      body.push(...renderEventualWait(wait, waitIdx));
+    });
   });
   body.push('});');
   return body.join('\n');
@@ -483,6 +504,80 @@ function escapeQuotes(s: string): string {
 }
 function camelCase(s: string) {
   return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+/**
+ * Render a planner-annotated eventual-state wait as a sibling block to a
+ * producer step (#159 PR B). The emitted code:
+ *
+ *   - resolves the witness URL with the same ctx-binding rewrite the
+ *     request steps use (`buildUrlExpression`), so a witness referencing
+ *     `{processInstanceKey}` picks up `ctx.processInstanceKeyVar` already
+ *     extracted from the producer's response;
+ *   - wraps the witness fetch in `awaitEventually(...)` with a structured
+ *     predicate generated from the spec — no user-supplied predicate
+ *     string is interpolated, so the on-disk config cannot smuggle
+ *     arbitrary code into the emitted suite.
+ *
+ * Returns the source lines (no trailing newlines) for direct push onto
+ * the scenario body buffer.
+ *
+ * Safety: the witness predicate's `path` is validated against
+ * `/^[A-Za-z_$][A-Za-z0-9_$]*$/` by the domain-semantics validator
+ * (`WitnessPredicateSchema`), so the bracket-access key emitted below
+ * is identifier-safe. `equals` is constrained to string|number|boolean,
+ * round-tripped through JSON.stringify, which produces a valid TS
+ * literal for each of those scalar shapes.
+ */
+function renderEventualWait(wait: EventualWaitSpec, idx: number): string[] {
+  const out: string[] = [];
+  const w = wait.witness;
+  const respVar = `witnessResp${idx + 1}`;
+  out.push(`  // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
+  out.push(`  {`);
+  out.push(`    const witnessUrl = baseUrl + ${buildUrlExpression(w.pathTemplate)};`);
+  const optionFields: string[] = [
+    `method: '${w.method.toUpperCase()}'`,
+    `operationId: '${w.operationId}'`,
+  ];
+  if (typeof w.waitUpToMs === 'number') optionFields.push(`waitUpToMs: ${w.waitUpToMs}`);
+  if (typeof w.pollIntervalMs === 'number')
+    optionFields.push(`pollIntervalMs: ${w.pollIntervalMs}`);
+  // Predicate body: narrow `unknown` to a record, read the configured
+  // top-level field, compare with the configured scalar. Indentation
+  // matches the surrounding `await awaitEventually(...)` call so the
+  // emitted file passes biome's formatter without a separate pass.
+  optionFields.push(`predicate: (body) => {
+        if (body === null || typeof body !== 'object') return false;
+        const v = (body as Record<string, unknown>)['${w.predicate.path}'];
+        return v === ${JSON.stringify(w.predicate.equals)};
+      }`);
+  const method = w.method.toLowerCase();
+  // Capture awaitEventually's return value and assert on the status the
+  // same way request-step blocks do. awaitEventually returns early
+  // (without throwing) on hard-fail statuses (400/401/403/409/422/5xx)
+  // so the caller can produce a useful diff via expect(...).toBe(200);
+  // ignoring the response (the pre-review shape) would let the scenario
+  // proceed to the consumer step and attribute the eventual failure to
+  // the wrong place. The 200 assertion below tags the failure to the
+  // witness wait. (#159 PR B review.)
+  out.push(`    const ${respVar} = await awaitEventually(`);
+  out.push(`      async () => request.${method}(witnessUrl, { headers: await authHeaders() }),`);
+  out.push(`      {`);
+  for (let i = 0; i < optionFields.length; i++) {
+    const sep = i === optionFields.length - 1 ? '' : ',';
+    out.push(`        ${optionFields[i]}${sep}`);
+  }
+  out.push(`      },`);
+  out.push(`    );`);
+  out.push(`    if (${respVar}.status() !== 200) {`);
+  out.push(
+    `      try { console.error('Witness response body:', await ${respVar}.text()); } catch {}`,
+  );
+  out.push(`    }`);
+  out.push(`    expect(${respVar}.status()).toBe(200);`);
+  out.push(`  }`);
+  return out;
 }
 
 /**

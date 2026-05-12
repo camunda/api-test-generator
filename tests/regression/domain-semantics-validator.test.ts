@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   assertSafeGlobalContextSeeds,
   validateDomainSemantics,
+  validateRuntimeStateWitnessGraphRefs,
 } from '../../path-analyser/src/domainSemanticsValidator.ts';
+import type { OperationGraph } from '../../path-analyser/src/types.ts';
 
 // ---------------------------------------------------------------------------
 // Class-scoped guards for path-analyser/src/domainSemanticsValidator.ts.
@@ -234,6 +236,79 @@ describe('validateDomainSemantics', () => {
     // cross-ref invariant fires.
     expect(errs.length).toBeGreaterThan(0);
   });
+
+  // #159 PR B: eventual + witness coherence.
+  it('rejects runtimeStates entries with eventual: true but no witness', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        SomeEventualState: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          // witness intentionally omitted
+        },
+      },
+    });
+    expect(errs.find((e) => e.invariant === 'eventualStateWitnessShape')?.message).toContain(
+      'eventual: true but has no witness',
+    );
+  });
+
+  it('rejects runtimeStates entries with a witness but eventual omitted (witness is dead config)', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        SomeState: {
+          kind: 'state',
+          producedBy: ['x'],
+          witness: {
+            operationId: 'get',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    });
+    expect(errs.find((e) => e.invariant === 'eventualStateWitnessShape')?.message).toContain(
+      'declares a witness but eventual is not true',
+    );
+  });
+
+  it('accepts a coherent eventual + witness entry', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        SomeEventualState: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getX',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    });
+    // No eventualStateWitnessShape issue for this entry.
+    expect(errs.find((e) => e.invariant === 'eventualStateWitnessShape')).toBeUndefined();
+  });
+
+  it('rejects witness.predicate.path that is not a safe identifier', () => {
+    const errs = validateDomainSemantics({
+      runtimeStates: {
+        S: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getX',
+            predicate: { path: 'state; drop table users', equals: 'READY' },
+          },
+        },
+      },
+    });
+    // Structural zod issue from WitnessPredicateSchema (regex mismatch),
+    // surfaces as `shape` rather than a named cross-ref invariant.
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs.some((e) => e.message.includes('predicate.path must match'))).toBe(true);
+  });
 });
 
 // Boundary chokepoint used by the emitter (renderPlaywrightSuite /
@@ -268,5 +343,137 @@ describe('assertSafeGlobalContextSeeds (boundary)', () => {
     expect(() => assertSafeGlobalContextSeeds([{ binding: 'tenant-id' }])).toThrow(
       /structural validation/,
     );
+  });
+});
+
+// #159 PR B (review): structural validation can't see the operation
+// graph, so a witness operationId that doesn't resolve, or whose method
+// isn't GET, slips through validateDomainSemantics and the planner
+// silently skips the wait. validateRuntimeStateWitnessGraphRefs runs at
+// load time AFTER the graph is assembled and rejects both shapes by name.
+describe('validateRuntimeStateWitnessGraphRefs (graph cross-references)', () => {
+  function buildGraph(
+    operations: Record<string, { operationId: string; method: string; path: string }>,
+    runtimeStates: Record<string, unknown>,
+  ): OperationGraph {
+    // Minimal stub: only the fields the validator reads. Casts to
+    // OperationNode are intentional — the test only exercises the
+    // validator's narrow read surface (operationId + method), not the
+    // full graph contract.
+    return {
+      // biome-ignore lint/plugin: test stub mirrors the narrow read surface of validateRuntimeStateWitnessGraphRefs
+      operations: operations as unknown as OperationGraph['operations'],
+      producersByType: {},
+      // biome-ignore lint/plugin: test stub mirrors the narrow read surface of validateRuntimeStateWitnessGraphRefs
+      domain: { version: 1, runtimeStates } as unknown as OperationGraph['domain'],
+    };
+  }
+
+  it('returns no issues when every eventual witness resolves to a GET op', () => {
+    const graph = buildGraph(
+      { getThing: { operationId: 'getThing', method: 'GET', path: '/things/{id}' } },
+      {
+        SomeEventualState: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getThing',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    );
+    expect(validateRuntimeStateWitnessGraphRefs(graph)).toEqual([]);
+  });
+
+  it('rejects witness.operationId that does not resolve in the bundled spec', () => {
+    const graph = buildGraph(
+      {},
+      {
+        S: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getMissing',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    );
+    const issues = validateRuntimeStateWitnessGraphRefs(graph);
+    expect(issues.find((i) => i.invariant === 'witnessOperationResolves')?.message).toContain(
+      'getMissing',
+    );
+  });
+
+  it('rejects witness.operationId whose method is not GET (PR B constraint)', () => {
+    const graph = buildGraph(
+      { searchThings: { operationId: 'searchThings', method: 'POST', path: '/things/search' } },
+      {
+        S: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'searchThings',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    );
+    const issues = validateRuntimeStateWitnessGraphRefs(graph);
+    expect(issues.find((i) => i.invariant === 'witnessOperationIsGet')?.message).toContain('POST');
+  });
+
+  it('ignores non-eventual states even if they declare a witness shape', () => {
+    // Cross-check: validateDomainSemantics already flags this as
+    // `eventualStateWitnessShape`. validateRuntimeStateWitnessGraphRefs
+    // is concerned with graph resolution, not with eventual/witness
+    // coherence — so it must not also fire here.
+    const graph = buildGraph(
+      { getThing: { operationId: 'getThing', method: 'GET', path: '/things/{id}' } },
+      {
+        S: {
+          kind: 'state',
+          producedBy: ['x'],
+          // eventual omitted on purpose
+          witness: {
+            operationId: 'getThing',
+            predicate: { path: 'state', equals: 'READY' },
+          },
+        },
+      },
+    );
+    expect(validateRuntimeStateWitnessGraphRefs(graph)).toEqual([]);
+  });
+});
+
+// #159 PR B (review): WitnessPredicateSchema is now `.strict()` so extra
+// keys (typos like `equal` for `equals`) are rejected at load time rather
+// than silently dropped.
+describe('WitnessPredicateSchema strictness', () => {
+  it('rejects extra keys under witness.predicate (e.g. typo "equal" for "equals")', () => {
+    // validateDomainSemantics takes `unknown` and builds the parse tree
+    // via Zod, so the input is intentionally typed loosely here. The
+    // typo "equal" must trip Zod's strict() rejection at load time
+    // rather than silently dropping through and leaving the planner
+    // with a broken predicate at runtime.
+    const input: unknown = {
+      runtimeStates: {
+        S: {
+          kind: 'state',
+          producedBy: ['x'],
+          eventual: true,
+          witness: {
+            operationId: 'getThing',
+            predicate: { path: 'state', equals: 'READY', equal: 'OOPS' },
+          },
+        },
+      },
+    };
+    const errs = validateDomainSemantics(input);
+    expect(errs.length).toBeGreaterThan(0);
   });
 });
