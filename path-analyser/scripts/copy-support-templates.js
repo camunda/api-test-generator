@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ---------------------------------------------------------------------------
-// Stages the runtime support templates that the Playwright emitter vendors
-// into every generated test suite.
+// Stages the runtime support templates that the Playwright and JS SDK
+// emitters vendor into every generated test suite.
 //
 // The canonical sources live in src/codegen/support/ (some are also imported
 // at generation time by analyser code — e.g. deterministicSuffix). This
@@ -15,11 +15,21 @@
 //     seeding.ts
 //     fixtures.ts
 //     seed-rules.json
+//     await-eventually.ts
+//   dist/src/codegen/js-sdk/support-templates/
+//     seeding.ts
+//     seed-rules.json
+//   dist/src/codegen/js-sdk/project-templates/
+//     package.json
+//     tsconfig.json
+//     vitest.config.ts
+//     .env.example
+//     README.md
 // ---------------------------------------------------------------------------
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-const SUPPORT_FILES = [
+const PLAYWRIGHT_SUPPORT_FILES = [
   'env.ts',
   'recorder.ts',
   'seeding.ts',
@@ -28,14 +38,26 @@ const SUPPORT_FILES = [
   'await-eventually.ts',
 ];
 
+const SDK_SUPPORT_FILES = ['seeding.ts', 'seed-rules.json'];
+
+const SDK_PROJECT_FILES = [
+  'package.json',
+  'tsconfig.json',
+  'vitest.config.ts',
+  '.env.example',
+  'README.md',
+];
+
 async function main() {
   const root = process.cwd();
-  const srcDir = path.join(root, 'src/codegen/support');
-  const destDir = path.join(root, 'dist/src/codegen/playwright/support-templates');
-  await fs.mkdir(destDir, { recursive: true });
-  for (const name of SUPPORT_FILES) {
-    const src = path.join(srcDir, name);
-    const dest = path.join(destDir, name);
+  const supportSrcDir = path.join(root, 'src/codegen/support');
+
+  // Playwright support templates
+  const playwrightDestDir = path.join(root, 'dist/src/codegen/playwright/support-templates');
+  await fs.mkdir(playwrightDestDir, { recursive: true });
+  for (const name of PLAYWRIGHT_SUPPORT_FILES) {
+    const src = path.join(supportSrcDir, name);
+    const dest = path.join(playwrightDestDir, name);
     try {
       await fs.access(src);
     } catch {
@@ -45,7 +67,38 @@ async function main() {
     await fs.copyFile(src, dest);
   }
   console.log(
-    `[copy-support-templates] staged ${SUPPORT_FILES.length} templates -> ${path.relative(root, destDir)}`,
+    `[copy-support-templates] staged ${PLAYWRIGHT_SUPPORT_FILES.length} playwright templates -> ${path.relative(root, playwrightDestDir)}`,
+  );
+
+  // JS SDK support templates (subset of Playwright support)
+  const sdkSupportDestDir = path.join(root, 'dist/src/codegen/js-sdk/support-templates');
+  await fs.mkdir(sdkSupportDestDir, { recursive: true });
+  for (const name of SDK_SUPPORT_FILES) {
+    const src = path.join(supportSrcDir, name);
+    const dest = path.join(sdkSupportDestDir, name);
+    await fs.copyFile(src, dest);
+  }
+  console.log(
+    `[copy-support-templates] staged ${SDK_SUPPORT_FILES.length} js-sdk support templates -> ${path.relative(root, sdkSupportDestDir)}`,
+  );
+
+  // JS SDK project templates (package.json, tsconfig, vitest.config, etc.)
+  const sdkProjSrcDir = path.join(root, 'src/codegen/js-sdk/project-templates');
+  const sdkProjDestDir = path.join(root, 'dist/src/codegen/js-sdk/project-templates');
+  await fs.mkdir(sdkProjDestDir, { recursive: true });
+  for (const name of SDK_PROJECT_FILES) {
+    const src = path.join(sdkProjSrcDir, name);
+    const dest = path.join(sdkProjDestDir, name);
+    try {
+      await fs.access(src);
+    } catch {
+      console.error('[copy-support-templates] source not found:', src);
+      process.exit(1);
+    }
+    await fs.copyFile(src, dest);
+  }
+  console.log(
+    `[copy-support-templates] staged ${SDK_PROJECT_FILES.length} js-sdk project templates -> ${path.relative(root, sdkProjDestDir)}`,
   );
 }
 

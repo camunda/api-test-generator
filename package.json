@@ -29,6 +29,8 @@
     "observe:aggregate": "npm run build:analyser && node path-analyser/dist/src/scripts/aggregate-observations.js",
     "optional-responses": "node optional-responses/report.js",
     "pipeline": "npm run fetch-spec && npm run testsuite:generate && npm run generate:request-validation",
+    "fetch-js-sdk-map": "node scripts/fetch-js-sdk-map.js",
+    "codegen:js-sdk:all": "npm run build:analyser && node path-analyser/dist/src/codegen/index.js --target=js-sdk --all",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "lint:generated": "biome check --config-path=biome.generated.json generated",
