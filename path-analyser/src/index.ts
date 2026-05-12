@@ -1241,19 +1241,17 @@ function buildRequestBodyFromCanonical(
       const fileRef = regHit?.ref || defaultFixtures[kind || ''] || '@@FILE:bpmn/simple.bpmn';
       // Bind jobType from the chosen fixture for later use in the request
       // body (`activateJobs.type`, `completeJob`/`failJob`/`throwJobError`
-      // path params, etc.). #163 review: the canonical source is
-      // `providesValues.JobType[0]` (PR 1 of #162's data shape); the
-      // legacy `parameters.jobType` field on the registry entry is
-      // accepted as a fallback during the transition. #164 will retire
-      // the literal-field-name special-case in
-      // `buildRequestBodyFromCanonical` that pairs with this binding;
-      // until then both call sites must agree on the source of truth.
-      const jobTypeFromProvides = regHit?.providesValues?.JobType?.[0];
-      const jobTypeFromParams =
-        regHit?.params && typeof regHit.params.jobType === 'string'
-          ? regHit.params.jobType
-          : undefined;
-      const jobTypeValue = jobTypeFromProvides ?? jobTypeFromParams;
+      // path params, etc.). After #164 the SOLE source is
+      // `providesValues.JobType[0]` (declared on the bpmnProcess fixture
+      // alongside ElementId). The legacy `parameters.jobType` field and
+      // its `??`-fallback reader are gone.
+      //
+      // The literal-field-name special-case at line 944
+      // (`name === 'type' && bindingMap.jobType`) that pairs the
+      // semantically-named `jobType` binding with the spec-named `type`
+      // field is intentionally left in place — that's a separate
+      // architectural cleanup tracked by #162 PR 3 (unified dispatch).
+      const jobTypeValue = regHit?.providesValues?.JobType?.[0];
       if (jobTypeValue !== undefined) {
         const varName = 'jobTypeVar';
         scenario.bindings ||= {};
@@ -1322,13 +1320,6 @@ type ArtifactRegistryEntry = {
   path: string;
   description?: string;
   /**
-   * Pre-#162 ad-hoc bag of "characteristics this fixture has" — the
-   * planner only ever consulted `parameters.jobType`. Kept for back-compat
-   * during the transition to `providesValues` (#162 PR 1); new entries
-   * should declare values under `providesValues` instead.
-   */
-  parameters?: Record<string, unknown>;
-  /**
    * Runtime characteristics this specific fixture provides BEYOND what
    * `artifactKinds.<kind>.producesStates` declares for the kind. The
    * selector picks the entry whose effective providesStates (entry ∪
@@ -1345,6 +1336,11 @@ type ArtifactRegistryEntry = {
    * Per-semantic the value is an array so a future per-consumer-site
    * preference vocabulary can pick a specific entry; PR 1's planner
    * takes index 0 unconditionally.
+   *
+   * After #164: this is the SOLE source of fixture-derived values. The
+   * pre-#162 ad-hoc `parameters: { jobType: ... }` field was the
+   * embryonic form of this idea and has been retired; any new
+   * fixture-derived value must be declared here.
    */
   providesValues?: Record<string, string[]>;
 };
@@ -1370,7 +1366,6 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
         kind: e.kind,
         path: e.path,
         description: e.description,
-        parameters: e.parameters,
         providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
         providesValues: normaliseProvidesValues(e.providesValues),
       }));
@@ -1499,13 +1494,7 @@ function chooseFixtureFromRegistry(
   kind: string | undefined,
   requiredStates: ReadonlySet<string>,
   kindLevelProvides: ReadonlySet<string>,
-):
-  | {
-      ref: string;
-      params?: Record<string, unknown>;
-      providesValues?: Record<string, string[]>;
-    }
-  | undefined {
+): { ref: string; providesValues?: Record<string, string[]> } | undefined {
   if (!kind) return undefined;
   const candidates = getArtifactsRegistry().filter((e) => e.kind === kind);
   if (candidates.length === 0) return undefined;
@@ -1528,7 +1517,6 @@ function chooseFixtureFromRegistry(
     const fallback = candidates[0];
     return {
       ref: `@@FILE:${fallback.path}`,
-      params: fallback.parameters,
       providesValues: fallback.providesValues,
     };
   }
@@ -1539,7 +1527,6 @@ function chooseFixtureFromRegistry(
   });
   return {
     ref: `@@FILE:${best.path}`,
-    params: best.parameters,
     providesValues: best.providesValues,
   };
 }
