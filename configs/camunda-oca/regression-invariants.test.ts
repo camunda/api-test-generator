@@ -1468,8 +1468,14 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
       throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
     }
     const src = readFileSync(spec, 'utf8');
-    const createIdx = src.indexOf('Step 2: createProcessInstance');
-    const deleteIdx = src.indexOf('Step 3: deleteProcessInstance');
+    // #118: each request step is now wrapped in `await test.step('<operationId>', ...)`
+    // instead of being preceded by a `// Step N: <operationId>` comment.
+    // Locate the create/delete steps by their test.step labels. The emitter
+    // produces double-quoted labels via JSON.stringify(operationId); the
+    // biome.generated.json post-processing rewrites them to single quotes,
+    // so the test matches what's actually written to disk.
+    const createIdx = src.indexOf("test.step('createProcessInstance'");
+    const deleteIdx = src.indexOf("test.step('deleteProcessInstance'");
     expect(createIdx, 'createProcessInstance step marker not found').toBeGreaterThan(0);
     expect(deleteIdx, 'deleteProcessInstance step marker not found').toBeGreaterThan(createIdx);
     const between = src.slice(createIdx, deleteIdx);

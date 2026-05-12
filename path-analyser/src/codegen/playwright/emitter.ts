@@ -345,9 +345,13 @@ function renderScenarioTest(
         step.bodyTemplate = { processDefinitionKey: '${processDefinitionKeyVar}' };
       }
     }
-    // Basic body handling placeholder
-    body.push(`  // Step ${idx + 1}: ${step.operationId}`);
-    body.push(`  {`);
+    // Each request step is wrapped in `await test.step(...)` so it shows
+    // up as a labelled, collapsible group in the Playwright HTML report
+    // and trace viewer, with per-step timing and failure attribution to
+    // the named step. Cross-step state flows through `ctx` declared in
+    // the outer test scope; the per-step locals (resp/body/json) stay
+    // confined to the callback.
+    body.push(`  await test.step(${JSON.stringify(step.operationId)}, async () => {`);
     body.push(`    const url = baseUrl + ${urlExpr};`);
     const bodyVar = `body${idx + 1}`;
     if (step.bodyKind === 'json' && step.bodyTemplate) {
@@ -473,7 +477,7 @@ function renderScenarioTest(
         body.push(`    extractInto(ctx, '${ex.bind}', json${optAcc});`);
       }
     }
-    body.push('  }');
+    body.push('  });');
     // #159 PR B: render planner-annotated eventual-state waits AFTER the
     // producer step's block. Emitted as a sibling block (not nested inside
     // the producer's `{ ... }`) so its locals (`witnessUrl`, etc.) don't

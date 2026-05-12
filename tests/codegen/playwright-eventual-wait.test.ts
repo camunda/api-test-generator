@@ -63,12 +63,13 @@ describe('emitter: eventual-state wait injection (#159 PR B)', () => {
       suiteName: 'deleteWidget',
       mode: 'feature',
     });
-    // The wait must appear in the source AND sit between Step 1 (producer)
-    // and Step 2 (consumer). Position is part of the contract — a wait
-    // emitted before the producer (or after the consumer) doesn't fix the
-    // motivating case.
-    const producerIdx = src.indexOf('Step 1: createWidget');
-    const consumerIdx = src.indexOf('Step 2: deleteWidget');
+    // The wait must appear in the source AND sit between the producer
+    // (createWidget) and the consumer (deleteWidget). Position is part of
+    // the contract — a wait emitted before the producer (or after the
+    // consumer) doesn't fix the motivating case. The per-step marker is
+    // `await test.step('<operationId>', ...)`.
+    const producerIdx = src.indexOf('test.step("createWidget"');
+    const consumerIdx = src.indexOf('test.step("deleteWidget"');
     const waitIdx = src.indexOf('await awaitEventually(');
     expect(producerIdx).toBeGreaterThan(0);
     expect(consumerIdx).toBeGreaterThan(producerIdx);
