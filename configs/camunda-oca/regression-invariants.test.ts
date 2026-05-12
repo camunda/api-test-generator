@@ -3055,10 +3055,11 @@ describeForThisConfig(
       ];
 
       // Match a single emitted `test('...', async (...) => { ... });`
-      // or `test("...", async (...) => { ... });` block. Captures the
-      // title (group 2) and the scenario kind (group 4).
+      // or `test("...", async (...) => { ... });` block. The single-
+      // quoted branch captures title/kind in groups 1/2; the double-
+      // quoted branch captures title/kind in groups 3/4.
       const TEST_BLOCK =
-        /test\((['"])([^'"]*)\1,\s*async[^]*?scenarioKind:\s*(['"])([^'"]+)\3[^]*?}\);/g;
+        /test\('([^']*)',\s*async[^]*?scenarioKind:\s*'([^']+)'[^]*?}\);|test\("([^"]*)",\s*async[^]*?scenarioKind:\s*"([^"]+)"[^]*?}\);/g;
 
       interface Offender {
         file: string;
@@ -3073,8 +3074,11 @@ describeForThisConfig(
         if (!f.endsWith('-validation-api-tests.spec.ts')) continue;
         const text = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
         for (const match of text.matchAll(TEST_BLOCK)) {
-          const title = match[2];
-          const scenarioKind = match[4];
+          const title = match[1] ?? match[3];
+          const scenarioKind = match[2] ?? match[4];
+          if (title === undefined || scenarioKind === undefined) {
+            continue;
+          }
           // Title format: `<operationId> - <suffix>` (qaEmitter.ts).
           const opMatch = title.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\s+-\s+/);
           if (!opMatch) continue;
