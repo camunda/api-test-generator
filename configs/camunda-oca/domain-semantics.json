@@ -156,7 +156,15 @@
     "DecisionDefinitionKey": { "witnesses": "DecisionDefinitionDeployed" },
     "DecisionRequirementsKey": { "witnesses": "DecisionRequirementsDeployed" },
     "FormKey": { "witnesses": "FormDeployed" },
-    "JobKey": { "witnesses": "JobAvailableForActivation" }
+    "JobKey": { "witnesses": "JobAvailableForActivation" },
+    "ElementId": {
+      "kind": "modelDerived",
+      "$comment": "Element IDs are defined inside the deployed BPMN model. The planner reads them out-of-band from the chosen fixture's providesValues at plan time — no Camunda API round-trip required. See #162 PR 1."
+    },
+    "JobType": {
+      "kind": "modelDerived",
+      "$comment": "zeebe:taskDefinition type is encoded in the BPMN model on each service-task element. Read out-of-band from the chosen fixture's providesValues. Subsumes the pre-#162 ad-hoc `parameters.jobType` handling in the registry."
+    }
   },
   "operationArtifactRules": {
     "createDeployment": {

@@ -568,6 +568,12 @@ function buildRequestPlan(
       steps.push(dup);
     }
   }
+  // #162 PR 1: bind modelDerived semantics from the chain's deploy fixture
+  // BEFORE merging populatesSubShape, so that the merge sees the
+  // populatesSubShape entry the helper plants for nested-path values
+  // (and so the binding has the fixture value rather than the
+  // synthetic placeholder featureCoverageGenerator stamped earlier).
+  bindModelDerivedFromFixture(scenario, steps, graph);
   // Issue #105 (Phase 3): for variant scenarios, deep-merge the populated
   // sub-shape into the FINAL step's bodyTemplate. The planner stamps
   // `populatesSubShape` on each variant scenario; the emitter expects the
@@ -660,6 +666,139 @@ function annotateEventualWaits(steps: RequestStep[], graph: OperationGraph): voi
       });
     }
   }
+}
+
+/**
+ * #162 PR 1: bind modelDerived semantic values from the chain's
+ * createDeployment fixture and annotate `populatesSubShape` so the final
+ * step's body materializes the value.
+ *
+ * "modelDerived" means the value comes from inside the deployment
+ * artifact itself (e.g. an ElementId encoded in the BPMN), not from a
+ * Camunda API response. The fixture registry's `providesValues` entry
+ * declares which concrete values each fixture supplies.
+ *
+ * Scope (PR 1):
+ *
+ *   - Runs ONLY for feature-coverage scenarios. Variant scenarios
+ *     continue using their producer-chain logic (see
+ *     `generateOptionalSubShapeVariants`); PR 4 of #162 unifies them.
+ *
+ *   - Single-deploy chains only — the helper picks the FIRST
+ *     `createDeployment` step's fixture as the value source. Multi-deploy
+ *     chains (source + target models, e.g. migrateProcessInstance) need
+ *     per-deploy-step fixture selection and are a follow-up.
+ *
+ *   - Index 0 of `providesValues[semantic]` is used unconditionally.
+ *     A future per-consumer-site preference vocabulary can pick a
+ *     specific entry; not load-bearing today.
+ *
+ * Side effects:
+ *
+ *   - For every modelDerived semantic listed in the endpoint's
+ *     `requestBodySemanticTypes`, overrides any pre-existing binding
+ *     (synthetic or otherwise) with the fixture value. The override is
+ *     intentional: modelDerived values are authoritative over the
+ *     `fc:pos:...` synthetic placeholder stamped by featureCoverageGenerator.
+ *
+ *   - For nested-array semantics (`fieldPath` containing `[]`), adds a
+ *     `populatesSubShape` entry so `mergePopulatesSubShapeIntoFinalBody`
+ *     materializes the nested structure. Top-level scalar semantics are
+ *     handled by the existing flat-optional fill loop in
+ *     `buildRequestBodyFromCanonical` and do not need a populatesSubShape
+ *     annotation.
+ */
+function bindModelDerivedFromFixture(
+  scenario: EndpointScenario,
+  steps: RequestStep[],
+  graph: OperationGraph,
+): void {
+  if (scenario.strategy !== 'featureCoverage') return;
+  const domain = graph.domain;
+  if (!domain?.semanticTypes) return;
+  if (!steps.length) return;
+  const finalStep = steps[steps.length - 1];
+  const endpoint = graph.operations[finalStep.operationId];
+  // optionalSubShapes already filters to nested optional semantic leaves
+  // (the graphLoader pre-computes this via `subShapeRootOf`). PR 1's
+  // scope is exactly that subset — nested ElementId at consumer sites
+  // like `startInstructions[].elementId`. Top-level scalar modelDerived
+  // semantics (e.g. JobType) go through a different binding path and
+  // are out of scope here.
+  const subShapes = endpoint?.optionalSubShapes ?? [];
+  if (!subShapes.length) return;
+  // Find the first createDeployment step in the chain — single-deploy
+  // only in PR 1; multi-deploy is a follow-up.
+  const deployStep = steps.find((s) => s.operationId === 'createDeployment');
+  if (!deployStep) return;
+  const fixture = fixtureFromDeployStep(deployStep);
+  if (!fixture?.providesValues) return;
+
+  for (const subShape of subShapes) {
+    for (const leaf of subShape.leaves) {
+      const semKind = domain.semanticTypes[leaf.semantic]?.kind;
+      if (semKind !== 'modelDerived') continue;
+      const values = fixture.providesValues[leaf.semantic];
+      if (!values?.length) continue;
+      const varName = `${camelCase(leaf.semantic)}Var`;
+      scenario.bindings ||= {};
+      // Authoritative override: a featureCoverageGenerator synthetic
+      // would otherwise shadow the real fixture value.
+      scenario.bindings[varName] = values[0];
+
+      const sub = scenario.populatesSubShape ?? {
+        rootPath: subShape.rootPath,
+        leafPaths: [],
+        leafSemantics: [],
+      };
+      if (!sub.leafPaths.includes(leaf.fieldPath)) {
+        sub.leafPaths.push(leaf.fieldPath);
+        sub.leafSemantics ||= [];
+        sub.leafSemantics.push(leaf.semantic);
+      }
+      if (!sub.rootPath) sub.rootPath = subShape.rootPath;
+      scenario.populatesSubShape = sub;
+    }
+  }
+}
+
+/**
+ * Find the fixture registry entry referenced by a `createDeployment`
+ * step's multipart `resources` template. Multi-deploy steps carry
+ * multiple file references; PR 1 returns the entry for the FIRST one
+ * (single-deploy scope).
+ */
+function fixtureFromDeployStep(step: RequestStep): ArtifactRegistryEntry | undefined {
+  const tpl = step.multipartTemplate;
+  if (!isPlainRecord(tpl)) return undefined;
+  const files = isPlainRecord(tpl.files) ? tpl.files : undefined;
+  if (!files) return undefined;
+  for (const v of Object.values(files)) {
+    if (typeof v === 'string' && v.startsWith('@@FILE:')) {
+      const path = v.slice('@@FILE:'.length);
+      return getArtifactsRegistry().find((e) => e.path === path);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Compute the sub-shape root segment for a given fieldPath. Mirrors the
+ * (simpler) cases of `subShapeRootOf` in graphLoader; here we only need
+ * the deepest object/array-of-object ancestor so the emitter's
+ * `populatesSubShape` annotation has a non-empty root.
+ *
+ *   "startInstructions[].elementId"     → "startInstructions[]"
+ *   "result.activateElements[].elementId" → "result.activateElements[]"
+ *   "moveInstructions[].sourceElementId"  → "moveInstructions[]"
+ *
+ * Top-level scalars never reach this function — they go through the
+ * existing flat-optional fill path in buildRequestBodyFromCanonical.
+ */
+function subShapeRootForFieldPath(fieldPath: string): string {
+  const segments = fieldPath.split('.');
+  if (segments.length < 2) return '';
+  return segments.slice(0, -1).join('.');
 }
 
 function mergePopulatesSubShapeIntoFinalBody(
@@ -1160,11 +1299,38 @@ ${'${'}${varName}}`;
   return undefined;
 }
 
+/**
+ * Validate and copy a registry entry's `providesValues` shape. Each value
+ * must be an array of strings; anything else is dropped silently so a
+ * malformed entry doesn't poison the cache (the L3 coherence invariant
+ * surfaces the issue separately). Returns `undefined` when the input
+ * isn't a usable record, so callers can early-out cheaply.
+ */
+function normaliseProvidesValues(input: unknown): Record<string, string[]> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!Array.isArray(v)) continue;
+    const strings: string[] = [];
+    for (const x of v) {
+      if (typeof x === 'string') strings.push(x);
+    }
+    if (strings.length) out[k] = strings;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 // -------- Artifact Registry support ---------
 type ArtifactRegistryEntry = {
   kind: string;
   path: string;
   description?: string;
+  /**
+   * Pre-#162 ad-hoc bag of "characteristics this fixture has" — the
+   * planner only ever consulted `parameters.jobType`. Kept for back-compat
+   * during the transition to `providesValues` (#162 PR 1); new entries
+   * should declare values under `providesValues` instead.
+   */
   parameters?: Record<string, unknown>;
   /**
    * Runtime characteristics this specific fixture provides BEYOND what
@@ -1173,6 +1339,18 @@ type ArtifactRegistryEntry = {
    * kind) covers the chain's required states (#159).
    */
   providesStates?: string[];
+  /**
+   * Concrete values this fixture supplies for semantic types whose
+   * `semanticTypes.<X>.kind === 'modelDerived'` (#162 PR 1). The planner
+   * reads these out-of-band at plan time — no Camunda API round-trip is
+   * needed to learn the values, because the BPMN/DMN/Form file already
+   * encodes them (element IDs, job types, form IDs, …).
+   *
+   * Per-semantic the value is an array so a future per-consumer-site
+   * preference vocabulary can pick a specific entry; PR 1's planner
+   * takes index 0 unconditionally.
+   */
+  providesValues?: Record<string, string[]>;
 };
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
@@ -1198,6 +1376,7 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
         description: e.description,
         parameters: e.parameters,
         providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
+        providesValues: normaliseProvidesValues(e.providesValues),
       }));
       return artifactsRegistryCache || [];
     } catch {}

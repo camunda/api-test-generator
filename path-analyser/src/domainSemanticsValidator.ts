@@ -37,6 +37,11 @@ import type { OperationGraph } from './types.js';
 const SemanticTypeSpecSchema = z
   .object({
     witnesses: z.string().min(1).optional(),
+    // #162 PR 1: value-source classification. Only `modelDerived` lands
+    // in PR 1; future PRs add `attribute` (client-minted free-form
+    // labels). Anything else is rejected at the schema layer so a typo
+    // doesn't silently fall through to the default classification chain.
+    kind: z.enum(['modelDerived']).optional(),
   })
   .passthrough();
 
