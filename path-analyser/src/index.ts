@@ -695,11 +695,12 @@ function annotateEventualWaits(steps: RequestStep[], graph: OperationGraph): voi
  *
  * Side effects:
  *
- *   - For every modelDerived semantic listed in the endpoint's
- *     `requestBodySemanticTypes`, overrides any pre-existing binding
- *     (synthetic or otherwise) with the fixture value. The override is
- *     intentional: modelDerived values are authoritative over the
- *     `fc:pos:...` synthetic placeholder stamped by featureCoverageGenerator.
+ *   - For modelDerived semantics on nested optional sub-shape leaves from
+ *     `endpoint.optionalSubShapes` (i.e. the leaves computed via
+ *     `subShapeRootOf`), overrides any pre-existing binding (synthetic or
+ *     otherwise) with the fixture value. The override is intentional:
+ *     modelDerived values are authoritative over the `fc:pos:...`
+ *     synthetic placeholder stamped by featureCoverageGenerator.
  *
  *   - For nested-array semantics (`fieldPath` containing `[]`), adds a
  *     `populatesSubShape` entry so `mergePopulatesSubShapeIntoFinalBody`
