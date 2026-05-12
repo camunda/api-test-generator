@@ -42,7 +42,8 @@ const SemanticTypeSpecSchema = z
     // silently falling through to the default classification chain.
     kind: z.enum(['modelDerived', 'attribute']).optional(),
     // #162 PR 2: only meaningful with `kind: 'attribute'`. Validator
-    // enforces the pairing in `checkSemanticTypeKindCoherent` below.
+    // enforces the pairing in `checkAttributeKindClientMintedPairing`
+    // below.
     clientMinted: z.boolean().optional(),
   })
   .passthrough();

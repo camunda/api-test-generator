@@ -168,7 +168,7 @@
     "Tag": {
       "kind": "attribute",
       "clientMinted": true,
-      "$comment": "Free-form label attached to an entity (createProcessInstance.tags[], searchProcessInstances.filter.tags[], etc.). No producer endpoint and no first-order entity retrievable by tag — the planner mints a deterministic value and threads it through setter and consumer sites in the chain. See #162 PR 2."
+      "$comment": "Free-form label attached to an entity (createProcessInstance.tags[], searchProcessInstances.filter.tags[], etc.). No producer endpoint and no first-order entity retrievable by tag — the planner mints a deterministic value at setter sites (createProcessInstance.tags[]). Filter-consumer reuse — threading the same minted value into searchProcessInstances.filter.tags[] and similar — is deferred (see #168). See #162 PR 2."
     },
     "BusinessId": {
       "kind": "attribute",
