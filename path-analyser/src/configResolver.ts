@@ -108,10 +108,10 @@ export interface PlaywrightCodegenOptions {
    * emitted, and `recorder.ts` is not vendored into the suite's `support/`
    * directory.
    *
-   * Default: false (#117 — the recorder is opt-in tooling for downstream
+   * Default: false. The recorder is opt-in tooling for downstream
    * response-shape diffing; suites that don't consume
    * `dist/runtime-observations/responses.jsonl` get cleaner output and
-   * skip the per-step `fs.appendFile`).
+   * skip the per-step `fs.appendFile`.
    */
   recordResponses: boolean;
 }

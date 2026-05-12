@@ -34,7 +34,7 @@ describe('getPlaywrightCodegenOptions', () => {
     await fs.writeFile(path.join(tmp, 'configs.json'), JSON.stringify(content), 'utf8');
   }
 
-  // #117: the recorder is opt-in tooling. Default is OFF so suites that
+  // The recorder is opt-in tooling. Default is OFF so suites that
   // don't consume responses.jsonl skip the boilerplate + per-step fs writes.
   test('defaults to recordResponses=false when the config has no codegen block', async () => {
     await writeConfig({ description: 'test' });
