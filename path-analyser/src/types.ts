@@ -444,6 +444,23 @@ export interface SemanticTypeSpec {
   // value implies the existence of. Required for key-shaped semantic types
   // (those listed in artifactKinds.*.producesSemantics).
   witnesses?: string;
+  /**
+   * How the planner obtains a value for this semantic type (#162). Five
+   * classifications are envisioned; PR 1 adds `modelDerived`.
+   *
+   *   - `modelDerived`: the value is read out-of-band from a deployment
+   *     artifact in the same chain. The planner looks the value up in the
+   *     `providesValues` entry of the fixture chosen for the chain's
+   *     `createDeployment` step. Examples: `ElementId`, `JobType` — these
+   *     values come from the BPMN model itself, not from a Camunda API
+   *     response.
+   *
+   * Future PRs will add `attribute` (free-form client-minted labels —
+   * `Tag`, `BusinessId`) under this same field. Absent `kind` means the
+   * planner falls back to its existing classification chain
+   * (producersByType / establishersByType / external-entity).
+   */
+  kind?: 'modelDerived';
 }
 
 export interface IdentifierSpec {

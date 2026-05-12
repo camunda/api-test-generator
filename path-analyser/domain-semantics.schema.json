@@ -89,13 +89,19 @@
       }
     },
     "semanticTypes": {
-      "description": "Declarations of semantic identifier types (e.g. ProcessDefinitionKey). Each entry's `witnesses` names the runtimeStates/capabilities entry whose presence proves the semantic value exists. Cross-section resolution of `witnesses` is enforced at load time by domainSemanticsValidator.ts.",
+      "description": "Declarations of semantic identifier types (e.g. ProcessDefinitionKey). Each entry's `witnesses` names the runtimeStates/capabilities entry whose presence proves the semantic value exists. `kind` optionally classifies how the planner sources values of this type at plan time (#162). Cross-section resolution of `witnesses` is enforced at load time by domainSemanticsValidator.ts.",
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "witnesses": {"type": "string", "minLength": 1}
+          "witnesses": {"type": "string", "minLength": 1},
+          "kind": {
+            "type": "string",
+            "enum": ["modelDerived"],
+            "description": "Value-source classification (#162 PR 1). When `modelDerived`, the planner reads values from the chain's createDeployment fixture's providesValues entry — no API round-trip required. Future PRs will add `attribute` for client-minted free-form labels."
+          },
+          "$comment": {"type": "string"}
         }
       }
     },

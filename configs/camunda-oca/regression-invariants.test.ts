@@ -2617,3 +2617,231 @@ describeForThisConfig(
   },
 );
 
+describeForThisConfig(
+  'bundled-spec invariants: modelDerived value source (#162 PR 1)',
+  () => {
+    // PR 1 of #162: ElementId and JobType are declared `kind: modelDerived`
+    // in domain-semantics, and the fixture registry's `providesValues`
+    // entry on each bpmn fixture declares which concrete values that
+    // fixture deploys. When the feature planner emits a scenario whose
+    // endpoint has ElementId or JobType as an optional input, it must
+    // bind the var from the chain's deployment fixture's providesValues
+    // — not from the synthetic `fc:pos:<endpoint>:<semantic>` placeholder
+    // the pre-PR-1 planner used.
+    //
+    // The 4 single-deploy ElementId consumer sites covered here:
+    //   - createProcessInstance        :: startInstructions[].elementId
+    //   - activateAdHocSubProcessActivities :: elements[].elementId
+    //   - completeJob                  :: result.activateElements[].elementId
+    //   - modifyProcessInstance        :: activateInstructions[].elementId
+    //
+    // Other ElementId consumer sites that remain uncovered by PR 1:
+    //   - modifyProcessInstancesBatchOperation :: moveInstructions[].sourceElementId
+    //     (single-endpoint chain — the planner doesn't insert a
+    //      createDeployment prerequisite for batch operations even though
+    //      sourceElementId needs a model. Separate chain-construction issue.)
+    //   - migrateProcessInstance / migrateProcessInstancesBatchOperation
+    //     (multi-deploy: source-model + target-model — needs per-deploy-step
+    //      fixture selection. PR 1's helper takes the FIRST deploy step.)
+
+    // The deterministic-synthetic value pattern emitted by
+    // featureCoverageGenerator pre-PR-1:
+    // `<camelLower(semantic)>_<deterministicSuffix(...)>`,
+    // e.g. `elementId_e1wc`. The suffix is base36 alphanumeric. The
+    // assertions below check this leading-pattern is absent from the
+    // corresponding feature scenario's binding — proving the binding
+    // comes from providesValues instead. A real BPMN element id starts
+    // with the model's element name (e.g. `StartEvent_1`,
+    // `Activity_06kuv4r`) and so cannot start with the lower-cased
+    // semantic name.
+    const SYNTHETIC_RE = /^elementId_[A-Za-z0-9]+$/;
+
+    interface FeatureScenarioBody {
+      bindings?: Record<string, string>;
+      strategy?: string;
+      variantKey?: string;
+    }
+    interface FeatureScenarioFile {
+      endpoint: { operationId: string };
+      scenarios: FeatureScenarioBody[];
+    }
+
+    function loadFeatureCollection(file: string): FeatureScenarioFile {
+      const raw = readFileSync(file, 'utf8');
+      // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+      return JSON.parse(raw) as FeatureScenarioFile;
+    }
+
+    function findScenarioBinding(
+      collection: FeatureScenarioFile,
+      variantKey: string,
+      varName: string,
+    ): string | undefined {
+      const scenario = collection.scenarios.find((s) => s.variantKey === variantKey);
+      return scenario?.bindings?.[varName];
+    }
+
+    interface Target {
+      endpoint: string;
+      featureFile: string;
+      variantKey: string;
+      varName: string;
+      consumerPathInBody: string;
+    }
+    const TARGETS: Target[] = [
+      {
+        endpoint: 'createProcessInstance',
+        featureFile: 'post--process-instances-scenarios.json',
+        variantKey: 'opt=ElementId',
+        varName: 'elementIdVar',
+        consumerPathInBody: 'startInstructions',
+      },
+      {
+        endpoint: 'activateAdHocSubProcessActivities',
+        featureFile:
+          'post--element-instances--ad-hoc-activities--{adHocSubProcessInstanceKey}--activation-scenarios.json',
+        variantKey: 'opt=ElementId',
+        varName: 'elementIdVar',
+        consumerPathInBody: 'elements',
+      },
+      {
+        endpoint: 'completeJob',
+        featureFile: 'post--jobs--{jobKey}--completion-scenarios.json',
+        variantKey: 'opt=ElementId',
+        varName: 'elementIdVar',
+        consumerPathInBody: 'result',
+      },
+      {
+        endpoint: 'modifyProcessInstance',
+        featureFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
+        variantKey: 'opt=ElementId',
+        varName: 'elementIdVar',
+        consumerPathInBody: 'activateInstructions',
+      },
+    ];
+
+    for (const t of TARGETS) {
+      it(`${t.endpoint} :: feature 'with ElementId' binds elementIdVar from fixture providesValues (#162)`, () => {
+        const path = join(FEATURE_SCENARIOS_DIR, t.featureFile);
+        if (!existsSync(path)) {
+          throw new Error(
+            `expected feature-output JSON not found: ${t.featureFile} — run 'npm run testsuite:generate'`,
+          );
+        }
+        const collection = loadFeatureCollection(path);
+        const binding = findScenarioBinding(collection, t.variantKey, t.varName);
+        expect(
+          binding,
+          `${t.endpoint}: scenario with variantKey '${t.variantKey}' must have a binding for ${t.varName}`,
+        ).toBeDefined();
+        expect(
+          binding,
+          `${t.endpoint}: ${t.varName} binding must NOT be the pre-PR-1 synthetic 'elementId_...' placeholder`,
+        ).not.toMatch(SYNTHETIC_RE);
+      });
+
+      it(`${t.endpoint} :: emitted feature spec references ctx.${t.varName} in the request body (#162)`, () => {
+        const specName = `${t.endpoint}.feature.spec.ts`;
+        const spec = join(GENERATED_TESTS_DIR, specName);
+        if (!existsSync(spec)) {
+          throw new Error(`expected emitted spec not found: ${specName}`);
+        }
+        const src = readFileSync(spec, 'utf8');
+        // The body for the 'opt=ElementId' scenario must reference the
+        // ElementId binding inside its consumer-path key (e.g. `elements`,
+        // `startInstructions`, …). Use the scenario title to scope the
+        // search to the right test block.
+        const scenarioMarker = `with ElementId`;
+        const scenarioIdx = src.indexOf(scenarioMarker);
+        expect(
+          scenarioIdx,
+          `${t.endpoint}: expected a scenario block titled 'with ElementId'`,
+        ).toBeGreaterThan(0);
+        // Find the end of the test block by scanning forward to the next
+        // `test(` opener (or end of file).
+        const nextTestIdx = src.indexOf("\n  test('", scenarioIdx + scenarioMarker.length);
+        const scenarioBlock = src.slice(
+          scenarioIdx,
+          nextTestIdx > 0 ? nextTestIdx : src.length,
+        );
+        expect(
+          scenarioBlock.includes(t.consumerPathInBody),
+          `${t.endpoint} 'with ElementId': body must populate '${t.consumerPathInBody}'`,
+        ).toBe(true);
+        expect(
+          scenarioBlock.includes(`ctx.${t.varName}`),
+          `${t.endpoint} 'with ElementId': body must reference ctx.${t.varName}`,
+        ).toBe(true);
+      });
+    }
+  },
+);
+
+describeForThisConfig(
+  'bundled-spec invariants: jobType binds from chosen fixture (#163 review)',
+  () => {
+    // #163 review-comment guard: when the registry switched from
+    // `parameters.jobType` to `providesValues.JobType`, the planner code
+    // path that binds `jobTypeVar` (separate from
+    // `bindModelDerivedFromFixture`) almost regressed — it still read
+    // `regHit.params.jobType` and would have fallen through to
+    // `seedBinding('jobTypeVar')` at runtime once `parameters` was
+    // removed. The bridge in PR 1 now consults
+    // `providesValues.JobType[0]` first. This class-scoped invariant
+    // asserts every job-related endpoint's feature-1 (base) scenario
+    // binds `jobTypeVar = 'sampleJobType'` — the value `service-task.bpmn`
+    // declares — and not a synthetic, runtime-seeded, or absent binding.
+    //
+    // The invariant covers the class, not a single instance: any job-
+    // related endpoint whose chain deploys `service-task.bpmn` and whose
+    // request body / path needs JobType is in scope.
+
+    interface ScenarioWithBindings {
+      id?: string;
+      strategy?: string;
+      bindings?: Record<string, string>;
+    }
+    interface FeatureCollection {
+      endpoint: { operationId: string };
+      scenarios: ScenarioWithBindings[];
+    }
+
+    function loadCollection(filename: string): FeatureCollection {
+      const raw = readFileSync(join(FEATURE_SCENARIOS_DIR, filename), 'utf8');
+      // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+      return JSON.parse(raw) as FeatureCollection;
+    }
+
+    const targets: { endpoint: string; featureFile: string }[] = [
+      { endpoint: 'activateJobs', featureFile: 'post--jobs--activation-scenarios.json' },
+      { endpoint: 'completeJob', featureFile: 'post--jobs--{jobKey}--completion-scenarios.json' },
+      { endpoint: 'failJob', featureFile: 'post--jobs--{jobKey}--failure-scenarios.json' },
+      { endpoint: 'throwJobError', featureFile: 'post--jobs--{jobKey}--error-scenarios.json' },
+    ];
+
+    for (const t of targets) {
+      it(`${t.endpoint} :: feature scenarios bind jobTypeVar to the fixture's JobType (#163)`, () => {
+        const path = join(FEATURE_SCENARIOS_DIR, t.featureFile);
+        if (!existsSync(path)) {
+          throw new Error(
+            `expected feature-output JSON not found: ${t.featureFile} — run 'npm run testsuite:generate'`,
+          );
+        }
+        const collection = loadCollection(t.featureFile);
+        // Pick the base (feature-1) scenario as the witness — any chain
+        // that needs jobTypeVar will have it set; the base scenario is
+        // the most representative.
+        const base = collection.scenarios.find(
+          (s) => s.strategy === 'featureCoverage' && s.id === 'feature-1',
+        );
+        expect(base, `${t.endpoint}: feature-1 base scenario not found`).toBeDefined();
+        const jt = base?.bindings?.jobTypeVar;
+        expect(
+          jt,
+          `${t.endpoint}: feature-1 must bind jobTypeVar (chain deploys service-task.bpmn, which declares JobType in providesValues)`,
+        ).toBe('sampleJobType');
+      });
+    }
+  },
+);
+
