@@ -40,6 +40,7 @@ import { emitQaTests } from '../src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
+import { shouldSkipForMultipart } from '../src/util/multipartSkip.js';
 
 interface CliOptions {
   only?: Set<string>;
@@ -429,6 +430,12 @@ async function main() {
       const hasMultipart = !!op.mediaTypes?.includes('multipart/form-data');
       const multipartOnly = hasMultipart && !hasJson;
       if (multipartOnly) {
+        // #135: drop scenarios whose mutations are nonsensical when
+        // wrapped as multipart form-data (body-top-type-mismatch,
+        // type-mismatch on binary parts, constraint-violation on
+        // array parts). Wrapping these produces 415s or false-positive
+        // 201s rather than the intended 400s.
+        if (shouldSkipForMultipart(s, op)) continue;
         const body = s.requestBody;
         const isJsonObjectBody =
           !!body && typeof body === 'object' && !Array.isArray(body) && !s.bodyEncoding;
