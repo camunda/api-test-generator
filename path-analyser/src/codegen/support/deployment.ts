@@ -33,6 +33,9 @@ interface ApiResponseLike {
   statusText(): string;
   text(): Promise<string>;
   url(): string;
+  // Required for structural compatibility with Playwright's APIResponse (which includes
+  // [Symbol.asyncDispose] as a required member). ESNext.Disposable must be in
+  // path-analyser/tsconfig.json's lib array for this to compile.
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -57,7 +60,7 @@ export interface DeployBody {
  * Perform a createDeployment call and extract all known response fields into ctx.
  *
  * - Resolves `@@FILE:<path>` entries in `body.files` via resolveFixture().
- * - Strips the `tenantId` field when `ctx['tenantIdVar'] === '<default>'` so
+ * - Strips the `tenantId` field when `ctx.tenantIdVar === '<default>'` so
  *   single-tenant deployments work without an explicit tenantId param.
  * - Throws a descriptive Error on any non-200 response (includes the response body
  *   for diagnosis).

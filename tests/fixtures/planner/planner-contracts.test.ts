@@ -669,7 +669,10 @@ describe('planner contracts: producerBound semantics must be __PENDING__ in bind
 
   it('class-scoped: no scenario for any endpoint has a synthetic literal for a producerBound Key semantic', () => {
     // Any semantic ending in 'Key' that has an authoritative producer must
-    // have its var set to __PENDING__, not a synthetic `<sem>_<suffix>`.
+    // have ALL its vars (including suffixed allocations like processDefinitionKeyVar2)
+    // set to __PENDING__, not a synthetic `<sem>_<suffix>`.
+    // The pattern ^<base>Var\d*$ catches the primary slot and any overflow
+    // slots that semanticToVarName allocates when the primary is already taken.
     const graph = fixtureProducerBoundBinding;
     const authoritative = Object.keys(graph.producersByType).filter(
       (s) => s.endsWith('Key') && (graph.producersByType[s]?.length ?? 0) > 0,
@@ -677,10 +680,17 @@ describe('planner contracts: producerBound semantics must be __PENDING__ in bind
     const collection = plan(graph, 'searchAuditLogs');
     for (const scenario of collection.scenarios) {
       for (const sem of authoritative) {
-        const varName = `${sem.charAt(0).toLowerCase()}${sem.slice(1)}Var`;
-        const value = scenario.bindings?.[varName];
-        if (value !== undefined) {
-          expect(value, `${varName} should be __PENDING__, not a synthetic literal`).toBe(
+        const baseVarName = `${sem.charAt(0).toLowerCase()}${sem.slice(1)}Var`;
+        const pattern = new RegExp(`^${baseVarName}\\d*$`);
+        const bindings = scenario.bindings ?? {};
+        const matchingKeys = Object.keys(bindings).filter((k) => pattern.test(k));
+        // The primary var must exist (the planner must allocate a slot for it)
+        expect(
+          matchingKeys.length,
+          `expected at least one binding matching ${pattern} for producerBound semantic ${sem}`,
+        ).toBeGreaterThan(0);
+        for (const key of matchingKeys) {
+          expect(bindings[key], `${key} should be __PENDING__, not a synthetic literal`).toBe(
             '__PENDING__',
           );
         }
