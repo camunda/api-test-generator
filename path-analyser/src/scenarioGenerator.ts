@@ -1728,21 +1728,21 @@ export function generateOptionalSubShapeVariants(
       const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
       if (seenVariantKeys.has(variantKey)) continue;
 
-      // Resolve producer candidates: prefer authoritative (provider:true)
-      // producers from `producersByType`, but fall back to the
-      // inclusive index that includes provider:false response leaves
-      // (e.g. searchElementInstances → ElementId via items[].elementId).
+      // Resolve producer candidates. When authoritative (provider:true)
+      // producers exist, use them exclusively — `tryProducerChainVariant`'s
+      // Pass 1 overlap heuristic would otherwise select an incidental
+      // responder (e.g. searchAgentInstances, which exposes
+      // ProcessDefinitionKey in its response but doesn't own it) over the
+      // true authoritative producer (createDeployment). Restricting to
+      // authoritative-only when available ensures the canonical source is
+      // always tried. When authoritative is empty, fall back to the
+      // inclusive index (provider:false response leaves, e.g.
+      // searchElementInstances → ElementId).
       const authoritative = graph.producersByType[leaf.semantic] ?? [];
       const inclusive = graph.responseProducersByType?.[leaf.semantic] ?? [];
-      // Prefer inclusive (search-style) producers first: search/list ops
-      // typically take optional filters that overlap endpoint outputs,
-      // making them the natural "look up the entity we just created" step
-      // in a variant chain. Authoritative producers (provider:true) are
-      // tried only as fallback. Note many ops appear in both lists; unique
-      // preserves first occurrence, so inclusive order wins.
-      const producerCandidates = unique([...inclusive, ...authoritative]).filter(
-        (id) => id !== endpointOpId,
-      );
+      const producerCandidates = unique(
+        authoritative.length > 0 ? authoritative : inclusive,
+      ).filter((id) => id !== endpointOpId);
 
       // #162 PR 4 (suite-partition cut): Try to build a producer-chain
       // variant first (the canonical "warm-up + search + final" pattern
