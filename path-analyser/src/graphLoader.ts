@@ -496,7 +496,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   if (classificationIssues.length > 0) {
     const detail = classificationIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
     throw new DomainSemanticsValidationFailure(
-      `domain-semantics.json failed cross-reference validation against the bundled spec:\n${detail}`,
+      `operation graph has unclassified requestBodySemanticTypes entries:\n${detail}`,
     );
   }
   return graph;
