@@ -787,14 +787,20 @@ export function generateScenariosForEndpoint(
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
         modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
       }
-      // Identifier heuristic: assign vars for newly added semantics ending with 'Key'
+      // Identifier heuristic: assign vars for newly added semantics ending with 'Key'.
+      // Only applies to semantics that have no authoritative producer — producerBound
+      // semantics (those with a producer in graph.producersByType) receive __PENDING__
+      // because their value is server-established at runtime via the response.
       const newlyAddedSemantics = [...newProduced].filter((s) => !state.produced.has(s));
       for (const s of newlyAddedSemantics) {
         if (/Key$/.test(s)) {
           const varName = semanticToVarName(s, bindingsDraft);
-          if (!bindingsDraft[varName])
-            bindingsDraft[varName] =
-              `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
+          if (!bindingsDraft[varName]) {
+            const isProducerBound = (graph.producersByType[s]?.length ?? 0) > 0;
+            bindingsDraft[varName] = isProducerBound
+              ? '__PENDING__'
+              : `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
+          }
         }
       }
       // Issue #104: when the producer is an establisher, mint a fresh
@@ -1554,7 +1560,7 @@ function coverageCount(rule: ArtifactRule, remaining: Set<string>, graph: Operat
 
 function ensureArtifactBindings(
   _rule: ArtifactRule,
-  _graph: OperationGraph,
+  graph: OperationGraph,
   state: State,
   semantics: string[],
   _states: string[],
@@ -1564,9 +1570,16 @@ function ensureArtifactBindings(
   // Semantic-driven bindings naming
   for (const s of semantics) {
     const varName = semanticToVarName(s, state.bindingsDraft);
-    if (!state.bindingsDraft[varName])
-      state.bindingsDraft[varName] =
-        `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
+    if (!state.bindingsDraft[varName]) {
+      // producerBound semantics (those with an authoritative producer) get
+      // __PENDING__ — their value is server-established at runtime via the
+      // producer's response. All other artifact semantics (model-derived,
+      // client-minted) get a deterministic literal for pre-seeding.
+      const isProducerBound = (graph.producersByType[s]?.length ?? 0) > 0;
+      state.bindingsDraft[varName] = isProducerBound
+        ? '__PENDING__'
+        : `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
+    }
     // If BPMN process definition -> ensure BPMN model spec exists
     if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
       state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
