@@ -1783,8 +1783,23 @@ export function generateOptionalSubShapeVariants(
         });
         const value = resolveFallbackValue(bound, leaf.semantic, endpointOpId);
         if (value === undefined) continue;
+        // Prefer the canonical `bound.varName` (the same
+        // `<camelCase(sem)>Var` convention every other binder uses) so
+        // bindings stay consistent across planner paths. For
+        // `unclassified` semantics (no entry in domain-semantics; no
+        // varName on the bound result) derive the same name shape
+        // locally so synthesised L2-fixture semantics like `ProductId`
+        // still bind correctly.
+        const varName =
+          bound.classification === 'unclassified'
+            ? `${camelLower(leaf.semantic)}Var`
+            : bound.varName;
         baseScenario.bindings ||= {};
-        baseScenario.bindings[`${camelLower(leaf.semantic)}Var`] = value;
+        // Only set the slot when empty so we never overwrite a binding
+        // the basic-chain planner produced earlier in this pass.
+        if (baseScenario.bindings[varName] === undefined) {
+          baseScenario.bindings[varName] = value;
+        }
         scenario = baseScenario;
       }
 
