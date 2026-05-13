@@ -495,8 +495,15 @@ export interface SemanticTypeSpec {
    * Absent `kind` means the planner falls back to its existing
    * classification chain (producersByType / establishersByType /
    * external-entity / synthetic).
+   *
+   * `serverEmergent` (#162 PR 5): server-minted lifecycle identifiers
+   * that no client API directly mints with a returned value (e.g.
+   * `IncidentKey`, `AuditLogKey`, `MessageSubscriptionKey`). The planner
+   * binds a deterministic placeholder so search-filter request shapes
+   * validate; an empty search result is acceptable because the value is
+   * a fabricated placeholder for a key the client could not have known.
    */
-  kind?: 'modelDerived' | 'attribute';
+  kind?: 'modelDerived' | 'attribute' | 'serverEmergent';
   /**
    * Whether values of this semantic are minted by the planner / client
    * rather than returned by a producer endpoint (#162 PR 2). Only

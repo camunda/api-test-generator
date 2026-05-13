@@ -1918,8 +1918,12 @@ function tryProducerChainVariant(args: {
 /**
  * #162 PR 4: pick a value for the bare-endpoint fallback path.
  *
- * - `clientMintedAttribute`: deterministic minted token from
- *   `bindSemanticInput`.
+ * - `clientMintedAttribute` and `serverEmergent` (PR 5): deterministic
+ *   minted token from `bindSemanticInput`. Both classifications carry
+ *   their own value because the planner is the authoritative source
+ *   for what to put in the request body (no producer chain to extract
+ *   from); reusing `bound.value` keeps the byte-stable mint formula
+ *   centralised in `bindSemanticInput.ts`.
  * - `modelDerived` and `producerBound` (and other classifications):
  *   synthesise the same `<semantic>_<suffix>` placeholder shape
  *   `featureCoverageGenerator` used pre-PR-4 for `opt=<sem>` scenarios.
@@ -1936,5 +1940,6 @@ function resolveFallbackValue(
   endpointOpId: string,
 ): string | undefined {
   if (bound.classification === 'clientMintedAttribute') return bound.value;
+  if (bound.classification === 'serverEmergent') return bound.value;
   return `${camelLower(semantic)}_${deterministicSuffix(`vc:opt:${endpointOpId}:${semantic}`)}`;
 }
