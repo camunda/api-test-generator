@@ -1720,6 +1720,14 @@ export function generateOptionalSubShapeVariants(
   outer: for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
       if (collectionScenarios.length >= maxVariants) break outer;
+
+      // Skip duplicates BEFORE any planning work: `requestBodySemanticTypes`
+      // can repeat a (rootPath, fieldPath) pair for siblings, and the
+      // producer-chain BFS below is the most expensive step in this
+      // function — never run it for a key we've already emitted.
+      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
+      if (seenVariantKeys.has(variantKey)) continue;
+
       // Resolve producer candidates: prefer authoritative (provider:true)
       // producers from `producersByType`, but fall back to the
       // inclusive index that includes provider:false response leaves
@@ -1756,9 +1764,6 @@ export function generateOptionalSubShapeVariants(
             producerCandidates,
           })
         : undefined;
-
-      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
-      if (seenVariantKeys.has(variantKey)) continue;
 
       let scenario: EndpointScenario | undefined;
       if (producerChain) {
