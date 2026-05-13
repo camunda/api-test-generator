@@ -189,7 +189,7 @@
     },
     "DeploymentKey": {
       "kind": "serverEmergent",
-      "$comment": "Temporary classification pending an upstream spec fix. createDeployment returns deploymentKey in its 200 response but the response field is currently flagged provider:false in the bundled spec, so the planner cannot bind it as a producerBound semantic. Once upstream marks deploymentKey as provider:true (tracked separately — see PR description), this entry should be removed and DeploymentKey will classify as producerBound automatically. See #162 PR 5."
+      "$comment": "Temporary classification pending upstream spec fix camunda/camunda#52926. createDeployment returns deploymentKey in its 200 response but the response field is currently flagged provider:false in the bundled spec, so the planner cannot bind it as a producerBound semantic. Once upstream marks deploymentKey as provider:true, this entry should be removed and DeploymentKey will classify as producerBound automatically. See #162 PR 5."
     },
     "MessageSubscriptionKey": {
       "kind": "serverEmergent",
