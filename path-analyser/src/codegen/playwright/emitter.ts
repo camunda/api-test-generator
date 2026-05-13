@@ -385,10 +385,14 @@ function renderScenarioTest(
     // assertion (throws on non-200), and extraction of all known deployment
     // response fields into ctx. This keeps each deployment step as a single
     // declarative call instead of ~35 lines of boilerplate.
+    // Only route 200-expected steps through deploy(): the helper hard-codes a
+    // 200 assertion, so a step with a declared non-200 expected status must
+    // fall through to the normal request path where step.expect.status is honoured.
     const isDeploymentStep =
       step.operationId === 'createDeployment' &&
       step.bodyKind === 'multipart' &&
-      !!step.multipartTemplate;
+      !!step.multipartTemplate &&
+      step.expect.status === 200;
     if (isDeploymentStep && step.multipartTemplate) {
       const tpl = JSON.stringify(step.multipartTemplate, null, 2).replace(
         /"\\?\$\{([^}]+)\}"/g,
