@@ -2,8 +2,8 @@ import fsSync from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { bindSemanticInput } from './bindSemanticInput.js';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
-import { deterministicSuffix } from './codegen/support/seeding.js';
 import {
   getActiveConfigDir,
   getFeatureOutputDir,
@@ -19,6 +19,7 @@ import {
 } from './scenarioGenerator.js';
 import { computeSeedBindings } from './seedBindings.js';
 import type {
+  ArtifactRegistryEntry,
   DomainSemantics,
   EndpointScenario,
   GenerationSummary,
@@ -732,8 +733,6 @@ export function bindModelDerivedFromFixture(
   graph: OperationGraph,
 ): void {
   if (scenario.strategy !== 'featureCoverage') return;
-  const domain = graph.domain;
-  if (!domain?.semanticTypes) return;
   if (!steps.length) return;
   const finalStep = steps[steps.length - 1];
   const endpoint = graph.operations[finalStep.operationId];
@@ -754,15 +753,23 @@ export function bindModelDerivedFromFixture(
 
   for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
-      const semKind = domain.semanticTypes[leaf.semantic]?.kind;
-      if (semKind !== 'modelDerived') continue;
-      const values = fixture.providesValues[leaf.semantic];
-      if (!values?.length) continue;
-      const varName = `${camelCase(leaf.semantic)}Var`;
+      // #162 PR 3: route classification + value derivation through the
+      // unified chokepoint. The helper still owns its scope filter
+      // (subShape leaves only) and its mutation (binding + populatesSubShape
+      // entry); the chokepoint owns "is this a modelDerived semantic and
+      // what value does it resolve to?".
+      const result = bindSemanticInput({
+        semantic: leaf.semantic,
+        operationId: finalStep.operationId,
+        graph,
+        fixture,
+      });
+      if (result.classification !== 'modelDerived') continue;
+
       scenario.bindings ||= {};
       // Authoritative override: a featureCoverageGenerator synthetic
       // would otherwise shadow the real fixture value.
-      scenario.bindings[varName] = values[0];
+      scenario.bindings[result.varName] = result.value;
 
       const sub = scenario.populatesSubShape ?? {
         rootPath: subShape.rootPath,
@@ -855,8 +862,6 @@ export function bindClientMintedAttribute(
   graph: OperationGraph,
 ): void {
   if (scenario.strategy !== 'featureCoverage') return;
-  const domain = graph.domain;
-  if (!domain?.semanticTypes) return;
   if (!steps.length) return;
   const finalStep = steps[steps.length - 1];
   const endpoint = graph.operations[finalStep.operationId];
@@ -864,8 +869,6 @@ export function bindClientMintedAttribute(
   if (!bodySems.length) return;
 
   for (const bodySem of bodySems) {
-    const spec = domain.semanticTypes[bodySem.semantic];
-    if (spec?.kind !== 'attribute' || spec.clientMinted !== true) continue;
     // PR 2 narrowed scope: only fill at the endpoint that IS the setter
     // (the final-step body accepts the semantic). Filter-consumer sites
     // also have the semantic in their bodySemantics but need a separate
@@ -883,10 +886,20 @@ export function bindClientMintedAttribute(
       continue;
     }
 
-    const varName = `${camelCase(bodySem.semantic)}Var`;
-    const mintedValue = `fc:cma:${camelCase(bodySem.semantic)}:${deterministicSuffix(`fc:cma:${finalStep.operationId}:${bodySem.semantic}`)}`;
+    // #162 PR 3: route classification + mint through the unified
+    // chokepoint. The helper still owns its scope filter (setter-site
+    // bodySemantics only) and its mutation (binding + populatesSubShape
+    // entry); the chokepoint owns "is this a clientMintedAttribute and
+    // what deterministic value does it mint?".
+    const result = bindSemanticInput({
+      semantic: bodySem.semantic,
+      operationId: finalStep.operationId,
+      graph,
+    });
+    if (result.classification !== 'clientMintedAttribute') continue;
+
     scenario.bindings ||= {};
-    scenario.bindings[varName] = mintedValue;
+    scenario.bindings[result.varName] = result.value;
 
     // Always plant a populatesSubShape entry so the body is filled by
     // the existing materializer. setLeafPlaceholder handles all three
@@ -1464,35 +1477,6 @@ function normaliseProvidesValues(input: unknown): Record<string, string[]> | und
 }
 
 // -------- Artifact Registry support ---------
-type ArtifactRegistryEntry = {
-  kind: string;
-  path: string;
-  description?: string;
-  /**
-   * Runtime characteristics this specific fixture provides BEYOND what
-   * `artifactKinds.<kind>.producesStates` declares for the kind. The
-   * selector picks the entry whose effective providesStates (entry ∪
-   * kind) covers the chain's required states (#159).
-   */
-  providesStates?: string[];
-  /**
-   * Concrete values this fixture supplies for semantic types whose
-   * `semanticTypes.<X>.kind === 'modelDerived'` (#162 PR 1). The planner
-   * reads these out-of-band at plan time — no Camunda API round-trip is
-   * needed to learn the values, because the BPMN/DMN/Form file already
-   * encodes them (element IDs, job types, form IDs, …).
-   *
-   * Per-semantic the value is an array so a future per-consumer-site
-   * preference vocabulary can pick a specific entry; PR 1's planner
-   * takes index 0 unconditionally.
-   *
-   * After #164: this is the SOLE source of fixture-derived values. The
-   * pre-#162 ad-hoc `parameters: { jobType: ... }` field was the
-   * embryonic form of this idea and has been retired; any new
-   * fixture-derived value must be declared here.
-   */
-  providesValues?: Record<string, string[]>;
-};
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
   if (artifactsRegistryCache) return artifactsRegistryCache;

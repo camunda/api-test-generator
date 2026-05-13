@@ -608,6 +608,49 @@ export interface ArtifactKindSpec {
   deploymentSlices?: string[]; // e.g., ["processDefinition"] or ["decisionDefinition","decisionRequirements"]
 }
 
+/**
+ * Single entry in the deployment artifact registry
+ * (`path-analyser/fixtures/deployment-artifacts.json`). One entry per
+ * checked-in BPMN/DMN/Form file the planner can deploy via
+ * `createDeployment`. Loaded lazily and cached at module scope by
+ * `getArtifactsRegistry()` in `path-analyser/src/index.ts`.
+ *
+ * Exported from `types.ts` (rather than kept private to `index.ts`) so
+ * the unified classification dispatch in `bindSemanticInput.ts` can
+ * accept a fixture parameter without having to import from `index.ts`
+ * (which would create a circular dependency once `index.ts` re-imports
+ * the chokepoint helper).
+ */
+export interface ArtifactRegistryEntry {
+  kind: string;
+  path: string;
+  description?: string;
+  /**
+   * Runtime characteristics this specific fixture provides BEYOND what
+   * `artifactKinds.<kind>.producesStates` declares for the kind. The
+   * selector picks the entry whose effective providesStates (entry ∪
+   * kind) covers the chain's required states (#159).
+   */
+  providesStates?: string[];
+  /**
+   * Concrete values this fixture supplies for semantic types whose
+   * `semanticTypes.<X>.kind === 'modelDerived'` (#162 PR 1). The planner
+   * reads these out-of-band at plan time — no Camunda API round-trip is
+   * needed to learn the values, because the BPMN/DMN/Form file already
+   * encodes them (element IDs, job types, form IDs, …).
+   *
+   * Per-semantic the value is an array so a future per-consumer-site
+   * preference vocabulary can pick a specific entry; PR 1's planner
+   * takes index 0 unconditionally.
+   *
+   * After #164: this is the SOLE source of fixture-derived values. The
+   * pre-#162 ad-hoc `parameters: { jobType: ... }` field was the
+   * embryonic form of this idea and has been retired; any new
+   * fixture-derived value must be declared here.
+   */
+  providesValues?: Record<string, string[]>;
+}
+
 export interface OperationArtifactRuleSpec {
   rules?: ArtifactRule[]; // optional when composable
   composable?: boolean; // if true, generator composes artifacts via set cover

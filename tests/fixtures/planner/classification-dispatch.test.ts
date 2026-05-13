@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { classifySemantic } from '../../../path-analyser/src/bindSemanticInput.ts';
 import {
   bindClientMintedAttribute,
   bindModelDerivedFromFixture,
@@ -434,5 +435,110 @@ describe('classification 3: client-minted attribute dispatch (#162 PR 2)', () =>
     bindClientMintedAttribute(scenario, steps, graph);
 
     expect(scenario.bindings).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifySemantic precedence (#162 PR 3)
+// ---------------------------------------------------------------------------
+//
+// The unified chokepoint resolves a semantic to ONE classification using
+// a documented precedence: explicit `domain.semanticTypes[T].kind`
+// declarations win over graph-index inferences. This block locks the
+// precedence in directly so PR 5 (load-time diagnostic on `unclassified`)
+// can build on a contract instead of an accident of code order.
+//
+// Today the bundled spec has no real collisions — every modelDerived /
+// clientMintedAttribute semantic is also absent from the producer /
+// establisher / external-entity indices. These synthetic tests assert
+// the precedence anyway, because the contract matters even if it is
+// today unobservable.
+
+describe('classifySemantic precedence (#162 PR 3)', () => {
+  function graphWithProducer(semantic: string): OperationGraph {
+    return {
+      operations: {},
+      producersByType: { [semantic]: ['someOp'] },
+    };
+  }
+
+  it('modelDerived declaration wins over a producersByType entry', () => {
+    const graph: OperationGraph = {
+      ...graphWithProducer('ElementId'),
+      domain: {
+        version: 1,
+        semanticTypes: { ElementId: { kind: 'modelDerived' } },
+      },
+    };
+
+    expect(classifySemantic('ElementId', graph)).toBe('modelDerived');
+  });
+
+  it('clientMintedAttribute declaration wins over a producersByType entry', () => {
+    const graph: OperationGraph = {
+      ...graphWithProducer('Tag'),
+      domain: {
+        version: 1,
+        semanticTypes: { Tag: { kind: 'attribute', clientMinted: true } },
+      },
+    };
+
+    expect(classifySemantic('Tag', graph)).toBe('clientMintedAttribute');
+  });
+
+  it('producerBound wins over clientMintedIdentifier when no domain.kind applies', () => {
+    const graph: OperationGraph = {
+      operations: {},
+      producersByType: { ProcessInstanceKey: ['createProcessInstance'] },
+      establishersByType: { ProcessInstanceKey: ['someOp'] },
+    };
+
+    expect(classifySemantic('ProcessInstanceKey', graph)).toBe('producerBound');
+  });
+
+  it('clientMintedIdentifier wins over externalBoundary when no producer applies', () => {
+    const graph: OperationGraph = {
+      operations: {},
+      producersByType: {},
+      establishersByType: { TenantId: ['createTenant'] },
+      externalEntityIdentifiers: new Set(['TenantId']),
+    };
+
+    expect(classifySemantic('TenantId', graph)).toBe('clientMintedIdentifier');
+  });
+
+  it('externalBoundary applies when only the external-entities set matches', () => {
+    const graph: OperationGraph = {
+      operations: {},
+      producersByType: {},
+      externalEntityIdentifiers: new Set(['ClientId']),
+    };
+
+    expect(classifySemantic('ClientId', graph)).toBe('externalBoundary');
+  });
+
+  it('returns unclassified when no declaration and no index entry matches', () => {
+    const graph: OperationGraph = {
+      operations: {},
+      producersByType: {},
+    };
+
+    expect(classifySemantic('UnknownSemantic', graph)).toBe('unclassified');
+  });
+
+  it('attribute declaration without clientMinted does NOT short-circuit producerBound', () => {
+    // A declaration of `kind: 'attribute'` without `clientMinted: true`
+    // must NOT be treated as clientMintedAttribute — only the explicit
+    // `clientMinted === true` flag promotes the semantic into PR 2's
+    // chokepoint scope.
+    const graph: OperationGraph = {
+      ...graphWithProducer('SomeAttr'),
+      domain: {
+        version: 1,
+        semanticTypes: { SomeAttr: { kind: 'attribute' } },
+      },
+    };
+
+    expect(classifySemantic('SomeAttr', graph)).toBe('producerBound');
   });
 });
