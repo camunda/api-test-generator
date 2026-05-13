@@ -49,11 +49,30 @@ interface Layout {
   domain?: Record<string, unknown>;
 }
 
+// Default classifications for the synthetic semantics these fixtures
+// reference in their `requestBodySemanticTypes` blocks. Without this,
+// #162 PR 5's load-time fail-fast diagnostic rejects every fixture
+// that names a semantic with no corresponding producer/establisher in
+// the synthetic graph (which is most of them — these fixtures are
+// scoped to the request-setter index, not to the classification chain).
+//
+// Any test exercising the unclassified-detection path itself must
+// override `domain` explicitly.
+const DEFAULT_DOMAIN = {
+  semanticTypes: {
+    Tag: { kind: 'attribute', clientMinted: true },
+    BusinessId: { kind: 'attribute', clientMinted: true },
+    NoPath: { kind: 'attribute', clientMinted: true },
+    ProcessInstanceKey: { kind: 'serverEmergent' },
+    ProcessDefinitionId: { kind: 'serverEmergent' },
+  },
+};
+
 function writeLayout(layout: Layout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
   writeFileSync(
     join(configDir, 'domain-semantics.json'),
-    JSON.stringify(layout.domain ?? { operationRequirements: {} }),
+    JSON.stringify(layout.domain ?? DEFAULT_DOMAIN),
   );
 }
 

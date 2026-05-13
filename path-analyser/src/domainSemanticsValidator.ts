@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { classifySemantic } from './bindSemanticInput.js';
 import type { OperationGraph } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -37,10 +38,13 @@ import type { OperationGraph } from './types.js';
 const SemanticTypeSpecSchema = z
   .object({
     witnesses: z.string().min(1).optional(),
-    // #162 PR 1 added `modelDerived`; PR 2 adds `attribute`. Strict enum
-    // so a typo (e.g. `attributes`) is rejected at load time rather than
-    // silently falling through to the default classification chain.
-    kind: z.enum(['modelDerived', 'attribute']).optional(),
+    // #162 PR 1 added `modelDerived`; PR 2 added `attribute`; PR 5 adds
+    // `serverEmergent` for server-minted lifecycle keys (e.g. IncidentKey,
+    // AuditLogKey) that no client API directly mints with a returned value.
+    // Strict enum so a typo (e.g. `attributes`) is rejected at load time
+    // rather than silently falling through to the default classification
+    // chain.
+    kind: z.enum(['modelDerived', 'attribute', 'serverEmergent']).optional(),
     // #162 PR 2: only meaningful with `kind: 'attribute'`. Validator
     // enforces the pairing in `checkAttributeKindClientMintedPairing`
     // below.
@@ -554,6 +558,60 @@ export function validateRuntimeStateWitnessGraphRefs(
         message: `runtimeStates.${stateName}.witness.operationId "${spec.witness.operationId}" is ${method || 'an unknown method'}; PR B (#159) supports GET-shape witnesses only.`,
       });
     }
+  }
+  return issues;
+}
+
+/**
+ * Validate that every semantic referenced by any operation's
+ * `requestBodySemanticTypes` resolves to a non-`'unclassified'`
+ * classification (#162 PR 5).
+ *
+ * The five terminal classifications are defined in
+ * `bindSemanticInput.ts#classifySemantic`:
+ *
+ *   - `modelDerived`            (domain-semantics: kind: 'modelDerived')
+ *   - `clientMintedAttribute`   (domain-semantics: kind: 'attribute' + clientMinted)
+ *   - `serverEmergent`          (domain-semantics: kind: 'serverEmergent')
+ *   - `producerBound`           (graph.producersByType[T])
+ *   - `clientMintedIdentifier`  (graph.establishersByType[T])
+ *   - `externalBoundary`        (graph.externalEntityIdentifiers)
+ *
+ * If a semantic falls through every tier, the planner has no rule for
+ * what value to bind into the request body. Pre-PR 5 this surfaced as
+ * a placeholder string in the emitted suite with no record of the gap;
+ * PR 5 turns it into a fail-fast at graph load so a future spec change
+ * that introduces a new semantic without an accompanying classification
+ * is caught immediately.
+ *
+ * The check is class-scoped: every (operationId, semantic) pair across
+ * the full graph is collected before throwing, so one load failure
+ * surfaces every gap rather than peeling them off one at a time.
+ *
+ * Returns the empty array on success.
+ */
+export function validateRequestBodySemanticsClassified(
+  graph: OperationGraph,
+): DomainSemanticsValidationError[] {
+  const issues: DomainSemanticsValidationError[] = [];
+  // Group offending sites by semantic so the error message stays
+  // readable when a missing classification fans out to many fields
+  // (e.g. AuditLogEntityKey appears at 10 sites in the live spec).
+  const offendersBySemantic = new Map<string, string[]>();
+  for (const op of Object.values(graph.operations)) {
+    for (const entry of op.requestBodySemantics ?? []) {
+      const classification = classifySemantic(entry.semantic, graph);
+      if (classification !== 'unclassified') continue;
+      const sites = offendersBySemantic.get(entry.semantic) ?? [];
+      sites.push(`${op.operationId}.${entry.fieldPath}`);
+      offendersBySemantic.set(entry.semantic, sites);
+    }
+  }
+  for (const [semantic, sites] of offendersBySemantic) {
+    issues.push({
+      invariant: 'requestBodySemanticUnclassified',
+      message: `semantic type "${semantic}" referenced by ${sites.length} requestBodySemanticTypes site(s) is unclassified — declare a domain-semantics.json entry (e.g. kind: 'serverEmergent' for server-minted lifecycle keys, kind: 'attribute' + clientMinted: true for client-supplied filter values), wire a producer/establisher in the spec, or add it to the kindRegistry as an external-entity identifier. Sites: ${sites.join(', ')}`,
+    });
   }
   return issues;
 }

@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import { getActiveConfigDir, getGraphDir, getSpecBundleDir } from './configResolver.js';
 import {
   validateDomainSemantics,
+  validateRequestBodySemanticsClassified,
   validateRuntimeStateWitnessGraphRefs,
 } from './domainSemanticsValidator.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
@@ -479,6 +480,21 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   const witnessIssues = validateRuntimeStateWitnessGraphRefs(graph);
   if (witnessIssues.length > 0) {
     const detail = witnessIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+    throw new DomainSemanticsValidationFailure(
+      `domain-semantics.json failed cross-reference validation against the bundled spec:\n${detail}`,
+    );
+  }
+  // #162 PR 5: every semantic referenced by an operation's
+  // requestBodySemanticTypes must classify into one of the five
+  // terminal classifications (see bindSemanticInput.ts). An
+  // unclassified semantic means the planner has no rule for what value
+  // to bind into the request body — fail-fast here so a future spec
+  // change that introduces a new semantic without an accompanying
+  // domain-semantics declaration is caught at load time rather than
+  // surfacing as an unexplained placeholder in the emitted suite.
+  const classificationIssues = validateRequestBodySemanticsClassified(graph);
+  if (classificationIssues.length > 0) {
+    const detail = classificationIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
     throw new DomainSemanticsValidationFailure(
       `domain-semantics.json failed cross-reference validation against the bundled spec:\n${detail}`,
     );

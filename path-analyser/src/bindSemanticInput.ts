@@ -34,6 +34,7 @@ import type { ArtifactRegistryEntry, OperationGraph } from './types.js';
 export type SemanticClassification =
   | 'modelDerived'
   | 'clientMintedAttribute'
+  | 'serverEmergent'
   | 'producerBound'
   | 'clientMintedIdentifier'
   | 'externalBoundary'
@@ -42,6 +43,7 @@ export type SemanticClassification =
 export type BoundInput =
   | { classification: 'modelDerived'; varName: string; value?: string }
   | { classification: 'clientMintedAttribute'; varName: string; value: string }
+  | { classification: 'serverEmergent'; varName: string; value: string }
   | { classification: 'producerBound'; varName: string }
   | { classification: 'clientMintedIdentifier'; varName: string }
   | { classification: 'externalBoundary'; varName: string }
@@ -55,6 +57,16 @@ export type BoundInput =
  *
  *   - `kind: 'modelDerived'`                   → modelDerived
  *   - `kind: 'attribute' && clientMinted: true` → clientMintedAttribute
+ *   - `kind: 'serverEmergent'`                 → serverEmergent
+ *
+ * Tier 1c — `serverEmergent` (#162 PR 5): server-minted lifecycle
+ * identifiers that no client API call directly mints with a returned
+ * key. Examples: `IncidentKey` (emerges from runtime failures),
+ * `AuditLogKey` (side-effect of audited writes), `MessageSubscriptionKey`
+ * (emerges from process deployment with message catch). The planner
+ * binds a deterministic placeholder so search-filter request shapes
+ * validate; the search returning empty is acceptable because the value
+ * is a fabricated placeholder for a key the client could not have known.
  *
  * Tier 2 — graph-index classifications, in order:
  *
@@ -80,6 +92,7 @@ export function classifySemantic(semantic: string, graph: OperationGraph): Seman
   if (decl?.kind === 'attribute' && decl.clientMinted === true) {
     return 'clientMintedAttribute';
   }
+  if (decl?.kind === 'serverEmergent') return 'serverEmergent';
   if (graph.producersByType?.[semantic]?.length) return 'producerBound';
   if (graph.establishersByType?.[semantic]?.length) return 'clientMintedIdentifier';
   if (graph.externalEntityIdentifiers?.has(semantic)) return 'externalBoundary';
@@ -136,6 +149,15 @@ export function bindSemanticInput(args: {
         `fc:cma:${operationId}:${semantic}`,
       )}`;
       return { classification: 'clientMintedAttribute', varName, value };
+    }
+    case 'serverEmergent': {
+      // #162 PR 5: deterministic placeholder for server-minted lifecycle
+      // keys. Distinct prefix (`fc:sem`) so a grep over emitted suites
+      // can tell the two synthesised-value classes apart.
+      const value = `fc:sem:${camelCaseSemantic(semantic)}:${deterministicSuffix(
+        `fc:sem:${operationId}:${semantic}`,
+      )}`;
+      return { classification: 'serverEmergent', varName, value };
     }
     case 'producerBound':
     case 'clientMintedIdentifier':
