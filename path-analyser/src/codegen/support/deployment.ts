@@ -72,8 +72,7 @@ export async function deploy(
   body: DeployBody,
   baseUrl: string,
 ): Promise<ApiResponseLike> {
-  const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> =
-    {};
+  const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};
 
   for (const [k, v] of Object.entries(body.fields ?? {})) {
     if (k === 'tenantId' && ctx.tenantIdVar === '<default>') continue;
