@@ -40,7 +40,7 @@ export type SemanticClassification =
   | 'unclassified';
 
 export type BoundInput =
-  | { classification: 'modelDerived'; varName: string; value: string }
+  | { classification: 'modelDerived'; varName: string; value?: string }
   | { classification: 'clientMintedAttribute'; varName: string; value: string }
   | { classification: 'producerBound'; varName: string }
   | { classification: 'clientMintedIdentifier'; varName: string }
@@ -92,11 +92,16 @@ export function classifySemantic(semantic: string, graph: OperationGraph): Seman
  *
  * Behaviour-preserving with the pre-PR3 inline helpers:
  *
- *   - `modelDerived`: uses the FIRST entry of `fixture.providesValues[semantic]`
- *     (matches `bindModelDerivedFromFixture` PR 1 scope). Returns
- *     `unclassified` if the fixture is missing or has no value entry
- *     for this semantic — the caller (helper) is expected to bail out
- *     without mutating the scenario, mirroring the pre-PR3 `if (!values?.length) continue`.
+ *   - `modelDerived`: classification is reported regardless of whether a
+ *     value can be resolved. The returned `value` is the FIRST entry of
+ *     `fixture.providesValues[semantic]` when present, or `undefined`
+ *     when the fixture is missing or has no entry for this semantic.
+ *     Callers that mutate scenario state must guard on `value !== undefined`
+ *     before binding, mirroring the pre-PR3 `if (!values?.length) continue`.
+ *     Keeping the classification stable (rather than collapsing the
+ *     missing-value case to `unclassified`) lets PR 5 distinguish a
+ *     genuinely-unclassified semantic from a modelDerived semantic with
+ *     missing fixture data.
  *
  *   - `clientMintedAttribute`: produces a deterministic
  *     `fc:cma:<sem>:<suffix>` token using `deterministicSuffix(opId, semantic)`,
@@ -122,7 +127,7 @@ export function bindSemanticInput(args: {
   switch (classification) {
     case 'modelDerived': {
       const values = fixture?.providesValues?.[semantic];
-      if (!values?.length) return { classification: 'unclassified' };
+      if (!values?.length) return { classification: 'modelDerived', varName };
       return { classification: 'modelDerived', varName, value: values[0] };
     }
     case 'clientMintedAttribute': {

@@ -765,6 +765,12 @@ export function bindModelDerivedFromFixture(
         fixture,
       });
       if (result.classification !== 'modelDerived') continue;
+      // Per #162 PR 3 reviewer note: the chokepoint reports modelDerived
+      // even when no fixture value is resolvable, so PR 5 can tell
+      // "unclassified semantic" apart from "modelDerived semantic with
+      // missing fixture data". The caller is responsible for skipping
+      // the unresolved case here — mirrors the pre-PR3 `if (!values?.length) continue`.
+      if (result.value === undefined) continue;
 
       scenario.bindings ||= {};
       // Authoritative override: a featureCoverageGenerator synthetic

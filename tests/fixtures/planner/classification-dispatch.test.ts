@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { classifySemantic } from '../../../path-analyser/src/bindSemanticInput.ts';
+import {
+  bindSemanticInput,
+  classifySemantic,
+} from '../../../path-analyser/src/bindSemanticInput.ts';
 import {
   bindClientMintedAttribute,
   bindModelDerivedFromFixture,
@@ -540,5 +543,116 @@ describe('classifySemantic precedence (#162 PR 3)', () => {
     };
 
     expect(classifySemantic('SomeAttr', graph)).toBe('producerBound');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bindSemanticInput modelDerived value-resolution contract (#162 PR 3)
+// ---------------------------------------------------------------------------
+//
+// Reviewer note on PR 179 (copilot-pull-request-reviewer): the chokepoint
+// must NOT collapse "modelDerived semantic with missing fixture data" to
+// `unclassified`, because PR 5 needs to tell the two cases apart in
+// load-time diagnostics. The classification is a property of the
+// semantic + graph; the value is a separate question of whether the
+// active fixture happens to provide it.
+
+describe('bindSemanticInput modelDerived value-resolution (#162 PR 3)', () => {
+  const modelDerivedGraph: OperationGraph = {
+    operations: {},
+    producersByType: {},
+    domain: {
+      version: 1,
+      semanticTypes: { ElementId: { kind: 'modelDerived' } },
+    },
+  };
+
+  it('returns modelDerived with the fixture value when providesValues is populated', () => {
+    const fixture = {
+      kind: 'bpmnProcess',
+      path: 'bpmn/service-task.bpmn',
+      providesValues: { ElementId: ['service_task_1', 'service_task_2'] },
+    };
+
+    const result = bindSemanticInput({
+      semantic: 'ElementId',
+      operationId: 'createProcessInstance',
+      graph: modelDerivedGraph,
+      fixture,
+    });
+
+    expect(result).toEqual({
+      classification: 'modelDerived',
+      varName: 'elementIdVar',
+      value: 'service_task_1',
+    });
+  });
+
+  it('returns modelDerived (NOT unclassified) when the fixture lacks providesValues', () => {
+    // Defect-class guard for the reviewer note: stable classification
+    // even when the value can't be resolved. PR 5 will use this to
+    // distinguish "semantic not declared anywhere" from "semantic
+    // declared modelDerived but the selected fixture is the wrong file".
+    const fixture = {
+      kind: 'form',
+      path: 'forms/simple.form',
+    };
+
+    const result = bindSemanticInput({
+      semantic: 'ElementId',
+      operationId: 'createProcessInstance',
+      graph: modelDerivedGraph,
+      fixture,
+    });
+
+    expect(result.classification).toBe('modelDerived');
+    if (result.classification === 'modelDerived') {
+      expect(result.varName).toBe('elementIdVar');
+      expect(result.value).toBeUndefined();
+    }
+  });
+
+  it('returns modelDerived with no value when no fixture is supplied at all', () => {
+    const result = bindSemanticInput({
+      semantic: 'ElementId',
+      operationId: 'createProcessInstance',
+      graph: modelDerivedGraph,
+      // fixture intentionally omitted
+    });
+
+    expect(result.classification).toBe('modelDerived');
+    if (result.classification === 'modelDerived') {
+      expect(result.value).toBeUndefined();
+    }
+  });
+
+  it('returns modelDerived with no value when providesValues[<sem>] is an empty array', () => {
+    const fixture = {
+      kind: 'bpmnProcess',
+      path: 'bpmn/service-task.bpmn',
+      providesValues: { ElementId: [] },
+    };
+
+    const result = bindSemanticInput({
+      semantic: 'ElementId',
+      operationId: 'createProcessInstance',
+      graph: modelDerivedGraph,
+      fixture,
+    });
+
+    expect(result.classification).toBe('modelDerived');
+    if (result.classification === 'modelDerived') {
+      expect(result.value).toBeUndefined();
+    }
+  });
+
+  it('still returns unclassified when the semantic is neither declared nor indexed', () => {
+    const result = bindSemanticInput({
+      semantic: 'UnknownSemantic',
+      operationId: 'createProcessInstance',
+      graph: { operations: {}, producersByType: {} },
+    });
+
+    expect(result.classification).toBe('unclassified');
   });
 });
