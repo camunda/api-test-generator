@@ -181,27 +181,46 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
   lines.push("import { extractInto, seedBinding } from './support/seeding';");
-  // deploy() is emitted for createDeployment multipart steps; resolveFixture
-  // is emitted for any other multipart steps (non-createDeployment). In the
-  // current spec, createDeployment is the only multipart operation, so both
-  // flags are mutually exclusive in practice — but future multipart operations
-  // would use the resolveFixture-based inline machinery.
+  // deploy() is emitted for 200-expected createDeployment multipart steps; resolveFixture
+  // is emitted for any step that falls through to the inline multipart path — this includes
+  // non-createDeployment multipart steps AND createDeployment steps with a non-200 expected
+  // status (which are not routed through deploy()). Mirror the isDeploymentStep condition
+  // exactly so the two flags stay in sync.
   const hasDeploymentMultipart = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some(
       (step) =>
         step.operationId === 'createDeployment' &&
         step.bodyKind === 'multipart' &&
-        !!step.multipartTemplate,
+        !!step.multipartTemplate &&
+        step.expect.status === 200,
     ),
   );
   const hasOtherMultipart = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some(
       (step) =>
-        step.operationId !== 'createDeployment' &&
         step.bodyKind === 'multipart' &&
-        !!step.multipartTemplate,
+        !!step.multipartTemplate &&
+        !(step.operationId === 'createDeployment' && step.expect.status === 200),
     ),
   );
+  // authHeaders is used in inline request steps and awaitEventually witness blocks.
+  // deploy() calls authHeaders internally, so deploy()-only suites don't need this import.
+  const hasInlineRequestStep = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some(
+      (step) =>
+        !(
+          step.operationId === 'createDeployment' &&
+          step.bodyKind === 'multipart' &&
+          !!step.multipartTemplate &&
+          step.expect.status === 200
+        ),
+    ),
+  );
+  if (hasInlineRequestStep || needsAwaitEventually) {
+    lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
+  } else {
+    lines.push("import { buildBaseUrl } from './support/env';");
+  }
   if (hasDeploymentMultipart) {
     lines.push("import { deploy } from './support/deployment';");
   }

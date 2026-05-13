@@ -130,8 +130,13 @@ export async function deploy(
   );
   extractInto(
     ctx,
+    'decisionRequirementsIdVar',
+    json?.deployments?.[0]?.decisionDefinition?.decisionRequirementsId,
+  );
+  extractInto(
+    ctx,
     'decisionRequirementsKeyVar',
-    json?.deployments?.[0]?.decisionRequirements?.decisionRequirementsKey,
+    json?.deployments?.[0]?.decisionDefinition?.decisionRequirementsKey,
   );
   extractInto(ctx, 'formIdVar', json?.deployments?.[0]?.form?.formId);
 
