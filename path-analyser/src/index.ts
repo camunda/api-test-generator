@@ -1,7 +1,7 @@
 import fsSync from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
 import { deterministicSuffix } from './codegen/support/seeding.js';
 import {
@@ -431,10 +431,20 @@ async function main() {
   console.log(`Generated scenario files for ${processed} endpoints.`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only auto-invoke main() when this module is executed directly as a
+// CLI (e.g. `node path-analyser/dist/src/index.js`), not when imported
+// by another module. Tests in tests/fixtures/planner/ import the
+// exported `bindModelDerivedFromFixture` / `bindClientMintedAttribute`
+// helpers from this file under Vitest; without the guard, importing
+// would kick off the generator pipeline (filesystem writes against
+// `generated/`) inside the test process. Standard ESM CLI idiom: the
+// module's own URL matches the file URL of `process.argv[1]`.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
 
 function buildRequestPlan(
   scenario: EndpointScenario,
