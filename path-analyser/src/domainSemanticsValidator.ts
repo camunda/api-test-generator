@@ -37,11 +37,14 @@ import type { OperationGraph } from './types.js';
 const SemanticTypeSpecSchema = z
   .object({
     witnesses: z.string().min(1).optional(),
-    // #162 PR 1: value-source classification. Only `modelDerived` lands
-    // in PR 1; future PRs add `attribute` (client-minted free-form
-    // labels). Anything else is rejected at the schema layer so a typo
-    // doesn't silently fall through to the default classification chain.
-    kind: z.enum(['modelDerived']).optional(),
+    // #162 PR 1 added `modelDerived`; PR 2 adds `attribute`. Strict enum
+    // so a typo (e.g. `attributes`) is rejected at load time rather than
+    // silently falling through to the default classification chain.
+    kind: z.enum(['modelDerived', 'attribute']).optional(),
+    // #162 PR 2: only meaningful with `kind: 'attribute'`. Validator
+    // enforces the pairing in `checkAttributeKindClientMintedPairing`
+    // below.
+    clientMinted: z.boolean().optional(),
   })
   .passthrough();
 
@@ -381,6 +384,35 @@ function checkEventualStateWitnessShape(d: DomainSemanticsShape): CrossRefIssue[
   return issues;
 }
 
+// #162 PR 2: `kind: 'attribute'` and `clientMinted: true` are paired —
+// a `clientMinted: true` flag without `kind: 'attribute'` is dead config
+// (the planner only consults clientMinted on attribute-kind semantics),
+// and `kind: 'attribute'` without `clientMinted: true` is currently
+// undefined (PR 2's planner branch hard-requires clientMinted, since the
+// alternative interpretation — server-minted attributes — isn't part of
+// the classification vocabulary). Both directions get a load-time error
+// so a typo doesn't silently fall through.
+function checkAttributeKindClientMintedPairing(d: DomainSemanticsShape): CrossRefIssue[] {
+  const issues: CrossRefIssue[] = [];
+  for (const [name, spec] of Object.entries(d.semanticTypes ?? {})) {
+    const kind = spec.kind;
+    const clientMinted = spec.clientMinted === true;
+    if (kind === 'attribute' && !clientMinted) {
+      issues.push({
+        code: 'attributeKindClientMintedPairing',
+        message: `semanticTypes.${name} sets kind: 'attribute' but is missing clientMinted: true. PR 2 (#162) requires the pairing — declare clientMinted: true or change the kind.`,
+      });
+    }
+    if (clientMinted && kind !== 'attribute') {
+      issues.push({
+        code: 'attributeKindClientMintedPairing',
+        message: `semanticTypes.${name} sets clientMinted: true but kind is ${kind ? `'${kind}'` : 'absent'}. The planner only consults clientMinted on attribute-kind semantics.`,
+      });
+    }
+  }
+  return issues;
+}
+
 const CROSS_REF_CHECKS = [
   checkArtifactKindStateDeclared,
   checkArtifactKindWitnessDeclared,
@@ -390,6 +422,7 @@ const CROSS_REF_CHECKS = [
   checkDisjunctionMemberResolves,
   checkGlobalContextSeedsCoherent,
   checkEventualStateWitnessShape,
+  checkAttributeKindClientMintedPairing,
 ] as const;
 
 // Composed schema: structural shape + every cross-reference invariant.
