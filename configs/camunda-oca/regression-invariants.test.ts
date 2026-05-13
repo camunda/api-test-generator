@@ -3257,13 +3257,20 @@ describeForThisConfig(
       const offenders: { file: string; id: string; variantKey: string }[] = [];
       for (const { file, parsed } of loadAllFeatureFiles()) {
         for (const s of readFeatureScenarios(parsed)) {
-          const key = s.variantKey;
-          if (typeof key !== 'string') continue;
           // Carve-out: behavioural-matrix scenarios (`duplicateTest`)
           // are allowed regardless of variantKey shape — the
           // distinguishing metadata is on the scenario object, not in
           // the key.
           if (s.duplicateTest) continue;
+          const key = s.variantKey;
+          // A missing/non-string variantKey is itself a regression:
+          // post-PR-4 every feature scenario must carry a suite-
+          // convention key. Treat as an offender so an accidentally
+          // omitted key cannot slip past this guard.
+          if (typeof key !== 'string') {
+            offenders.push({ file, id: s.id, variantKey: String(key) });
+            continue;
+          }
           if (!ALLOW_PATTERNS.some((p) => p.test(key))) {
             offenders.push({ file, id: s.id, variantKey: key });
           }
@@ -3271,7 +3278,7 @@ describeForThisConfig(
       }
       expect(
         offenders,
-        'Feature suite emitted a scenario whose variantKey is not in the post-PR-4 allowlist (base | neg | oneOf=<g>:<v> | duplicateTest carve-out).',
+        'Feature suite emitted a scenario whose variantKey is missing or not in the post-PR-4 allowlist (base | neg | oneOf=<g>:<v> | duplicateTest carve-out).',
       ).toEqual([]);
     });
 
@@ -3328,12 +3335,13 @@ describeForThisConfig(
         for (const e of op.requestBodySemanticTypes ?? []) {
           if (e.required) continue;
           if (typeof e.fieldPath !== 'string') continue;
-          // Flat top-level optional: no `.` and no `[]` (operator-object
-          // and scalar-array leaves are intentionally skipped today;
-          // the partition contract is about real populated-vs-omitted
-          // object leaves).
+          // Flat top-level optional: no `.` separator. This includes
+          // both flat scalars (e.g. `tenantId`) and top-level scalar-
+          // array leaves (e.g. `tags[]`, `tenantIds[]`) — both are
+          // populated-vs-omitted optionals the variant suite owns
+          // post-cut. Operator-object pseudo-fields (`$eq`, `$like`,
+          // ...) are excluded because they are not real body leaves.
           if (e.fieldPath.includes('.')) continue;
-          if (e.fieldPath.endsWith('[]')) continue;
           if (e.fieldPath.startsWith('$')) continue;
           const covered = variantBySemanticByOp.get(op.operationId);
           if (!covered?.has(e.semanticType)) {
