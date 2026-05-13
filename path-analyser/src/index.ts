@@ -716,7 +716,7 @@ function annotateEventualWaits(steps: RequestStep[], graph: OperationGraph): voi
  *     `buildRequestBodyFromCanonical` and do not need a populatesSubShape
  *     annotation.
  */
-function bindModelDerivedFromFixture(
+export function bindModelDerivedFromFixture(
   scenario: EndpointScenario,
   steps: RequestStep[],
   graph: OperationGraph,
@@ -839,7 +839,7 @@ function fixtureFromDeployStep(step: RequestStep): ArtifactRegistryEntry | undef
  *     `tags[]` and `filter.tags: ['${tagVar}']` for nested
  *     `filter.tags[]`.
  */
-function bindClientMintedAttribute(
+export function bindClientMintedAttribute(
   scenario: EndpointScenario,
   steps: RequestStep[],
   graph: OperationGraph,
