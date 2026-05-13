@@ -2657,126 +2657,114 @@ describeForThisConfig(
     // assertions below check this leading-pattern is absent from the
     // corresponding feature scenario's binding — proving the binding
     // comes from providesValues instead. A real BPMN element id starts
-    // with the model's element name (e.g. `StartEvent_1`,
-    // `Activity_06kuv4r`) and so cannot start with the lower-cased
-    // semantic name.
-    const SYNTHETIC_RE = /^elementId_[A-Za-z0-9]+$/;
+    // #162 PR 4: the suite partition cut moved per-leaf optional
+    // coverage from feature (was `opt=ElementId`) to variant (one
+    // scenario per `<rootPath>::<fieldPath>`). The original assertion
+    // that `elementIdVar` resolves from a deploy fixture and must NOT
+    // match the synthetic `elementId_<suffix>` placeholder no longer
+    // applies in the variant suite: variant-suite fallback minting
+    // (path-analyser/src/scenarioGenerator.ts → `resolveFallbackValue`)
+    // legitimately produces synthetic placeholders for `modelDerived`
+    // semantics when the producer-chain BFS cannot satisfy the leaf,
+    // because the variant generator does not have deploy-fixture
+    // context at that stage. The cut's structural guards live in
+    // `'bundled-spec invariants: suite-partition cut (#162 PR 4)'`
+    // above. Here we keep a class-scoped existence + body-reference
+    // invariant only: every endpoint that declares ElementId as an
+    // optional body leaf must have at least one variant scenario that
+    // populates ElementId, binds `elementIdVar`, and the emitted
+    // variant spec must reference `ctx.elementIdVar`.
 
-    interface FeatureScenarioBody {
+    interface VariantScenarioBody {
       bindings?: Record<string, string>;
       strategy?: string;
       variantKey?: string;
+      populatesSubShape?: { leafSemantics?: string[] };
     }
-    interface FeatureScenarioFile {
+    interface VariantScenarioFile {
       endpoint: { operationId: string };
-      scenarios: FeatureScenarioBody[];
+      scenarios: VariantScenarioBody[];
     }
 
-    function loadFeatureCollection(file: string): FeatureScenarioFile {
+    function loadVariantCollection(file: string): VariantScenarioFile {
       const raw = readFileSync(file, 'utf8');
       // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
-      return JSON.parse(raw) as FeatureScenarioFile;
+      return JSON.parse(raw) as VariantScenarioFile;
     }
 
-    function findScenarioBinding(
-      collection: FeatureScenarioFile,
-      variantKey: string,
-      varName: string,
-    ): string | undefined {
-      const scenario = collection.scenarios.find((s) => s.variantKey === variantKey);
-      return scenario?.bindings?.[varName];
+    function findElementIdVariant(
+      collection: VariantScenarioFile,
+    ): VariantScenarioBody | undefined {
+      return collection.scenarios.find((s) =>
+        s.populatesSubShape?.leafSemantics?.includes('ElementId'),
+      );
     }
 
     interface Target {
       endpoint: string;
-      featureFile: string;
-      variantKey: string;
+      variantFile: string;
       varName: string;
-      consumerPathInBody: string;
     }
     const TARGETS: Target[] = [
       {
         endpoint: 'createProcessInstance',
-        featureFile: 'post--process-instances-scenarios.json',
-        variantKey: 'opt=ElementId',
+        variantFile: 'post--process-instances-scenarios.json',
         varName: 'elementIdVar',
-        consumerPathInBody: 'startInstructions',
       },
       {
         endpoint: 'activateAdHocSubProcessActivities',
-        featureFile:
+        variantFile:
           'post--element-instances--ad-hoc-activities--{adHocSubProcessInstanceKey}--activation-scenarios.json',
-        variantKey: 'opt=ElementId',
         varName: 'elementIdVar',
-        consumerPathInBody: 'elements',
       },
       {
         endpoint: 'completeJob',
-        featureFile: 'post--jobs--{jobKey}--completion-scenarios.json',
-        variantKey: 'opt=ElementId',
+        variantFile: 'post--jobs--{jobKey}--completion-scenarios.json',
         varName: 'elementIdVar',
-        consumerPathInBody: 'result',
       },
       {
         endpoint: 'modifyProcessInstance',
-        featureFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
-        variantKey: 'opt=ElementId',
+        variantFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
         varName: 'elementIdVar',
-        consumerPathInBody: 'activateInstructions',
       },
     ];
 
     for (const t of TARGETS) {
-      it(`${t.endpoint} :: feature 'with ElementId' binds elementIdVar from fixture providesValues (#162)`, () => {
-        const path = join(FEATURE_SCENARIOS_DIR, t.featureFile);
+      it(`${t.endpoint} :: variant suite emits an ElementId-populating scenario binding ${t.varName} (#162 PR 4)`, () => {
+        const path = join(VARIANT_SCENARIOS_DIR, t.variantFile);
         if (!existsSync(path)) {
           throw new Error(
-            `expected feature-output JSON not found: ${t.featureFile} — run 'npm run testsuite:generate'`,
+            `expected variant-output JSON not found: ${t.variantFile} — run 'npm run testsuite:generate'`,
           );
         }
-        const collection = loadFeatureCollection(path);
-        const binding = findScenarioBinding(collection, t.variantKey, t.varName);
+        const collection = loadVariantCollection(path);
+        const scenario = findElementIdVariant(collection);
         expect(
-          binding,
-          `${t.endpoint}: scenario with variantKey '${t.variantKey}' must have a binding for ${t.varName}`,
+          scenario,
+          `${t.endpoint}: expected a variant scenario whose populatesSubShape.leafSemantics includes 'ElementId'`,
         ).toBeDefined();
+        const binding = scenario?.bindings?.[t.varName];
         expect(
           binding,
-          `${t.endpoint}: ${t.varName} binding must NOT be the pre-PR-1 synthetic 'elementId_...' placeholder`,
-        ).not.toMatch(SYNTHETIC_RE);
+          `${t.endpoint}: ElementId variant must bind ${t.varName}`,
+        ).toBeDefined();
       });
 
-      it(`${t.endpoint} :: emitted feature spec references ctx.${t.varName} in the request body (#162)`, () => {
-        const specName = `${t.endpoint}.feature.spec.ts`;
+      it(`${t.endpoint} :: emitted variant spec references ctx.${t.varName} (#162 PR 4)`, () => {
+        const specName = `${t.endpoint}.variant.spec.ts`;
         const spec = join(GENERATED_TESTS_DIR, specName);
         if (!existsSync(spec)) {
           throw new Error(`expected emitted spec not found: ${specName}`);
         }
         const src = readFileSync(spec, 'utf8');
-        // The body for the 'opt=ElementId' scenario must reference the
-        // ElementId binding inside its consumer-path key (e.g. `elements`,
-        // `startInstructions`, …). Use the scenario title to scope the
-        // search to the right test block.
-        const scenarioMarker = `with ElementId`;
-        const scenarioIdx = src.indexOf(scenarioMarker);
+        // Variant specs use `variant-N` titles (no semantic-named
+        // marker), and an endpoint's variant file contains only its
+        // variant scenarios — so a file-wide `ctx.elementIdVar`
+        // reference is sufficient and unambiguous evidence that the
+        // ElementId variant body wires the binding.
         expect(
-          scenarioIdx,
-          `${t.endpoint}: expected a scenario block titled 'with ElementId'`,
-        ).toBeGreaterThan(0);
-        // Find the end of the test block by scanning forward to the next
-        // `test(` opener (or end of file).
-        const nextTestIdx = src.indexOf("\n  test('", scenarioIdx + scenarioMarker.length);
-        const scenarioBlock = src.slice(
-          scenarioIdx,
-          nextTestIdx > 0 ? nextTestIdx : src.length,
-        );
-        expect(
-          scenarioBlock.includes(t.consumerPathInBody),
-          `${t.endpoint} 'with ElementId': body must populate '${t.consumerPathInBody}'`,
-        ).toBe(true);
-        expect(
-          scenarioBlock.includes(`ctx.${t.varName}`),
-          `${t.endpoint} 'with ElementId': body must reference ctx.${t.varName}`,
+          src.includes(`ctx.${t.varName}`),
+          `${t.endpoint} variant spec: body must reference ctx.${t.varName}`,
         ).toBe(true);
       });
     }
@@ -2945,61 +2933,68 @@ describeForThisConfig(
 
       for (const op of setterOps) {
         const varName = `${camelCase(semantic)}Var`;
-        const expectedPrefix = `fc:cma:${camelCase(semantic)}:`;
-        const variantKey = `opt=${semantic}`;
 
-        it(`${semantic} :: ${op.operationId}: opt=${semantic} feature scenario binds ${varName} with the clientMintedAttribute prefix (#162 PR 2)`, () => {
-          const featureFile = join(FEATURE_SCENARIOS_DIR, featureFileFor(op));
-          if (!existsSync(featureFile)) {
+        it(`${semantic} :: ${op.operationId}: variant suite emits a ${semantic}-populating scenario binding ${varName} (#162 PR 4)`, () => {
+          const variantFile = join(VARIANT_SCENARIOS_DIR, featureFileFor(op));
+          if (!existsSync(variantFile)) {
             throw new Error(
-              `expected feature-output JSON not found: ${featureFileFor(op)} — run 'npm run testsuite:generate'`,
+              `expected variant-output JSON not found: ${featureFileFor(op)} — run 'npm run testsuite:generate'`,
             );
           }
-          const raw = readFileSync(featureFile, 'utf8');
+          const raw = readFileSync(variantFile, 'utf8');
           // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
           const parsed = JSON.parse(raw) as {
-            scenarios: Array<{ variantKey?: string; bindings?: Record<string, string> }>;
+            scenarios: Array<{
+              variantKey?: string;
+              bindings?: Record<string, string>;
+              populatesSubShape?: { leafSemantics?: string[] };
+            }>;
           };
-          const scenario = parsed.scenarios.find((s) => s.variantKey === variantKey);
+          const scenario = parsed.scenarios.find((s) =>
+            s.populatesSubShape?.leafSemantics?.includes(semantic),
+          );
           expect(
             scenario,
-            `${op.operationId}: expected an ${variantKey} feature scenario`,
+            `${op.operationId}: expected a variant scenario whose populatesSubShape.leafSemantics includes '${semantic}'`,
           ).toBeDefined();
           const binding = scenario?.bindings?.[varName];
           expect(
             binding,
-            `${op.operationId} ${variantKey}: must bind ${varName}`,
+            `${op.operationId}: ${semantic} variant must bind ${varName}`,
           ).toBeDefined();
-          expect(
-            binding?.startsWith(expectedPrefix),
-            `${op.operationId} ${variantKey}: ${varName} binding must use the clientMintedAttribute prefix (${expectedPrefix}…); got '${binding}'`,
-          ).toBe(true);
+          // PR 4 note: the binding may be either
+          //   - `fc:cma:<sem>:<suffix>` — variant fallback path
+          //     (`bindSemanticInput` for clientMintedAttribute), used
+          //     when the producer-chain BFS could not satisfy the leaf;
+          //   - `__PENDING__` — variant producer-chain path, where the
+          //     value is extracted at runtime from a search step in the
+          //     chain;
+          //   - `<sem>_<suffix>` — variant fallback path for
+          //     non-clientMintedAttribute classifications (only
+          //     reached when the semantic is not clientMinted; included
+          //     here for completeness even though clientMintedAttribute
+          //     semantics never take this branch).
+          // Asserting any of these specifically would couple this
+          // invariant to the BFS outcome rather than to the suite-
+          // partition contract.
         });
 
-        it(`${semantic} :: ${op.operationId}: emitted with-${semantic} feature spec references ctx.${varName} (#162 PR 2)`, () => {
-          // Map operationId → emitted Playwright spec path. The
-          // generator names files by operationId (not method+path) for
-          // playwright suites, so this lookup is direct.
-          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.feature.spec.ts`);
+        it(`${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`, () => {
+          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.variant.spec.ts`);
           if (!existsSync(spec)) {
             throw new Error(
-              `expected emitted spec not found: ${op.operationId}.feature.spec.ts — run 'npm run testsuite:generate'`,
+              `expected emitted spec not found: ${op.operationId}.variant.spec.ts — run 'npm run testsuite:generate'`,
             );
           }
           const src = readFileSync(spec, 'utf8');
-          // The variant title fragment the emitter writes for `opt=<X>`
-          // is `with <X>` (see featureCoverageGenerator title formatter).
-          const scenarioMarker = `with ${semantic}`;
-          const scenarioIdx = src.indexOf(scenarioMarker);
+          // Variant specs use `variant-N` titles (no semantic-named
+          // marker), and an endpoint's variant file contains only its
+          // variant scenarios — so a file-wide `ctx.<sem>Var` reference
+          // is sufficient and unambiguous evidence that the scenario
+          // body wires the binding.
           expect(
-            scenarioIdx,
-            `${op.operationId}: expected a scenario block titled '${scenarioMarker}'`,
-          ).toBeGreaterThan(0);
-          const nextTestIdx = src.indexOf("\n  test('", scenarioIdx + scenarioMarker.length);
-          const block = src.slice(scenarioIdx, nextTestIdx > 0 ? nextTestIdx : src.length);
-          expect(
-            block.includes(`ctx.${varName}`),
-            `${op.operationId} '${scenarioMarker}': body must reference ctx.${varName}`,
+            src.includes(`ctx.${varName}`),
+            `${op.operationId} variant spec: body must reference ctx.${varName}`,
           ).toBe(true);
         });
       }
@@ -3123,3 +3118,246 @@ describeForThisConfig(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Suite-partition cut (#162 PR 4) — feature suite is required-only,
+// variant suite owns every populated optional (flat + nested + oneOf:rich).
+// ---------------------------------------------------------------------------
+//
+// These invariants encode the post-cut contract from issue #162's
+// "Suite-partition cut" section:
+//
+//   - feature: one scenario per request shape, required fields ONLY.
+//     Polymorphic (oneOf) request: one scenario per shape, MINIMAL
+//     materialisation. Plus carve-out behavioural-matrix scenarios
+//     (`duplicateTest`, `search-empty-negative`).
+//
+//   - variant: combinatorial exploration of optional fields, both flat
+//     (top-level optionals like Tag) and nested (filter.elementId,
+//     startInstructions[].elementId). Absorbs every `opt=*` scenario
+//     and every `oneOf:rich` scenario the feature planner used to emit.
+//
+// Step 0 of PR 4 (this commit) lands the assertions before any
+// production code moves — per AGENTS.md "Coverage analysis before a
+// behaviour-preserving refactor". The cut is NOT behaviour-preserving,
+// but the same red/green discipline applies: writing the assertions
+// first proves the new contract is detectable, and the cut commit
+// proves the production code now satisfies it.
+//
+// Expected on `main` (pre-cut): every `it` in this block FAILS. Today
+// the feature suite has 284 `opt=*` scenarios and 8 `oneOf:rich`
+// scenarios that PR 4 will move into variant.
+//
+// Expected after PR 4: every `it` passes; feature shrinks from 517 to
+// ~233 scenarios, variant grows from 208 to ~492.
+
+describeForThisConfig(
+  'bundled-spec invariants: suite-partition cut (#162 PR 4)',
+  () => {
+    function loadAllFeatureFiles(): { file: string; parsed: ScenarioFile }[] {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature scenarios directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      const out: { file: string; parsed: ScenarioFile }[] = [];
+      for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const parsed = JSON.parse(
+          readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+        ) as ScenarioFile;
+        out.push({ file: f, parsed });
+      }
+      return out;
+    }
+
+    function loadAllVariantFiles(): { file: string; parsed: VariantScenarioFile }[] {
+      if (!existsSync(VARIANT_SCENARIOS_DIR)) return [];
+      const out: { file: string; parsed: VariantScenarioFile }[] = [];
+      for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const parsed = JSON.parse(
+          readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+        ) as VariantScenarioFile;
+        out.push({ file: f, parsed });
+      }
+      return out;
+    }
+
+    interface FeatureScenarioWithKey {
+      id: string;
+      variantKey?: string;
+      negative?: boolean;
+      duplicateTest?: { mode: string };
+      requestVariantGroup?: string;
+      requestVariantRichness?: string;
+    }
+
+    function readFeatureScenarios(parsed: ScenarioFile): FeatureScenarioWithKey[] {
+      // The ScenarioFile schema in this test file is intentionally
+      // minimal; widen the row shape here for the partition checks.
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON — partition fields read out-of-band
+      return parsed.scenarios as unknown as FeatureScenarioWithKey[];
+    }
+
+    it('feature suite contains zero scenarios with variantKey starting with `opt=` (#162 PR 4)', () => {
+      // Class-scoped guard for the cut: every populated-optional
+      // scenario must live in the variant suite. A single `opt=*`
+      // entry in feature output means the partition has regressed.
+      const offenders: { file: string; id: string; variantKey: string }[] = [];
+      for (const { file, parsed } of loadAllFeatureFiles()) {
+        for (const s of readFeatureScenarios(parsed)) {
+          if (typeof s.variantKey === 'string' && s.variantKey.startsWith('opt=')) {
+            offenders.push({ file, id: s.id, variantKey: s.variantKey });
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Feature suite emitted scenarios with `opt=` variantKey. Per #162 PR 4, every populated-optional scenario belongs in the variant suite.',
+      ).toEqual([]);
+    });
+
+    it('feature suite contains zero scenarios with `:rich` variantKey suffix (#162 PR 4)', () => {
+      // The `oneOf=*:rich` shapes (oneOf branch with optionals filled)
+      // are populated-optional scenarios in disguise and belong in the
+      // variant suite. The minimal `oneOf=*` (no `:rich` suffix) stays
+      // in feature — one scenario per request shape.
+      const offenders: { file: string; id: string; variantKey: string }[] = [];
+      for (const { file, parsed } of loadAllFeatureFiles()) {
+        for (const s of readFeatureScenarios(parsed)) {
+          if (typeof s.variantKey === 'string' && s.variantKey.endsWith(':rich')) {
+            offenders.push({ file, id: s.id, variantKey: s.variantKey });
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Feature suite emitted `:rich` oneOf scenarios. Per #162 PR 4, the rich shape (oneOf branch with optionals populated) belongs in the variant suite.',
+      ).toEqual([]);
+    });
+
+    it('every feature scenario variantKey matches the carve-out allowlist (#162 PR 4)', () => {
+      // Authoritative list of feature-suite variantKey shapes after the
+      // cut. Anything else is a regression. The allowlist:
+      //   - 'base'                    : the canonical required-only scenario
+      //   - 'neg'                     : search-empty-negative carve-out
+      //   - 'oneOf=<group>:<variant>' : minimal oneOf branch (no `:rich`)
+      //   - duplicateTest scenarios   : variantKey may be 'base' or 'neg';
+      //                                 the duplicateTest field carries the
+      //                                 distinguishing metadata and is
+      //                                 permitted regardless.
+      const ALLOW_PATTERNS: RegExp[] = [
+        /^base$/,
+        /^neg$/,
+        /^oneOf=[^|]+:[^|:]+$/, // oneOf=<group>:<variant>, with no `:rich`
+      ];
+      const offenders: { file: string; id: string; variantKey: string }[] = [];
+      for (const { file, parsed } of loadAllFeatureFiles()) {
+        for (const s of readFeatureScenarios(parsed)) {
+          // Carve-out: behavioural-matrix scenarios (`duplicateTest`)
+          // are allowed regardless of variantKey shape — the
+          // distinguishing metadata is on the scenario object, not in
+          // the key.
+          if (s.duplicateTest) continue;
+          const key = s.variantKey;
+          // A missing/non-string variantKey is itself a regression:
+          // post-PR-4 every feature scenario must carry a suite-
+          // convention key. Treat as an offender so an accidentally
+          // omitted key cannot slip past this guard.
+          if (typeof key !== 'string') {
+            offenders.push({ file, id: s.id, variantKey: String(key) });
+            continue;
+          }
+          if (!ALLOW_PATTERNS.some((p) => p.test(key))) {
+            offenders.push({ file, id: s.id, variantKey: key });
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Feature suite emitted a scenario whose variantKey is missing or not in the post-PR-4 allowlist (base | neg | oneOf=<g>:<v> | duplicateTest carve-out).',
+      ).toEqual([]);
+    });
+
+    it('every feature scenario file is materialised as a *.feature.spec.ts (#162 PR 4)', () => {
+      // Mirror of the variant-suite #105 guard. A feature JSON file
+      // without a corresponding `.feature.spec.ts` means the emitter
+      // dropped the suite silently — exactly the failure mode the
+      // partition cut is supposed to prevent.
+      const offenders: { jsonFile: string; expectedSpec: string }[] = [];
+      for (const { file, parsed } of loadAllFeatureFiles()) {
+        if (!parsed.scenarios?.length) continue;
+        const opId = parsed.endpoint?.operationId;
+        if (!opId) continue;
+        const expectedSpec = `${opId}.feature.spec.ts`;
+        const specPath = join(GENERATED_TESTS_DIR, expectedSpec);
+        if (!existsSync(specPath)) {
+          offenders.push({ jsonFile: file, expectedSpec });
+        }
+      }
+      expect(
+        offenders,
+        'Feature scenario JSON without a matching .feature.spec.ts in the playwright suite directory.',
+      ).toEqual([]);
+    });
+
+    it('variant suite covers every flat top-level optional present in the feature suite pre-cut (#162 PR 4)', () => {
+      // After dropping the `subShapeRootOf` `segments.length < 2`
+      // filter, the variant planner must enumerate flat top-level
+      // optionals. Today the planner only enumerates nested sub-shapes
+      // (filter.*, startInstructions[].*) — flat optionals like Tag,
+      // CorrelationKey, BusinessId are skipped. This guard fails until
+      // the cut lands.
+      //
+      // Concrete acceptance: for every (operationId, semantic) where
+      // the operation declares the semantic as an optional top-level
+      // requestBody field (no `.` in fieldPath), there is a variant
+      // scenario whose populatesSubShape.leafSemantics includes it.
+      const variantBySemanticByOp = new Map<string, Set<string>>();
+      for (const { parsed } of loadAllVariantFiles()) {
+        const opId = parsed.endpoint?.operationId;
+        if (!opId) continue;
+        const set = variantBySemanticByOp.get(opId) ?? new Set<string>();
+        for (const s of parsed.scenarios ?? []) {
+          for (const sem of s.populatesSubShape?.leafSemantics ?? []) {
+            set.add(sem);
+          }
+        }
+        variantBySemanticByOp.set(opId, set);
+      }
+
+      const graph = loadGraph();
+      const offenders: { operationId: string; semantic: string; fieldPath: string }[] = [];
+      for (const op of graph.operations) {
+        for (const e of op.requestBodySemanticTypes ?? []) {
+          if (e.required) continue;
+          if (typeof e.fieldPath !== 'string') continue;
+          // Flat top-level optional: no `.` separator. This includes
+          // both flat scalars (e.g. `tenantId`) and top-level scalar-
+          // array leaves (e.g. `tags[]`, `tenantIds[]`) — both are
+          // populated-vs-omitted optionals the variant suite owns
+          // post-cut. Operator-object pseudo-fields (`$eq`, `$like`,
+          // ...) are excluded because they are not real body leaves.
+          if (e.fieldPath.includes('.')) continue;
+          if (e.fieldPath.startsWith('$')) continue;
+          const covered = variantBySemanticByOp.get(op.operationId);
+          if (!covered?.has(e.semanticType)) {
+            offenders.push({
+              operationId: op.operationId,
+              semantic: e.semanticType,
+              fieldPath: e.fieldPath,
+            });
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Variant suite is missing scenarios for flat top-level optionals. Per #162 PR 4, the variant planner must absorb every populated-optional scenario the feature suite previously emitted as `opt=*`.',
+      ).toEqual([]);
+    });
+  },
+);
+

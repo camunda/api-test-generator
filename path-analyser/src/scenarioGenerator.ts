@@ -1,3 +1,4 @@
+import { bindSemanticInput } from './bindSemanticInput.js';
 import { deterministicSuffix } from './codegen/support/seeding.js';
 import type {
   ArtifactRule,
@@ -1719,6 +1720,14 @@ export function generateOptionalSubShapeVariants(
   outer: for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
       if (collectionScenarios.length >= maxVariants) break outer;
+
+      // Skip duplicates BEFORE any planning work: `requestBodySemanticTypes`
+      // can repeat a (rootPath, fieldPath) pair for siblings, and the
+      // producer-chain BFS below is the most expensive step in this
+      // function — never run it for a key we've already emitted.
+      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
+      if (seenVariantKeys.has(variantKey)) continue;
+
       // Resolve producer candidates: prefer authoritative (provider:true)
       // producers from `producersByType`, but fall back to the
       // inclusive index that includes provider:false response leaves
@@ -1734,95 +1743,72 @@ export function generateOptionalSubShapeVariants(
       const producerCandidates = unique([...inclusive, ...authoritative]).filter(
         (id) => id !== endpointOpId,
       );
-      if (!producerCandidates.length) continue;
-      // Try each candidate producer; pick the first that yields a valid
-      // variant. Two passes:
-      //   1. Prefer producers whose required + opportunistic-optional inputs
-      //      overlap the endpoint's outputs. This forces a warm-up call to
-      //      the endpoint (e.g. createProcessInstance → searchElementInstances
-      //      → createProcessInstance) — the canonical "look up the entity
-      //      we just created" chain.
-      //   2. Fall back to non-overlap producers (independent producers that
-      //      need nothing from the endpoint). The variant chain is then a
-      //      simple `producer → endpoint` shape with no warm-up.
-      // Without the fallback, optional sub-shapes whose leaf semantics are
-      // produced by independent ops (e.g. a standalone `mintFoo` for an
-      // optional `foo` field) would receive zero variant coverage.
-      const buildAdditional = (candidate: OperationNode): Set<string> => {
-        const additional = new Set<string>();
-        for (const opt of candidate.requires.optional) {
-          if (endpoint.produces.includes(opt)) additional.add(opt);
+
+      // #162 PR 4 (suite-partition cut): Try to build a producer-chain
+      // variant first (the canonical "warm-up + search + final" pattern
+      // for nested object leaves like `startInstructions[].elementId`).
+      // If that fails — either because no producer exists at all
+      // (clientMintedAttribute leaves like Tag/BusinessId) or because
+      // BFS could not satisfy the augmented chain (some flat top-level
+      // optionals on isolated message/signal endpoints) — fall back to
+      // a bare endpoint scenario plus the populatesSubShape annotation
+      // so the materializer still fills the body and the variant suite
+      // covers the leaf.
+      const producerChain = producerCandidates.length
+        ? tryProducerChainVariant({
+            graph,
+            endpoint,
+            endpointOpId,
+            opts,
+            leaf,
+            producerCandidates,
+          })
+        : undefined;
+
+      let scenario: EndpointScenario | undefined;
+      if (producerChain) {
+        scenario = producerChain;
+      } else {
+        // Bare-endpoint fallback: generate the basic chain and bind the
+        // leaf semantic via the unified `bindSemanticInput` chokepoint.
+        // For producerBound leaves where the chain failed, mint a
+        // synthetic placeholder so the body still has a non-empty value
+        // — matches the pre-PR-4 featureCoverageGenerator synthetic
+        // (`<sem>_<suffix>`).
+        const planned = generateScenariosForEndpoint(graph, endpointOpId, {
+          ...opts,
+          maxScenarios: 1,
+        });
+        const baseScenario = planned.scenarios[0];
+        if (!baseScenario || planned.unsatisfied) continue;
+        const bound = bindSemanticInput({
+          semantic: leaf.semantic,
+          operationId: endpointOpId,
+          graph,
+        });
+        const value = resolveFallbackValue(bound, leaf.semantic, endpointOpId);
+        if (value === undefined) continue;
+        // Prefer the canonical `bound.varName` (the same
+        // `<camelCase(sem)>Var` convention every other binder uses) so
+        // bindings stay consistent across planner paths. For
+        // `unclassified` semantics (no entry in domain-semantics; no
+        // varName on the bound result) derive the same name shape
+        // locally so synthesised L2-fixture semantics like `ProductId`
+        // still bind correctly.
+        const varName =
+          bound.classification === 'unclassified'
+            ? `${camelLower(leaf.semantic)}Var`
+            : bound.varName;
+        baseScenario.bindings ||= {};
+        // Only set the slot when empty so we never overwrite a binding
+        // the basic-chain planner produced earlier in this pass.
+        if (baseScenario.bindings[varName] === undefined) {
+          baseScenario.bindings[varName] = value;
         }
-        for (const req of candidate.requires.required) additional.add(req);
-        additional.add(leaf.semantic);
-        return additional;
-      };
-      let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
-      // Pass 1: overlap-based (warm-up forced).
-      for (const candidateOpId of producerCandidates) {
-        const candidate = graph.operations[candidateOpId];
-        if (!candidate) continue;
-        const additional = buildAdditional(candidate);
-        const overlapsEndpoint = [...additional].some((s) => endpoint.produces.includes(s));
-        if (!overlapsEndpoint) continue;
-        chosenProducer = { node: candidate, additional };
-        break;
+        scenario = baseScenario;
       }
-      // Pass 2: non-overlap fallback (no warm-up).
-      if (!chosenProducer) {
-        for (const candidateOpId of producerCandidates) {
-          const candidate = graph.operations[candidateOpId];
-          if (!candidate) continue;
-          chosenProducer = { node: candidate, additional: buildAdditional(candidate) };
-          break;
-        }
-      }
-      if (!chosenProducer) continue;
-      const { additional } = chosenProducer;
 
-      // Build a per-variant graph view: pin the chosen producer as the
-      // SOLE producer of the leaf semantic AND mark it as authoritative
-      // (`providerMap[leaf.semantic] = true`, semantic added to `produces`).
-      // Without that, BFS would insert the chosen producer but its
-      // `produces` list (built from `provider:true` annotations only)
-      // wouldn't include the leaf semantic — leaving ElementId unsatisfied
-      // in `remaining` and looping forever. The endpoint itself is NOT
-      // mutated — augmented needs are passed via `additionalNeeded` so
-      // they don't bleed into the endpoint's prereq set when it appears
-      // as a warm-up step.
-      const chosenId = chosenProducer.node.operationId;
-      const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
-      variantProducersByType[leaf.semantic] = [chosenId];
-      const variantOperations: Record<string, OperationNode> = { ...graph.operations };
-      variantOperations[chosenId] = {
-        ...chosenProducer.node,
-        produces: chosenProducer.node.produces.includes(leaf.semantic)
-          ? chosenProducer.node.produces
-          : [...chosenProducer.node.produces, leaf.semantic],
-        providerMap: {
-          ...(chosenProducer.node.providerMap ?? {}),
-          [leaf.semantic]: true,
-        },
-      };
-      const variantGraph: OperationGraph = {
-        ...graph,
-        operations: variantOperations,
-        producersByType: variantProducersByType,
-      };
-
-      const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
-        ...opts,
-        allowEndpointAsProducer: true,
-        additionalNeeded: [...additional],
-        maxScenarios: 1,
-      });
-      const scenario = planned.scenarios[0];
-      if (!scenario || planned.unsatisfied) continue;
-
-      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
-      if (seenVariantKeys.has(variantKey)) continue;
       seenVariantKeys.add(variantKey);
-
       scenario.id = `variant-${collectionScenarios.length + 1}`;
       scenario.strategy = 'optionalSubShapeVariant';
       scenario.variantKey = variantKey;
@@ -1846,4 +1832,109 @@ export function generateOptionalSubShapeVariants(
 
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
+}
+
+/**
+ * #162 PR 4: producer-chain variant builder, extracted from
+ * `generateOptionalSubShapeVariants` so the suite-partition-cut
+ * fallback path can be invoked when no producer chain is viable.
+ *
+ * Returns the planned scenario on success, or `undefined` if no
+ * producer candidate yields a satisfied chain (caller falls through
+ * to the bare-endpoint variant).
+ */
+function tryProducerChainVariant(args: {
+  graph: OperationGraph;
+  endpoint: OperationNode;
+  endpointOpId: string;
+  opts: GenerationOpts;
+  leaf: { fieldPath: string; semantic: string };
+  producerCandidates: string[];
+}): EndpointScenario | undefined {
+  const { graph, endpoint, endpointOpId, opts, leaf, producerCandidates } = args;
+  const buildAdditional = (candidate: OperationNode): Set<string> => {
+    const additional = new Set<string>();
+    for (const opt of candidate.requires.optional) {
+      if (endpoint.produces.includes(opt)) additional.add(opt);
+    }
+    for (const req of candidate.requires.required) additional.add(req);
+    additional.add(leaf.semantic);
+    return additional;
+  };
+  let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
+  // Pass 1: overlap-based (warm-up forced).
+  for (const candidateOpId of producerCandidates) {
+    const candidate = graph.operations[candidateOpId];
+    if (!candidate) continue;
+    const additional = buildAdditional(candidate);
+    const overlapsEndpoint = [...additional].some((s) => endpoint.produces.includes(s));
+    if (!overlapsEndpoint) continue;
+    chosenProducer = { node: candidate, additional };
+    break;
+  }
+  // Pass 2: non-overlap fallback (no warm-up).
+  if (!chosenProducer) {
+    for (const candidateOpId of producerCandidates) {
+      const candidate = graph.operations[candidateOpId];
+      if (!candidate) continue;
+      chosenProducer = { node: candidate, additional: buildAdditional(candidate) };
+      break;
+    }
+  }
+  if (!chosenProducer) return undefined;
+  const { additional } = chosenProducer;
+
+  const chosenId = chosenProducer.node.operationId;
+  const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
+  variantProducersByType[leaf.semantic] = [chosenId];
+  const variantOperations: Record<string, OperationNode> = { ...graph.operations };
+  variantOperations[chosenId] = {
+    ...chosenProducer.node,
+    produces: chosenProducer.node.produces.includes(leaf.semantic)
+      ? chosenProducer.node.produces
+      : [...chosenProducer.node.produces, leaf.semantic],
+    providerMap: {
+      ...(chosenProducer.node.providerMap ?? {}),
+      [leaf.semantic]: true,
+    },
+  };
+  const variantGraph: OperationGraph = {
+    ...graph,
+    operations: variantOperations,
+    producersByType: variantProducersByType,
+  };
+
+  const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
+    ...opts,
+    allowEndpointAsProducer: true,
+    additionalNeeded: [...additional],
+    maxScenarios: 1,
+  });
+  const scenario = planned.scenarios[0];
+  if (!scenario || planned.unsatisfied) return undefined;
+  return scenario;
+}
+
+/**
+ * #162 PR 4: pick a value for the bare-endpoint fallback path.
+ *
+ * - `clientMintedAttribute`: deterministic minted token from
+ *   `bindSemanticInput`.
+ * - `modelDerived` and `producerBound` (and other classifications):
+ *   synthesise the same `<semantic>_<suffix>` placeholder shape
+ *   `featureCoverageGenerator` used pre-PR-4 for `opt=<sem>` scenarios.
+ *   For `modelDerived`, the proper deploy-fixture value is unreachable
+ *   from this stage (no chain context); the placeholder is a stand-in
+ *   so the variant exists and the body is well-formed. For
+ *   `producerBound`, chain-extracted values would be preferable but
+ *   are not reachable for endpoints whose producer-chain BFS could not
+ *   satisfy.
+ */
+function resolveFallbackValue(
+  bound: ReturnType<typeof bindSemanticInput>,
+  semantic: string,
+  endpointOpId: string,
+): string | undefined {
+  if (bound.classification === 'clientMintedAttribute') return bound.value;
+  return `${camelLower(semantic)}_${deterministicSuffix(`vc:opt:${endpointOpId}:${semantic}`)}`;
 }

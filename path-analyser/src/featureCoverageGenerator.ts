@@ -64,27 +64,12 @@ export function generateFeatureCoverageForEndpoint(
     });
   }
 
-  // Single optional variants
-  for (const o of optional) {
-    variants.push({
-      endpointId: endpointOpId,
-      optionals: [o],
-      disjunctionChoices: [],
-      artifactSemantics: [o],
-      expectedResult: 'nonEmpty',
-    });
-  }
-
-  // All optionals variant if under threshold
-  if (optional.length > 1 && optional.length <= options.includeAllOptionalsThreshold) {
-    variants.push({
-      endpointId: endpointOpId,
-      optionals: [...optional],
-      disjunctionChoices: [],
-      artifactSemantics: [...optional],
-      expectedResult: 'nonEmpty',
-    });
-  }
+  // #162 PR 4 (suite-partition cut): optional-population scenarios
+  // (single `opt=<sem>` and the `all optionals` combo) used to be
+  // emitted here. They now live exclusively in the variant suite
+  // (`generateOptionalSubShapeVariants`) so each suite has one
+  // convention. The feature suite shrinks to: base, oneOf-minimal,
+  // negative-empty, and duplicate-test carve-outs.
 
   // Negative empty-result variant: only for search-like endpoints (query style or activateJobs) with no required semantics
   const isSearchLike =
@@ -148,19 +133,11 @@ export function generateFeatureCoverageForEndpoint(
           requestVariantName: v.variantName,
           requestVariantRichness: 'minimal',
         });
-        // rich variant (required + optional) if there are optional fields
-        if (v.optional.length) {
-          variants.push({
-            endpointId: endpointOpId,
-            optionals: [],
-            disjunctionChoices: [],
-            artifactSemantics: [],
-            expectedResult: 'nonEmpty',
-            requestVariantGroup: group.groupId,
-            requestVariantName: `${v.variantName}:rich`,
-            requestVariantRichness: 'rich',
-          });
-        }
+        // #162 PR 4 (suite-partition cut): the `<variant>:rich` shape
+        // (oneOf variant with all optional fields populated) used to be
+        // emitted here as well. It is now owned by the variant suite
+        // alongside other populated-optional scenarios; the feature
+        // suite keeps only the minimal-required oneOf variant per group.
       }
       // oneOf union-all/pairwise negatives are owned by the request-validation suite
       // (see issue #27); intentionally not emitted here.
