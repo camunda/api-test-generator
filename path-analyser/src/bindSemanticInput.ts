@@ -104,7 +104,8 @@ export function classifySemantic(semantic: string, graph: OperationGraph): Seman
  *     missing fixture data.
  *
  *   - `clientMintedAttribute`: produces a deterministic
- *     `fc:cma:<sem>:<suffix>` token using `deterministicSuffix(opId, semantic)`,
+ *     `fc:cma:<sem>:<suffix>` token using
+ *     ``deterministicSuffix(`fc:cma:${operationId}:${semantic}`)``,
  *     matching the byte-stable mint formula from
  *     `bindClientMintedAttribute` PR 2.
  *
