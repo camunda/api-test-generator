@@ -61,6 +61,7 @@ describe.each(SUITES)('emitted $label suite typechecks under strict mode', ({
     const result = spawnSync('npx', ['--no-install', 'tsc', '--noEmit', '-p', tsconfig], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
+      shell: true,
     });
     if (result.error) {
       throw new Error(

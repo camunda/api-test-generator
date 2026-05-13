@@ -231,7 +231,7 @@ export async function materializeResponseSchemas(
       `--specFile=${resolvedSpec}`,
       `--outputDir=${targetDir}`,
     ],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', shell: true },
   );
   if (result.status !== 0) {
     throw new Error(

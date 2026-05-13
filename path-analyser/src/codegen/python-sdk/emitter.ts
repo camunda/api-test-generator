@@ -12,11 +12,7 @@
  *   - Hard-fail on multipart (unsupported in Python SDK integration)
  */
 
-import type {
-  EndpointScenario,
-  EndpointScenarioCollection,
-  RequestStep,
-} from '../../types.js';
+import type { EndpointScenario, EndpointScenarioCollection } from '../../types.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 import {
   camelToSnake,
@@ -28,9 +24,10 @@ import {
  * File name for Python SDK generated test suite.
  *
  * Pattern: <operationId>.python_sdk.spec.py
+ * Uses the operationId directly (camelCase) to match the JS SDK convention.
  */
 function pythonSdkFileName(operationId: string): string {
-  return `${camelToSnake(operationId)}.python_sdk.spec.py`;
+  return `${operationId}.python_sdk.spec.py`;
 }
 
 /**
@@ -49,8 +46,9 @@ function renderScenarioTest(
 ): string {
   const lines: string[] = [];
 
-  // Function signature
-  const testName = camelToSnake(scenario.id || 'test');
+  // Function signature: convert scenario id to valid Python identifier
+  // Replace hyphens (common in scenario ids like sc-activate-jobs-simple) with underscores
+  const testName = camelToSnake((scenario.id || 'test').replace(/-/g, '_'));
   const testFuncName = `test_${testName}`;
   lines.push('@pytest.mark.asyncio');
   lines.push(`async def ${testFuncName}(client: CamundaAsyncClient) -> None:`);
@@ -73,13 +71,17 @@ function renderScenarioTest(
     lines.push('  # Seed scenario bindings');
     for (const [k, v] of Object.entries(bindings)) {
       if (v === '__PENDING__') continue; // Skip pending markers
-      lines.push(`  ctx['${k}'] = ${JSON.stringify(v)}`);
+      // Use Python-style single-quoted strings for string values
+      const pyValue = typeof v === 'string' ? `'${v}'` : JSON.stringify(v);
+      lines.push(`  ctx['${k}'] = ${pyValue}`);
     }
     lines.push('');
   }
 
   // Emit seedBinding() calls for PENDING bindings
-  const seedBindings = scenario.seedBindings || [];
+  const seedBindings = Object.entries(bindings)
+    .filter(([, v]) => v === '__PENDING__')
+    .map(([k]) => k);
   if (seedBindings.length > 0) {
     lines.push('  # Seed runtime-generated bindings');
     for (const k of seedBindings) {
@@ -178,7 +180,11 @@ function buildBodyDict(bodyTemplate: unknown): string {
   const withVars = json.replace(/"(\$\{([^}]+)\})"/g, (_, _fullMatch, varName) => {
     return `ctx['${varName}']`;
   });
-  return withVars;
+  // Convert remaining JSON double-quoted strings (keys and string values) to Python single quotes.
+  // This handles: "key": → 'key': and "stringValue" → 'stringValue'
+  // Does not touch ctx['var'] substitutions already made (those use single quotes already).
+  const withSingleQuotes = withVars.replace(/"([^"\\]*)"/g, "'$1'");
+  return withSingleQuotes;
 }
 
 /**
@@ -255,17 +261,12 @@ function renderPythonTestSuite(
 /**
  * Factory: create a Python SDK emitter backed by the given operation map.
  */
-export function createPythonSdkEmitter(
-  operationMapSource?: OperationMapJsonSource,
-): Emitter {
+export function createPythonSdkEmitter(operationMapSource?: OperationMapJsonSource): Emitter {
   const source = operationMapSource ?? createDefaultOperationMapSource();
   return {
     id: 'python-sdk',
     name: 'Python SDK (Async)',
-    async emit(
-      collection: EndpointScenarioCollection,
-      ctx: EmitContext,
-    ): Promise<EmittedFile[]> {
+    async emit(collection: EndpointScenarioCollection, _ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderPythonTestSuite(collection, source);
       return [
         {
