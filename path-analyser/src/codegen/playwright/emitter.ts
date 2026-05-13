@@ -9,7 +9,7 @@ import type {
   RequestStep,
 } from '../../types.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
-import { materializeSupport } from './materialize-support.js';
+import { materializeFixtures, materializeSupport } from './materialize-support.js';
 
 interface EmitOptions {
   outDir: string;
@@ -87,6 +87,7 @@ export async function emitPlaywrightSuite(
   const recordResponses = opts.recordResponses ?? true;
   const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
   await materializeSupport(opts.outDir, undefined, undefined, true, excludeSupportFiles);
+  await materializeFixtures(opts.outDir);
   const file = path.join(opts.outDir, playwrightSuiteFileName(collection, opts.mode || 'feature'));
   const code = renderPlaywrightSuite(collection, opts);
   await fs.writeFile(file, code, 'utf8');

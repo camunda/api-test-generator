@@ -175,9 +175,10 @@ export const FIXTURES_DIR_NAME = 'fixtures';
 /**
  * Locate the generator's `fixtures/` directory.
  *
- * In dist mode the fixtures live at `<pkg>/fixtures/` (two levels up from
- * `dist/src/codegen/playwright/`). In source mode they live at
- * `<pkg>/fixtures/` (three levels up from `src/codegen/playwright/`).
+ * In both dist and source modes the fixtures live at `<pkg>/fixtures/`.
+ * From `dist/src/codegen/playwright/` that is four parent hops up;
+ * from `src/codegen/playwright/` it is three hops up. The search loop
+ * handles both without a hard-coded depth.
  */
 function defaultFixturesSourceDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -200,8 +201,9 @@ function defaultFixturesSourceDir(): string {
  * tests resolve via the `path.resolve(here, '..', 'fixtures', p)` candidate
  * in `support/fixtures.ts` regardless of `process.cwd()`.
  *
- * Idempotent: always overwrites to keep the vendored copy in sync with the
- * generator's fixture source on every codegen run.
+ * Idempotent: wipes `<outDir>/fixtures/` before copying so the vendored
+ * copy stays in sync with the generator's fixture source on every codegen
+ * run — including when files are deleted from the source tree.
  *
  * @param outDir          The same directory passed to {@link materializeSupport}.
  * @param fixturesSourceDir  Optional override for the fixtures source directory.
@@ -214,6 +216,10 @@ export async function materializeFixtures(
 ): Promise<string> {
   const srcDir = fixturesSourceDir ?? defaultFixturesSourceDir();
   const destDir = path.join(outDir, FIXTURES_DIR_NAME);
+
+  // Wipe the destination first so deleted source files don't accumulate in
+  // the vendored copy across successive codegen runs.
+  await fs.rm(destDir, { recursive: true, force: true });
 
   async function copyDir(src: string, dest: string): Promise<void> {
     await fs.mkdir(dest, { recursive: true });

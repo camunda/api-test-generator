@@ -178,13 +178,15 @@ describe('materializeFixtures', () => {
     const destDir = await materializeFixtures(tmp);
     expect(destDir).toBe(path.join(tmp, FIXTURES_DIR_NAME));
 
-    const bmpDir = path.join(destDir, 'bpmn');
-    expect(existsSync(bmpDir)).toBe(true);
-    const bpmnFiles = await fs.readdir(bmpDir);
-    expect(bpmnFiles.length).toBeGreaterThan(0);
-    for (const f of bpmnFiles) {
-      const stat = await fs.stat(path.join(bmpDir, f));
-      expect(stat.size).toBeGreaterThan(0);
+    for (const subdir of ['bpmn', 'dmn', 'forms']) {
+      const dir = path.join(destDir, subdir);
+      expect(existsSync(dir), `${subdir}/ should exist`).toBe(true);
+      const files = await fs.readdir(dir);
+      expect(files.length, `${subdir}/ should contain at least one file`).toBeGreaterThan(0);
+      for (const f of files) {
+        const stat = await fs.stat(path.join(dir, f));
+        expect(stat.size, `${subdir}/${f} should be non-empty`).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -193,14 +195,17 @@ describe('materializeFixtures', () => {
     await expect(materializeFixtures(tmp)).resolves.toBe(path.join(tmp, FIXTURES_DIR_NAME));
   });
 
-  test('resolveFixture can load a materialized file from its here-relative candidate', async () => {
-    // Verify that the fixture resolution path used by support/fixtures.ts
-    // (`path.resolve(here, '..', 'fixtures', p)`) finds the materialized
-    // files when `here` is <outDir>/support/ (as it is in the generated suite).
+  test('here-relative candidate path resolves to a materialized file when here is <outDir>/support/', async () => {
+    // Guard against regressions to the fixture resolution path used by
+    // support/fixtures.ts. That file calls:
+    //   path.resolve(here, '..', 'fixtures', p)
+    // where `here` = fileURLToPath(import.meta.url)'s dirname = <outDir>/support/.
+    // If materializeFixtures stops populating <outDir>/fixtures/ or the
+    // relative traversal changes, this assertion fails.
     await materializeFixtures(tmp);
     const supportDir = path.join(tmp, 'support');
     await fs.mkdir(supportDir, { recursive: true });
-    // Simulate resolveFixture's here-relative candidate from <outDir>/support/:
+    // Reproduce the exact candidate that support/fixtures.ts constructs:
     const candidate = path.resolve(supportDir, '..', 'fixtures', 'bpmn/service-task.bpmn');
     const buf = await fs.readFile(candidate);
     expect(buf.length).toBeGreaterThan(0);
