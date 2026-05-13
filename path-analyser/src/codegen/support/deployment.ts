@@ -34,8 +34,9 @@ interface ApiResponseLike {
   text(): Promise<string>;
   url(): string;
   // Required for structural compatibility with Playwright's APIResponse (which includes
-  // [Symbol.asyncDispose] as a required member). ESNext.Disposable must be in
-  // path-analyser/tsconfig.json's lib array for this to compile.
+  // [Symbol.asyncDispose] as a required member). Both path-analyser/tsconfig.json and
+  // the generated suite's tsconfig must include ESNext.Disposable in their lib array
+  // for this to compile.
   [Symbol.asyncDispose](): Promise<void>;
 }
 
