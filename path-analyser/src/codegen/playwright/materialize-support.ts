@@ -1,12 +1,13 @@
 // ---------------------------------------------------------------------------
-// Vendors the Playwright runtime support files AND project scaffolding into
-// an emitted test suite so the suite is runnable in place:
+// Vendors the Playwright runtime support files, project scaffolding, AND
+// artifact fixture files into an emitted test suite so the suite is runnable
+// in place:
 //
 //   cd <outDir>
 //   npm install
 //   API_BASE_URL=http://localhost:8080/v2 npm test
 //
-// Two template sets are copied:
+// Three sets of assets are copied:
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
 //                fixtures.ts, seed-rules.json). Sources:
 //                path-analyser/src/codegen/support/, staged into
@@ -15,6 +16,8 @@
 //   * project root — package.json, playwright.config.ts, tsconfig.json,
 //                    .env.example, README.md.
 //                    Sources: path-analyser/templates/.
+//   * fixtures/ — BPMN/DMN/form files referenced by @@FILE:<rel-path>
+//                 markers in emitted tests. Sources: path-analyser/fixtures/.
 //
 // Keep SUPPORT_TEMPLATE_FILES in sync with
 // path-analyser/scripts/copy-support-templates.js.
@@ -162,6 +165,70 @@ export async function materializeSupport(
     await fs.copyFile(path.join(projSrcDir, name), dest);
   }
 
+  return destDir;
+}
+
+/** Subdirectory created under the emitter's outDir to hold BPMN/DMN/form
+ *  fixture files referenced by `@@FILE:<rel-path>` markers in emitted tests. */
+export const FIXTURES_DIR_NAME = 'fixtures';
+
+/**
+ * Locate the generator's `fixtures/` directory.
+ *
+ * In dist mode the fixtures live at `<pkg>/fixtures/` (two levels up from
+ * `dist/src/codegen/playwright/`). In source mode they live at
+ * `<pkg>/fixtures/` (three levels up from `src/codegen/playwright/`).
+ */
+function defaultFixturesSourceDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, 'fixtures');
+    if (existsSync(path.join(candidate, 'bpmn'))) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.resolve(here, '..', '..', '..', '..', 'fixtures');
+}
+
+/**
+ * Copy `<fixturesSourceDir>/` recursively into `<outDir>/fixtures/` so the
+ * emitted suite is self-contained: `@@FILE:<rel-path>` markers in generated
+ * tests resolve via the `path.resolve(here, '..', 'fixtures', p)` candidate
+ * in `support/fixtures.ts` regardless of `process.cwd()`.
+ *
+ * Idempotent: always overwrites to keep the vendored copy in sync with the
+ * generator's fixture source on every codegen run.
+ *
+ * @param outDir          The same directory passed to {@link materializeSupport}.
+ * @param fixturesSourceDir  Optional override for the fixtures source directory.
+ *                           Production callers should omit this.
+ * @returns               Path to the fixtures directory under `outDir`.
+ */
+export async function materializeFixtures(
+  outDir: string,
+  fixturesSourceDir?: string,
+): Promise<string> {
+  const srcDir = fixturesSourceDir ?? defaultFixturesSourceDir();
+  const destDir = path.join(outDir, FIXTURES_DIR_NAME);
+
+  async function copyDir(src: string, dest: string): Promise<void> {
+    await fs.mkdir(dest, { recursive: true });
+    for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        await copyDir(srcPath, destPath);
+      } else {
+        await fs.copyFile(srcPath, destPath);
+      }
+    }
+  }
+
+  await copyDir(srcDir, destDir);
   return destDir;
 }
 

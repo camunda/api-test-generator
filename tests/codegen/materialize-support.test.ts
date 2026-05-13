@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  FIXTURES_DIR_NAME,
+  materializeFixtures,
   materializeSupport,
   PROJECT_TEMPLATE_FILES,
   SUPPORT_DIR_NAME,
@@ -158,5 +160,49 @@ describe('materializeSupport', () => {
     } finally {
       await fs.rm(fakeSrc, { recursive: true, force: true });
     }
+  });
+});
+
+describe('materializeFixtures', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-fixtures-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('copies bpmn/ dmn/ forms/ fixture files into <outDir>/fixtures/', async () => {
+    const destDir = await materializeFixtures(tmp);
+    expect(destDir).toBe(path.join(tmp, FIXTURES_DIR_NAME));
+
+    const bmpDir = path.join(destDir, 'bpmn');
+    expect(existsSync(bmpDir)).toBe(true);
+    const bpmnFiles = await fs.readdir(bmpDir);
+    expect(bpmnFiles.length).toBeGreaterThan(0);
+    for (const f of bpmnFiles) {
+      const stat = await fs.stat(path.join(bmpDir, f));
+      expect(stat.size).toBeGreaterThan(0);
+    }
+  });
+
+  test('is idempotent: a second call overwrites without error', async () => {
+    await materializeFixtures(tmp);
+    await expect(materializeFixtures(tmp)).resolves.toBe(path.join(tmp, FIXTURES_DIR_NAME));
+  });
+
+  test('resolveFixture can load a materialized file from its here-relative candidate', async () => {
+    // Verify that the fixture resolution path used by support/fixtures.ts
+    // (`path.resolve(here, '..', 'fixtures', p)`) finds the materialized
+    // files when `here` is <outDir>/support/ (as it is in the generated suite).
+    await materializeFixtures(tmp);
+    const supportDir = path.join(tmp, 'support');
+    await fs.mkdir(supportDir, { recursive: true });
+    // Simulate resolveFixture's here-relative candidate from <outDir>/support/:
+    const candidate = path.resolve(supportDir, '..', 'fixtures', 'bpmn/service-task.bpmn');
+    const buf = await fs.readFile(candidate);
+    expect(buf.length).toBeGreaterThan(0);
   });
 });
