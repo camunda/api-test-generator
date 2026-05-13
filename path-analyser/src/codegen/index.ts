@@ -13,6 +13,7 @@ import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
+  materializeFixtures,
   materializeResponseSchemas,
   materializeSupport,
 } from './playwright/materialize-support.js';
@@ -140,6 +141,10 @@ async function run() {
     recordResponses = codegenOpts.recordResponses;
     const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
     await materializeSupport(outDir, undefined, undefined, true, excludeSupportFiles);
+    // Copy BPMN/DMN/form fixture files into <outDir>/fixtures/ so the suite
+    // is self-contained: @@FILE:<rel-path> markers in emitted tests resolve
+    // via support/fixtures.ts regardless of process.cwd().
+    await materializeFixtures(outDir);
     // Also extract response-body schemas alongside the emitted specs so the
     // generated `validateResponse(...)` calls have a schema source. Co-located
     // here (rather than a separate npm script) so every codegen run produces

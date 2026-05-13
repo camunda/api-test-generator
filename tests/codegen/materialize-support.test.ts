@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  FIXTURES_DIR_NAME,
+  materializeFixtures,
   materializeSupport,
   PROJECT_TEMPLATE_FILES,
   SUPPORT_DIR_NAME,
@@ -158,5 +160,54 @@ describe('materializeSupport', () => {
     } finally {
       await fs.rm(fakeSrc, { recursive: true, force: true });
     }
+  });
+});
+
+describe('materializeFixtures', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-fixtures-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('copies bpmn/ dmn/ forms/ fixture files into <outDir>/fixtures/', async () => {
+    const destDir = await materializeFixtures(tmp);
+    expect(destDir).toBe(path.join(tmp, FIXTURES_DIR_NAME));
+
+    for (const subdir of ['bpmn', 'dmn', 'forms']) {
+      const dir = path.join(destDir, subdir);
+      expect(existsSync(dir), `${subdir}/ should exist`).toBe(true);
+      const files = await fs.readdir(dir);
+      expect(files.length, `${subdir}/ should contain at least one file`).toBeGreaterThan(0);
+      for (const f of files) {
+        const stat = await fs.stat(path.join(dir, f));
+        expect(stat.size, `${subdir}/${f} should be non-empty`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test('is idempotent: a second call overwrites without error', async () => {
+    await materializeFixtures(tmp);
+    await expect(materializeFixtures(tmp)).resolves.toBe(path.join(tmp, FIXTURES_DIR_NAME));
+  });
+
+  test('here-relative candidate path resolves to a materialized file when here is <outDir>/support/', async () => {
+    // Guard against regressions to the fixture resolution path used by
+    // support/fixtures.ts. That file calls:
+    //   path.resolve(here, '..', 'fixtures', p)
+    // where `here` = fileURLToPath(import.meta.url)'s dirname = <outDir>/support/.
+    // If materializeFixtures stops populating <outDir>/fixtures/ or the
+    // relative traversal changes, this assertion fails.
+    await materializeFixtures(tmp);
+    const supportDir = path.join(tmp, 'support');
+    await fs.mkdir(supportDir, { recursive: true });
+    // Reproduce the exact candidate that support/fixtures.ts constructs:
+    const candidate = path.resolve(supportDir, '..', 'fixtures', 'bpmn/service-task.bpmn');
+    const buf = await fs.readFile(candidate);
+    expect(buf.length).toBeGreaterThan(0);
   });
 });
