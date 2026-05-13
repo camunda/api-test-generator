@@ -1,17 +1,22 @@
 /**
- * Loader fixtures for `deriveOptionalSubShapes` in graphLoader (#37).
+ * Loader fixtures for `deriveOptionalSubShapes` in graphLoader (#37,
+ * widened by #162 PR 4).
  *
  * `subShapeRootOf` strips the trailing leaf segment from a request-body
- * `fieldPath` to obtain the sub-shape root, returning `null` for paths
- * that do not represent a populated-vs-omitted object or array-of-object
- * ancestor (top-level scalars, operator-object keys, scalar arrays).
+ * `fieldPath` to obtain the sub-shape root, returning `null` ONLY for
+ * operator-object pseudo-fields (`filter.x.$eq`, `.$in[]`, …). Every
+ * other optional leaf — nested object leaves, scalar-array leaves
+ * (`tags[]`, `filter.tags[]`), and flat top-level scalars (`tenantId`)
+ * — enters `optionalSubShapes` so the variant suite owns the entire
+ * populated-optional partition (#162 PR 4).
  *
- * The class-scoped guarantee guarded here: an optional request-body
- * leaf whose path is a *scalar-array item* (ends with `[]`) must NOT be
- * grouped into an `optionalSubShapes` entry, regardless of how many
- * dotted ancestors it has. Without the fix, `filter.tags[]` was grouped
- * under root `filter`, causing the variant planner to emit a sub-shape
- * variant whose only leaf is a scalar collection.
+ * Class-scoped guarantees pinned here:
+ *
+ *   - Operator-object leaves (`$`-prefixed terminal segment) are
+ *     excluded.
+ *   - Every other optional leaf is included, with `rootPath` derived
+ *     from the dotted ancestors (empty string for flat top-level
+ *     leaves).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,15 +63,19 @@ function writeLayout(layout: Layout): void {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture K — `subShapeRootOf` rejects scalar-array item leaves at any depth
-// (#37).
+// Fixture K — `subShapeRootOf` includes scalar-array and flat top-level
+// leaves at any depth; only operator-object pseudo-fields are excluded
+// (#37 + #162 PR 4).
 // ---------------------------------------------------------------------------
 //
-// Class-scoped: any optional fieldPath whose terminal segment ends with
-// `[]` (i.e. the leaf IS the scalar-array item) is excluded from
-// `optionalSubShapes` regardless of nesting depth.
-describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at any depth (#37)', () => {
-  it('does not group `filter.tags[]` (nested scalar array) under a sub-shape root', async () => {
+// Class-scoped: every optional fieldPath whose terminal segment is NOT
+// `$`-prefixed enters `optionalSubShapes`, regardless of nesting depth
+// or whether the leaf is a scalar-array item. Operator subtrees
+// (`filter.x.$eq`, etc.) remain excluded because they are pseudo-fields
+// the extractor surfaces for filter expressiveness, not a settable
+// shape.
+describe('graphLoader: deriveOptionalSubShapes includes scalar-array and flat leaves; rejects operator objects (#37 + #162 PR 4)', () => {
+  it('groups `filter.tags[]` (nested scalar array) under root `filter` (PR 4 widening)', async () => {
     writeLayout({
       graph: {
         operations: [
@@ -75,8 +84,6 @@ describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at an
             method: 'POST',
             path: '/search',
             requestBodySemanticTypes: [
-              // Nested scalar array — leaf segment is `tags[]`. Must NOT
-              // be grouped under root `filter`.
               {
                 fieldPath: 'filter.tags[]',
                 semanticType: 'TagName',
@@ -89,21 +96,12 @@ describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at an
     });
     const g = await loadGraph(baseDir);
     const op = g.operations.searchWithTags;
-    expect(op, 'operation must load').toBeDefined();
-    const subShapes = op?.optionalSubShapes ?? [];
-    // No sub-shape may have `filter` (or any other root) carrying a
-    // scalar-array leaf.
-    for (const s of subShapes) {
-      for (const leaf of s.leaves) {
-        expect(
-          leaf.fieldPath.endsWith('[]'),
-          `optionalSubShapes leaf ${leaf.fieldPath} (root ${s.rootPath}) must not be a scalar-array item`,
-        ).toBe(false);
-      }
-    }
-    // And specifically: no sub-shape root for this op (the only optional
-    // leaf was a scalar array).
-    expect(subShapes).toEqual([]);
+    expect(op?.optionalSubShapes).toEqual([
+      {
+        rootPath: 'filter',
+        leaves: [{ fieldPath: 'filter.tags[]', semantic: 'TagName' }],
+      },
+    ]);
   });
 
   it('groups genuine array-of-object leaves (e.g. `startInstructions[].elementId`) normally', async () => {
@@ -135,7 +133,7 @@ describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at an
     ]);
   });
 
-  it('mixed leaves: scalar-array siblings are excluded; object-shape siblings retained', async () => {
+  it('mixed leaves: scalar-array siblings and object-shape siblings co-exist under one root (PR 4 widening)', async () => {
     writeLayout({
       graph: {
         operations: [
@@ -144,13 +142,11 @@ describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at an
             method: 'POST',
             path: '/mixed',
             requestBodySemanticTypes: [
-              // Scalar-array sibling — must be excluded.
               {
                 fieldPath: 'filter.tags[]',
                 semanticType: 'TagName',
                 required: false,
               },
-              // Object-shape sibling under same root — must be retained.
               {
                 fieldPath: 'filter.processInstanceKey',
                 semanticType: 'ProcessInstanceKey',
@@ -166,8 +162,58 @@ describe('graphLoader: deriveOptionalSubShapes rejects scalar-array leaves at an
     expect(subShapes).toEqual([
       {
         rootPath: 'filter',
-        leaves: [{ fieldPath: 'filter.processInstanceKey', semantic: 'ProcessInstanceKey' }],
+        leaves: [
+          { fieldPath: 'filter.tags[]', semantic: 'TagName' },
+          { fieldPath: 'filter.processInstanceKey', semantic: 'ProcessInstanceKey' },
+        ],
       },
     ]);
+  });
+
+  it('flat top-level scalar leaves group under empty root (PR 4 widening)', async () => {
+    writeLayout({
+      graph: {
+        operations: [
+          {
+            operationId: 'createMessage',
+            method: 'POST',
+            path: '/messages',
+            requestBodySemanticTypes: [
+              { fieldPath: 'tenantId', semanticType: 'TenantId', required: false },
+            ],
+          },
+        ],
+      },
+    });
+    const g = await loadGraph(baseDir);
+    expect(g.operations.createMessage?.optionalSubShapes).toEqual([
+      {
+        rootPath: '',
+        leaves: [{ fieldPath: 'tenantId', semantic: 'TenantId' }],
+      },
+    ]);
+  });
+
+  it('operator-object leaves (`filter.x.$eq`) remain excluded', async () => {
+    writeLayout({
+      graph: {
+        operations: [
+          {
+            operationId: 'searchByOperator',
+            method: 'POST',
+            path: '/search',
+            requestBodySemanticTypes: [
+              {
+                fieldPath: 'filter.processInstanceKey.$eq',
+                semanticType: 'ProcessInstanceKey',
+                required: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const g = await loadGraph(baseDir);
+    expect(g.operations.searchByOperator?.optionalSubShapes ?? []).toEqual([]);
   });
 });

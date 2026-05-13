@@ -494,11 +494,22 @@ describe('planner contracts: variant planner respects success-status producer fi
     expect(fixtureErrorOnlyProducer.responseProducersByType?.ProductId).toBeUndefined();
   });
 
-  it('emits zero variants when the only candidate producer surfaces the leaf in a 4xx response', () => {
+  it('falls back to a bare-endpoint variant when the only candidate producer surfaces the leaf in a 4xx response (#162 PR 4)', () => {
+    // Pre-#162-PR-4 this case emitted ZERO variants. The PR-4 cut moves
+    // ALL populated-optional coverage into the variant suite, so when
+    // the producer-chain path cannot satisfy the leaf the planner falls
+    // back to a bare-endpoint scenario with a synthetic placeholder
+    // (see `resolveFallbackValue` in scenarioGenerator.ts). The
+    // 4xx-only producer must NOT appear in the chain — the variant has
+    // exactly one operation (the endpoint itself).
     const variants = generateOptionalSubShapeVariants(fixtureErrorOnlyProducer, 'placeOrder', {
       maxScenarios: 10,
     });
-    expect(variants.scenarios).toEqual([]);
+    expect(variants.scenarios).toHaveLength(1);
+    const [scenario] = variants.scenarios;
+    expect(scenario.strategy).toBe('optionalSubShapeVariant');
+    expect(scenario.variantKey).toBe('addons[]::addons[].productId');
+    expect(scenario.operations.map((o) => o.operationId)).toEqual(['placeOrder']);
   });
 });
 

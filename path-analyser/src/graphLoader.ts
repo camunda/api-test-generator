@@ -763,7 +763,7 @@ function deriveOptionalSubShapes(op: RawOp): NonNullable<OperationNode['optional
     const fieldPath = entry.fieldPath;
     if (typeof semantic !== 'string' || typeof fieldPath !== 'string') continue;
     const root = subShapeRootOf(fieldPath);
-    if (!root) continue;
+    if (root === null) continue;
     const list = groups.get(root) ?? [];
     list.push({ fieldPath, semantic });
     groups.set(root, list);
@@ -772,29 +772,28 @@ function deriveOptionalSubShapes(op: RawOp): NonNullable<OperationNode['optional
 }
 
 // Strip the trailing leaf segment from a fieldPath to get its sub-shape
-// root, or `null` if no proper object/array-of-object ancestor exists.
-//   "startInstructions[].elementId" -> "startInstructions[]"
-//   "filter.processInstanceKey"      -> "filter"
+// root, or `null` if the fieldPath is an operator-object construct that
+// is not a real populated-vs-omitted shape.
+//
+// Post-#162-PR4 the variant suite owns EVERY populated-optional path —
+// nested object leaves, scalar-array leaves, and flat top-level scalars
+// alike — so the previous "only count nested object sub-shapes" filters
+// (`segments.length < 2`, `lastSegment.endsWith('[]')`) have been
+// removed. The `$` operator-object filter is preserved because
+// operator subtrees (`filter.x.$eq`, `.$in[]`, …) are pseudo-fields
+// the extractor surfaces for filter expressiveness, not a settable
+// shape.
+//
+//   "startInstructions[].elementId" -> "startInstructions[]"  (nested object)
+//   "filter.processInstanceKey"      -> "filter"             (nested object)
+//   "filter.tags[]"                   -> "filter"             (scalar array under filter)
+//   "tags[]"                          -> ""                   (top-level scalar array)
+//   "tenantId"                        -> ""                   (flat top-level scalar)
 //   "filter.elementId.$eq"           -> null  (operator object)
-//   "tags[]"                          -> null  (scalar array, no leaf segment)
-//   "filter.tags[]"                   -> null  (nested scalar array)
-//   "tenantId"                        -> null  (top-level scalar)
 function subShapeRootOf(fieldPath: string): string | null {
-  // Split into dot-separated segments.
   const segments = fieldPath.split('.');
-  if (segments.length < 2) return null;
   const lastSegment = segments[segments.length - 1];
-  // Operator-object syntax (filter.x.$eq, .$in[], etc.) — not a real
-  // populated-vs-omitted sub-shape.
   if (lastSegment.startsWith('$')) return null;
-  // Scalar-array item leaves (`tags[]`, `filter.tags[]`, etc.) — the
-  // extractor surfaces array items with a trailing `[]`. A scalar-array
-  // leaf is the same flavour of "set a primitive collection or omit it"
-  // exclusion as the top-level `tags[]` case; grouping it under its
-  // parent (`filter`) would produce a sub-shape whose only leaf is a
-  // scalar collection, which is not a populated-vs-omitted object shape
-  // worth a sibling positive-coverage scenario.
-  if (lastSegment.endsWith('[]')) return null;
   return segments.slice(0, -1).join('.');
 }
 

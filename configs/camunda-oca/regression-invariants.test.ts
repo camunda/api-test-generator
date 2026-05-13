@@ -2657,126 +2657,114 @@ describeForThisConfig(
     // assertions below check this leading-pattern is absent from the
     // corresponding feature scenario's binding — proving the binding
     // comes from providesValues instead. A real BPMN element id starts
-    // with the model's element name (e.g. `StartEvent_1`,
-    // `Activity_06kuv4r`) and so cannot start with the lower-cased
-    // semantic name.
-    const SYNTHETIC_RE = /^elementId_[A-Za-z0-9]+$/;
+    // #162 PR 4: the suite partition cut moved per-leaf optional
+    // coverage from feature (was `opt=ElementId`) to variant (one
+    // scenario per `<rootPath>::<fieldPath>`). The original assertion
+    // that `elementIdVar` resolves from a deploy fixture and must NOT
+    // match the synthetic `elementId_<suffix>` placeholder no longer
+    // applies in the variant suite: variant-suite fallback minting
+    // (path-analyser/src/scenarioGenerator.ts → `resolveFallbackValue`)
+    // legitimately produces synthetic placeholders for `modelDerived`
+    // semantics when the producer-chain BFS cannot satisfy the leaf,
+    // because the variant generator does not have deploy-fixture
+    // context at that stage. The cut's structural guards live in
+    // `'bundled-spec invariants: suite-partition cut (#162 PR 4)'`
+    // above. Here we keep a class-scoped existence + body-reference
+    // invariant only: every endpoint that declares ElementId as an
+    // optional body leaf must have at least one variant scenario that
+    // populates ElementId, binds `elementIdVar`, and the emitted
+    // variant spec must reference `ctx.elementIdVar`.
 
-    interface FeatureScenarioBody {
+    interface VariantScenarioBody {
       bindings?: Record<string, string>;
       strategy?: string;
       variantKey?: string;
+      populatesSubShape?: { leafSemantics?: string[] };
     }
-    interface FeatureScenarioFile {
+    interface VariantScenarioFile {
       endpoint: { operationId: string };
-      scenarios: FeatureScenarioBody[];
+      scenarios: VariantScenarioBody[];
     }
 
-    function loadFeatureCollection(file: string): FeatureScenarioFile {
+    function loadVariantCollection(file: string): VariantScenarioFile {
       const raw = readFileSync(file, 'utf8');
       // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
-      return JSON.parse(raw) as FeatureScenarioFile;
+      return JSON.parse(raw) as VariantScenarioFile;
     }
 
-    function findScenarioBinding(
-      collection: FeatureScenarioFile,
-      variantKey: string,
-      varName: string,
-    ): string | undefined {
-      const scenario = collection.scenarios.find((s) => s.variantKey === variantKey);
-      return scenario?.bindings?.[varName];
+    function findElementIdVariant(
+      collection: VariantScenarioFile,
+    ): VariantScenarioBody | undefined {
+      return collection.scenarios.find((s) =>
+        s.populatesSubShape?.leafSemantics?.includes('ElementId'),
+      );
     }
 
     interface Target {
       endpoint: string;
-      featureFile: string;
-      variantKey: string;
+      variantFile: string;
       varName: string;
-      consumerPathInBody: string;
     }
     const TARGETS: Target[] = [
       {
         endpoint: 'createProcessInstance',
-        featureFile: 'post--process-instances-scenarios.json',
-        variantKey: 'opt=ElementId',
+        variantFile: 'post--process-instances-scenarios.json',
         varName: 'elementIdVar',
-        consumerPathInBody: 'startInstructions',
       },
       {
         endpoint: 'activateAdHocSubProcessActivities',
-        featureFile:
+        variantFile:
           'post--element-instances--ad-hoc-activities--{adHocSubProcessInstanceKey}--activation-scenarios.json',
-        variantKey: 'opt=ElementId',
         varName: 'elementIdVar',
-        consumerPathInBody: 'elements',
       },
       {
         endpoint: 'completeJob',
-        featureFile: 'post--jobs--{jobKey}--completion-scenarios.json',
-        variantKey: 'opt=ElementId',
+        variantFile: 'post--jobs--{jobKey}--completion-scenarios.json',
         varName: 'elementIdVar',
-        consumerPathInBody: 'result',
       },
       {
         endpoint: 'modifyProcessInstance',
-        featureFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
-        variantKey: 'opt=ElementId',
+        variantFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
         varName: 'elementIdVar',
-        consumerPathInBody: 'activateInstructions',
       },
     ];
 
     for (const t of TARGETS) {
-      it(`${t.endpoint} :: feature 'with ElementId' binds elementIdVar from fixture providesValues (#162)`, () => {
-        const path = join(FEATURE_SCENARIOS_DIR, t.featureFile);
+      it(`${t.endpoint} :: variant suite emits an ElementId-populating scenario binding ${t.varName} (#162 PR 4)`, () => {
+        const path = join(VARIANT_SCENARIOS_DIR, t.variantFile);
         if (!existsSync(path)) {
           throw new Error(
-            `expected feature-output JSON not found: ${t.featureFile} — run 'npm run testsuite:generate'`,
+            `expected variant-output JSON not found: ${t.variantFile} — run 'npm run testsuite:generate'`,
           );
         }
-        const collection = loadFeatureCollection(path);
-        const binding = findScenarioBinding(collection, t.variantKey, t.varName);
+        const collection = loadVariantCollection(path);
+        const scenario = findElementIdVariant(collection);
         expect(
-          binding,
-          `${t.endpoint}: scenario with variantKey '${t.variantKey}' must have a binding for ${t.varName}`,
+          scenario,
+          `${t.endpoint}: expected a variant scenario whose populatesSubShape.leafSemantics includes 'ElementId'`,
         ).toBeDefined();
+        const binding = scenario?.bindings?.[t.varName];
         expect(
           binding,
-          `${t.endpoint}: ${t.varName} binding must NOT be the pre-PR-1 synthetic 'elementId_...' placeholder`,
-        ).not.toMatch(SYNTHETIC_RE);
+          `${t.endpoint}: ElementId variant must bind ${t.varName}`,
+        ).toBeDefined();
       });
 
-      it(`${t.endpoint} :: emitted feature spec references ctx.${t.varName} in the request body (#162)`, () => {
-        const specName = `${t.endpoint}.feature.spec.ts`;
+      it(`${t.endpoint} :: emitted variant spec references ctx.${t.varName} (#162 PR 4)`, () => {
+        const specName = `${t.endpoint}.variant.spec.ts`;
         const spec = join(GENERATED_TESTS_DIR, specName);
         if (!existsSync(spec)) {
           throw new Error(`expected emitted spec not found: ${specName}`);
         }
         const src = readFileSync(spec, 'utf8');
-        // The body for the 'opt=ElementId' scenario must reference the
-        // ElementId binding inside its consumer-path key (e.g. `elements`,
-        // `startInstructions`, …). Use the scenario title to scope the
-        // search to the right test block.
-        const scenarioMarker = `with ElementId`;
-        const scenarioIdx = src.indexOf(scenarioMarker);
+        // Variant specs use `variant-N` titles (no semantic-named
+        // marker), and an endpoint's variant file contains only its
+        // variant scenarios — so a file-wide `ctx.elementIdVar`
+        // reference is sufficient and unambiguous evidence that the
+        // ElementId variant body wires the binding.
         expect(
-          scenarioIdx,
-          `${t.endpoint}: expected a scenario block titled 'with ElementId'`,
-        ).toBeGreaterThan(0);
-        // Find the end of the test block by scanning forward to the next
-        // `test(` opener (or end of file).
-        const nextTestIdx = src.indexOf("\n  test('", scenarioIdx + scenarioMarker.length);
-        const scenarioBlock = src.slice(
-          scenarioIdx,
-          nextTestIdx > 0 ? nextTestIdx : src.length,
-        );
-        expect(
-          scenarioBlock.includes(t.consumerPathInBody),
-          `${t.endpoint} 'with ElementId': body must populate '${t.consumerPathInBody}'`,
-        ).toBe(true);
-        expect(
-          scenarioBlock.includes(`ctx.${t.varName}`),
-          `${t.endpoint} 'with ElementId': body must reference ctx.${t.varName}`,
+          src.includes(`ctx.${t.varName}`),
+          `${t.endpoint} variant spec: body must reference ctx.${t.varName}`,
         ).toBe(true);
       });
     }
@@ -2945,61 +2933,68 @@ describeForThisConfig(
 
       for (const op of setterOps) {
         const varName = `${camelCase(semantic)}Var`;
-        const expectedPrefix = `fc:cma:${camelCase(semantic)}:`;
-        const variantKey = `opt=${semantic}`;
 
-        it(`${semantic} :: ${op.operationId}: opt=${semantic} feature scenario binds ${varName} with the clientMintedAttribute prefix (#162 PR 2)`, () => {
-          const featureFile = join(FEATURE_SCENARIOS_DIR, featureFileFor(op));
-          if (!existsSync(featureFile)) {
+        it(`${semantic} :: ${op.operationId}: variant suite emits a ${semantic}-populating scenario binding ${varName} (#162 PR 4)`, () => {
+          const variantFile = join(VARIANT_SCENARIOS_DIR, featureFileFor(op));
+          if (!existsSync(variantFile)) {
             throw new Error(
-              `expected feature-output JSON not found: ${featureFileFor(op)} — run 'npm run testsuite:generate'`,
+              `expected variant-output JSON not found: ${featureFileFor(op)} — run 'npm run testsuite:generate'`,
             );
           }
-          const raw = readFileSync(featureFile, 'utf8');
+          const raw = readFileSync(variantFile, 'utf8');
           // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
           const parsed = JSON.parse(raw) as {
-            scenarios: Array<{ variantKey?: string; bindings?: Record<string, string> }>;
+            scenarios: Array<{
+              variantKey?: string;
+              bindings?: Record<string, string>;
+              populatesSubShape?: { leafSemantics?: string[] };
+            }>;
           };
-          const scenario = parsed.scenarios.find((s) => s.variantKey === variantKey);
+          const scenario = parsed.scenarios.find((s) =>
+            s.populatesSubShape?.leafSemantics?.includes(semantic),
+          );
           expect(
             scenario,
-            `${op.operationId}: expected an ${variantKey} feature scenario`,
+            `${op.operationId}: expected a variant scenario whose populatesSubShape.leafSemantics includes '${semantic}'`,
           ).toBeDefined();
           const binding = scenario?.bindings?.[varName];
           expect(
             binding,
-            `${op.operationId} ${variantKey}: must bind ${varName}`,
+            `${op.operationId}: ${semantic} variant must bind ${varName}`,
           ).toBeDefined();
-          expect(
-            binding?.startsWith(expectedPrefix),
-            `${op.operationId} ${variantKey}: ${varName} binding must use the clientMintedAttribute prefix (${expectedPrefix}…); got '${binding}'`,
-          ).toBe(true);
+          // PR 4 note: the binding may be either
+          //   - `fc:cma:<sem>:<suffix>` — variant fallback path
+          //     (`bindSemanticInput` for clientMintedAttribute), used
+          //     when the producer-chain BFS could not satisfy the leaf;
+          //   - `__PENDING__` — variant producer-chain path, where the
+          //     value is extracted at runtime from a search step in the
+          //     chain;
+          //   - `<sem>_<suffix>` — variant fallback path for
+          //     non-clientMintedAttribute classifications (only
+          //     reached when the semantic is not clientMinted; included
+          //     here for completeness even though clientMintedAttribute
+          //     semantics never take this branch).
+          // Asserting any of these specifically would couple this
+          // invariant to the BFS outcome rather than to the suite-
+          // partition contract.
         });
 
-        it(`${semantic} :: ${op.operationId}: emitted with-${semantic} feature spec references ctx.${varName} (#162 PR 2)`, () => {
-          // Map operationId → emitted Playwright spec path. The
-          // generator names files by operationId (not method+path) for
-          // playwright suites, so this lookup is direct.
-          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.feature.spec.ts`);
+        it(`${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`, () => {
+          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.variant.spec.ts`);
           if (!existsSync(spec)) {
             throw new Error(
-              `expected emitted spec not found: ${op.operationId}.feature.spec.ts — run 'npm run testsuite:generate'`,
+              `expected emitted spec not found: ${op.operationId}.variant.spec.ts — run 'npm run testsuite:generate'`,
             );
           }
           const src = readFileSync(spec, 'utf8');
-          // The variant title fragment the emitter writes for `opt=<X>`
-          // is `with <X>` (see featureCoverageGenerator title formatter).
-          const scenarioMarker = `with ${semantic}`;
-          const scenarioIdx = src.indexOf(scenarioMarker);
+          // Variant specs use `variant-N` titles (no semantic-named
+          // marker), and an endpoint's variant file contains only its
+          // variant scenarios — so a file-wide `ctx.<sem>Var` reference
+          // is sufficient and unambiguous evidence that the scenario
+          // body wires the binding.
           expect(
-            scenarioIdx,
-            `${op.operationId}: expected a scenario block titled '${scenarioMarker}'`,
-          ).toBeGreaterThan(0);
-          const nextTestIdx = src.indexOf("\n  test('", scenarioIdx + scenarioMarker.length);
-          const block = src.slice(scenarioIdx, nextTestIdx > 0 ? nextTestIdx : src.length);
-          expect(
-            block.includes(`ctx.${varName}`),
-            `${op.operationId} '${scenarioMarker}': body must reference ctx.${varName}`,
+            src.includes(`ctx.${varName}`),
+            `${op.operationId} variant spec: body must reference ctx.${varName}`,
           ).toBe(true);
         });
       }
