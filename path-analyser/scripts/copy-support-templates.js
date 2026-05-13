@@ -26,6 +26,7 @@ const SUPPORT_FILES = [
   'fixtures.ts',
   'seed-rules.json',
   'await-eventually.ts',
+  'deployment.ts',
 ];
 
 async function main() {

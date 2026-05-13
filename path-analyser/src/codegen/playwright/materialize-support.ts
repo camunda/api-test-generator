@@ -35,6 +35,7 @@ export const SUPPORT_TEMPLATE_FILES = [
   'fixtures.ts',
   'seed-rules.json',
   'await-eventually.ts',
+  'deployment.ts',
 ] as const;
 
 /** Files copied directly into <outDir>/ (project root scaffolding). */

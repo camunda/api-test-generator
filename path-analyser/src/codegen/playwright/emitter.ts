@@ -181,7 +181,33 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
   lines.push("import { extractInto, seedBinding } from './support/seeding';");
-  lines.push("import { resolveFixture } from './support/fixtures';");
+  // deploy() is emitted for createDeployment multipart steps; resolveFixture
+  // is emitted for any other multipart steps (non-createDeployment). In the
+  // current spec, createDeployment is the only multipart operation, so both
+  // flags are mutually exclusive in practice — but future multipart operations
+  // would use the resolveFixture-based inline machinery.
+  const hasDeploymentMultipart = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some(
+      (step) =>
+        step.operationId === 'createDeployment' &&
+        step.bodyKind === 'multipart' &&
+        !!step.multipartTemplate,
+    ),
+  );
+  const hasOtherMultipart = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some(
+      (step) =>
+        step.operationId !== 'createDeployment' &&
+        step.bodyKind === 'multipart' &&
+        !!step.multipartTemplate,
+    ),
+  );
+  if (hasDeploymentMultipart) {
+    lines.push("import { deploy } from './support/deployment';");
+  }
+  if (hasOtherMultipart) {
+    lines.push("import { resolveFixture } from './support/fixtures';");
+  }
   if (needsAwaitEventually) {
     lines.push("import { awaitEventually } from './support/await-eventually';");
   }
@@ -353,46 +379,69 @@ function renderScenarioTest(
     // the outer test scope; the per-step locals (resp/body/json) stay
     // confined to the callback.
     body.push(`  await test.step(${JSON.stringify(step.operationId)}, async () => {`);
-    body.push(`    const url = baseUrl + ${urlExpr};`);
-    const bodyVar = `body${idx + 1}`;
-    if (step.bodyKind === 'json' && step.bodyTemplate) {
-      const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
+
+    // createDeployment multipart steps use the deploy() helper which encapsulates
+    // multipart body building, @@FILE: resolution, auth, HTTP POST, status
+    // assertion (throws on non-200), and extraction of all known deployment
+    // response fields into ctx. This keeps each deployment step as a single
+    // declarative call instead of ~35 lines of boilerplate.
+    const isDeploymentStep =
+      step.operationId === 'createDeployment' &&
+      step.bodyKind === 'multipart' &&
+      !!step.multipartTemplate;
+    if (isDeploymentStep && step.multipartTemplate) {
+      const tpl = JSON.stringify(step.multipartTemplate, null, 2).replace(
         /"\\?\$\{([^}]+)\}"/g,
         (_, v) => `ctx["${v}"]`,
       );
-      body.push(`    const ${bodyVar} = ${json};`);
-    } else if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-      // multipart template format: { fields: Record<string,string>, files: Record<string,string> }
-      const tpl = JSON.stringify(step.multipartTemplate, null, 4).replace(
-        /"\\?\$\{([^}]+)\}"/g,
-        (_, v) => `ctx["${v}"]`,
-      );
-      body.push(`    const ${bodyVar} = ${tpl};`);
-    }
-    const opts: string[] = [];
-    opts.push('headers: await authHeaders()');
-    if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
-    if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-      // Convert template to Playwright's expected multipart shape: a keyed object map.
-      // Field values are stringified (`String(v)`); file values are passed as
-      // `{ name, mimeType, buffer }`. The element type below mirrors the
-      // permissive subset of Playwright's `multipart` option that we actually
-      // emit, so the generated suite typechecks under `strict: true` when
-      // `request.post({ multipart })` is called.
-      body.push(
-        `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
-      );
-      body.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
-      // Emit a strip branch for every globalContextSeeds entry whose
-      // sentinel local was declared in the prologue. The emitter never
-      // hard-codes a field name here — the field name is the metadata key
-      // and the local was named after it.
-      for (const [fieldName, local] of sentinelLocals) {
-        body.push(`      if (k === '${fieldName}' && ${local}) continue;`);
+      // Indent all lines after the first so the object literal aligns under
+      // the opening `{` in the deploy() call.
+      const tplIndented = tpl
+        .split('\n')
+        .map((line: string, i: number) => (i === 0 ? line : `    ${line}`))
+        .join('\n');
+      body.push(`    const ${varName} = await deploy(ctx, request, ${tplIndented}, baseUrl);`);
+    } else {
+      body.push(`    const url = baseUrl + ${urlExpr};`);
+      const bodyVar = `body${idx + 1}`;
+      if (step.bodyKind === 'json' && step.bodyTemplate) {
+        const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
+          /"\\?\$\{([^}]+)\}"/g,
+          (_, v) => `ctx["${v}"]`,
+        );
+        body.push(`    const ${bodyVar} = ${json};`);
+      } else if (step.bodyKind === 'multipart' && step.multipartTemplate) {
+        // Non-createDeployment multipart template
+        const tpl = JSON.stringify(step.multipartTemplate, null, 4).replace(
+          /"\\?\$\{([^}]+)\}"/g,
+          (_, v) => `ctx["${v}"]`,
+        );
+        body.push(`    const ${bodyVar} = ${tpl};`);
       }
-      body.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
-      body.push(`    }`);
-      body.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
+      const opts: string[] = [];
+      opts.push('headers: await authHeaders()');
+      if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
+      if (step.bodyKind === 'multipart' && step.multipartTemplate) {
+        // Convert template to Playwright's expected multipart shape: a keyed object map.
+        // Field values are stringified (`String(v)`); file values are passed as
+        // `{ name, mimeType, buffer }`. The element type below mirrors the
+        // permissive subset of Playwright's `multipart` option that we actually
+        // emit, so the generated suite typechecks under `strict: true` when
+        // `request.post({ multipart })` is called.
+        body.push(
+          `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
+        );
+        body.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
+        // Emit a strip branch for every globalContextSeeds entry whose
+        // sentinel local was declared in the prologue. The emitter never
+        // hard-codes a field name here — the field name is the metadata key
+        // and the local was named after it.
+        for (const [fieldName, local] of sentinelLocals) {
+          body.push(`      if (k === '${fieldName}' && ${local}) continue;`);
+        }
+        body.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
+        body.push(`    }`);
+        body.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
         if (typeof v === 'string' && v.startsWith('@@FILE:')) {
           const p = v.slice('@@FILE:'.length);
           const buf = await resolveFixture(p);
@@ -402,28 +451,30 @@ function renderScenarioTest(
           multipart[k] = String(v);
         }
       }`);
-      opts.push('multipart: multipart');
+        opts.push('multipart: multipart');
+      }
+      // (#106) Eventually-consistent reads are wrapped with awaitEventually(),
+      // which retries the same request within a budget until the response is
+      // observably consistent (default predicate for POST .../search:
+      // `body.items.length > 0`; for GET: any 200) and returns the final
+      // APIResponse. Non-EC steps go straight through `request.${method}`.
+      if (awaitStepIndices.has(idx)) {
+        body.push(`    const ${varName} = await awaitEventually(`);
+        body.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
+        body.push(
+          `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
+        );
+        body.push(`    );`);
+      } else {
+        body.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
+      }
+      body.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
+      body.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
+      body.push(`    }`);
+      body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
     }
-    // (#106) Eventually-consistent reads are wrapped with awaitEventually(),
-    // which retries the same request within a budget until the response is
-    // observably consistent (default predicate for POST .../search:
-    // `body.items.length > 0`; for GET: any 200) and returns the final
-    // APIResponse. Non-EC steps go straight through `request.${method}`.
-    if (awaitStepIndices.has(idx)) {
-      body.push(`    const ${varName} = await awaitEventually(`);
-      body.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
-      body.push(
-        `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
-      );
-      body.push(`    );`);
-    } else {
-      body.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
-    }
-    body.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
-    body.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
-    body.push(`    }`);
-    body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
     // Record observation for this step (best-effort). Only capture response shapes for 200 responses.
+    // For deploy() steps the helper throws on non-200, so __status is always 200 when this block runs.
     if (recordResponses) {
       body.push(`    try {`);
       body.push(`      const __status = ${varName}.status();`);
@@ -465,13 +516,12 @@ function renderScenarioTest(
         `    await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );
     }
-    // Extraction. `extractInto` is the vendored helper from
-    // support/seeding.ts; it skips the assignment when the value is
-    // `undefined` so seeded bindings (e.g. globalContextSeeds entries)
-    // and earlier extracts in the same scenario aren't clobbered by a
-    // later step whose response shape omits the field. See its JSDoc
-    // for the full preserve-on-undefined rationale.
-    if (step.extract?.length) {
+    // Extraction. `extractInto` is the vendored helper from support/seeding.ts;
+    // it skips the assignment when the value is `undefined` so seeded bindings
+    // and earlier extracts in the same scenario aren't clobbered by a later step
+    // whose response shape omits the field. deploy() steps are excluded here
+    // because the helper extracts all known deployment response fields internally.
+    if (!isDeploymentStep && step.extract?.length) {
       body.push(`    const json = await ${varName}.json();`);
       for (const ex of step.extract) {
         const optAcc = toOptionalAccessor(ex.fieldPath);
