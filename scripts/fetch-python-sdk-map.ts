@@ -40,6 +40,7 @@ function execCommand(cmd: string, options?: Record<string, unknown>): string {
   try {
     return execSync(cmd, { encoding: 'utf-8', ...options }).trim();
   } catch (error) {
+    // biome-ignore lint/plugin: error is caught from execSync; status/stderr/stdout are the Node.js SpawnSyncReturns fields
     const err = error as { status: number; stderr: Buffer; stdout: Buffer };
     console.error(`Command failed: ${cmd}`);
     console.error(err.stderr?.toString() || err.stdout?.toString() || String(error));
@@ -54,9 +55,7 @@ async function main(): Promise<void> {
   const operationMapPath = join(pythonSdkDir, 'operation-map.json');
   const metadataPath = join(pythonSdkDir, 'sdk-metadata.json');
 
-  console.error(
-    `[fetch-python-sdk-map] ref=${pythonSdkRef}, output=${pythonSdkDir}`,
-  );
+  console.error(`[fetch-python-sdk-map] ref=${pythonSdkRef}, output=${pythonSdkDir}`);
 
   // Clean up any prior temp directory
   if (process.platform === 'win32') {
@@ -91,12 +90,9 @@ async function main(): Promise<void> {
 
     // Fetch the specific ref if not main
     if (pythonSdkRef !== 'main') {
-      execCommand(
-        `git fetch origin "${pythonSdkRef}:refs/remotes/origin/${pythonSdkRef}"`,
-        {
-          cwd: tempCloneDir,
-        },
-      );
+      execCommand(`git fetch origin "${pythonSdkRef}:refs/remotes/origin/${pythonSdkRef}"`, {
+        cwd: tempCloneDir,
+      });
       execCommand(`git checkout ${pythonSdkRef}`, {
         cwd: tempCloneDir,
       });
@@ -132,10 +128,8 @@ async function main(): Promise<void> {
     let operationMapContent: string;
     try {
       operationMapContent = readFileSync(sourceMapPath, 'utf-8');
-    } catch (error) {
-      throw new Error(
-        `Failed to read operation-map.json from cloned repo at ${sourceMapPath}`,
-      );
+    } catch (_error) {
+      throw new Error(`Failed to read operation-map.json from cloned repo at ${sourceMapPath}`);
     }
 
     // Ensure output directory exists

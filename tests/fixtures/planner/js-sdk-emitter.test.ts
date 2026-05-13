@@ -157,6 +157,7 @@ describe('JsSdkEmitter Layer-1 fixture: JSON body scenario (activateJobs)', () =
     expect(src).toContain("ctx['workerType']");
   });
 
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: test description documents that ${workerType} placeholder is resolved to ctx["workerType"]
   it('activateJobs body template ${workerType} resolves to ctx["workerType"] in the args object', () => {
     const src = renderJsSdkSuite(FIXTURE_ACTIVATE_JOBS, FALLBACK_MAPPING, { mode: 'feature' });
     expect(src).toContain('ctx["workerType"]');
@@ -172,9 +173,9 @@ describe('JsSdkEmitter Layer-1 fixture: JSON body scenario (activateJobs)', () =
     expect(src).toContain("extractInto(ctx, 'jobKey'");
   });
 
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: test description references ${...} syntax as a literal example of unresolved placeholders
   it('emitted suite contains no unresolved ${...} placeholder strings (Bug A guard)', () => {
     const src = renderJsSdkSuite(FIXTURE_ACTIVATE_JOBS, FALLBACK_MAPPING, { mode: 'feature' });
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal regex check for unresolved template placeholder syntax in emitted output
     expect(src).not.toMatch(/\$\{[^}]+\}/);
   });
 

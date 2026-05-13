@@ -80,16 +80,21 @@ function renderCsharpSuite(
   lines.push('        var result = JsonSerializer.Deserialize<T>(json);');
   lines.push('        if (result is null)');
   lines.push('        {');
-  lines.push('            throw new InvalidOperationException("Template deserialization failed.");');
+  lines.push(
+    '            throw new InvalidOperationException("Template deserialization failed.");',
+  );
   lines.push('        }');
   lines.push('        return result;');
   lines.push('    }');
   lines.push('');
-  lines.push('    private static object? ResolveTemplate(object? template, Dictionary<string, object?> ctx)');
+  lines.push(
+    '    private static object? ResolveTemplate(object? template, Dictionary<string, object?> ctx)',
+  );
   lines.push('    {');
   lines.push('        if (template is null) return null;');
   lines.push('        if (template is string s)');
   lines.push('        {');
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: emitting C# string literal that checks for ${...} runtime template syntax
   lines.push('            if (s.StartsWith("${") && s.EndsWith("}"))');
   lines.push('            {');
   lines.push('                var key = s[2..^1];');
@@ -118,16 +123,22 @@ function renderCsharpSuite(
   lines.push('        return template;');
   lines.push('    }');
   lines.push('');
-  lines.push('    private static string GetRequiredString(Dictionary<string, object?> ctx, string key)');
+  lines.push(
+    '    private static string GetRequiredString(Dictionary<string, object?> ctx, string key)',
+  );
   lines.push('    {');
   lines.push('        if (!ctx.TryGetValue(key, out var value) || value is null)');
   lines.push('        {');
-  lines.push('            throw new InvalidOperationException($"Missing required binding: {key}");');
+  lines.push(
+    '            throw new InvalidOperationException($"Missing required binding: {key}");',
+  );
   lines.push('        }');
   lines.push('        return value.ToString() ?? string.Empty;');
   lines.push('    }');
   lines.push('');
-  lines.push('    private static void ApplyExtract(Dictionary<string, object?> ctx, object response, string fieldPath, string bind)');
+  lines.push(
+    '    private static void ApplyExtract(Dictionary<string, object?> ctx, object response, string fieldPath, string bind)',
+  );
   lines.push('    {');
   lines.push('        var root = JsonSerializer.SerializeToElement(response);');
   lines.push('        if (TryExtract(root, fieldPath, out var value))');
@@ -136,7 +147,9 @@ function renderCsharpSuite(
   lines.push('        }');
   lines.push('    }');
   lines.push('');
-  lines.push('    private static bool TryExtract(JsonElement element, string fieldPath, out object? value)');
+  lines.push(
+    '    private static bool TryExtract(JsonElement element, string fieldPath, out object? value)',
+  );
   lines.push('    {');
   lines.push('        value = null;');
   lines.push('        var current = element;');
@@ -177,13 +190,19 @@ function renderCsharpSuite(
   lines.push('        return true;');
   lines.push('    }');
   lines.push('');
-  lines.push('    private static DeploymentRequest BuildDeploymentRequest(object? template, Dictionary<string, object?> ctx)');
+  lines.push(
+    '    private static DeploymentRequest BuildDeploymentRequest(object? template, Dictionary<string, object?> ctx)',
+  );
   lines.push('    {');
-  lines.push('        var resolved = ResolveTemplate(template, ctx) as Dictionary<string, object?>;');
+  lines.push(
+    '        var resolved = ResolveTemplate(template, ctx) as Dictionary<string, object?>;',
+  );
   lines.push('        var fields = resolved != null && resolved.TryGetValue("fields", out var f)');
   lines.push('            ? f as Dictionary<string, object?>');
   lines.push('            : null;');
-  lines.push('        var files = resolved != null && resolved.TryGetValue("files", out var filesObj)');
+  lines.push(
+    '        var files = resolved != null && resolved.TryGetValue("files", out var filesObj)',
+  );
   lines.push('            ? filesObj as Dictionary<string, object?>');
   lines.push('            : null;');
   lines.push('        var resources = new List<DeploymentResource>();');
@@ -192,10 +211,14 @@ function renderCsharpSuite(
   lines.push('            foreach (var (key, value) in files)');
   lines.push('            {');
   lines.push('                if (value is not string pathValue) continue;');
-  lines.push('                var path = pathValue.StartsWith("@@FILE:") ? pathValue[7..] : pathValue;');
+  lines.push(
+    '                var path = pathValue.StartsWith("@@FILE:") ? pathValue[7..] : pathValue;',
+  );
   lines.push('                var content = File.ReadAllBytes(path);');
   lines.push('                var fileName = Path.GetFileName(path);');
-  lines.push('                resources.Add(new DeploymentResource(fileName, "application/octet-stream", content));');
+  lines.push(
+    '                resources.Add(new DeploymentResource(fileName, "application/octet-stream", content));',
+  );
   lines.push('            }');
   lines.push('        }');
   lines.push('        TenantId? tenantId = null;');
@@ -203,7 +226,9 @@ function renderCsharpSuite(
   lines.push('        {');
   lines.push('            tenantId = tenant?.ToString();');
   lines.push('        }');
-  lines.push('        return new DeploymentRequest { TenantId = tenantId, Resources = resources };');
+  lines.push(
+    '        return new DeploymentRequest { TenantId = tenantId, Resources = resources };',
+  );
   lines.push('    }');
   lines.push('}');
   lines.push('');
@@ -239,22 +264,26 @@ function emitStep(
 ): void {
   const responseVar = `${opId}Response`;
   if (opId === 'createDeployment') {
-    lines.push('        var deploymentTemplate = ' + renderTemplate(step.multipartTemplate) + ';');
+    lines.push(`        var deploymentTemplate = ${renderTemplate(step.multipartTemplate)};`);
     lines.push('        var deploymentRequest = BuildDeploymentRequest(deploymentTemplate, ctx);');
     lines.push(`        var ${responseVar} = await client.${methodName}(deploymentRequest);`);
     emitExtracts(lines, responseVar, step.extract);
     return;
   }
   if (opId === 'createProcessInstance') {
-    lines.push('        var instanceTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
-    lines.push('        var instanceRequest = FromTemplate<CreateProcessInstanceRequest>(ResolveTemplate(instanceTemplate, ctx));');
+    lines.push(`        var instanceTemplate = ${renderTemplate(step.bodyTemplate)};`);
+    lines.push(
+      '        var instanceRequest = FromTemplate<CreateProcessInstanceRequest>(ResolveTemplate(instanceTemplate, ctx));',
+    );
     lines.push(`        var ${responseVar} = await client.${methodName}(instanceRequest);`);
     emitExtracts(lines, responseVar, step.extract);
     return;
   }
   if (opId === 'searchProcessInstances') {
-    lines.push('        var searchTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
-    lines.push('        var searchRequest = FromTemplate<SearchProcessInstancesRequest>(ResolveTemplate(searchTemplate, ctx));');
+    lines.push(`        var searchTemplate = ${renderTemplate(step.bodyTemplate)};`);
+    lines.push(
+      '        var searchRequest = FromTemplate<SearchProcessInstancesRequest>(ResolveTemplate(searchTemplate, ctx));',
+    );
     lines.push(`        var ${responseVar} = await client.${methodName}(searchRequest);`);
     emitExtracts(lines, responseVar, step.extract);
     return;
@@ -267,15 +296,19 @@ function emitStep(
     return;
   }
   if (opId === 'activateJobs') {
-    lines.push('        var activationTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
-    lines.push('        var activationRequest = FromTemplate<ActivateJobsRequest>(ResolveTemplate(activationTemplate, ctx));');
+    lines.push(`        var activationTemplate = ${renderTemplate(step.bodyTemplate)};`);
+    lines.push(
+      '        var activationRequest = FromTemplate<ActivateJobsRequest>(ResolveTemplate(activationTemplate, ctx));',
+    );
     lines.push(`        var ${responseVar} = await client.${methodName}(activationRequest);`);
     emitExtracts(lines, responseVar, step.extract);
     return;
   }
   if (opId === 'searchJobs') {
-    lines.push('        var searchTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
-    lines.push('        var searchRequest = FromTemplate<JobSearchRequest>(ResolveTemplate(searchTemplate, ctx));');
+    lines.push(`        var searchTemplate = ${renderTemplate(step.bodyTemplate)};`);
+    lines.push(
+      '        var searchRequest = FromTemplate<JobSearchRequest>(ResolveTemplate(searchTemplate, ctx));',
+    );
     lines.push(`        var ${responseVar} = await client.${methodName}(searchRequest);`);
     emitExtracts(lines, responseVar, step.extract);
     return;
@@ -283,15 +316,17 @@ function emitStep(
   if (opId === 'completeJob') {
     const pathVar = step.pathParams?.find((p) => p.name === 'jobKey')?.var;
     const jobKey = pathVar ? `GetRequiredString(ctx, "${pathVar}")` : 'string.Empty';
-    lines.push('        var completionTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
-    lines.push('        var completionRequest = FromTemplate<CompleteJobRequest>(ResolveTemplate(completionTemplate, ctx));');
+    lines.push(`        var completionTemplate = ${renderTemplate(step.bodyTemplate)};`);
+    lines.push(
+      '        var completionRequest = FromTemplate<CompleteJobRequest>(ResolveTemplate(completionTemplate, ctx));',
+    );
     lines.push(`        await client.${methodName}(${jobKey}, completionRequest);`);
     return;
   }
   if (opId === 'failJob') {
     const pathVar = step.pathParams?.find((p) => p.name === 'jobKey')?.var;
     const jobKey = pathVar ? `GetRequiredString(ctx, "${pathVar}")` : 'string.Empty';
-    lines.push('        var failureTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
+    lines.push(`        var failureTemplate = ${renderTemplate(step.bodyTemplate)};`);
     lines.push('        var resolvedFailure = ResolveTemplate(failureTemplate, ctx);');
     lines.push('        if (resolvedFailure is null)');
     lines.push('        {');
@@ -307,8 +342,10 @@ function emitStep(
   if (opId === 'cancelProcessInstance') {
     const pathVar = step.pathParams?.find((p) => p.name === 'processInstanceKey')?.var;
     const processInstanceKey = pathVar ? `GetRequiredString(ctx, "${pathVar}")` : 'string.Empty';
-    lines.push('        var cancelTemplate = ' + renderTemplate(step.bodyTemplate) + ';');
-    lines.push('        var cancelRequest = FromTemplate<CancelProcessInstanceRequest>(ResolveTemplate(cancelTemplate, ctx));');
+    lines.push(`        var cancelTemplate = ${renderTemplate(step.bodyTemplate)};`);
+    lines.push(
+      '        var cancelRequest = FromTemplate<CancelProcessInstanceRequest>(ResolveTemplate(cancelTemplate, ctx));',
+    );
     lines.push(`        await client.${methodName}(${processInstanceKey}, cancelRequest);`);
     return;
   }
@@ -343,6 +380,7 @@ function renderValue(value: unknown): string {
     return `new List<object?> { ${items} }`;
   }
   if (typeof value === 'object') {
+    // biome-ignore lint/plugin: runtime narrowing — typeof 'object' guard above ensures the cast is safe
     const entries = Object.entries(value as Record<string, unknown>)
       .map(([key, v]) => `[${JSON.stringify(key)}] = ${renderValue(v)}`)
       .join(', ');

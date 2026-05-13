@@ -10,24 +10,25 @@ import {
 import { validateDomainSemantics } from '../domainSemanticsValidator.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
+import { createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
+import { loadCsharpOperationMap } from './csharp-sdk/operation-map.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
-import { createPythonSdkEmitter } from './python-sdk/emitter.js';
-import {
-  createOperationMapSource as createPythonOperationMapSource,
-  createDefaultOperationMapSource as createDefaultPythonOperationMapSource,
-  type OperationMapJsonSource as PythonOperationMapJsonSource,
-} from './python-sdk/sdk-mapping.js';
-import { materializePythonSupport } from './python-sdk/materialize-support.js';
 import { writeEmitted } from './orchestrator.js';
-import { createCsharpEmitter } from './csharp-sdk/emitter.js';
-import { loadCsharpOperationMap } from './csharp-sdk/operation-map.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
   materializeResponseSchemas,
   materializeSupport,
 } from './playwright/materialize-support.js';
+import { createPythonSdkEmitter } from './python-sdk/emitter.js';
+import { materializePythonSupport } from './python-sdk/materialize-support.js';
+import {
+  createDefaultOperationMapSource as createDefaultPythonOperationMapSource,
+  createOperationMapSource as createPythonOperationMapSource,
+  type OperationMapJsonSource as PythonOperationMapJsonSource,
+} from './python-sdk/sdk-mapping.js';
 import { getEmitter, listEmitters, registerEmitter } from './registry.js';
 
 // Built-in emitter registration. New emitters register themselves here.
@@ -151,6 +152,7 @@ async function run() {
         // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
         const mapData = JSON.parse(raw) as Record<string, unknown>;
         pythonSdkMapping = createPythonOperationMapSource(
+          // biome-ignore lint/plugin: runtime contract boundary — mapData was already cast from unknown above; this narrows to the expected shape
           mapData as Record<string, Array<{ region?: string }>>,
         );
         break;
@@ -215,6 +217,9 @@ async function run() {
   }
   if (emitter.id === 'python-sdk') {
     await materializePythonSupport(outDir);
+  }
+  if (emitter.id === 'csharp-sdk') {
+    await materializeCsharpSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));

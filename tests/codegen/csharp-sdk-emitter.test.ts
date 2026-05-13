@@ -35,6 +35,7 @@ const DEPLOYMENT_COLLECTION: EndpointScenarioCollection = {
           pathTemplate: '/deployments',
           bodyKind: 'multipart',
           multipartTemplate: {
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional binding placeholder for C# runtime template resolution
             fields: { tenantId: '${tenantIdVar}' },
             files: { resource: '@@FILE:fixtures/bpmn/sample.bpmn' },
           },
@@ -66,6 +67,7 @@ const PROCESS_INSTANCE_COLLECTION: EndpointScenarioCollection = {
           pathTemplate: '/process-instances',
           bodyKind: 'json',
           bodyTemplate: {
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional binding placeholder for C# runtime template resolution
             processDefinitionKey: '${processDefinitionKeyVar}',
             variables: { foo: 'bar' },
           },
@@ -156,7 +158,9 @@ describe('C# SDK emitter (Emitter contract)', () => {
     const content = files[0].content;
     expect(content).toContain('var instanceRequest = FromTemplate<CreateProcessInstanceRequest>');
     expect(content).toContain('client.CreateProcessInstanceAsync');
-    expect(content).toContain("ApplyExtract(ctx, createProcessInstanceResponse, 'processInstanceKey', 'processInstanceKeyVar');");
+    expect(content).toContain(
+      "ApplyExtract(ctx, createProcessInstanceResponse, 'processInstanceKey', 'processInstanceKeyVar');",
+    );
   });
 
   test('emits SDK call scaffolding for searchJobs', async () => {

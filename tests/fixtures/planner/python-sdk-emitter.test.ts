@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  EndpointScenarioCollection,
-  RequestStep,
-} from '../../../path-analyser/src/types.ts';
+import type { EndpointScenarioCollection, RequestStep } from '../../../path-analyser/src/types.ts';
 
 /**
  * Layer-1 Python SDK emitter fixture — red step
@@ -47,11 +44,13 @@ const FIXTURE_ACTIVATE_JOBS: EndpointScenarioCollection = {
         workerType: 'MyWorkerType',
       },
       requestPlan: [
+        // biome-ignore lint/plugin: test-only cast at a fixture boundary — value is hand-crafted in the fixture
         {
           operationId: 'activateJobs',
           method: 'POST',
           pathTemplate: '/jobs/activate',
           bodyTemplate: {
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional binding placeholder
             type: '${workerType}',
             maxJobsToActivate: 1,
             timeout: 30000,
@@ -129,8 +128,8 @@ describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
     expect(FIXTURE_ACTIVATE_JOBS.scenarios).toHaveLength(1);
     const scenario = FIXTURE_ACTIVATE_JOBS.scenarios[0];
     expect(scenario.requestPlan).toHaveLength(1);
-    expect(scenario.requestPlan![0].operationId).toBe('activateJobs');
-    expect(scenario.requestPlan![0].extract).toHaveLength(1);
+    expect(scenario.requestPlan?.[0]?.operationId).toBe('activateJobs');
+    expect(scenario.requestPlan?.[0]?.extract).toHaveLength(1);
   });
 
   it('fixture scenario has seed binding for workerType', () => {
@@ -140,9 +139,9 @@ describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
   });
 
   it('fixture request step uses json bodyKind (not multipart)', () => {
-    const step = FIXTURE_ACTIVATE_JOBS.scenarios[0].requestPlan![0];
-    expect(step.bodyKind).toBe('json');
-    expect(step.multipartTemplate).toBeUndefined();
+    const step = FIXTURE_ACTIVATE_JOBS.scenarios[0].requestPlan?.[0];
+    expect(step?.bodyKind).toBe('json');
+    expect(step?.multipartTemplate).toBeUndefined();
   });
 
   it('golden Python output contains required async def test signature', () => {
@@ -152,9 +151,7 @@ describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
   });
 
   it('golden output contains from_dict() call (not raw dict)', () => {
-    expect(GOLDEN_ACTIVATE_JOBS_PY).toContain(
-      'ActivateJobsRequest.from_dict(request_body)',
-    );
+    expect(GOLDEN_ACTIVATE_JOBS_PY).toContain('ActivateJobsRequest.from_dict(request_body)');
   });
 
   it('golden output contains await client.<snake_case>() call', () => {
@@ -176,9 +173,7 @@ describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
   });
 
   it('golden output contains seed binding call for workerType', () => {
-    expect(GOLDEN_ACTIVATE_JOBS_PY).toContain(
-      "seedBinding('workerType')",
-    );
+    expect(GOLDEN_ACTIVATE_JOBS_PY).toContain("seedBinding('workerType')");
   });
 
   it('fixture scenario bindings and seedBindings are aligned', () => {
@@ -191,8 +186,9 @@ describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
   });
 
   it('fixture has correct request body template with placeholders', () => {
-    const step = FIXTURE_ACTIVATE_JOBS.scenarios[0].requestPlan![0];
-    expect(step.bodyTemplate).toEqual({
+    const step = FIXTURE_ACTIVATE_JOBS.scenarios[0].requestPlan?.[0];
+    expect(step?.bodyTemplate).toEqual({
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional binding placeholder
       type: '${workerType}',
       maxJobsToActivate: 1,
       timeout: 30000,

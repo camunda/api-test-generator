@@ -37,11 +37,13 @@ const FIXTURE_ACTIVATE_JOBS: EndpointScenarioCollection = {
         workerType: 'MyWorkerType',
       },
       requestPlan: [
+        // biome-ignore lint/plugin: test-only cast at a fixture boundary — value is hand-crafted in the test
         {
           operationId: 'activateJobs',
           method: 'POST',
           pathTemplate: '/jobs/activate',
           bodyTemplate: {
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional binding placeholder resolved by the Python SDK emitter
             type: '${workerType}',
             maxJobsToActivate: 1,
             timeout: 30000,
@@ -138,7 +140,9 @@ describe('PythonSdkEmitter Layer-2 purity test (green step)', () => {
       mode: 'feature',
     });
 
-    expect(file.content).toMatch(/async def test_sc_activate_jobs_simple\(client: CamundaAsyncClient\)/);
+    expect(file.content).toMatch(
+      /async def test_sc_activate_jobs_simple\(client: CamundaAsyncClient\)/,
+    );
   });
 
   test('emitted test contains context dict initialization', async () => {
@@ -192,7 +196,7 @@ describe('PythonSdkEmitter Layer-2 purity test (green step)', () => {
       mode: 'feature',
     });
 
-    expect(file.content).toContain("assert result is not None");
+    expect(file.content).toContain('assert result is not None');
   });
 
   test('emitted test contains extract_into() calls for response fields', async () => {
@@ -212,6 +216,7 @@ describe('PythonSdkEmitter Layer-2 purity test (green step)', () => {
         {
           ...FIXTURE_ACTIVATE_JOBS.scenarios[0],
           requestPlan: [
+            // biome-ignore lint/plugin: test-only cast at a fixture boundary — value is hand-crafted in the test
             {
               operationId: 'createDeployment',
               method: 'POST',

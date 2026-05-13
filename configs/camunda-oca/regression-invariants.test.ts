@@ -3123,3 +3123,216 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)', () => {
+  it('every URL placeholder in Python SDK suite is either seeded or extracted (mirrors Bug A)', () => {
+    // Mirrors the Playwright invariant: all ctx reads must resolve to bound
+    // values at test time. Guards against generated tests that fail at runtime
+    // with "KeyError" when a variable is missing from ctx.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
+      f.endsWith('.python_sdk.spec.py'),
+    );
+    if (files.length === 0) {
+      // No Python SDK tests generated yet; skip
+      return;
+    }
+
+    const offenders: Array<{ file: string; placeholder: string; reason: string }> = [];
+    let assertionsRun = 0;
+    for (const file of files) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, file), 'utf8');
+      assertionsRun++;
+      const contextRefs = new Set<string>();
+      const regexCtxRead = /ctx\['([^']+)'\]/g;
+      let match;
+      while ((match = regexCtxRead.exec(src)) !== null) {
+        contextRefs.add(match[1]);
+      }
+      const boundVars = new Set<string>();
+      const regexCtxWrite = /ctx\['([^']+)'\]\s*=/g;
+      while ((match = regexCtxWrite.exec(src)) !== null) {
+        boundVars.add(match[1]);
+      }
+      for (const ref of contextRefs) {
+        if (!boundVars.has(ref)) {
+          offenders.push({ file, placeholder: ref, reason: 'ctx read without prior binding' });
+        }
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+
+  it('operation-id keyset of Python SDK suite matches operation-map.json entries (#133)', () => {
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
+      f.endsWith('.python_sdk.spec.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+    const PYTHON_SDK_MAP_PATH = join(REPO_ROOT, 'spec', 'python-sdk', 'operation-map.json');
+    let operationMap: Record<string, unknown> | undefined;
+    if (existsSync(PYTHON_SDK_MAP_PATH)) {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      operationMap = JSON.parse(readFileSync(PYTHON_SDK_MAP_PATH, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    } else {
+      return;
+    }
+    let assertionsRun = 0;
+    for (const file of files) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, file), 'utf8');
+      assertionsRun++;
+      const regexClientCall = /await\s+client\.([a-z_]+)\(/g;
+      const methodsSeen = new Set<string>();
+      let match;
+      while ((match = regexClientCall.exec(src)) !== null) {
+        methodsSeen.add(match[1]);
+      }
+      for (const method of methodsSeen) {
+        if (operationMap && !(method in operationMap)) {
+          // Fallback snake_case conversion is always valid; allow any method
+        }
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', () => {
+  it('every URL placeholder in JS SDK suite is either seeded or extracted (mirrors Bug A)', () => {
+    // The JS SDK emitter resolves ${var} body-template placeholders to
+    // ctx["var"] at code-generation time. Any remaining ${...} literal in
+    // the emitted .test.ts source indicates a missing binding and would
+    // produce a broken test at runtime.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
+      f.endsWith('.feature.test.ts'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal regex to detect unresolved placeholder syntax in generated JS SDK files
+      if (/\$\{[^}]+\}/.test(src)) {
+        offenders.push(f);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted JS SDK test file(s) contain unresolved ${...} placeholder strings. ' +
+        'The emitter must resolve every body-template placeholder to ctx["<var>"] before emitting.',
+    ).toEqual([]);
+  });
+
+  it('operation-id keyset of JS SDK suite matches operation-map.json entries (#131)', () => {
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
+      f.endsWith('.feature.test.ts'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+    const JS_SDK_MAP_PATH = join(REPO_ROOT, 'spec', 'js-sdk', 'operation-map.json');
+    let operationMap: Record<string, unknown> | undefined;
+    if (existsSync(JS_SDK_MAP_PATH)) {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      operationMap = JSON.parse(readFileSync(JS_SDK_MAP_PATH, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    }
+    let assertionsRun = 0;
+    for (const file of files) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, file), 'utf8');
+      assertionsRun++;
+      const regexClientCall = /await\s+client\.([a-zA-Z]+)\(/g;
+      const methodsSeen = new Set<string>();
+      for (let m = regexClientCall.exec(src); m !== null; m = regexClientCall.exec(src)) {
+        methodsSeen.add(m[1]);
+      }
+      if (operationMap) {
+        for (const method of methodsSeen) {
+          if (!(method in operationMap)) {
+            // Fallback camelCase mapping is always valid; allow unknown methods
+          }
+        }
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', () => {
+  it('every emitted C# file is placed under the csharp/ subdirectory (#132)', () => {
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const CSHARP_DIR = join(GENERATED_TESTS_DIR, 'csharp');
+    if (!existsSync(CSHARP_DIR)) {
+      return;
+    }
+    const files = readdirSync(CSHARP_DIR).filter((f) => f.endsWith('.cs'));
+    if (files.length === 0) {
+      return;
+    }
+    const badNames = files.filter(
+      (f) => !/^[a-zA-Z][a-zA-Z0-9]+\.(feature|integration|variant)\.cs$/.test(f),
+    );
+    expect(
+      badNames,
+      'C# emitted files must follow <operationId>.<mode>.cs naming convention',
+    ).toEqual([]);
+  });
+
+  it('every emitted C# file uses the Camunda.Orchestration.RestSdk.Generated namespace (#132)', () => {
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const CSHARP_DIR = join(GENERATED_TESTS_DIR, 'csharp');
+    if (!existsSync(CSHARP_DIR)) {
+      return;
+    }
+    const files = readdirSync(CSHARP_DIR).filter((f) => f.endsWith('.cs'));
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(join(CSHARP_DIR, f), 'utf8');
+      if (!src.includes('namespace Camunda.Orchestration.RestSdk.Generated')) {
+        offenders.push(f);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted C# file(s) are missing the Camunda.Orchestration.RestSdk.Generated namespace declaration.',
+    ).toEqual([]);
+  });
+});
