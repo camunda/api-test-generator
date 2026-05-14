@@ -13,7 +13,7 @@ import { edgeSchema } from './edgeSchema.js';
 // under `ontology/vocabulary/` at the repo root.
 //
 // True single source of truth: the TBox is authored as a TS const
-// (`edge.schema.ts`) and consumed here both at runtime (ajv) and at
+// (`edgeSchema.ts`) and consumed here both at runtime (ajv) and at
 // type-time (`FromSchema<typeof edgeSchema>`). The matching
 // `edge.schema.json` is generated from the same TS const by
 // `scripts/build-ontology.ts` for external SPARQL/SHACL/OWL consumers,

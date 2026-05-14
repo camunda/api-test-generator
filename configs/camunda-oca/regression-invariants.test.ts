@@ -3955,6 +3955,24 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
         `${NS}${term}`,
       );
     }
+
+    // identifiedBy is an ordered tuple ([endpoints.from-id, endpoints.to-id]).
+    // The TBox encodes this via `minItems`/`maxItems` on the JSON array, but
+    // RDF/JSON-LD consumers will only preserve element order if the term's
+    // mapping carries `@container: '@list'` — without it a JSON-LD processor
+    // may emit an unordered RDF set and silently lose the from/to pairing.
+    const identifiedByMapping = ctxObj.identifiedBy;
+    const identifiedByContainer =
+      identifiedByMapping &&
+      typeof identifiedByMapping === 'object' &&
+      '@container' in identifiedByMapping
+        ? // biome-ignore lint/plugin: runtime contract boundary — narrowing JSON-LD term mapping value
+          (identifiedByMapping as { '@container'?: unknown })['@container']
+        : undefined;
+    expect(
+      identifiedByContainer,
+      "@context['identifiedBy'] must declare `@container: '@list'` so RDF consumers preserve the [from-id, to-id] tuple order",
+    ).toBe('@list');
   });
 
   it('every edge endpoint references an entity-shaped kind in semantic-kinds.json', async () => {
