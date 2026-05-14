@@ -627,6 +627,78 @@ const fixtureNonOverlapVariant: OperationGraph = makeGraph([
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Fixture L: producerBound semantics must not receive synthetic literals
+// ---------------------------------------------------------------------------
+//
+// When `createDeployment` is selected as an authoritative producer for
+// `ProcessDefinitionKey`, the planner used to assign a synthetic literal
+// (`processDefinitionKey_<suffix>`) to `bindingsDraft.processDefinitionKeyVar`
+// via the Key heuristic and `ensureArtifactBindings`. This caused the emitter
+// to emit `ctx.processDefinitionKeyVar = 'processDefinitionKey_dadq'` on the
+// line *before* the deployment call that actually establishes the value —
+// the synthetic pre-seed was immediately overwritten at runtime.
+//
+// Class-scoped rule: any semantic that has an authoritative producer in
+// `graph.producersByType` is `producerBound` — its value is server-established
+// at runtime via the producer's response. Its binding must be `'__PENDING__'`
+// in the planned scenario, never a synthetic literal. `__PENDING__` causes
+// the emitter to skip the literal assignment; `deploy()` / `extractInto()`
+// then populate the binding at runtime with the real server-assigned value.
+const fixtureProducerBoundBinding: OperationGraph = makeGraph([
+  makeOp('createDeployment', {
+    produces: ['ProcessDefinitionKey'],
+    providerMap: { ProcessDefinitionKey: true },
+  }),
+  makeOp('searchAuditLogs', {
+    required: ['ProcessDefinitionKey'],
+  }),
+]);
+
+describe('planner contracts: producerBound semantics must be __PENDING__ in bindings', () => {
+  it('ProcessDefinitionKey binding is __PENDING__ when createDeployment is the authoritative producer', () => {
+    // Reproducer: prior to the fix the planner emitted
+    // `processDefinitionKeyVar: 'processDefinitionKey_<suffix>'`.
+    // The emitter then output a redundant literal assignment that was
+    // overwritten by the deployment helper at runtime.
+    const collection = plan(fixtureProducerBoundBinding, 'searchAuditLogs');
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const scenario = collection.scenarios[0];
+    expect(scenario.bindings?.processDefinitionKeyVar).toBe('__PENDING__');
+  });
+
+  it('class-scoped: no scenario for any endpoint has a synthetic literal for a producerBound Key semantic', () => {
+    // Any semantic ending in 'Key' that has an authoritative producer must
+    // have ALL its vars (including suffixed allocations like processDefinitionKeyVar2)
+    // set to __PENDING__, not a synthetic `<sem>_<suffix>`.
+    // The pattern ^<base>Var\d*$ catches the primary slot and any overflow
+    // slots that semanticToVarName allocates when the primary is already taken.
+    const graph = fixtureProducerBoundBinding;
+    const authoritative = Object.keys(graph.producersByType).filter(
+      (s) => s.endsWith('Key') && (graph.producersByType[s]?.length ?? 0) > 0,
+    );
+    const collection = plan(graph, 'searchAuditLogs');
+    for (const scenario of collection.scenarios) {
+      for (const sem of authoritative) {
+        const baseVarName = `${sem.charAt(0).toLowerCase()}${sem.slice(1)}Var`;
+        const pattern = new RegExp(`^${baseVarName}\\d*$`);
+        const bindings = scenario.bindings ?? {};
+        const matchingKeys = Object.keys(bindings).filter((k) => pattern.test(k));
+        // The primary var must exist (the planner must allocate a slot for it)
+        expect(
+          matchingKeys.length,
+          `expected at least one binding matching ${pattern} for producerBound semantic ${sem}`,
+        ).toBeGreaterThan(0);
+        for (const key of matchingKeys) {
+          expect(bindings[key], `${key} should be __PENDING__, not a synthetic literal`).toBe(
+            '__PENDING__',
+          );
+        }
+      }
+    }
+  });
+});
+
 describe('planner contracts: variant planner non-overlap producer fallback (#37)', () => {
   it('emits a producer→endpoint variant with no warm-up when the producer needs nothing from the endpoint', () => {
     const variants = generateOptionalSubShapeVariants(fixtureNonOverlapVariant, 'createOrder', {

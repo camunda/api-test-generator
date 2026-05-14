@@ -432,9 +432,17 @@ function renderScenarioTest(
         .split('\n')
         .map((line: string, i: number) => (i === 0 ? line : `    ${line}`))
         .join('\n');
-      body.push(`    const ${varName} = await deploy(ctx, request, ${tplIndented}, baseUrl);`);
+      // Derive strip rules from globalContextSeeds so deploy() has no
+      // hard-coded domain knowledge about sentinel values or field names.
+      const strips = globalContextSeeds
+        .filter((seed) => seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined)
+        .map((seed) => ({ fieldName: seed.fieldName, sentinel: seed.defaultSentinel }));
+      const stripsArg = strips.length > 0 ? `, ${JSON.stringify(strips)}` : '';
+      body.push(
+        `    const ${varName} = await deploy(ctx, request, ${tplIndented}, baseUrl${stripsArg});`,
+      );
       // Explicit status assertion mirrors the normal request path so the
-      // generated suite's assertion pattern is consistent and expect is not unused.
+      // generated suite's assertion pattern is consistent across all steps.
       // deploy() also throws on non-200 with the response body, but the
       // expect() call keeps the declared expectation visible in the test.
       body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);

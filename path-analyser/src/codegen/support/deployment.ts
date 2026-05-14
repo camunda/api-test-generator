@@ -33,6 +33,10 @@ interface ApiResponseLike {
   statusText(): string;
   text(): Promise<string>;
   url(): string;
+  // Required for structural compatibility with Playwright's APIResponse (which includes
+  // [Symbol.asyncDispose] as a required member). Both path-analyser/tsconfig.json and
+  // the generated suite's tsconfig must include ESNext.Disposable in their lib array
+  // for this to compile.
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -54,11 +58,24 @@ export interface DeployBody {
 }
 
 /**
+ * A strip rule: skip `fieldName` from the multipart body when the field's
+ * resolved value equals `sentinel`. Passed by the emitter via the `strips`
+ * parameter so deploy() has no hard-coded domain knowledge about tenant sentinels
+ * or any other config-specific defaults.
+ */
+export interface DeployStripRule {
+  fieldName: string;
+  sentinel: string;
+}
+
+/**
  * Perform a createDeployment call and extract all known response fields into ctx.
  *
  * - Resolves `@@FILE:<path>` entries in `body.files` via resolveFixture().
- * - Strips the `tenantId` field when `ctx['tenantIdVar'] === '<default>'` so
- *   single-tenant deployments work without an explicit tenantId param.
+ * - Strips fields whose resolved value equals the corresponding sentinel in `strips`
+ *   (e.g. `{ fieldName: 'tenantId', sentinel: '<default>' }` for single-tenant
+ *   deployments). Strips are derived by the emitter from `globalContextSeeds` so
+ *   no domain-specific knowledge is hard-coded here.
  * - Throws a descriptive Error on any non-200 response (includes the response body
  *   for diagnosis).
  * - Extracts all known deployment response fields into ctx; extractInto() is a
@@ -71,11 +88,12 @@ export async function deploy(
   request: ApiRequestContextLike,
   body: DeployBody,
   baseUrl: string,
+  strips?: DeployStripRule[],
 ): Promise<ApiResponseLike> {
   const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};
 
   for (const [k, v] of Object.entries(body.fields ?? {})) {
-    if (k === 'tenantId' && ctx.tenantIdVar === '<default>') continue;
+    if (strips?.some((s) => s.fieldName === k && String(v) === s.sentinel)) continue;
     if (v !== undefined && v !== null) multipart[k] = String(v);
   }
 
