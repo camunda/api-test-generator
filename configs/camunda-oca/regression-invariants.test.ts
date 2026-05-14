@@ -3738,3 +3738,156 @@ describeForThisConfig(
   },
 );
 
+
+// ---------------------------------------------------------------------------
+// Edge-kinds ABox cross-reference invariants (#201 — Lift 1)
+// ---------------------------------------------------------------------------
+//
+// Lift 1 of the ontology migration (#199) introduces the per-config edges
+// ABox at `configs/<active>/ontology/edges.json`, validated by the TBox
+// JSON Schema at `ontology/vocabulary/edge.schema.json` and loaded by
+// `path-analyser/src/ontology/loader.ts`. The TBox can express the row
+// shape but Draft-07 cannot express cross-references against the bundled
+// spec (operationIds existing, endpoint kind names existing, identifier
+// types matching). Those are encoded here as named L3 invariants —
+// failures point directly at the broken row instead of producing a
+// generic schema error.
+//
+// Class-scoped: every assertion ranges over every entry in the ABox AND
+// every edge-shaped kind in the spec's semantic-kinds registry, so a
+// new edge kind can't slip in unsynced in either direction.
+describeForThisConfig(
+  'bundled-spec invariants: edges ABox cross-references (#201)',
+  () => {
+    interface SpecKind {
+      name: string;
+      shape: string;
+      identifiers?: string[];
+    }
+    interface SemanticKindsFile {
+      kinds: SpecKind[];
+    }
+
+    function loadSemanticKinds(): SemanticKindsFile {
+      const p = join(getSpecBundleDir(REPO_ROOT), 'semantic-kinds.json');
+      if (!existsSync(p)) {
+        throw new Error(`semantic-kinds.json not found at ${p}. Run 'npm run fetch-spec' first.`);
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      return JSON.parse(readFileSync(p, 'utf8')) as SemanticKindsFile;
+    }
+
+    it('loads the edges ABox via the generic loader (proves the load path)', async () => {
+      // Deliberately import via the public loader entry point rather than
+      // re-parsing the JSON directly: this is the assertion that the
+      // generic loader works end-to-end against the real ABox shipped
+      // by this config. A regression in the loader (e.g. a tightened
+      // zod schema) fails this test before any cross-reference is even
+      // attempted.
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadEdgesAbox(REPO_ROOT);
+      expect(abox, 'edges ABox file must exist for the camunda-oca config').not.toBeNull();
+      expect(abox?.edges.length).toBeGreaterThan(0);
+    });
+
+    it('every edge.establishedBy and edge.observableVia is an operationId in the bundled spec', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadEdgesAbox(REPO_ROOT);
+      if (!abox) throw new Error('edges ABox missing');
+
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
+        throw new Error(`Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`);
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as {
+        paths?: Record<string, Record<string, { operationId?: string }>>;
+      };
+      const opIds = new Set<string>();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(pathItem)) {
+          if (op && typeof op === 'object' && typeof op.operationId === 'string') {
+            opIds.add(op.operationId);
+          }
+        }
+      }
+
+      const offenders: { edge: string; field: 'establishedBy' | 'observableVia'; op: string }[] = [];
+      for (const e of abox.edges) {
+        if (!opIds.has(e.establishedBy)) {
+          offenders.push({ edge: e.name, field: 'establishedBy', op: e.establishedBy });
+        }
+        if (!opIds.has(e.observableVia)) {
+          offenders.push({ edge: e.name, field: 'observableVia', op: e.observableVia });
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('every edge endpoint references an entity-shaped kind in semantic-kinds.json', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadEdgesAbox(REPO_ROOT);
+      if (!abox) throw new Error('edges ABox missing');
+      const kinds = loadSemanticKinds();
+      const entityKinds = new Map<string, SpecKind>();
+      for (const k of kinds.kinds) {
+        if (k.shape === 'entity' || k.shape === 'external-entity') {
+          entityKinds.set(k.name, k);
+        }
+      }
+      const offenders: { edge: string; side: 'from' | 'to'; kind: string }[] = [];
+      for (const e of abox.edges) {
+        if (!entityKinds.has(e.endpoints.from)) {
+          offenders.push({ edge: e.name, side: 'from', kind: e.endpoints.from });
+        }
+        if (!entityKinds.has(e.endpoints.to)) {
+          offenders.push({ edge: e.name, side: 'to', kind: e.endpoints.to });
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('every edge.identifiedBy[i] matches an identifier of the corresponding endpoint kind', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadEdgesAbox(REPO_ROOT);
+      if (!abox) throw new Error('edges ABox missing');
+      const kinds = loadSemanticKinds();
+      const entityKinds = new Map<string, SpecKind>();
+      for (const k of kinds.kinds) {
+        if (k.shape === 'entity' || k.shape === 'external-entity') {
+          entityKinds.set(k.name, k);
+        }
+      }
+      const offenders: { edge: string; position: number; identifier: string; kind: string; declared: string[] }[] = [];
+      for (const e of abox.edges) {
+        const endpointKinds = [e.endpoints.from, e.endpoints.to];
+        for (let i = 0; i < e.identifiedBy.length; i++) {
+          const kindName = endpointKinds[i];
+          // SAFETY: identifiedBy.length is fixed at 2 by the TBox and
+          // endpointKinds has 2 entries; the index is in-bounds.
+          if (kindName === undefined) continue;
+          const kind = entityKinds.get(kindName);
+          if (!kind) continue; // covered by the previous invariant
+          const declared = kind.identifiers ?? [];
+          const id = e.identifiedBy[i];
+          if (id === undefined || !declared.includes(id)) {
+            offenders.push({ edge: e.name, position: i, identifier: id ?? '<undefined>', kind: kindName, declared });
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('the ABox covers every edge-shaped kind in semantic-kinds.json (no orphans either way)', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadEdgesAbox(REPO_ROOT);
+      if (!abox) throw new Error('edges ABox missing');
+      const kinds = loadSemanticKinds();
+      const specEdgeNames = new Set(kinds.kinds.filter((k) => k.shape === 'edge').map((k) => k.name));
+      const aboxEdgeNames = new Set(abox.edges.map((e) => e.name));
+      const missingFromAbox = [...specEdgeNames].filter((n) => !aboxEdgeNames.has(n));
+      const extraInAbox = [...aboxEdgeNames].filter((n) => !specEdgeNames.has(n));
+      expect(missingFromAbox, 'spec declares edge kinds not present in ABox').toEqual([]);
+      expect(extraInAbox, 'ABox declares edge kinds not present in spec').toEqual([]);
+    });
+  },
+);
