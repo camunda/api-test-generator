@@ -1041,8 +1041,7 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
     // authHeaders is handled internally by deploy(); suite must not import it
     expect(src).not.toContain('authHeaders');
     expect(src).toContain("import { buildBaseUrl } from './support/env';");
-    // extractInto is only used in non-deploy extract steps; deploy() handles
-    // extraction internally, so a deploy-only suite must not import extractInto
+    // Minimal fixture has no step.extract entries; extractInto is not needed
     expect(src).not.toContain('extractInto');
     expect(src).toContain("import { seedBinding } from './support/seeding';");
   });
@@ -1057,6 +1056,51 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
       recordResponses: false,
     });
     expect(src).toContain('expect(resp1.status()).toBe(200)');
+  });
+
+  test('deploy step with placeholder-alias extract: emits extractInto and imports it', () => {
+    // aliasProducerExtractsToPlaceholders can attach a placeholderAlias extract to a
+    // createDeployment step (e.g. bind processDefinitionIdVar from the same fieldPath as
+    // processDefinitionKeyVar when the next step's path uses {processDefinitionId}).
+    // The emitter must emit this extractInto call even for deployment steps; skipping it
+    // leaves the URL placeholder var unset in the generated test.
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+                extract: [
+                  {
+                    fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+                    bind: 'processDefinitionIdVar',
+                    note: 'placeholderAlias',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'createDeployment', mode: 'feature', recordResponses: false },
+    );
+    // The placeholder alias must be emitted even though the step goes through deploy()
+    expect(src).toContain("extractInto(ctx, 'processDefinitionIdVar'");
+    // extractInto must be imported
+    expect(src).toContain("import { extractInto, seedBinding } from './support/seeding';");
   });
 
   test('non-200 createDeployment multipart: imports resolveFixture, not deploy', () => {

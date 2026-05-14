@@ -179,21 +179,13 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   if (recordResponses) {
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
-  // extractInto is only used in non-deployment extract steps; deploy() handles extraction
-  // internally for deployment steps. Gate extractInto to avoid an unused-import error in
-  // suites whose request plan consists entirely of createDeployment multipart steps.
-  const hasNonDeployExtract = collection.scenarios.some((s) =>
-    (s.requestPlan ?? []).some(
-      (step) =>
-        !(
-          step.operationId === 'createDeployment' &&
-          step.bodyKind === 'multipart' &&
-          !!step.multipartTemplate &&
-          step.expect.status === 200
-        ) && (step.extract?.length ?? 0) > 0,
-    ),
+  // extractInto is used in the per-step extract loop which runs for ALL steps (including
+  // deployment steps — see comment at the extract loop below). Gate the import on whether
+  // any step in the collection has extracts, regardless of step type.
+  const hasAnyExtract = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some((step) => (step.extract?.length ?? 0) > 0),
   );
-  if (hasNonDeployExtract) {
+  if (hasAnyExtract) {
     lines.push("import { extractInto, seedBinding } from './support/seeding';");
   } else {
     lines.push("import { seedBinding } from './support/seeding';");
@@ -564,9 +556,15 @@ function renderScenarioTest(
     // Extraction. `extractInto` is the vendored helper from support/seeding.ts;
     // it skips the assignment when the value is `undefined` so seeded bindings
     // and earlier extracts in the same scenario aren't clobbered by a later step
-    // whose response shape omits the field. deploy() steps are excluded here
-    // because the helper extracts all known deployment response fields internally.
-    if (!isDeploymentStep && step.extract?.length) {
+    // whose response shape omits the field.
+    // Deployment steps are NOT skipped here: deploy() extracts the known semantic
+    // bindings internally, but the planner's aliasProducerExtractsToPlaceholders
+    // can attach extra extracts (e.g. placeholderAlias bindings for URL vars) to
+    // the same step. deploy() has no knowledge of these aliases, so the emitter
+    // must emit them. Re-emitting the hard-coded deploy() bindings is harmless
+    // because extractInto is a no-op when the response field is undefined, and
+    // overwrites with the same value when it is present.
+    if (step.extract?.length) {
       body.push(`    const json = await ${varName}.json();`);
       for (const ex of step.extract) {
         const optAcc = toOptionalAccessor(ex.fieldPath);
