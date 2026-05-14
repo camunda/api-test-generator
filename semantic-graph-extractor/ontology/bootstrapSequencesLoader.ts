@@ -109,10 +109,30 @@ export function loadBootstrapSequences(repoRoot: string, opts: LoadOptions): Loa
     );
   }
 
-  // Hard error: every `produces[]` semantic type must exist in the spec.
-  // A typo here disables credit on a downstream scoring path silently.
-  const unknownTypes: { sequence: string; type: string }[] = [];
+  // Compute soft-drops first so the `produces[]` cross-reference check
+  // only ranges over sequences that will actually be loaded. Otherwise
+  // a sequence whose operationId is absent from this variant could
+  // still hard-fail extraction if its `produces[]` referenced a
+  // semantic type also absent from this variant — defeating the whole
+  // "same ABox across API variants" contract.
+  const droppedForMissingOperations: { name: string; missing: string[] }[] = [];
+  const retained: typeof parsed.sequences = [];
   for (const s of parsed.sequences) {
+    const missing = s.operations.filter((op) => !opts.knownOperationIds.has(op));
+    if (missing.length > 0) {
+      droppedForMissingOperations.push({ name: s.name, missing });
+      continue;
+    }
+    retained.push(s);
+  }
+
+  // Hard error: every `produces[]` semantic type on a *retained*
+  // sequence must exist in the spec. A typo here would silently
+  // disable credit on a downstream scoring path; conversely, a typo
+  // on a sequence that's already being soft-dropped is unreachable
+  // and shouldn't gate the whole extraction.
+  const unknownTypes: { sequence: string; type: string }[] = [];
+  for (const s of retained) {
     for (const t of s.produces) {
       if (!opts.knownSemanticTypes.has(t)) {
         unknownTypes.push({ sequence: s.name, type: t });
@@ -126,24 +146,12 @@ export function loadBootstrapSequences(repoRoot: string, opts: LoadOptions): Loa
     );
   }
 
-  // Soft drop: sequences whose ops aren't all in the spec are skipped.
-  // This mirrors the original `if (operationExists(...))` guards but
-  // declaratively — the ABox is the same across API variants.
-  const sequences: BootstrapSequence[] = [];
-  const droppedForMissingOperations: { name: string; missing: string[] }[] = [];
-  for (const s of parsed.sequences) {
-    const missing = s.operations.filter((op) => !opts.knownOperationIds.has(op));
-    if (missing.length > 0) {
-      droppedForMissingOperations.push({ name: s.name, missing });
-      continue;
-    }
-    sequences.push({
-      name: s.name,
-      description: s.description,
-      operations: [...s.operations],
-      produces: [...s.produces],
-    });
-  }
+  const sequences: BootstrapSequence[] = retained.map((s) => ({
+    name: s.name,
+    description: s.description,
+    operations: [...s.operations],
+    produces: [...s.produces],
+  }));
 
   return { sequences, droppedForMissingOperations };
 }

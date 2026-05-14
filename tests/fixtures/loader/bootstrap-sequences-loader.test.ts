@@ -170,6 +170,43 @@ describe('loadBootstrapSequences: documented branches (#202)', () => {
     ]);
   });
 
+  it('does not validate `produces` for sequences that are soft-dropped (cross-variant ABox contract)', () => {
+    // Regression guard for the PR #205 review comment: validating
+    // `produces[]` on every row before computing soft-drops would break
+    // the documented "same ABox across API variants" behaviour — a
+    // sequence whose operationId is absent from the variant could
+    // still hard-fail extraction if its `produces[]` referenced a
+    // semantic type also absent from the variant.
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        sequences: [
+          {
+            name: 'variant_only_sequence',
+            description: 'op + produces type both absent from this variant',
+            operations: ['opMissing'],
+            produces: ['TypeMissing'],
+          },
+          {
+            name: 'present_sequence',
+            description: 'all ops + types present',
+            operations: ['opOne'],
+            produces: ['SomeType'],
+          },
+        ],
+      }),
+    );
+    const result = loadBootstrapSequences(workdir, {
+      knownOperationIds: new Set(['opOne']),
+      knownSemanticTypes: new Set(['SomeType']),
+    });
+    expect(result.sequences).toHaveLength(1);
+    expect(result.sequences[0]?.name).toBe('present_sequence');
+    expect(result.droppedForMissingOperations).toEqual([
+      { name: 'variant_only_sequence', missing: ['opMissing'] },
+    ]);
+  });
+
   it('returns the parsed sequence for a minimal valid file with no API-specific knowledge (AC #6)', () => {
     // The loader must work for any operationId/semantic-type vocabulary —
     // there are no OCA literals (createDeployment, ProcessDefinitionKey, etc.)
