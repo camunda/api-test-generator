@@ -69,30 +69,63 @@ function resolveSeed(): { seed: string; random: boolean } {
   return { seed: raw && raw.length > 0 ? raw : DEFAULT_SEED, random: false };
 }
 
-const globalEnv: SeedEnv = (() => {
+// Per-suite salt injected by the generated spec file via initSpecSalt().
+// Mixing the suite name (operationId) into the seed prevents cross-worker id collisions
+// when Playwright runs multiple spec files in parallel: each worker re-seeds
+// from the same TEST_SEED, so without a per-suite discriminator the first
+// seedBinding() call in every worker returns the same value (#175).
+let _specSalt = '';
+let _globalEnv: SeedEnv | undefined;
+
+/**
+ * Set the per-suite salt before the first seedBinding() call.
+ *
+ * Generated spec files call this at module level (before test.describe) so
+ * each Playwright worker process draws from a distinct PRNG sequence even
+ * though all workers share the same TEST_SEED. The salt is the suite name
+ * (operationId), which is stable across regenerations.
+ *
+ * Calling this function resets the PRNG state so the new salt takes effect
+ * from the next seedBinding() call onward. It must not be called after
+ * seedBinding() has already been called in the same process.
+ */
+export function initSpecSalt(salt: string): void {
+  _specSalt = salt;
+  _globalEnv = undefined; // reset so next seedBinding() picks up the new salt
+}
+
+function buildGlobalEnv(): SeedEnv {
   const { seed: seedStr, random } = resolveSeed();
   let seedNum = 0;
   if (random) {
     seedNum = Date.now() ^ (Math.random() * 0xffffffff);
   } else {
-    // hash string to 32-bit int
+    // Hash TEST_SEED string to 32-bit int.
     for (let i = 0; i < seedStr.length; i++)
       seedNum = (Math.imul(31, seedNum) + seedStr.charCodeAt(i)) | 0;
+    // Mix in the per-spec-file salt so parallel workers draw different sequences.
+    for (let i = 0; i < _specSalt.length; i++)
+      seedNum = (Math.imul(31, seedNum) + _specSalt.charCodeAt(i)) | 0;
   }
   const rand = random ? Math.random : mulberry32(seedNum >>> 0);
   const counters = new Map<string, number>();
-  const env: SeedEnv = {
+  const runId = random ? `rt-${Date.now().toString(36)}` : `det-${seedStr}`;
+  return {
     random: () => rand().toString(36).slice(2),
     counter: (bucket = 'default') => {
       const v = (counters.get(bucket) || 0) + 1;
       counters.set(bucket, v);
       return v;
     },
-    runId: random ? `rt-${Date.now().toString(36)}` : `det-${seedStr}`,
+    runId,
     deterministic: !random,
   };
-  return env;
-})();
+}
+
+function getGlobalEnv(): SeedEnv {
+  if (!_globalEnv) _globalEnv = buildGlobalEnv();
+  return _globalEnv;
+}
 
 /**
  * Short suffix for test fixture identifiers (e.g. `tenantId_5l5k`).
@@ -205,12 +238,13 @@ function expandTemplate(tpl: string, varName: string, env: SeedEnv): string {
 
 export function seedBinding(varName: string, _opts?: SeedOptions): string {
   loadRules();
+  const env = getGlobalEnv();
   for (const r of rules) {
     const m = r.match instanceof RegExp ? r.match.test(varName) : r.match(varName);
-    if (m) return r.gen(varName, globalEnv);
+    if (m) return r.gen(varName, env);
   }
   // Should never reach here due to fallback rule
-  return `${varName}-${globalEnv.random().slice(0, 6)}`;
+  return `${varName}-${env.random().slice(0, 6)}`;
 }
 
 export function debugSeed(varName: string): string {

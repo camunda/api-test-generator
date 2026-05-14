@@ -186,9 +186,9 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     (s.requestPlan ?? []).some((step) => (step.extract?.length ?? 0) > 0),
   );
   if (hasAnyExtract) {
-    lines.push("import { extractInto, seedBinding } from './support/seeding';");
+    lines.push("import { extractInto, seedBinding, initSpecSalt } from './support/seeding';");
   } else {
-    lines.push("import { seedBinding } from './support/seeding';");
+    lines.push("import { seedBinding, initSpecSalt } from './support/seeding';");
   }
   // deploy() is emitted for 200-expected createDeployment multipart steps; resolveFixture
   // is emitted for any step that falls through to the inline multipart path — this includes
@@ -240,14 +240,16 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     lines.push("import { awaitEventually } from './support/await-eventually';");
   }
   lines.push('');
+  lines.push(`initSpecSalt(${JSON.stringify(suiteName)});`);
   if (needsValidation) {
     // Resolve responses.json relative to this spec file so the suite is
     // portable regardless of the working directory the test runner uses.
+    lines.push('');
     lines.push(
       "const __responsesFile = import.meta.dirname + '/json-body-assertions/responses.json';",
     );
-    lines.push('');
   }
+  lines.push('');
   lines.push(`test.describe('${suiteName}', () => {`);
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
