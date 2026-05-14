@@ -240,7 +240,7 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     lines.push("import { awaitEventually } from './support/await-eventually';");
   }
   lines.push('');
-  lines.push(`initSpecSalt('${suiteName}');`);
+  lines.push(`initSpecSalt(${JSON.stringify(suiteName)});`);
   if (needsValidation) {
     // Resolve responses.json relative to this spec file so the suite is
     // portable regardless of the working directory the test runner uses.

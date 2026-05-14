@@ -1182,7 +1182,7 @@ describe('emitter: initSpecSalt emission (#175)', () => {
       mode: 'feature',
       recordResponses: false,
     });
-    expect(src).toContain("initSpecSalt('createWidget');");
+    expect(src).toContain('initSpecSalt("createWidget");');
   });
 
   test('different suite names produce different initSpecSalt calls', () => {
@@ -1196,10 +1196,10 @@ describe('emitter: initSpecSalt emission (#175)', () => {
       mode: 'feature',
       recordResponses: false,
     });
-    expect(src1).toContain("initSpecSalt('createRole');");
-    expect(src2).toContain("initSpecSalt('assignRoleToClient');");
-    expect(src1).not.toContain("initSpecSalt('assignRoleToClient');");
-    expect(src2).not.toContain("initSpecSalt('createRole');");
+    expect(src1).toContain('initSpecSalt("createRole");');
+    expect(src2).toContain('initSpecSalt("assignRoleToClient");');
+    expect(src1).not.toContain('initSpecSalt("assignRoleToClient");');
+    expect(src2).not.toContain('initSpecSalt("createRole");');
   });
 
   test('initSpecSalt call appears before test.describe', () => {
@@ -1208,7 +1208,7 @@ describe('emitter: initSpecSalt emission (#175)', () => {
       mode: 'feature',
       recordResponses: false,
     });
-    const saltPos = src.indexOf("initSpecSalt('createWidget');");
+    const saltPos = src.indexOf('initSpecSalt("createWidget");');
     const describePos = src.indexOf("test.describe('createWidget'");
     expect(saltPos).toBeGreaterThan(-1);
     expect(describePos).toBeGreaterThan(-1);

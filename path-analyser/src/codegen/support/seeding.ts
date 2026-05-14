@@ -69,16 +69,16 @@ function resolveSeed(): { seed: string; random: boolean } {
   return { seed: raw && raw.length > 0 ? raw : DEFAULT_SEED, random: false };
 }
 
-// Per-spec-file salt injected by the generated spec file via initSpecSalt().
-// Mixing the spec filename into the seed prevents cross-worker id collisions
+// Per-suite salt injected by the generated spec file via initSpecSalt().
+// Mixing the suite name (operationId) into the seed prevents cross-worker id collisions
 // when Playwright runs multiple spec files in parallel: each worker re-seeds
-// from the same TEST_SEED, so without a per-file discriminator the first
+// from the same TEST_SEED, so without a per-suite discriminator the first
 // seedBinding() call in every worker returns the same value (#175).
 let _specSalt = '';
 let _globalEnv: SeedEnv | undefined;
 
 /**
- * Set the per-spec-file salt before the first seedBinding() call.
+ * Set the per-suite salt before the first seedBinding() call.
  *
  * Generated spec files call this at module level (before test.describe) so
  * each Playwright worker process draws from a distinct PRNG sequence even
@@ -109,11 +109,7 @@ function buildGlobalEnv(): SeedEnv {
   }
   const rand = random ? Math.random : mulberry32(seedNum >>> 0);
   const counters = new Map<string, number>();
-  const runId = random
-    ? `rt-${Date.now().toString(36)}`
-    : _specSalt
-      ? `det-${seedStr}-${_specSalt}`
-      : `det-${seedStr}`;
+  const runId = random ? `rt-${Date.now().toString(36)}` : `det-${seedStr}`;
   return {
     random: () => rand().toString(36).slice(2),
     counter: (bucket = 'default') => {
