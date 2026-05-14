@@ -40,8 +40,11 @@ npm run fetch-js-sdk-map
 This downloads the SDK's method-to-operationId mapping from the
 `@camunda8/orchestration-cluster-api` npm package and writes it to
 `spec/js-sdk/operation-map.json`. Without it, the emitter falls back to
-identity mapping (operationId unchanged) which works for most Camunda REST
-API operations.
+identity mapping (operationId unchanged).
+
+⚠️ **Warning**: Fallback identity mapping may not work for all operations —
+some SDK methods have different names than their operationIds. Run
+`npm run fetch-js-sdk-map` to ensure correct method names in generated tests.
 
 ## Environment variables
 

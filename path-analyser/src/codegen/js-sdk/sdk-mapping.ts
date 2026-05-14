@@ -98,8 +98,19 @@ export class OperationMapJsonSource implements SdkMappingSource {
  * Used when `operation-map.json` has not been fetched yet (e.g. the user
  * has not run `npm run fetch-js-sdk-map`). The emitted code will still work
  * since operationIds already match the raw SDK method names.
+ *
+ * ⚠️ Warning: Emits a console warning when instantiated, as fallback mapping
+ * may not work for all operations — some SDK methods have different names.
  */
 export class FallbackMappingSource implements SdkMappingSource {
+  constructor() {
+    // Warn once at emitter creation time
+    console.warn(
+      '[js-sdk-emitter] Using fallback operation-map (operationId unchanged). ' +
+        'Some SDK methods may have different names. Run `npm run fetch-js-sdk-map` to ensure correct method names.',
+    );
+  }
+
   resolveMethod(operationId: string): string {
     return operationId;
   }

@@ -21,6 +21,68 @@ import {
 } from './sdk-mapping.js';
 
 /**
+ * Render a value as a Python literal.
+ *
+ * Handles:
+ * - null → None
+ * - boolean → True/False
+ * - string → properly escaped, with template ${var} → ctx['var'] conversion
+ * - number → as-is
+ * - array → [...]
+ * - object → {...}
+ *
+ * Example:
+ *   toPythonLiteral({ type: '${workerType}', active: true })
+ *   → {"type": ctx['workerType'], "active": True}
+ */
+function toPythonLiteral(value: unknown): string {
+  // Handle null
+  if (value === null) return 'None';
+
+  // Handle booleans
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+
+  // Handle strings
+  if (typeof value === 'string') {
+    // Check if this is a template placeholder (e.g., "${varName}")
+    if (value.includes('${')) {
+      // Replace ${varName} with ctx['varName'] (no quotes)
+      return value.replace(/\$\{([^}]+)\}/g, "ctx['$1']");
+    }
+
+    // Regular string: choose quotes intelligently
+    if (value.includes("'") && !value.includes('"')) {
+      // Has single quotes but not double → use double quotes
+      return `"${value}"`;
+    }
+
+    // Otherwise use single quotes with escaping
+    const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'" );
+    return `'${escaped}'`;
+  }
+
+  // Handle numbers
+  if (typeof value === 'number') return String(value);
+
+  // Handle arrays
+  if (Array.isArray(value)) {
+    const items = value.map(v => toPythonLiteral(v)).join(', ');
+    return `[${items}]`;
+  }
+
+  // Handle objects
+  if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value)
+      .map(([k, v]) => `'${k}': ${toPythonLiteral(v)}`)
+      .join(', ');
+    return `{${entries}}`;
+  }
+
+  // Fallback
+  return 'None';
+}
+
+/**
  * File name for Python SDK generated test suite.
  *
  * Pattern: <operationId>.python_sdk.spec.py
@@ -72,8 +134,8 @@ function renderScenarioTest(
     lines.push('  # Seed scenario bindings');
     for (const [k, v] of Object.entries(bindings)) {
       if (v === '__PENDING__') continue; // Skip pending markers
-      // Use Python-style single-quoted strings for string values
-      const pyValue = typeof v === 'string' ? `'${v}'` : JSON.stringify(v);
+      // Render value as Python literal (handles booleans, nulls, templates, etc.)
+      const pyValue = toPythonLiteral(v);
       lines.push(`  ctx['${k}'] = ${pyValue}`);
     }
     lines.push('');
@@ -167,26 +229,19 @@ function renderScenarioTest(
 /**
  * Build a Python dict representation from a request template.
  *
- * Replaces ${var} placeholders with ctx['var'] lookups.
+ * Renders the template as a Python literal, handling:
+ * - ${var} placeholders → ctx['var'] lookups
+ * - boolean true/false → True/False
+ * - null → None
+ * - proper string escaping
+ *
  * Example:
- *   { type: "${workerType}", maxJobs: 1 }
+ *   { type: "${workerType}", active: true, metadata: null }
  *   →
- *   {
- *     'type': ctx['workerType'],
- *     'maxJobs': 1
- *   }
+ *   {'type': ctx['workerType'], 'active': True, 'metadata': None}
  */
 function buildBodyDict(bodyTemplate: unknown): string {
-  const json = JSON.stringify(bodyTemplate, null, 2);
-  // Replace "${varName}" with ctx['varName']
-  const withVars = json.replace(/"(\$\{([^}]+)\})"/g, (_, _fullMatch, varName) => {
-    return `ctx['${varName}']`;
-  });
-  // Convert remaining JSON double-quoted strings (keys and string values) to Python single quotes.
-  // This handles: "key": → 'key': and "stringValue" → 'stringValue'
-  // Does not touch ctx['var'] substitutions already made (those use single quotes already).
-  const withSingleQuotes = withVars.replace(/"([^"\\]*)"/g, "'$1'");
-  return withSingleQuotes;
+  return toPythonLiteral(bodyTemplate);
 }
 
 /**

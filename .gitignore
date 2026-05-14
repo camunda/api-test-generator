@@ -6,3 +6,5 @@ external-spec/
 test-results/
 *.tsbuildinfo
 .claw/
+csharp-sdk/**/obj/
+csharp-sdk/**/bin/

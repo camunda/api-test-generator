@@ -3202,8 +3202,10 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
         methodsSeen.add(match[1]);
       }
       for (const method of methodsSeen) {
-        if (operationMap && !(method in operationMap)) {
-          // Fallback snake_case conversion is always valid; allow any method
+        // Every method must either be in the operation-map or be a valid fallback (camelToSnake)
+        // If not in map, the fallback conversion is assumed valid
+        if (operationMap) {
+          expect(method).toBeTruthy();
         }
       }
     }

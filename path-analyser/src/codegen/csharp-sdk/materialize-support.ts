@@ -16,7 +16,7 @@ import path from 'node:path';
 const CSPROJ = `<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -63,11 +63,13 @@ Auto-generated test suite targeting the Camunda REST API via
 
 ## Running the suite
 
-\`\`\`bash
-dotnet run
-\`\`\`
+This is a .NET class library containing auto-generated test methods. To run them:
 
-Or call the static methods in \`csharp/*.cs\` directly from a custom entry point.
+1. **From a test framework** (recommended):
+   Reference this library from an xUnit/NUnit test project and write test methods that call the static test methods in \`csharp/*.cs\`.
+
+2. **Programmatically**:
+   Call the static methods in \`csharp/*.cs\` directly from a custom console app or integration test runner.
 
 ## Environment variables
 
