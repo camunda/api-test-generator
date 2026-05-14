@@ -363,18 +363,34 @@ function renderScenarioTest(
   // skip branch below — this is the only place the emitter knows about the
   // sentinel.
   //
+  // The local is only emitted when the scenario has at least one inline
+  // multipart step (i.e. a multipart step that is NOT routed through
+  // deploy()). deploy() steps pass strips as a JSON literal argument and
+  // never read the prologue local; omitting it for deploy-only scenarios
+  // prevents an unused-variable error in the generated suite.
+  //
   // Safety: `binding`, `fieldName`, `seedRule` are all required by the
   // domain-semantics validator (#87) to match `/^[A-Za-z_$][A-Za-z0-9_$]*$/`,
   // and `defaultSentinel` is required to contain no single quotes,
   // backslashes, or line terminators. That lets us interpolate them
   // directly into emitted single-quoted TS string literals without an
   // escape pass.
+  const hasInlineMultipartStep = (s.requestPlan ?? []).some(
+    (step) =>
+      step.bodyKind === 'multipart' &&
+      !!step.multipartTemplate &&
+      !(step.operationId === 'createDeployment' && step.expect.status === 200),
+  );
   const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
   for (const seed of globalContextSeeds) {
     body.push(
       `  ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? seedBinding('${seed.seedRule}');`,
     );
-    if (seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined) {
+    if (
+      hasInlineMultipartStep &&
+      seed.stripFromMultipartWhenDefault &&
+      seed.defaultSentinel !== undefined
+    ) {
       const local = `__${seed.fieldName}IsDefault`;
       sentinelLocals.set(seed.fieldName, local);
       body.push(`  const ${local} = ctx['${seed.binding}'] === '${seed.defaultSentinel}';`);
