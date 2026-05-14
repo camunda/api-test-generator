@@ -500,6 +500,53 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     expect(c).not.toMatch(/__tenantIdIsDefault/);
     expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
   });
+
+  test('deploy-only scenario: sentinel local not emitted (deploy() receives strips, local is unused)', async () => {
+    // Regression guard: when a scenario's only multipart step is a 200 createDeployment
+    // step (routed through deploy()), the sentinel __<fieldName>IsDefault local must NOT
+    // be emitted. deploy() receives strips as a JSON literal argument; it never reads the
+    // prologue local. Emitting it produces an unused-variable Biome error in the generated
+    // suite.
+    const deployOnlyCollection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'deploy case',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createDeployment',
+              method: 'POST',
+              pathTemplate: '/deployments',
+              expect: { status: 200 },
+              bodyKind: 'multipart',
+              multipartTemplate: {
+                fields: { tenantId: '${' + 'tenantIdVar}' },
+                files: {},
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const [file] = await PlaywrightEmitter.emit(deployOnlyCollection, {
+      outDir: '/unused',
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED],
+    });
+    const c = file.content;
+    // Seed assignment still emitted (always needed)
+    expect(c).toContain(`ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`);
+    // Sentinel local must NOT be emitted — no inline multipart step uses it
+    expect(c).not.toMatch(/__tenantIdIsDefault/);
+    expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
+  });
 });
 
 // Boundary safety guards (#87 review): the public emitter entry points
