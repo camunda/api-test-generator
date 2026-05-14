@@ -35,7 +35,7 @@ export class SemanticGraphExtractor {
    */
   async extractGraph(
     specPath: string,
-    opts: { repoRoot?: string } = {},
+    opts: { repoRoot?: string; strictBootstrapAbox?: boolean } = {},
   ): Promise<OperationDependencyGraph> {
     console.log(`Loading OpenAPI specification from: ${specPath}`);
 
@@ -86,6 +86,7 @@ export class SemanticGraphExtractor {
     const rootDependencies = this.rootDependencyAnalyzer.analyzeRootDependencies(graph, {
       knownSemanticTypes,
       repoRoot: opts.repoRoot,
+      strictBootstrapAbox: opts.strictBootstrapAbox,
     });
 
     // Find cross-contamination opportunities
@@ -256,7 +257,13 @@ async function main() {
     );
 
     // Extract the dependency graph
-    const graph = await extractor.extractGraph(specPath, { repoRoot });
+    // STRICT_BOOTSTRAP_ABOX=1 escalates soft-dropped bootstrap
+    // sequences (where the ABox declares an opId not present in the
+    // parsed spec) to a hard error. Default off so the same ABox can
+    // ship across API variants where some sequences may legitimately
+    // not apply.
+    const strictBootstrapAbox = (process.env.STRICT_BOOTSTRAP_ABOX ?? '').trim() === '1';
+    const graph = await extractor.extractGraph(specPath, { repoRoot, strictBootstrapAbox });
 
     // Save to disk
     await extractor.saveGraph(graph, outputPath);

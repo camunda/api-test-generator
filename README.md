@@ -326,6 +326,18 @@ npm run extract-graph              # build + extract
 npm run analyze-graph -w semantic-graph-extractor   # human-readable analysis report
 ```
 
+The bootstrap-sequences ABox at `configs/<active>/ontology/bootstrap-sequences.json`
+soft-drops any sequence whose operationIds aren't all present in the parsed spec
+(the same ABox can ship across API variants where some sequences may legitimately
+not apply). Drops are logged to stderr with a `WARNING:` prefix and surfaced on
+`graph.rootDependencyAnalysis.droppedBootstrapSequences`. Set
+`STRICT_BOOTSTRAP_ABOX=1` to escalate any drop to a hard error — useful in a CI
+leg targeting one active config to assert ABox/spec consistency.
+
+```bash
+STRICT_BOOTSTRAP_ABOX=1 npm run extract-graph
+```
+
 ### path-analyser
 
 Reads the dependency graph and the OpenAPI spec to generate **positive** test

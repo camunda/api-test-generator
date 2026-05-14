@@ -202,3 +202,84 @@ describe('loadBootstrapSequences: documented branches (#202)', () => {
     expect(result.droppedForMissingOperations).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Analyzer-level strict-mode tests (#202 review feedback).
+//
+// The loader always soft-drops sequences whose operationIds aren't all
+// in the spec — that's the cross-API-variant contract. The analyzer
+// layer adds an opt-in strict mode (driven by env var
+// STRICT_BOOTSTRAP_ABOX=1 in production; via opts in unit tests) that
+// escalates such drops to a hard error so a CI leg targeting one
+// active config can assert ABox/spec consistency.
+// ---------------------------------------------------------------------------
+describe('RootDependencyAnalyzer: strict bootstrap-abox mode (#202)', () => {
+  // Late-import so the loader's beforeEach has set CONFIG to the temp tree.
+  async function loadAnalyzer() {
+    return await import('../../../semantic-graph-extractor/root-dependency-analyzer.ts');
+  }
+
+  function emptyGraph(opIds: string[]) {
+    const operations = new Map<string, unknown>();
+    for (const id of opIds) operations.set(id, { operationId: id });
+    // The analyzer only reads `operations` (for known opIds) and `edges`
+    // (for entry-point computation); other fields are unused.
+    // biome-ignore lint/plugin: minimal stub for analyzer test — not a real OperationDependencyGraph
+    return { operations, edges: [] } as unknown as Parameters<
+      Awaited<
+        ReturnType<typeof loadAnalyzer>
+      >['RootDependencyAnalyzer']['prototype']['analyzeRootDependencies']
+    >[0];
+  }
+
+  it('strict mode throws when a sequence is dropped for missing operationIds', async () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        sequences: [
+          {
+            name: 'partial_sequence',
+            description: 'one op missing from spec',
+            operations: ['present', 'missing'],
+            produces: [],
+          },
+        ],
+      }),
+    );
+    const { RootDependencyAnalyzer } = await loadAnalyzer();
+    const analyzer = new RootDependencyAnalyzer();
+    expect(() =>
+      analyzer.analyzeRootDependencies(emptyGraph(['present']), {
+        knownSemanticTypes: new Set(),
+        repoRoot: workdir,
+        strictBootstrapAbox: true,
+      }),
+    ).toThrow(/Strict bootstrap-sequences ABox: refusing to silently drop 1 sequence\(s\)/);
+  });
+
+  it('non-strict mode (default) surfaces drops on the result and does not throw', async () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        sequences: [
+          {
+            name: 'partial_sequence',
+            description: 'one op missing from spec',
+            operations: ['present', 'missing'],
+            produces: [],
+          },
+        ],
+      }),
+    );
+    const { RootDependencyAnalyzer } = await loadAnalyzer();
+    const analyzer = new RootDependencyAnalyzer();
+    const result = analyzer.analyzeRootDependencies(emptyGraph(['present']), {
+      knownSemanticTypes: new Set(),
+      repoRoot: workdir,
+    });
+    expect(result.bootstrapSequences).toEqual([]);
+    expect(result.droppedBootstrapSequences).toEqual([
+      { name: 'partial_sequence', missing: ['missing'] },
+    ]);
+  });
+});

@@ -41,6 +41,15 @@ export interface RootDependencyAnalyzerOptions {
    * checks against the active config's published ABox.
    */
   repoRoot?: string;
+  /**
+   * If true, treat any soft-dropped bootstrap sequence (one whose
+   * operationIds aren't all present in the parsed spec) as a hard
+   * error. Off by default because the ABox is intended to ship across
+   * API variants where some sequences may legitimately not apply; CI
+   * for the active config can enable it (env var
+   * `STRICT_BOOTSTRAP_ABOX=1`) to assert ABox/spec consistency.
+   */
+  strictBootstrapAbox?: boolean;
 }
 
 export class RootDependencyAnalyzer {
@@ -61,6 +70,7 @@ export class RootDependencyAnalyzer {
         setupOperations: [],
         entryPointOperations,
         bootstrapSequences: [],
+        droppedBootstrapSequences: [],
       };
     }
     const loaded: LoadResult = loadBootstrapSequences(opts.repoRoot, {
@@ -69,9 +79,23 @@ export class RootDependencyAnalyzer {
     });
 
     if (loaded.droppedForMissingOperations.length > 0) {
+      // (1) Visible: stderr + WARNING prefix + summary line so a CI
+      // log scrape (`grep -i 'WARNING: bootstrap'`) catches drops
+      // even when the rest of the extractor output is verbose.
+      // (3) Strict mode (env-driven; defaults off) escalates to a
+      // hard error so the active config can assert ABox/spec
+      // consistency without hand-rolled tests scraping the warning.
+      const summary = `WARNING: bootstrap-sequences ABox dropped ${loaded.droppedForMissingOperations.length} sequence(s) because at least one referenced operationId is absent from the parsed spec:`;
+      console.warn(summary);
       for (const dropped of loaded.droppedForMissingOperations) {
-        console.log(
-          `  - dropped bootstrap sequence '${dropped.name}' (operationId(s) not in spec: ${dropped.missing.join(', ')})`,
+        console.warn(`  - '${dropped.name}' missing operationId(s): ${dropped.missing.join(', ')}`);
+      }
+      if (opts.strictBootstrapAbox) {
+        const detail = loaded.droppedForMissingOperations
+          .map((d) => `'${d.name}' (missing: ${d.missing.join(', ')})`)
+          .join('; ');
+        throw new Error(
+          `Strict bootstrap-sequences ABox: refusing to silently drop ${loaded.droppedForMissingOperations.length} sequence(s): ${detail}`,
         );
       }
     }
@@ -89,6 +113,9 @@ export class RootDependencyAnalyzer {
       setupOperations: [],
       entryPointOperations,
       bootstrapSequences: loaded.sequences,
+      // (2) Surface drops on the graph so downstream tooling and L3
+      // invariants can detect unexpected drops without scraping logs.
+      droppedBootstrapSequences: loaded.droppedForMissingOperations,
     };
   }
 

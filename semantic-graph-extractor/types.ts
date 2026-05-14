@@ -462,6 +462,14 @@ export interface RootOperationAnalysis {
   setupOperations: string[]; // Operations that must run before others
   entryPointOperations: string[]; // Operations with no dependencies
   bootstrapSequences: BootstrapSequence[];
+  /**
+   * Bootstrap sequences declared in the active config's ABox that were
+   * silently dropped because at least one referenced operationId is
+   * absent from the parsed spec. Surfaced on the graph (and not just
+   * logged) so downstream tooling and L3 invariants can detect
+   * unexpected drops without scraping CI logs.
+   */
+  droppedBootstrapSequences: { name: string; missing: string[] }[];
 }
 
 export interface BootstrapSequence {

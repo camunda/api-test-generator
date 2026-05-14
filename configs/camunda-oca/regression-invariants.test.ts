@@ -4220,5 +4220,31 @@ describeForThisConfig(
         "@context['operations'] must declare `@container: '@list'` so RDF consumers preserve execution order",
       ).toBe('@list');
     });
+
+    it('the bundled graph contains zero unexpected bootstrap-sequence drops for the active config', () => {
+      // The OCA ABox is authored against the pinned spec; every
+      // sequence's operationIds must be present. A drop here is a
+      // genuine ABox/spec inconsistency (either the ABox was authored
+      // against the wrong spec ref or the spec ref was bumped without
+      // updating the ABox). Surfacing this as an L3 invariant means
+      // the failure points directly at the offending row instead of
+      // disappearing into the extractor's verbose stdout.
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        rootDependencyAnalysis?: {
+          droppedBootstrapSequences?: { name: string; missing: string[] }[];
+        };
+      };
+      const dropped = graph.rootDependencyAnalysis?.droppedBootstrapSequences ?? [];
+      expect(
+        dropped,
+        'bootstrap-sequences ABox dropped one or more sequences against the pinned spec — fix the ABox or rerun against the matching spec ref',
+      ).toEqual([]);
+    });
   },
 );
