@@ -47,6 +47,7 @@ const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
 const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
+const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 
 interface SemanticTypeEntry {
   semanticType: string;
@@ -3454,6 +3455,154 @@ describeForThisConfig(
         expect(
           offenders,
           'Feature spec seeds a field-name var for a request body field whose semantic type has a provider:true graph-level producer. The auto-derivation from requestBodySemanticTypes must wire these to the semantic var (ctx.${semanticType}Var) instead of seeding a placeholder.',
+        ).toEqual([]);
+      },
+    );
+  },
+);
+
+describeForThisConfig(
+  'bundled-spec invariants: object-typed body field seeding (#174 sub-class 1)',
+  () => {
+    it(
+      'no feature or variant scenario seeds a ${...} string placeholder for a required request body field whose schema type is object or array',
+      () => {
+        // Regression guard for #174 sub-class 1: the planner must emit {} / []
+        // literals for object/array-typed required body fields instead of seeding
+        // a string placeholder (which causes broker "cannot be parsed" errors).
+        //
+        // Class-scoped: covers every operation in the bundled spec — not just the
+        // known offenders (filter, variables, changeset) at the time of writing.
+        if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+          throw new Error(
+            `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+          );
+        }
+        if (!existsSync(BUNDLED_SPEC_PATH)) {
+          throw new Error(
+            `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+          );
+        }
+
+        interface SchemaObject {
+          type?: string;
+          $ref?: string;
+          required?: string[];
+          properties?: Record<string, SchemaObject>;
+          oneOf?: SchemaObject[];
+        }
+
+        interface OpenApiSpec {
+          paths: Record<
+            string,
+            Record<
+              string,
+              {
+                operationId?: string;
+                requestBody?: {
+                  content?: {
+                    'application/json'?: { schema?: SchemaObject };
+                  };
+                };
+              }
+            >
+          >;
+          components?: { schemas?: Record<string, SchemaObject> };
+        }
+
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as OpenApiSpec;
+
+        function resolveRef(ref: string): SchemaObject | undefined {
+          const name = ref.split('/').pop() ?? '';
+          return spec.components?.schemas?.[name];
+        }
+
+        function resolveSchemaObj(s: SchemaObject): SchemaObject {
+          if (s.$ref) return resolveRef(s.$ref) ?? s;
+          return s;
+        }
+
+        function getEffectiveType(s: SchemaObject): string | undefined {
+          if (s.type) return s.type;
+          if (s.$ref) return resolveRef(s.$ref)?.type;
+          return undefined;
+        }
+
+        /** Collect top-level field names whose resolved type is 'object' or 'array' from a schema. */
+        function collectObjectArrayFields(schema: SchemaObject): Set<string> {
+          const fields = new Set<string>();
+          const resolved = resolveSchemaObj(schema);
+          // Root schema with properties
+          for (const [fieldName, fieldSchema] of Object.entries(resolved.properties ?? {})) {
+            const t = getEffectiveType(fieldSchema);
+            if (t === 'object' || t === 'array') fields.add(fieldName);
+          }
+          // oneOf variants: union their fields
+          for (const variant of resolved.oneOf ?? []) {
+            const rv = resolveSchemaObj(variant);
+            for (const [fieldName, fieldSchema] of Object.entries(rv.properties ?? {})) {
+              const t = getEffectiveType(fieldSchema);
+              if (t === 'object' || t === 'array') fields.add(fieldName);
+            }
+          }
+          return fields;
+        }
+
+        // Build a map of operationId -> set of top-level body field names that have type 'object' or 'array'
+        const objectFieldsByOp = new Map<string, Set<string>>();
+        for (const pathItem of Object.values(spec.paths ?? {})) {
+          for (const op of Object.values(pathItem)) {
+            if (!op.operationId) continue;
+            const jsonBody = op.requestBody?.content?.['application/json']?.schema;
+            if (!jsonBody) continue;
+            const objectFields = collectObjectArrayFields(jsonBody);
+            if (objectFields.size > 0) {
+              objectFieldsByOp.set(op.operationId, objectFields);
+            }
+          }
+        }
+
+        interface FeatureScenarioFile {
+          scenarios: {
+            id: string;
+            seedBindings?: string[];
+            requestPlan?: { operationId: string; bodyTemplate?: Record<string, unknown> }[];
+          }[];
+        }
+
+        const offenders: { file: string; scenario: string; field: string; value: string }[] = [];
+        const templatePattern = /^\$\{([^}]+)\}$/;
+
+        const dirs = [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR];
+        for (const dir of dirs) {
+          if (!existsSync(dir)) continue;
+          for (const f of readdirSync(dir)) {
+            if (!f.endsWith('-scenarios.json')) continue;
+            // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+            const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as FeatureScenarioFile;
+            for (const scenario of file.scenarios ?? []) {
+              const seededVars = new Set(scenario.seedBindings ?? []);
+              for (const step of scenario.requestPlan ?? []) {
+                const objectFields = objectFieldsByOp.get(step.operationId);
+                if (!objectFields) continue;
+                for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
+                  if (!objectFields.has(field) || typeof value !== 'string') continue;
+                  const match = templatePattern.exec(value);
+                  if (match && seededVars.has(match[1])) {
+                    offenders.push({ file: f, scenario: scenario.id, field, value });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        expect(
+          offenders,
+          'A scenario bodyTemplate seeds a string placeholder for a field whose request body schema type is object or array. ' +
+            'The planner must emit {} or [] literals for these fields instead of ${...} placeholders. ' +
+            'A string placeholder causes broker "Request property [X] cannot be parsed" errors (#174 sub-class 1).',
         ).toEqual([]);
       },
     );

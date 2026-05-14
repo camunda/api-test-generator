@@ -259,6 +259,11 @@ function findOneOfGroups(
       const props = vs.properties || {};
       const required = vs.required || [];
       const optional = Object.keys(props).filter((k) => !required.includes(k));
+      const fieldTypes: Record<string, string> = {};
+      for (const [fname, fsch] of Object.entries(props)) {
+        const ft = effectiveType(fsch, components);
+        if (ft && ft !== 'unknown') fieldTypes[fname] = ft;
+      }
       let discriminator: { field: string; value: string } | undefined;
       if (resolved.discriminator?.propertyName) {
         const discField = resolved.discriminator.propertyName;
@@ -274,6 +279,7 @@ function findOneOfGroups(
         variantName: vs.title || `variant${idx + 1}`,
         required,
         optional,
+        fieldTypes,
         discriminator,
       };
     });
