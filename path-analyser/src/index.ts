@@ -1164,13 +1164,23 @@ function buildRequestBodyFromCanonical(
   const declaredTypeByLeaf: Record<string, string> = {};
   try {
     for (const n of nodes) {
-      if (!n.path.includes('[]')) {
-        const leaf = n.path.split('.').pop() ?? '';
+      // Top-level array fields are recorded by walkSchema as 'field[]' (with type: 'array').
+      // Normalize those to bare name so declaredTypeByLeaf['field'] === 'array'.
+      const isTopLevelArray = n.path.endsWith('[]') && !n.path.slice(0, -2).includes('[]');
+      const normalizedPath = isTopLevelArray ? n.path.slice(0, -2) : n.path;
+      if (!normalizedPath.includes('[]')) {
+        const leaf = normalizedPath.split('.').pop() ?? '';
         if (leaf && !declaredTypeByLeaf[leaf]) declaredTypeByLeaf[leaf] = n.type;
       }
     }
   } catch {}
-  const requiredFields = nodes.filter((n) => n.required && !n.path.includes('[]'));
+  // Include top-level array required nodes (path ends with '[]', no '[]' in the base path)
+  // so that required array fields like 'moveInstructions' are not silently dropped.
+  const requiredFields = nodes.filter(
+    (n) =>
+      n.required &&
+      (!n.path.includes('[]') || (n.path.endsWith('[]') && !n.path.slice(0, -2).includes('[]'))),
+  );
   // Bindings map from domain valueBindings (request.* -> parameter name).
   // Two RHS grammars are supported:
   //   1. `state.parameter`        — legacy form; parameter name is the leaf of the RHS.
@@ -1278,7 +1288,8 @@ function buildRequestBodyFromCanonical(
     } else {
       // Non-oneOf: use canonical required flags
       for (const f of requiredFields) {
-        const leaf = f.path.split('.').pop() ?? '';
+        // Array nodes are recorded as 'field[]'; strip the suffix for the template key.
+        const leaf = f.path.replace(/\[\]$/, '').split('.').pop() ?? '';
         if (allowedFields && !allowedFields.has(leaf)) continue;
         const viaProvider = resolveProvider(opId, leaf, scenario);
         if (viaProvider !== undefined) {
@@ -1287,13 +1298,16 @@ function buildRequestBodyFromCanonical(
         }
         // Special-case: support mapping jobType -> type
         const hasJobType = !!bindingMap.jobType;
-        const mapJobTypeToType = leaf === 'type' && !bindingMap[f.path] && hasJobType;
-        const semanticParam = semanticFallback[f.path];
+        const normalizedPath = f.path.replace(/\[\]$/, '');
+        const mapJobTypeToType = leaf === 'type' && !bindingMap[normalizedPath] && hasJobType;
+        const semanticParam = semanticFallback[normalizedPath];
         const mappedParamName = mapJobTypeToType
           ? 'jobType'
-          : bindingMap[f.path] || semanticParam || leaf || 'value';
+          : bindingMap[normalizedPath] || semanticParam || leaf || 'value';
         const varName = `${camelCase(mappedParamName)}Var`;
-        const hasBinding = mapJobTypeToType ? true : !!(bindingMap[f.path] || semanticParam);
+        const hasBinding = mapJobTypeToType
+          ? true
+          : !!(bindingMap[normalizedPath] || semanticParam);
         if (hasBinding) {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
@@ -1311,7 +1325,7 @@ function buildRequestBodyFromCanonical(
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
           template[leaf] = `${'${'}${varName}}`;
-          if (!bindingMap[f.path]) missing.push(f.path);
+          if (!bindingMap[normalizedPath]) missing.push(normalizedPath);
         }
       }
       // For search-like empty-negative scenarios, allow provider-injected optional filters to drive an empty result
