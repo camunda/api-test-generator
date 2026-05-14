@@ -33,7 +33,10 @@ export class SemanticGraphExtractor {
   /**
    * Extract the operation dependency graph from an OpenAPI specification
    */
-  async extractGraph(specPath: string): Promise<OperationDependencyGraph> {
+  async extractGraph(
+    specPath: string,
+    opts: { repoRoot?: string } = {},
+  ): Promise<OperationDependencyGraph> {
     console.log(`Loading OpenAPI specification from: ${specPath}`);
 
     // Load and parse the OpenAPI spec.
@@ -79,7 +82,11 @@ export class SemanticGraphExtractor {
 
     // Analyze root dependencies and setup operations
     console.log(`Analyzing root dependencies and setup operations...`);
-    const rootDependencies = this.rootDependencyAnalyzer.analyzeRootDependencies(graph);
+    const knownSemanticTypes = new Set<string>(graph.semanticTypes.keys());
+    const rootDependencies = this.rootDependencyAnalyzer.analyzeRootDependencies(graph, {
+      knownSemanticTypes,
+      repoRoot: opts.repoRoot,
+    });
 
     // Find cross-contamination opportunities
     console.log(`Finding cross-contamination opportunities...`);
@@ -249,7 +256,7 @@ async function main() {
     );
 
     // Extract the dependency graph
-    const graph = await extractor.extractGraph(specPath);
+    const graph = await extractor.extractGraph(specPath, { repoRoot });
 
     // Save to disk
     await extractor.saveGraph(graph, outputPath);

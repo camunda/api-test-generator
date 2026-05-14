@@ -324,7 +324,6 @@ consume which semantic types, enabling dependency-aware test ordering.
 npm run build -w semantic-graph-extractor
 npm run extract-graph              # build + extract
 npm run analyze-graph -w semantic-graph-extractor   # human-readable analysis report
-npm run validate-graph -w semantic-graph-extractor  # validate graph integrity
 ```
 
 ### path-analyser

@@ -16,6 +16,15 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { edgeSchema } from '../path-analyser/src/ontology/edgeSchema.ts';
+// Namespace import: the schema source lives in the CommonJS-flavoured
+// `semantic-graph-extractor` workspace (`type: commonjs` in its
+// package.json). Node's CJS-to-ESM interop exposes the actual
+// `module.exports` object under `.default` when the cjs-module-lexer
+// can't statically infer the named exports from TS source. We tolerate
+// either shape so the script works under both tsx (which often inlines
+// CJS exports) and Vite/Vitest (which goes through Node's strict
+// interop).
+import * as bootstrapSequenceModule from '../semantic-graph-extractor/ontology/bootstrapSequenceSchema.ts';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -28,6 +37,14 @@ const ARTIFACTS: OntologyArtifact[] = [
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'edge.schema.json'),
     schema: edgeSchema,
+  },
+  {
+    jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'bootstrap-sequence.schema.json'),
+    schema:
+      bootstrapSequenceModule.bootstrapSequenceSchema ??
+      // biome-ignore lint/plugin: runtime CJS-interop fallback when cjs-module-lexer can't see TS exports
+      (bootstrapSequenceModule as { default?: { bootstrapSequenceSchema?: unknown } }).default
+        ?.bootstrapSequenceSchema,
   },
 ];
 

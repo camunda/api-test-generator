@@ -1,203 +1,109 @@
-import type {
-  BootstrapSequence,
-  Operation,
-  OperationDependencyGraph,
-  RootOperationAnalysis,
-} from './types';
+import { type LoadResult, loadBootstrapSequences } from './ontology/bootstrapSequencesLoader';
+import type { OperationDependencyGraph, RootOperationAnalysis } from './types';
 
 /**
- * Analyzes operation dependencies to identify root operations and bootstrap sequences
+ * Generic, ABox-driven loader for the bootstrap-sequence and entry-point
+ * analysis previously produced by the heuristic `RootDependencyAnalyzer`.
+ *
+ * Replaces (#202, Lift 2) the OCA-specific operation/kind literals and
+ * the `isDeploymentOperation()`/`isSetupOperation()` heuristics with a
+ * declarative ABox at `configs/<active>/ontology/bootstrap-sequences.json`.
+ *
+ * What's still computed here vs lifted to the ABox:
+ *
+ *   - `bootstrapSequences`: lifted. Source of truth is the ABox; the
+ *     loader filters out sequences whose operationIds aren't all in the
+ *     spec (preserves the original `if (operationExists(...))` shape
+ *     declaratively).
+ *
+ *   - `entryPointOperations`: kept. This is a *structural* property of
+ *     the dependency graph (operations that are not the target of any
+ *     edge), not an API-specific assertion, so it stays computed.
+ *
+ *   - `deploymentOperations` / `setupOperations`: were heuristic
+ *     classifications (path substrings, opId prefixes, hard-coded
+ *     setup-operation literals).
+ *     No downstream consumer reads either field today (planner reads
+ *     only `bootstrapSequences`). They are preserved on the type for
+ *     ABI stability and emitted as empty arrays so a future ABox slice
+ *     ("operation roles" — see #199 axis 3) can populate them without
+ *     a contract change.
  */
-export class RootDependencyAnalyzer {
+export interface RootDependencyAnalyzerOptions {
+  knownSemanticTypes: Set<string>;
   /**
-   * Analyze the dependency graph to identify root operations and bootstrap sequences
+   * Absolute path to the repo root that hosts `configs.json`. When
+   * omitted, ABox loading is skipped entirely (the analyzer still
+   * computes structural entry points). Production callers
+   * (`SemanticGraphExtractor.extractGraph` via `index.ts main`) always
+   * pass this; ad-hoc test callers that exercise the extractor against
+   * synthesized fixtures may omit it to bypass the cross-reference
+   * checks against the active config's published ABox.
    */
-  analyzeRootDependencies(graph: OperationDependencyGraph): RootOperationAnalysis {
+  repoRoot?: string;
+}
+
+export class RootDependencyAnalyzer {
+  analyzeRootDependencies(
+    graph: OperationDependencyGraph,
+    opts: RootDependencyAnalyzerOptions,
+  ): RootOperationAnalysis {
     console.log('Analyzing root dependencies...');
 
-    const operations = Array.from(graph.operations.values());
+    const knownOperationIds = new Set(Array.from(graph.operations.keys()));
+    if (opts.repoRoot === undefined) {
+      console.log(
+        'No repoRoot provided; skipping bootstrap-sequences ABox (entry-points still computed).',
+      );
+      const entryPointOperations = this.findEntryPointOperations(graph);
+      return {
+        deploymentOperations: [],
+        setupOperations: [],
+        entryPointOperations,
+        bootstrapSequences: [],
+      };
+    }
+    const loaded: LoadResult = loadBootstrapSequences(opts.repoRoot, {
+      knownOperationIds,
+      knownSemanticTypes: opts.knownSemanticTypes,
+    });
 
-    // Find different types of root operations
-    const deploymentOperations = this.findDeploymentOperations(operations);
-    const setupOperations = this.findSetupOperations(operations);
+    if (loaded.droppedForMissingOperations.length > 0) {
+      for (const dropped of loaded.droppedForMissingOperations) {
+        console.log(
+          `  - dropped bootstrap sequence '${dropped.name}' (operationId(s) not in spec: ${dropped.missing.join(', ')})`,
+        );
+      }
+    }
+
     const entryPointOperations = this.findEntryPointOperations(graph);
 
-    // Build bootstrap sequences
-    const bootstrapSequences = this.buildBootstrapSequences(deploymentOperations, operations);
-
     console.log(
-      `Found ${deploymentOperations.length} deployment operations, ${setupOperations.length} setup operations`,
+      `Loaded ${loaded.sequences.length} bootstrap sequences from ABox; ${entryPointOperations.length} structural entry points.`,
     );
-    console.log(`Identified ${bootstrapSequences.length} bootstrap sequences`);
 
     return {
-      deploymentOperations,
-      setupOperations,
+      // No longer heuristically classified — see header comment. A
+      // future ABox slice (#199 axis 3) can lift these too.
+      deploymentOperations: [],
+      setupOperations: [],
       entryPointOperations,
-      bootstrapSequences,
+      bootstrapSequences: loaded.sequences,
     };
   }
 
   /**
-   * Find operations that deploy resources (foundational operations)
-   */
-  private findDeploymentOperations(operations: Operation[]): string[] {
-    return operations.filter((op) => this.isDeploymentOperation(op)).map((op) => op.operationId);
-  }
-
-  /**
-   * Find operations that must run before others (setup operations)
-   */
-  private findSetupOperations(operations: Operation[]): string[] {
-    return operations.filter((op) => this.isSetupOperation(op)).map((op) => op.operationId);
-  }
-
-  /**
-   * Find operations that have no dependencies (true entry points)
+   * Operations with no inbound dependency edges. Structural property
+   * of the graph — kept here because it's API-agnostic.
    */
   private findEntryPointOperations(graph: OperationDependencyGraph): string[] {
     const targetOperations = new Set(graph.edges.map((e) => e.targetOperationId));
     const entryPoints: string[] = [];
-
-    for (const [opId] of Array.from(graph.operations)) {
+    for (const opId of Array.from(graph.operations.keys())) {
       if (!targetOperations.has(opId)) {
         entryPoints.push(opId);
       }
     }
-
     return entryPoints;
-  }
-
-  /**
-   * Build bootstrap sequences that create foundational resources
-   */
-  private buildBootstrapSequences(
-    deploymentOps: string[],
-    allOps: Operation[],
-  ): BootstrapSequence[] {
-    const sequences: BootstrapSequence[] = [];
-
-    // Helper function to check if operation exists
-    const operationExists = (operationId: string): boolean => {
-      return allOps.some((op) => op.operationId === operationId);
-    };
-
-    // Process definition bootstrap sequence
-    if (deploymentOps.includes('createDeployment')) {
-      // createDeployment is a root dependency satisfier that can produce multiple key types
-      // According to DeploymentMetadataResult, it returns: ProcessDefinitionKey, DecisionDefinitionKey, FormKey, DeploymentKey
-
-      sequences.push({
-        name: 'deployment_setup',
-        description: 'Deploy resources and obtain all available keys from deployment result',
-        operations: ['createDeployment'],
-        produces: ['ProcessDefinitionKey', 'DecisionDefinitionKey', 'FormKey', 'DeploymentKey'],
-      });
-
-      // Additional sequences for specific searches (only if those operations exist)
-      if (operationExists('searchProcessDefinitions')) {
-        sequences.push({
-          name: 'process_definition_search',
-          description: 'Deploy and search for specific process definitions',
-          operations: ['createDeployment', 'searchProcessDefinitions'],
-          produces: ['ProcessDefinitionKey', 'DeploymentKey'],
-        });
-      }
-
-      if (operationExists('searchDecisionDefinitions')) {
-        sequences.push({
-          name: 'decision_definition_search',
-          description: 'Deploy and search for specific decision definitions',
-          operations: ['createDeployment', 'searchDecisionDefinitions'],
-          produces: ['DecisionDefinitionKey', 'DeploymentKey'],
-        });
-      }
-    }
-
-    // User and tenant setup sequences
-    const hasCreateUser = allOps.some((op) => op.operationId === 'createUser');
-    const hasCreateTenant = allOps.some((op) => op.operationId === 'createTenant');
-
-    if (hasCreateTenant) {
-      sequences.push({
-        name: 'tenant_setup',
-        description: 'Create tenant for multi-tenancy testing',
-        operations: ['createTenant'],
-        produces: [], // Tenant creation doesn't produce semantic types we track
-      });
-    }
-
-    if (hasCreateUser) {
-      sequences.push({
-        name: 'user_setup',
-        description: 'Create user for authentication testing',
-        operations: ['createUser'],
-        produces: [], // User creation doesn't produce semantic types we track
-      });
-    }
-
-    // Process instance workflow bootstrap
-    sequences.push({
-      name: 'process_instance_workflow_setup',
-      description: 'Complete process setup and create instance',
-      operations: ['createDeployment', 'searchProcessDefinitions', 'createProcessInstance'],
-      produces: ['ProcessDefinitionKey', 'DeploymentKey', 'ProcessInstanceKey'],
-    });
-
-    return sequences;
-  }
-
-  /**
-   * Check if an operation is a deployment operation
-   */
-  private isDeploymentOperation(operation: Operation): boolean {
-    return (
-      operation.operationType === 'deploy' ||
-      operation.operationId.toLowerCase().includes('deploy') ||
-      operation.path.includes('/deployment') ||
-      (operation.tags?.includes('Resource') === true && operation.method === 'POST')
-    );
-  }
-
-  /**
-   * Check if an operation is a setup operation
-   */
-  private isSetupOperation(operation: Operation): boolean {
-    const setupKeywords = ['create', 'setup', 'initialize', 'configure'];
-    const operationName = operation.operationId.toLowerCase();
-
-    return (
-      operation.operationType === 'setup' ||
-      setupKeywords.some((keyword) => operationName.includes(keyword)) ||
-      // Tenant and user creation are setup operations
-      operation.operationId === 'createTenant' ||
-      operation.operationId === 'createUser' ||
-      operation.operationId === 'createGroup' ||
-      operation.operationId === 'createRole'
-    );
-  }
-
-  /**
-   * Analyze operation relationships to find implicit dependencies
-   */
-  findImplicitDependencies(operations: Operation[]): { [operationId: string]: string[] } {
-    const implicitDeps: { [operationId: string]: string[] } = {};
-
-    // Most operations that work with ProcessInstanceKey need a process definition first
-    const processOps = operations.filter(
-      (op) =>
-        op.operationId.toLowerCase().includes('process') &&
-        op.operationType !== 'deploy' &&
-        op.operationType !== 'search',
-    );
-
-    for (const op of processOps) {
-      if (!implicitDeps[op.operationId]) {
-        implicitDeps[op.operationId] = [];
-      }
-      implicitDeps[op.operationId].push('process_definition_setup');
-    }
-
-    return implicitDeps;
   }
 }
