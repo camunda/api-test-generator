@@ -3379,8 +3379,8 @@ describeForThisConfig(
         // `requestBodySemanticTypes` instead of emitting a seeded placeholder
         // named after the raw field leaf (e.g. `targetProcessDefinitionKeyVar`).
         //
-        // Class-scoped: for every edge in the graph that wires a *provider:true*
-        // response producer into a request body consumer (non-filter path), the
+        // Class-scoped: for every request-body consumer edge in the graph that
+        // wires a *provider:true* response producer (non-filter path), the
         // emitted feature spec for that consumer operation must NOT contain a
         // `seedBinding` call for the field-leaf-name-derived var.  Presence of
         // such a seeded call means the auto-derivation regressed and the field
@@ -3388,6 +3388,9 @@ describeForThisConfig(
         //
         // Edges from client-minted (establisher) or provider:false response
         // fields are excluded because those semantics are intentionally seeded.
+        //
+        // Parameter edges (path.*, query.*, header.*, cookie.*) are excluded —
+        // they are not request body fields and are wired via path/query helpers.
         //
         // Filter-prefixed paths (filter.* / filter[) are excluded because they
         // are deferred to #168 (clientMintedAttribute setter-chain reuse).
@@ -3406,9 +3409,18 @@ describeForThisConfig(
 
         // Index edges by consumer: targetOperationId → set of field leaf names
         // that should NOT appear as seeded vars in the feature spec.
+        // Only request-body consumer edges are relevant; skip parameter edges
+        // (path.*, query.*, header.*, cookie.*) which are not request body fields.
         const shouldNotSeedByOp = new Map<string, { fieldLeaf: string; semanticType: string }[]>();
         for (const edge of graph.edges) {
           const fp = edge.targetFieldPath;
+          if (
+            fp.startsWith('path.') ||
+            fp.startsWith('query.') ||
+            fp.startsWith('header.') ||
+            fp.startsWith('cookie.')
+          )
+            continue;
           if (fp.startsWith('filter.') || fp.startsWith('filter[')) continue;
           if (!providerTrueSemantics.has(edge.semanticType)) continue;
           const leaf = fp
