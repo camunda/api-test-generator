@@ -81,6 +81,9 @@ npm run lint                         # Biome (lint + plugin)
 npm run lint:fix                     # apply safe fixes
 npm test                             # vitest (regression + unit)
 npx tsc --noEmit -p <workspace>/tsconfig.json   # per-workspace typecheck
+
+# Ontology artefacts
+npm run build:ontology               # regenerate ontology/vocabulary/*.schema.json from TS source
 ```
 
 `spec/`, `dist/`, and `**/generated/` are gitignored. CI regenerates them
@@ -390,6 +393,15 @@ npm test
 For Layer-3 invariant changes you must run the regen step or the test
 file aborts with a "graph not found" / "scenarios directory not found"
 error.
+
+> **`npm run build:ontology` is a separate step.** Run it whenever you
+> edit any TypeScript file under `path-analyser/src/ontology/` (e.g.
+> `edgeSchema.ts`). It regenerates the committed JSON Schema artefacts
+> under `ontology/vocabulary/` that external SPARQL/SHACL/OWL tooling
+> reads. A Layer-3 drift-detector invariant in
+> `configs/<config>/regression-invariants.test.ts` fails if the
+> committed JSON drifts from the TS source of truth, so a stale file
+> will surface as a test failure rather than shipping silently.
 
 ## Terminal commands (agent tooling)
 

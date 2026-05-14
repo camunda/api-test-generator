@@ -175,6 +175,7 @@ npm run build --workspaces --if-present
 | `npm run lint:fix` | Lint and apply safe Biome fixes |
 | `npm run format` | Format all workspaces with Biome |
 | `npm test` | Run the regression test suite (extractor + planner fixtures, bundled-spec invariants) |
+| `npm run build:ontology` | Regenerate `ontology/vocabulary/*.schema.json` from their TypeScript source of truth. Run whenever you edit a schema const under `path-analyser/src/ontology/` (e.g. `edgeSchema.ts`). A drift-detector invariant fails if the committed JSON is stale. |
 
 ## Code Quality Tooling
 
