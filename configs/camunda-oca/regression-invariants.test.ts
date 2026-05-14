@@ -3745,13 +3745,19 @@ describeForThisConfig(
 //
 // Lift 1 of the ontology migration (#199) introduces the per-config edges
 // ABox at `configs/<active>/ontology/edges.json`, validated by the TBox
-// JSON Schema at `ontology/vocabulary/edge.schema.json` and loaded by
-// `path-analyser/src/ontology/loader.ts`. The TBox can express the row
-// shape but Draft-07 cannot express cross-references against the bundled
-// spec (operationIds existing, endpoint kind names existing, identifier
-// types matching). Those are encoded here as named L3 invariants —
-// failures point directly at the broken row instead of producing a
-// generic schema error.
+// authored as a TS const in `path-analyser/src/ontology/edgeSchema.ts`,
+// loaded by `path-analyser/src/ontology/loader.ts` (single source of
+// truth: ajv runtime validation + json-schema-to-ts type inference both
+// consume the same TS literal). The matching `ontology/vocabulary/
+// edge.schema.json` is generated from the TS const by
+// `scripts/build-ontology.ts` for external SPARQL/SHACL/OWL consumers.
+//
+// The TBox can express the row shape but Draft-07 cannot express
+// cross-references against the bundled spec (operationIds existing,
+// endpoint kind names existing, identifier types matching). Those are
+// encoded here as named L3 invariants — failures point directly at the
+// broken row instead of producing a generic schema error. A drift
+// detector below also catches a stale generated JSON artefact.
 //
 // Class-scoped: every assertion ranges over every entry in the ABox AND
 // every edge-shaped kind in the spec's semantic-kinds registry, so a
@@ -3781,45 +3787,35 @@ describeForThisConfig(
       // Deliberately import via the public loader entry point rather than
       // re-parsing the JSON directly: this is the assertion that the
       // generic loader works end-to-end against the real ABox shipped
-      // by this config. A regression in the loader (e.g. a tightened
-      // zod schema) fails this test before any cross-reference is even
-      // attempted.
+      // by this config. The loader compiles the TBox TS const with ajv,
+      // so a regression in either the TBox shape or the loader fails
+      // this test before any cross-reference is even attempted.
       const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const abox = loadEdgesAbox(REPO_ROOT);
       expect(abox, 'edges ABox file must exist for the camunda-oca config').not.toBeNull();
       expect(abox?.edges.length).toBeGreaterThan(0);
     });
 
-    it('the ABox file validates against the published TBox JSON Schema (end-to-end layout check)', async () => {
-      // The loader uses a hand-mirrored zod schema for runtime validation,
-      // but the TBox file (`ontology/vocabulary/edge.schema.json`) is what
-      // external SPARQL/SHACL/OWL consumers actually see. This invariant
-      // closes the drift gap by validating the on-disk ABox against the
-      // on-disk TBox using a stock JSON Schema validator (ajv). If the
-      // loader's zod schema and the TBox diverge (e.g. one tightens a
-      // constraint the other doesn't), one of:
-      //   (a) the ABox passes the loader but fails this check → TBox
-      //       added a constraint the loader is missing.
-      //   (b) the ABox passes this check but fails the loader → loader
-      //       added a constraint the TBox is missing.
-      // Either failure points directly at the drift site.
-      const { default: Ajv } = await import('ajv');
-      const ajv = new Ajv({ allErrors: true, strict: false });
-      const tboxPath = join(REPO_ROOT, 'ontology', 'vocabulary', 'edge.schema.json');
-      const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'edges.json');
-      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      const tbox = JSON.parse(readFileSync(tboxPath, 'utf8'));
-      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8'));
-      const validate = ajv.compile(tbox);
-      const ok = validate(aboxJson);
-      if (!ok) {
-        const messages = (validate.errors ?? [])
-          .map((e) => `  - ${e.instancePath || '<root>'}: ${e.message ?? '(no message)'}`)
-          .join('\n');
-        throw new Error(`ABox at ${aboxPath} failed TBox validation:\n${messages}`);
+    it('the committed TBox JSON file matches the regenerated output of `npm run build:ontology` (drift detector)', async () => {
+      // The TBox source of truth is the TS const in
+      // `path-analyser/src/ontology/edgeSchema.ts`; the matching
+      // `ontology/vocabulary/edge.schema.json` is generated from it
+      // for external SPARQL/SHACL/OWL consumers (the schema's `$id`
+      // URL points at this JSON file). If an author edits the TS
+      // const but forgets to run `npm run build:ontology`, the JSON
+      // ships stale to external consumers. This invariant catches
+      // exactly that drift by re-rendering the artefact in-process
+      // and comparing.
+      const { ARTIFACTS, renderSchema } = await import('../../scripts/build-ontology.ts');
+      for (const artifact of ARTIFACTS) {
+        const onDisk = readFileSync(artifact.jsonPath, 'utf8');
+        const rendered = renderSchema(artifact.schema);
+        expect(
+          onDisk,
+          `Generated ontology artefact at ${artifact.jsonPath} is stale. ` +
+            `Run 'npm run build:ontology' to refresh it from the TS source of truth.`,
+        ).toBe(rendered);
       }
-      expect(ok).toBe(true);
     });
 
     it('every edge.establishedBy and edge.observableVia is an operationId in the bundled spec', async () => {
