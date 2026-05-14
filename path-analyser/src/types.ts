@@ -348,6 +348,8 @@ export interface RequestOneOfVariant {
   variantName: string;
   required: string[];
   optional: string[];
+  /** Effective JSON Schema type for each field in this variant ('object', 'array', 'string', …). */
+  fieldTypes: Record<string, string>;
   discriminator?: { field: string; value: string };
 }
 

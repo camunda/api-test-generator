@@ -3484,6 +3484,14 @@ describeForThisConfig(
           );
         }
 
+        interface SchemaObject {
+          type?: string;
+          $ref?: string;
+          required?: string[];
+          properties?: Record<string, SchemaObject>;
+          oneOf?: SchemaObject[];
+        }
+
         interface OpenApiSpec {
           paths: Record<
             string,
@@ -3493,17 +3501,53 @@ describeForThisConfig(
                 operationId?: string;
                 requestBody?: {
                   content?: {
-                    'application/json'?: { schema?: { $ref?: string; properties?: Record<string, { type?: string; $ref?: string }> } };
+                    'application/json'?: { schema?: SchemaObject };
                   };
                 };
               }
             >
           >;
-          components?: { schemas?: Record<string, { type?: string; required?: string[]; properties?: Record<string, { type?: string; $ref?: string }> }> };
+          components?: { schemas?: Record<string, SchemaObject> };
         }
 
         // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
         const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as OpenApiSpec;
+
+        function resolveRef(ref: string): SchemaObject | undefined {
+          const name = ref.split('/').pop() ?? '';
+          return spec.components?.schemas?.[name];
+        }
+
+        function resolveSchemaObj(s: SchemaObject): SchemaObject {
+          if (s.$ref) return resolveRef(s.$ref) ?? s;
+          return s;
+        }
+
+        function getEffectiveType(s: SchemaObject): string | undefined {
+          if (s.type) return s.type;
+          if (s.$ref) return resolveRef(s.$ref)?.type;
+          return undefined;
+        }
+
+        /** Collect top-level field names whose resolved type is 'object' or 'array' from a schema. */
+        function collectObjectArrayFields(schema: SchemaObject): Set<string> {
+          const fields = new Set<string>();
+          const resolved = resolveSchemaObj(schema);
+          // Root schema with properties
+          for (const [fieldName, fieldSchema] of Object.entries(resolved.properties ?? {})) {
+            const t = getEffectiveType(fieldSchema);
+            if (t === 'object' || t === 'array') fields.add(fieldName);
+          }
+          // oneOf variants: union their fields
+          for (const variant of resolved.oneOf ?? []) {
+            const rv = resolveSchemaObj(variant);
+            for (const [fieldName, fieldSchema] of Object.entries(rv.properties ?? {})) {
+              const t = getEffectiveType(fieldSchema);
+              if (t === 'object' || t === 'array') fields.add(fieldName);
+            }
+          }
+          return fields;
+        }
 
         // Build a map of operationId -> set of top-level body field names that have type 'object' or 'array'
         const objectFieldsByOp = new Map<string, Set<string>>();
@@ -3512,22 +3556,7 @@ describeForThisConfig(
             if (!op.operationId) continue;
             const jsonBody = op.requestBody?.content?.['application/json']?.schema;
             if (!jsonBody) continue;
-            const schemaRef = jsonBody.$ref;
-            const schema = schemaRef
-              ? spec.components?.schemas?.[schemaRef.split('/').pop() ?? '']
-              : jsonBody;
-            if (!schema?.properties) continue;
-            const objectFields = new Set<string>();
-            for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
-              let effectiveType = fieldSchema.type;
-              if (!effectiveType && fieldSchema.$ref) {
-                const refName = fieldSchema.$ref.split('/').pop() ?? '';
-                effectiveType = spec.components?.schemas?.[refName]?.type;
-              }
-              if (effectiveType === 'object' || effectiveType === 'array') {
-                objectFields.add(fieldName);
-              }
-            }
+            const objectFields = collectObjectArrayFields(jsonBody);
             if (objectFields.size > 0) {
               objectFieldsByOp.set(op.operationId, objectFields);
             }

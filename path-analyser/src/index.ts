@@ -1225,6 +1225,7 @@ function buildRequestBodyFromCanonical(
   const defaults = getRequestDefaultsForOperation(opId);
   let allowedFields: Set<string> | undefined;
   let chosenVariantRequired: string[] | undefined;
+  let chosenVariant: RequestOneOfVariant | undefined;
   if (chosenCt === 'application/json' && requestGroups.length) {
     // Determine selected variant for endpoint scenarios
     const selected = isEndpoint ? scenario.requestVariants?.[0] : undefined;
@@ -1239,6 +1240,7 @@ function buildRequestBodyFromCanonical(
     if (!isEndpoint) {
       chosen = variants.find((v) => v.required.some((f) => /Key$/.test(f))) || chosen;
     }
+    chosenVariant = chosen;
     chosenVariantRequired = [...(chosen?.required || [])];
     // Allow chosen required, plus chosen optional that are NOT required by any other variant
     const otherRequired = new Set<string>(
@@ -1274,12 +1276,12 @@ function buildRequestBodyFromCanonical(
             template[name] = `${'${'}${varName}}`;
           } else if (defaults && Object.hasOwn(defaults, name)) {
             template[name] = defaults[name];
-          } else if (declaredTypeByLeaf[name] === 'object') {
+          } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'object') {
             // Object-typed required field with no binding: emit {} rather than seeding
             // a string placeholder. An empty object is always a valid JSON value and
             // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
             template[name] = {};
-          } else if (declaredTypeByLeaf[name] === 'array') {
+          } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'array') {
             template[name] = [];
           } else {
             scenario.bindings ||= {};
