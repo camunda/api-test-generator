@@ -321,7 +321,9 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
     const content = await renderFirst(
       buildCollectionWithExtracts([{ fieldPath: 'widgetKey', bind: 'widgetKeyVar' }]),
     );
-    expect(content).toContain("import { extractInto, seedBinding } from './support/seeding';");
+    expect(content).toContain(
+      "import { extractInto, seedBinding, initSpecSalt } from './support/seeding';",
+    );
   });
 
   test('emits exactly one extractInto(ctx, ...) call per extract entry', async () => {
@@ -1043,7 +1045,7 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
     expect(src).toContain("import { buildBaseUrl } from './support/env';");
     // Minimal fixture has no step.extract entries; extractInto is not needed
     expect(src).not.toContain('extractInto');
-    expect(src).toContain("import { seedBinding } from './support/seeding';");
+    expect(src).toContain("import { seedBinding, initSpecSalt } from './support/seeding';");
   });
 
   test('deploy-only suite: emits explicit expect(status).toBe(200) for each deploy step', () => {
@@ -1100,7 +1102,9 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
     // The placeholder alias must be emitted even though the step goes through deploy()
     expect(src).toContain("extractInto(ctx, 'processDefinitionIdVar'");
     // extractInto must be imported
-    expect(src).toContain("import { extractInto, seedBinding } from './support/seeding';");
+    expect(src).toContain(
+      "import { extractInto, seedBinding, initSpecSalt } from './support/seeding';",
+    );
   });
 
   test('non-200 createDeployment multipart: imports resolveFixture, not deploy', () => {
@@ -1158,5 +1162,56 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
     expect(src).toContain("import { resolveFixture } from './support/fixtures';");
     // authHeaders is needed for the inline uploadDocument step
     expect(src).toContain('authHeaders');
+  });
+});
+
+// #175 — per-spec-file initSpecSalt emission
+describe('emitter: initSpecSalt emission (#175)', () => {
+  test('emitted suite imports initSpecSalt from the seeding module', () => {
+    const src = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain("import { seedBinding, initSpecSalt } from './support/seeding';");
+  });
+
+  test('emitted suite calls initSpecSalt with the suite name', () => {
+    const src = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain("initSpecSalt('createWidget');");
+  });
+
+  test('different suite names produce different initSpecSalt calls', () => {
+    const src1 = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createRole',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    const src2 = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'assignRoleToClient',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src1).toContain("initSpecSalt('createRole');");
+    expect(src2).toContain("initSpecSalt('assignRoleToClient');");
+    expect(src1).not.toContain("initSpecSalt('assignRoleToClient');");
+    expect(src2).not.toContain("initSpecSalt('createRole');");
+  });
+
+  test('initSpecSalt call appears before test.describe', () => {
+    const src = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    const saltPos = src.indexOf("initSpecSalt('createWidget');");
+    const describePos = src.indexOf("test.describe('createWidget'");
+    expect(saltPos).toBeGreaterThan(-1);
+    expect(describePos).toBeGreaterThan(-1);
+    expect(saltPos).toBeLessThan(describePos);
   });
 });
