@@ -1190,6 +1190,21 @@ function buildRequestBodyFromCanonical(
       }
     }
   }
+  // Auto-derive semantic-type bindings from requestBodySemantics for consumer fields whose
+  // semantic type has a graph-level response producer. This avoids the need to manually
+  // duplicate x-semantic-type information in domain-semantics.json valueBindings entries.
+  // Filter paths are excluded — those are deferred to issue #168 (setter-chain reuse).
+  const semanticFallback: Record<string, string> = {};
+  for (const entry of graph.operations[opId]?.requestBodySemantics ?? []) {
+    if (entry.fieldPath.startsWith('filter.') || entry.fieldPath.startsWith('filter[')) continue;
+    if (bindingMap[entry.fieldPath]) continue;
+    // Only auto-derive when the graph has a response-producer for this semantic type.
+    // This excludes clientMintedAttribute semantics (Tag, BusinessId) which have no
+    // graph-level response producer and are handled separately by bindClientMintedAttribute.
+    if (!graph.producersByType[entry.semantic]?.length) continue;
+    semanticFallback[entry.fieldPath] = camelCase(entry.semantic);
+  }
+
   // If JSON and oneOf groups exist, figure out which fields are allowed
   const requestGroups = requestGroupsIndex?.[opId] || [];
   // Load request defaults (operation-level overrides global)
@@ -1236,8 +1251,9 @@ function buildRequestBodyFromCanonical(
             template[name] = viaProvider;
             continue;
           }
-          const varName = `${camelCase(bindingMap[mappedName] || name || 'value')}Var`;
-          const hasBinding = !!bindingMap[mappedName];
+          const semanticParam = semanticFallback[mappedName];
+          const varName = `${camelCase(bindingMap[mappedName] || semanticParam || name || 'value')}Var`;
+          const hasBinding = !!(bindingMap[mappedName] || semanticParam);
           if (hasBinding) {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
@@ -1265,11 +1281,12 @@ function buildRequestBodyFromCanonical(
         // Special-case: support mapping jobType -> type
         const hasJobType = !!bindingMap.jobType;
         const mapJobTypeToType = leaf === 'type' && !bindingMap[f.path] && hasJobType;
+        const semanticParam = semanticFallback[f.path];
         const mappedParamName = mapJobTypeToType
           ? 'jobType'
-          : bindingMap[f.path] || leaf || 'value';
+          : bindingMap[f.path] || semanticParam || leaf || 'value';
         const varName = `${camelCase(mappedParamName)}Var`;
-        const hasBinding = mapJobTypeToType ? true : !!bindingMap[f.path];
+        const hasBinding = mapJobTypeToType ? true : !!(bindingMap[f.path] || semanticParam);
         if (hasBinding) {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
