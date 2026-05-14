@@ -22,6 +22,7 @@
       "semantic-graph-extractor/**/*.ts",
       "scripts/**/*.ts",
       "tests/**/*.ts",
+      "configs/*/*.ts",
       "!**/dist",
       "!**/generated",
       "!**/node_modules",
@@ -40,6 +41,7 @@
       "semantic-graph-extractor/**/*.ts",
       "scripts/**/*.ts",
       "tests/**/*.ts",
+      "configs/*/*.ts",
       "!**/dist/**",
       "!**/generated/**",
       "!**/node_modules/**"
