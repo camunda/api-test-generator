@@ -1484,10 +1484,9 @@ function buildRequestBodyFromCanonical(
     // emission time by the universal-seed prologue derived from the same
     // `globalContextSeeds` entry — see codegen/playwright/emitter.ts) and
     // substitutes a `${binding}` reference into the multipart fields. Driven
-    // entirely from the per-config sidecar so configs without the
-    // default-tenant concept (or any other globalContextSeeds entry) get no
-    // field substitution. Lifts the previously hard-coded
-    // `'tenantId'`/`'tenantIdVar'` literals out of generic planner code (#200).
+    // entirely from the per-config sidecar so configs without relevant
+    // globalContextSeeds entries get no field substitution. Lifts previously
+    // hard-coded field/binding name literals out of generic planner code (#200).
     for (const seed of graph.domain?.globalContextSeeds ?? []) {
       const node = nodes.find((n) => n.path === seed.fieldName);
       if (!node) continue;
