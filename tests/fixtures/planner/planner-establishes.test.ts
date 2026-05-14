@@ -737,9 +737,9 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       // calls. The contract for `producersByType` is "authoritative
       // producers only" — establishers must stay in `establishersByType`.
       const graph = fixtureSimpleEstablisherChain;
-      const beforeUsername = [...(graph.producersByType['Username'] ?? [])];
+      const beforeUsername = [...(graph.producersByType.Username ?? [])];
       generateScenariosForEndpoint(graph, 'getUser', { maxScenarios: 10 });
-      const afterUsername = graph.producersByType['Username'] ?? [];
+      const afterUsername = graph.producersByType.Username ?? [];
       // The establisher (`createUser`) must NOT have leaked into the
       // global producer index for Username.
       expect(afterUsername).toEqual(beforeUsername);

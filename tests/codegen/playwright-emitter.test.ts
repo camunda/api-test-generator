@@ -980,3 +980,183 @@ describe('PlaywrightEmitter — eventual-consistency wrapping (#106)', () => {
     expect(src).toContain("operationId: 'searchProcessInstances'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Import gating: deploy() vs resolveFixture vs authHeaders
+// ---------------------------------------------------------------------------
+//
+// These tests guard the three conditional import decisions added for the
+// deploy() helper. Each decision has a class-scoped rule:
+//
+//   1. deploy-only suite (all createDeployment multipart steps are status 200)
+//      → imports `deploy` from deployment, NOT resolveFixture, NOT authHeaders
+//      (deploy() handles auth internally; no inline request uses authHeaders)
+//
+//   2. non-200 createDeployment multipart step (falls through to inline path)
+//      → imports resolveFixture (the inline multipart path calls it), NOT deploy
+//
+//   3. mixed suite (200-deployment + non-deployment multipart)
+//      → imports both deploy and resolveFixture
+//
+// Regression risk: a change to the isDeploymentStep condition or import
+// flags that shifts a step between the deploy() path and the inline path
+// can produce a missing import (compile error in the generated suite) or
+// an unused import (Biome noUnusedImports error in the generated suite).
+
+describe('emitter: conditional import gating for deploy() and resolveFixture', () => {
+  function deployOnlyCollection(expectedStatus = 200): EndpointScenarioCollection {
+    return {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createDeployment',
+              method: 'POST',
+              pathTemplate: '/deployments',
+              expect: { status: expectedStatus },
+              bodyKind: 'multipart',
+              multipartTemplate: { fields: {}, files: {} },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  test('deploy-only suite: imports deploy, not resolveFixture, not authHeaders', () => {
+    const src = renderPlaywrightSuite(deployOnlyCollection(200), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain("import { deploy } from './support/deployment';");
+    expect(src).not.toContain('resolveFixture');
+    // authHeaders is handled internally by deploy(); suite must not import it
+    expect(src).not.toContain('authHeaders');
+    expect(src).toContain("import { buildBaseUrl } from './support/env';");
+    // Minimal fixture has no step.extract entries; extractInto is not needed
+    expect(src).not.toContain('extractInto');
+    expect(src).toContain("import { seedBinding } from './support/seeding';");
+  });
+
+  test('deploy-only suite: emits explicit expect(status).toBe(200) for each deploy step', () => {
+    // The explicit assertion keeps expect from @playwright/test from becoming
+    // unused in suites whose request plan consists entirely of deploy() steps,
+    // and mirrors the status-assertion pattern emitted for inline request steps.
+    const src = renderPlaywrightSuite(deployOnlyCollection(200), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain('expect(resp1.status()).toBe(200)');
+  });
+
+  test('deploy step with placeholder-alias extract: emits extractInto and imports it', () => {
+    // aliasProducerExtractsToPlaceholders can attach a placeholderAlias extract to a
+    // createDeployment step (e.g. bind processDefinitionIdVar from the same fieldPath as
+    // processDefinitionKeyVar when the next step's path uses {processDefinitionId}).
+    // The emitter must emit this extractInto call even for deployment steps; skipping it
+    // leaves the URL placeholder var unset in the generated test.
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+                extract: [
+                  {
+                    fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+                    bind: 'processDefinitionIdVar',
+                    note: 'placeholderAlias',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'createDeployment', mode: 'feature', recordResponses: false },
+    );
+    // The placeholder alias must be emitted even though the step goes through deploy()
+    expect(src).toContain("extractInto(ctx, 'processDefinitionIdVar'");
+    // extractInto must be imported
+    expect(src).toContain("import { extractInto, seedBinding } from './support/seeding';");
+  });
+
+  test('non-200 createDeployment multipart: imports resolveFixture, not deploy', () => {
+    // A non-200 createDeployment step (e.g. request-validation scenario) falls
+    // through to the inline multipart path which calls resolveFixture.
+    const src = renderPlaywrightSuite(deployOnlyCollection(400), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).not.toContain('import { deploy }');
+    expect(src).toContain("import { resolveFixture } from './support/fixtures';");
+    // Inline path uses authHeaders
+    expect(src).toContain('authHeaders');
+  });
+
+  test('mixed suite (200-deployment + non-deployment multipart): imports both', () => {
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              // 200 deployment step → deploy()
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+              },
+              // non-deployment multipart step → inline + resolveFixture
+              {
+                operationId: 'uploadDocument',
+                method: 'POST',
+                pathTemplate: '/documents',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: { file: '@@FILE:test.txt' } },
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'createDeployment', mode: 'feature', recordResponses: false },
+    );
+    expect(src).toContain("import { deploy } from './support/deployment';");
+    expect(src).toContain("import { resolveFixture } from './support/fixtures';");
+    // authHeaders is needed for the inline uploadDocument step
+    expect(src).toContain('authHeaders');
+  });
+});

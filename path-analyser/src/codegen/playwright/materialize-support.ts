@@ -9,7 +9,8 @@
 //
 // Three sets of assets are copied:
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
-//                fixtures.ts, seed-rules.json). Sources:
+//                fixtures.ts, seed-rules.json, await-eventually.ts,
+//                deployment.ts). Sources:
 //                path-analyser/src/codegen/support/, staged into
 //                dist/src/codegen/playwright/support-templates/ at
 //                build time.
@@ -35,6 +36,7 @@ export const SUPPORT_TEMPLATE_FILES = [
   'fixtures.ts',
   'seed-rules.json',
   'await-eventually.ts',
+  'deployment.ts',
 ] as const;
 
 /** Files copied directly into <outDir>/ (project root scaffolding). */
