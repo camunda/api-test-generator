@@ -179,7 +179,25 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   if (recordResponses) {
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
-  lines.push("import { extractInto, seedBinding } from './support/seeding';");
+  // extractInto is only used in non-deployment extract steps; deploy() handles extraction
+  // internally for deployment steps. Gate extractInto to avoid an unused-import error in
+  // suites whose request plan consists entirely of createDeployment multipart steps.
+  const hasNonDeployExtract = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some(
+      (step) =>
+        !(
+          step.operationId === 'createDeployment' &&
+          step.bodyKind === 'multipart' &&
+          !!step.multipartTemplate &&
+          step.expect.status === 200
+        ) && (step.extract?.length ?? 0) > 0,
+    ),
+  );
+  if (hasNonDeployExtract) {
+    lines.push("import { extractInto, seedBinding } from './support/seeding';");
+  } else {
+    lines.push("import { seedBinding } from './support/seeding';");
+  }
   // deploy() is emitted for 200-expected createDeployment multipart steps; resolveFixture
   // is emitted for any step that falls through to the inline multipart path — this includes
   // non-createDeployment multipart steps AND createDeployment steps with a non-200 expected
@@ -423,6 +441,11 @@ function renderScenarioTest(
         .map((line: string, i: number) => (i === 0 ? line : `    ${line}`))
         .join('\n');
       body.push(`    const ${varName} = await deploy(ctx, request, ${tplIndented}, baseUrl);`);
+      // Explicit status assertion mirrors the normal request path so the
+      // generated suite's assertion pattern is consistent and expect is not unused.
+      // deploy() also throws on non-200 with the response body, but the
+      // expect() call keeps the declared expectation visible in the test.
+      body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
     } else {
       body.push(`    const url = baseUrl + ${urlExpr};`);
       const bodyVar = `body${idx + 1}`;

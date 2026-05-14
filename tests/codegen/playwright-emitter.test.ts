@@ -1041,6 +1041,22 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
     // authHeaders is handled internally by deploy(); suite must not import it
     expect(src).not.toContain('authHeaders');
     expect(src).toContain("import { buildBaseUrl } from './support/env';");
+    // extractInto is only used in non-deploy extract steps; deploy() handles
+    // extraction internally, so a deploy-only suite must not import extractInto
+    expect(src).not.toContain('extractInto');
+    expect(src).toContain("import { seedBinding } from './support/seeding';");
+  });
+
+  test('deploy-only suite: emits explicit expect(status).toBe(200) for each deploy step', () => {
+    // The explicit assertion keeps expect from @playwright/test from becoming
+    // unused in suites whose request plan consists entirely of deploy() steps,
+    // and mirrors the status-assertion pattern emitted for inline request steps.
+    const src = renderPlaywrightSuite(deployOnlyCollection(200), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain('expect(resp1.status()).toBe(200)');
   });
 
   test('non-200 createDeployment multipart: imports resolveFixture, not deploy', () => {
