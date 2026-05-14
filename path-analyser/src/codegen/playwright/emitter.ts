@@ -176,7 +176,6 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // Import vendored helpers from the suite-local ./support/ directory.
   // materializeSupport() copies these files alongside the emitted specs so
   // the generated suite has no dependency on this generator project.
-  lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   if (recordResponses) {
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
