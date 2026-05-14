@@ -68,8 +68,16 @@ interface OperationNode {
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
 }
+interface GraphEdge {
+  sourceOperationId: string;
+  targetOperationId: string;
+  semanticType: string;
+  sourceFieldPath: string;
+  targetFieldPath: string;
+}
 interface DependencyGraph {
   operations: OperationNode[];
+  edges: GraphEdge[];
 }
 interface ScenarioFile {
   endpoint: { operationId: string };
@@ -3358,6 +3366,85 @@ describeForThisConfig(
         'Variant suite is missing scenarios for flat top-level optionals. Per #162 PR 4, the variant planner must absorb every populated-optional scenario the feature suite previously emitted as `opt=*`.',
       ).toEqual([]);
     });
+  },
+);
+
+describeForThisConfig(
+  'bundled-spec invariants: semantic body binding auto-derivation (#174)',
+  () => {
+    it(
+      'feature specs do not seed field-name vars for request body fields whose semantic type has a graph-level provider:true producer (#174)',
+      () => {
+        // Guard for the fix that auto-derives `ctx.${semanticType}Var` from
+        // `requestBodySemanticTypes` instead of emitting a seeded placeholder
+        // named after the raw field leaf (e.g. `targetProcessDefinitionKeyVar`).
+        //
+        // Class-scoped: for every edge in the graph that wires a *provider:true*
+        // response producer into a request body consumer (non-filter path), the
+        // emitted feature spec for that consumer operation must NOT contain a
+        // `seedBinding` call for the field-leaf-name-derived var.  Presence of
+        // such a seeded call means the auto-derivation regressed and the field
+        // is no longer wired to the semantic producer.
+        //
+        // Edges from client-minted (establisher) or provider:false response
+        // fields are excluded because those semantics are intentionally seeded.
+        //
+        // Filter-prefixed paths (filter.* / filter[) are excluded because they
+        // are deferred to #168 (clientMintedAttribute setter-chain reuse).
+        const graph = loadGraph();
+
+        // Build the set of semantic types with at least one provider:true response producer.
+        // Only response fields with `provider: true` flow into producersByType (graphLoader #97/#98).
+        const providerTrueSemantics = new Set<string>();
+        for (const op of graph.operations) {
+          for (const arr of Object.values(op.responseSemanticTypes ?? {})) {
+            for (const e of arr) {
+              if (e.provider) providerTrueSemantics.add(e.semanticType);
+            }
+          }
+        }
+
+        // Index edges by consumer: targetOperationId → set of field leaf names
+        // that should NOT appear as seeded vars in the feature spec.
+        const shouldNotSeedByOp = new Map<string, { fieldLeaf: string; semanticType: string }[]>();
+        for (const edge of graph.edges) {
+          const fp = edge.targetFieldPath;
+          if (fp.startsWith('filter.') || fp.startsWith('filter[')) continue;
+          if (!providerTrueSemantics.has(edge.semanticType)) continue;
+          const leaf = fp
+            .split('.')
+            .pop()
+            ?.replace(/\[\]$/, '')
+            ?.replace(/\[.*\]$/, '');
+          if (!leaf) continue;
+          const leafVar = `${leaf[0].toLowerCase()}${leaf.slice(1)}Var`;
+          const semanticVar = `${edge.semanticType[0].toLowerCase()}${edge.semanticType.slice(1)}Var`;
+          // Only flag cases where the field-leaf var name differs from the semantic var name;
+          // if they happen to be the same the seeded call is ambiguous either way.
+          if (leafVar === semanticVar) continue;
+          const entries = shouldNotSeedByOp.get(edge.targetOperationId) ?? [];
+          entries.push({ fieldLeaf: leafVar, semanticType: semanticVar });
+          shouldNotSeedByOp.set(edge.targetOperationId, entries);
+        }
+
+        const offenders: { spec: string; seededVar: string; expectedVar: string }[] = [];
+        for (const [opId, fields] of shouldNotSeedByOp.entries()) {
+          const specPath = join(GENERATED_TESTS_DIR, `${opId}.feature.spec.ts`);
+          if (!existsSync(specPath)) continue;
+          const src = readFileSync(specPath, 'utf8');
+          for (const { fieldLeaf, semanticType } of fields) {
+            if (src.includes(`seedBinding('${fieldLeaf}')`)) {
+              offenders.push({ spec: `${opId}.feature.spec.ts`, seededVar: fieldLeaf, expectedVar: semanticType });
+            }
+          }
+        }
+
+        expect(
+          offenders,
+          'Feature spec seeds a field-name var for a request body field whose semantic type has a provider:true graph-level producer. The auto-derivation from requestBodySemanticTypes must wire these to the semantic var (ctx.${semanticType}Var) instead of seeding a placeholder.',
+        ).toEqual([]);
+      },
+    );
   },
 );
 
