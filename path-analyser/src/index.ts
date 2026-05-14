@@ -1260,6 +1260,13 @@ function buildRequestBodyFromCanonical(
             template[name] = `${'${'}${varName}}`;
           } else if (defaults && Object.hasOwn(defaults, name)) {
             template[name] = defaults[name];
+          } else if (declaredTypeByLeaf[name] === 'object') {
+            // Object-typed required field with no binding: emit {} rather than seeding
+            // a string placeholder. An empty object is always a valid JSON value and
+            // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
+            template[name] = {};
+          } else if (declaredTypeByLeaf[name] === 'array') {
+            template[name] = [];
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
@@ -1293,6 +1300,13 @@ function buildRequestBodyFromCanonical(
           template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
           template[leaf] = defaults[leaf];
+        } else if (f.type === 'object') {
+          // Object-typed required field with no binding: emit {} rather than seeding
+          // a string placeholder. An empty object is always a valid JSON value and
+          // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
+          template[leaf] = {};
+        } else if (f.type === 'array') {
+          template[leaf] = [];
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
