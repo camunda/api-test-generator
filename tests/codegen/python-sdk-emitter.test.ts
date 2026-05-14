@@ -120,6 +120,7 @@ describe('PythonSdkEmitter Layer-2 purity test (green step)', () => {
     expect(file.content).toContain('from typing import Any');
     expect(file.content).toContain('import pytest');
     expect(file.content).toContain('from camunda.client import CamundaAsyncClient');
+    expect(file.content).toContain('from camunda.models import ActivateJobsRequest');
     expect(file.content).toContain('from helper import extract_into, seedBinding');
   });
 

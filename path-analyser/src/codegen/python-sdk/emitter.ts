@@ -43,6 +43,7 @@ function pythonSdkFileName(operationId: string): string {
 function renderScenarioTest(
   scenario: EndpointScenario,
   operationMapSource: OperationMapJsonSource,
+  modelImports: Set<string>,
 ): string {
   const lines: string[] = [];
 
@@ -128,6 +129,7 @@ function renderScenarioTest(
     if (step.bodyTemplate && step.bodyKind === 'json') {
       // Use from_dict() with model class name derived from operationId
       const modelClassName = inferModelClassName(step.operationId);
+      modelImports.add(modelClassName);
       kwargs.push(`data=${modelClassName}.from_dict(request_body)`);
     }
 
@@ -236,6 +238,13 @@ function renderPythonTestSuite(
   operationMapSource: OperationMapJsonSource,
 ): string {
   const lines: string[] = [];
+  const modelImports = new Set<string>();
+  const scenarioBlocks: string[] = [];
+
+  // Scenarios as test functions (collect model imports while rendering)
+  for (const scenario of collection.scenarios) {
+    scenarioBlocks.push(renderScenarioTest(scenario, operationMapSource, modelImports));
+  }
 
   // Header
   lines.push(`# Test suite for ${collection.endpoint.operationId}`);
@@ -246,12 +255,15 @@ function renderPythonTestSuite(
   lines.push('from typing import Any');
   lines.push('import pytest');
   lines.push('from camunda.client import CamundaAsyncClient');
+  if (modelImports.size > 0) {
+    const sortedImports = Array.from(modelImports).sort();
+    lines.push(`from camunda.models import ${sortedImports.join(', ')}`);
+  }
   lines.push('from helper import extract_into, seedBinding');
   lines.push('');
 
-  // Scenarios as test functions
-  for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario, operationMapSource));
+  for (const block of scenarioBlocks) {
+    lines.push(block);
     lines.push('');
   }
 
