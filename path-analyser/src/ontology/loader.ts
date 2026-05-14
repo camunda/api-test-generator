@@ -38,7 +38,14 @@ const EdgeSchema = z
 const EdgesAboxSchema = z
   .object({
     $schema: z.string().optional(),
-    '@context': z.unknown().optional(),
+    // Mirror the TBox's `@context` shape (object|string|array) so the
+    // loader can't accept ABox files that the published JSON Schema
+    // would reject. JSON-LD permits other forms in principle, but this
+    // ontology only emits these three and a tighter type prevents the
+    // loader from drifting laxer than the TBox.
+    '@context': z
+      .union([z.record(z.string(), z.unknown()), z.string(), z.array(z.unknown())])
+      .optional(),
     version: z.number().int().min(1),
     edges: z.array(EdgeSchema).min(1),
   })

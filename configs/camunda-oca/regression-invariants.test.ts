@@ -3790,6 +3790,38 @@ describeForThisConfig(
       expect(abox?.edges.length).toBeGreaterThan(0);
     });
 
+    it('the ABox file validates against the published TBox JSON Schema (end-to-end layout check)', async () => {
+      // The loader uses a hand-mirrored zod schema for runtime validation,
+      // but the TBox file (`ontology/vocabulary/edge.schema.json`) is what
+      // external SPARQL/SHACL/OWL consumers actually see. This invariant
+      // closes the drift gap by validating the on-disk ABox against the
+      // on-disk TBox using a stock JSON Schema validator (ajv). If the
+      // loader's zod schema and the TBox diverge (e.g. one tightens a
+      // constraint the other doesn't), one of:
+      //   (a) the ABox passes the loader but fails this check → TBox
+      //       added a constraint the loader is missing.
+      //   (b) the ABox passes this check but fails the loader → loader
+      //       added a constraint the TBox is missing.
+      // Either failure points directly at the drift site.
+      const { default: Ajv } = await import('ajv');
+      const ajv = new Ajv({ allErrors: true, strict: false });
+      const tboxPath = join(REPO_ROOT, 'ontology', 'vocabulary', 'edge.schema.json');
+      const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'edges.json');
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const tbox = JSON.parse(readFileSync(tboxPath, 'utf8'));
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8'));
+      const validate = ajv.compile(tbox);
+      const ok = validate(aboxJson);
+      if (!ok) {
+        const messages = (validate.errors ?? [])
+          .map((e) => `  - ${e.instancePath || '<root>'}: ${e.message ?? '(no message)'}`)
+          .join('\n');
+        throw new Error(`ABox at ${aboxPath} failed TBox validation:\n${messages}`);
+      }
+      expect(ok).toBe(true);
+    });
+
     it('every edge.establishedBy and edge.observableVia is an operationId in the bundled spec', async () => {
       const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const abox = loadEdgesAbox(REPO_ROOT);
