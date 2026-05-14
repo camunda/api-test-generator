@@ -3936,8 +3936,9 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8')) as AboxHeader;
     const ctx = aboxJson['@context'];
-    expect(ctx, '@context must be an object').toBeTypeOf('object');
-    if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return;
+    expect(ctx, '@context must be a non-array object').toBeTypeOf('object');
+    expect(Array.isArray(ctx), '@context must not be an array').toBe(false);
+    if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return; // type narrowing only
     // biome-ignore lint/plugin: runtime contract boundary — narrowing JSON-LD context value
     const ctxObj = ctx as Record<string, unknown>;
     expect(ctxObj['@vocab'], `@vocab must be the v1 namespace IRI`).toBe(NS);

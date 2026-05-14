@@ -72,9 +72,9 @@ describe('loadEdgesAbox: documented branches (#201 review)', () => {
   });
 
   it('lists the failing instance path in the validation diagnostic', () => {
-    // `edges` is required; emitting the error path is the property we depend on.
+    // `edges` is required; the Ajv error message must name the missing property.
     writeAbox(JSON.stringify({ version: 1 }));
-    expect(() => loadEdgesAbox(workdir)).toThrow(/edges/);
+    expect(() => loadEdgesAbox(workdir)).toThrow(/must have required property 'edges'/);
   });
 
   it('throws a duplicate-name error when two edges share the same `name`', () => {
