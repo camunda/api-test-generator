@@ -3609,3 +3609,132 @@ describeForThisConfig(
   },
 );
 
+// ---------------------------------------------------------------------------
+// globalContextSeeds substitution into multipart templates (#200 — Lift 0)
+// ---------------------------------------------------------------------------
+//
+// Lift 0 of the ontology migration retired the literal `'tenantId'` /
+// `'tenantIdVar'` / `'__PENDING__'` triple that the multipart branch of
+// `buildRequestBodyFromCanonical()` previously hard-coded, replacing it
+// with a loop over `graph.domain.globalContextSeeds`. The behaviour is
+// supposed to be byte-identical: every multipart scenario whose request
+// body declares a `globalContextSeeds[i].fieldName` field must still
+// emit `template.fields[fieldName] = "${binding}"`, AND the scenario's
+// `bindings[binding]` must equal `__PENDING__` so the emitter's
+// universal-seed prologue (codegen/playwright/emitter.ts) can rewrite
+// it to the runtime sentinel (`<default>`). This invariant locks both
+// directions and is class-scoped (every multipart scenario across the
+// bundled output, not just createDeployment) so the same regression
+// can't recur in a sibling op.
+describeForThisConfig(
+  'bundled-spec invariants: globalContextSeeds substitution survives Lift 0 (#200)',
+  () => {
+    it('every multipart scenario binds and substitutes each globalContextSeeds entry whose fieldName appears in the multipart template', () => {
+      if (!existsSync(SCENARIOS_DIR)) {
+        throw new Error(
+          `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+
+      // Read the active config's globalContextSeeds directly from the
+      // sidecar so this invariant fails loudly if the sidecar shape
+      // changes (it's the canonical source post-Lift 0).
+      const domainSemanticsPath = join(
+        REPO_ROOT,
+        'configs',
+        CONFIG_NAME,
+        'domain-semantics.json',
+      );
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const domainSemantics = JSON.parse(readFileSync(domainSemanticsPath, 'utf8')) as {
+        globalContextSeeds?: { fieldName: string; binding: string }[];
+      };
+      const seeds = domainSemantics.globalContextSeeds ?? [];
+      expect(
+        seeds.length,
+        'Lift 0 assumes the active config declares at least one globalContextSeeds entry; ' +
+          'without it the multipart substitution loop has nothing to do and this invariant ' +
+          'becomes vacuous.',
+      ).toBeGreaterThan(0);
+
+      interface MultipartStep {
+        multipartTemplate?: { fields?: Record<string, string> };
+      }
+      interface ScenarioWithMultipart {
+        id: string;
+        bindings?: Record<string, string>;
+        requestPlan?: MultipartStep[];
+      }
+      interface ScenarioFileWithMultipart {
+        endpoint: { operationId: string };
+        scenarios: ScenarioWithMultipart[];
+      }
+
+      const offenders: {
+        file: string;
+        scenarioId: string;
+        operationId: string;
+        seed: string;
+        reason: string;
+      }[] = [];
+      let multipartFieldHits = 0;
+
+      for (const f of readdirSync(SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const file = JSON.parse(
+          readFileSync(join(SCENARIOS_DIR, f), 'utf8'),
+        ) as ScenarioFileWithMultipart;
+        for (const scenario of file.scenarios ?? []) {
+          for (const step of scenario.requestPlan ?? []) {
+            const fields = step.multipartTemplate?.fields;
+            if (!fields) continue;
+            for (const seed of seeds) {
+              if (!(seed.fieldName in fields)) continue;
+              multipartFieldHits++;
+              const expected = `\${${seed.binding}}`;
+              if (fields[seed.fieldName] !== expected) {
+                offenders.push({
+                  file: f,
+                  scenarioId: scenario.id,
+                  operationId: file.endpoint.operationId,
+                  seed: seed.fieldName,
+                  reason: `multipart field '${seed.fieldName}' = ${JSON.stringify(
+                    fields[seed.fieldName],
+                  )}, expected ${JSON.stringify(expected)}`,
+                });
+              }
+              if (scenario.bindings?.[seed.binding] !== '__PENDING__') {
+                offenders.push({
+                  file: f,
+                  scenarioId: scenario.id,
+                  operationId: file.endpoint.operationId,
+                  seed: seed.fieldName,
+                  reason: `binding '${seed.binding}' = ${JSON.stringify(
+                    scenario.bindings?.[seed.binding],
+                  )}, expected "__PENDING__"`,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Floor: at least one bundled-spec multipart scenario must have
+      // exercised at least one globalContextSeeds substitution. If
+      // multipartFieldHits is zero, the lift's only branch was never
+      // entered, the multipart op vanished from the spec, or the
+      // sidecar's fieldName drifted from the spec. Any of those is
+      // worth a hard fail so we don't ship a vacuously-passing guard.
+      expect(
+        multipartFieldHits,
+        'expected ≥1 multipart scenario across the bundled output to substitute a ' +
+          'globalContextSeeds field (e.g. createDeployment.tenantId). Zero matches ' +
+          'means the lift code path was never exercised.',
+      ).toBeGreaterThan(0);
+
+      expect(offenders).toEqual([]);
+    });
+  },
+);
+

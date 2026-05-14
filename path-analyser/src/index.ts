@@ -1478,13 +1478,22 @@ function buildRequestBodyFromCanonical(
       }
       template.files.resources = fileRef;
     }
-    const tenant = nodes.find((n) => n.path === 'tenantId');
-    if (tenant) {
-      const varName = 'tenantIdVar';
+    // Wire global context seeds (e.g. tenantIdVar) into multipart fields by
+    // matching the seed's `fieldName` against the canonical schema nodes.
+    // Each match seeds the planner binding with `__PENDING__` (resolved at
+    // emission time by the universal-seed prologue derived from the same
+    // `globalContextSeeds` entry — see codegen/playwright/emitter.ts) and
+    // substitutes a `${binding}` reference into the multipart fields. Driven
+    // entirely from the per-config sidecar so configs without the
+    // default-tenant concept (or any other globalContextSeeds entry) get no
+    // field substitution. Lifts the previously hard-coded
+    // `'tenantId'`/`'tenantIdVar'` literals out of generic planner code (#200).
+    for (const seed of graph.domain?.globalContextSeeds ?? []) {
+      const node = nodes.find((n) => n.path === seed.fieldName);
+      if (!node) continue;
       scenario.bindings ||= {};
-      if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
-      template.fields.tenantId = `\
-${'${'}${varName}}`;
+      if (!scenario.bindings[seed.binding]) scenario.bindings[seed.binding] = '__PENDING__';
+      template.fields[seed.fieldName] = `\${${seed.binding}}`;
     }
     // Derive expected deployment slices using domain sidecar mapping (explicit). Fallback to heuristic later in emitter.
     const expectedSlicesSet = new Set<string>();
