@@ -3537,12 +3537,13 @@ describeForThisConfig(
         interface FeatureScenarioFile {
           scenarios: {
             id: string;
+            seedBindings?: string[];
             requestPlan?: { operationId: string; bodyTemplate?: Record<string, unknown> }[];
           }[];
         }
 
         const offenders: { file: string; scenario: string; field: string; value: string }[] = [];
-        const templatePattern = /^\$\{[^}]+\}$/;
+        const templatePattern = /^\$\{([^}]+)\}$/;
 
         const dirs = [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR];
         for (const dir of dirs) {
@@ -3552,11 +3553,14 @@ describeForThisConfig(
             // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
             const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as FeatureScenarioFile;
             for (const scenario of file.scenarios ?? []) {
+              const seededVars = new Set(scenario.seedBindings ?? []);
               for (const step of scenario.requestPlan ?? []) {
                 const objectFields = objectFieldsByOp.get(step.operationId);
                 if (!objectFields) continue;
                 for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
-                  if (objectFields.has(field) && typeof value === 'string' && templatePattern.test(value)) {
+                  if (!objectFields.has(field) || typeof value !== 'string') continue;
+                  const match = templatePattern.exec(value);
+                  if (match && seededVars.has(match[1])) {
                     offenders.push({ file: f, scenario: scenario.id, field, value });
                   }
                 }

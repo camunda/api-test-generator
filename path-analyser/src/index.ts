@@ -1166,21 +1166,25 @@ function buildRequestBodyFromCanonical(
     for (const n of nodes) {
       // Top-level array fields are recorded by walkSchema as 'field[]' (with type: 'array').
       // Normalize those to bare name so declaredTypeByLeaf['field'] === 'array'.
-      const isTopLevelArray = n.path.endsWith('[]') && !n.path.slice(0, -2).includes('[]');
-      const normalizedPath = isTopLevelArray ? n.path.slice(0, -2) : n.path;
+      // Guard: stripped path must have no '.' (confirming it's truly top-level, not 'parent.items[]').
+      const strippedPath = n.path.endsWith('[]') ? n.path.slice(0, -2) : n.path;
+      const isTopLevelArray =
+        n.path.endsWith('[]') && !strippedPath.includes('[]') && !strippedPath.includes('.');
+      const normalizedPath = isTopLevelArray ? strippedPath : n.path;
       if (!normalizedPath.includes('[]')) {
         const leaf = normalizedPath.split('.').pop() ?? '';
         if (leaf && !declaredTypeByLeaf[leaf]) declaredTypeByLeaf[leaf] = n.type;
       }
     }
   } catch {}
-  // Include top-level array required nodes (path ends with '[]', no '[]' in the base path)
+  // Include top-level array required nodes (path ends with '[]', no '[]' or '.' in the base path)
   // so that required array fields like 'moveInstructions' are not silently dropped.
-  const requiredFields = nodes.filter(
-    (n) =>
-      n.required &&
-      (!n.path.includes('[]') || (n.path.endsWith('[]') && !n.path.slice(0, -2).includes('[]'))),
-  );
+  const requiredFields = nodes.filter((n) => {
+    if (!n.required) return false;
+    if (!n.path.includes('[]')) return true;
+    const strippedPath = n.path.slice(0, -2);
+    return n.path.endsWith('[]') && !strippedPath.includes('[]') && !strippedPath.includes('.');
+  });
   // Bindings map from domain valueBindings (request.* -> parameter name).
   // Two RHS grammars are supported:
   //   1. `state.parameter`        — legacy form; parameter name is the leaf of the RHS.
