@@ -3535,7 +3535,6 @@ describeForThisConfig(
         }
 
         interface FeatureScenarioFile {
-          endpoint: { operationId: string };
           scenarios: {
             id: string;
             requestPlan?: { operationId: string; bodyTemplate?: Record<string, unknown> }[];
@@ -3552,10 +3551,10 @@ describeForThisConfig(
             if (!f.endsWith('-scenarios.json')) continue;
             // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
             const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as FeatureScenarioFile;
-            const objectFields = objectFieldsByOp.get(file.endpoint?.operationId ?? '');
-            if (!objectFields) continue;
             for (const scenario of file.scenarios ?? []) {
               for (const step of scenario.requestPlan ?? []) {
+                const objectFields = objectFieldsByOp.get(step.operationId);
+                if (!objectFields) continue;
                 for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
                   if (objectFields.has(field) && typeof value === 'string' && templatePattern.test(value)) {
                     offenders.push({ file: f, scenario: scenario.id, field, value });
