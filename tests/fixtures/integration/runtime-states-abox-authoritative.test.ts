@@ -115,6 +115,36 @@ afterEach(() => {
 });
 
 describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain runtime sub-trees', () => {
+  it('populates graph.domain runtime sub-trees AND producersByState from the ABox even when no domain-semantics.json is shipped (Lift 8-style ABox-authoritative)', async () => {
+    writeWorkspace({
+      // No domain-semantics.json sidecar at all.
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'AboxOnlyState', producedBy: ['createDeployment'] }],
+        operationRequirements: [
+          {
+            operationId: 'createProcessInstance',
+            requires: ['AboxOnlyState'],
+            produces: ['DerivedState'],
+          },
+        ],
+      },
+      graphOps: ops(),
+    });
+    const graph = await loadGraph(baseDir);
+    // graph.domain populated from the ABox.
+    expect(Object.keys(graph.domain?.runtimeStates ?? {})).toEqual(['AboxOnlyState']);
+    expect(graph.domain?.operationRequirements?.createProcessInstance?.requires).toEqual([
+      'AboxOnlyState',
+    ]);
+    // producersByState built from the ABox (the consumer-loop fix).
+    expect(graph.producersByState?.AboxOnlyState).toEqual(['createDeployment']);
+    expect(graph.producersByState?.DerivedState).toEqual(['createProcessInstance']);
+    // node.domain* setters fired from the ABox.
+    expect(graph.operations.createProcessInstance?.domainRequiresAll).toEqual(['AboxOnlyState']);
+    expect(graph.operations.createProcessInstance?.domainProduces).toContain('DerivedState');
+  });
+
   it('overrides domain-semantics.json runtimeStates+operationRequirements with ABox values (promote) AND propagates to producersByState', async () => {
     writeWorkspace({
       domainSemantics: {

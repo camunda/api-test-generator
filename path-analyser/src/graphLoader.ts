@@ -566,6 +566,80 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
   if (runtimeStatesAboxPresent) postOverlayReValidationNeeded = true;
+
+  // Lift 6 / #214: when the runtime-states ABox is shipped but no
+  // legacy `domain-semantics.json` sidecar exists (the future
+  // Lift 8-style ABox-authoritative configs, and any test fixture
+  // that exercises ABox-only loading), the consumer logic that lives
+  // inside the legacy try block above is never reached — leaving
+  // `graph.domain.runtimeStates`, `graph.domain.operationRequirements`,
+  // `producersByState`, and `node.domainRequiresAll`/etc. all
+  // unpopulated even though the ABox declares them. Mirror the
+  // artifact-kinds post-try overlay here: synthesize a minimal
+  // `domain` from the ABox views and re-run the same consumer logic
+  // against it. Only runtime-states + operationRequirements come
+  // from this ABox; semanticTypes/capabilities/identifiers stay
+  // legacy-only until Lift 7, so the witness-implication loop and
+  // capability/identifier producer expansion are intentionally
+  // omitted (they are no-ops without a legacy sidecar).
+  if (runtimeStatesAboxPresent && !legacyDomainLoaded) {
+    const views = deriveRuntimeStatesViews(repoRoot);
+    if (views !== null) {
+      const baseDomain: DomainSemantics = domain ?? { version: 1 };
+      domain = {
+        ...baseDomain,
+        runtimeStates: views.runtimeStates,
+        operationRequirements: views.operationRequirements,
+      };
+      // node.domainRequiresAll / domainDisjunctions / domainProduces /
+      // domainImplicitAdds setters — same shape as the in-try loop.
+      for (const [opId, req] of Object.entries(views.operationRequirements)) {
+        const node = operations[opId];
+        if (!node) continue;
+        if (req.requires) node.domainRequiresAll = req.requires;
+        if (req.disjunctions) node.domainDisjunctions = req.disjunctions;
+        if (req.produces) node.domainProduces = req.produces;
+        if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
+      }
+      // producersByState builder — same dedup contract as the in-try
+      // builder. Surfaces `domainProduces` on the producing nodes too,
+      // so semantic BFS sees the same picture.
+      const producers: Record<string, string[]> = producersByState ?? {};
+      producersByState = producers;
+      const addProducer = (state: string, opId: string) => {
+        const list = producers[state] ?? [];
+        if (!list.includes(opId)) list.push(opId);
+        producers[state] = list;
+        const node = operations[opId];
+        if (node) {
+          if (!node.domainProduces) node.domainProduces = [state];
+          else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
+        }
+      };
+      for (const [stateName, spec] of Object.entries(views.runtimeStates)) {
+        for (const opId of spec.producedBy ?? []) {
+          if (operations[opId]) addProducer(stateName, opId);
+        }
+      }
+      for (const [opId, spec] of Object.entries(views.operationRequirements)) {
+        if (!operations[opId]) continue;
+        for (const st of spec.produces ?? []) addProducer(st, opId);
+        for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
+      }
+      // #56 mirror: surface ABox-declared `produces` into op.produces /
+      // producersByType so semantic BFS sees them.
+      for (const [opId, spec] of Object.entries(views.operationRequirements)) {
+        const node = operations[opId];
+        if (!node) continue;
+        for (const st of spec.produces ?? []) {
+          if (!node.produces.includes(st)) node.produces.push(st);
+          const list = producersByType[st] ?? [];
+          if (!list.includes(opId)) list.push(opId);
+          producersByType[st] = list;
+        }
+      }
+    }
+  }
   // Re-run the cross-reference invariants from `validateDomainSemantics`
   // against the post-overlay value, but only when a legacy
   // `domain-semantics.json` sidecar was loaded. The pre-overlay
