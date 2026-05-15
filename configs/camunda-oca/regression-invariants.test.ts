@@ -4248,3 +4248,250 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-references (#210)', () => {
+  // Lift 4 / #210: the entity-kinds ABox is now the authoritative
+  // source for `graph.externalEntityIdentifiers` (and, transitionally,
+  // for the inventory of in-API entity kinds). These invariants are
+  // the locality-loss replacement signal: where the spec gave us
+  // "missing annotation lints at the operation site" for free, we
+  // now manufacture the same completeness signal as named L3
+  // assertions over ABox + spec + bundled graph. See #210 §4b/§4c
+  // for the rationale and the two-sense framing of drift.
+
+  it('loads the entity-kinds ABox via the generic loader (proves the load path)', async () => {
+    const { loadEntityKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadEntityKindsAbox(REPO_ROOT);
+    expect(abox, 'entity-kinds ABox file must exist for the camunda-oca config').not.toBeNull();
+    expect(abox?.kinds.length).toBeGreaterThan(0);
+  });
+
+  it('every kind name in the ABox appears in the spec semantic-kinds.json (sense-1: spec-vs-abox, ABox-stale)', async () => {
+    // Transitional check (Lift 4 §4b sense 1). Becomes a no-op once
+    // upstream retires `x-semantic-kind`; until then it catches
+    // typos and stale ABox entries against the live spec.
+    const { loadEntityKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadEntityKindsAbox(REPO_ROOT);
+    if (!abox) throw new Error('entity-kinds ABox missing');
+    const kindsPath = join(getSpecBundleDir(REPO_ROOT), 'semantic-kinds.json');
+    if (!existsSync(kindsPath)) {
+      throw new Error(
+        `semantic-kinds.json not found at ${kindsPath}. Run 'npm run fetch-spec' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const specKinds = JSON.parse(readFileSync(kindsPath, 'utf8')) as {
+      kinds?: { name?: unknown }[];
+    };
+    const specNames = new Set<string>();
+    for (const k of specKinds.kinds ?? []) {
+      if (k && typeof k.name === 'string') specNames.add(k.name);
+    }
+    const aboxOnly = abox.kinds.map((k) => k.name).filter((n) => !specNames.has(n));
+    expect(
+      aboxOnly,
+      'entity-kinds ABox lists kind names that the spec semantic-kinds.json does not — either the ABox is stale or the spec was regenerated against a ref that retired the kind',
+    ).toEqual([]);
+  });
+
+  it('every non-edge kind in the spec semantic-kinds.json is listed in the ABox (sense-1: spec-vs-abox, ABox-incomplete)', async () => {
+    // Transitional check (Lift 4 §4b sense 1). Until `x-semantic-kind`
+    // retires upstream, the spec's kind list is the second source of
+    // truth — every entry that isn't an `edge` shape (edges are owned
+    // by the edges ABox post-Lift-3) must be classified by the
+    // entity-kinds ABox. Without this, a new upstream kind would
+    // ship with no domain classification and the planner would
+    // silently treat any of its identifier types as "ordinary value
+    // field, must have a producer" — usually wrong for external
+    // entities and silently wrong for in-API entities.
+    const { loadEntityKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadEntityKindsAbox(REPO_ROOT);
+    if (!abox) throw new Error('entity-kinds ABox missing');
+    const kindsPath = join(getSpecBundleDir(REPO_ROOT), 'semantic-kinds.json');
+    if (!existsSync(kindsPath)) {
+      throw new Error(
+        `semantic-kinds.json not found at ${kindsPath}. Run 'npm run fetch-spec' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const specKinds = JSON.parse(readFileSync(kindsPath, 'utf8')) as {
+      kinds?: { name?: unknown; shape?: unknown }[];
+    };
+    const aboxNames = new Set(abox.kinds.map((k) => k.name));
+    const specOnly: string[] = [];
+    for (const k of specKinds.kinds ?? []) {
+      if (k && typeof k.name === 'string' && k.shape !== 'edge' && !aboxNames.has(k.name)) {
+        specOnly.push(k.name);
+      }
+    }
+    expect(
+      specOnly,
+      "spec semantic-kinds.json lists non-edge kind names that the entity-kinds ABox does not classify — add the kind to configs/<config>/ontology/entity-kinds.json (or, if it's an edge kind, to edges.json instead)",
+    ).toEqual([]);
+  });
+
+  it('every kind in the ABox has at least one identifier referenced by some operation in the bundled graph (sense-2: abox-vs-graph, ABox-stale-vs-use)', async () => {
+    // Durable check (Lift 4 §4b sense 2). Survives the upstream
+    // retirement of `x-semantic-kind` because it grounds drift in
+    // actual runtime use of the bundled graph: a kind whose
+    // identifier types appear nowhere in produces/requires/
+    // establishes is dead weight in this API.
+    const { loadEntityKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadEntityKindsAbox(REPO_ROOT);
+    if (!abox) throw new Error('entity-kinds ABox missing');
+    if (!existsSync(GRAPH_PATH)) {
+      throw new Error(`Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`);
+    }
+    interface GraphOp {
+      operationId?: string;
+      requires?: { required?: unknown; optional?: unknown };
+      produces?: unknown;
+      establishes?: { identifiedBy?: { semanticType?: unknown }[] };
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+      operationsById?: Record<string, GraphOp>;
+      operations?: Record<string, GraphOp> | GraphOp[];
+    };
+    const ops: GraphOp[] = graph.operationsById
+      ? Object.values(graph.operationsById)
+      : Array.isArray(graph.operations)
+        ? graph.operations
+        : Object.values(graph.operations ?? {});
+    const referenced = new Set<string>();
+    for (const op of ops) {
+      if (Array.isArray(op.produces))
+        for (const t of op.produces) if (typeof t === 'string') referenced.add(t);
+      const req = op.requires;
+      if (req && typeof req === 'object') {
+        if (Array.isArray(req.required))
+          for (const t of req.required) if (typeof t === 'string') referenced.add(t);
+        if (Array.isArray(req.optional))
+          for (const t of req.optional) if (typeof t === 'string') referenced.add(t);
+      }
+      const est = op.establishes;
+      if (est && Array.isArray(est.identifiedBy)) {
+        for (const id of est.identifiedBy) {
+          if (id && typeof id.semanticType === 'string') referenced.add(id.semanticType);
+        }
+      }
+    }
+    const dead = abox.kinds.filter((k) => !k.identifiers.some((t) => referenced.has(t)));
+    expect(
+      dead.map((k) => ({ kind: k.name, identifiers: k.identifiers })),
+      'entity-kinds ABox lists kinds whose identifier types are not referenced by any operation in the bundled graph — either remove the kind or add an operation that consumes one of its identifiers',
+    ).toEqual([]);
+  });
+
+  it('every semantic identifier type used in any op.establishes.identifiedBy[] is claimed by some kind in the ABox (sense-2: abox-vs-graph, ABox-incomplete-vs-use)', async () => {
+    // Durable check (Lift 4 §4b/§4c sense 2). This is the locality-
+    // loss replacement signal in its strongest form: when an upstream
+    // PR adds a new `x-semantic-establishes.identifiedBy` whose
+    // semanticType refers to a new identifier kind we forgot to
+    // classify in the ABox, this invariant fails immediately with the
+    // offending type. Without it, the new identifier would silently
+    // fall through to the "ordinary value field" path and the
+    // planner's kind-aware behaviour (externalBoundary
+    // short-circuit, identifier minting) would no longer apply.
+    const { loadEntityKindsAbox, loadEdgesAbox } = await import(
+      '../../path-analyser/src/ontology/loader.js'
+    );
+    const entityAbox = loadEntityKindsAbox(REPO_ROOT);
+    if (!entityAbox) throw new Error('entity-kinds ABox missing');
+    const edgesAbox = loadEdgesAbox(REPO_ROOT);
+    if (!existsSync(GRAPH_PATH)) {
+      throw new Error(`Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`);
+    }
+    interface GraphOp {
+      operationId?: string;
+      establishes?: { identifiedBy?: { semanticType?: unknown }[] };
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+      operationsById?: Record<string, GraphOp>;
+      operations?: Record<string, GraphOp> | GraphOp[];
+    };
+    const ops: GraphOp[] = graph.operationsById
+      ? Object.values(graph.operationsById)
+      : Array.isArray(graph.operations)
+        ? graph.operations
+        : Object.values(graph.operations ?? {});
+    // Union of every identifier-shaped semantic type appearing in any
+    // op's establish-identifiedBy list.
+    const identifierTypes = new Set<string>();
+    for (const op of ops) {
+      const ids = op.establishes?.identifiedBy ?? [];
+      for (const id of ids) {
+        if (id && typeof id.semanticType === 'string') identifierTypes.add(id.semanticType);
+      }
+    }
+    // Set of every identifier type claimed by some entity-kinds ABox kind
+    // (or, for edge kinds, by the edges ABox's identifiedBy tuples — edges
+    // own their own identifier classification post-Lift-3).
+    const claimed = new Set<string>();
+    for (const k of entityAbox.kinds) for (const t of k.identifiers) claimed.add(t);
+    for (const e of edgesAbox?.edges ?? []) for (const t of e.identifiedBy) claimed.add(t);
+    const unclassified = [...identifierTypes].filter((t) => !claimed.has(t));
+    expect(
+      unclassified,
+      "semantic identifier type(s) appear in some op's x-semantic-establishes.identifiedBy[] but are not claimed by any kind in the entity-kinds ABox or the edges ABox — add the type to a kind's identifiers[] in configs/<config>/ontology/entity-kinds.json (or, for edge identifiers, to the appropriate edge's identifiedBy in edges.json)",
+    ).toEqual([]);
+  });
+
+  it('graph.externalEntityIdentifiers is sourced from the entity-kinds ABox (planner contract)', async () => {
+    // Closes the loop: the loader is supposed to source
+    // graph.externalEntityIdentifiers from the entity-kinds ABox's
+    // `external-entity` kinds. If a future change causes the loader
+    // to silently fall back to the legacy spec-emitted kindRegistry
+    // path (e.g. ABox file moves and ENOENT swallows the error),
+    // this invariant fails by direct comparison.
+    const { loadEntityKindsAbox, loadGraph } = await import(
+      '../../path-analyser/src/ontology/loader.js'
+    ).then(async (m) => ({
+      ...m,
+      loadGraph: (await import('../../path-analyser/src/graphLoader.js')).loadGraph,
+    }));
+    const abox = loadEntityKindsAbox(REPO_ROOT);
+    if (!abox) throw new Error('entity-kinds ABox missing');
+    const expected = new Set<string>();
+    for (const k of abox.kinds) {
+      if (k.shape === 'external-entity') for (const t of k.identifiers) expected.add(t);
+    }
+    const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+    const actual = graph.externalEntityIdentifiers ?? new Set<string>();
+    expect(
+      [...actual].sort(),
+      'graph.externalEntityIdentifiers does not match the union of identifiers across `external-entity` kinds in the entity-kinds ABox',
+    ).toEqual([...expected].sort());
+  });
+
+  it('the committed entity-kinds vocabulary JSON matches the regenerated TBox (drift detector)', async () => {
+    const { ARTIFACTS, renderSchema } = await import('../../scripts/build-ontology.ts');
+    const target = ARTIFACTS.find((a) => a.jsonPath.endsWith('entity-kinds.schema.json'));
+    expect(target, 'build-ontology must include entity-kinds.schema.json').toBeDefined();
+    if (!target) return;
+    const onDisk = readFileSync(target.jsonPath, 'utf8');
+    const rendered = renderSchema(target.schema);
+    expect(
+      onDisk,
+      `Generated ontology artefact at ${target.jsonPath} is stale. Run 'npm run build:ontology' to refresh it.`,
+    ).toBe(rendered);
+  });
+
+  it("the entity-kinds ABox's $schema field resolves to the published TBox JSON", () => {
+    const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'entity-kinds.json');
+    const expectedTboxPath = join(REPO_ROOT, 'ontology', 'vocabulary', 'entity-kinds.schema.json');
+    interface AboxHeader {
+      $schema?: unknown;
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8')) as AboxHeader;
+    const schemaField = aboxJson.$schema;
+    expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
+    if (typeof schemaField !== 'string') return;
+    expect(schemaField).toBe(
+      'https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json',
+    );
+    void expectedTboxPath;
+  });
+});

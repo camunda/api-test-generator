@@ -4,6 +4,7 @@ import { Ajv, type ErrorObject } from 'ajv';
 import type { FromSchema } from 'json-schema-to-ts';
 import { getActiveConfigDir } from '../configResolver.js';
 import { edgeSchema } from './edgeSchema.js';
+import { entityKindsSchema } from './entityKindsSchema.js';
 
 // ---------------------------------------------------------------------------
 // path-analyser/src/ontology/loader.ts
@@ -35,11 +36,15 @@ import { edgeSchema } from './edgeSchema.js';
 export type EdgesAbox = FromSchema<typeof edgeSchema>;
 export type Edge = EdgesAbox['edges'][number];
 
+export type EntityKindsAbox = FromSchema<typeof entityKindsSchema>;
+export type EntityKind = EntityKindsAbox['kinds'][number];
+
 // `Ajv` is the named export pointing at the constructor; the namespace
 // also has a self-referential default but the named export is the
 // least error-prone form under module=nodenext.
 const ajv = new Ajv({ allErrors: true, strict: false });
-const validateAbox = ajv.compile<EdgesAbox>(edgeSchema);
+const validateEdgesAbox = ajv.compile<EdgesAbox>(edgeSchema);
+const validateEntityKindsAbox = ajv.compile<EntityKindsAbox>(entityKindsSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? [])
@@ -85,9 +90,9 @@ export function loadEdgesAbox(repoRoot: string): EdgesAbox | null {
       `Failed to parse edges ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (!validateAbox(parsed)) {
+  if (!validateEdgesAbox(parsed)) {
     throw new Error(
-      `Edges ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateAbox.errors)}`,
+      `Edges ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateEdgesAbox.errors)}`,
     );
   }
   // ajv's user-defined type guard has narrowed `parsed` to EdgesAbox.
@@ -126,6 +131,101 @@ export function loadEdgeEstablishers(repoRoot: string): Set<string> | null {
   const set = new Set<string>();
   for (const e of abox.edges) {
     set.add(e.establishedBy);
+  }
+  return set;
+}
+
+/**
+ * Load and validate the entity-kinds ABox file for the active config.
+ *
+ * Lift 4 / #210: the entity-kinds ABox is the authoritative runtime
+ * source for the inventory of entity kinds (the domain nouns) and
+ * their classifier (`entity` vs `external-entity`) per the principle
+ * landed in #198. The upstream spec's `kindRegistry` payload (built
+ * from `x-semantic-kind` annotations) becomes a transitional fallback
+ * for unmigrated configs; once the ABox is shipped it is consulted
+ * exclusively.
+ *
+ * @param repoRoot Absolute path to the api-test-generator repository root.
+ * @returns The parsed ABox, or `null` if the file does not exist (configs
+ *   are not required to ship one; a missing file leaves the legacy
+ *   spec-driven `kindRegistry` path active).
+ * @throws if the file exists but does not validate against the TBox, or
+ *   if it contains duplicate `name` values.
+ */
+export function loadEntityKindsAbox(repoRoot: string): EntityKindsAbox | null {
+  // Symmetric with `loadEdgesAbox` — tests that exercise loadGraph
+  // against an isolated tmpDir don't ship a `configs.json`, and the
+  // right fallback there is "no ABox available" so the test exercises
+  // the legacy spec-driven path.
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'entity-kinds.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse entity-kinds ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateEntityKindsAbox(parsed)) {
+    throw new Error(
+      `Entity-kinds ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateEntityKindsAbox.errors)}`,
+    );
+  }
+  // Reject duplicate `name` values up front — Draft-07 cannot express
+  // uniqueness, but a duplicate kind name would silently shadow facts
+  // at query time.
+  const names = new Map<string, number>();
+  for (const k of parsed.kinds) {
+    names.set(k.name, (names.get(k.name) ?? 0) + 1);
+  }
+  const dupes = [...names.entries()].filter(([, n]) => n > 1).map(([name]) => name);
+  if (dupes.length > 0) {
+    throw new Error(
+      `Entity-kinds ABox at ${aboxPath} has duplicate kind name(s): ${dupes.join(', ')}`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Derive the set of semantic identifier-type names that are minted
+ * outside the API (`shape: 'external-entity'` kinds), sourced from the
+ * entity-kinds ABox.
+ *
+ * The planner consults this set in two places:
+ *   - `bindSemanticInput.ts` classifies these types as `'externalBoundary'`.
+ *   - `scenarioGenerator.ts` short-circuits the upstream-producer
+ *     search for them.
+ *
+ * @returns A Set of identifier-type names, or `null` if no entity-kinds
+ *   ABox exists for the active config (in which case the caller falls
+ *   back to the spec-emitted `kindRegistry` for backward compatibility).
+ */
+export function loadExternalEntityIdentifiers(repoRoot: string): Set<string> | null {
+  const abox = loadEntityKindsAbox(repoRoot);
+  if (abox === null) return null;
+  const set = new Set<string>();
+  for (const k of abox.kinds) {
+    if (k.shape === 'external-entity') {
+      for (const id of k.identifiers) {
+        set.add(id);
+      }
+    }
   }
   return set;
 }

@@ -7,7 +7,11 @@ import {
   validateRequestBodySemanticsClassified,
   validateRuntimeStateWitnessGraphRefs,
 } from './domainSemanticsValidator.js';
-import { loadEdgeEstablishers } from './ontology/loader.js';
+import {
+  loadEdgeEstablishers,
+  loadEntityKindsAbox,
+  loadExternalEntityIdentifiers,
+} from './ontology/loader.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
 class DomainSemanticsValidationFailure extends Error {
@@ -463,16 +467,20 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
-  // Issue #134 / camunda/camunda#52320: build the external-entity
-  // identifier set from the kindRegistry payload (if any). Each kind
-  // with `shape: "external-entity"` contributes its `identifiers`
-  // (e.g. Client → ClientId) — the planner treats these as
-  // automatically client-mintable. Source the registry from the same
-  // root that yielded `candidateOps` so nested-graph layouts
-  // (`parsed.graph` / `parsed.data`) are handled consistently with
-  // the top-level layout.
+  // Lift 4 / #210: the entity-kinds ABox is the authoritative runtime
+  // source for the external-entity identifier set. Falls back to the
+  // spec-emitted `kindRegistry` (Issue #134 / camunda/camunda#52320)
+  // when no ABox is shipped — the legacy path stays alive so
+  // unmigrated configs and tests using isolated tmpDirs still work.
+  // Mirrors the Lift 3 (#208) edges-ABox pattern.
   let externalEntityIdentifiers: Set<string> | undefined;
-  if (opsRoot) {
+  const aboxExternals = loadExternalEntityIdentifiers(repoRoot);
+  if (aboxExternals !== null) {
+    if (aboxExternals.size > 0) externalEntityIdentifiers = aboxExternals;
+  } else if (opsRoot) {
+    // Source the registry from the same root that yielded `candidateOps`
+    // so nested-graph layouts (`parsed.graph` / `parsed.data`) are
+    // handled consistently with the top-level layout.
     const registry = opsRoot.kindRegistry;
     if (registry && Array.isArray(registry.kinds)) {
       const set = new Set<string>();
@@ -484,6 +492,28 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         }
       }
       if (set.size > 0) externalEntityIdentifiers = set;
+    }
+  }
+
+  // Lift 4 / #210: cross-validate the entity-kinds ABox against both
+  // the spec-emitted kindRegistry (transitional, sense 1) and the
+  // bundled-graph use-sites (durable, sense 2). The two senses have
+  // different lifetimes — sense 1 is migration scaffolding that
+  // retires when upstream drops `x-semantic-kind`; sense 2 is the
+  // permanent gate that catches "upstream added a new endpoint and
+  // we forgot to update the ABox" (the locality-loss replacement
+  // signal). See #210 §4b for the full rationale.
+  if (aboxExternals !== null) {
+    const drift = detectEntityKindsDrift(opsRoot?.kindRegistry, operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `entity-kinds ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_ENTITY_KINDS_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(
+        `WARNING: ${message}\n  (set STRICT_ENTITY_KINDS_ABOX=1 to fail-fast on drift.)`,
+      );
     }
   }
 
@@ -863,6 +893,87 @@ function detectEdgeAnnotationDrift(
       );
     }
   }
+  return drift;
+}
+
+/**
+ * Cross-validate the entity-kinds ABox against (1) the spec-emitted
+ * `kindRegistry` payload and (2) the bundled-graph use-sites. Lift 4 /
+ * #210 introduces two senses of drift with different lifetimes; both
+ * are checked here.
+ *
+ *   - **Sense 1 (transitional, `spec-vs-abox`)**: cross-checks the ABox
+ *     against the spec's `kindRegistry`. Useful migration scaffolding;
+ *     becomes a no-op once `x-semantic-kind` retires upstream.
+ *
+ *       - ABox lists kind X but kindRegistry does not.
+ *       - kindRegistry lists kind X but ABox does not.
+ *
+ *   - **Sense 2 (durable, `abox-vs-graph`)**: grounds drift in actual
+ *     runtime use of the bundled graph. Permanent gate that catches
+ *     "upstream added a new endpoint and we forgot to update the ABox".
+ *
+ *       - ABox lists kind X but no operation in the graph references
+ *         any of X's identifier types in `produces[]`, `requires[]`,
+ *         or `establishes.identifiedBy[]`. X is dead weight.
+ *
+ *   The reverse Sense-2 direction (semantic type appears in the graph
+ *   but no kind classifies it) is enforced as an L3 coverage invariant
+ *   in `configs/<config>/regression-invariants.test.ts` instead of
+ *   here, because it depends on per-config classification of which
+ *   semantic types are *identifiers* (vs ordinary value fields), which
+ *   the loader does not own.
+ */
+function detectEntityKindsDrift(
+  rawRegistry: RawGraphRoot['kindRegistry'] | undefined,
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadEntityKindsAbox(repoRoot);
+  if (abox === null) return drift;
+
+  const aboxByName = new Map(abox.kinds.map((k) => [k.name, k]));
+
+  if (rawRegistry && Array.isArray(rawRegistry.kinds)) {
+    const specByName = new Map<string, { name?: unknown }>();
+    for (const k of rawRegistry.kinds) {
+      if (k && typeof k.name === 'string') specByName.set(k.name, k);
+    }
+    for (const [name] of aboxByName) {
+      if (!specByName.has(name)) {
+        drift.push(
+          `[spec-vs-abox] ABox lists kind '${name}', but spec kindRegistry does not (transitional check; safe to ignore once spec annotation retires upstream)`,
+        );
+      }
+    }
+    for (const [name] of specByName) {
+      if (!aboxByName.has(name)) {
+        drift.push(
+          `[spec-vs-abox] spec kindRegistry lists kind '${name}', but ABox does not (ABox is authoritative; spec entry will be ignored)`,
+        );
+      }
+    }
+  }
+
+  const referencedTypes = new Set<string>();
+  for (const op of Object.values(operations)) {
+    for (const t of op.produces) referencedTypes.add(t);
+    for (const t of op.requires.required) referencedTypes.add(t);
+    for (const t of op.requires.optional) referencedTypes.add(t);
+    if (op.establishes) {
+      for (const id of op.establishes.identifiedBy) referencedTypes.add(id.semanticType);
+    }
+  }
+  for (const [name, kind] of aboxByName) {
+    const used = kind.identifiers.some((t) => referencedTypes.has(t));
+    if (!used) {
+      drift.push(
+        `[abox-vs-graph] ABox lists kind '${name}' (identifiers: ${kind.identifiers.join(', ')}), but none of those identifier types are referenced by any operation in the graph (kind is dead weight; either remove from ABox or add a consumer op)`,
+      );
+    }
+  }
+
   return drift;
 }
 

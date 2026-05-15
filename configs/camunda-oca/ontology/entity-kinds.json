@@ -1,0 +1,88 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "kinds": [
+    {
+      "@type": "EntityKind",
+      "name": "Role",
+      "shape": "entity",
+      "identifiers": [
+        "RoleId"
+      ],
+      "description": "A role entity, identified by its client-minted roleId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "User",
+      "shape": "entity",
+      "identifiers": [
+        "Username"
+      ],
+      "description": "A user entity, identified by its client-minted username."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Tenant",
+      "shape": "entity",
+      "identifiers": [
+        "TenantId"
+      ],
+      "description": "A tenant entity, identified by its client-minted tenantId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Group",
+      "shape": "entity",
+      "identifiers": [
+        "GroupId"
+      ],
+      "description": "A group entity, identified by its client-minted groupId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "MappingRule",
+      "shape": "entity",
+      "identifiers": [
+        "MappingRuleId"
+      ],
+      "description": "A mapping rule entity, identified by its client-minted mappingRuleId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "GlobalTaskListener",
+      "shape": "entity",
+      "identifiers": [
+        "GlobalListenerId"
+      ],
+      "description": "A global user task listener entity, identified by its client-minted id (a GlobalListenerId)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "GlobalClusterVariable",
+      "shape": "entity",
+      "identifiers": [
+        "ClusterVariableName"
+      ],
+      "description": "A global-scoped cluster variable, identified by its client-minted name (a ClusterVariableName). Established by createGlobalClusterVariable."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "TenantClusterVariable",
+      "shape": "entity",
+      "identifiers": [
+        "ClusterVariableName"
+      ],
+      "description": "A tenant-scoped cluster variable, identified by the (tenantId, name) tuple. Established by createTenantClusterVariable. Only ClusterVariableName is listed in 'identifiers' here because TenantId is owned by the Tenant entity and must remain single-owner for the edge-derivation rule; the Tenant requirement of tenant-scoped operations is expressed via the tenantId path parameter."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Client",
+      "shape": "external-entity",
+      "identifiers": [
+        "ClientId"
+      ],
+      "description": "An OAuth client. Minted outside the Camunda REST API: by Console in SaaS, by the configured external IdP (EntraID, Keycloak, Okta, …) in Self-Managed with OIDC. Not modelled at all under Self-Managed Basic auth, where m2m apps are users instead. Referenced by the client-membership edges only — never established or fetched via this API."
+    }
+  ]
+}
