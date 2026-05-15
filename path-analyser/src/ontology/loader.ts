@@ -261,8 +261,7 @@ export function loadExternalEntityIdentifiers(repoRoot: string): Set<string> | n
  * Load and validate the artifact-kinds ABox file for the active config.
  *
  * Lift 5 / #212: the artifact-kinds ABox is the authoritative runtime
- * source for the four artifact-related sub-trees previously carried in
- * `configs/<config>/domain-semantics.json` (`artifactKinds`,
+ * source for the four artifact-related sub-trees (`artifactKinds`,
  * `semanticTypeToArtifactKind`, `operationArtifactRules`,
  * `artifactFileKinds`). Per the principle landed in #198: artifact
  * dispatch is domain knowledge with no wire signature, so it belongs
@@ -276,18 +275,15 @@ export function loadExternalEntityIdentifiers(repoRoot: string): Set<string> | n
  * `detectArtifactKindsDrift` in `graphLoader.ts`.
  *
  * @param repoRoot Absolute path to the api-test-generator repository root.
- * @returns The parsed ABox, or `null` if the file does not exist (configs
- *   are not required to ship one; a missing file leaves the legacy
- *   `domain-semantics.json` keys authoritative for backward compatibility).
+ * @returns The parsed ABox, or `null` if the file does not exist.
  * @throws if the file exists but does not validate against the TBox, or
  *   if it contains duplicate kind / operationId / extension / semanticType
  *   keys.
  */
 export function loadArtifactKindsAbox(repoRoot: string): ArtifactKindsAbox | null {
   // Symmetric with `loadEdgesAbox` / `loadEntityKindsAbox` — tests that
-  // exercise loadGraph against an isolated tmpDir don't ship a
-  // `configs.json`, and the right fallback there is "no ABox available"
-  // so the test exercises the legacy domain-semantics.json path.
+  // exercise loadGraph against an isolated tmpDir may not ship a
+  // `configs.json`, and the right fallback there is "no ABox available".
   let aboxPath: string;
   try {
     aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'artifact-kinds.json');
@@ -369,8 +365,7 @@ function duplicates(values: string[]): string[] {
 /**
  * Derive the four record-shaped views of the artifact-kinds ABox that
  * `graph.domain.*` consumers (planner, codegen, feature-coverage)
- * expect. Returning `null` when no ABox is shipped lets `loadGraph`
- * fall back to the legacy `domain-semantics.json` keys.
+ * expect.
  */
 export interface ArtifactKindsViews {
   artifactKinds: Record<
@@ -454,19 +449,15 @@ export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews |
  * Load and validate the runtime-states ABox file for the active config.
  *
  * @param repoRoot Absolute path to the api-test-generator repository root.
- * @returns The parsed ABox, or `null` if the file does not exist (configs
- *   are not required to ship one; a missing file leaves the legacy
- *   `domain-semantics.json` `runtimeStates`/`operationRequirements` keys
- *   authoritative for backward compatibility).
+ * @returns The parsed ABox, or `null` if the file does not exist.
  * @throws if the file exists but does not validate against the TBox, or
  *   if it contains duplicate state names or duplicate operationRequirements
  *   entries.
  */
 export function loadRuntimeStatesAbox(repoRoot: string): RuntimeStatesAbox | null {
   // Symmetric with the other loadXxxAbox helpers — tests that exercise
-  // loadGraph against an isolated tmpDir don't ship a `configs.json`,
-  // and the right fallback there is "no ABox available" so the test
-  // exercises the legacy domain-semantics.json path.
+  // loadGraph against an isolated tmpDir may not ship a `configs.json`,
+  // and the right fallback there is "no ABox available".
   let aboxPath: string;
   try {
     aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'runtime-states.json');
@@ -528,9 +519,7 @@ export function loadRuntimeStatesAbox(repoRoot: string): RuntimeStatesAbox | nul
 /**
  * Derive the two record-shaped views of the runtime-states ABox that
  * `graph.domain.*` consumers (planner BFS, value-binding emitter,
- * witness machinery) expect. Returning `null` when no ABox is shipped
- * lets `loadGraph` fall back to the legacy `domain-semantics.json`
- * keys.
+ * witness machinery) expect.
  */
 export interface RuntimeStatesViews {
   runtimeStates: Record<
@@ -602,10 +591,7 @@ export function deriveRuntimeStatesViews(repoRoot: string): RuntimeStatesViews |
  * capabilities + identifiers) for the active config.
  *
  * @param repoRoot Absolute path to the api-test-generator repository root.
- * @returns The parsed ABox, or `null` if the file does not exist
- *   (configs are not required to ship one; a missing file leaves the
- *   legacy `domain-semantics.json` `semanticTypes` / `capabilities` /
- *   `identifiers` keys authoritative for backward compatibility).
+ * @returns The parsed ABox, or `null` if the file does not exist.
  * @throws if the file exists but does not validate against the TBox,
  *   if it contains duplicate names within any sub-tree, or if a
  *   cross-property invariant is violated (e.g. `kind: 'attribute'`
@@ -613,9 +599,8 @@ export function deriveRuntimeStatesViews(repoRoot: string): RuntimeStatesViews |
  */
 export function loadSemanticsAbox(repoRoot: string): SemanticsAbox | null {
   // Symmetric with the other loadXxxAbox helpers — tests that exercise
-  // loadGraph against an isolated tmpDir don't ship a `configs.json`,
-  // and the right fallback there is "no ABox available" so the test
-  // exercises the legacy domain-semantics.json path.
+  // loadGraph against an isolated tmpDir may not ship a `configs.json`,
+  // and the right fallback there is "no ABox available".
   let aboxPath: string;
   try {
     aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'semantics.json');
@@ -686,9 +671,7 @@ export function loadSemanticsAbox(repoRoot: string): SemanticsAbox | null {
 /**
  * Derive the three record-shaped views of the semantics ABox that
  * `graph.domain.*` consumers (planner BFS, value-binding emitter,
- * #70 witness-implication loop) expect. Returning `null` when no ABox
- * is shipped lets `loadGraph` fall back to the legacy
- * `domain-semantics.json` keys.
+ * #70 witness-implication loop) expect.
  */
 export interface SemanticsViews {
   semanticTypes: Record<

@@ -166,7 +166,7 @@ describe('loadSemanticsAbox: documented branches', () => {
 });
 
 describe('deriveSemanticsViews: record-shaped views', () => {
-  it('returns null when no ABox is shipped (caller falls back to domain-semantics.json)', () => {
+  it('returns null when no ABox is shipped', () => {
     expect(deriveSemanticsViews(workdir)).toBeNull();
   });
 

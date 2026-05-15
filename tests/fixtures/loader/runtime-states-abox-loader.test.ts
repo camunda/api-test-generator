@@ -143,7 +143,7 @@ describe('loadRuntimeStatesAbox: documented branches', () => {
 });
 
 describe('deriveRuntimeStatesViews: record-shaped views', () => {
-  it('returns null when no ABox is shipped (caller falls back to domain-semantics.json)', () => {
+  it('returns null when no ABox is shipped', () => {
     expect(deriveRuntimeStatesViews(workdir)).toBeNull();
   });
 

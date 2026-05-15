@@ -1,41 +1,29 @@
 /**
  * Integration fixture for Lift 6 (#214): the runtime-states ABox is
  * the authoritative source for `graph.domain.runtimeStates` and
- * `graph.domain.operationRequirements` at runtime, AND the values it
- * declares are seen by the producersByState-building loop and the
- * `node.domainRequiresAll` / `domainImplicitAdds` / `domainProduces`
- * setters inside loadGraph (because the overlay happens inside the
- * try block, not in the post-try block where artifact-kinds lives).
+ * `graph.domain.operationRequirements` at runtime, and the values it
+ * declares are reflected in the producer/setter indexes loadGraph
+ * builds.
  *
  * Mirrors `artifact-kinds-abox-authoritative.test.ts` (Lift 5 / #212).
  *
- * Six observable behaviours guarded here:
+ * Four observable behaviours guarded here:
  *
- *   1. **ABox authoritative — promotes**: `domain-semantics.json`
- *      declares one set of runtimeStates; the ABox declares a
- *      different set. After loadGraph, `graph.domain.runtimeStates`
- *      reflects the ABox AND `producersByState` is built from the
- *      ABox values.
+ *   1. **ABox-only graph population**: the runtime-states ABox
+ *      populates `graph.domain.runtimeStates`,
+ *      `graph.domain.operationRequirements`, and the dependent
+ *      producer/setter indexes.
  *
  *   2. **Strict mode**: with `STRICT_RUNTIME_STATES_ABOX=1`, an
  *      abox-vs-graph drift (producedBy referencing a nonexistent
  *      opId) is a hard error.
  *
- *   3. **Legacy fallback**: with no ABox shipped, the legacy
- *      `domain-semantics.json` keys remain authoritative.
- *
- *   4. **Sense-2 drift warnings**: dead-state / dangling-opId
+ *   3. **Sense-2 drift warnings**: dead-state / dangling-opId
  *      references are flagged.
  *
- *   5. **Post-overlay re-validation**: an ABox that introduces an
+ *   4. **Cross-ABox validation**: an ABox that introduces an
  *      `operationRequirements.disjunctions` member referencing an
- *      undeclared state is rejected, even when the legacy sidecar
- *      didn't have that member at all.
- *
- *   6. **ABox supersedes stale legacy**: a legacy sidecar that
- *      contains a `runtimeStates` entry referencing a state that
- *      _itself_ no longer exists in the ABox does NOT fail load —
- *      because pre-overlay validation overlays the ABox values.
+ *      undeclared state is rejected.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,7 +44,6 @@ const ORIGINAL = {
 
 function writeWorkspace(opts: {
   runtimeStatesAbox: object | null;
-  domainSemantics?: object;
   graphOps: Record<string, unknown>;
 }): void {
   const repoRoot = workdir;
@@ -68,9 +55,6 @@ function writeWorkspace(opts: {
   );
   const configDir = join(repoRoot, 'configs', CONFIG_NAME);
   mkdirSync(configDir, { recursive: true });
-  if (opts.domainSemantics !== undefined) {
-    writeFileSync(join(configDir, 'domain-semantics.json'), JSON.stringify(opts.domainSemantics));
-  }
   if (opts.runtimeStatesAbox !== null) {
     const aboxDir = join(configDir, 'ontology');
     mkdirSync(aboxDir, { recursive: true });
@@ -115,9 +99,8 @@ afterEach(() => {
 });
 
 describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain runtime sub-trees', () => {
-  it('populates graph.domain runtime sub-trees AND producersByState from the ABox even when no domain-semantics.json is shipped (Lift 8-style ABox-authoritative)', async () => {
+  it('populates graph.domain runtime sub-trees AND producersByState from the ABox', async () => {
     writeWorkspace({
-      // No domain-semantics.json sidecar at all.
       runtimeStatesAbox: {
         version: 1,
         states: [{ name: 'AboxOnlyState', producedBy: ['createDeployment'] }],
@@ -132,31 +115,18 @@ describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain r
       graphOps: ops(),
     });
     const graph = await loadGraph(baseDir);
-    // graph.domain populated from the ABox.
     expect(Object.keys(graph.domain?.runtimeStates ?? {})).toEqual(['AboxOnlyState']);
     expect(graph.domain?.operationRequirements?.createProcessInstance?.requires).toEqual([
       'AboxOnlyState',
     ]);
-    // producersByState built from the ABox (the consumer-loop fix).
     expect(graph.producersByState?.AboxOnlyState).toEqual(['createDeployment']);
     expect(graph.producersByState?.DerivedState).toEqual(['createProcessInstance']);
-    // node.domain* setters fired from the ABox.
     expect(graph.operations.createProcessInstance?.domainRequiresAll).toEqual(['AboxOnlyState']);
     expect(graph.operations.createProcessInstance?.domainProduces).toContain('DerivedState');
   });
 
-  it('overrides domain-semantics.json runtimeStates+operationRequirements with ABox values (promote) AND propagates to producersByState', async () => {
+  it('propagates runtime-state producers and operationRequirements from the ABox into graph indexes', async () => {
     writeWorkspace({
-      domainSemantics: {
-        version: 1,
-        // Legacy declares one state. ABox declares a different one.
-        runtimeStates: {
-          LegacyOnlyState: { kind: 'state', producedBy: ['createDeployment'] },
-        },
-        operationRequirements: {
-          createProcessInstance: { requires: ['LegacyOnlyState'] },
-        },
-      },
       runtimeStatesAbox: {
         version: 1,
         states: [{ name: 'AboxState', producedBy: ['createDeployment'] }],
@@ -165,22 +135,17 @@ describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain r
       graphOps: ops(),
     });
     const graph = await loadGraph(baseDir);
-    // graph.domain reflects the ABox.
     expect(Object.keys(graph.domain?.runtimeStates ?? {})).toEqual(['AboxState']);
     expect(graph.domain?.operationRequirements?.createProcessInstance?.requires).toEqual([
       'AboxState',
     ]);
-    // producersByState is built INSIDE the try block from the overlaid value.
     expect(graph.producersByState?.AboxState).toEqual(['createDeployment']);
-    expect(graph.producersByState?.LegacyOnlyState).toBeUndefined();
-    // node.domainRequiresAll picks up the ABox-overlaid operationRequirements.
     expect(graph.operations.createProcessInstance?.domainRequiresAll).toEqual(['AboxState']);
   });
 
   it('hard-errors on abox-vs-graph drift when STRICT_RUNTIME_STATES_ABOX=1', async () => {
     process.env.STRICT_RUNTIME_STATES_ABOX = '1';
     writeWorkspace({
-      domainSemantics: { version: 1 },
       runtimeStatesAbox: {
         version: 1,
         states: [
@@ -194,33 +159,14 @@ describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain r
     await expect(loadGraph(baseDir)).rejects.toThrow(/runtime-states ABox drift detected/);
   });
 
-  it('preserves legacy domain-semantics.json runtime sub-trees when no ABox is shipped', async () => {
-    writeWorkspace({
-      runtimeStatesAbox: null,
-      domainSemantics: {
-        version: 1,
-        runtimeStates: { LegacyState: { kind: 'state', producedBy: ['createDeployment'] } },
-        operationRequirements: {
-          createProcessInstance: { requires: ['LegacyState'] },
-        },
-      },
-      graphOps: ops(),
-    });
-    const graph = await loadGraph(baseDir);
-    expect(graph.domain?.runtimeStates?.LegacyState).toBeDefined();
-    expect(graph.producersByState?.LegacyState).toEqual(['createDeployment']);
-  });
-
   it('warns on dangling opIds (sense-2 abox-vs-graph)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeWorkspace({
-      domainSemantics: { version: 1 },
       runtimeStatesAbox: {
         version: 1,
         states: [{ name: 'UsedState', producedBy: ['createDeployment'] }],
         operationRequirements: [
           { operationId: 'createProcessInstance', requires: ['UsedState'] },
-          // Dangling opId
           { operationId: 'nonexistentOp', requires: ['UsedState'] },
         ],
       },
@@ -234,11 +180,8 @@ describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain r
     warn.mockRestore();
   });
 
-  it('post-overlay validation rejects an ABox that introduces a disjunctions member referencing an undeclared state (the validator sees the merged authoritative view)', async () => {
+  it('rejects a disjunction that references an undeclared state', async () => {
     writeWorkspace({
-      domainSemantics: {
-        version: 1,
-      },
       runtimeStatesAbox: {
         version: 1,
         states: [{ name: 'DeclaredState', producedBy: ['createDeployment'] }],
@@ -253,33 +196,5 @@ describe('Lift 6 (#214): runtime-states ABox is authoritative for graph.domain r
       graphOps: ops(),
     });
     await expect(loadGraph(baseDir)).rejects.toThrow(/disjunctionMemberResolves.*UndeclaredState/);
-  });
-
-  it('ABox supersedes a legacy sidecar that itself references a now-removed state (no spurious load failure)', async () => {
-    writeWorkspace({
-      domainSemantics: {
-        version: 1,
-        // Legacy declares an operationRequirements entry that references
-        // a state the legacy sidecar's runtimeStates no longer declares.
-        // Without the pre-overlay overlay, validateDomainSemantics would
-        // fail on this stale entry. With the overlay, the ABox values
-        // are validated instead.
-        runtimeStates: {
-          StaleStateName: { kind: 'state', producedBy: ['createDeployment'] },
-        },
-        operationRequirements: {
-          createProcessInstance: { disjunctions: [['StaleStateName', 'GoneState']] },
-        },
-      },
-      runtimeStatesAbox: {
-        version: 1,
-        states: [{ name: 'AboxState', producedBy: ['createDeployment'] }],
-        operationRequirements: [{ operationId: 'createProcessInstance', requires: ['AboxState'] }],
-      },
-      graphOps: ops(),
-    });
-    const graph = await loadGraph(baseDir);
-    expect(Object.keys(graph.domain?.runtimeStates ?? {})).toEqual(['AboxState']);
-    expect(graph.operations.createProcessInstance?.domainRequiresAll).toEqual(['AboxState']);
   });
 });

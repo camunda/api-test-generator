@@ -28,11 +28,9 @@
 // than inter-file ones.
 //
 // Like Lifts 5 and 6, the data was never sourced from upstream
-// OpenAPI annotations — it has always lived in the per-config
-// `domain-semantics.json` sidecar. Consequence: there is no
-// `spec-vs-abox` (sense-1) drift to detect. The ABox supersedes the
-// legacy `domain-semantics.json` keys when present; coverage gates
-// check the durable `abox-vs-graph` (sense-2) invariants only
+// OpenAPI annotations — it has always lived in per-config ontology
+// data. Consequence: there is no `spec-vs-abox` (sense-1) drift to
+// detect. Coverage gates check the durable `abox-vs-graph` (sense-2) invariants only
 // (referenced opIds exist in the graph, witness/dependsOn/validityState/
 // derivedVia targets resolve).
 //

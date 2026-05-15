@@ -318,7 +318,7 @@ function renderScenarioTest(
   //      trust the planner's list verbatim.
   //
   //   2. Config-driven (`globalContextSeeds`, sourced from
-  //      `domain-semantics.json`): every emitted scenario must seed
+  //      the global-context-seeds ABox): every emitted scenario must seed
   //      certain universal bindings (e.g. the default-tenant identifier
   //      under single-tenant mode). Handled by the "universal-seed
   //      prologue" further down.
@@ -359,7 +359,7 @@ function renderScenarioTest(
       body.push(`  if (ctx['${k}'] === undefined) { ctx['${k}'] = seedBinding('${k}'); }`);
     }
   }
-  // Universal-seed prologue derived from domain-semantics.json#globalContextSeeds.
+  // Universal-seed prologue derived from the global-context-seeds ABox.
   // Each entry emits a single nullish-coalesced assignment that is idempotent
   // over both bindings-loop outcomes above:
   //   - literal binding (`ctx['<k>'] = "value";`) — `??` short-circuits, value preserved

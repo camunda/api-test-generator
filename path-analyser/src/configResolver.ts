@@ -3,7 +3,7 @@ import path from 'node:path';
 
 /**
  * Resolves the directory holding the active generator configuration's
- * sidecar files (domain-semantics.json, filter-providers.json,
+ * per-config generator files (ontology ABoxes, filter-providers.json,
  * request-defaults.json, spec-pin.json).
  *
  * The active config name comes from `process.env.CONFIG`. If unset,

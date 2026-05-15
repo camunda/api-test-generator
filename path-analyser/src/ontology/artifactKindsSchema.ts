@@ -15,14 +15,12 @@
 // kinds* an API can deploy and the rules that map operations and
 // uploaded files to those kinds. Today (camunda-oca) this means BPMN
 // processes, DMN decisions, DMN DRDs, and forms; the four sub-trees
-// were carried in `configs/<config>/domain-semantics.json` until this
-// lift moved them to a per-config ontology ABox.
+// now live in a per-config ontology ABox.
 //
 // Unlike Lifts 3 and 4, the data was never sourced from upstream
-// OpenAPI annotations — it has always lived in the per-config sidecar.
+// OpenAPI annotations — it has always lived in per-config data.
 // Consequence: there is no `spec-vs-abox` (sense-1) drift to detect.
-// The ABox supersedes the legacy `domain-semantics.json` keys when
-// present; coverage gates check the durable `abox-vs-graph` (sense-2)
+// Coverage gates check the durable `abox-vs-graph` (sense-2)
 // invariants only (kinds reach the graph; rules reference real ops; no
 // dead kinds).
 //
@@ -61,7 +59,7 @@ export const artifactKindsSchema = {
   $id: 'https://camunda.github.io/api-test-generator/ns/v1/artifact-kinds.schema.json',
   title: 'Artifact-kinds ABox (api-test-generator ontology, v1)',
   description:
-    'TBox JSON Schema for an ABox file describing the artifact kinds an API can deploy plus the rules that classify operations and uploaded files into those kinds. Each entry asserts: an artifact kind exists with a stable identifier-type and deployment-slice list; a semantic-type maps to a single artifact kind; an operation deploys one or more artifact kinds (optionally composable); a file extension classifies as one or more candidate kinds. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/artifact-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (operationIds existing, artifact kind names being internally consistent across rules / semanticTypeMap / fileExtensionMap, kinds being referenced by some entry) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them. Cross-references against `runtimeStates`/`semanticTypes` (sibling sub-trees in `domain-semantics.json` that the artifact-kinds ABox references via `producesStates`, `producibleStates`, and `producesSemantics`) are re-validated at load time by re-running `validateDomainSemantics` against the post-overlay `graph.domain` — see `graphLoader.ts`.',
+    'TBox JSON Schema for an ABox file describing the artifact kinds an API can deploy plus the rules that classify operations and uploaded files into those kinds. Each entry asserts: an artifact kind exists with a stable identifier-type and deployment-slice list; a semantic-type maps to a single artifact kind; an operation deploys one or more artifact kinds (optionally composable); a file extension classifies as one or more candidate kinds. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/artifact-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (operationIds existing, artifact kind names being internally consistent across rules / semanticTypeMap / fileExtensionMap, kinds being referenced by some entry) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them. Cross-references against sibling ontology sub-trees (`runtimeStates` / `semanticTypes`) referenced via `producesStates`, `producibleStates`, and `producesSemantics` are re-validated at load time by re-running `validateDomainSemantics` against `graph.domain` — see `graphLoader.ts`.',
   type: 'object',
   additionalProperties: false,
   required: ['version', 'kinds', 'semanticTypeMap', 'operationRules', 'fileExtensionMap'],

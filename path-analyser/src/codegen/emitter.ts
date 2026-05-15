@@ -17,7 +17,7 @@ export interface EmitContext {
   /**
    * Bindings that every emitted scenario must seed before its request plan
    * runs (e.g. the default-tenant identifier under single-tenant mode).
-   * Sourced from `domain-semantics.json#globalContextSeeds`. Optional so
+   * Sourced from the global-context-seeds ABox. Optional so
    * emitters that don't need universal seeding (or unit tests that exercise
    * unrelated paths) can omit it; when omitted the emitter writes no
    * universal-seed prologue and no multipart strip branches.

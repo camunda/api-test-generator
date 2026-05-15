@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { getActiveConfigDir, getGraphDir, getSpecBundleDir } from './configResolver.js';
+import { getGraphDir, getSpecBundleDir } from './configResolver.js';
 import {
   validateDomainSemantics,
   validateRequestBodySemanticsClassified,
@@ -16,7 +16,6 @@ import {
   loadEdgeEstablishers,
   loadEntityKindsAbox,
   loadExternalEntityIdentifiers,
-  loadGlobalContextSeedsAbox,
   loadRuntimeStatesAbox,
   loadSemanticsAbox,
 } from './ontology/loader.js';
@@ -324,163 +323,63 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
 
-  // Domain sidecar load (optional). The file lives under the active
-  // config directory at the repo root (see #128). `baseDir` is the
-  // path-analyser workspace, so the repo root is its parent.
+  // Per-config ontology ABoxes (optional). Each file contributes one
+  // slice of `graph.domain`; absent ABoxes simply leave that slice
+  // unset.
   let domain: DomainSemantics | undefined;
   let producersByState: Record<string, string[]> | undefined;
-  let legacyDomainLoaded = false;
-  // Determined once before the try block so the post-overlay
-  // re-validation (after the try/catch) can also see the flags.
-  const artifactAboxPresent = loadArtifactKindsAbox(repoRoot) !== null;
-  const runtimeStatesAboxPresent = loadRuntimeStatesAbox(repoRoot) !== null;
-  const semanticsAboxPresent = loadSemanticsAbox(repoRoot) !== null;
-  const globalContextSeedsAboxPresent = loadGlobalContextSeedsAbox(repoRoot) !== null;
-  try {
-    const domainPath = path.resolve(getActiveConfigDir(repoRoot), 'domain-semantics.json');
-    const domainRaw = await readFile(domainPath, 'utf8');
-    // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
-    const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;
-    // Lift 5 / #212 + Lift 6 / #214 + Lift 7 / #216 + Lift 8 / #218:
-    // when a per-config ABox is present it is the authoritative source
-    // for the corresponding sub-tree, and the post-overlay step below
-    // replaces the legacy sidecar's copy. Pre-overlay validation must
-    // therefore see the ABox values — not the legacy ones — so that:
-    //   (a) a stale legacy entry whose state name no longer exists in
-    //       the ABox cannot fail load (was the original strip
-    //       motivation); and
-    //   (b) cross-references from sub-trees that have NOT yet
-    //       migrated still resolve through the authoritative ABox
-    //       values during pre-overlay validation.
-    // Stripping alone (Lift 5's first attempt) breaks (b) because the
-    // unmigrated sub-trees still expect their cross-refs to resolve.
-    // Overlaying both pre- and post- gives one consistent view.
-    let validationTarget: DomainSemantics = parsedDomain;
-    if (
-      artifactAboxPresent ||
-      runtimeStatesAboxPresent ||
-      semanticsAboxPresent ||
-      globalContextSeedsAboxPresent
-    ) {
-      const overlaid: DomainSemantics = { ...parsedDomain };
-      if (artifactAboxPresent) {
-        const av = deriveArtifactKindsViews(repoRoot);
-        if (av !== null) {
-          overlaid.artifactKinds = av.artifactKinds;
-          overlaid.semanticTypeToArtifactKind = av.semanticTypeToArtifactKind;
-          overlaid.operationArtifactRules = av.operationArtifactRules;
-          overlaid.artifactFileKinds = av.artifactFileKinds;
-        }
-      }
-      if (runtimeStatesAboxPresent) {
-        const rv = deriveRuntimeStatesViews(repoRoot);
-        if (rv !== null) {
-          overlaid.runtimeStates = rv.runtimeStates;
-          overlaid.operationRequirements = rv.operationRequirements;
-        }
-      }
-      if (semanticsAboxPresent) {
-        const sv = deriveSemanticsViews(repoRoot);
-        if (sv !== null) {
-          overlaid.semanticTypes = sv.semanticTypes;
-          overlaid.capabilities = sv.capabilities;
-          overlaid.identifiers = sv.identifiers;
-        }
-      }
-      if (globalContextSeedsAboxPresent) {
-        const gv = deriveGlobalContextSeedsViews(repoRoot);
-        if (gv !== null) {
-          overlaid.globalContextSeeds = gv.globalContextSeeds;
-        }
-      }
-      validationTarget = overlaid;
+  const artifactViews = deriveArtifactKindsViews(repoRoot);
+  const runtimeStatesViews = deriveRuntimeStatesViews(repoRoot);
+  const semanticsViews = deriveSemanticsViews(repoRoot);
+  const globalContextSeedsViews = deriveGlobalContextSeedsViews(repoRoot);
+  const postOverlayReValidationNeeded =
+    artifactViews !== null ||
+    runtimeStatesViews !== null ||
+    semanticsViews !== null ||
+    globalContextSeedsViews !== null;
+
+  if (postOverlayReValidationNeeded) {
+    domain = { version: 1 };
+    if (artifactViews !== null) {
+      domain = {
+        ...domain,
+        artifactKinds: artifactViews.artifactKinds,
+        semanticTypeToArtifactKind: artifactViews.semanticTypeToArtifactKind,
+        operationArtifactRules: artifactViews.operationArtifactRules,
+        artifactFileKinds: artifactViews.artifactFileKinds,
+      };
     }
-    const issues = validateDomainSemantics(validationTarget);
-    if (issues.length > 0) {
-      const detail = issues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
-      throw new DomainSemanticsValidationFailure(
-        `domain-semantics.json failed validation:\n${detail}`,
-      );
+    if (runtimeStatesViews !== null) {
+      domain = {
+        ...domain,
+        runtimeStates: runtimeStatesViews.runtimeStates,
+        operationRequirements: runtimeStatesViews.operationRequirements,
+      };
     }
-    domain = parsedDomain;
-    legacyDomainLoaded = true;
-    // Lift 6 / #214: runtime-states ABox supersedes the legacy
-    // `runtimeStates` and `operationRequirements` sub-trees. Performed
-    // inside the try block (and right after `domain = parsedDomain`)
-    // so the existing consumer loops below — building `producersByState`,
-    // setting `node.domainRequiresAll`/`domainImplicitAdds`/`domainProduces`,
-    // resolving `operationRequirements.valueBindings` — see the
-    // overlaid values without further plumbing. The pre-overlay strip
-    // above ensures the validator already accepted this swap; the
-    // post-overlay re-validation block (after the try/catch) catches
-    // ABox-introduced cross-reference violations against the
-    // unmigrated `semanticTypes`/`capabilities` sub-trees.
-    if (runtimeStatesAboxPresent) {
-      const views = deriveRuntimeStatesViews(repoRoot);
-      if (views !== null) {
-        domain = {
-          ...domain,
-          runtimeStates: views.runtimeStates,
-          operationRequirements: views.operationRequirements,
-        };
-      }
+    if (semanticsViews !== null) {
+      domain = {
+        ...domain,
+        semanticTypes: semanticsViews.semanticTypes,
+        capabilities: semanticsViews.capabilities,
+        identifiers: semanticsViews.identifiers,
+      };
     }
-    // Lift 7 / #216: semantics ABox supersedes the legacy
-    // `semanticTypes` / `capabilities` / `identifiers` sub-trees.
-    // Performed inside the try block (and right after `domain =
-    // parsedDomain`) so the existing consumer loops below — building
-    // `producersByState` from `capabilities.producedBy` and
-    // `identifiers.boundBy`, the #56 producersByType propagation, the
-    // #70 witness-implication loop — see the overlaid values without
-    // further plumbing. The pre-overlay step above ensures the
-    // validator already accepted this swap; the post-overlay
-    // re-validation block (after the try/catch) catches
-    // ABox-introduced cross-reference violations.
-    if (semanticsAboxPresent) {
-      const sv = deriveSemanticsViews(repoRoot);
-      if (sv !== null) {
-        domain = {
-          ...domain,
-          semanticTypes: sv.semanticTypes,
-          capabilities: sv.capabilities,
-          identifiers: sv.identifiers,
-        };
-      }
+    if (globalContextSeedsViews !== null) {
+      domain = { ...domain, globalContextSeeds: globalContextSeedsViews.globalContextSeeds };
     }
-    // Lift 8 / #218: global-context-seeds ABox supersedes the legacy
-    // `globalContextSeeds` array. Promoted in the same in-try block so
-    // `graph.domain.globalContextSeeds` (consumed by the Playwright
-    // emitter prologue and `loadGlobalContextSeeds` in codegen/index.ts)
-    // sees the ABox values.
-    if (globalContextSeedsAboxPresent) {
-      const gv = deriveGlobalContextSeedsViews(repoRoot);
-      if (gv !== null) {
-        domain = { ...domain, globalContextSeeds: gv.globalContextSeeds };
-      }
+  }
+
+  if (runtimeStatesViews !== null) {
+    for (const [opId, req] of Object.entries(runtimeStatesViews.operationRequirements)) {
+      const node = operations[opId];
+      if (!node) continue;
+      if (req.requires) node.domainRequiresAll = req.requires;
+      if (req.disjunctions) node.domainDisjunctions = req.disjunctions;
+      if (req.produces) node.domainProduces = req.produces;
+      if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
     }
-    // debug: domain semantics sidecar loaded
-    if (domain?.operationRequirements) {
-      for (const [opId, req] of Object.entries(domain.operationRequirements)) {
-        const node = operations[opId];
-        if (!node) continue;
-        if (req.requires) node.domainRequiresAll = req.requires;
-        if (req.disjunctions) node.domainDisjunctions = req.disjunctions;
-        if (req.produces) node.domainProduces = req.produces;
-        if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
-      }
-    }
-    // Build producersByState
     const producers: Record<string, string[]> = {};
     producersByState = producers;
-    // Dedup at the writer: every callsite (runtimeStates.producedBy,
-    // capabilities.producedBy, identifiers.boundBy, operationRequirements.
-    // produces / implicitAdds, the #70 witness implication) funnels through
-    // here, so guarding once prevents duplicate (state, opId) pairs from any
-    // current or future caller. Without this, an opId that satisfies a state
-    // through more than one channel (e.g. createDeployment producing
-    // ProcessDefinitionDeployed both directly and via the
-    // ProcessDefinitionKey → ProcessDefinitionDeployed witness edge) would
-    // appear multiple times in producersByState[state].
     const addProducer = (state: string, opId: string) => {
       const list = producers[state] ?? [];
       if (!list.includes(opId)) list.push(opId);
@@ -491,57 +390,64 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
       }
     };
-    if (domain?.runtimeStates) {
-      for (const [stateName, spec] of Object.entries(domain.runtimeStates)) {
-        for (const opId of spec.producedBy ?? []) {
-          if (operations[opId]) addProducer(stateName, opId);
-        }
+    for (const [stateName, spec] of Object.entries(runtimeStatesViews.runtimeStates)) {
+      for (const opId of spec.producedBy ?? []) {
+        if (operations[opId]) addProducer(stateName, opId);
       }
     }
-    if (domain?.capabilities) {
-      for (const [capName, spec] of Object.entries(domain.capabilities)) {
-        for (const opId of spec.producedBy ?? []) {
-          if (operations[opId]) addProducer(capName, opId);
-        }
-      }
+    for (const [opId, spec] of Object.entries(runtimeStatesViews.operationRequirements)) {
+      if (!operations[opId]) continue;
+      for (const st of spec.produces ?? []) addProducer(st, opId);
+      for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
     }
-    if (domain?.identifiers) {
-      for (const [, spec] of Object.entries(domain.identifiers)) {
-        const state = spec.validityState;
-        // Skip identifiers whose validityState is not declared in the sidecar.
-        // Empty strings are invalid data and would surface as a malformed
-        // producersByState key — the regression test in
-        // tests/regression/graph-loader-undefined-state-key.test.ts asserts
-        // no such key is ever written. We use `state == null` per #65 review:
-        // an empty string is not the same as "absent" and should not be
-        // silently treated as such.
-        if (state == null) continue;
-        for (const opId of spec.boundBy ?? []) {
-          if (operations[opId]) addProducer(state, opId);
-        }
-      }
-    }
-    if (domain?.operationRequirements) {
-      for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
-        if (!operations[opId]) continue;
-        for (const st of spec.produces ?? []) addProducer(st, opId);
-        for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
-      }
-    }
-    // #56: surface sidecar-declared `produces` into the semantic-BFS-visible
+    // #56: surface ABox-declared `produces` into the semantic-BFS-visible
     // structures (op.produces and producersByType). Without this step the
-    // sidecar entry only updates `domainProduces` / `producersByState`, which
-    // are used by the runtime-state planner but invisible to semantic BFS.
-    if (domain?.operationRequirements) {
-      for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
-        const node = operations[opId];
-        if (!node) continue;
-        for (const st of spec.produces ?? []) {
-          if (!node.produces.includes(st)) node.produces.push(st);
-          const list = producersByType[st] ?? [];
-          if (!list.includes(opId)) list.push(opId);
-          producersByType[st] = list;
-        }
+    // entry only updates `domainProduces` / `producersByState`, which are
+    // used by the runtime-state planner but invisible to semantic BFS.
+    for (const [opId, spec] of Object.entries(runtimeStatesViews.operationRequirements)) {
+      const node = operations[opId];
+      if (!node) continue;
+      for (const st of spec.produces ?? []) {
+        if (!node.produces.includes(st)) node.produces.push(st);
+        const list = producersByType[st] ?? [];
+        if (!list.includes(opId)) list.push(opId);
+        producersByType[st] = list;
+      }
+    }
+  }
+
+  if (semanticsViews !== null) {
+    // Preserve any runtime-state-derived producers when the semantics
+    // ABox is also present; otherwise start a fresh map.
+    const producers: Record<string, string[]> = producersByState ?? {};
+    producersByState = producers;
+    const addProducer = (state: string, opId: string) => {
+      const list = producers[state] ?? [];
+      if (!list.includes(opId)) list.push(opId);
+      producers[state] = list;
+      const node = operations[opId];
+      if (node) {
+        if (!node.domainProduces) node.domainProduces = [state];
+        else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
+      }
+    };
+    for (const [capName, spec] of Object.entries(semanticsViews.capabilities)) {
+      for (const opId of spec.producedBy ?? []) {
+        if (operations[opId]) addProducer(capName, opId);
+      }
+    }
+    for (const [, spec] of Object.entries(semanticsViews.identifiers)) {
+      const state = spec.validityState;
+      // Skip identifiers whose validityState is absent. Empty strings are
+      // invalid data and would surface as a malformed producersByState key —
+      // the regression test in
+      // tests/regression/graph-loader-undefined-state-key.test.ts asserts
+      // no such key is ever written. We use `state == null` per #65 review:
+      // an empty string is not the same as "absent" and should not be
+      // silently treated as such.
+      if (state == null) continue;
+      for (const opId of spec.boundBy ?? []) {
+        if (operations[opId]) addProducer(state, opId);
       }
     }
     // #70: witness implication. Producing a value of semantic type T
@@ -562,223 +468,21 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // createDocument symptom in #95). Authoritative producers
     // (`provider: true`) are still surfaced; that is the relation #70
     // intended to capture.
-    if (domain?.semanticTypes) {
-      for (const [semanticType, spec] of Object.entries(domain.semanticTypes)) {
-        const witnessed = spec.witnesses;
-        if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
-        const producers = producersByType[semanticType] ?? [];
-        for (const opId of producers) {
-          const op = operations[opId];
-          if (!op) continue;
-          if (op.providerMap?.[semanticType] !== true) continue;
-          addProducer(witnessed, opId);
-        }
+    for (const [semanticType, spec] of Object.entries(semanticsViews.semanticTypes)) {
+      const witnessed = spec.witnesses;
+      if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
+      const producersForSemantic = producersByType[semanticType] ?? [];
+      for (const opId of producersForSemantic) {
+        const op = operations[opId];
+        if (!op) continue;
+        if (op.providerMap?.[semanticType] !== true) continue;
+        addProducer(witnessed, opId);
       }
     }
-  } catch (err) {
-    if (err instanceof DomainSemanticsValidationFailure) throw err;
-    if (err instanceof SyntaxError) {
-      throw new DomainSemanticsValidationFailure(
-        `domain-semantics.json is not valid JSON: ${err.message}`,
-      );
-    }
-    if (err instanceof Error && 'code' in err && err.code !== 'ENOENT') {
-      throw new DomainSemanticsValidationFailure(
-        `Failed to load domain-semantics.json: ${err.message}`,
-      );
-    }
-    // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
-  // Lift 5 / #212 + Lift 6 / #214: per-config ABoxes supersede the
-  // legacy `domain-semantics.json` keys when present. Per #198, the
-  // domain knowledge with no wire signature lives in the per-config
-  // ontology rather than in the freeform sidecar. The legacy keys
-  // remain a transitional fallback so unmigrated configs (and tests
-  // that exercise loadGraph against an isolated tmpDir without a
-  // domain-semantics.json) keep working until Lift 8 retires them.
-  // When both are present, the ABox is authoritative —
-  // `detectArtifactKindsDrift` surfaces dead/dangling entries (the
-  // durable abox-vs-graph signal) before the override can silently
-  // mask them. Placed outside the domain-semantics try/catch so a
-  // shipped ABox is honoured even when the legacy sidecar is absent.
-  // Note: the runtime-states ABox overlay happens INSIDE the try
-  // block (right after `domain = parsedDomain`) because its values
-  // are consumed by the producersByState-building loop further down
-  // in that block. The post-overlay re-validation here covers BOTH
-  // overlays (artifact-kinds AND runtime-states).
-  let postOverlayReValidationNeeded = false;
-  {
-    const artifactViews = deriveArtifactKindsViews(repoRoot);
-    if (artifactViews !== null) {
-      const baseDomain: DomainSemantics = domain ?? { version: 1 };
-      domain = {
-        ...baseDomain,
-        artifactKinds: artifactViews.artifactKinds,
-        semanticTypeToArtifactKind: artifactViews.semanticTypeToArtifactKind,
-        operationArtifactRules: artifactViews.operationArtifactRules,
-        artifactFileKinds: artifactViews.artifactFileKinds,
-      };
-      postOverlayReValidationNeeded = true;
-    }
-  }
-  if (runtimeStatesAboxPresent) postOverlayReValidationNeeded = true;
-  if (semanticsAboxPresent) postOverlayReValidationNeeded = true;
-
-  // Lift 6 / #214: when the runtime-states ABox is shipped but no
-  // legacy `domain-semantics.json` sidecar exists (the future
-  // Lift 8-style ABox-authoritative configs, and any test fixture
-  // that exercises ABox-only loading), the consumer logic that lives
-  // inside the legacy try block above is never reached — leaving
-  // `graph.domain.runtimeStates`, `graph.domain.operationRequirements`,
-  // `producersByState`, and `node.domainRequiresAll`/etc. all
-  // unpopulated even though the ABox declares them. Mirror the
-  // artifact-kinds post-try overlay here: synthesize a minimal
-  // `domain` from the ABox views and re-run the same consumer logic
-  // against it. Only runtime-states + operationRequirements come
-  // from this ABox; semanticTypes/capabilities/identifiers stay
-  // legacy-only until Lift 7, so the witness-implication loop and
-  // capability/identifier producer expansion are intentionally
-  // omitted (they are no-ops without a legacy sidecar).
-  if (runtimeStatesAboxPresent && !legacyDomainLoaded) {
-    const views = deriveRuntimeStatesViews(repoRoot);
-    if (views !== null) {
-      const baseDomain: DomainSemantics = domain ?? { version: 1 };
-      domain = {
-        ...baseDomain,
-        runtimeStates: views.runtimeStates,
-        operationRequirements: views.operationRequirements,
-      };
-      // node.domainRequiresAll / domainDisjunctions / domainProduces /
-      // domainImplicitAdds setters — same shape as the in-try loop.
-      for (const [opId, req] of Object.entries(views.operationRequirements)) {
-        const node = operations[opId];
-        if (!node) continue;
-        if (req.requires) node.domainRequiresAll = req.requires;
-        if (req.disjunctions) node.domainDisjunctions = req.disjunctions;
-        if (req.produces) node.domainProduces = req.produces;
-        if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
-      }
-      // producersByState builder — same dedup contract as the in-try
-      // builder. Surfaces `domainProduces` on the producing nodes too,
-      // so semantic BFS sees the same picture.
-      const producers: Record<string, string[]> = producersByState ?? {};
-      producersByState = producers;
-      const addProducer = (state: string, opId: string) => {
-        const list = producers[state] ?? [];
-        if (!list.includes(opId)) list.push(opId);
-        producers[state] = list;
-        const node = operations[opId];
-        if (node) {
-          if (!node.domainProduces) node.domainProduces = [state];
-          else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
-        }
-      };
-      for (const [stateName, spec] of Object.entries(views.runtimeStates)) {
-        for (const opId of spec.producedBy ?? []) {
-          if (operations[opId]) addProducer(stateName, opId);
-        }
-      }
-      for (const [opId, spec] of Object.entries(views.operationRequirements)) {
-        if (!operations[opId]) continue;
-        for (const st of spec.produces ?? []) addProducer(st, opId);
-        for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
-      }
-      // #56 mirror: surface ABox-declared `produces` into op.produces /
-      // producersByType so semantic BFS sees them.
-      for (const [opId, spec] of Object.entries(views.operationRequirements)) {
-        const node = operations[opId];
-        if (!node) continue;
-        for (const st of spec.produces ?? []) {
-          if (!node.produces.includes(st)) node.produces.push(st);
-          const list = producersByType[st] ?? [];
-          if (!list.includes(opId)) list.push(opId);
-          producersByType[st] = list;
-        }
-      }
-    }
-  }
-  // Lift 7 / #216: when the semantics ABox is shipped but no legacy
-  // `domain-semantics.json` sidecar exists, the in-try consumer loops
-  // (capability/identifier producer expansion at lines ~444-466 and
-  // the #70 witness-implication loop at lines ~508-520) are never
-  // reached — leaving `graph.domain.semanticTypes`/`capabilities`/
-  // `identifiers` and the dependent `producersByState` /
-  // `node.domainProduces` entries unpopulated even though the ABox
-  // declares them. Mirror the runtime-states post-try block:
-  // synthesize `domain` from the views and re-run the same consumer
-  // logic against it. Safe to compose with the runtime-states post-try
-  // block because that one only writes runtime-state-derived
-  // producers; this one writes capability- / identifier- /
-  // witness-derived producers — disjoint addProducer key sets in
-  // practice (and `addProducer` here dedups against the existing
-  // `producersByState`).
-  if (semanticsAboxPresent && !legacyDomainLoaded) {
-    const sv = deriveSemanticsViews(repoRoot);
-    if (sv !== null) {
-      const baseDomain: DomainSemantics = domain ?? { version: 1 };
-      domain = {
-        ...baseDomain,
-        semanticTypes: sv.semanticTypes,
-        capabilities: sv.capabilities,
-        identifiers: sv.identifiers,
-      };
-      const producers: Record<string, string[]> = producersByState ?? {};
-      producersByState = producers;
-      const addProducer = (state: string, opId: string) => {
-        const list = producers[state] ?? [];
-        if (!list.includes(opId)) list.push(opId);
-        producers[state] = list;
-        const node = operations[opId];
-        if (node) {
-          if (!node.domainProduces) node.domainProduces = [state];
-          else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
-        }
-      };
-      // capabilities.producedBy → producersByState[capName]
-      for (const [capName, spec] of Object.entries(sv.capabilities)) {
-        for (const opId of spec.producedBy ?? []) {
-          if (operations[opId]) addProducer(capName, opId);
-        }
-      }
-      // identifiers.boundBy → producersByState[validityState]
-      for (const [, spec] of Object.entries(sv.identifiers)) {
-        const state = spec.validityState;
-        if (state == null) continue;
-        for (const opId of spec.boundBy ?? []) {
-          if (operations[opId]) addProducer(state, opId);
-        }
-      }
-      // #70 witness implication, gated on providerMap[T] === true (#95).
-      // Same shape as the in-try loop at lines ~508-520.
-      for (const [semanticType, spec] of Object.entries(sv.semanticTypes)) {
-        const witnessed = spec.witnesses;
-        if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
-        const ops = producersByType[semanticType] ?? [];
-        for (const opId of ops) {
-          const op = operations[opId];
-          if (!op) continue;
-          if (op.providerMap?.[semanticType] !== true) continue;
-          addProducer(witnessed, opId);
-        }
-      }
-    }
-  }
-  // Lift 8 / #218: when the global-context-seeds ABox is shipped but no
-  // legacy `domain-semantics.json` sidecar exists, the in-try promote
-  // is never reached — leaving `graph.domain.globalContextSeeds`
-  // empty. Mirror the other ABox-only post-try blocks: synthesize
-  // the field from the views.
-  if (globalContextSeedsAboxPresent && !legacyDomainLoaded) {
-    const gv = deriveGlobalContextSeedsViews(repoRoot);
-    if (gv !== null) {
-      const baseDomain: DomainSemantics = domain ?? { version: 1 };
-      domain = { ...baseDomain, globalContextSeeds: gv.globalContextSeeds };
-    }
-  }
   // Re-run the cross-reference invariants from `validateDomainSemantics`
-  // against the post-overlay value in BOTH the legacy-sidecar path
-  // and the ABox-only path (PR #217 review). The per-ABox drift
+  // against the synthesized ontology-derived `graph.domain`. The per-ABox drift
   // detectors (detectArtifactKindsDrift / detectRuntimeStatesDrift /
   // detectSemanticsDrift) only check abox-vs-graph opId references;
   // they do NOT check cross-ABox references like
@@ -791,7 +495,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // would still return an invalid `graph.domain`. The validator is
   // structural (zod `safeParse`) and tolerant of any subset of
   // sub-trees being absent, so it is safe to invoke on the synthesized
-  // ABox-only domain too. Reuses the same validator and the same
+  // domain. Reuses the same validator and the same
   // DomainSemanticsValidationFailure error type so the diagnostic
   // surfaces with one well-known shape regardless of which ABox
   // tripped it.
@@ -799,11 +503,8 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const overlayIssues = validateDomainSemantics(domain);
     if (overlayIssues.length > 0) {
       const detail = overlayIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
-      const sourceDescription = legacyDomainLoaded
-        ? 'when overlaid on domain-semantics.json'
-        : 'in the ABox-only authoritative domain';
       throw new DomainSemanticsValidationFailure(
-        `ontology ABox introduced cross-reference violation(s) ${sourceDescription}:\n${detail}`,
+        `ontology ABox introduced cross-reference violation(s):\n${detail}`,
       );
     }
   }
@@ -950,7 +651,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   if (witnessIssues.length > 0) {
     const detail = witnessIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
     throw new DomainSemanticsValidationFailure(
-      `domain-semantics.json failed cross-reference validation against the bundled spec:\n${detail}`,
+      `graph domain failed cross-reference validation against the bundled spec:\n${detail}`,
     );
   }
   // #162 PR 5: every semantic referenced by an operation's
@@ -1399,8 +1100,7 @@ function detectEntityKindsDrift(
  *   - every kind is referenced by at least one rule, semanticTypeMap
  *     entry, or fileExtensionMap entry (no dead kinds).
  *
- * Returns an empty list when no ABox is shipped, so the caller treats
- * the legacy `domain-semantics.json` fallback as drift-free.
+ * Returns an empty list when no ABox is shipped.
  */
 function detectArtifactKindsDrift(
   operations: Record<string, OperationNode>,
