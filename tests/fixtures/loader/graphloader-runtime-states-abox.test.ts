@@ -121,7 +121,7 @@ describe('graphLoader: runtime-states ABox declared produces (#56)', () => {
               '200': [{ semanticType: 'Foo', fieldPath: 'foo', provider: true }],
             },
           },
-          { operationId: 'aboxProducer', method: 'POST', path: '/abox' },
+          { operationId: 'runtimeStatesProducer', method: 'POST', path: '/runtime-states' },
         ],
       },
       runtimeStatesAbox: {
@@ -129,7 +129,7 @@ describe('graphLoader: runtime-states ABox declared produces (#56)', () => {
         states: [{ name: 'Foo' }],
         operationRequirements: [
           {
-            operationId: 'aboxProducer',
+            operationId: 'runtimeStatesProducer',
             produces: ['Foo'],
           },
         ],
@@ -137,7 +137,7 @@ describe('graphLoader: runtime-states ABox declared produces (#56)', () => {
     });
     const g = await loadGraph(baseDir);
     expect(g.producersByType.Foo).toEqual(
-      expect.arrayContaining(['extractorProducer', 'aboxProducer']),
+      expect.arrayContaining(['extractorProducer', 'runtimeStatesProducer']),
     );
   });
 
