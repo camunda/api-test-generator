@@ -396,7 +396,7 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     warn.mockRestore();
   });
 
-  it('hard-errors when the ABox introduces a `producesStates` value not declared in domain-semantics.json runtimeStates / capabilities (post-overlay re-validation)', async () => {
+  it('hard-errors when the ABox introduces a `producesStates` value not declared in domain-semantics.json runtimeStates / capabilities (pre-overlay validation sees the merged authoritative view)', async () => {
     writeWorkspace({
       domainSemantics: {
         version: 1,
@@ -428,9 +428,7 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
       },
       graphOps: deployOp(),
     });
-    await expect(loadGraph(baseDir)).rejects.toThrow(
-      /artifact-kinds ABox introduced cross-reference violation/,
-    );
+    await expect(loadGraph(baseDir)).rejects.toThrow(/artifactKindStateDeclared.*UndeclaredState/);
   });
 
   it('hard-errors when an ABox rule-level `producesStates` override references a state not declared in runtimeStates / capabilities (post-overlay re-validation, rule-level)', async () => {

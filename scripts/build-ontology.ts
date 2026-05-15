@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { artifactKindsSchema } from '../path-analyser/src/ontology/artifactKindsSchema.ts';
 import { edgeSchema } from '../path-analyser/src/ontology/edgeSchema.ts';
 import { entityKindsSchema } from '../path-analyser/src/ontology/entityKindsSchema.ts';
+import { runtimeStatesSchema } from '../path-analyser/src/ontology/runtimeStatesSchema.ts';
 // Namespace import: the schema source lives in the CommonJS-flavoured
 // `semantic-graph-extractor` workspace (`type: commonjs` in its
 // package.json). Node's CJS-to-ESM interop exposes the actual
@@ -68,6 +69,10 @@ const ARTIFACTS: OntologyArtifact[] = [
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'artifact-kinds.schema.json'),
     schema: artifactKindsSchema,
+  },
+  {
+    jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'runtime-states.schema.json'),
+    schema: runtimeStatesSchema,
   },
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'bootstrap-sequence.schema.json'),

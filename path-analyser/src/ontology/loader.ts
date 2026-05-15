@@ -6,6 +6,7 @@ import { getActiveConfigDir } from '../configResolver.js';
 import { artifactKindsSchema } from './artifactKindsSchema.js';
 import { edgeSchema } from './edgeSchema.js';
 import { entityKindsSchema } from './entityKindsSchema.js';
+import { runtimeStatesSchema } from './runtimeStatesSchema.js';
 
 // ---------------------------------------------------------------------------
 // path-analyser/src/ontology/loader.ts
@@ -46,6 +47,10 @@ export type ArtifactSemanticTypeMapping = ArtifactKindsAbox['semanticTypeMap'][n
 export type ArtifactOperationRule = ArtifactKindsAbox['operationRules'][number];
 export type ArtifactFileExtensionMapping = ArtifactKindsAbox['fileExtensionMap'][number];
 
+export type RuntimeStatesAbox = FromSchema<typeof runtimeStatesSchema>;
+export type RuntimeStateEntry = RuntimeStatesAbox['states'][number];
+export type OperationRequirementEntry = RuntimeStatesAbox['operationRequirements'][number];
+
 // `Ajv` is the named export pointing at the constructor; the namespace
 // also has a self-referential default but the named export is the
 // least error-prone form under module=nodenext.
@@ -53,6 +58,7 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 const validateEdgesAbox = ajv.compile<EdgesAbox>(edgeSchema);
 const validateEntityKindsAbox = ajv.compile<EntityKindsAbox>(entityKindsSchema);
 const validateArtifactKindsAbox = ajv.compile<ArtifactKindsAbox>(artifactKindsSchema);
+const validateRuntimeStatesAbox = ajv.compile<RuntimeStatesAbox>(runtimeStatesSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? [])
@@ -429,4 +435,151 @@ export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews |
     operationArtifactRules,
     artifactFileKinds,
   };
+}
+
+/**
+ * Load and validate the runtime-states ABox file for the active config.
+ *
+ * @param repoRoot Absolute path to the api-test-generator repository root.
+ * @returns The parsed ABox, or `null` if the file does not exist (configs
+ *   are not required to ship one; a missing file leaves the legacy
+ *   `domain-semantics.json` `runtimeStates`/`operationRequirements` keys
+ *   authoritative for backward compatibility).
+ * @throws if the file exists but does not validate against the TBox, or
+ *   if it contains duplicate state names or duplicate operationRequirements
+ *   entries.
+ */
+export function loadRuntimeStatesAbox(repoRoot: string): RuntimeStatesAbox | null {
+  // Symmetric with the other loadXxxAbox helpers — tests that exercise
+  // loadGraph against an isolated tmpDir don't ship a `configs.json`,
+  // and the right fallback there is "no ABox available" so the test
+  // exercises the legacy domain-semantics.json path.
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'runtime-states.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse runtime-states ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateRuntimeStatesAbox(parsed)) {
+    throw new Error(
+      `Runtime-states ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateRuntimeStatesAbox.errors)}`,
+    );
+  }
+  // Reject duplicate keys up front — Draft-07 cannot express
+  // uniqueness, but a duplicate would silently shadow facts at query
+  // time. Same defensive check as in the other ABox loaders.
+  const dupeStates = duplicates(parsed.states.map((s) => s.name));
+  if (dupeStates.length > 0) {
+    throw new Error(
+      `Runtime-states ABox at ${aboxPath} has duplicate state name(s): ${dupeStates.join(', ')}`,
+    );
+  }
+  const dupeOps = duplicates(parsed.operationRequirements.map((r) => r.operationId));
+  if (dupeOps.length > 0) {
+    throw new Error(
+      `Runtime-states ABox at ${aboxPath} has duplicate operationRequirements entries for: ${dupeOps.join(', ')}`,
+    );
+  }
+  // `eventual: true` requires a witness — same coupling as the legacy
+  // `RuntimeStateSpec` (#159 PR B). The TBox cannot express this
+  // without `if/then` (Draft-07 supports it, but for consistency with
+  // the other ABoxes we keep the cross-property invariants in the
+  // loader).
+  for (const s of parsed.states) {
+    if (s.eventual === true && s.witness === undefined) {
+      throw new Error(
+        `Runtime-states ABox at ${aboxPath} state '${s.name}' has eventual: true but no witness — eventual states require a witness for the planner's awaitEventually wait`,
+      );
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Derive the two record-shaped views of the runtime-states ABox that
+ * `graph.domain.*` consumers (planner BFS, value-binding emitter,
+ * witness machinery) expect. Returning `null` when no ABox is shipped
+ * lets `loadGraph` fall back to the legacy `domain-semantics.json`
+ * keys.
+ */
+export interface RuntimeStatesViews {
+  runtimeStates: Record<
+    string,
+    {
+      kind: 'state';
+      producedBy?: string[];
+      parameter?: string;
+      parameters?: string[];
+      requires?: string[];
+      eventual?: boolean;
+      witness?: {
+        operationId: string;
+        predicate: { path: string; equals: string | number | boolean };
+        waitUpToMs?: number;
+        pollIntervalMs?: number;
+      };
+    }
+  >;
+  operationRequirements: Record<
+    string,
+    {
+      requires?: string[];
+      disjunctions?: string[][];
+      implicitAdds?: string[];
+      produces?: string[];
+      valueBindings?: Record<string, string>;
+    }
+  >;
+}
+
+export function deriveRuntimeStatesViews(repoRoot: string): RuntimeStatesViews | null {
+  const abox = loadRuntimeStatesAbox(repoRoot);
+  if (abox === null) return null;
+  const runtimeStates: RuntimeStatesViews['runtimeStates'] = {};
+  for (const s of abox.states) {
+    const entry: RuntimeStatesViews['runtimeStates'][string] = { kind: 'state' };
+    if (s.producedBy !== undefined) entry.producedBy = [...s.producedBy];
+    if (s.parameter !== undefined) entry.parameter = s.parameter;
+    if (s.parameters !== undefined) entry.parameters = [...s.parameters];
+    if (s.requires !== undefined) entry.requires = [...s.requires];
+    if (s.eventual !== undefined) entry.eventual = s.eventual;
+    if (s.witness !== undefined) {
+      entry.witness = {
+        operationId: s.witness.operationId,
+        predicate: { path: s.witness.predicate.path, equals: s.witness.predicate.equals },
+      };
+      if (s.witness.waitUpToMs !== undefined) entry.witness.waitUpToMs = s.witness.waitUpToMs;
+      if (s.witness.pollIntervalMs !== undefined)
+        entry.witness.pollIntervalMs = s.witness.pollIntervalMs;
+    }
+    runtimeStates[s.name] = entry;
+  }
+  const operationRequirements: RuntimeStatesViews['operationRequirements'] = {};
+  for (const r of abox.operationRequirements) {
+    const entry: RuntimeStatesViews['operationRequirements'][string] = {};
+    if (r.requires !== undefined) entry.requires = [...r.requires];
+    if (r.disjunctions !== undefined) entry.disjunctions = r.disjunctions.map((d) => [...d]);
+    if (r.implicitAdds !== undefined) entry.implicitAdds = [...r.implicitAdds];
+    if (r.produces !== undefined) entry.produces = [...r.produces];
+    if (r.valueBindings !== undefined) entry.valueBindings = { ...r.valueBindings };
+    operationRequirements[r.operationId] = entry;
+  }
+  return { runtimeStates, operationRequirements };
 }
