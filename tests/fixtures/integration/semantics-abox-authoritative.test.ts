@@ -128,6 +128,11 @@ describe('Lift 7 (#216): semantics ABox is authoritative for graph.domain semant
   it('populates graph.domain semantic sub-trees AND producersByState from the ABox even when no domain-semantics.json is shipped (Lift 8-style ABox-authoritative)', async () => {
     writeWorkspace({
       // No domain-semantics.json sidecar at all.
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'ProcessDefinitionDeployed', producedBy: ['createDeployment'] }],
+        operationRequirements: [],
+      },
       semanticsAbox: {
         version: 1,
         semanticTypes: [
@@ -316,5 +321,27 @@ describe('Lift 7 (#216): semantics ABox is authoritative for graph.domain semant
     });
     const graph = await loadGraph(baseDir);
     expect(Object.keys(graph.domain?.semanticTypes ?? {})).toEqual(['GoodType']);
+  });
+
+  it('PR #217 review: post-overlay cross-reference validation runs in the ABox-only path too (no legacy sidecar present)', async () => {
+    writeWorkspace({
+      // No domain-semantics.json sidecar at all — exercises the
+      // ABox-authoritative branch the reviewer flagged.
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'DeclaredState', producedBy: ['createDeployment'] }],
+        operationRequirements: [],
+      },
+      semanticsAbox: {
+        version: 1,
+        // 'GoneState' is not in runtimeStates and not in capabilities,
+        // so witnesses targets nothing in the synthesized ABox-only domain.
+        semanticTypes: [{ name: 'BadType', witnesses: 'GoneState' }],
+      },
+      graphOps: ops(),
+    });
+    await expect(loadGraph(baseDir)).rejects.toThrow(
+      /semanticTypeWitnessTargetResolves.*GoneState/,
+    );
   });
 });

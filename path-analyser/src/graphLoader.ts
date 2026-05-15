@@ -741,25 +741,33 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
   // Re-run the cross-reference invariants from `validateDomainSemantics`
-  // against the post-overlay value, but only when a legacy
-  // `domain-semantics.json` sidecar was loaded. The pre-overlay
-  // validation already saw the ABox values via the merged
-  // validationTarget, so this catches only ABox-introduced
-  // cross-reference drift relative to the in-try-promoted `domain` —
-  // mostly redundant after Lift 7, but kept as belt-and-braces. When
-  // no sidecar is present the validator has no `globalContextSeeds`
-  // (the only remaining sub-tree pre-Lift-8) to cross-check against;
-  // ABox-only paths are re-validated by the per-ABox drift detectors
-  // above and by the L3 invariants. Reuses the same Zod-driven
-  // validator and the same DomainSemanticsValidationFailure error
-  // type so the diagnostic surfaces with one well-known shape
-  // regardless of which ABox tripped it.
-  if (postOverlayReValidationNeeded && legacyDomainLoaded && domain !== undefined) {
+  // against the post-overlay value in BOTH the legacy-sidecar path
+  // and the ABox-only path (PR #217 review). The per-ABox drift
+  // detectors (detectArtifactKindsDrift / detectRuntimeStatesDrift /
+  // detectSemanticsDrift) only check abox-vs-graph opId references;
+  // they do NOT check cross-ABox references like
+  // `semanticTypes.witnesses → runtimeStates|capabilities`,
+  // `capabilities.dependsOn → runtimeStates`,
+  // `identifiers.validityState → runtimeStates`, or
+  // `identifiers.derivedVia → capabilities`. Without this re-validation
+  // pass an ABox-only config could ship a `semantics.json` whose
+  // `witnesses` points at a now-removed runtime state and `loadGraph`
+  // would still return an invalid `graph.domain`. The validator is
+  // structural (zod `safeParse`) and tolerant of any subset of
+  // sub-trees being absent, so it is safe to invoke on the synthesized
+  // ABox-only domain too. Reuses the same validator and the same
+  // DomainSemanticsValidationFailure error type so the diagnostic
+  // surfaces with one well-known shape regardless of which ABox
+  // tripped it.
+  if (postOverlayReValidationNeeded && domain !== undefined) {
     const overlayIssues = validateDomainSemantics(domain);
     if (overlayIssues.length > 0) {
       const detail = overlayIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+      const sourceDescription = legacyDomainLoaded
+        ? 'when overlaid on domain-semantics.json'
+        : 'in the ABox-only authoritative domain';
       throw new DomainSemanticsValidationFailure(
-        `ontology ABox introduced cross-reference violation(s) when overlaid on domain-semantics.json:\n${detail}`,
+        `ontology ABox introduced cross-reference violation(s) ${sourceDescription}:\n${detail}`,
       );
     }
   }
@@ -1492,9 +1500,10 @@ function detectSemanticsDrift(
   // Cross-sub-tree integrity (witnesses target runtimeStates|capabilities,
   // dependsOn / validityState target runtimeStates, derivedVia targets
   // capabilities) is enforced by post-overlay `validateDomainSemantics`
-  // for the legacy-sidecar path and by the L3 invariant in
-  // `configs/<name>/regression-invariants.test.ts` for the
-  // ABox-authoritative path.
+  // in `loadGraph` for both the legacy-sidecar and ABox-only paths
+  // (PR #217 review), and by the L3 invariant in
+  // `configs/<name>/regression-invariants.test.ts` as a build-time
+  // belt-and-braces check.
   return drift;
 }
 
