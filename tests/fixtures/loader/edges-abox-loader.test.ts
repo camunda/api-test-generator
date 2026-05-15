@@ -23,7 +23,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadEdgesAbox } from '../../../path-analyser/src/ontology/loader.ts';
+import { loadEdgeEstablishers, loadEdgesAbox } from '../../../path-analyser/src/ontology/loader.ts';
 
 let workdir: string;
 const CONFIG_NAME = 'unit-test-config';
@@ -126,5 +126,53 @@ describe('loadEdgesAbox: documented branches (#201 review)', () => {
     const abox = loadEdgesAbox(workdir);
     expect(abox?.edges).toHaveLength(1);
     expect(abox?.edges[0]?.name).toBe('OnlyEdge');
+  });
+});
+
+describe('loadEdgeEstablishers: Lift 3 (#208) — ABox-derived edge-establisher set', () => {
+  it('returns null when the ABox file does not exist (caller falls back to spec-driven shape)', () => {
+    expect(loadEdgeEstablishers(workdir)).toBeNull();
+  });
+
+  it('returns null when configs.json itself is missing (test-isolation fallback)', () => {
+    // The integration tests run loadGraph against a tmpDir that
+    // doesn't ship a configs.json; loadEdgeEstablishers must degrade
+    // to "no ABox" so the legacy spec-driven behaviour is preserved.
+    rmSync(join(workdir, 'configs.json'));
+    expect(loadEdgeEstablishers(workdir)).toBeNull();
+  });
+
+  it('returns the set of opIds from `establishedBy` across all edges', () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        edges: [
+          {
+            name: 'EdgeOne',
+            endpoints: { from: 'A', to: 'B' },
+            identifiedBy: ['AId', 'BId'],
+            establishedBy: 'establishOne',
+            observableVia: 'observeOne',
+            description: 'fixture-one',
+          },
+          {
+            name: 'EdgeTwo',
+            endpoints: { from: 'C', to: 'D' },
+            identifiedBy: ['CId', 'DId'],
+            establishedBy: 'establishTwo',
+            observableVia: 'observeTwo',
+            description: 'fixture-two',
+          },
+        ],
+      }),
+    );
+    const set = loadEdgeEstablishers(workdir);
+    expect(set).not.toBeNull();
+    expect(set).toEqual(new Set(['establishOne', 'establishTwo']));
+  });
+
+  it("propagates the loader's validation failure (does not silently swallow malformed ABox)", () => {
+    writeAbox('{ this is not json');
+    expect(() => loadEdgeEstablishers(workdir)).toThrow(/Failed to parse edges ABox/);
   });
 });

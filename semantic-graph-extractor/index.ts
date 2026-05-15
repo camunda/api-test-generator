@@ -217,6 +217,17 @@ function loadKindRegistry():
       const kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> = [];
       for (const k of parsed.kinds) {
         if (!k || typeof k.name !== 'string') continue;
+        // Lift 3 / #208: the runtime planner only consumes `shape:
+        // 'external-entity'` entries from this registry (graphLoader
+        // builds an external-entity identifier set from them). Edge
+        // entries (`shape: 'edge'`) are now sourced authoritatively
+        // from the per-config ABox at `configs/<name>/ontology/
+        // edges.json`; the spec-derived edge entries here are dead
+        // weight at runtime and pruning them avoids wire-format
+        // confusion when the ABox and spec disagree. Plain entity
+        // entries (no `shape`) are kept for now — they will be lifted
+        // in Lift 4.
+        if (k.shape === 'edge') continue;
         const entry: { name: string; shape?: string; identifiers?: string[] } = { name: k.name };
         if (typeof k.shape === 'string') entry.shape = k.shape;
         if (Array.isArray(k.identifiers)) {

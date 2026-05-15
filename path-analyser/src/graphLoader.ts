@@ -7,6 +7,7 @@ import {
   validateRequestBodySemanticsClassified,
   validateRuntimeStateWitnessGraphRefs,
 } from './domainSemanticsValidator.js';
+import { loadEdgeEstablishers } from './ontology/loader.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
 class DomainSemanticsValidationFailure extends Error {
@@ -134,6 +135,15 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     throw new Error(`Failed to parse graph JSON at ${graphPath}: ${msg}`);
   }
 
+  // Lift 3 / #208: load the per-config edges ABox up front. The set of
+  // edge-establisher opIds is the authoritative source for
+  // `op.establishes.shape === 'edge'` going forward; the spec
+  // annotation's `shape` field is consulted only for cross-validation
+  // (drift warning). When the active config has not shipped an edges
+  // ABox, `edgeEstablishers` is `null` and `normalizeEstablishes` falls
+  // back to the legacy spec-annotation behaviour for backward compat.
+  const edgeEstablishers = loadEdgeEstablishers(repoRoot);
+
   const operations: Record<string, OperationNode> = {};
 
   // Support multiple possible root shapes
@@ -176,11 +186,32 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         console.warn('[graphLoader] Skipping node without operationId/id/name:', Object.keys(op));
         continue;
       }
-      operations[opId] = normalizeOp(opId, op);
+      operations[opId] = normalizeOp(opId, op, edgeEstablishers);
     }
   } else {
     for (const [opId, op] of Object.entries(candidateOps)) {
-      operations[opId] = normalizeOp(opId, op);
+      operations[opId] = normalizeOp(opId, op, edgeEstablishers);
+    }
+  }
+
+  // Lift 3 / #208: cross-validate the edges ABox against the spec
+  // annotations now that every op has been normalised. The ABox is
+  // authoritative for `shape: 'edge'` at runtime, but a disagreement
+  // with the spec annotation almost always signals a config error
+  // (typo in `establishedBy`, ABox missing a recently-added op,
+  // upstream rename) — surface it loudly so it doesn't rot.
+  //
+  // Strict mode (STRICT_EDGES_ABOX=1) escalates drift to a hard error;
+  // default is a warning so a partially-migrated config still loads.
+  if (edgeEstablishers !== null) {
+    const drift = detectEdgeAnnotationDrift(candidateOps, edgeEstablishers, operations);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `edges ABox / spec-annotation drift detected:\n${detail}`;
+      if (process.env.STRICT_EDGES_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(`WARNING: ${message}\n  (set STRICT_EDGES_ABOX=1 to fail-fast on drift.)`);
     }
   }
 
@@ -502,7 +533,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   return graph;
 }
 
-function normalizeOp(opId: string, op: RawOp): OperationNode {
+function normalizeOp(opId: string, op: RawOp, edgeEstablishers: Set<string> | null): OperationNode {
   // Extract produced semantic types.
   // Priority:
   // 1. Explicit fields (producesSemanticTypes / producesSemanticType / produces / outputsSemanticTypes)
@@ -618,7 +649,7 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
   // *consumed* prerequisites, not values established by this op. The
   // edge itself has no semantic type the planner can chain on, so we
   // don't touch `produces` for edges.
-  const establishes = normalizeEstablishes(op.establishes);
+  const establishes = normalizeEstablishes(op.establishes, opId, edgeEstablishers);
   const establishedSemantics = new Set<string>();
   if (establishes && establishes.shape !== 'edge') {
     for (const id of establishes.identifiedBy) {
@@ -684,7 +715,11 @@ function extractRequestBodySemantics(op: RawOp): OperationNode['requestBodySeman
   return out.length ? out : undefined;
 }
 
-function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
+function normalizeEstablishes(
+  raw: unknown,
+  opId: string,
+  edgeEstablishers: Set<string> | null,
+): OperationNode['establishes'] {
   if (!raw || typeof raw !== 'object') return undefined;
   // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
   const r = raw as { kind?: unknown; shape?: unknown; identifiedBy?: unknown };
@@ -727,19 +762,108 @@ function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
     if (e.acceptsExternal === true) entry.acceptsExternal = true;
     identifiedBy.push(entry);
   }
-  // Same `shape` restriction as the extractor: an unknown string would
-  // silently degrade to non-edge behaviour and `normalizeOp` would push
-  // the components into `produces` and strip them from `requires` —
-  // the exact opposite of the intended edge semantics. Reject unknown
-  // shapes wholesale.
+  // Lift 3 / #208: ABox is the authoritative source for `shape: 'edge'`
+  // when the active config has shipped an edges ABox. The spec
+  // annotation's `shape` field is consulted only as a fallback (for
+  // configs without an ABox) and as a drift signal (cross-validated by
+  // a separate check in loadGraph after all ops are normalised).
+  //
+  // When the ABox is present:
+  //   - opId in `edgeEstablishers` ⇒ `shape: 'edge'` (regardless of
+  //     what the spec annotation says).
+  //   - opId NOT in `edgeEstablishers` ⇒ `shape: undefined` (treat as
+  //     non-edge even if the spec annotation says `shape: 'edge'`; the
+  //     drift is surfaced as a warning by detectEdgeAnnotationDrift).
+  //
+  // When the ABox is absent (`edgeEstablishers === null`), fall back to
+  // the legacy spec-annotation behaviour for backward compat with
+  // configs that have not yet migrated.
   const rawShape = r.shape;
-  const shapeValid = rawShape === undefined || rawShape === 'edge';
-  if (!shapeValid) return undefined;
+  let resolvedShape: 'edge' | undefined;
+  if (edgeEstablishers !== null) {
+    resolvedShape = edgeEstablishers.has(opId) ? 'edge' : undefined;
+  } else {
+    // Legacy spec-driven behaviour: same `shape` restriction as the
+    // extractor. An unknown string would silently degrade to non-edge
+    // behaviour and `normalizeOp` would push the components into
+    // `produces` and strip them from `requires` — the exact opposite
+    // of the intended edge semantics. Reject unknown shapes wholesale.
+    const shapeValid = rawShape === undefined || rawShape === 'edge';
+    if (!shapeValid) return undefined;
+    resolvedShape = rawShape === 'edge' ? 'edge' : undefined;
+  }
   return {
     kind: r.kind,
-    shape: rawShape === 'edge' ? 'edge' : undefined,
+    shape: resolvedShape,
     identifiedBy,
   };
+}
+
+/**
+ * Lift 3 / #208: detect drift between the edges ABox (authoritative
+ * for `shape: 'edge'`) and the per-op `x-semantic-establishes.shape`
+ * annotations from the spec. Returns one human-readable line per
+ * disagreement; an empty array means the two are consistent.
+ *
+ * Two drift kinds:
+ *   - **ABox lists op X but spec annotation says non-edge** (or no
+ *     annotation at all): the planner will treat X as an edge
+ *     establisher, but the spec disagrees — likely an ABox typo or a
+ *     stale spec annotation.
+ *   - **Spec says X is `shape: 'edge'` but ABox does not list X**: the
+ *     planner now treats X as a non-edge (per ABox); the spec
+ *     annotation is being ignored — likely an ABox missed an op or a
+ *     spec annotation is stale.
+ *
+ * Either condition is loud: silently letting the planner classify the
+ * op the wrong way would re-introduce the partial-state hazard #112
+ * was meant to close.
+ */
+function detectEdgeAnnotationDrift(
+  candidateOps: Record<string, RawOp> | RawOp[],
+  edgeEstablishers: Set<string>,
+  operations: Record<string, OperationNode>,
+): string[] {
+  const drift: string[] = [];
+  const specEdgeOps = new Set<string>();
+  const iterate = (cb: (opId: string, op: RawOp) => void) => {
+    if (Array.isArray(candidateOps)) {
+      for (const op of candidateOps) {
+        const opId = op?.operationId || op?.id || op?.name;
+        if (opId) cb(opId, op);
+      }
+    } else {
+      for (const [opId, op] of Object.entries(candidateOps)) cb(opId, op);
+    }
+  };
+  iterate((opId, op) => {
+    const est = op.establishes;
+    if (est === null || typeof est !== 'object') return;
+    // biome-ignore lint/plugin: drift detection inspects raw spec-annotation contract; result is narrowed by literal comparison below.
+    const shape = (est as Record<string, unknown>).shape;
+    if (shape === 'edge') {
+      specEdgeOps.add(opId);
+    }
+  });
+  for (const opId of edgeEstablishers) {
+    if (!(opId in operations)) {
+      drift.push(`ABox lists '${opId}' as an edge establisher, but the op is not in the spec`);
+      continue;
+    }
+    if (!specEdgeOps.has(opId)) {
+      drift.push(
+        `ABox lists '${opId}' as an edge establisher, but the spec annotation does not have shape: 'edge' (ABox is authoritative; spec annotation will be ignored)`,
+      );
+    }
+  }
+  for (const opId of specEdgeOps) {
+    if (!edgeEstablishers.has(opId)) {
+      drift.push(
+        `spec annotates '${opId}' with shape: 'edge', but the ABox does not list it as an edge establisher (ABox is authoritative; '${opId}' will be treated as a non-edge establisher)`,
+      );
+    }
+  }
+  return drift;
 }
 
 function extractPathParameters(op: RawOp): { name: string; semanticType?: string }[] | undefined {
