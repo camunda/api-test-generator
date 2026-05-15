@@ -16,6 +16,7 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { edgeSchema } from '../path-analyser/src/ontology/edgeSchema.ts';
+import { entityKindsSchema } from '../path-analyser/src/ontology/entityKindsSchema.ts';
 // Namespace import: the schema source lives in the CommonJS-flavoured
 // `semantic-graph-extractor` workspace (`type: commonjs` in its
 // package.json). Node's CJS-to-ESM interop exposes the actual
@@ -58,6 +59,10 @@ const ARTIFACTS: OntologyArtifact[] = [
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'edge.schema.json'),
     schema: edgeSchema,
+  },
+  {
+    jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'entity-kinds.schema.json'),
+    schema: entityKindsSchema,
   },
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'bootstrap-sequence.schema.json'),
