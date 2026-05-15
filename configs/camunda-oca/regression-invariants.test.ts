@@ -4828,13 +4828,29 @@ describeForThisConfig(
         }
       }
       for (const s of abox.states) for (const x of s.requires ?? []) referenced.add(x);
-      // Also count witness references from sibling sub-trees that have
-      // not yet migrated to their own ABoxes (Lift 7): semanticTypes
-      // and capabilities still live in domain-semantics.json and may
-      // reference states via `witnesses`. Without this, states only
-      // referenced by a semanticType.witnesses (e.g.
-      // `ProcessDefinitionDeployed` ← `ProcessDefinitionKey.witnesses`)
-      // would be flagged as dead even though they are live.
+      // Also count witness references from sibling sub-trees:
+      // semanticTypes.witnesses (now in the semantics ABox / Lift 7) and
+      // capabilities.dependsOn (semantics ABox) reference runtime-state
+      // names. Without this, states only referenced by a witness coupling
+      // (e.g. `ProcessDefinitionDeployed` ←
+      // `ProcessDefinitionKey.witnesses`) would be flagged as dead even
+      // though they are live. We read the semantics ABox first; the
+      // legacy `domain-semantics.json` block below remains as a fallback
+      // for configs that haven't migrated yet (or for the
+      // pre-Lift-8 transitional state).
+      const { loadSemanticsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const semantics = loadSemanticsAbox(REPO_ROOT);
+      if (semantics !== null) {
+        for (const t of semantics.semanticTypes) {
+          if (typeof t.witnesses === 'string') referenced.add(t.witnesses);
+        }
+        for (const c of semantics.capabilities ?? []) {
+          for (const dep of c.dependsOn ?? []) referenced.add(dep);
+        }
+        for (const i of semantics.identifiers ?? []) {
+          if (typeof i.validityState === 'string') referenced.add(i.validityState);
+        }
+      }
       interface DomainSemanticsLite {
         semanticTypes?: Record<string, { witnesses?: string }>;
         capabilities?: Record<string, { witnesses?: string }>;
@@ -4924,3 +4940,158 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig('bundled-spec invariants: semantics ABox cross-references (#216)', () => {
+  // Lift 7 / #216: the semantics ABox is now the authoritative
+  // source for the three value-source sub-trees (semanticTypes,
+  // capabilities, identifiers) previously carried in
+  // domain-semantics.json. Same coverage strategy as Lifts 5 and 6.
+
+  it('loads the semantics ABox via the generic loader (proves the load path)', async () => {
+    const { loadSemanticsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadSemanticsAbox(REPO_ROOT);
+    expect(abox, 'semantics ABox file must exist for the camunda-oca config').not.toBeNull();
+    expect(abox?.semanticTypes.length).toBeGreaterThan(0);
+  });
+
+  it('every capabilities.producedBy / identifiers.boundBy references a real opId in the bundled graph (sense-2: abox-vs-graph)', async () => {
+    const { loadSemanticsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadSemanticsAbox(REPO_ROOT);
+    if (!abox) throw new Error('semantics ABox missing');
+    if (!existsSync(GRAPH_PATH)) {
+      throw new Error(`Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`);
+    }
+    interface GraphOp {
+      operationId?: string;
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+      operationsById?: Record<string, GraphOp>;
+      operations?: Record<string, GraphOp> | GraphOp[];
+    };
+    const opIds = new Set<string>(
+      Object.keys(graph.operationsById ?? {}).length > 0
+        ? Object.keys(graph.operationsById ?? {})
+        : Array.isArray(graph.operations)
+          ? graph.operations
+              .map((o) => o.operationId)
+              .filter((s): s is string => typeof s === 'string')
+          : Object.keys(graph.operations ?? {}),
+    );
+    const dangling: string[] = [];
+    for (const c of abox.capabilities ?? []) {
+      for (const op of c.producedBy ?? []) {
+        if (!opIds.has(op)) dangling.push(`capabilities['${c.name}'].producedBy -> '${op}'`);
+      }
+    }
+    for (const i of abox.identifiers ?? []) {
+      for (const op of i.boundBy ?? []) {
+        if (!opIds.has(op)) dangling.push(`identifiers['${i.name}'].boundBy -> '${op}'`);
+      }
+    }
+    expect(
+      dangling,
+      'semantics ABox references opIds that do not exist in the bundled graph - typo, renamed-upstream op, or stale entry; remove or fix in configs/<config>/ontology/semantics.json',
+    ).toEqual([]);
+  });
+
+  it('every semanticTypes.witnesses / capabilities.dependsOn / identifiers.validityState resolves to a runtime-states ABox state OR a capability declared in the same semantics ABox (cross-ABox integrity)', async () => {
+    const { loadSemanticsAbox, loadRuntimeStatesAbox } = await import(
+      '../../path-analyser/src/ontology/loader.js'
+    );
+    const semanticsAbox = loadSemanticsAbox(REPO_ROOT);
+    const runtimeStatesAbox = loadRuntimeStatesAbox(REPO_ROOT);
+    if (!semanticsAbox) throw new Error('semantics ABox missing');
+    if (!runtimeStatesAbox) throw new Error('runtime-states ABox missing');
+    const stateNames = new Set(runtimeStatesAbox.states.map((s) => s.name));
+    const capNames = new Set((semanticsAbox.capabilities ?? []).map((c) => c.name));
+    const dangling: string[] = [];
+    for (const t of semanticsAbox.semanticTypes) {
+      if (
+        typeof t.witnesses === 'string' &&
+        !stateNames.has(t.witnesses) &&
+        !capNames.has(t.witnesses)
+      ) {
+        dangling.push(
+          `semanticTypes['${t.name}'].witnesses -> '${t.witnesses}' (not a runtime state or capability)`,
+        );
+      }
+    }
+    for (const c of semanticsAbox.capabilities ?? []) {
+      for (const dep of c.dependsOn ?? []) {
+        if (!stateNames.has(dep)) {
+          dangling.push(`capabilities['${c.name}'].dependsOn -> '${dep}' (not a runtime state)`);
+        }
+      }
+    }
+    for (const i of semanticsAbox.identifiers ?? []) {
+      if (typeof i.validityState === 'string' && !stateNames.has(i.validityState)) {
+        dangling.push(
+          `identifiers['${i.name}'].validityState -> '${i.validityState}' (not a runtime state)`,
+        );
+      }
+      if (typeof i.derivedVia === 'string' && !capNames.has(i.derivedVia)) {
+        dangling.push(
+          `identifiers['${i.name}'].derivedVia -> '${i.derivedVia}' (not a capability)`,
+        );
+      }
+    }
+    expect(
+      dangling,
+      'semantics ABox references targets that do not exist in either the semantics or runtime-states ABox - cross-ABox integrity broken',
+    ).toEqual([]);
+  });
+
+  it('graph.domain.semanticTypes / capabilities / identifiers match the record-shaped views derived from the ABox (planner contract - ABox supersedes domain-semantics.json)', async () => {
+    const { deriveSemanticsViews } = await import('../../path-analyser/src/ontology/loader.js');
+    const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+    const expectedViews = deriveSemanticsViews(REPO_ROOT);
+    if (!expectedViews) throw new Error('semantics ABox missing');
+    const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+    expect(
+      graph.domain?.semanticTypes,
+      'graph.domain.semanticTypes does not match the ABox-derived view - overlay regression',
+    ).toEqual(expectedViews.semanticTypes);
+    expect(
+      graph.domain?.capabilities,
+      'graph.domain.capabilities does not match the ABox-derived view - overlay regression',
+    ).toEqual(expectedViews.capabilities);
+    expect(
+      graph.domain?.identifiers,
+      'graph.domain.identifiers does not match the ABox-derived view - overlay regression',
+    ).toEqual(expectedViews.identifiers);
+  });
+
+  it('the committed semantics vocabulary JSON matches the regenerated TBox (drift detector)', async () => {
+    const { ARTIFACTS, renderSchema } = await import('../../scripts/build-ontology.ts');
+    const target = ARTIFACTS.find((a) => a.jsonPath.endsWith('semantics.schema.json'));
+    expect(target, 'build-ontology must include semantics.schema.json').toBeDefined();
+    if (!target) return;
+    const onDisk = readFileSync(target.jsonPath, 'utf8');
+    const rendered = renderSchema(target.schema);
+    expect(
+      onDisk,
+      `Generated ontology artefact at ${target.jsonPath} is stale. Run 'npm run build:ontology' to refresh it.`,
+    ).toBe(rendered);
+  });
+
+  it("the semantics ABox's $schema field resolves to the published TBox JSON", () => {
+    const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json');
+    const expectedTboxPath = join(REPO_ROOT, 'ontology', 'vocabulary', 'semantics.schema.json');
+    expect(
+      existsSync(expectedTboxPath),
+      `Published TBox at '${expectedTboxPath}' does not exist`,
+    ).toBe(true);
+    interface AboxHeader {
+      $schema?: unknown;
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8')) as AboxHeader;
+    const schemaField = aboxJson.$schema;
+    expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
+    if (typeof schemaField !== 'string') return;
+    expect(schemaField).toBe(
+      'https://camunda.github.io/api-test-generator/ns/v1/semantics.schema.json',
+    );
+  });
+});

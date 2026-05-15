@@ -10,11 +10,13 @@ import {
 import {
   deriveArtifactKindsViews,
   deriveRuntimeStatesViews,
+  deriveSemanticsViews,
   loadArtifactKindsAbox,
   loadEdgeEstablishers,
   loadEntityKindsAbox,
   loadExternalEntityIdentifiers,
   loadRuntimeStatesAbox,
+  loadSemanticsAbox,
 } from './ontology/loader.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
@@ -330,6 +332,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // re-validation (after the try/catch) can also see the flags.
   const artifactAboxPresent = loadArtifactKindsAbox(repoRoot) !== null;
   const runtimeStatesAboxPresent = loadRuntimeStatesAbox(repoRoot) !== null;
+  const semanticsAboxPresent = loadSemanticsAbox(repoRoot) !== null;
   try {
     const domainPath = path.resolve(getActiveConfigDir(repoRoot), 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
@@ -351,7 +354,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // unmigrated sub-trees still expect their cross-refs to resolve.
     // Overlaying both pre- and post- gives one consistent view.
     let validationTarget: DomainSemantics = parsedDomain;
-    if (artifactAboxPresent || runtimeStatesAboxPresent) {
+    if (artifactAboxPresent || runtimeStatesAboxPresent || semanticsAboxPresent) {
       const overlaid: DomainSemantics = { ...parsedDomain };
       if (artifactAboxPresent) {
         const av = deriveArtifactKindsViews(repoRoot);
@@ -367,6 +370,14 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         if (rv !== null) {
           overlaid.runtimeStates = rv.runtimeStates;
           overlaid.operationRequirements = rv.operationRequirements;
+        }
+      }
+      if (semanticsAboxPresent) {
+        const sv = deriveSemanticsViews(repoRoot);
+        if (sv !== null) {
+          overlaid.semanticTypes = sv.semanticTypes;
+          overlaid.capabilities = sv.capabilities;
+          overlaid.identifiers = sv.identifiers;
         }
       }
       validationTarget = overlaid;
@@ -398,6 +409,28 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
           ...domain,
           runtimeStates: views.runtimeStates,
           operationRequirements: views.operationRequirements,
+        };
+      }
+    }
+    // Lift 7 / #216: semantics ABox supersedes the legacy
+    // `semanticTypes` / `capabilities` / `identifiers` sub-trees.
+    // Performed inside the try block (and right after `domain =
+    // parsedDomain`) so the existing consumer loops below — building
+    // `producersByState` from `capabilities.producedBy` and
+    // `identifiers.boundBy`, the #56 producersByType propagation, the
+    // #70 witness-implication loop — see the overlaid values without
+    // further plumbing. The pre-overlay step above ensures the
+    // validator already accepted this swap; the post-overlay
+    // re-validation block (after the try/catch) catches
+    // ABox-introduced cross-reference violations.
+    if (semanticsAboxPresent) {
+      const sv = deriveSemanticsViews(repoRoot);
+      if (sv !== null) {
+        domain = {
+          ...domain,
+          semanticTypes: sv.semanticTypes,
+          capabilities: sv.capabilities,
+          identifiers: sv.identifiers,
         };
       }
     }
@@ -566,6 +599,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
   if (runtimeStatesAboxPresent) postOverlayReValidationNeeded = true;
+  if (semanticsAboxPresent) postOverlayReValidationNeeded = true;
 
   // Lift 6 / #214: when the runtime-states ABox is shipped but no
   // legacy `domain-semantics.json` sidecar exists (the future
@@ -640,20 +674,85 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       }
     }
   }
+  // Lift 7 / #216: when the semantics ABox is shipped but no legacy
+  // `domain-semantics.json` sidecar exists, the in-try consumer loops
+  // (capability/identifier producer expansion at lines ~444-466 and
+  // the #70 witness-implication loop at lines ~508-520) are never
+  // reached — leaving `graph.domain.semanticTypes`/`capabilities`/
+  // `identifiers` and the dependent `producersByState` /
+  // `node.domainProduces` entries unpopulated even though the ABox
+  // declares them. Mirror the runtime-states post-try block:
+  // synthesize `domain` from the views and re-run the same consumer
+  // logic against it. Safe to compose with the runtime-states post-try
+  // block because that one only writes runtime-state-derived
+  // producers; this one writes capability- / identifier- /
+  // witness-derived producers — disjoint addProducer key sets in
+  // practice (and `addProducer` here dedups against the existing
+  // `producersByState`).
+  if (semanticsAboxPresent && !legacyDomainLoaded) {
+    const sv = deriveSemanticsViews(repoRoot);
+    if (sv !== null) {
+      const baseDomain: DomainSemantics = domain ?? { version: 1 };
+      domain = {
+        ...baseDomain,
+        semanticTypes: sv.semanticTypes,
+        capabilities: sv.capabilities,
+        identifiers: sv.identifiers,
+      };
+      const producers: Record<string, string[]> = producersByState ?? {};
+      producersByState = producers;
+      const addProducer = (state: string, opId: string) => {
+        const list = producers[state] ?? [];
+        if (!list.includes(opId)) list.push(opId);
+        producers[state] = list;
+        const node = operations[opId];
+        if (node) {
+          if (!node.domainProduces) node.domainProduces = [state];
+          else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
+        }
+      };
+      // capabilities.producedBy → producersByState[capName]
+      for (const [capName, spec] of Object.entries(sv.capabilities)) {
+        for (const opId of spec.producedBy ?? []) {
+          if (operations[opId]) addProducer(capName, opId);
+        }
+      }
+      // identifiers.boundBy → producersByState[validityState]
+      for (const [, spec] of Object.entries(sv.identifiers)) {
+        const state = spec.validityState;
+        if (state == null) continue;
+        for (const opId of spec.boundBy ?? []) {
+          if (operations[opId]) addProducer(state, opId);
+        }
+      }
+      // #70 witness implication, gated on providerMap[T] === true (#95).
+      // Same shape as the in-try loop at lines ~508-520.
+      for (const [semanticType, spec] of Object.entries(sv.semanticTypes)) {
+        const witnessed = spec.witnesses;
+        if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
+        const ops = producersByType[semanticType] ?? [];
+        for (const opId of ops) {
+          const op = operations[opId];
+          if (!op) continue;
+          if (op.providerMap?.[semanticType] !== true) continue;
+          addProducer(witnessed, opId);
+        }
+      }
+    }
+  }
   // Re-run the cross-reference invariants from `validateDomainSemantics`
   // against the post-overlay value, but only when a legacy
   // `domain-semantics.json` sidecar was loaded. The pre-overlay
-  // validation only sees the (already-stripped) legacy sub-trees, so
-  // an ABox that introduces an undeclared `producesStates` /
-  // `producibleStates` (not in `runtimeStates` / `capabilities`), or a
-  // `producesSemantics` entry without a `semanticTypes.witnesses`
-  // declaration, or an `operationRequirements.requires` referencing an
-  // undeclared state, would otherwise slip through. When no sidecar
-  // is present the validator has no `semanticTypes` / `capabilities`
-  // to cross-check against — the ABox stands alone, and Lift 7 will
-  // move those declarations into their own ABox. Reuses the same
-  // Zod-driven validator and the same DomainSemanticsValidationFailure
-  // error type so the diagnostic surfaces with one well-known shape
+  // validation already saw the ABox values via the merged
+  // validationTarget, so this catches only ABox-introduced
+  // cross-reference drift relative to the in-try-promoted `domain` —
+  // mostly redundant after Lift 7, but kept as belt-and-braces. When
+  // no sidecar is present the validator has no `globalContextSeeds`
+  // (the only remaining sub-tree pre-Lift-8) to cross-check against;
+  // ABox-only paths are re-validated by the per-ABox drift detectors
+  // above and by the L3 invariants. Reuses the same Zod-driven
+  // validator and the same DomainSemanticsValidationFailure error
+  // type so the diagnostic surfaces with one well-known shape
   // regardless of which ABox tripped it.
   if (postOverlayReValidationNeeded && legacyDomainLoaded && domain !== undefined) {
     const overlayIssues = validateDomainSemantics(domain);
@@ -744,11 +843,9 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // runtime-states ABox. Catches: producedBy / witness.operationId /
   // operationRequirements.operationId references to opIds that don't
   // exist in the bundled graph (typo, renamed-upstream op, or stale
-  // entry). Cross-references to capabilities / semanticTypes are not
-  // checked here — they live in the unmigrated `domain-semantics.json`
-  // sub-trees and are covered by the post-overlay re-validation
-  // (`validateDomainSemantics`) above. Lift 7 will fold them into this
-  // detector.
+  // entry). Cross-references to capabilities / semanticTypes now live
+  // in the semantics ABox and are covered by `detectSemanticsDrift`
+  // (Lift 7 / #216) and by the L3 cross-ABox invariants.
   {
     const drift = detectRuntimeStatesDrift(operations, repoRoot);
     if (drift.length > 0) {
@@ -760,6 +857,27 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       console.warn(
         `WARNING: ${message}\n  (set STRICT_RUNTIME_STATES_ABOX=1 to fail-fast on drift.)`,
       );
+    }
+  }
+
+  // Lift 7 / #216: per-fact-class drift detector for the semantics
+  // ABox (semanticTypes + capabilities + identifiers). Catches:
+  // capabilities.producedBy / identifiers.boundBy references to
+  // opIds that don't exist in the bundled graph (typo,
+  // renamed-upstream op, or stale entry). Cross-sub-tree
+  // dead-entry checks (e.g. unreferenced semanticTypes) are
+  // deferred to the L3 invariant in
+  // `configs/<config>/regression-invariants.test.ts`, which sees
+  // both this ABox and the runtime-states ABox at once.
+  {
+    const drift = detectSemanticsDrift(operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `semantics ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_SEMANTICS_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(`WARNING: ${message}\n  (set STRICT_SEMANTICS_ABOX=1 to fail-fast on drift.)`);
     }
   }
 
@@ -1334,15 +1452,49 @@ function detectRuntimeStatesDrift(
     }
   }
 
-  // Dead-state check is deferred to Lift 7 (#199): until
-  // `semanticTypes`/`capabilities` migrate to their own ABox, states
-  // can be referenced from those legacy sidecar sub-trees (e.g.
-  // `semanticTypes.X.witnesses → 'StateName'`). The detector here
-  // sees only the runtime-states ABox, so it would false-positive on
-  // states whose only live reference is via a witness coupling. The
-  // L3 invariant in `configs/<name>/regression-invariants.test.ts`
-  // covers the dead-state check by reading both sources.
+  // Cross-sub-tree dead-state check is deferred to the L3 invariant in
+  // `configs/<name>/regression-invariants.test.ts`, which sees both the
+  // runtime-states ABox AND the semantics ABox at once (Lift 7 / #216).
+  // In-graphLoader detection would false-positive on states whose only
+  // live reference is via a `semanticTypes.*.witnesses` coupling, since
+  // this detector sees only the runtime-states ABox.
 
+  return drift;
+}
+
+function detectSemanticsDrift(
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadSemanticsAbox(repoRoot);
+  if (abox === null) return drift;
+
+  for (const c of abox.capabilities ?? []) {
+    for (const opId of c.producedBy ?? []) {
+      if (!operations[opId]) {
+        drift.push(
+          `[abox-vs-graph] capability '${c.name}'.producedBy references opId '${opId}' that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+        );
+      }
+    }
+  }
+  for (const i of abox.identifiers ?? []) {
+    for (const opId of i.boundBy ?? []) {
+      if (!operations[opId]) {
+        drift.push(
+          `[abox-vs-graph] identifier '${i.name}'.boundBy references opId '${opId}' that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+        );
+      }
+    }
+  }
+
+  // Cross-sub-tree integrity (witnesses target runtimeStates|capabilities,
+  // dependsOn / validityState target runtimeStates, derivedVia targets
+  // capabilities) is enforced by post-overlay `validateDomainSemantics`
+  // for the legacy-sidecar path and by the L3 invariant in
+  // `configs/<name>/regression-invariants.test.ts` for the
+  // ABox-authoritative path.
   return drift;
 }
 
