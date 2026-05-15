@@ -758,10 +758,11 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
  * ABox (Lift 8 / #218).
  *
  * @returns the parsed ABox, or `null` if no `global-context-seeds.json`
- *   is shipped under `configs/<active>/ontology/` (configs are not
- *   required to ship one; a missing file leaves the legacy
- *   `domain-semantics.json#globalContextSeeds` key authoritative for
- *   backward compatibility, although Lift 8 deletes that fallback).
+ *   is shipped under `configs/<active>/ontology/`. A missing file is
+ *   non-fatal: `graph.domain.globalContextSeeds` is left undefined and
+ *   the Playwright emitter prologue + `loadGlobalContextSeeds` in
+ *   `codegen/index.ts` treat it as the empty list. There is no longer
+ *   a legacy-sidecar fallback (Lift 8 retired it).
  * @throws if the file exists but does not validate against the TBox,
  *   if it contains duplicate `binding` or `fieldName` values, or if a
  *   cross-property invariant is violated (`stripFromMultipartWhenDefault`

@@ -48,7 +48,7 @@
 
 export const globalContextSeedsSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
-  $id: 'https://camunda.github.io/api-test-generator/ontology/global-context-seeds.schema.json',
+  $id: 'https://camunda.github.io/api-test-generator/ns/v1/global-context-seeds.schema.json',
   title: 'GlobalContextSeedsAbox',
   description:
     'TBox JSON Schema for an ABox file describing the universal seed bindings every emitted scenario must populate before its request plan runs (e.g. a single-tenant `tenantIdVar` default). Each entry asserts: a context binding name, the request-body / multipart field name it maps to, the seed-rules.json key invoked at runtime, and (optionally) a sentinel value that triggers multipart-field stripping. The schema is intentionally agnostic to which API ships the seeds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/global-context-seeds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Identifier safety (binding/fieldName/seedRule must match /^[A-Za-z_$][A-Za-z0-9_$]*$/) and sentinel-string safety (no single-quotes, backslashes, line terminators, or control chars) are encoded in the `pattern` constraints because the emitter interpolates these values directly into emitted TS source as identifiers and single-quoted string literals (#87).',
