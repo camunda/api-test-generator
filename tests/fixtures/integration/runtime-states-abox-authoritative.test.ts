@@ -7,7 +7,7 @@
  *
  * Mirrors `artifact-kinds-abox-authoritative.test.ts` (Lift 5 / #212).
  *
- * Five observable behaviours guarded here:
+ * Four observable behaviours guarded here:
  *
  *   1. **ABox-only graph population**: the runtime-states ABox
  *      populates `graph.domain.runtimeStates`,
