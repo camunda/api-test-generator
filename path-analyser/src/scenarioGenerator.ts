@@ -370,10 +370,13 @@ export function generateScenariosForEndpoint(
   const maxPreOps = opts.longChains?.maxPreOps ?? 25;
   // Lift 9 / #225: the deployment-gateway operationId for the active config
   // (per `artifact-kinds.json#operationRules[].role === "deploymentGateway"`).
-  // `undefined` when the ABox is absent — every special-case below then
-  // collapses to "no op is the deployment gateway", which preserves the
-  // pre-Lift-9 behaviour for unit tests that build minimal graphs without
-  // a domain.
+  // `undefined` when the ABox is absent or no rule declares the role —
+  // every special-case below then collapses to "no op is the deployment
+  // gateway". This is a behaviour change relative to the pre-Lift-9 code,
+  // which always special-cased the literal `'createDeployment'` opId. Unit
+  // tests that build minimal graphs and rely on the deployment special-
+  // casing must declare the role on their fixture domain (see
+  // `tests/fixtures/planner/classification-dispatch.test.ts`).
   const deploymentGatewayOpId = findDeploymentGatewayOpId(graph.domain);
   while (queue.length && scenarios.length < max) {
     // biome-ignore lint/style/noNonNullAssertion: queue.length is checked in the loop predicate

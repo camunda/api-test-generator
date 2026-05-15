@@ -129,8 +129,9 @@ async function run() {
   // Lift 9 / #225: discriminator for the deployment-gateway routing in
   // the Playwright emitter, sourced from the active config's
   // artifact-kinds ABox (`operationRules[].role === "deploymentGateway"`).
-  // `null` when no ABox is shipped — the emitter will then take the
-  // inline-multipart path for every step.
+  // `undefined` when no ABox is shipped, or when no rule declares the
+  // role — the emitter will then take the inline-multipart path for
+  // every step.
   const artifactViews = deriveArtifactKindsViews(repoRoot);
   const deploymentGatewayOpId = findDeploymentGatewayOpId(
     artifactViews ? { operationArtifactRules: artifactViews.operationArtifactRules } : undefined,

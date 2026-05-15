@@ -1741,16 +1741,20 @@ function chooseFixtureFromRegistry(
 }
 
 /**
- * Compute the set of runtime states the `createDeployment` step in a chain
+ * Compute the set of runtime states the deployment-gateway step in a chain
  * must provide. Walks every operation in the scenario chain, accumulating
  * required states from `operationRequirements.<op>.requires`, then subtracts
- * states produced by any non-deployment op in the chain (those are
- * satisfied by their own producer step, not by the deployment). The chain
- * is BFS-ordered with producers before their consumers, so a simple
+ * states produced by any non-deployment-gateway op in the chain (those are
+ * satisfied by their own producer step, not by the deployment gateway). The
+ * chain is BFS-ordered with producers before their consumers, so a simple
  * unordered subtraction is equivalent to a left-to-right walk here.
  *
+ * The deployment-gateway op is identified via `isDeploymentGatewayOp`
+ * (Lift 9 / #225 — see `ontology/operationRoles.ts`), not by a hard-coded
+ * operationId.
+ *
  * Returns the residual — states that have to come from the
- * `createDeployment` step's fixture selection. An empty set means any
+ * deployment-gateway step's fixture selection. An empty set means any
  * fixture of the right kind is acceptable.
  */
 function computeDeploymentRequiredStates(
@@ -1765,10 +1769,10 @@ function computeDeploymentRequiredStates(
     if (!req) continue;
     for (const s of req.requires ?? []) result.add(s);
   }
-  // States produced by non-deployment ops earlier in the chain are
-  // satisfied by their own producer step; the deployment doesn't need to
-  // provide them. Lift 9 / #225: the deployment-gateway op is now
-  // identified via the ABox role lookup instead of a hard-coded literal.
+  // States produced by non-deployment-gateway ops earlier in the chain are
+  // satisfied by their own producer step; the deployment gateway doesn't
+  // need to provide them. The deployment-gateway op is identified via the
+  // ABox role lookup (Lift 9 / #225) instead of a hard-coded literal.
   for (const opRef of scenario.operations) {
     if (isDeploymentGatewayOp(domain, opRef.operationId)) continue;
     const req = opReqs[opRef.operationId];

@@ -136,7 +136,7 @@ const ArtifactRuleSchema = z
 const OperationArtifactRuleSpecSchema = z
   .object({
     composable: z.boolean().optional(),
-    role: z.string().optional(),
+    role: z.string().min(1).optional(),
     rules: z.array(ArtifactRuleSchema).optional(),
   })
   .passthrough();
