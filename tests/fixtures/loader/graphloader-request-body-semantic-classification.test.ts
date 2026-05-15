@@ -3,7 +3,7 @@
  * diagnostic.
  *
  * Every semantic referenced by an operation's `requestBodySemanticTypes`
- * must fit exactly one of the five classifications defined in
+ * must fit exactly one of the six classifications defined in
  * `bindSemanticInput.ts`:
  *
  *   - `modelDerived`             (semantics ABox: kind: 'modelDerived')
