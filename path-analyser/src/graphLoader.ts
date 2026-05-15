@@ -378,7 +378,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       if (req.produces) node.domainProduces = req.produces;
       if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
     }
-    const producers: Record<string, string[]> = producersByState ?? {};
+    const producers: Record<string, string[]> = {};
     producersByState = producers;
     const addProducer = (state: string, opId: string) => {
       const list = producers[state] ?? [];
@@ -417,6 +417,8 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   }
 
   if (semanticsViews !== null) {
+    // Preserve any runtime-state-derived producers when the semantics
+    // ABox is also present; otherwise start a fresh map.
     const producers: Record<string, string[]> = producersByState ?? {};
     producersByState = producers;
     const addProducer = (state: string, opId: string) => {
