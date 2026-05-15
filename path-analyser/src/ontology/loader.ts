@@ -7,6 +7,7 @@ import { artifactKindsSchema } from './artifactKindsSchema.js';
 import { edgeSchema } from './edgeSchema.js';
 import { entityKindsSchema } from './entityKindsSchema.js';
 import { runtimeStatesSchema } from './runtimeStatesSchema.js';
+import { semanticsSchema } from './semanticsSchema.js';
 
 // ---------------------------------------------------------------------------
 // path-analyser/src/ontology/loader.ts
@@ -51,6 +52,11 @@ export type RuntimeStatesAbox = FromSchema<typeof runtimeStatesSchema>;
 export type RuntimeStateEntry = RuntimeStatesAbox['states'][number];
 export type OperationRequirementEntry = RuntimeStatesAbox['operationRequirements'][number];
 
+export type SemanticsAbox = FromSchema<typeof semanticsSchema>;
+export type SemanticTypeEntry = SemanticsAbox['semanticTypes'][number];
+export type CapabilityEntry = NonNullable<SemanticsAbox['capabilities']>[number];
+export type IdentifierEntry = NonNullable<SemanticsAbox['identifiers']>[number];
+
 // `Ajv` is the named export pointing at the constructor; the namespace
 // also has a self-referential default but the named export is the
 // least error-prone form under module=nodenext.
@@ -59,6 +65,7 @@ const validateEdgesAbox = ajv.compile<EdgesAbox>(edgeSchema);
 const validateEntityKindsAbox = ajv.compile<EntityKindsAbox>(entityKindsSchema);
 const validateArtifactKindsAbox = ajv.compile<ArtifactKindsAbox>(artifactKindsSchema);
 const validateRuntimeStatesAbox = ajv.compile<RuntimeStatesAbox>(runtimeStatesSchema);
+const validateSemanticsAbox = ajv.compile<SemanticsAbox>(semanticsSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? [])
@@ -582,4 +589,160 @@ export function deriveRuntimeStatesViews(repoRoot: string): RuntimeStatesViews |
     operationRequirements[r.operationId] = entry;
   }
   return { runtimeStates, operationRequirements };
+}
+
+/**
+ * Load and validate the semantics ABox file (semanticTypes +
+ * capabilities + identifiers) for the active config.
+ *
+ * @param repoRoot Absolute path to the api-test-generator repository root.
+ * @returns The parsed ABox, or `null` if the file does not exist
+ *   (configs are not required to ship one; a missing file leaves the
+ *   legacy `domain-semantics.json` `semanticTypes` / `capabilities` /
+ *   `identifiers` keys authoritative for backward compatibility).
+ * @throws if the file exists but does not validate against the TBox,
+ *   if it contains duplicate names within any sub-tree, or if a
+ *   cross-property invariant is violated (e.g. `kind: 'attribute'`
+ *   without `clientMinted: true`).
+ */
+export function loadSemanticsAbox(repoRoot: string): SemanticsAbox | null {
+  // Symmetric with the other loadXxxAbox helpers — tests that exercise
+  // loadGraph against an isolated tmpDir don't ship a `configs.json`,
+  // and the right fallback there is "no ABox available" so the test
+  // exercises the legacy domain-semantics.json path.
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'semantics.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse semantics ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateSemanticsAbox(parsed)) {
+    throw new Error(
+      `Semantics ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateSemanticsAbox.errors)}`,
+    );
+  }
+  // Reject duplicate keys up front — Draft-07 cannot express
+  // uniqueness, but a duplicate would silently shadow facts at query
+  // time. Same defensive check as in the other ABox loaders.
+  const dupeTypes = duplicates(parsed.semanticTypes.map((t) => t.name));
+  if (dupeTypes.length > 0) {
+    throw new Error(
+      `Semantics ABox at ${aboxPath} has duplicate semanticTypes name(s): ${dupeTypes.join(', ')}`,
+    );
+  }
+  if (parsed.capabilities !== undefined) {
+    const dupeCaps = duplicates(parsed.capabilities.map((c) => c.name));
+    if (dupeCaps.length > 0) {
+      throw new Error(
+        `Semantics ABox at ${aboxPath} has duplicate capabilities name(s): ${dupeCaps.join(', ')}`,
+      );
+    }
+  }
+  if (parsed.identifiers !== undefined) {
+    const dupeIds = duplicates(parsed.identifiers.map((i) => i.name));
+    if (dupeIds.length > 0) {
+      throw new Error(
+        `Semantics ABox at ${aboxPath} has duplicate identifiers name(s): ${dupeIds.join(', ')}`,
+      );
+    }
+  }
+  // Cross-property invariant: `kind: 'attribute'` ⇒ `clientMinted: true`
+  // (#162 PR 2 coupling, was enforced by `domainSemanticsValidator` for the
+  // legacy sidecar). Same shape as the runtime-states `eventual`/`witness`
+  // coupling check.
+  for (const t of parsed.semanticTypes) {
+    if (t.kind === 'attribute' && t.clientMinted !== true) {
+      throw new Error(
+        `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'attribute' but clientMinted is not true — attribute-shaped semantic types must declare clientMinted: true so the planner mints values rather than waiting for a producer`,
+      );
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Derive the three record-shaped views of the semantics ABox that
+ * `graph.domain.*` consumers (planner BFS, value-binding emitter,
+ * #70 witness-implication loop) expect. Returning `null` when no ABox
+ * is shipped lets `loadGraph` fall back to the legacy
+ * `domain-semantics.json` keys.
+ */
+export interface SemanticsViews {
+  semanticTypes: Record<
+    string,
+    {
+      witnesses?: string;
+      kind?: 'modelDerived' | 'attribute' | 'serverEmergent';
+      clientMinted?: boolean;
+    }
+  >;
+  capabilities: Record<
+    string,
+    {
+      kind: 'capability';
+      parameter: string;
+      producedBy?: string[];
+      dependsOn?: string[];
+    }
+  >;
+  identifiers: Record<
+    string,
+    {
+      kind: 'identifier';
+      validityState?: string;
+      boundBy?: string[];
+      fieldPaths?: string[];
+      derivedVia?: string;
+    }
+  >;
+}
+
+export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
+  const abox = loadSemanticsAbox(repoRoot);
+  if (abox === null) return null;
+  const semanticTypes: SemanticsViews['semanticTypes'] = {};
+  for (const t of abox.semanticTypes) {
+    const entry: SemanticsViews['semanticTypes'][string] = {};
+    if (t.witnesses !== undefined) entry.witnesses = t.witnesses;
+    if (t.kind !== undefined) entry.kind = t.kind;
+    if (t.clientMinted !== undefined) entry.clientMinted = t.clientMinted;
+    semanticTypes[t.name] = entry;
+  }
+  const capabilities: SemanticsViews['capabilities'] = {};
+  for (const c of abox.capabilities ?? []) {
+    const entry: SemanticsViews['capabilities'][string] = {
+      kind: 'capability',
+      parameter: c.parameter,
+    };
+    if (c.producedBy !== undefined) entry.producedBy = [...c.producedBy];
+    if (c.dependsOn !== undefined) entry.dependsOn = [...c.dependsOn];
+    capabilities[c.name] = entry;
+  }
+  const identifiers: SemanticsViews['identifiers'] = {};
+  for (const i of abox.identifiers ?? []) {
+    const entry: SemanticsViews['identifiers'][string] = { kind: 'identifier' };
+    if (i.validityState !== undefined) entry.validityState = i.validityState;
+    if (i.boundBy !== undefined) entry.boundBy = [...i.boundBy];
+    if (i.fieldPaths !== undefined) entry.fieldPaths = [...i.fieldPaths];
+    if (i.derivedVia !== undefined) entry.derivedVia = i.derivedVia;
+    identifiers[i.name] = entry;
+  }
+  return { semanticTypes, capabilities, identifiers };
 }

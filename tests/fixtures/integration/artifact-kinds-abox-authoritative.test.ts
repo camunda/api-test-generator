@@ -90,11 +90,15 @@ function deployOp(): Record<string, unknown> {
 }
 
 function minimalKind(name: string, identifierType: string): Record<string, unknown> {
+  // Empty producesStates / producesSemantics by default — those would
+  // reference runtimeStates / semanticTypes which most focused fixtures
+  // don't declare. Tests that need cross-ABox validation supply them
+  // inline along with companion declarations (PR #217 review).
   return {
     name,
     identifierType,
-    producesStates: [`${identifierType}Deployed`],
-    producesSemantics: [`${name}Key`],
+    producesStates: [],
+    producesSemantics: [],
     deploymentSlices: [name],
     description: `${name} fixture`,
   };
