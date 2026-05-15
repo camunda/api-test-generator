@@ -663,6 +663,16 @@ export interface ArtifactRegistryEntry {
 export interface OperationArtifactRuleSpec {
   rules?: ArtifactRule[]; // optional when composable
   composable?: boolean; // if true, generator composes artifacts via set cover
+  /**
+   * Optional ontological role this operation plays in the API surface
+   * (Lift 9 / #225). The planner and Playwright emitter consult this
+   * field via `findOpIdByRole` / `isDeploymentGatewayOp` to discriminate
+   * special-case behaviour against the ABox instead of a hard-coded
+   * operationId. Conventional values include `deploymentGateway` —
+   * the multipart deploy operation whose response surfaces deployed
+   * artifact identifiers.
+   */
+  role?: string;
 }
 
 export interface ArtifactRule {

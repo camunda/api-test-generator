@@ -13,6 +13,7 @@ import {
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
+import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
 import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
@@ -744,9 +745,14 @@ export function bindModelDerivedFromFixture(
   // are out of scope here.
   const subShapes = endpoint?.optionalSubShapes ?? [];
   if (!subShapes.length) return;
-  // Find the first createDeployment step in the chain — single-deploy
-  // only in PR 1; multi-deploy is a follow-up.
-  const deployStep = steps.find((s) => s.operationId === 'createDeployment');
+  // Find the first deployment-gateway step in the chain — single-deploy
+  // only in PR 1; multi-deploy is a follow-up. The op is identified via
+  // the active config's artifact-kinds ABox role lookup
+  // (Lift 9 / #225) instead of a hard-coded `createDeployment` literal.
+  const deploymentGatewayOpId = findDeploymentGatewayOpId(graph.domain);
+  const deployStep = deploymentGatewayOpId
+    ? steps.find((s) => s.operationId === deploymentGatewayOpId)
+    : undefined;
   if (!deployStep) return;
   const fixture = fixtureFromDeployStep(deployStep);
   if (!fixture?.providesValues) return;
@@ -1433,8 +1439,12 @@ function buildRequestBodyFromCanonical(
       const rule = ruleId ? domainRules.find((r) => r.id === ruleId) : undefined;
       let kind = rule?.artifactKind;
       if (!kind) {
-        // Default to BPMN process for deployments when unspecified
-        if (opId === 'createDeployment') kind = 'bpmnProcess';
+        // Default to BPMN process for the deployment-gateway op when
+        // unspecified. Lift 9 / #225: the op is now resolved against the
+        // ABox role mapping; the bpmnProcess default for that op stays
+        // hard-coded here pending Lift 10 (#225 follow-up: derive the
+        // default from operationRules[op].rules[0].artifactKind).
+        if (isDeploymentGatewayOp(graph.domain, opId)) kind = 'bpmnProcess';
       }
       // Map artifact kind -> default fixture path
       const defaultFixtures: Record<string, string> = {
@@ -1757,9 +1767,10 @@ function computeDeploymentRequiredStates(
   }
   // States produced by non-deployment ops earlier in the chain are
   // satisfied by their own producer step; the deployment doesn't need to
-  // provide them.
+  // provide them. Lift 9 / #225: the deployment-gateway op is now
+  // identified via the ABox role lookup instead of a hard-coded literal.
   for (const opRef of scenario.operations) {
-    if (opRef.operationId === 'createDeployment') continue;
+    if (isDeploymentGatewayOp(domain, opRef.operationId)) continue;
     const req = opReqs[opRef.operationId];
     if (!req) continue;
     for (const s of req.produces ?? []) result.delete(s);

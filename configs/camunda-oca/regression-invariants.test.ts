@@ -4699,6 +4699,25 @@ describeForThisConfig(
       ).toEqual(expectedViews.operationArtifactRules);
     });
 
+    it('exactly one operation has role "deploymentGateway" and it is `createDeployment` (Lift 9 / #225)', async () => {
+      // The deployment-gateway role discriminates the operation whose
+      // multipart response surfaces deployed artifact identifiers.
+      // The planner and Playwright emitter rely on this role to decide
+      // which step uses the `deploy()` helper and whose extracts feed
+      // model-derived bindings. Two operations with the role would make
+      // those decisions ambiguous; zero would silently disable the
+      // deploy() path. The role must map to `createDeployment` for the
+      // camunda-oca config because that is the upstream multipart
+      // deployment endpoint.
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const rules = graph.domain?.operationArtifactRules ?? {};
+      const opsWithDeploymentGateway = Object.entries(rules)
+        .filter(([, spec]) => spec.role === 'deploymentGateway')
+        .map(([opId]) => opId);
+      expect(opsWithDeploymentGateway).toEqual(['createDeployment']);
+    });
+
     it('graph.domain.semanticTypeToArtifactKind matches the ABox `semanticTypeMap[]` (planner contract)', async () => {
       const { deriveArtifactKindsViews } = await import(
         '../../path-analyser/src/ontology/loader.js'

@@ -51,6 +51,7 @@
     {
       "@type": "OperationArtifactRule",
       "operationId": "createDeployment",
+      "role": "deploymentGateway",
       "composable": true,
       "rules": [
         { "id": "bpmn", "artifactKind": "bpmnProcess" },
