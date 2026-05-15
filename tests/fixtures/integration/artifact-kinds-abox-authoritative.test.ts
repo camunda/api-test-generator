@@ -11,7 +11,7 @@
  * `abox-vs-graph` (sense-2) drift signal; there is no transitional
  * `spec-vs-abox` (sense-1) sense to test.
  *
- * Five observable behaviours guarded here:
+ * Four observable behaviours guarded here:
  *
  *   1. **ABox-only graph population**: the ABox alone populates the
  *      four artifact-related sub-trees on `graph.domain`.
