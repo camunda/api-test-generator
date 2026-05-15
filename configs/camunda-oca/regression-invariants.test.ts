@@ -4054,3 +4054,197 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
     expect(extraInAbox, 'ABox declares edge kinds not present in spec').toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lift 2 of the ontology migration (#202): bootstrap-sequences ABox
+//
+// The previous heuristic `RootDependencyAnalyzer` produced six hard-coded
+// `bootstrapSequences` keyed off OCA-specific operationIds and semantic
+// types. That logic is now lifted to a per-config ABox at
+// `configs/<active>/ontology/bootstrap-sequences.json`, validated by the
+// TBox authored as a TS const in
+// `semantic-graph-extractor/ontology/bootstrapSequenceSchema.ts`, loaded
+// by `semantic-graph-extractor/ontology/bootstrapSequencesLoader.ts`.
+// The matching `ontology/vocabulary/bootstrap-sequence.schema.json` is
+// generated from the TS const by `scripts/build-ontology.ts`. Drift
+// between the TS source and the generated JSON is caught by the shared
+// drift-detector invariant in the edges block above (it ranges over
+// every artefact in `ARTIFACTS`).
+//
+// The TBox can express the row shape but cannot express cross-references
+// against the bundled spec (operationIds existing, semantic types
+// existing). Those are encoded here as named L3 invariants — failures
+// point directly at the broken row.
+// ---------------------------------------------------------------------------
+describeForThisConfig(
+  'bundled-spec invariants: bootstrap-sequences ABox cross-references (#202)',
+  () => {
+    const ABOX_PATH = join(
+      REPO_ROOT,
+      'configs',
+      CONFIG_NAME,
+      'ontology',
+      'bootstrap-sequences.json',
+    );
+
+    it('every bootstrap-sequence operationId is present in the bundled spec', () => {
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operations?: { operationId?: string }[];
+      };
+      const opIds = new Set((graph.operations ?? []).map((o) => o.operationId).filter(Boolean));
+
+      interface AboxFile {
+        sequences: { name: string; operations: string[] }[];
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const abox = JSON.parse(readFileSync(ABOX_PATH, 'utf8')) as AboxFile;
+
+      const offenders: { sequence: string; missing: string[] }[] = [];
+      for (const s of abox.sequences) {
+        const missing = s.operations.filter((op) => !opIds.has(op));
+        if (missing.length > 0) offenders.push({ sequence: s.name, missing });
+      }
+      expect(
+        offenders,
+        'bootstrap-sequence references operationIds absent from the bundled spec',
+      ).toEqual([]);
+    });
+
+    it('every bootstrap-sequence `produces` semantic type is registered in the bundled graph', () => {
+      // The runtime contract is: `produces[]` must match a semantic type
+      // visible to the planner via `graph.semanticTypes` (the loader's
+      // `knownSemanticTypes` set is built from this list). Note that
+      // `spec/<config>/bundled/semantic-kinds.json` covers a different
+      // (entity/edge) registry and is intentionally NOT used here.
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        semanticTypes?: { name?: string }[];
+      };
+      const known = new Set(
+        (graph.semanticTypes ?? []).map((t) => t.name).filter((n): n is string => Boolean(n)),
+      );
+
+      interface AboxFile {
+        sequences: { name: string; produces: string[] }[];
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const abox = JSON.parse(readFileSync(ABOX_PATH, 'utf8')) as AboxFile;
+      const offenders: { sequence: string; type: string }[] = [];
+      for (const s of abox.sequences) {
+        for (const t of s.produces) {
+          if (!known.has(t)) offenders.push({ sequence: s.name, type: t });
+        }
+      }
+      expect(
+        offenders,
+        'bootstrap-sequence `produces` references semantic types not in graph.semanticTypes',
+      ).toEqual([]);
+    });
+
+    it('the ABox $schema field resolves to the published TBox JSON (external JSON Schema tooling contract)', () => {
+      const expectedTboxPath = join(
+        REPO_ROOT,
+        'ontology',
+        'vocabulary',
+        'bootstrap-sequence.schema.json',
+      );
+      interface AboxHeader {
+        $schema?: unknown;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const aboxJson = JSON.parse(readFileSync(ABOX_PATH, 'utf8')) as AboxHeader;
+      const schemaField = aboxJson.$schema;
+      expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
+      if (typeof schemaField !== 'string') return;
+      const resolved = join(ABOX_PATH, '..', schemaField);
+      expect(
+        resolved,
+        `ABox $schema='${schemaField}' resolves to '${resolved}', expected the published TBox at '${expectedTboxPath}'.`,
+      ).toBe(expectedTboxPath);
+    });
+
+    it('the ABox @context maps every TBox term to the v1 ns IRI (JSON-LD contract for external RDF tooling)', () => {
+      const NS = 'https://camunda.github.io/api-test-generator/ns/v1/';
+      interface AboxHeader {
+        '@context'?: unknown;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const aboxJson = JSON.parse(readFileSync(ABOX_PATH, 'utf8')) as AboxHeader;
+      const ctx = aboxJson['@context'];
+      expect(ctx, '@context must be a non-array object').toBeTypeOf('object');
+      expect(Array.isArray(ctx), '@context must not be an array').toBe(false);
+      if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return;
+      // biome-ignore lint/plugin: runtime contract boundary — narrowing JSON-LD context value
+      const ctxObj = ctx as Record<string, unknown>;
+      expect(ctxObj['@vocab'], '@vocab must be the v1 namespace IRI').toBe(NS);
+
+      const requiredTerms = ['sequences', 'operations', 'produces'];
+      for (const term of requiredTerms) {
+        const mapping = ctxObj[term];
+        const iri =
+          mapping && typeof mapping === 'object' && '@id' in mapping
+            ? // biome-ignore lint/plugin: runtime contract boundary — narrowing JSON-LD term mapping value
+              (mapping as { '@id'?: unknown })['@id']
+            : mapping;
+        expect(iri, `@context['${term}'] must map to the v1 ns IRI for '${term}'`).toBe(
+          `${NS}${term}`,
+        );
+      }
+
+      // operations is an ordered list (the prereq chain is order-significant —
+      // running tenant-setup before deployment vs after has very different
+      // semantics). Without `@container: '@list'` an RDF/JSON-LD processor
+      // may emit the operations as an unordered set and silently lose the
+      // execution order.
+      const operationsMapping = ctxObj.operations;
+      const operationsContainer =
+        operationsMapping &&
+        typeof operationsMapping === 'object' &&
+        '@container' in operationsMapping
+          ? // biome-ignore lint/plugin: runtime contract boundary — narrowing JSON-LD term mapping value
+            (operationsMapping as { '@container'?: unknown })['@container']
+          : undefined;
+      expect(
+        operationsContainer,
+        "@context['operations'] must declare `@container: '@list'` so RDF consumers preserve execution order",
+      ).toBe('@list');
+    });
+
+    it('the bundled graph contains zero unexpected bootstrap-sequence drops for the active config', () => {
+      // The OCA ABox is authored against the pinned spec; every
+      // sequence's operationIds must be present. A drop here is a
+      // genuine ABox/spec inconsistency (either the ABox was authored
+      // against the wrong spec ref or the spec ref was bumped without
+      // updating the ABox). Surfacing this as an L3 invariant means
+      // the failure points directly at the offending row instead of
+      // disappearing into the extractor's verbose stdout.
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        rootDependencyAnalysis?: {
+          droppedBootstrapSequences?: { name: string; missing: string[] }[];
+        };
+      };
+      const dropped = graph.rootDependencyAnalysis?.droppedBootstrapSequences ?? [];
+      expect(
+        dropped,
+        'bootstrap-sequences ABox dropped one or more sequences against the pinned spec — fix the ABox or rerun against the matching spec ref',
+      ).toEqual([]);
+    });
+  },
+);
