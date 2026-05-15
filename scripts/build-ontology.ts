@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { artifactKindsSchema } from '../path-analyser/src/ontology/artifactKindsSchema.ts';
 import { edgeSchema } from '../path-analyser/src/ontology/edgeSchema.ts';
 import { entityKindsSchema } from '../path-analyser/src/ontology/entityKindsSchema.ts';
+import { globalContextSeedsSchema } from '../path-analyser/src/ontology/globalContextSeedsSchema.ts';
 import { runtimeStatesSchema } from '../path-analyser/src/ontology/runtimeStatesSchema.ts';
 import { semanticsSchema } from '../path-analyser/src/ontology/semanticsSchema.ts';
 // Namespace import: the schema source lives in the CommonJS-flavoured
@@ -78,6 +79,10 @@ const ARTIFACTS: OntologyArtifact[] = [
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'semantics.schema.json'),
     schema: semanticsSchema,
+  },
+  {
+    jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'global-context-seeds.schema.json'),
+    schema: globalContextSeedsSchema,
   },
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'bootstrap-sequence.schema.json'),

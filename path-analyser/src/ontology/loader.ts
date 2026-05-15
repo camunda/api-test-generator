@@ -6,6 +6,7 @@ import { getActiveConfigDir } from '../configResolver.js';
 import { artifactKindsSchema } from './artifactKindsSchema.js';
 import { edgeSchema } from './edgeSchema.js';
 import { entityKindsSchema } from './entityKindsSchema.js';
+import { globalContextSeedsSchema } from './globalContextSeedsSchema.js';
 import { runtimeStatesSchema } from './runtimeStatesSchema.js';
 import { semanticsSchema } from './semanticsSchema.js';
 
@@ -57,6 +58,9 @@ export type SemanticTypeEntry = SemanticsAbox['semanticTypes'][number];
 export type CapabilityEntry = NonNullable<SemanticsAbox['capabilities']>[number];
 export type IdentifierEntry = NonNullable<SemanticsAbox['identifiers']>[number];
 
+export type GlobalContextSeedsAbox = FromSchema<typeof globalContextSeedsSchema>;
+export type GlobalContextSeedEntry = GlobalContextSeedsAbox['seeds'][number];
+
 // `Ajv` is the named export pointing at the constructor; the namespace
 // also has a self-referential default but the named export is the
 // least error-prone form under module=nodenext.
@@ -66,6 +70,8 @@ const validateEntityKindsAbox = ajv.compile<EntityKindsAbox>(entityKindsSchema);
 const validateArtifactKindsAbox = ajv.compile<ArtifactKindsAbox>(artifactKindsSchema);
 const validateRuntimeStatesAbox = ajv.compile<RuntimeStatesAbox>(runtimeStatesSchema);
 const validateSemanticsAbox = ajv.compile<SemanticsAbox>(semanticsSchema);
+const validateGlobalContextSeedsAbox =
+  ajv.compile<GlobalContextSeedsAbox>(globalContextSeedsSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? [])
@@ -745,4 +751,167 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
     identifiers[i.name] = entry;
   }
   return { semanticTypes, capabilities, identifiers };
+}
+
+/**
+ * Load and structurally validate the per-config global-context-seeds
+ * ABox (Lift 8 / #218).
+ *
+ * @returns the parsed ABox, or `null` if no `global-context-seeds.json`
+ *   is shipped under `configs/<active>/ontology/`. A missing file is
+ *   non-fatal: `graph.domain.globalContextSeeds` is left undefined and
+ *   the Playwright emitter prologue + `loadGlobalContextSeeds` in
+ *   `codegen/index.ts` treat it as the empty list. There is no longer
+ *   a legacy-sidecar fallback (Lift 8 retired it).
+ * @throws if the file exists but does not validate against the TBox,
+ *   if it contains duplicate `binding` or `fieldName` values, or if a
+ *   cross-property invariant is violated (`stripFromMultipartWhenDefault`
+ *   without `defaultSentinel`).
+ */
+export function loadGlobalContextSeedsAbox(repoRoot: string): GlobalContextSeedsAbox | null {
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'global-context-seeds.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse global-context-seeds ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateGlobalContextSeedsAbox(parsed)) {
+    throw new Error(
+      `Global-context-seeds ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateGlobalContextSeedsAbox.errors)}`,
+    );
+  }
+  // Reject duplicate keys up front — Draft-07 cannot express
+  // uniqueness across two distinct properties, but a duplicate would
+  // shadow the intent at emission time. Same defensive check as in
+  // the other ABox loaders.
+  const dupeBindings = duplicates(parsed.seeds.map((s) => s.binding));
+  if (dupeBindings.length > 0) {
+    throw new Error(
+      `Global-context-seeds ABox at ${aboxPath} has duplicate binding(s): ${dupeBindings.join(', ')}`,
+    );
+  }
+  const dupeFields = duplicates(parsed.seeds.map((s) => s.fieldName));
+  if (dupeFields.length > 0) {
+    throw new Error(
+      `Global-context-seeds ABox at ${aboxPath} has duplicate fieldName(s): ${dupeFields.join(', ')}`,
+    );
+  }
+  // Cross-property invariant: stripFromMultipartWhenDefault === true
+  // requires a defaultSentinel to compare against. Mirrors the
+  // legacy `checkGlobalContextSeedsCoherent` rule.
+  for (const s of parsed.seeds) {
+    if (s.stripFromMultipartWhenDefault === true && s.defaultSentinel === undefined) {
+      throw new Error(
+        `Global-context-seeds ABox at ${aboxPath} entry for binding '${s.binding}' sets stripFromMultipartWhenDefault but has no defaultSentinel — the multipart-strip branch has no value to compare against`,
+      );
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Derive the array-shaped view of the global-context-seeds ABox that
+ * `graph.domain.globalContextSeeds` consumers (Playwright emitter
+ * universal-seed prologue, multipart-strip branches, codegen
+ * `loadGlobalContextSeeds`) expect. Returning `null` means no
+ * `global-context-seeds.json` ABox is shipped for the active config, so
+ * callers leave `graph.domain.globalContextSeeds` undefined and treat it
+ * as the empty list.
+ */
+export interface GlobalContextSeedsViews {
+  globalContextSeeds: Array<{
+    binding: string;
+    fieldName: string;
+    seedRule: string;
+    defaultSentinel?: string;
+    stripFromMultipartWhenDefault?: boolean;
+    rationale?: string;
+  }>;
+}
+
+export function deriveGlobalContextSeedsViews(repoRoot: string): GlobalContextSeedsViews | null {
+  const abox = loadGlobalContextSeedsAbox(repoRoot);
+  if (abox === null) return null;
+  const globalContextSeeds: GlobalContextSeedsViews['globalContextSeeds'] = abox.seeds.map((s) => {
+    const entry: GlobalContextSeedsViews['globalContextSeeds'][number] = {
+      binding: s.binding,
+      fieldName: s.fieldName,
+      seedRule: s.seedRule,
+    };
+    if (s.defaultSentinel !== undefined) entry.defaultSentinel = s.defaultSentinel;
+    if (s.stripFromMultipartWhenDefault !== undefined) {
+      entry.stripFromMultipartWhenDefault = s.stripFromMultipartWhenDefault;
+    }
+    if (s.rationale !== undefined) entry.rationale = s.rationale;
+    return entry;
+  });
+  return { globalContextSeeds };
+}
+
+/**
+ * Boundary-level safety assertion for `globalContextSeeds` arrays
+ * accepted by the public Playwright emitter entry points
+ * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`).
+ *
+ * The emitter interpolates `binding`, `fieldName`, `seedRule`, and
+ * `defaultSentinel` directly into emitted TS source as identifiers and
+ * single-quoted string literals (#87). The graph loader validates the
+ * seeds when reading `global-context-seeds.json`, but the emitter
+ * accepts a `globalContextSeeds` argument from any caller. This helper
+ * re-validates at that boundary so a programmatic caller cannot bypass
+ * the loader's safety net and produce broken or injection-vulnerable
+ * generated suites.
+ *
+ * Throws on any structural issue (TBox shape) or any cross-seed
+ * coherence violation (uniqueness, strip-requires-sentinel). Returns
+ * silently on success.
+ */
+export function assertSafeGlobalContextSeeds(seeds: unknown): void {
+  if (!Array.isArray(seeds)) {
+    throw new Error(
+      `globalContextSeeds must be an array when provided (received ${seeds === null ? 'null' : typeof seeds}).`,
+    );
+  }
+  const wrapper = { version: 1, seeds };
+  if (!validateGlobalContextSeedsAbox(wrapper)) {
+    throw new Error(
+      `globalContextSeeds failed structural validation:\n${formatErrors(validateGlobalContextSeedsAbox.errors)}`,
+    );
+  }
+  const dupeBindings = duplicates(wrapper.seeds.map((s) => s.binding));
+  if (dupeBindings.length > 0) {
+    throw new Error(
+      `globalContextSeeds failed coherence validation:\n  - duplicate binding(s): ${dupeBindings.join(', ')}`,
+    );
+  }
+  const dupeFields = duplicates(wrapper.seeds.map((s) => s.fieldName));
+  if (dupeFields.length > 0) {
+    throw new Error(
+      `globalContextSeeds failed coherence validation:\n  - duplicate fieldName(s): ${dupeFields.join(', ')}`,
+    );
+  }
+  for (const s of wrapper.seeds) {
+    if (s.stripFromMultipartWhenDefault === true && s.defaultSentinel === undefined) {
+      throw new Error(
+        `globalContextSeeds failed coherence validation:\n  - entry for binding '${s.binding}' sets stripFromMultipartWhenDefault but has no defaultSentinel`,
+      );
+    }
+  }
 }

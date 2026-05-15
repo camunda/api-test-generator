@@ -1,35 +1,28 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  deriveArtifactKindsViews,
+  deriveRuntimeStatesViews,
+  deriveSemanticsViews,
+} from '../../path-analyser/src/ontology/loader.js';
 
-interface ArtifactKindSpec {
-  producesStates?: string[];
-}
-interface RuntimeStateSpec {
-  kind: 'state';
-}
-interface DomainSemantics {
-  artifactKinds?: Record<string, ArtifactKindSpec>;
-  runtimeStates?: Record<string, RuntimeStateSpec>;
-  capabilities?: Record<string, unknown>;
-}
+describe('domain ABox — artifactKinds.producesStates declarations', () => {
+  it('every state claimed by an artifact kind must be declared in runtimeStates or capabilities (#66 — FormDeployed defect class, also catches DMN)', () => {
+    const repoRoot = path.resolve(import.meta.dirname, '../..');
+    const artifactViews = deriveArtifactKindsViews(repoRoot);
+    const runtimeViews = deriveRuntimeStatesViews(repoRoot);
+    const semanticsViews = deriveSemanticsViews(repoRoot);
+    if (!artifactViews) throw new Error('artifact-kinds ABox missing');
+    if (!runtimeViews) throw new Error('runtime-states ABox missing');
+    if (!semanticsViews) throw new Error('semantics ABox missing');
 
-describe('domain-semantics.json — artifactKinds.producesStates declarations', () => {
-  it('every state claimed by an artifact kind must be declared in runtimeStates or capabilities (#66 — FormDeployed defect class, also catches DMN)', async () => {
-    const file = path.resolve(
-      import.meta.dirname,
-      '../../configs/camunda-oca/domain-semantics.json',
-    );
-    const raw = await readFile(file, 'utf8');
-    // biome-ignore lint/plugin: domain-semantics.json is the runtime contract.
-    const domain = JSON.parse(raw) as DomainSemantics;
-
-    const declaredInRuntime = Object.keys(domain.runtimeStates ?? {});
-    const declaredInCapabilities = Object.keys(domain.capabilities ?? {});
-    const declaredStates = new Set([...declaredInRuntime, ...declaredInCapabilities]);
+    const declaredStates = new Set([
+      ...Object.keys(runtimeViews.runtimeStates),
+      ...Object.keys(semanticsViews.capabilities),
+    ]);
 
     const claimedByArtifacts: { artifactKind: string; state: string }[] = [];
-    for (const [artifactKind, spec] of Object.entries(domain.artifactKinds ?? {})) {
+    for (const [artifactKind, spec] of Object.entries(artifactViews.artifactKinds)) {
       for (const state of spec.producesStates ?? []) {
         claimedByArtifacts.push({ artifactKind, state });
       }

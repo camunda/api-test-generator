@@ -1500,7 +1500,7 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     );
   });
 
-  it('every entry in deployment-artifacts.json#providesStates is acknowledged by its kind (#159)', () => {
+  it('every entry in deployment-artifacts.json#providesStates is acknowledged by its kind (#159)', async () => {
     // Class-scoped coherence check between the fixture registry and
     // domain-semantics. For every registry entry e, every state in
     // e.providesStates MUST appear in either
@@ -1526,10 +1526,19 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
     const registry = JSON.parse(registryRaw) as { artifacts?: RegistryEntry[] };
 
-    const dsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
-    const dsRaw = readFileSync(dsPath, 'utf8');
-    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
-    const ds = JSON.parse(dsRaw) as DomainSemanticsShape;
+    const { deriveArtifactKindsViews, deriveRuntimeStatesViews, deriveSemanticsViews } =
+      await import('../../path-analyser/src/ontology/loader.ts');
+    const artifactViews = deriveArtifactKindsViews(REPO_ROOT);
+    const runtimeViews = deriveRuntimeStatesViews(REPO_ROOT);
+    const semanticsViews = deriveSemanticsViews(REPO_ROOT);
+    if (!artifactViews) throw new Error('artifact-kinds ABox missing');
+    if (!runtimeViews) throw new Error('runtime-states ABox missing');
+    if (!semanticsViews) throw new Error('semantics ABox missing');
+    const ds: DomainSemanticsShape = {
+      runtimeStates: runtimeViews.runtimeStates,
+      capabilities: semanticsViews.capabilities,
+      artifactKinds: artifactViews.artifactKinds,
+    };
     const declaredStates = new Set<string>([
       ...Object.keys(ds.runtimeStates ?? {}),
       ...Object.keys(ds.capabilities ?? {}),
@@ -2861,12 +2870,13 @@ describeForThisConfig(
     }
 
     function loadAttributeClientMintedSemantics(): string[] {
-      const path = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      const domain = JSON.parse(readFileSync(path, 'utf8')) as DomainSemantics;
-      return Object.entries(domain.semanticTypes ?? {})
-        .filter(([, spec]) => spec?.kind === 'attribute' && spec?.clientMinted === true)
-        .map(([name]) => name)
+      const abox = JSON.parse(
+        readFileSync(join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json'), 'utf8'),
+      ) as { semanticTypes?: Array<{ name: string } & SemanticTypeDecl> };
+      return (abox.semanticTypes ?? [])
+        .filter((spec) => spec?.kind === 'attribute' && spec?.clientMinted === true)
+        .map((spec) => spec.name)
         .sort();
     }
 
@@ -3608,15 +3618,20 @@ describeForThisConfig(
         );
       }
 
-      // Read the active config's globalContextSeeds directly from the
-      // sidecar so this invariant fails loudly if the sidecar shape
-      // changes (it's the canonical source post-Lift 0).
-      const domainSemanticsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
+      // Read the active config's globalContextSeeds from the
+      // per-config ABox (Lift 8 / #218 — the canonical source post-Lift 8).
+      const seedsPath = join(
+        REPO_ROOT,
+        'configs',
+        CONFIG_NAME,
+        'ontology',
+        'global-context-seeds.json',
+      );
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      const domainSemantics = JSON.parse(readFileSync(domainSemanticsPath, 'utf8')) as {
-        globalContextSeeds?: { fieldName: string; binding: string }[];
+      const seedsAbox = JSON.parse(readFileSync(seedsPath, 'utf8')) as {
+        seeds?: { fieldName: string; binding: string }[];
       };
-      const seeds = domainSemantics.globalContextSeeds ?? [];
+      const seeds = seedsAbox.seeds ?? [];
       expect(
         seeds.length,
         'Lift 0 assumes the active config declares at least one globalContextSeeds entry; ' +
@@ -5095,3 +5110,81 @@ describeForThisConfig('bundled-spec invariants: semantics ABox cross-references 
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lift 8 (#218): global-context-seeds ABox invariants.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
+  'bundled-spec invariants: global-context-seeds ABox is authoritative (Lift 8 / #218)',
+  () => {
+    it('the ABox loads, validates against the TBox, and has a stable shape', async () => {
+      const { loadGlobalContextSeedsAbox } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const abox = loadGlobalContextSeedsAbox(REPO_ROOT);
+      expect(abox, 'global-context-seeds ABox missing').not.toBeNull();
+      if (!abox) return;
+      expect(abox.version).toBe(1);
+      expect(abox.seeds.length).toBeGreaterThan(0);
+    });
+
+    it('graph.domain.globalContextSeeds matches the array-shaped view derived from the ABox (planner contract — ABox supersedes domain-semantics.json)', async () => {
+      const { deriveGlobalContextSeedsViews } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const expectedViews = deriveGlobalContextSeedsViews(REPO_ROOT);
+      if (!expectedViews) throw new Error('global-context-seeds ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      expect(
+        graph.domain?.globalContextSeeds,
+        'graph.domain.globalContextSeeds does not match the ABox-derived view — overlay regression',
+      ).toEqual(expectedViews.globalContextSeeds);
+    });
+
+    it('the committed global-context-seeds vocabulary JSON matches the regenerated TBox (drift detector)', async () => {
+      const { ARTIFACTS, renderSchema } = await import('../../scripts/build-ontology.ts');
+      const target = ARTIFACTS.find((a) => a.jsonPath.endsWith('global-context-seeds.schema.json'));
+      expect(target, 'build-ontology must include global-context-seeds.schema.json').toBeDefined();
+      if (!target) return;
+      const onDisk = readFileSync(target.jsonPath, 'utf8');
+      const rendered = renderSchema(target.schema);
+      expect(
+        onDisk,
+        `Generated ontology artefact at ${target.jsonPath} is stale. Run 'npm run build:ontology' to refresh it.`,
+      ).toBe(rendered);
+    });
+
+    it("the global-context-seeds ABox's $schema field resolves to the published TBox JSON", () => {
+      const aboxPath = join(
+        REPO_ROOT,
+        'configs',
+        CONFIG_NAME,
+        'ontology',
+        'global-context-seeds.json',
+      );
+      const expectedTboxPath = join(
+        REPO_ROOT,
+        'ontology',
+        'vocabulary',
+        'global-context-seeds.schema.json',
+      );
+      expect(
+        existsSync(expectedTboxPath),
+        `Published TBox at '${expectedTboxPath}' does not exist`,
+      ).toBe(true);
+      interface AboxHeader {
+        $schema?: unknown;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8')) as AboxHeader;
+      const schemaField = aboxJson.$schema;
+      expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
+      if (typeof schemaField !== 'string') return;
+      expect(schemaField).toBe(
+        'https://camunda.github.io/api-test-generator/ns/v1/global-context-seeds.schema.json',
+      );
+    });
+  },
+);
