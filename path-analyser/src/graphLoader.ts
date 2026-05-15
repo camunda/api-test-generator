@@ -9,10 +9,12 @@ import {
 } from './domainSemanticsValidator.js';
 import {
   deriveArtifactKindsViews,
+  deriveRuntimeStatesViews,
   loadArtifactKindsAbox,
   loadEdgeEstablishers,
   loadEntityKindsAbox,
   loadExternalEntityIdentifiers,
+  loadRuntimeStatesAbox,
 } from './ontology/loader.js';
 import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
@@ -323,29 +325,51 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // path-analyser workspace, so the repo root is its parent.
   let domain: DomainSemantics | undefined;
   let producersByState: Record<string, string[]> | undefined;
+  let legacyDomainLoaded = false;
+  // Determined once before the try block so the post-overlay
+  // re-validation (after the try/catch) can also see the flags.
+  const artifactAboxPresent = loadArtifactKindsAbox(repoRoot) !== null;
+  const runtimeStatesAboxPresent = loadRuntimeStatesAbox(repoRoot) !== null;
   try {
-    const repoRoot = path.resolve(baseDir, '..');
     const domainPath = path.resolve(getActiveConfigDir(repoRoot), 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
     // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
     const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;
-    // Lift 5 / #212: when an artifact-kinds ABox is present it is the
-    // authoritative source for the four artifact sub-trees; the legacy
-    // sidecar's copy is about to be replaced by the post-overlay step
-    // below. Strip those keys before pre-overlay validation so a stale
-    // legacy entry (e.g. a `producesStates` referencing a state that
-    // the legacy sidecar no longer declares) cannot fail load when the
-    // ABox already supersedes it. The post-overlay re-validation
-    // covers the ABox values via the same Zod-driven validator.
-    const aboxPresent = loadArtifactKindsAbox(repoRoot) !== null;
+    // Lift 5 / #212 + Lift 6 / #214: when a per-config ABox is present
+    // it is the authoritative source for the corresponding sub-tree,
+    // and the post-overlay step below replaces the legacy sidecar's
+    // copy. Pre-overlay validation must therefore see the ABox values
+    // — not the legacy ones — so that:
+    //   (a) a stale legacy entry whose state name no longer exists in
+    //       the ABox cannot fail load (was the original strip
+    //       motivation); and
+    //   (b) cross-references from sub-trees that have NOT yet
+    //       migrated (e.g. semanticTypes.witnesses → runtimeStates,
+    //       capabilities → runtimeStates) still resolve through the
+    //       authoritative ABox values during pre-overlay validation.
+    // Stripping alone (Lift 5's first attempt) breaks (b) because the
+    // unmigrated sub-trees still expect their cross-refs to resolve.
+    // Overlaying both pre- and post- gives one consistent view.
     let validationTarget: DomainSemantics = parsedDomain;
-    if (aboxPresent) {
-      const stripped: DomainSemantics = { ...parsedDomain };
-      delete stripped.artifactKinds;
-      delete stripped.semanticTypeToArtifactKind;
-      delete stripped.operationArtifactRules;
-      delete stripped.artifactFileKinds;
-      validationTarget = stripped;
+    if (artifactAboxPresent || runtimeStatesAboxPresent) {
+      const overlaid: DomainSemantics = { ...parsedDomain };
+      if (artifactAboxPresent) {
+        const av = deriveArtifactKindsViews(repoRoot);
+        if (av !== null) {
+          overlaid.artifactKinds = av.artifactKinds;
+          overlaid.semanticTypeToArtifactKind = av.semanticTypeToArtifactKind;
+          overlaid.operationArtifactRules = av.operationArtifactRules;
+          overlaid.artifactFileKinds = av.artifactFileKinds;
+        }
+      }
+      if (runtimeStatesAboxPresent) {
+        const rv = deriveRuntimeStatesViews(repoRoot);
+        if (rv !== null) {
+          overlaid.runtimeStates = rv.runtimeStates;
+          overlaid.operationRequirements = rv.operationRequirements;
+        }
+      }
+      validationTarget = overlaid;
     }
     const issues = validateDomainSemantics(validationTarget);
     if (issues.length > 0) {
@@ -355,6 +379,28 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       );
     }
     domain = parsedDomain;
+    legacyDomainLoaded = true;
+    // Lift 6 / #214: runtime-states ABox supersedes the legacy
+    // `runtimeStates` and `operationRequirements` sub-trees. Performed
+    // inside the try block (and right after `domain = parsedDomain`)
+    // so the existing consumer loops below — building `producersByState`,
+    // setting `node.domainRequiresAll`/`domainImplicitAdds`/`domainProduces`,
+    // resolving `operationRequirements.valueBindings` — see the
+    // overlaid values without further plumbing. The pre-overlay strip
+    // above ensures the validator already accepted this swap; the
+    // post-overlay re-validation block (after the try/catch) catches
+    // ABox-introduced cross-reference violations against the
+    // unmigrated `semanticTypes`/`capabilities` sub-trees.
+    if (runtimeStatesAboxPresent) {
+      const views = deriveRuntimeStatesViews(repoRoot);
+      if (views !== null) {
+        domain = {
+          ...domain,
+          runtimeStates: views.runtimeStates,
+          operationRequirements: views.operationRequirements,
+        };
+      }
+    }
     // debug: domain semantics sidecar loaded
     if (domain?.operationRequirements) {
       for (const [opId, req] of Object.entries(domain.operationRequirements)) {
@@ -487,22 +533,27 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
-  // Lift 5 / #212: artifact-kinds ABox supersedes the legacy
-  // `domain-semantics.json` keys when present. Per #198, artifact
-  // dispatch is domain knowledge with no wire signature, so it lives
-  // in the per-config ontology rather than in the freeform sidecar.
-  // The legacy keys remain a transitional fallback so unmigrated
-  // configs (and tests that exercise loadGraph against an isolated
-  // tmpDir without a domain-semantics.json) keep working until Lift 8
-  // retires them. When both are present, the ABox is authoritative —
+  // Lift 5 / #212 + Lift 6 / #214: per-config ABoxes supersede the
+  // legacy `domain-semantics.json` keys when present. Per #198, the
+  // domain knowledge with no wire signature lives in the per-config
+  // ontology rather than in the freeform sidecar. The legacy keys
+  // remain a transitional fallback so unmigrated configs (and tests
+  // that exercise loadGraph against an isolated tmpDir without a
+  // domain-semantics.json) keep working until Lift 8 retires them.
+  // When both are present, the ABox is authoritative —
   // `detectArtifactKindsDrift` surfaces dead/dangling entries (the
   // durable abox-vs-graph signal) before the override can silently
   // mask them. Placed outside the domain-semantics try/catch so a
   // shipped ABox is honoured even when the legacy sidecar is absent.
+  // Note: the runtime-states ABox overlay happens INSIDE the try
+  // block (right after `domain = parsedDomain`) because its values
+  // are consumed by the producersByState-building loop further down
+  // in that block. The post-overlay re-validation here covers BOTH
+  // overlays (artifact-kinds AND runtime-states).
+  let postOverlayReValidationNeeded = false;
   {
     const artifactViews = deriveArtifactKindsViews(repoRoot);
     if (artifactViews !== null) {
-      const hadLegacyDomain = domain !== undefined;
       const baseDomain: DomainSemantics = domain ?? { version: 1 };
       domain = {
         ...baseDomain,
@@ -511,30 +562,32 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         operationArtifactRules: artifactViews.operationArtifactRules,
         artifactFileKinds: artifactViews.artifactFileKinds,
       };
-      // Re-run the cross-reference invariants from
-      // `validateDomainSemantics` against the post-overlay value, but
-      // only when a legacy `domain-semantics.json` sidecar was loaded.
-      // The pre-overlay validation only sees the legacy artifact
-      // sub-trees, so an ABox that introduces an undeclared
-      // `producesStates`/`producibleStates` (not in
-      // `runtimeStates`/`capabilities`) or a `producesSemantics` entry
-      // without a `semanticTypes.witnesses` declaration would
-      // otherwise slip through. When no sidecar is present the
-      // validator has no `runtimeStates`/`semanticTypes` to cross-check
-      // against — the ABox stands alone, and Lift 6/7 will move those
-      // declarations into their own ABoxes. Reuses the same Zod-driven
-      // validator and the same DomainSemanticsValidationFailure error
-      // type so the diagnostic surfaces with one well-known shape
-      // regardless of which source (legacy sidecar or ABox) tripped it.
-      if (hadLegacyDomain) {
-        const overlayIssues = validateDomainSemantics(domain);
-        if (overlayIssues.length > 0) {
-          const detail = overlayIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
-          throw new DomainSemanticsValidationFailure(
-            `artifact-kinds ABox introduced cross-reference violation(s) when overlaid on domain-semantics.json:\n${detail}`,
-          );
-        }
-      }
+      postOverlayReValidationNeeded = true;
+    }
+  }
+  if (runtimeStatesAboxPresent) postOverlayReValidationNeeded = true;
+  // Re-run the cross-reference invariants from `validateDomainSemantics`
+  // against the post-overlay value, but only when a legacy
+  // `domain-semantics.json` sidecar was loaded. The pre-overlay
+  // validation only sees the (already-stripped) legacy sub-trees, so
+  // an ABox that introduces an undeclared `producesStates` /
+  // `producibleStates` (not in `runtimeStates` / `capabilities`), or a
+  // `producesSemantics` entry without a `semanticTypes.witnesses`
+  // declaration, or an `operationRequirements.requires` referencing an
+  // undeclared state, would otherwise slip through. When no sidecar
+  // is present the validator has no `semanticTypes` / `capabilities`
+  // to cross-check against — the ABox stands alone, and Lift 7 will
+  // move those declarations into their own ABox. Reuses the same
+  // Zod-driven validator and the same DomainSemanticsValidationFailure
+  // error type so the diagnostic surfaces with one well-known shape
+  // regardless of which ABox tripped it.
+  if (postOverlayReValidationNeeded && legacyDomainLoaded && domain !== undefined) {
+    const overlayIssues = validateDomainSemantics(domain);
+    if (overlayIssues.length > 0) {
+      const detail = overlayIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+      throw new DomainSemanticsValidationFailure(
+        `ontology ABox introduced cross-reference violation(s) when overlaid on domain-semantics.json:\n${detail}`,
+      );
     }
   }
 
@@ -609,6 +662,29 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       }
       console.warn(
         `WARNING: ${message}\n  (set STRICT_ARTIFACT_KINDS_ABOX=1 to fail-fast on drift.)`,
+      );
+    }
+  }
+
+  // Lift 6 / #214: same per-fact-class drift detector for the
+  // runtime-states ABox. Catches: producedBy / witness.operationId /
+  // operationRequirements.operationId references to opIds that don't
+  // exist in the bundled graph (typo, renamed-upstream op, or stale
+  // entry). Cross-references to capabilities / semanticTypes are not
+  // checked here — they live in the unmigrated `domain-semantics.json`
+  // sub-trees and are covered by the post-overlay re-validation
+  // (`validateDomainSemantics`) above. Lift 7 will fold them into this
+  // detector.
+  {
+    const drift = detectRuntimeStatesDrift(operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `runtime-states ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_RUNTIME_STATES_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(
+        `WARNING: ${message}\n  (set STRICT_RUNTIME_STATES_ABOX=1 to fail-fast on drift.)`,
       );
     }
   }
@@ -1150,6 +1226,48 @@ function detectArtifactKindsDrift(
       );
     }
   }
+
+  return drift;
+}
+
+function detectRuntimeStatesDrift(
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadRuntimeStatesAbox(repoRoot);
+  if (abox === null) return drift;
+
+  for (const s of abox.states) {
+    for (const opId of s.producedBy ?? []) {
+      if (!operations[opId]) {
+        drift.push(
+          `[abox-vs-graph] state '${s.name}'.producedBy references opId '${opId}' that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+        );
+      }
+    }
+    if (s.witness !== undefined && !operations[s.witness.operationId]) {
+      drift.push(
+        `[abox-vs-graph] state '${s.name}'.witness.operationId '${s.witness.operationId}' does not exist in the bundled graph`,
+      );
+    }
+  }
+  for (const r of abox.operationRequirements) {
+    if (!operations[r.operationId]) {
+      drift.push(
+        `[abox-vs-graph] operationRequirements entry '${r.operationId}' references an opId that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+      );
+    }
+  }
+
+  // Dead-state check is deferred to Lift 7 (#199): until
+  // `semanticTypes`/`capabilities` migrate to their own ABox, states
+  // can be referenced from those legacy sidecar sub-trees (e.g.
+  // `semanticTypes.X.witnesses → 'StateName'`). The detector here
+  // sees only the runtime-states ABox, so it would false-positive on
+  // states whose only live reference is via a witness coupling. The
+  // L3 invariant in `configs/<name>/regression-invariants.test.ts`
+  // covers the dead-state check by reading both sources.
 
   return drift;
 }

@@ -4751,3 +4751,176 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig(
+  'bundled-spec invariants: runtime-states ABox cross-references (#214)',
+  () => {
+    // Lift 6 / #214: the runtime-states ABox is now the authoritative
+    // source for the two runtime-related sub-trees (runtimeStates and
+    // operationRequirements) previously carried in
+    // domain-semantics.json. Same coverage strategy as Lift 5.
+
+    it('loads the runtime-states ABox via the generic loader (proves the load path)', async () => {
+      const { loadRuntimeStatesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadRuntimeStatesAbox(REPO_ROOT);
+      expect(abox, 'runtime-states ABox file must exist for the camunda-oca config').not.toBeNull();
+      expect(abox?.states.length).toBeGreaterThan(0);
+      expect(abox?.operationRequirements.length).toBeGreaterThan(0);
+    });
+
+    it('every state.producedBy / state.witness.operationId / operationRequirements.operationId references a real opId in the bundled graph (sense-2: abox-vs-graph)', async () => {
+      const { loadRuntimeStatesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadRuntimeStatesAbox(REPO_ROOT);
+      if (!abox) throw new Error('runtime-states ABox missing');
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      interface GraphOp {
+        operationId?: string;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operationsById?: Record<string, GraphOp>;
+        operations?: Record<string, GraphOp> | GraphOp[];
+      };
+      const opIds = new Set<string>(
+        Object.keys(graph.operationsById ?? {}).length > 0
+          ? Object.keys(graph.operationsById ?? {})
+          : Array.isArray(graph.operations)
+            ? graph.operations
+                .map((o) => o.operationId)
+                .filter((s): s is string => typeof s === 'string')
+            : Object.keys(graph.operations ?? {}),
+      );
+      const dangling: string[] = [];
+      for (const s of abox.states) {
+        for (const op of s.producedBy ?? []) {
+          if (!opIds.has(op)) dangling.push(`states['${s.name}'].producedBy -> '${op}'`);
+        }
+        if (s.witness && !opIds.has(s.witness.operationId)) {
+          dangling.push(`states['${s.name}'].witness.operationId -> '${s.witness.operationId}'`);
+        }
+      }
+      for (const r of abox.operationRequirements) {
+        if (!opIds.has(r.operationId)) dangling.push(`operationRequirements['${r.operationId}']`);
+      }
+      expect(
+        dangling,
+        'runtime-states ABox references opIds that do not exist in the bundled graph - typo, renamed-upstream op, or stale entry; remove or fix in configs/<config>/ontology/runtime-states.json',
+      ).toEqual([]);
+    });
+
+    it('every state declared in the ABox is referenced by at least one operationRequirement / state.requires / semanticTypes.witnesses (no dead states)', async () => {
+      const { loadRuntimeStatesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadRuntimeStatesAbox(REPO_ROOT);
+      if (!abox) throw new Error('runtime-states ABox missing');
+      const referenced = new Set<string>();
+      for (const r of abox.operationRequirements) {
+        for (const x of r.requires ?? []) referenced.add(x);
+        for (const d of r.disjunctions ?? []) for (const x of d) referenced.add(x);
+        for (const x of r.implicitAdds ?? []) referenced.add(x);
+        for (const x of r.produces ?? []) referenced.add(x);
+        for (const v of Object.values(r.valueBindings ?? {})) {
+          const dot = v.indexOf('.');
+          if (dot > 0 && !v.startsWith('semantic:')) referenced.add(v.slice(0, dot));
+        }
+      }
+      for (const s of abox.states) for (const x of s.requires ?? []) referenced.add(x);
+      // Also count witness references from sibling sub-trees that have
+      // not yet migrated to their own ABoxes (Lift 7): semanticTypes
+      // and capabilities still live in domain-semantics.json and may
+      // reference states via `witnesses`. Without this, states only
+      // referenced by a semanticType.witnesses (e.g.
+      // `ProcessDefinitionDeployed` ← `ProcessDefinitionKey.witnesses`)
+      // would be flagged as dead even though they are live.
+      interface DomainSemanticsLite {
+        semanticTypes?: Record<string, { witnesses?: string }>;
+        capabilities?: Record<string, { witnesses?: string }>;
+      }
+      const domainPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
+      if (existsSync(domainPath)) {
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const ds = JSON.parse(readFileSync(domainPath, 'utf8')) as DomainSemanticsLite;
+        for (const t of Object.values(ds.semanticTypes ?? {})) {
+          if (typeof t.witnesses === 'string') referenced.add(t.witnesses);
+        }
+        for (const c of Object.values(ds.capabilities ?? {})) {
+          if (typeof c.witnesses === 'string') referenced.add(c.witnesses);
+        }
+      }
+      const dead = abox.states.filter((s) => !referenced.has(s.name)).map((s) => s.name);
+      expect(
+        dead,
+        'runtime-states ABox lists state(s) referenced by no operationRequirement / state.requires / semanticTypes.witnesses entry - dead weight; either remove or add a reference',
+      ).toEqual([]);
+    });
+
+    it('graph.domain.runtimeStates matches the record-shaped view derived from the ABox (planner contract - ABox supersedes domain-semantics.json)', async () => {
+      const { deriveRuntimeStatesViews } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const expectedViews = deriveRuntimeStatesViews(REPO_ROOT);
+      if (!expectedViews) throw new Error('runtime-states ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      expect(
+        graph.domain?.runtimeStates,
+        'graph.domain.runtimeStates does not match the ABox-derived view - overlay regression',
+      ).toEqual(expectedViews.runtimeStates);
+    });
+
+    it('graph.domain.operationRequirements matches the record-shaped view derived from the ABox (planner contract)', async () => {
+      const { deriveRuntimeStatesViews } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const expectedViews = deriveRuntimeStatesViews(REPO_ROOT);
+      if (!expectedViews) throw new Error('runtime-states ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      expect(
+        graph.domain?.operationRequirements,
+        'graph.domain.operationRequirements does not match the ABox-derived view - overlay regression',
+      ).toEqual(expectedViews.operationRequirements);
+    });
+
+    it('the committed runtime-states vocabulary JSON matches the regenerated TBox (drift detector)', async () => {
+      const { ARTIFACTS, renderSchema } = await import('../../scripts/build-ontology.ts');
+      const target = ARTIFACTS.find((a) => a.jsonPath.endsWith('runtime-states.schema.json'));
+      expect(target, 'build-ontology must include runtime-states.schema.json').toBeDefined();
+      if (!target) return;
+      const onDisk = readFileSync(target.jsonPath, 'utf8');
+      const rendered = renderSchema(target.schema);
+      expect(
+        onDisk,
+        `Generated ontology artefact at ${target.jsonPath} is stale. Run 'npm run build:ontology' to refresh it.`,
+      ).toBe(rendered);
+    });
+
+    it("the runtime-states ABox's $schema field resolves to the published TBox JSON", () => {
+      const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'runtime-states.json');
+      const expectedTboxPath = join(
+        REPO_ROOT,
+        'ontology',
+        'vocabulary',
+        'runtime-states.schema.json',
+      );
+      expect(
+        existsSync(expectedTboxPath),
+        `Published TBox at '${expectedTboxPath}' does not exist`,
+      ).toBe(true);
+      interface AboxHeader {
+        $schema?: unknown;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8')) as AboxHeader;
+      const schemaField = aboxJson.$schema;
+      expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
+      if (typeof schemaField !== 'string') return;
+      expect(schemaField).toBe(
+        'https://camunda.github.io/api-test-generator/ns/v1/runtime-states.schema.json',
+      );
+    });
+  },
+);
