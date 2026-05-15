@@ -628,7 +628,7 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
         mode: 'feature',
         globalContextSeeds: [badSeed],
       }),
-    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier/);
+    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier|must match pattern/);
   });
 
   test('rejects duplicate fieldName via renderPlaywrightSuite', () => {
@@ -664,7 +664,7 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
         mode: 'feature',
         globalContextSeeds: [badSeed],
       }),
-    ).toThrow(/globalContextSeedSentinelSafe|line terminator|control char/);
+    ).toThrow(/globalContextSeedSentinelSafe|line terminator|control char|must match pattern/);
   });
 
   test('accepts the production tenant seed shape', () => {

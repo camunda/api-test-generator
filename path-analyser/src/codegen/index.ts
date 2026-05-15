@@ -1,13 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
-  getActiveConfigDir,
   getFeatureOutputDir,
   getPlaywrightCodegenOptions,
   getPlaywrightSuiteDir,
   getVariantOutputDir,
 } from '../configResolver.js';
-import { validateDomainSemantics } from '../domainSemanticsValidator.js';
+import { assertSafeGlobalContextSeeds, deriveGlobalContextSeedsViews } from '../ontology/loader.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
@@ -32,53 +31,21 @@ function parseScenarioCollection(text: string): EndpointScenarioCollection {
 }
 
 /**
- * Load `globalContextSeeds` from `domain-semantics.json`. The full sidecar
- * is validated by graphLoader during planning, but we re-validate here
- * because these values are interpolated directly into emitted TS source —
- * a malformed entry (wrong type, unsafe characters, duplicate fieldName)
+ * Load `globalContextSeeds` from the per-config global-context-seeds
+ * ABox (`configs/<active>/ontology/global-context-seeds.json`,
+ * Lift 8 / #218). Returns `[]` when no ABox is shipped. The graphLoader
+ * validates the ABox during planning, but we re-validate here because
+ * these values are interpolated directly into emitted TS source — a
+ * malformed entry (wrong type, unsafe characters, duplicate fieldName)
  * would produce a broken suite or, worse, allow config-driven code
- * injection. A missing file is non-fatal; an invalid file aborts the
- * generator with a fail-fast diagnostic.
+ * injection.
  */
 async function loadGlobalContextSeeds(baseDir: string): Promise<GlobalContextSeed[]> {
-  let text: string;
-  try {
-    // domain-semantics.json lives under the active config directory at
-    // the repo root (see #128). `baseDir` is the path-analyser workspace,
-    // so the repo root is its parent.
-    const repoRoot = path.resolve(baseDir, '..');
-    text = await fs.readFile(
-      path.join(getActiveConfigDir(repoRoot), 'domain-semantics.json'),
-      'utf8',
-    );
-  } catch (error) {
-    // Only treat a missing sidecar as non-fatal. EACCES, EISDIR, transient
-    // I/O errors, etc. all indicate a real operational problem and must
-    // surface so the build fails loudly rather than silently emitting a
-    // suite without its universal-seed prologue.
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      Reflect.get(error, 'code') === 'ENOENT'
-    ) {
-      return [];
-    }
-    throw error;
-  }
-  // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-  const parsed = JSON.parse(text) as unknown;
-  const errors = validateDomainSemantics(parsed);
-  if (errors.length > 0) {
-    const formatted = errors.map((e) => `  - [${e.invariant}] ${e.message}`).join('\n');
-    throw new Error(
-      `domain-semantics.json failed validation (${errors.length} error(s)):\n${formatted}`,
-    );
-  }
-  // validateDomainSemantics returning [] means the parsed shape conforms.
-  // biome-ignore lint/plugin: validated above by validateDomainSemantics
-  const validated = parsed as { globalContextSeeds?: GlobalContextSeed[] };
-  return validated.globalContextSeeds ?? [];
+  const repoRoot = path.resolve(baseDir, '..');
+  const aboxViews = deriveGlobalContextSeedsViews(repoRoot);
+  if (aboxViews === null) return [];
+  assertSafeGlobalContextSeeds(aboxViews.globalContextSeeds);
+  return aboxViews.globalContextSeeds;
 }
 
 function printUsage(): void {

@@ -1,6 +1,10 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  deriveArtifactKindsViews,
+  deriveRuntimeStatesViews,
+  deriveSemanticsViews,
+} from '../../path-analyser/src/ontology/loader.js';
 
 interface ArtifactKindSpec {
   producesStates?: string[];
@@ -20,16 +24,26 @@ interface DomainSemantics {
   semanticTypes?: Record<string, SemanticTypeSpec>;
 }
 
-async function loadDomain(): Promise<DomainSemantics> {
-  const file = path.resolve(import.meta.dirname, '../../configs/camunda-oca/domain-semantics.json');
-  const raw = await readFile(file, 'utf8');
-  // biome-ignore lint/plugin: domain-semantics.json is the runtime contract.
-  return JSON.parse(raw) as DomainSemantics;
+function loadDomain(): DomainSemantics {
+  const repoRoot = path.resolve(import.meta.dirname, '../..');
+  const artifactViews = deriveArtifactKindsViews(repoRoot);
+  const runtimeViews = deriveRuntimeStatesViews(repoRoot);
+  const semanticsViews = deriveSemanticsViews(repoRoot);
+  if (!artifactViews) throw new Error('artifact-kinds ABox missing');
+  if (!runtimeViews) throw new Error('runtime-states ABox missing');
+  if (!semanticsViews) throw new Error('semantics ABox missing');
+  return {
+    artifactKinds: artifactViews.artifactKinds,
+    runtimeStates: runtimeViews.runtimeStates,
+    operationRequirements: runtimeViews.operationRequirements,
+    capabilities: semanticsViews.capabilities,
+    semanticTypes: semanticsViews.semanticTypes,
+  };
 }
 
-describe('domain-semantics.json — semanticTypes.witnesses relation (#70)', () => {
-  it('every key-shaped semantic type (artifactKinds.*.producesSemantics) must declare a witnesses edge', async () => {
-    const domain = await loadDomain();
+describe('domain ABox — semanticTypes.witnesses relation (#70)', () => {
+  it('every key-shaped semantic type (artifactKinds.*.producesSemantics) must declare a witnesses edge', () => {
+    const domain = loadDomain();
 
     const declaredSemanticTypes = domain.semanticTypes ?? {};
 
@@ -51,8 +65,8 @@ describe('domain-semantics.json — semanticTypes.witnesses relation (#70)', () 
     ).toEqual([]);
   });
 
-  it('every semanticTypes[X].witnesses target must resolve to a declared runtimeState or capability', async () => {
-    const domain = await loadDomain();
+  it('every semanticTypes[X].witnesses target must resolve to a declared runtimeState or capability', () => {
+    const domain = loadDomain();
 
     const declaredStates = new Set([
       ...Object.keys(domain.runtimeStates ?? {}),
@@ -72,8 +86,8 @@ describe('domain-semantics.json — semanticTypes.witnesses relation (#70)', () 
     ).toEqual([]);
   });
 
-  it('every valueBindings RHS of the form "semantic:X" must reference a declared semanticType', async () => {
-    const domain = await loadDomain();
+  it('every valueBindings RHS of the form "semantic:X" must reference a declared semanticType', () => {
+    const domain = loadDomain();
 
     const declaredSemanticTypes = new Set(Object.keys(domain.semanticTypes ?? {}));
 

@@ -6,15 +6,17 @@ import {
   validateDomainSemantics,
   validateRequestBodySemanticsClassified,
   validateRuntimeStateWitnessGraphRefs,
-} from './domainSemanticsValidator.js';
+} from './ontology/crossRefValidator.js';
 import {
   deriveArtifactKindsViews,
+  deriveGlobalContextSeedsViews,
   deriveRuntimeStatesViews,
   deriveSemanticsViews,
   loadArtifactKindsAbox,
   loadEdgeEstablishers,
   loadEntityKindsAbox,
   loadExternalEntityIdentifiers,
+  loadGlobalContextSeedsAbox,
   loadRuntimeStatesAbox,
   loadSemanticsAbox,
 } from './ontology/loader.js';
@@ -333,28 +335,33 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   const artifactAboxPresent = loadArtifactKindsAbox(repoRoot) !== null;
   const runtimeStatesAboxPresent = loadRuntimeStatesAbox(repoRoot) !== null;
   const semanticsAboxPresent = loadSemanticsAbox(repoRoot) !== null;
+  const globalContextSeedsAboxPresent = loadGlobalContextSeedsAbox(repoRoot) !== null;
   try {
     const domainPath = path.resolve(getActiveConfigDir(repoRoot), 'domain-semantics.json');
     const domainRaw = await readFile(domainPath, 'utf8');
     // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
     const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;
-    // Lift 5 / #212 + Lift 6 / #214: when a per-config ABox is present
-    // it is the authoritative source for the corresponding sub-tree,
-    // and the post-overlay step below replaces the legacy sidecar's
-    // copy. Pre-overlay validation must therefore see the ABox values
-    // — not the legacy ones — so that:
+    // Lift 5 / #212 + Lift 6 / #214 + Lift 7 / #216 + Lift 8 / #218:
+    // when a per-config ABox is present it is the authoritative source
+    // for the corresponding sub-tree, and the post-overlay step below
+    // replaces the legacy sidecar's copy. Pre-overlay validation must
+    // therefore see the ABox values — not the legacy ones — so that:
     //   (a) a stale legacy entry whose state name no longer exists in
     //       the ABox cannot fail load (was the original strip
     //       motivation); and
     //   (b) cross-references from sub-trees that have NOT yet
-    //       migrated (e.g. semanticTypes.witnesses → runtimeStates,
-    //       capabilities → runtimeStates) still resolve through the
-    //       authoritative ABox values during pre-overlay validation.
+    //       migrated still resolve through the authoritative ABox
+    //       values during pre-overlay validation.
     // Stripping alone (Lift 5's first attempt) breaks (b) because the
     // unmigrated sub-trees still expect their cross-refs to resolve.
     // Overlaying both pre- and post- gives one consistent view.
     let validationTarget: DomainSemantics = parsedDomain;
-    if (artifactAboxPresent || runtimeStatesAboxPresent || semanticsAboxPresent) {
+    if (
+      artifactAboxPresent ||
+      runtimeStatesAboxPresent ||
+      semanticsAboxPresent ||
+      globalContextSeedsAboxPresent
+    ) {
       const overlaid: DomainSemantics = { ...parsedDomain };
       if (artifactAboxPresent) {
         const av = deriveArtifactKindsViews(repoRoot);
@@ -378,6 +385,12 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
           overlaid.semanticTypes = sv.semanticTypes;
           overlaid.capabilities = sv.capabilities;
           overlaid.identifiers = sv.identifiers;
+        }
+      }
+      if (globalContextSeedsAboxPresent) {
+        const gv = deriveGlobalContextSeedsViews(repoRoot);
+        if (gv !== null) {
+          overlaid.globalContextSeeds = gv.globalContextSeeds;
         }
       }
       validationTarget = overlaid;
@@ -432,6 +445,17 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
           capabilities: sv.capabilities,
           identifiers: sv.identifiers,
         };
+      }
+    }
+    // Lift 8 / #218: global-context-seeds ABox supersedes the legacy
+    // `globalContextSeeds` array. Promoted in the same in-try block so
+    // `graph.domain.globalContextSeeds` (consumed by the Playwright
+    // emitter prologue and `loadGlobalContextSeeds` in codegen/index.ts)
+    // sees the ABox values.
+    if (globalContextSeedsAboxPresent) {
+      const gv = deriveGlobalContextSeedsViews(repoRoot);
+      if (gv !== null) {
+        domain = { ...domain, globalContextSeeds: gv.globalContextSeeds };
       }
     }
     // debug: domain semantics sidecar loaded
@@ -738,6 +762,18 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
           addProducer(witnessed, opId);
         }
       }
+    }
+  }
+  // Lift 8 / #218: when the global-context-seeds ABox is shipped but no
+  // legacy `domain-semantics.json` sidecar exists, the in-try promote
+  // is never reached — leaving `graph.domain.globalContextSeeds`
+  // empty. Mirror the other ABox-only post-try blocks: synthesize
+  // the field from the views.
+  if (globalContextSeedsAboxPresent && !legacyDomainLoaded) {
+    const gv = deriveGlobalContextSeedsViews(repoRoot);
+    if (gv !== null) {
+      const baseDomain: DomainSemantics = domain ?? { version: 1 };
+      domain = { ...baseDomain, globalContextSeeds: gv.globalContextSeeds };
     }
   }
   // Re-run the cross-reference invariants from `validateDomainSemantics`

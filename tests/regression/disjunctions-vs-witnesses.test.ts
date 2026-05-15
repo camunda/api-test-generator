@@ -1,6 +1,9 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  deriveRuntimeStatesViews,
+  deriveSemanticsViews,
+} from '../../path-analyser/src/ontology/loader.js';
 
 interface OperationDomainRequirements {
   disjunctions?: string[][];
@@ -15,15 +18,22 @@ interface DomainSemantics {
   capabilities?: Record<string, unknown>;
 }
 
-async function loadDomain(): Promise<DomainSemantics> {
-  const file = path.resolve(import.meta.dirname, '../../configs/camunda-oca/domain-semantics.json');
-  const raw = await readFile(file, 'utf8');
-  // biome-ignore lint/plugin: domain-semantics.json is the runtime contract.
-  return JSON.parse(raw) as DomainSemantics;
+function loadDomain(): DomainSemantics {
+  const repoRoot = path.resolve(import.meta.dirname, '../..');
+  const runtimeViews = deriveRuntimeStatesViews(repoRoot);
+  const semanticsViews = deriveSemanticsViews(repoRoot);
+  if (!runtimeViews) throw new Error('runtime-states ABox missing');
+  if (!semanticsViews) throw new Error('semantics ABox missing');
+  return {
+    operationRequirements: runtimeViews.operationRequirements,
+    runtimeStates: runtimeViews.runtimeStates,
+    semanticTypes: semanticsViews.semanticTypes,
+    capabilities: semanticsViews.capabilities,
+  };
 }
 
-describe('domain-semantics.json — disjunctions vs witnesses (#66)', () => {
-  it('no disjunction group may contain both a semantic type X and the state semanticTypes[X].witnesses', async () => {
+describe('domain ABox — disjunctions vs witnesses (#66)', () => {
+  it('no disjunction group may contain both a semantic type X and the state semanticTypes[X].witnesses', () => {
     // After #70 introduced the witnesses relation, a disjunction of the
     // form ["ProcessDefinitionKey", "ProcessDefinitionDeployed"] is
     // redundant: every operation that produces ProcessDefinitionKey is
@@ -35,8 +45,7 @@ describe('domain-semantics.json — disjunctions vs witnesses (#66)', () => {
     // state.domainStates, which never contains semantic types — so the
     // X branch of such a disjunction is dead code. Catch this class
     // here so future bindings don't reintroduce the redundancy.
-    const domain = await loadDomain();
-
+    const domain = loadDomain();
     const witnessOf = new Map<string, string>();
     for (const [semanticType, spec] of Object.entries(domain.semanticTypes ?? {})) {
       if (typeof spec.witnesses === 'string' && spec.witnesses.length > 0) {
@@ -67,11 +76,11 @@ describe('domain-semantics.json — disjunctions vs witnesses (#66)', () => {
     ).toEqual([]);
   });
 
-  it('every disjunction member must resolve to a declared runtimeState or capability', async () => {
+  it('every disjunction member must resolve to a declared runtimeState or capability', () => {
     // After collapsing semantic-type/witnessed-state pairs, every remaining
     // disjunction member must be a real domain state — otherwise the planner
     // can never satisfy it (domainStates only ever contains state names).
-    const domain = await loadDomain();
+    const domain = loadDomain();
 
     const declaredStates = new Set([
       ...Object.keys(domain.runtimeStates ?? {}),

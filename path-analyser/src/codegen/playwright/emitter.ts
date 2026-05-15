@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { assertSafeGlobalContextSeeds } from '../../domainSemanticsValidator.js';
+import { assertSafeGlobalContextSeeds } from '../../ontology/loader.js';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,

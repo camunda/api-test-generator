@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { classifySemantic } from './bindSemanticInput.js';
-import type { OperationGraph } from './types.js';
+import { classifySemantic } from '../bindSemanticInput.js';
+import type { OperationGraph } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // path-analyser/src/domainSemanticsValidator.ts
