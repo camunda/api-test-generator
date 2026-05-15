@@ -8,6 +8,8 @@ import {
   validateRuntimeStateWitnessGraphRefs,
 } from './domainSemanticsValidator.js';
 import {
+  deriveArtifactKindsViews,
+  loadArtifactKindsAbox,
   loadEdgeEstablishers,
   loadEntityKindsAbox,
   loadExternalEntityIdentifiers,
@@ -467,6 +469,32 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
+  // Lift 5 / #212: artifact-kinds ABox supersedes the legacy
+  // `domain-semantics.json` keys when present. Per #198, artifact
+  // dispatch is domain knowledge with no wire signature, so it lives
+  // in the per-config ontology rather than in the freeform sidecar.
+  // The legacy keys remain a transitional fallback so unmigrated
+  // configs (and tests that exercise loadGraph against an isolated
+  // tmpDir without a domain-semantics.json) keep working until Lift 8
+  // retires them. When both are present, the ABox is authoritative —
+  // `detectArtifactKindsDrift` surfaces dead/dangling entries (the
+  // durable abox-vs-graph signal) before the override can silently
+  // mask them. Placed outside the domain-semantics try/catch so a
+  // shipped ABox is honoured even when the legacy sidecar is absent.
+  {
+    const artifactViews = deriveArtifactKindsViews(repoRoot);
+    if (artifactViews !== null) {
+      const baseDomain: DomainSemantics = domain ?? { version: 1 };
+      domain = {
+        ...baseDomain,
+        artifactKinds: artifactViews.artifactKinds,
+        semanticTypeToArtifactKind: artifactViews.semanticTypeToArtifactKind,
+        operationArtifactRules: artifactViews.operationArtifactRules,
+        artifactFileKinds: artifactViews.artifactFileKinds,
+      };
+    }
+  }
+
   // Lift 4 / #210: the entity-kinds ABox is the authoritative runtime
   // source for the external-entity identifier set. Falls back to the
   // spec-emitted `kindRegistry` (Issue #134 / camunda/camunda#52320)
@@ -513,6 +541,29 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
       }
       console.warn(
         `WARNING: ${message}\n  (set STRICT_ENTITY_KINDS_ABOX=1 to fail-fast on drift.)`,
+      );
+    }
+  }
+
+  // Lift 5 / #212: cross-validate the artifact-kinds ABox against the
+  // bundled graph (durable, sense 2 only — there is no spec source for
+  // these facts to disagree with). Catches: rules naming nonexistent
+  // operations / artifact kinds; semantic-types mapped to nonexistent
+  // kinds; file-extension entries pointing at nonexistent kinds; kinds
+  // not referenced by any rule, semanticTypeMap entry, or
+  // fileExtensionMap entry (dead weight). The locality-loss
+  // replacement signal: surfaces drift when the upstream API adds a
+  // new artifact-flavoured op and the ABox isn't updated.
+  {
+    const drift = detectArtifactKindsDrift(operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `artifact-kinds ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_ARTIFACT_KINDS_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(
+        `WARNING: ${message}\n  (set STRICT_ARTIFACT_KINDS_ABOX=1 to fail-fast on drift.)`,
       );
     }
   }
@@ -970,6 +1021,87 @@ function detectEntityKindsDrift(
     if (!used) {
       drift.push(
         `[abox-vs-graph] ABox lists kind '${name}' (identifiers: ${kind.identifiers.join(', ')}), but none of those identifier types are referenced by any operation in the graph (kind is dead weight; either remove from ABox or add a consumer op)`,
+      );
+    }
+  }
+
+  return drift;
+}
+
+/**
+ * Cross-validate the artifact-kinds ABox against the bundled-graph
+ * use-sites. Lift 5 / #212. Unlike the entity-kinds detector, there is
+ * no transitional `spec-vs-abox` sense — the data was never sourced
+ * from the upstream OpenAPI spec, so there is no second source of
+ * truth for the ABox to disagree with. Only the durable
+ * `abox-vs-graph` (sense-2) checks apply:
+ *
+ *   - rule operationIds reference real ops in the graph;
+ *   - rule artifactKind / semanticTypeMap.artifactKind /
+ *     fileExtensionMap.artifactKinds entries reference real kinds;
+ *   - every kind is referenced by at least one rule, semanticTypeMap
+ *     entry, or fileExtensionMap entry (no dead kinds).
+ *
+ * Returns an empty list when no ABox is shipped, so the caller treats
+ * the legacy `domain-semantics.json` fallback as drift-free.
+ */
+function detectArtifactKindsDrift(
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadArtifactKindsAbox(repoRoot);
+  if (abox === null) return drift;
+
+  const kindNames = new Set(abox.kinds.map((k) => k.name));
+
+  for (const rule of abox.operationRules) {
+    if (!operations[rule.operationId]) {
+      drift.push(
+        `[abox-vs-graph] operationRules entry '${rule.operationId}' references an opId that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+      );
+    }
+    for (const r of rule.rules) {
+      if (!kindNames.has(r.artifactKind)) {
+        drift.push(
+          `[abox-vs-graph] operationRules['${rule.operationId}'].rules['${r.id}'] references unknown artifactKind '${r.artifactKind}'`,
+        );
+      }
+    }
+  }
+  for (const m of abox.semanticTypeMap) {
+    if (!kindNames.has(m.artifactKind)) {
+      drift.push(
+        `[abox-vs-graph] semanticTypeMap entry '${m.semanticType}' → '${m.artifactKind}' references unknown artifactKind`,
+      );
+    }
+  }
+  for (const m of abox.fileExtensionMap) {
+    for (const kind of m.artifactKinds) {
+      if (!kindNames.has(kind)) {
+        drift.push(
+          `[abox-vs-graph] fileExtensionMap entry '${m.extension}' references unknown artifactKind '${kind}'`,
+        );
+      }
+    }
+  }
+
+  // Dead-weight check: every kind must be referenced from at least one
+  // of the three side-tables. A kind that nothing references can never
+  // be dispatched to, and is almost certainly a stale entry from an
+  // earlier API surface.
+  const referencedKinds = new Set<string>();
+  for (const rule of abox.operationRules) {
+    for (const r of rule.rules) referencedKinds.add(r.artifactKind);
+  }
+  for (const m of abox.semanticTypeMap) referencedKinds.add(m.artifactKind);
+  for (const m of abox.fileExtensionMap) {
+    for (const k of m.artifactKinds) referencedKinds.add(k);
+  }
+  for (const k of abox.kinds) {
+    if (!referencedKinds.has(k.name)) {
+      drift.push(
+        `[abox-vs-graph] ABox lists kind '${k.name}' but no operationRules / semanticTypeMap / fileExtensionMap entry references it (dead weight; either remove from ABox or add a referencing entry)`,
       );
     }
   }

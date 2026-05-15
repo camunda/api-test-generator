@@ -4494,3 +4494,212 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     );
   });
 });
+
+describeForThisConfig(
+  'bundled-spec invariants: artifact-kinds ABox cross-references (#212)',
+  () => {
+    // Lift 5 / #212: the artifact-kinds ABox is now the authoritative
+    // source for the four artifact-related sub-trees (artifactKinds,
+    // semanticTypeToArtifactKind, operationArtifactRules,
+    // artifactFileKinds) previously carried in domain-semantics.json.
+    //
+    // Unlike Lifts 3/4, the data was never sourced from upstream
+    // OpenAPI annotations — so there is no `spec-vs-abox` (sense-1)
+    // drift to guard. These invariants encode the durable
+    // `abox-vs-graph` (sense-2) coverage gates only: the locality-loss
+    // replacement signal that catches stale ABox entries against
+    // runtime use of the bundled graph.
+
+    it('loads the artifact-kinds ABox via the generic loader (proves the load path)', async () => {
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      expect(abox, 'artifact-kinds ABox file must exist for the camunda-oca config').not.toBeNull();
+      expect(abox?.kinds.length).toBeGreaterThan(0);
+      expect(abox?.operationRules.length).toBeGreaterThan(0);
+    });
+
+    it('every operationRules entry references a real opId in the bundled graph (sense-2: abox-vs-graph)', async () => {
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      if (!abox) throw new Error('artifact-kinds ABox missing');
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      interface GraphOp {
+        operationId?: string;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operationsById?: Record<string, GraphOp>;
+        operations?: Record<string, GraphOp> | GraphOp[];
+      };
+      const opIds = new Set<string>(
+        Object.keys(graph.operationsById ?? {}).length > 0
+          ? Object.keys(graph.operationsById ?? {})
+          : Array.isArray(graph.operations)
+            ? graph.operations
+                .map((o) => o.operationId)
+                .filter((s): s is string => typeof s === 'string')
+            : Object.keys(graph.operations ?? {}),
+      );
+      const dangling = abox.operationRules.map((r) => r.operationId).filter((id) => !opIds.has(id));
+      expect(
+        dangling,
+        'artifact-kinds ABox operationRules entries reference opIds that do not exist in the bundled graph — typo, renamed-upstream op, or stale entry; remove or fix in configs/<config>/ontology/artifact-kinds.json',
+      ).toEqual([]);
+    });
+
+    it('every artifact-kind referenced by operationRules / semanticTypeMap / fileExtensionMap is defined in `kinds`', async () => {
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      if (!abox) throw new Error('artifact-kinds ABox missing');
+      const kindNames = new Set(abox.kinds.map((k) => k.name));
+      const dangling: string[] = [];
+      for (const rule of abox.operationRules) {
+        for (const r of rule.rules) {
+          if (!kindNames.has(r.artifactKind))
+            dangling.push(
+              `operationRules['${rule.operationId}'].rules['${r.id}'] → '${r.artifactKind}'`,
+            );
+        }
+      }
+      for (const m of abox.semanticTypeMap) {
+        if (!kindNames.has(m.artifactKind))
+          dangling.push(`semanticTypeMap['${m.semanticType}'] → '${m.artifactKind}'`);
+      }
+      for (const m of abox.fileExtensionMap) {
+        for (const k of m.artifactKinds) {
+          if (!kindNames.has(k)) dangling.push(`fileExtensionMap['${m.extension}'] → '${k}'`);
+        }
+      }
+      expect(
+        dangling,
+        'artifact-kinds ABox cross-references unknown kind name(s) — define the missing kind in `kinds[]` or fix the reference',
+      ).toEqual([]);
+    });
+
+    it('every artifact-kind in the ABox is referenced by at least one operationRules / semanticTypeMap / fileExtensionMap entry (no dead kinds)', async () => {
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      if (!abox) throw new Error('artifact-kinds ABox missing');
+      const referenced = new Set<string>();
+      for (const rule of abox.operationRules) {
+        for (const r of rule.rules) referenced.add(r.artifactKind);
+      }
+      for (const m of abox.semanticTypeMap) referenced.add(m.artifactKind);
+      for (const m of abox.fileExtensionMap) {
+        for (const k of m.artifactKinds) referenced.add(k);
+      }
+      const dead = abox.kinds.filter((k) => !referenced.has(k.name)).map((k) => k.name);
+      expect(
+        dead,
+        'artifact-kinds ABox lists kind(s) referenced by no rule, semanticTypeMap entry, or fileExtensionMap entry — kind is dead weight; either remove it or add a reference',
+      ).toEqual([]);
+    });
+
+    it('every semantic-type produced by some artifact kind has a matching semanticTypeMap entry (catches new kinds with no reverse-mapping)', async () => {
+      // Heuristic gate: when a new kind is added with `producesSemantics:
+      // ['NewKey']` but no corresponding `semanticTypeMap` entry mapping
+      // `NewKey → newKind`, the planner can't reverse-look up which kind
+      // produces NewKey. Surface as drift before runtime breakage.
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      if (!abox) throw new Error('artifact-kinds ABox missing');
+      const mapped = new Map<string, string>();
+      for (const m of abox.semanticTypeMap) mapped.set(m.semanticType, m.artifactKind);
+      const missing: string[] = [];
+      for (const kind of abox.kinds) {
+        for (const sem of kind.producesSemantics) {
+          const mappedKind = mapped.get(sem);
+          if (mappedKind === undefined) {
+            missing.push(`'${sem}' (produced by '${kind.name}', no semanticTypeMap entry)`);
+          } else if (mappedKind !== kind.name) {
+            missing.push(
+              `'${sem}' (produced by '${kind.name}' but semanticTypeMap maps it to '${mappedKind}')`,
+            );
+          }
+        }
+      }
+      expect(
+        missing,
+        'artifact-kinds ABox has kinds whose `producesSemantics` are not (or are wrongly) mapped in `semanticTypeMap` — every produced semantic type must reverse-map to its producer kind',
+      ).toEqual([]);
+    });
+
+    it('graph.domain.artifactKinds matches the ABox `kinds[]` (planner contract — ABox supersedes domain-semantics.json)', async () => {
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      if (!abox) throw new Error('artifact-kinds ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const expected = abox.kinds.map((k) => k.name).sort();
+      const actual = Object.keys(graph.domain?.artifactKinds ?? {}).sort();
+      expect(
+        actual,
+        'graph.domain.artifactKinds keys do not match the ABox `kinds[]` names — the loader may have failed to overlay the ABox onto graph.domain',
+      ).toEqual(expected);
+      // Spot-check: a kind's identifierType comes from the ABox, not the legacy sidecar.
+      for (const k of abox.kinds) {
+        expect(graph.domain?.artifactKinds?.[k.name]?.identifierType).toBe(k.identifierType);
+      }
+    });
+
+    it('graph.domain.operationArtifactRules matches the ABox `operationRules[]` (planner contract)', async () => {
+      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const abox = loadArtifactKindsAbox(REPO_ROOT);
+      if (!abox) throw new Error('artifact-kinds ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const expectedOps = abox.operationRules.map((r) => r.operationId).sort();
+      const actualOps = Object.keys(graph.domain?.operationArtifactRules ?? {}).sort();
+      expect(actualOps).toEqual(expectedOps);
+      for (const rule of abox.operationRules) {
+        const actual = graph.domain?.operationArtifactRules?.[rule.operationId];
+        expect(actual?.composable).toBe(rule.composable);
+        expect(actual?.rules?.map((r) => r.artifactKind).sort()).toEqual(
+          rule.rules.map((r) => r.artifactKind).sort(),
+        );
+      }
+    });
+
+    it('the committed artifact-kinds vocabulary JSON matches the regenerated TBox (drift detector)', async () => {
+      const { ARTIFACTS, renderSchema } = await import('../../scripts/build-ontology.ts');
+      const target = ARTIFACTS.find((a) => a.jsonPath.endsWith('artifact-kinds.schema.json'));
+      expect(target, 'build-ontology must include artifact-kinds.schema.json').toBeDefined();
+      if (!target) return;
+      const onDisk = readFileSync(target.jsonPath, 'utf8');
+      const rendered = renderSchema(target.schema);
+      expect(
+        onDisk,
+        `Generated ontology artefact at ${target.jsonPath} is stale. Run 'npm run build:ontology' to refresh it.`,
+      ).toBe(rendered);
+    });
+
+    it("the artifact-kinds ABox's $schema field resolves to the published TBox JSON", () => {
+      const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'artifact-kinds.json');
+      const expectedTboxPath = join(
+        REPO_ROOT,
+        'ontology',
+        'vocabulary',
+        'artifact-kinds.schema.json',
+      );
+      expect(
+        existsSync(expectedTboxPath),
+        `Published TBox at '${expectedTboxPath}' does not exist — vocabulary file may have been deleted or renamed`,
+      ).toBe(true);
+      interface AboxHeader {
+        $schema?: unknown;
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const aboxJson = JSON.parse(readFileSync(aboxPath, 'utf8')) as AboxHeader;
+      const schemaField = aboxJson.$schema;
+      expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
+      if (typeof schemaField !== 'string') return;
+      expect(schemaField).toBe(
+        'https://camunda.github.io/api-test-generator/ns/v1/artifact-kinds.schema.json',
+      );
+    });
+  },
+);

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Ajv, type ErrorObject } from 'ajv';
 import type { FromSchema } from 'json-schema-to-ts';
 import { getActiveConfigDir } from '../configResolver.js';
+import { artifactKindsSchema } from './artifactKindsSchema.js';
 import { edgeSchema } from './edgeSchema.js';
 import { entityKindsSchema } from './entityKindsSchema.js';
 
@@ -39,12 +40,19 @@ export type Edge = EdgesAbox['edges'][number];
 export type EntityKindsAbox = FromSchema<typeof entityKindsSchema>;
 export type EntityKind = EntityKindsAbox['kinds'][number];
 
+export type ArtifactKindsAbox = FromSchema<typeof artifactKindsSchema>;
+export type ArtifactKindEntry = ArtifactKindsAbox['kinds'][number];
+export type ArtifactSemanticTypeMapping = ArtifactKindsAbox['semanticTypeMap'][number];
+export type ArtifactOperationRule = ArtifactKindsAbox['operationRules'][number];
+export type ArtifactFileExtensionMapping = ArtifactKindsAbox['fileExtensionMap'][number];
+
 // `Ajv` is the named export pointing at the constructor; the namespace
 // also has a self-referential default but the named export is the
 // least error-prone form under module=nodenext.
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validateEdgesAbox = ajv.compile<EdgesAbox>(edgeSchema);
 const validateEntityKindsAbox = ajv.compile<EntityKindsAbox>(entityKindsSchema);
+const validateArtifactKindsAbox = ajv.compile<ArtifactKindsAbox>(artifactKindsSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? [])
@@ -228,4 +236,161 @@ export function loadExternalEntityIdentifiers(repoRoot: string): Set<string> | n
     }
   }
   return set;
+}
+
+/**
+ * Load and validate the artifact-kinds ABox file for the active config.
+ *
+ * Lift 5 / #212: the artifact-kinds ABox is the authoritative runtime
+ * source for the four artifact-related sub-trees previously carried in
+ * `configs/<config>/domain-semantics.json` (`artifactKinds`,
+ * `semanticTypeToArtifactKind`, `operationArtifactRules`,
+ * `artifactFileKinds`). Per the principle landed in #198: artifact
+ * dispatch is domain knowledge with no wire signature, so it belongs
+ * in the per-config ontology rather than scattered across spec
+ * annotations or freeform sidecars.
+ *
+ * Unlike the edges and entity-kinds ABoxes, the data here was never
+ * sourced from upstream OpenAPI annotations — there is no
+ * `spec-vs-abox` (sense-1) drift to detect, only the durable
+ * `abox-vs-graph` (sense-2) cross-references which are enforced by
+ * `detectArtifactKindsDrift` in `graphLoader.ts`.
+ *
+ * @param repoRoot Absolute path to the api-test-generator repository root.
+ * @returns The parsed ABox, or `null` if the file does not exist (configs
+ *   are not required to ship one; a missing file leaves the legacy
+ *   `domain-semantics.json` keys authoritative for backward compatibility).
+ * @throws if the file exists but does not validate against the TBox, or
+ *   if it contains duplicate kind / operationId / extension / semanticType
+ *   keys.
+ */
+export function loadArtifactKindsAbox(repoRoot: string): ArtifactKindsAbox | null {
+  // Symmetric with `loadEdgesAbox` / `loadEntityKindsAbox` — tests that
+  // exercise loadGraph against an isolated tmpDir don't ship a
+  // `configs.json`, and the right fallback there is "no ABox available"
+  // so the test exercises the legacy domain-semantics.json path.
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'artifact-kinds.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse artifact-kinds ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateArtifactKindsAbox(parsed)) {
+    throw new Error(
+      `Artifact-kinds ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateArtifactKindsAbox.errors)}`,
+    );
+  }
+  // Reject duplicate keys up front — Draft-07 cannot express
+  // uniqueness, but a duplicate would silently shadow facts at query
+  // time. Same defensive check as in the other ABox loaders.
+  const dupeKinds = duplicates(parsed.kinds.map((k) => k.name));
+  if (dupeKinds.length > 0) {
+    throw new Error(
+      `Artifact-kinds ABox at ${aboxPath} has duplicate kind name(s): ${dupeKinds.join(', ')}`,
+    );
+  }
+  const dupeSemantics = duplicates(parsed.semanticTypeMap.map((m) => m.semanticType));
+  if (dupeSemantics.length > 0) {
+    throw new Error(
+      `Artifact-kinds ABox at ${aboxPath} has duplicate semanticTypeMap entries for: ${dupeSemantics.join(', ')}`,
+    );
+  }
+  const dupeOps = duplicates(parsed.operationRules.map((r) => r.operationId));
+  if (dupeOps.length > 0) {
+    throw new Error(
+      `Artifact-kinds ABox at ${aboxPath} has duplicate operationRules entries for: ${dupeOps.join(', ')}`,
+    );
+  }
+  const dupeExts = duplicates(parsed.fileExtensionMap.map((m) => m.extension));
+  if (dupeExts.length > 0) {
+    throw new Error(
+      `Artifact-kinds ABox at ${aboxPath} has duplicate fileExtensionMap entries for: ${dupeExts.join(', ')}`,
+    );
+  }
+  return parsed;
+}
+
+function duplicates(values: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts.entries()].filter(([, n]) => n > 1).map(([v]) => v);
+}
+
+/**
+ * Derive the four record-shaped views of the artifact-kinds ABox that
+ * `graph.domain.*` consumers (planner, codegen, feature-coverage)
+ * expect. Returning `null` when no ABox is shipped lets `loadGraph`
+ * fall back to the legacy `domain-semantics.json` keys.
+ */
+export interface ArtifactKindsViews {
+  artifactKinds: Record<
+    string,
+    {
+      producesStates?: string[];
+      producibleStates?: string[];
+      producesSemantics?: string[];
+      identifierType?: string;
+      deploymentSlices?: string[];
+    }
+  >;
+  semanticTypeToArtifactKind: Record<string, string>;
+  operationArtifactRules: Record<
+    string,
+    { composable?: boolean; rules?: { id?: string; artifactKind: string }[] }
+  >;
+  artifactFileKinds: Record<string, string[]>;
+}
+
+export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews | null {
+  const abox = loadArtifactKindsAbox(repoRoot);
+  if (abox === null) return null;
+  const artifactKinds: ArtifactKindsViews['artifactKinds'] = {};
+  for (const k of abox.kinds) {
+    const entry: ArtifactKindsViews['artifactKinds'][string] = {
+      producesStates: k.producesStates,
+      producesSemantics: k.producesSemantics,
+      identifierType: k.identifierType,
+      deploymentSlices: k.deploymentSlices,
+    };
+    if (k.producibleStates !== undefined) entry.producibleStates = k.producibleStates;
+    artifactKinds[k.name] = entry;
+  }
+  const semanticTypeToArtifactKind: Record<string, string> = {};
+  for (const m of abox.semanticTypeMap) {
+    semanticTypeToArtifactKind[m.semanticType] = m.artifactKind;
+  }
+  const operationArtifactRules: ArtifactKindsViews['operationArtifactRules'] = {};
+  for (const r of abox.operationRules) {
+    operationArtifactRules[r.operationId] = {
+      composable: r.composable,
+      rules: r.rules.map((rule) => ({ id: rule.id, artifactKind: rule.artifactKind })),
+    };
+  }
+  const artifactFileKinds: Record<string, string[]> = {};
+  for (const m of abox.fileExtensionMap) {
+    artifactFileKinds[m.extension] = [...m.artifactKinds];
+  }
+  return {
+    artifactKinds,
+    semanticTypeToArtifactKind,
+    operationArtifactRules,
+    artifactFileKinds,
+  };
 }
