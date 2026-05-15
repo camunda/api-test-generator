@@ -5,7 +5,7 @@ import type { OperationGraph } from '../types.js';
 // ---------------------------------------------------------------------------
 // path-analyser/src/domainSemanticsValidator.ts
 //
-// Load-time validator for path-analyser/domain-semantics.json.
+// Load-time validator for the synthesized graph-domain view.
 //
 // The shape of `DomainSemantics` (in types.ts) describes *what* fields exist;
 // this module describes *which combinations of values are coherent* — the
@@ -531,7 +531,7 @@ export function validateDomainSemantics(raw: unknown): DomainSemanticsValidation
  * The Playwright emitter interpolates `binding`, `fieldName`, `seedRule`,
  * and `defaultSentinel` directly into emitted TS source as identifiers and
  * single-quoted string literals (#87). The loader validates the seeds when
- * reading `domain-semantics.json`, but the public emitter entry points
+ * reading the ontology-derived graph domain, but the public emitter entry points
  * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`)
  * accept a `globalContextSeeds` argument from any caller. This helper
  * re-validates at that boundary so a programmatic caller cannot bypass
@@ -665,7 +665,7 @@ export function validateRequestBodySemanticsClassified(
   for (const [semantic, sites] of offendersBySemantic) {
     issues.push({
       invariant: 'requestBodySemanticUnclassified',
-      message: `semantic type "${semantic}" referenced by ${sites.length} requestBodySemanticTypes site(s) is unclassified — declare a domain-semantics.json entry (e.g. kind: 'serverEmergent' for server-minted lifecycle keys, kind: 'attribute' + clientMinted: true for client-supplied filter values), wire a producer/establisher in the spec, or add it to the kindRegistry as an external-entity identifier. Sites: ${sites.join(', ')}`,
+      message: `semantic type "${semantic}" referenced by ${sites.length} requestBodySemanticTypes site(s) is unclassified — declare a semantics ABox entry (e.g. kind: 'serverEmergent' for server-minted lifecycle keys, kind: 'attribute' + clientMinted: true for client-supplied filter values), wire a producer/establisher in the spec, or add it to the kindRegistry as an external-entity identifier. Sites: ${sites.join(', ')}`,
     });
   }
   return issues;

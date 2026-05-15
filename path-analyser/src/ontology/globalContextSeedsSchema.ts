@@ -27,10 +27,8 @@
 // the request body when the binding equals the sentinel.
 //
 // Like Lifts 5/6/7, the data was never sourced from upstream OpenAPI
-// annotations — it has always lived in the per-config
-// `domain-semantics.json` sidecar. Consequence: there is no
-// `spec-vs-abox` (sense-1) drift to detect. The ABox supersedes the
-// legacy `domain-semantics.json#globalContextSeeds` when present.
+// annotations — it has always lived in per-config ontology data.
+// Consequence: there is no `spec-vs-abox` (sense-1) drift to detect.
 //
 // Identifier / sentinel safety constraints (the same constraints
 // previously enforced by `domainSemanticsValidator.ts#GlobalContextSeedSchema`

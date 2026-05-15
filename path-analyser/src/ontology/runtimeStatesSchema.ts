@@ -22,12 +22,11 @@
 // ABox-level invariant rather than an inter-file one.
 //
 // Like Lift 5, the data was never sourced from upstream OpenAPI
-// annotations — it has always lived in the per-config
-// `domain-semantics.json` sidecar. Consequence: there is no
-// `spec-vs-abox` (sense-1) drift to detect. The ABox supersedes the
-// legacy `domain-semantics.json` keys when present; coverage gates
-// check the durable `abox-vs-graph` (sense-2) invariants only (states
-// reach the graph; ops reference real ops; no dead states).
+// annotations — it has always lived in per-config ontology data.
+// Consequence: there is no `spec-vs-abox` (sense-1) drift to detect.
+// Coverage gates check the durable `abox-vs-graph` (sense-2)
+// invariants only (states reach the graph; ops reference real ops; no
+// dead states).
 //
 // Two entry classes:
 //
@@ -58,7 +57,7 @@ export const runtimeStatesSchema = {
   $id: 'https://camunda.github.io/api-test-generator/ns/v1/runtime-states.schema.json',
   title: 'Runtime-states ABox (api-test-generator ontology, v1)',
   description:
-    'TBox JSON Schema for an ABox file describing the runtime states a deployed API surfaces, plus the per-operation requirements that reference those states. Each entry asserts: a runtime state exists with a known parameter shape and producer set; an operation requires (or produces, or binds values from) a set of states. The schema is intentionally agnostic to which API ships the states — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/runtime-states.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (operationIds existing, state names being internally consistent across `producedBy`, `requires`, `implicitAdds`, `produces`, `valueBindings`, `requires`-chains terminating, no orphan states) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them. Cross-references against `semanticTypes`/`capabilities` (sibling sub-trees in `domain-semantics.json` that this ABox transitively references via `valueBindings` RHS like `semantic:ProcessDefinitionKey` or via `requires`-of-capability entries) are re-validated at load time by re-running `validateDomainSemantics` against the post-overlay `graph.domain` — see `graphLoader.ts`.',
+    'TBox JSON Schema for an ABox file describing the runtime states a deployed API surfaces, plus the per-operation requirements that reference those states. Each entry asserts: a runtime state exists with a known parameter shape and producer set; an operation requires (or produces, or binds values from) a set of states. The schema is intentionally agnostic to which API ships the states — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/runtime-states.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (operationIds existing, state names being internally consistent across `producedBy`, `requires`, `implicitAdds`, `produces`, `valueBindings`, `requires`-chains terminating, no orphan states) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them. Cross-references against sibling ontology sub-trees (`semanticTypes` / `capabilities`) that this ABox transitively references via `valueBindings` RHS like `semantic:ProcessDefinitionKey` or via `requires`-of-capability entries are re-validated at load time by re-running `validateDomainSemantics` against `graph.domain` — see `graphLoader.ts`.',
   type: 'object',
   additionalProperties: false,
   required: ['version', 'states', 'operationRequirements'],
@@ -124,7 +123,7 @@ export const runtimeStatesSchema = {
           type: 'array',
           items: { type: 'string', minLength: 1 },
           description:
-            'Prerequisite states that must hold before this state can be produced. Each entry must reference another state in `states` or a capability declared in `domain-semantics.json` (capabilities migrate in Lift 7).',
+            'Prerequisite states that must hold before this state can be produced. Each entry must reference another state in `states` or a capability declared in the semantics ABox.',
         },
         eventual: {
           type: 'boolean',
@@ -201,7 +200,7 @@ export const runtimeStatesSchema = {
           type: 'array',
           items: { type: 'string', minLength: 1 },
           description:
-            'States that must hold before invoking this op. Each entry must reference a state in `states` or a capability in `domain-semantics.json` (capabilities migrate in Lift 7).',
+            'States that must hold before invoking this op. Each entry must reference a state in `states` or a capability in the semantics ABox.',
         },
         disjunctions: {
           type: 'array',

@@ -179,7 +179,7 @@ describe('loadArtifactKindsAbox: documented branches', () => {
 });
 
 describe('deriveArtifactKindsViews: record-shaped views', () => {
-  it('returns null when no ABox is shipped (caller falls back to domain-semantics.json)', () => {
+  it('returns null when no ABox is shipped', () => {
     expect(deriveArtifactKindsViews(workdir)).toBeNull();
   });
 

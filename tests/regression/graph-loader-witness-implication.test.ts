@@ -5,7 +5,7 @@ import { loadGraph } from '../../path-analyser/src/graphLoader.ts';
 /**
  * Witness-implication gating — class-scoped regression for #95.
  *
- * `domain-semantics.json` declares `semanticTypes[T].witnesses = W` for
+ * The semantics ABox declares `semanticTypes[T].witnesses = W` for
  * key-shaped semantic types: producing a value of `T` is taken as
  * evidence that runtime state `W` holds. `graphLoader.ts` lifts this
  * relation by adding every op in `producersByType[T]` to

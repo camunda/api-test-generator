@@ -6,30 +6,25 @@
  * `entity-kinds-abox-authoritative.test.ts` (Lift 4 / #210).
  *
  * Unlike Lift 4, the migrated facts were never carried in upstream
- * OpenAPI annotations — only in `configs/<config>/domain-semantics.json`.
+ * OpenAPI annotations — only in the per-config ontology.
  * Consequence: the integration only exercises the durable
  * `abox-vs-graph` (sense-2) drift signal; there is no transitional
  * `spec-vs-abox` (sense-1) sense to test.
  *
  * Five observable behaviours guarded here:
  *
- *   1. **ABox authoritative — promotes**: `domain-semantics.json`
- *      declares one set of artifactKinds; the ABox declares a
- *      different set. After loadGraph, `graph.domain.artifactKinds`
- *      reflects the ABox.
+ *   1. **ABox-only graph population**: the ABox alone populates the
+ *      four artifact-related sub-trees on `graph.domain`.
  *
- *   2. **ABox authoritative — works without domain-semantics.json**:
- *      no legacy sidecar shipped at all; the ABox alone populates the
- *      four sub-trees on `graph.domain`.
- *
- *   3. **Strict mode**: with `STRICT_ARTIFACT_KINDS_ABOX=1`, an
+ *   2. **Strict mode**: with `STRICT_ARTIFACT_KINDS_ABOX=1`, an
  *      abox-vs-graph drift is a hard error.
  *
- *   4. **Legacy fallback**: with no ABox shipped, the legacy
- *      `domain-semantics.json` keys remain authoritative.
- *
- *   5. **Sense-2 drift warnings**: dead-kind / unknown-opId /
+ *   3. **Sense-2 drift warnings**: dead-kind / unknown-opId /
  *      unknown-artifactKind references are flagged.
+ *
+ *   4. **Cross-ABox validation**: artifact kinds referencing runtime
+ *      states or semantic types must resolve through the authoritative
+ *      runtime-states and semantics ABoxes.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -50,7 +45,8 @@ const ORIGINAL = {
 
 function writeWorkspace(opts: {
   artifactKindsAbox: object | null;
-  domainSemantics?: object;
+  runtimeStatesAbox?: object;
+  semanticsAbox?: object;
   graphOps: Record<string, unknown>;
 }): void {
   const repoRoot = workdir;
@@ -62,13 +58,22 @@ function writeWorkspace(opts: {
   );
   const configDir = join(repoRoot, 'configs', CONFIG_NAME);
   mkdirSync(configDir, { recursive: true });
-  if (opts.domainSemantics !== undefined) {
-    writeFileSync(join(configDir, 'domain-semantics.json'), JSON.stringify(opts.domainSemantics));
+  const aboxDir = join(configDir, 'ontology');
+  if (
+    opts.artifactKindsAbox !== null ||
+    opts.runtimeStatesAbox !== undefined ||
+    opts.semanticsAbox !== undefined
+  ) {
+    mkdirSync(aboxDir, { recursive: true });
   }
   if (opts.artifactKindsAbox !== null) {
-    const aboxDir = join(configDir, 'ontology');
-    mkdirSync(aboxDir, { recursive: true });
     writeFileSync(join(aboxDir, 'artifact-kinds.json'), JSON.stringify(opts.artifactKindsAbox));
+  }
+  if (opts.runtimeStatesAbox !== undefined) {
+    writeFileSync(join(aboxDir, 'runtime-states.json'), JSON.stringify(opts.runtimeStatesAbox));
+  }
+  if (opts.semanticsAbox !== undefined) {
+    writeFileSync(join(aboxDir, 'semantics.json'), JSON.stringify(opts.semanticsAbox));
   }
   const graphPath = join(baseDir, 'operation-dependency-graph.json');
   writeFileSync(graphPath, JSON.stringify({ operations: opts.graphOps }));
@@ -117,38 +122,8 @@ afterEach(() => {
 });
 
 describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain artifact sub-trees', () => {
-  it('overrides domain-semantics.json artifactKinds with the ABox values when both are present (promote)', async () => {
+  it('populates graph.domain artifact sub-trees from the ABox in a multi-kind fixture', async () => {
     writeWorkspace({
-      domainSemantics: {
-        version: 1,
-        runtimeStates: {
-          ProcessDefinitionDeployed: { producedBy: [] },
-          ProcessDefinitionIdDeployed: { producedBy: [] },
-          FormIdDeployed: { producedBy: [] },
-        },
-        semanticTypes: {
-          ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' },
-          bpmnProcessKey: { witnesses: 'ProcessDefinitionIdDeployed' },
-          formKey: { witnesses: 'FormIdDeployed' },
-        },
-        // Legacy says only bpmnProcess. ABox will add `form`.
-        artifactKinds: {
-          bpmnProcess: {
-            producesStates: ['ProcessDefinitionDeployed'],
-            producesSemantics: ['ProcessDefinitionKey'],
-            identifierType: 'ProcessDefinitionId',
-            deploymentSlices: ['processDefinition'],
-          },
-        },
-        semanticTypeToArtifactKind: { ProcessDefinitionKey: 'bpmnProcess' },
-        operationArtifactRules: {
-          createDeployment: {
-            composable: false,
-            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
-          },
-        },
-        artifactFileKinds: { '.bpmn': ['bpmnProcess'] },
-      },
       artifactKindsAbox: {
         version: 1,
         kinds: [minimalKind('bpmnProcess', 'ProcessDefinitionId'), minimalKind('form', 'FormId')],
@@ -174,13 +149,12 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
       graphOps: deployOp(),
     });
     const graph = await loadGraph(baseDir);
-    // ABox supersedes — `form` is now part of artifactKinds, composable is true.
     expect(Object.keys(graph.domain?.artifactKinds ?? {})).toEqual(['bpmnProcess', 'form']);
     expect(graph.domain?.operationArtifactRules?.createDeployment?.composable).toBe(true);
     expect(graph.domain?.artifactFileKinds?.['.form']).toEqual(['form']);
   });
 
-  it('populates graph.domain artifact sub-trees from the ABox even when no domain-semantics.json is shipped', async () => {
+  it('populates graph.domain artifact sub-trees from the ABox in a minimal single-kind fixture', async () => {
     writeWorkspace({
       artifactKindsAbox: {
         version: 1,
@@ -224,32 +198,6 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
       graphOps: deployOp(),
     });
     await expect(loadGraph(baseDir)).rejects.toThrow(/artifact-kinds ABox drift detected/);
-  });
-
-  it('preserves legacy domain-semantics.json artifact sub-trees when no ABox is shipped', async () => {
-    writeWorkspace({
-      artifactKindsAbox: null,
-      domainSemantics: {
-        version: 1,
-        runtimeStates: { LegacyDeployed: { producedBy: [] } },
-        semanticTypes: { LegacyKey: { witnesses: 'LegacyDeployed' } },
-        artifactKinds: {
-          legacyKind: {
-            producesStates: ['LegacyDeployed'],
-            producesSemantics: ['LegacyKey'],
-            identifierType: 'LegacyId',
-            deploymentSlices: ['legacy'],
-          },
-        },
-        semanticTypeToArtifactKind: { LegacyKey: 'legacyKind' },
-        operationArtifactRules: {},
-        artifactFileKinds: { '.legacy': ['legacyKind'] },
-      },
-      graphOps: deployOp(),
-    });
-    const graph = await loadGraph(baseDir);
-    expect(graph.domain?.artifactKinds?.legacyKind?.identifierType).toBe('LegacyId');
-    expect(graph.domain?.semanticTypeToArtifactKind?.LegacyKey).toBe('legacyKind');
   });
 
   it('warns on dead artifact kinds (sense-2 abox-vs-graph)', async () => {
@@ -400,12 +348,16 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     warn.mockRestore();
   });
 
-  it('hard-errors when the ABox introduces a `producesStates` value not declared in domain-semantics.json runtimeStates / capabilities (pre-overlay validation sees the merged authoritative view)', async () => {
+  it('hard-errors when the ABox introduces a `producesStates` value not declared in the runtime-state domain', async () => {
     writeWorkspace({
-      domainSemantics: {
+      runtimeStatesAbox: {
         version: 1,
-        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
-        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+        states: [{ name: 'ProcessDefinitionDeployed', producedBy: ['createDeployment'] }],
+        operationRequirements: [],
+      },
+      semanticsAbox: {
+        version: 1,
+        semanticTypes: [{ name: 'ProcessDefinitionKey', witnesses: 'ProcessDefinitionDeployed' }],
       },
       artifactKindsAbox: {
         version: 1,
@@ -440,10 +392,14 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     // via getEffectiveProducesStates(); kind-level-only validation
     // would let an undeclared rule-level state slip through.
     writeWorkspace({
-      domainSemantics: {
+      runtimeStatesAbox: {
         version: 1,
-        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
-        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+        states: [{ name: 'ProcessDefinitionDeployed', producedBy: ['createDeployment'] }],
+        operationRequirements: [],
+      },
+      semanticsAbox: {
+        version: 1,
+        semanticTypes: [{ name: 'ProcessDefinitionKey', witnesses: 'ProcessDefinitionDeployed' }],
       },
       artifactKindsAbox: {
         version: 1,
@@ -483,10 +439,14 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
 
   it('hard-errors when an ABox rule-level `producesSemantics` override references a semantic type with no semanticTypes.witnesses declaration', async () => {
     writeWorkspace({
-      domainSemantics: {
+      runtimeStatesAbox: {
         version: 1,
-        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
-        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+        states: [{ name: 'ProcessDefinitionDeployed', producedBy: ['createDeployment'] }],
+        operationRequirements: [],
+      },
+      semanticsAbox: {
+        version: 1,
+        semanticTypes: [{ name: 'ProcessDefinitionKey', witnesses: 'ProcessDefinitionDeployed' }],
       },
       artifactKindsAbox: {
         version: 1,
@@ -521,53 +481,5 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     await expect(loadGraph(baseDir)).rejects.toThrow(
       /operationArtifactRules\.createDeployment\.rules\['bpmn'\]\.producesSemantics references "UndeclaredKey"/,
     );
-  });
-
-  it('does not pre-validate the legacy `domain-semantics.json` artifact sub-trees when an ABox is shipped (ABox is truly authoritative)', async () => {
-    // Without the pre-overlay strip, a stale legacy `artifactKinds`
-    // (e.g. referencing a state the legacy sidecar no longer declares)
-    // would fail load even though the ABox already supersedes it.
-    writeWorkspace({
-      domainSemantics: {
-        version: 1,
-        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
-        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
-        // Stale legacy entry — references a state NOT declared above.
-        artifactKinds: {
-          staleKind: {
-            producesStates: ['LegacyUndeclaredState'],
-            producesSemantics: ['LegacyUndeclaredKey'],
-            identifierType: 'StaleId',
-            deploymentSlices: ['stale'],
-          },
-        },
-      },
-      artifactKindsAbox: {
-        version: 1,
-        kinds: [
-          {
-            name: 'bpmnProcess',
-            identifierType: 'ProcessDefinitionId',
-            producesStates: ['ProcessDefinitionDeployed'],
-            producesSemantics: ['ProcessDefinitionKey'],
-            deploymentSlices: ['processDefinition'],
-            description: 'fixture',
-          },
-        ],
-        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
-        operationRules: [
-          {
-            operationId: 'createDeployment',
-            composable: false,
-            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
-          },
-        ],
-        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
-      },
-      graphOps: deployOp(),
-    });
-    const graph = await loadGraph(baseDir);
-    // ABox-derived bpmnProcess is the only kind; staleKind was discarded by overlay.
-    expect(Object.keys(graph.domain?.artifactKinds ?? {})).toEqual(['bpmnProcess']);
   });
 });

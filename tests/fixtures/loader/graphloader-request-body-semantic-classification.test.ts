@@ -6,9 +6,9 @@
  * must fit exactly one of the five classifications defined in
  * `bindSemanticInput.ts`:
  *
- *   - `modelDerived`             (domain-semantics: kind: 'modelDerived')
- *   - `clientMintedAttribute`    (domain-semantics: kind: 'attribute' + clientMinted)
- *   - `serverEmergent`           (domain-semantics: kind: 'serverEmergent')
+ *   - `modelDerived`             (semantics ABox: kind: 'modelDerived')
+ *   - `clientMintedAttribute`    (semantics ABox: kind: 'attribute' + clientMinted)
+ *   - `serverEmergent`           (semantics ABox: kind: 'serverEmergent')
  *   - `producerBound`            (graph.producersByType[T])
  *   - `clientMintedIdentifier`   (graph.establishersByType[T])
  *   - `externalBoundary`         (graph.externalEntityIdentifiers)
@@ -33,7 +33,7 @@ import { loadGraph } from '../../../path-analyser/src/graphLoader.ts';
 
 interface Layout {
   graph: Record<string, unknown>;
-  domain: Record<string, unknown>;
+  semanticsAbox: Record<string, unknown>;
 }
 
 let workdir: string;
@@ -61,7 +61,9 @@ afterEach(() => {
 
 function writeLayout(layout: Layout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
-  writeFileSync(join(configDir, 'domain-semantics.json'), JSON.stringify(layout.domain));
+  const aboxDir = join(configDir, 'ontology');
+  mkdirSync(aboxDir, { recursive: true });
+  writeFileSync(join(aboxDir, 'semantics.json'), JSON.stringify(layout.semanticsAbox));
 }
 
 describe('graphLoader: requestBodySemantics classification fail-fast (#162 PR 5)', () => {
@@ -81,7 +83,7 @@ describe('graphLoader: requestBodySemantics classification fail-fast (#162 PR 5)
       },
       // No semanticTypes declaration for FooKey, no producer, no establisher,
       // no external-entity identifier — the classifier returns 'unclassified'.
-      domain: {},
+      semanticsAbox: { version: 1, semanticTypes: [{ name: 'KnownType' }] },
     });
 
     await expect(loadGraph(baseDir)).rejects.toThrow(/requestBodySemanticUnclassified/);
@@ -115,7 +117,7 @@ describe('graphLoader: requestBodySemantics classification fail-fast (#162 PR 5)
           },
         ],
       },
-      domain: {},
+      semanticsAbox: { version: 1, semanticTypes: [{ name: 'KnownType' }] },
     });
 
     let captured: unknown;
@@ -166,10 +168,9 @@ describe('graphLoader: requestBodySemantics classification fail-fast (#162 PR 5)
           },
         ],
       },
-      domain: {
-        semanticTypes: {
-          WidgetIncidentKey: { kind: 'serverEmergent' },
-        },
+      semanticsAbox: {
+        version: 1,
+        semanticTypes: [{ name: 'WidgetIncidentKey', kind: 'serverEmergent' }],
       },
     });
 

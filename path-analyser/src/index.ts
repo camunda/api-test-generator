@@ -1206,7 +1206,7 @@ function buildRequestBodyFromCanonical(
   }
   // Auto-derive semantic-type bindings from requestBodySemantics for consumer fields whose
   // semantic type has a graph-level response producer. This avoids the need to manually
-  // duplicate x-semantic-type information in domain-semantics.json valueBindings entries.
+  // duplicate x-semantic-type information in ontology-derived valueBindings entries.
   // Filter paths are excluded — those are deferred to issue #168 (setter-chain reuse).
   const semanticFallback: Record<string, string> = {};
   for (const entry of graph.operations[opId]?.requestBodySemantics ?? []) {

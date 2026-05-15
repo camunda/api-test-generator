@@ -1,14 +1,14 @@
 /**
- * Loader fixtures for graphLoader sidecar handling — issue #56.
+ * Loader fixtures for runtime-states ABox handling — issue #56.
  *
  * Each fixture builds a tiny on-disk layout mimicking the path-analyser
  * baseDir contract (a `generated/<config>/graph/` directory at the repo
- * root holding the dependency graph, plus a `domain-semantics.json`
- * inside the active config directory at the repo root — see #128), then
- * calls `loadGraph()` and asserts on the returned `OperationGraph`.
+ * root holding the dependency graph, plus ontology ABoxes inside the
+ * active config directory at the repo root — see #128), then calls
+ * `loadGraph()` and asserts on the returned `OperationGraph`.
  *
- * The first fixture pins the regression for #56: a sidecar-declared
- * `domain.operationRequirements[opId].produces` must surface in
+ * The fixtures pin the regression for #56: an ABox-declared
+ * `operationRequirements[opId].produces` must surface in
  * `producersByType` and `operations[opId].produces`, otherwise
  * semantic BFS cannot use it.
  */
@@ -18,9 +18,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadGraph } from '../../../path-analyser/src/graphLoader.ts';
 
-interface SidecarLayout {
+interface Layout {
   graph: Record<string, unknown>;
-  domain: Record<string, unknown>;
+  runtimeStatesAbox?: Record<string, unknown>;
 }
 
 let workdir: string;
@@ -31,15 +31,11 @@ let configDir: string;
 beforeEach(() => {
   workdir = mkdtempSync(join(tmpdir(), 'graphloader-fixture-'));
   baseDir = join(workdir, 'path-analyser');
-  // Per-config layout (#128 PR 2): the dependency graph now lives
-  // under generated/<config>/graph/ at the repo root.
   graphDir = join(workdir, 'generated', 'camunda-oca', 'graph');
   configDir = join(workdir, 'configs', 'camunda-oca');
   mkdirSync(baseDir, { recursive: true });
   mkdirSync(graphDir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
-  // configResolver requires a configs.json at the repo root with the
-  // active config declared in its allowlist (see #128).
   writeFileSync(
     join(workdir, 'configs.json'),
     JSON.stringify({ default: 'camunda-oca', configs: { 'camunda-oca': {} } }),
@@ -50,16 +46,17 @@ afterEach(() => {
   rmSync(workdir, { recursive: true, force: true });
 });
 
-function writeLayout(layout: SidecarLayout): void {
+function writeLayout(layout: Layout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
-  writeFileSync(join(configDir, 'domain-semantics.json'), JSON.stringify(layout.domain));
+  if (layout.runtimeStatesAbox !== undefined) {
+    const aboxDir = join(configDir, 'ontology');
+    mkdirSync(aboxDir, { recursive: true });
+    writeFileSync(join(aboxDir, 'runtime-states.json'), JSON.stringify(layout.runtimeStatesAbox));
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Fixture #56 — sidecar `produces` must surface in BFS-visible maps.
-// ---------------------------------------------------------------------------
-describe('graphLoader: sidecar-declared produces (#56)', () => {
-  it('registers sidecar produces in producersByType so semantic BFS can find them', async () => {
+describe('graphLoader: runtime-states ABox declared produces (#56)', () => {
+  it('registers ABox produces in producersByType so semantic BFS can find them', async () => {
     writeLayout({
       graph: {
         operations: [
@@ -75,38 +72,44 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
           },
         ],
       },
-      domain: {
-        operationRequirements: {
-          producerOp: {
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'Foo' }],
+        operationRequirements: [
+          {
+            operationId: 'producerOp',
             produces: ['Foo'],
           },
-        },
+        ],
       },
     });
     const g = await loadGraph(baseDir);
-    expect(g.producersByType.Foo, 'sidecar producer must be registered for semantic BFS').toEqual([
+    expect(g.producersByType.Foo, 'ABox producer must be registered for semantic BFS').toEqual([
       'producerOp',
     ]);
   });
 
-  it("registers sidecar produces on the operation's own produces list", async () => {
+  it("registers ABox produces on the operation's own produces list", async () => {
     writeLayout({
       graph: {
         operations: [{ operationId: 'producerOp', method: 'POST', path: '/producer' }],
       },
-      domain: {
-        operationRequirements: {
-          producerOp: {
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'Foo' }],
+        operationRequirements: [
+          {
+            operationId: 'producerOp',
             produces: ['Foo'],
           },
-        },
+        ],
       },
     });
     const g = await loadGraph(baseDir);
     expect(g.operations.producerOp?.produces).toContain('Foo');
   });
 
-  it('preserves an existing extractor-derived producer when the sidecar declares the same semantic', async () => {
+  it('preserves an existing extractor-derived producer when the ABox declares the same semantic', async () => {
     writeLayout({
       graph: {
         operations: [
@@ -118,24 +121,27 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
               '200': [{ semanticType: 'Foo', fieldPath: 'foo', provider: true }],
             },
           },
-          { operationId: 'sidecarProducer', method: 'POST', path: '/sidecar' },
+          { operationId: 'aboxProducer', method: 'POST', path: '/abox' },
         ],
       },
-      domain: {
-        operationRequirements: {
-          sidecarProducer: {
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'Foo' }],
+        operationRequirements: [
+          {
+            operationId: 'aboxProducer',
             produces: ['Foo'],
           },
-        },
+        ],
       },
     });
     const g = await loadGraph(baseDir);
     expect(g.producersByType.Foo).toEqual(
-      expect.arrayContaining(['extractorProducer', 'sidecarProducer']),
+      expect.arrayContaining(['extractorProducer', 'aboxProducer']),
     );
   });
 
-  it('does not duplicate a producer if the sidecar redundantly declares an extractor-derived semantic', async () => {
+  it('does not duplicate a producer if the ABox redundantly declares an extractor-derived semantic', async () => {
     writeLayout({
       graph: {
         operations: [
@@ -149,58 +155,30 @@ describe('graphLoader: sidecar-declared produces (#56)', () => {
           },
         ],
       },
-      domain: {
-        operationRequirements: {
-          opOne: {
+      runtimeStatesAbox: {
+        version: 1,
+        states: [{ name: 'Foo' }],
+        operationRequirements: [
+          {
+            operationId: 'opOne',
             produces: ['Foo'],
           },
-        },
+        ],
       },
     });
     const g = await loadGraph(baseDir);
     expect(g.producersByType.Foo).toEqual(['opOne']);
     expect(g.operations.opOne?.produces.filter((s) => s === 'Foo').length).toBe(1);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Class-scoped guard: load-time "fail loud" invariant for an unreadable
-// or malformed domain-semantics.json. A missing sidecar (ENOENT) must
-// continue to disable domain analysis silently, but anything else — bad
-// JSON, permissions error, validator failure — must surface as a thrown
-// DomainSemanticsValidationFailure rather than be swallowed.
-// ---------------------------------------------------------------------------
-describe('graphLoader: domain-semantics.json fail-loud invariant', () => {
-  it('does not throw when domain-semantics.json is absent (ENOENT is tolerated)', async () => {
-    writeFileSync(
-      join(graphDir, 'operation-dependency-graph.json'),
-      JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
-    );
-    // intentionally do NOT write domain-semantics.json
-    await expect(loadGraph(baseDir)).resolves.toBeDefined();
-  });
-
-  it('throws DomainSemanticsValidationFailure when domain-semantics.json is malformed JSON', async () => {
-    writeFileSync(
-      join(graphDir, 'operation-dependency-graph.json'),
-      JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
-    );
-    writeFileSync(join(configDir, 'domain-semantics.json'), '{ this is not valid json');
-    await expect(loadGraph(baseDir)).rejects.toThrow(/domain-semantics\.json is not valid JSON/);
-  });
-
-  it('throws DomainSemanticsValidationFailure when domain-semantics.json fails validation', async () => {
-    writeFileSync(
-      join(graphDir, 'operation-dependency-graph.json'),
-      JSON.stringify({ operations: [{ operationId: 'op', method: 'GET', path: '/x' }] }),
-    );
-    writeFileSync(
-      join(configDir, 'domain-semantics.json'),
-      JSON.stringify({
-        runtimeStates: { Known: {} },
-        artifactKinds: { kindA: { producesStates: ['UndeclaredState'] } },
-      }),
-    );
-    await expect(loadGraph(baseDir)).rejects.toThrow(/artifactKindStateDeclared/);
+  it('leaves domain analysis disabled when no ontology ABox is shipped', async () => {
+    writeLayout({
+      graph: {
+        operations: [{ operationId: 'op', method: 'GET', path: '/x' }],
+      },
+    });
+    const graph = await loadGraph(baseDir);
+    expect(graph.domain).toBeUndefined();
+    expect(graph.producersByState).toBeUndefined();
   });
 });

@@ -2914,10 +2914,10 @@ describeForThisConfig(
 
     const ATTRIBUTE_SEMANTICS = loadAttributeClientMintedSemantics();
 
-    it('domain-semantics declares at least one clientMintedAttribute semantic (PR 2 must not regress to zero)', () => {
+    it('the semantics ABox declares at least one clientMintedAttribute semantic (PR 2 must not regress to zero)', () => {
       expect(
         ATTRIBUTE_SEMANTICS.length,
-        `expected at least one kind:'attribute' + clientMinted:true semantic in configs/${CONFIG_NAME}/domain-semantics.json`,
+        `expected at least one kind:'attribute' + clientMinted:true semantic in configs/${CONFIG_NAME}/ontology/semantics.json`,
       ).toBeGreaterThan(0);
     });
 
@@ -4516,7 +4516,7 @@ describeForThisConfig(
     // Lift 5 / #212: the artifact-kinds ABox is now the authoritative
     // source for the four artifact-related sub-trees (artifactKinds,
     // semanticTypeToArtifactKind, operationArtifactRules,
-    // artifactFileKinds) previously carried in domain-semantics.json.
+    // artifactFileKinds).
     //
     // Unlike Lifts 3/4, the data was never sourced from upstream
     // OpenAPI annotations — so there is no `spec-vs-abox` (sense-1)
@@ -4660,7 +4660,7 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
-    it('graph.domain.artifactKinds matches the ABox `kinds[]` (planner contract — ABox supersedes domain-semantics.json)', async () => {
+    it('graph.domain.artifactKinds matches the ABox `kinds[]` (planner contract)', async () => {
       const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
       const abox = loadArtifactKindsAbox(REPO_ROOT);
@@ -4772,8 +4772,7 @@ describeForThisConfig(
   () => {
     // Lift 6 / #214: the runtime-states ABox is now the authoritative
     // source for the two runtime-related sub-trees (runtimeStates and
-    // operationRequirements) previously carried in
-    // domain-semantics.json. Same coverage strategy as Lift 5.
+    // operationRequirements). Same coverage strategy as Lift 5.
 
     it('loads the runtime-states ABox via the generic loader (proves the load path)', async () => {
       const { loadRuntimeStatesAbox } = await import('../../path-analyser/src/ontology/loader.js');
@@ -4849,10 +4848,8 @@ describeForThisConfig(
       // names. Without this, states only referenced by a witness coupling
       // (e.g. `ProcessDefinitionDeployed` ←
       // `ProcessDefinitionKey.witnesses`) would be flagged as dead even
-      // though they are live. We read the semantics ABox first; the
-      // legacy `domain-semantics.json` block below remains as a fallback
-      // for configs that haven't migrated yet (or for the
-      // pre-Lift-8 transitional state).
+      // though they are live. We read the semantics ABox directly because
+      // the runtime ontology is now fully ABox-authored.
       const { loadSemanticsAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const semantics = loadSemanticsAbox(REPO_ROOT);
       if (semantics !== null) {
@@ -4866,21 +4863,6 @@ describeForThisConfig(
           if (typeof i.validityState === 'string') referenced.add(i.validityState);
         }
       }
-      interface DomainSemanticsLite {
-        semanticTypes?: Record<string, { witnesses?: string }>;
-        capabilities?: Record<string, { witnesses?: string }>;
-      }
-      const domainPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'domain-semantics.json');
-      if (existsSync(domainPath)) {
-        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-        const ds = JSON.parse(readFileSync(domainPath, 'utf8')) as DomainSemanticsLite;
-        for (const t of Object.values(ds.semanticTypes ?? {})) {
-          if (typeof t.witnesses === 'string') referenced.add(t.witnesses);
-        }
-        for (const c of Object.values(ds.capabilities ?? {})) {
-          if (typeof c.witnesses === 'string') referenced.add(c.witnesses);
-        }
-      }
       const dead = abox.states.filter((s) => !referenced.has(s.name)).map((s) => s.name);
       expect(
         dead,
@@ -4888,7 +4870,7 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
-    it('graph.domain.runtimeStates matches the record-shaped view derived from the ABox (planner contract - ABox supersedes domain-semantics.json)', async () => {
+    it('graph.domain.runtimeStates matches the record-shaped view derived from the ABox (planner contract)', async () => {
       const { deriveRuntimeStatesViews } = await import(
         '../../path-analyser/src/ontology/loader.js'
       );
@@ -4959,8 +4941,7 @@ describeForThisConfig(
 describeForThisConfig('bundled-spec invariants: semantics ABox cross-references (#216)', () => {
   // Lift 7 / #216: the semantics ABox is now the authoritative
   // source for the three value-source sub-trees (semanticTypes,
-  // capabilities, identifiers) previously carried in
-  // domain-semantics.json. Same coverage strategy as Lifts 5 and 6.
+  // capabilities, identifiers). Same coverage strategy as Lifts 5 and 6.
 
   it('loads the semantics ABox via the generic loader (proves the load path)', async () => {
     const { loadSemanticsAbox } = await import('../../path-analyser/src/ontology/loader.js');
@@ -5057,7 +5038,7 @@ describeForThisConfig('bundled-spec invariants: semantics ABox cross-references 
     ).toEqual([]);
   });
 
-  it('graph.domain.semanticTypes / capabilities / identifiers match the record-shaped views derived from the ABox (planner contract - ABox supersedes domain-semantics.json)', async () => {
+  it('graph.domain.semanticTypes / capabilities / identifiers match the record-shaped views derived from the ABox (planner contract)', async () => {
     const { deriveSemanticsViews } = await import('../../path-analyser/src/ontology/loader.js');
     const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
     const expectedViews = deriveSemanticsViews(REPO_ROOT);
@@ -5129,7 +5110,7 @@ describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
       expect(abox.seeds.length).toBeGreaterThan(0);
     });
 
-    it('graph.domain.globalContextSeeds matches the array-shaped view derived from the ABox (planner contract — ABox supersedes domain-semantics.json)', async () => {
+    it('graph.domain.globalContextSeeds matches the array-shaped view derived from the ABox (planner contract)', async () => {
       const { deriveGlobalContextSeedsViews } = await import(
         '../../path-analyser/src/ontology/loader.js'
       );

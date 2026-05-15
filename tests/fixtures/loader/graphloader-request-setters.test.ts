@@ -46,7 +46,7 @@ afterEach(() => {
 
 interface Layout {
   graph: Record<string, unknown>;
-  domain?: Record<string, unknown>;
+  semanticsAbox?: Record<string, unknown>;
 }
 
 // Default classifications for the synthetic semantics these fixtures
@@ -57,22 +57,25 @@ interface Layout {
 // scoped to the request-setter index, not to the classification chain).
 //
 // Any test exercising the unclassified-detection path itself must
-// override `domain` explicitly.
-const DEFAULT_DOMAIN = {
-  semanticTypes: {
-    Tag: { kind: 'attribute', clientMinted: true },
-    BusinessId: { kind: 'attribute', clientMinted: true },
-    NoPath: { kind: 'attribute', clientMinted: true },
-    ProcessInstanceKey: { kind: 'serverEmergent' },
-    ProcessDefinitionId: { kind: 'serverEmergent' },
-  },
+// override `semanticsAbox` explicitly.
+const DEFAULT_SEMANTICS_ABOX = {
+  version: 1,
+  semanticTypes: [
+    { name: 'Tag', kind: 'attribute', clientMinted: true },
+    { name: 'BusinessId', kind: 'attribute', clientMinted: true },
+    { name: 'NoPath', kind: 'attribute', clientMinted: true },
+    { name: 'ProcessInstanceKey', kind: 'serverEmergent' },
+    { name: 'ProcessDefinitionId', kind: 'serverEmergent' },
+  ],
 };
 
 function writeLayout(layout: Layout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
+  const aboxDir = join(configDir, 'ontology');
+  mkdirSync(aboxDir, { recursive: true });
   writeFileSync(
-    join(configDir, 'domain-semantics.json'),
-    JSON.stringify(layout.domain ?? DEFAULT_DOMAIN),
+    join(aboxDir, 'semantics.json'),
+    JSON.stringify(layout.semanticsAbox ?? DEFAULT_SEMANTICS_ABOX),
   );
 }
 

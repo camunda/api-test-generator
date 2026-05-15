@@ -11,7 +11,7 @@ import type {
 
 // The tenant-related tests below all derive the emitter's universal-seed
 // behaviour from this fixture, mirroring the entry shipped in
-// path-analyser/domain-semantics.json so the assertions track production
+// the semantics ABox so the assertions track production
 // configuration shape.
 const TENANT_SEED: GlobalContextSeed = {
   binding: 'tenantIdVar',
