@@ -16,7 +16,6 @@ import {
   loadEdgeEstablishers,
   loadEntityKindsAbox,
   loadExternalEntityIdentifiers,
-  loadGlobalContextSeedsAbox,
   loadRuntimeStatesAbox,
   loadSemanticsAbox,
 } from './ontology/loader.js';

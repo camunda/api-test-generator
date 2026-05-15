@@ -159,9 +159,7 @@ describe('Lift 7 (#216): semantics ABox is authoritative for graph.domain semant
       semanticsAbox: {
         version: 1,
         semanticTypes: [{ name: 'T' }],
-        capabilities: [
-          { name: 'Cap', parameter: 'p', producedBy: ['nonexistentOp'] },
-        ],
+        capabilities: [{ name: 'Cap', parameter: 'p', producedBy: ['nonexistentOp'] }],
       },
       graphOps: ops(),
     });
