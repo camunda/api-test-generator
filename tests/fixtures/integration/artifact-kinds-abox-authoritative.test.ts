@@ -397,10 +397,6 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
   });
 
   it('hard-errors when the ABox introduces a `producesStates` value not declared in domain-semantics.json runtimeStates / capabilities (post-overlay re-validation)', async () => {
-    // Pre-overlay validation only sees the legacy sidecar's
-    // artifactKinds. Without re-validating after the ABox overlay, an
-    // ABox that introduces an undeclared state would slip through and
-    // the planner would silently break at the BFS stage.
     writeWorkspace({
       domainSemantics: {
         version: 1,
@@ -435,5 +431,141 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     await expect(loadGraph(baseDir)).rejects.toThrow(
       /artifact-kinds ABox introduced cross-reference violation/,
     );
+  });
+
+  it('hard-errors when an ABox rule-level `producesStates` override references a state not declared in runtimeStates / capabilities (post-overlay re-validation, rule-level)', async () => {
+    // Rule-level overrides on operationArtifactRules feed the planner
+    // via getEffectiveProducesStates(); kind-level-only validation
+    // would let an undeclared rule-level state slip through.
+    writeWorkspace({
+      domainSemantics: {
+        version: 1,
+        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
+        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+      },
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [
+          {
+            name: 'bpmnProcess',
+            identifierType: 'ProcessDefinitionId',
+            producesStates: ['ProcessDefinitionDeployed'],
+            producesSemantics: ['ProcessDefinitionKey'],
+            deploymentSlices: ['processDefinition'],
+            description: 'fixture',
+          },
+        ],
+        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [
+              {
+                id: 'bpmn',
+                artifactKind: 'bpmnProcess',
+                // Rule-level override pointing at an undeclared state.
+                producesStates: ['UndeclaredRuleLevelState'],
+              },
+            ],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    await expect(loadGraph(baseDir)).rejects.toThrow(
+      /operationArtifactRules\.createDeployment\.rules\['bpmn'\]\.producesStates references "UndeclaredRuleLevelState"/,
+    );
+  });
+
+  it('hard-errors when an ABox rule-level `producesSemantics` override references a semantic type with no semanticTypes.witnesses declaration', async () => {
+    writeWorkspace({
+      domainSemantics: {
+        version: 1,
+        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
+        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+      },
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [
+          {
+            name: 'bpmnProcess',
+            identifierType: 'ProcessDefinitionId',
+            producesStates: ['ProcessDefinitionDeployed'],
+            producesSemantics: ['ProcessDefinitionKey'],
+            deploymentSlices: ['processDefinition'],
+            description: 'fixture',
+          },
+        ],
+        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [
+              {
+                id: 'bpmn',
+                artifactKind: 'bpmnProcess',
+                producesSemantics: ['UndeclaredKey'],
+              },
+            ],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    await expect(loadGraph(baseDir)).rejects.toThrow(
+      /operationArtifactRules\.createDeployment\.rules\['bpmn'\]\.producesSemantics references "UndeclaredKey"/,
+    );
+  });
+
+  it('does not pre-validate the legacy `domain-semantics.json` artifact sub-trees when an ABox is shipped (ABox is truly authoritative)', async () => {
+    // Without the pre-overlay strip, a stale legacy `artifactKinds`
+    // (e.g. referencing a state the legacy sidecar no longer declares)
+    // would fail load even though the ABox already supersedes it.
+    writeWorkspace({
+      domainSemantics: {
+        version: 1,
+        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
+        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+        // Stale legacy entry — references a state NOT declared above.
+        artifactKinds: {
+          staleKind: {
+            producesStates: ['LegacyUndeclaredState'],
+            producesSemantics: ['LegacyUndeclaredKey'],
+            identifierType: 'StaleId',
+            deploymentSlices: ['stale'],
+          },
+        },
+      },
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [
+          {
+            name: 'bpmnProcess',
+            identifierType: 'ProcessDefinitionId',
+            producesStates: ['ProcessDefinitionDeployed'],
+            producesSemantics: ['ProcessDefinitionKey'],
+            deploymentSlices: ['processDefinition'],
+            description: 'fixture',
+          },
+        ],
+        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    const graph = await loadGraph(baseDir);
+    // ABox-derived bpmnProcess is the only kind; staleKind was discarded by overlay.
+    expect(Object.keys(graph.domain?.artifactKinds ?? {})).toEqual(['bpmnProcess']);
   });
 });

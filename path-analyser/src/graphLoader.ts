@@ -329,7 +329,25 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const domainRaw = await readFile(domainPath, 'utf8');
     // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
     const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;
-    const issues = validateDomainSemantics(parsedDomain);
+    // Lift 5 / #212: when an artifact-kinds ABox is present it is the
+    // authoritative source for the four artifact sub-trees; the legacy
+    // sidecar's copy is about to be replaced by the post-overlay step
+    // below. Strip those keys before pre-overlay validation so a stale
+    // legacy entry (e.g. a `producesStates` referencing a state that
+    // the legacy sidecar no longer declares) cannot fail load when the
+    // ABox already supersedes it. The post-overlay re-validation
+    // covers the ABox values via the same Zod-driven validator.
+    const aboxPresent = loadArtifactKindsAbox(repoRoot) !== null;
+    let validationTarget: DomainSemantics = parsedDomain;
+    if (aboxPresent) {
+      const stripped: DomainSemantics = { ...parsedDomain };
+      delete stripped.artifactKinds;
+      delete stripped.semanticTypeToArtifactKind;
+      delete stripped.operationArtifactRules;
+      delete stripped.artifactFileKinds;
+      validationTarget = stripped;
+    }
+    const issues = validateDomainSemantics(validationTarget);
     if (issues.length > 0) {
       const detail = issues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
       throw new DomainSemanticsValidationFailure(
