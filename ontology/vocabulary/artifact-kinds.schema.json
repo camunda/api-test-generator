@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://camunda.github.io/api-test-generator/ns/v1/artifact-kinds.schema.json",
   "title": "Artifact-kinds ABox (api-test-generator ontology, v1)",
-  "description": "TBox JSON Schema for an ABox file describing the artifact kinds an API can deploy plus the rules that classify operations and uploaded files into those kinds. Each entry asserts: an artifact kind exists with a stable identifier-type and deployment-slice list; a semantic-type maps to a single artifact kind; an operation deploys one or more artifact kinds (optionally composable); a file extension classifies as one or more candidate kinds. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/artifact-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (operationIds existing, semantic-types being live, kinds being referenced by some op) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.",
+  "description": "TBox JSON Schema for an ABox file describing the artifact kinds an API can deploy plus the rules that classify operations and uploaded files into those kinds. Each entry asserts: an artifact kind exists with a stable identifier-type and deployment-slice list; a semantic-type maps to a single artifact kind; an operation deploys one or more artifact kinds (optionally composable); a file extension classifies as one or more candidate kinds. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/artifact-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (operationIds existing, artifact kind names being internally consistent across rules / semanticTypeMap / fileExtensionMap, kinds being referenced by some entry) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them. Cross-references against `runtimeStates`/`semanticTypes` (sibling sub-trees in `domain-semantics.json` that the artifact-kinds ABox references via `producesStates`, `producibleStates`, and `producesSemantics`) are re-validated at load time by re-running `validateDomainSemantics` against the post-overlay `graph.domain` — see `graphLoader.ts`.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -149,9 +149,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "operationId",
-        "composable",
-        "rules"
+        "operationId"
       ],
       "properties": {
         "@type": {
@@ -165,14 +163,15 @@
         },
         "composable": {
           "type": "boolean",
-          "description": "When true, the planner may compose multiple `rules` into a single deployment request via set-cover (e.g. `createDeployment` accepts a multi-file payload)."
+          "description": "When true, the planner may compose multiple `rules` into a single deployment request via set-cover (e.g. `createDeployment` accepts a multi-file payload). Optional — mirrors the legacy `OperationArtifactRuleSpec.composable` contract; absence is treated as `false` by the planner."
         },
         "rules": {
           "type": "array",
           "minItems": 1,
           "items": {
             "$ref": "#/definitions/ArtifactRule"
-          }
+          },
+          "description": "Optional list of artifact rules for this operation. Mirrors the legacy `OperationArtifactRuleSpec.rules` contract — an entry with no `rules` is permitted so a future composable-only opcode can declare itself without listing concrete rules."
         }
       }
     },
@@ -180,19 +179,38 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "id",
         "artifactKind"
       ],
       "properties": {
         "id": {
           "type": "string",
           "minLength": 1,
-          "description": "Stable identifier for this rule within its operation (e.g. `bpmn`, `dmn`). Used by the scenario emitter to reference a specific rule."
+          "description": "Optional stable identifier for this rule within its operation (e.g. `bpmn`, `dmn`). Used by the scenario emitter to reference a specific rule. Mirrors the legacy `ArtifactRule.id` contract — when present it must be unique within the operation (checked by the loader)."
         },
         "artifactKind": {
           "type": "string",
           "minLength": 1,
           "description": "Name of the artifact kind this rule deploys. Must reference an entry in `kinds`."
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Optional priority hint for the planner: lower number = higher priority. Mirrors the legacy `ArtifactRule.priority` contract."
+        },
+        "producesSemantics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional explicit override of the semantic types this rule produces. When omitted, the planner derives the list from `kinds[artifactKind].producesSemantics` and `semanticTypeMap`. Mirrors the legacy `ArtifactRule.producesSemantics` contract."
+        },
+        "producesStates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional additional domain states this rule produces beyond the kind-level `producesStates`. Mirrors the legacy `ArtifactRule.producesStates` contract."
         }
       }
     },

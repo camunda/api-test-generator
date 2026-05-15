@@ -484,6 +484,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   {
     const artifactViews = deriveArtifactKindsViews(repoRoot);
     if (artifactViews !== null) {
+      const hadLegacyDomain = domain !== undefined;
       const baseDomain: DomainSemantics = domain ?? { version: 1 };
       domain = {
         ...baseDomain,
@@ -492,6 +493,30 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         operationArtifactRules: artifactViews.operationArtifactRules,
         artifactFileKinds: artifactViews.artifactFileKinds,
       };
+      // Re-run the cross-reference invariants from
+      // `validateDomainSemantics` against the post-overlay value, but
+      // only when a legacy `domain-semantics.json` sidecar was loaded.
+      // The pre-overlay validation only sees the legacy artifact
+      // sub-trees, so an ABox that introduces an undeclared
+      // `producesStates`/`producibleStates` (not in
+      // `runtimeStates`/`capabilities`) or a `producesSemantics` entry
+      // without a `semanticTypes.witnesses` declaration would
+      // otherwise slip through. When no sidecar is present the
+      // validator has no `runtimeStates`/`semanticTypes` to cross-check
+      // against — the ABox stands alone, and Lift 6/7 will move those
+      // declarations into their own ABoxes. Reuses the same Zod-driven
+      // validator and the same DomainSemanticsValidationFailure error
+      // type so the diagnostic surfaces with one well-known shape
+      // regardless of which source (legacy sidecar or ABox) tripped it.
+      if (hadLegacyDomain) {
+        const overlayIssues = validateDomainSemantics(domain);
+        if (overlayIssues.length > 0) {
+          const detail = overlayIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+          throw new DomainSemanticsValidationFailure(
+            `artifact-kinds ABox introduced cross-reference violation(s) when overlaid on domain-semantics.json:\n${detail}`,
+          );
+        }
+      }
     }
   }
 
@@ -551,9 +576,11 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // operations / artifact kinds; semantic-types mapped to nonexistent
   // kinds; file-extension entries pointing at nonexistent kinds; kinds
   // not referenced by any rule, semanticTypeMap entry, or
-  // fileExtensionMap entry (dead weight). The locality-loss
-  // replacement signal: surfaces drift when the upstream API adds a
-  // new artifact-flavoured op and the ABox isn't updated.
+  // fileExtensionMap entry (dead weight). Validates only entries that
+  // are present in the ABox — there is no reverse heuristic for
+  // discovering newly-added artifact-flavoured ops in the bundled
+  // graph that should have been added to the ABox; that direction is
+  // the open coverage gap a future iteration could close.
   {
     const drift = detectArtifactKindsDrift(operations, repoRoot);
     if (drift.length > 0) {
@@ -1061,10 +1088,10 @@ function detectArtifactKindsDrift(
         `[abox-vs-graph] operationRules entry '${rule.operationId}' references an opId that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
       );
     }
-    for (const r of rule.rules) {
+    for (const r of rule.rules ?? []) {
       if (!kindNames.has(r.artifactKind)) {
         drift.push(
-          `[abox-vs-graph] operationRules['${rule.operationId}'].rules['${r.id}'] references unknown artifactKind '${r.artifactKind}'`,
+          `[abox-vs-graph] operationRules['${rule.operationId}'].rules['${r.id ?? '<unnamed>'}'] references unknown artifactKind '${r.artifactKind}'`,
         );
       }
     }
@@ -1092,7 +1119,7 @@ function detectArtifactKindsDrift(
   // earlier API surface.
   const referencedKinds = new Set<string>();
   for (const rule of abox.operationRules) {
-    for (const r of rule.rules) referencedKinds.add(r.artifactKind);
+    for (const r of rule.rules ?? []) referencedKinds.add(r.artifactKind);
   }
   for (const m of abox.semanticTypeMap) referencedKinds.add(m.artifactKind);
   for (const m of abox.fileExtensionMap) {

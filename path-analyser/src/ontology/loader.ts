@@ -318,6 +318,20 @@ export function loadArtifactKindsAbox(repoRoot: string): ArtifactKindsAbox | nul
       `Artifact-kinds ABox at ${aboxPath} has duplicate operationRules entries for: ${dupeOps.join(', ')}`,
     );
   }
+  // Per-operation rule-id uniqueness — `id` is optional but when
+  // present it is used by the emitter to look up the chosen rule via
+  // `find(...)`, so a duplicate would silently mask one of the rules.
+  // Skip undefined ids (legacy rules need not name themselves).
+  for (const rule of parsed.operationRules) {
+    if (!rule.rules) continue;
+    const ids = rule.rules.map((r) => r.id).filter((id): id is string => typeof id === 'string');
+    const dupeRuleIds = duplicates(ids);
+    if (dupeRuleIds.length > 0) {
+      throw new Error(
+        `Artifact-kinds ABox at ${aboxPath} operationRules['${rule.operationId}'] has duplicate rule id(s): ${dupeRuleIds.join(', ')}`,
+      );
+    }
+  }
   const dupeExts = duplicates(parsed.fileExtensionMap.map((m) => m.extension));
   if (dupeExts.length > 0) {
     throw new Error(
@@ -353,7 +367,16 @@ export interface ArtifactKindsViews {
   semanticTypeToArtifactKind: Record<string, string>;
   operationArtifactRules: Record<
     string,
-    { composable?: boolean; rules?: { id?: string; artifactKind: string }[] }
+    {
+      composable?: boolean;
+      rules?: {
+        id?: string;
+        artifactKind: string;
+        priority?: number;
+        producesSemantics?: string[];
+        producesStates?: string[];
+      }[];
+    }
   >;
   artifactFileKinds: Record<string, string[]>;
 }
@@ -378,10 +401,23 @@ export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews |
   }
   const operationArtifactRules: ArtifactKindsViews['operationArtifactRules'] = {};
   for (const r of abox.operationRules) {
-    operationArtifactRules[r.operationId] = {
-      composable: r.composable,
-      rules: r.rules.map((rule) => ({ id: rule.id, artifactKind: rule.artifactKind })),
-    };
+    const entry: ArtifactKindsViews['operationArtifactRules'][string] = {};
+    if (r.composable !== undefined) entry.composable = r.composable;
+    if (r.rules !== undefined) {
+      entry.rules = r.rules.map((rule) => {
+        const out: NonNullable<
+          ArtifactKindsViews['operationArtifactRules'][string]['rules']
+        >[number] = {
+          artifactKind: rule.artifactKind,
+        };
+        if (rule.id !== undefined) out.id = rule.id;
+        if (rule.priority !== undefined) out.priority = rule.priority;
+        if (rule.producesSemantics !== undefined) out.producesSemantics = rule.producesSemantics;
+        if (rule.producesStates !== undefined) out.producesStates = rule.producesStates;
+        return out;
+      });
+    }
+    operationArtifactRules[r.operationId] = entry;
   }
   const artifactFileKinds: Record<string, string[]> = {};
   for (const m of abox.fileExtensionMap) {

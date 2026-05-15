@@ -117,8 +117,16 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     writeWorkspace({
       domainSemantics: {
         version: 1,
-        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
-        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+        runtimeStates: {
+          ProcessDefinitionDeployed: { producedBy: [] },
+          ProcessDefinitionIdDeployed: { producedBy: [] },
+          FormIdDeployed: { producedBy: [] },
+        },
+        semanticTypes: {
+          ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' },
+          bpmnProcessKey: { witnesses: 'ProcessDefinitionIdDeployed' },
+          formKey: { witnesses: 'FormIdDeployed' },
+        },
         // Legacy says only bpmnProcess. ABox will add `form`.
         artifactKinds: {
           bpmnProcess: {
@@ -268,5 +276,164 @@ describe('Lift 5 (#212): artifact-kinds ABox is authoritative for graph.domain a
     expect(allWarnings).toMatch(/deadKind/);
     expect(allWarnings).not.toMatch(/bpmnProcess.*dead weight/);
     warn.mockRestore();
+  });
+
+  it('warns on operationRules entries pointing at unknown opIds (sense-2 abox-vs-graph)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeWorkspace({
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [minimalKind('bpmnProcess', 'ProcessDefinitionId')],
+        semanticTypeMap: [{ semanticType: 'bpmnProcessKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
+          },
+          {
+            // Op missing from the graph — must surface as drift.
+            operationId: 'createGhostDeployment',
+            composable: false,
+            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    await loadGraph(baseDir);
+    const allWarnings = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(allWarnings).toMatch(/abox-vs-graph/);
+    expect(allWarnings).toMatch(/createGhostDeployment/);
+    warn.mockRestore();
+  });
+
+  it('warns on operationRules.rules entries pointing at unknown artifactKinds (sense-2 abox-vs-graph)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeWorkspace({
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [minimalKind('bpmnProcess', 'ProcessDefinitionId')],
+        semanticTypeMap: [{ semanticType: 'bpmnProcessKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [
+              { id: 'bpmn', artifactKind: 'bpmnProcess' },
+              { id: 'ghost', artifactKind: 'ghostKind' },
+            ],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    await loadGraph(baseDir);
+    const allWarnings = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(allWarnings).toMatch(
+      /operationRules\['createDeployment'\]\.rules\['ghost'\] references unknown artifactKind 'ghostKind'/,
+    );
+    warn.mockRestore();
+  });
+
+  it('warns on semanticTypeMap entries pointing at unknown artifactKinds (sense-2 abox-vs-graph)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeWorkspace({
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [minimalKind('bpmnProcess', 'ProcessDefinitionId')],
+        semanticTypeMap: [
+          { semanticType: 'bpmnProcessKey', artifactKind: 'bpmnProcess' },
+          { semanticType: 'GhostKey', artifactKind: 'ghostKind' },
+        ],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    await loadGraph(baseDir);
+    const allWarnings = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(allWarnings).toMatch(
+      /semanticTypeMap entry 'GhostKey' → 'ghostKind' references unknown artifactKind/,
+    );
+    warn.mockRestore();
+  });
+
+  it('warns on fileExtensionMap entries pointing at unknown artifactKinds (sense-2 abox-vs-graph)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeWorkspace({
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [minimalKind('bpmnProcess', 'ProcessDefinitionId')],
+        semanticTypeMap: [{ semanticType: 'bpmnProcessKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
+          },
+        ],
+        fileExtensionMap: [
+          { extension: '.bpmn', artifactKinds: ['bpmnProcess'] },
+          { extension: '.ghost', artifactKinds: ['ghostKind'] },
+        ],
+      },
+      graphOps: deployOp(),
+    });
+    await loadGraph(baseDir);
+    const allWarnings = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(allWarnings).toMatch(
+      /fileExtensionMap entry '\.ghost' references unknown artifactKind 'ghostKind'/,
+    );
+    warn.mockRestore();
+  });
+
+  it('hard-errors when the ABox introduces a `producesStates` value not declared in domain-semantics.json runtimeStates / capabilities (post-overlay re-validation)', async () => {
+    // Pre-overlay validation only sees the legacy sidecar's
+    // artifactKinds. Without re-validating after the ABox overlay, an
+    // ABox that introduces an undeclared state would slip through and
+    // the planner would silently break at the BFS stage.
+    writeWorkspace({
+      domainSemantics: {
+        version: 1,
+        runtimeStates: { ProcessDefinitionDeployed: { producedBy: [] } },
+        semanticTypes: { ProcessDefinitionKey: { witnesses: 'ProcessDefinitionDeployed' } },
+      },
+      artifactKindsAbox: {
+        version: 1,
+        kinds: [
+          {
+            name: 'bpmnProcess',
+            identifierType: 'ProcessDefinitionId',
+            // 'UndeclaredState' is NOT in runtimeStates above.
+            producesStates: ['ProcessDefinitionDeployed', 'UndeclaredState'],
+            producesSemantics: ['ProcessDefinitionKey'],
+            deploymentSlices: ['processDefinition'],
+            description: 'fixture',
+          },
+        ],
+        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: false,
+            rules: [{ id: 'bpmn', artifactKind: 'bpmnProcess' }],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      },
+      graphOps: deployOp(),
+    });
+    await expect(loadGraph(baseDir)).rejects.toThrow(
+      /artifact-kinds ABox introduced cross-reference violation/,
+    );
   });
 });

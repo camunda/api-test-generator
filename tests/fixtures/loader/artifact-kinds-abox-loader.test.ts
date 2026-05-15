@@ -232,4 +232,66 @@ describe('deriveArtifactKindsViews: record-shaped views', () => {
     writeAbox('{ not json');
     expect(() => deriveArtifactKindsViews(workdir)).toThrow(/Failed to parse artifact-kinds ABox/);
   });
+
+  it('throws when an operation defines duplicate `rules[].id` values', () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        kinds: [minimalKind()],
+        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: true,
+            rules: [
+              { id: 'bpmn', artifactKind: 'bpmnProcess' },
+              { id: 'bpmn', artifactKind: 'bpmnProcess', priority: 5 },
+            ],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      }),
+    );
+    expect(() => loadArtifactKindsAbox(workdir)).toThrow(
+      /operationRules\['createDeployment'\] has duplicate rule id\(s\): bpmn/,
+    );
+  });
+
+  it('preserves optional rule fields (`id`, `priority`, `producesSemantics`, `producesStates`) through deriveArtifactKindsViews', () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        kinds: [minimalKind()],
+        semanticTypeMap: [{ semanticType: 'ProcessDefinitionKey', artifactKind: 'bpmnProcess' }],
+        operationRules: [
+          {
+            operationId: 'createDeployment',
+            composable: true,
+            rules: [
+              {
+                id: 'bpmn',
+                artifactKind: 'bpmnProcess',
+                priority: 7,
+                producesSemantics: ['ExtraKey'],
+                producesStates: ['ExtraState'],
+              },
+            ],
+          },
+        ],
+        fileExtensionMap: [{ extension: '.bpmn', artifactKinds: ['bpmnProcess'] }],
+      }),
+    );
+    const views = deriveArtifactKindsViews(workdir);
+    if (!views) throw new Error('expected derived views');
+    const rules = views.operationArtifactRules.createDeployment?.rules;
+    expect(rules).toEqual([
+      {
+        id: 'bpmn',
+        artifactKind: 'bpmnProcess',
+        priority: 7,
+        producesSemantics: ['ExtraKey'],
+        producesStates: ['ExtraState'],
+      },
+    ]);
+  });
 });

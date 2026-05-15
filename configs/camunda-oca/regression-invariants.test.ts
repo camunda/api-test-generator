@@ -4558,10 +4558,10 @@ describeForThisConfig(
       const kindNames = new Set(abox.kinds.map((k) => k.name));
       const dangling: string[] = [];
       for (const rule of abox.operationRules) {
-        for (const r of rule.rules) {
+        for (const r of rule.rules ?? []) {
           if (!kindNames.has(r.artifactKind))
             dangling.push(
-              `operationRules['${rule.operationId}'].rules['${r.id}'] → '${r.artifactKind}'`,
+              `operationRules['${rule.operationId}'].rules['${r.id ?? '<unnamed>'}'] → '${r.artifactKind}'`,
             );
         }
       }
@@ -4586,7 +4586,7 @@ describeForThisConfig(
       if (!abox) throw new Error('artifact-kinds ABox missing');
       const referenced = new Set<string>();
       for (const rule of abox.operationRules) {
-        for (const r of rule.rules) referenced.add(r.artifactKind);
+        for (const r of rule.rules ?? []) referenced.add(r.artifactKind);
       }
       for (const m of abox.semanticTypeMap) referenced.add(m.artifactKind);
       for (const m of abox.fileExtensionMap) {
@@ -4599,32 +4599,49 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
-    it('every semantic-type produced by some artifact kind has a matching semanticTypeMap entry (catches new kinds with no reverse-mapping)', async () => {
-      // Heuristic gate: when a new kind is added with `producesSemantics:
-      // ['NewKey']` but no corresponding `semanticTypeMap` entry mapping
-      // `NewKey → newKind`, the planner can't reverse-look up which kind
-      // produces NewKey. Surface as drift before runtime breakage.
+    it('the `producesSemantics` ↔ `semanticTypeMap` relation is bidirectionally consistent (no dead or wrong reverse mappings)', async () => {
+      // Bidirectional gate. Forward direction: every semantic type a
+      // kind claims to produce must reverse-map to that kind. Reverse
+      // direction: every semanticTypeMap entry must point to a kind
+      // that actually claims (in `producesSemantics`) the mapped
+      // semantic type. Without the reverse check, a stale or
+      // misspelled `semanticTypeMap` entry that maps a type the kind
+      // does not produce would still pass the forward-only test.
       const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const abox = loadArtifactKindsAbox(REPO_ROOT);
       if (!abox) throw new Error('artifact-kinds ABox missing');
-      const mapped = new Map<string, string>();
-      for (const m of abox.semanticTypeMap) mapped.set(m.semanticType, m.artifactKind);
-      const missing: string[] = [];
+      const mappedToKind = new Map<string, string>();
+      for (const m of abox.semanticTypeMap) mappedToKind.set(m.semanticType, m.artifactKind);
+      const kindByName = new Map(abox.kinds.map((k) => [k.name, k]));
+      const issues: string[] = [];
+      // Forward: kind.producesSemantics → semanticTypeMap.
       for (const kind of abox.kinds) {
         for (const sem of kind.producesSemantics) {
-          const mappedKind = mapped.get(sem);
+          const mappedKind = mappedToKind.get(sem);
           if (mappedKind === undefined) {
-            missing.push(`'${sem}' (produced by '${kind.name}', no semanticTypeMap entry)`);
+            issues.push(
+              `[forward] '${sem}' is produced by kind '${kind.name}' but has no semanticTypeMap entry`,
+            );
           } else if (mappedKind !== kind.name) {
-            missing.push(
-              `'${sem}' (produced by '${kind.name}' but semanticTypeMap maps it to '${mappedKind}')`,
+            issues.push(
+              `[forward] '${sem}' is produced by kind '${kind.name}' but semanticTypeMap maps it to '${mappedKind}'`,
             );
           }
         }
       }
+      // Reverse: semanticTypeMap → kind.producesSemantics.
+      for (const m of abox.semanticTypeMap) {
+        const kind = kindByName.get(m.artifactKind);
+        if (!kind) continue; // dangling-kind reference is already caught by another invariant
+        if (!kind.producesSemantics.includes(m.semanticType)) {
+          issues.push(
+            `[reverse] semanticTypeMap maps '${m.semanticType}' to kind '${m.artifactKind}', but '${m.artifactKind}.producesSemantics' does not list '${m.semanticType}'`,
+          );
+        }
+      }
       expect(
-        missing,
-        'artifact-kinds ABox has kinds whose `producesSemantics` are not (or are wrongly) mapped in `semanticTypeMap` — every produced semantic type must reverse-map to its producer kind',
+        issues,
+        'artifact-kinds ABox `semanticTypeMap` is not in bidirectional sync with `kinds[].producesSemantics` — every produced semantic type must reverse-map to its producer kind, and every map entry must point to a kind that actually produces the mapped type',
       ).toEqual([]);
     });
 
@@ -4646,22 +4663,53 @@ describeForThisConfig(
       }
     });
 
-    it('graph.domain.operationArtifactRules matches the ABox `operationRules[]` (planner contract)', async () => {
-      const { loadArtifactKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    it('graph.domain.operationArtifactRules matches the ABox `operationRules[]` (planner contract — full per-rule fields)', async () => {
+      const { loadArtifactKindsAbox, deriveArtifactKindsViews } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
       const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
       const abox = loadArtifactKindsAbox(REPO_ROOT);
-      if (!abox) throw new Error('artifact-kinds ABox missing');
+      const expectedViews = deriveArtifactKindsViews(REPO_ROOT);
+      if (!abox || !expectedViews) throw new Error('artifact-kinds ABox missing');
       const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
-      const expectedOps = abox.operationRules.map((r) => r.operationId).sort();
-      const actualOps = Object.keys(graph.domain?.operationArtifactRules ?? {}).sort();
-      expect(actualOps).toEqual(expectedOps);
-      for (const rule of abox.operationRules) {
-        const actual = graph.domain?.operationArtifactRules?.[rule.operationId];
-        expect(actual?.composable).toBe(rule.composable);
-        expect(actual?.rules?.map((r) => r.artifactKind).sort()).toEqual(
-          rule.rules.map((r) => r.artifactKind).sort(),
-        );
-      }
+      // Compare the full record-shaped views: keys, composable flag,
+      // and every rule-level field (id, artifactKind, priority,
+      // producesSemantics, producesStates). A regression that drops
+      // any of those is caught directly because the rule.id is what
+      // the emitter uses to look up the chosen rule, and the
+      // optional override fields drive the planner's output.
+      expect(
+        graph.domain?.operationArtifactRules,
+        'graph.domain.operationArtifactRules does not match the record-shaped view derived from the ABox — the loader may have failed to overlay the ABox onto graph.domain or may be dropping rule-level fields',
+      ).toEqual(expectedViews.operationArtifactRules);
+    });
+
+    it('graph.domain.semanticTypeToArtifactKind matches the ABox `semanticTypeMap[]` (planner contract)', async () => {
+      const { deriveArtifactKindsViews } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const expectedViews = deriveArtifactKindsViews(REPO_ROOT);
+      if (!expectedViews) throw new Error('artifact-kinds ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      expect(
+        graph.domain?.semanticTypeToArtifactKind,
+        'graph.domain.semanticTypeToArtifactKind does not match the ABox semanticTypeMap — overlay regression',
+      ).toEqual(expectedViews.semanticTypeToArtifactKind);
+    });
+
+    it('graph.domain.artifactFileKinds matches the ABox `fileExtensionMap[]` (planner contract)', async () => {
+      const { deriveArtifactKindsViews } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const expectedViews = deriveArtifactKindsViews(REPO_ROOT);
+      if (!expectedViews) throw new Error('artifact-kinds ABox missing');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      expect(
+        graph.domain?.artifactFileKinds,
+        'graph.domain.artifactFileKinds does not match the ABox fileExtensionMap — overlay regression',
+      ).toEqual(expectedViews.artifactFileKinds);
     });
 
     it('the committed artifact-kinds vocabulary JSON matches the regenerated TBox (drift detector)', async () => {
