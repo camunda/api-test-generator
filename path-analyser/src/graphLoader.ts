@@ -773,7 +773,7 @@ function normalizeEstablishes(
   //     what the spec annotation says).
   //   - opId NOT in `edgeEstablishers` ⇒ `shape: undefined` (treat as
   //     non-edge even if the spec annotation says `shape: 'edge'`; the
-  //     drift is surfaced as a warning by validateEdgeAnnotationDrift).
+  //     drift is surfaced as a warning by detectEdgeAnnotationDrift).
   //
   // When the ABox is absent (`edgeEstablishers === null`), fall back to
   // the legacy spec-annotation behaviour for backward compat with
