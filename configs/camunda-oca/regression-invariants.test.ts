@@ -4445,12 +4445,8 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     // to silently fall back to the legacy spec-emitted kindRegistry
     // path (e.g. ABox file moves and ENOENT swallows the error),
     // this invariant fails by direct comparison.
-    const { loadEntityKindsAbox, loadGraph } = await import(
-      '../../path-analyser/src/ontology/loader.js'
-    ).then(async (m) => ({
-      ...m,
-      loadGraph: (await import('../../path-analyser/src/graphLoader.js')).loadGraph,
-    }));
+    const { loadEntityKindsAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
     const abox = loadEntityKindsAbox(REPO_ROOT);
     if (!abox) throw new Error('entity-kinds ABox missing');
     const expected = new Set<string>();
@@ -4481,6 +4477,10 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
   it("the entity-kinds ABox's $schema field resolves to the published TBox JSON", () => {
     const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'entity-kinds.json');
     const expectedTboxPath = join(REPO_ROOT, 'ontology', 'vocabulary', 'entity-kinds.schema.json');
+    expect(
+      existsSync(expectedTboxPath),
+      `Published TBox at '${expectedTboxPath}' does not exist — vocabulary file may have been deleted or renamed`,
+    ).toBe(true);
     interface AboxHeader {
       $schema?: unknown;
     }
@@ -4492,6 +4492,5 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     expect(schemaField).toBe(
       'https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json',
     );
-    void expectedTboxPath;
   });
 });
