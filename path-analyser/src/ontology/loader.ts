@@ -56,7 +56,18 @@ function formatErrors(errors: ErrorObject[] | null | undefined): string {
  * @throws if the file exists but does not validate against the TBox.
  */
 export function loadEdgesAbox(repoRoot: string): EdgesAbox | null {
-  const aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'edges.json');
+  // The active-config resolver depends on a `configs.json` index at the
+  // repo root. Tests that exercise loadGraph against an isolated
+  // tmpDir don't ship one, and the right fallback there is "no ABox"
+  // (the test will then exercise the legacy spec-annotation path).
+  // Treat any resolver failure as "no ABox available" — symmetrical to
+  // the ENOENT-on-edges.json case below.
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'edges.json');
+  } catch {
+    return null;
+  }
   let raw: string;
   try {
     raw = readFileSync(aboxPath, 'utf8');
@@ -92,4 +103,29 @@ export function loadEdgesAbox(repoRoot: string): EdgesAbox | null {
     throw new Error(`Edges ABox at ${aboxPath} has duplicate edge name(s): ${dupes.join(', ')}`);
   }
   return parsed;
+}
+
+/**
+ * Derive the set of operationIds that establish an edge, sourced from
+ * the edges ABox for the active config.
+ *
+ * Lift 3 / #208: the ABox is the authoritative source for "is this op
+ * an edge establisher" — a domain claim with no wire signature, per
+ * the principle in #198. Per-op `x-semantic-establishes: { shape:
+ * "edge" }` annotations in the upstream spec are no longer
+ * authoritative at runtime; the planner derives `op.establishes.shape`
+ * from the result of this function instead.
+ *
+ * @returns A Set of opIds, or `null` if no edges ABox exists for the
+ *   active config (in which case the caller falls back to the spec
+ *   annotation's `shape` field for backward compatibility).
+ */
+export function loadEdgeEstablishers(repoRoot: string): Set<string> | null {
+  const abox = loadEdgesAbox(repoRoot);
+  if (abox === null) return null;
+  const set = new Set<string>();
+  for (const e of abox.edges) {
+    set.add(e.establishedBy);
+  }
+  return set;
 }
