@@ -179,11 +179,24 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   if (recordResponses) {
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
-  // extractInto is used in the per-step extract loop which runs for ALL steps (including
-  // deployment steps — see comment at the extract loop below). Gate the import on whether
-  // any step in the collection has extracts, regardless of step type.
+  // extractInto is used in the per-step extract loop. For deploy() steps only
+  // placeholderAlias extracts are emitted (all others are handled internally by
+  // deploy()). Mirror that filter here so the import is not emitted when all
+  // extracts for a deployment step are non-alias entries — those generate no
+  // extractInto() calls in the suite, which would produce a Biome noUnusedImports
+  // error.
   const hasAnyExtract = collection.scenarios.some((s) =>
-    (s.requestPlan ?? []).some((step) => (step.extract?.length ?? 0) > 0),
+    (s.requestPlan ?? []).some((step) => {
+      const isDeployStep =
+        step.operationId === 'createDeployment' &&
+        step.bodyKind === 'multipart' &&
+        !!step.multipartTemplate &&
+        step.expect.status === 200;
+      const relevant = isDeployStep
+        ? (step.extract ?? []).filter((ex) => ex.note === 'placeholderAlias')
+        : (step.extract ?? []);
+      return relevant.length > 0;
+    }),
   );
   if (hasAnyExtract) {
     lines.push("import { extractInto, seedBinding, initSpecSalt } from './support/seeding';");
@@ -583,6 +596,7 @@ function renderScenarioTest(
     // it skips the assignment when the value is `undefined` so seeded bindings
     // and earlier extracts in the same scenario aren't clobbered by a later step
     // whose response shape omits the field.
+    // deploy() steps: deploy() already extracts all known deployment response
     // fields internally (processDefinitionKeyVar, deploymentKeyVar, tenantIdVar,
     // etc.). Emitting those same extractInto() calls outside the helper would
     // call resp.json() a second time and duplicate every assignment.
