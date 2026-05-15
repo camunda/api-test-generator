@@ -123,15 +123,33 @@ export const GlobalContextSeedSchema = z
   })
   .strict();
 
-// Top-level shape — `passthrough` so unrelated fields (operationArtifactRules,
-// artifactFileKinds, semanticTypeToArtifactKind, identifiers, version, $schema)
-// flow through unmodified.
+const ArtifactRuleSchema = z
+  .object({
+    id: z.string().optional(),
+    artifactKind: z.string(),
+    priority: z.number().optional(),
+    producesSemantics: z.array(z.string()).optional(),
+    producesStates: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+const OperationArtifactRuleSpecSchema = z
+  .object({
+    composable: z.boolean().optional(),
+    rules: z.array(ArtifactRuleSchema).optional(),
+  })
+  .passthrough();
+
+// Top-level shape — `passthrough` so unrelated fields
+// (artifactFileKinds, semanticTypeToArtifactKind, identifiers, version,
+// $schema) flow through unmodified.
 const DomainSemanticsShape = z
   .object({
     runtimeStates: z.record(z.string(), RuntimeStateSpecSchema).optional(),
     capabilities: z.record(z.string(), z.unknown()).optional(),
     semanticTypes: z.record(z.string(), SemanticTypeSpecSchema).optional(),
     artifactKinds: z.record(z.string(), ArtifactKindSpecSchema).optional(),
+    operationArtifactRules: z.record(z.string(), OperationArtifactRuleSpecSchema).optional(),
     operationRequirements: z.record(z.string(), OperationDomainRequirementsSchema).optional(),
     globalContextSeeds: z.array(GlobalContextSeedSchema).optional(),
   })
@@ -187,6 +205,25 @@ function checkArtifactKindStateDeclared(d: DomainSemanticsShape): CrossRefIssue[
       }
     }
   }
+  // Lift 5 / #212: rule-level overrides on operationArtifactRules carry the
+  // same cross-reference invariant as kind-level producesStates — the planner
+  // reads them via getEffectiveProducesStates() during chain-feasibility BFS.
+  // Without this check, an ABox-introduced (or hand-edited legacy) override
+  // pointing at an undeclared state silently breaks the BFS rather than
+  // surfacing as a load-time config error.
+  for (const [op, spec] of Object.entries(d.operationArtifactRules ?? {})) {
+    for (const rule of spec.rules ?? []) {
+      const ruleId = rule.id ?? '<unnamed>';
+      for (const state of rule.producesStates ?? []) {
+        if (!declared.has(state)) {
+          issues.push({
+            code: 'artifactKindStateDeclared',
+            message: `operationArtifactRules.${op}.rules['${ruleId}'].producesStates references "${state}", which is not declared in runtimeStates or capabilities`,
+          });
+        }
+      }
+    }
+  }
   return issues;
 }
 
@@ -201,6 +238,24 @@ function checkArtifactKindWitnessDeclared(d: DomainSemanticsShape): CrossRefIssu
           code: 'artifactKindWitnessDeclared',
           message: `artifactKinds.${kind}.producesSemantics references "${type}", which has no semanticTypes.${type}.witnesses declaration`,
         });
+      }
+    }
+  }
+  // Lift 5 / #212: same coverage extension as
+  // checkArtifactKindStateDeclared — rule-level producesSemantics
+  // overrides also reach the planner via getEffectiveProducesSemantics()
+  // and a stale/ABox-introduced typo would otherwise pass through.
+  for (const [op, spec] of Object.entries(d.operationArtifactRules ?? {})) {
+    for (const rule of spec.rules ?? []) {
+      const ruleId = rule.id ?? '<unnamed>';
+      for (const type of rule.producesSemantics ?? []) {
+        const entry = declared[type];
+        if (!entry || typeof entry.witnesses !== 'string' || entry.witnesses.length === 0) {
+          issues.push({
+            code: 'artifactKindWitnessDeclared',
+            message: `operationArtifactRules.${op}.rules['${ruleId}'].producesSemantics references "${type}", which has no semanticTypes.${type}.witnesses declaration`,
+          });
+        }
       }
     }
   }
