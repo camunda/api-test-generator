@@ -830,10 +830,10 @@ export function loadGlobalContextSeedsAbox(repoRoot: string): GlobalContextSeeds
  * Derive the array-shaped view of the global-context-seeds ABox that
  * `graph.domain.globalContextSeeds` consumers (Playwright emitter
  * universal-seed prologue, multipart-strip branches, codegen
- * `loadGlobalContextSeeds`) expect. Returning `null` when no ABox is
- * shipped lets callers fall back to the legacy
- * `domain-semantics.json#globalContextSeeds` key (until Lift 8 Phase B
- * deletes that fallback).
+ * `loadGlobalContextSeeds`) expect. Returning `null` means no
+ * `global-context-seeds.json` ABox is shipped for the active config, so
+ * callers leave `graph.domain.globalContextSeeds` undefined and treat it
+ * as the empty list.
  */
 export interface GlobalContextSeedsViews {
   globalContextSeeds: Array<{
