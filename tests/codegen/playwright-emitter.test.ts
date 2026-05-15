@@ -549,6 +549,61 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     expect(c).not.toMatch(/__tenantIdIsDefault/);
     expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
   });
+
+  test('deploy step: no inline extractInto block emitted outside deploy() (no duplicate extraction)', async () => {
+    // Regression guard: deploy() already extracts all known deployment response
+    // fields (processDefinitionKeyVar, deploymentKeyVar, tenantIdVar, etc.)
+    // internally. The emitter must NOT also emit a `const json = await resp.json()`
+    // + extractInto loop for the same step — that would call json() twice and
+    // duplicate every assignment. Class-scoped: asserts the emitted suite never
+    // contains either artefact of the old inline extraction block after a deploy()
+    // call, regardless of which extract entries the planner attached.
+    const deployWithExtracts: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'deploy with extracts',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createDeployment',
+              method: 'POST',
+              pathTemplate: '/deployments',
+              expect: { status: 200 },
+              bodyKind: 'multipart',
+              multipartTemplate: { fields: {}, files: {} },
+              extract: [
+                { fieldPath: 'deploymentKey', bind: 'deploymentKeyVar' },
+                {
+                  fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+                  bind: 'processDefinitionKeyVar',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const [file] = await PlaywrightEmitter.emit(deployWithExtracts, {
+      outDir: '/unused',
+      suiteName: 'createDeployment',
+      mode: 'feature',
+    });
+    const c = file.content;
+    // deploy() call must be present
+    expect(c).toContain('await deploy(ctx, request,');
+    // No second json() read — deploy() owns the response body
+    const jsonReads = c.match(/const json = await \w+\.json\(\);/g) ?? [];
+    expect(jsonReads, 'resp.json() must not be called outside deploy()').toHaveLength(0);
+    // No inline extractInto — all extraction delegated to deploy()
+    const extractCalls = c.match(/extractInto\(ctx,/g) ?? [];
+    expect(extractCalls, 'extractInto must not be emitted inline for deploy steps').toHaveLength(0);
+  });
 });
 
 // Boundary safety guards (#87 review): the public emitter entry points

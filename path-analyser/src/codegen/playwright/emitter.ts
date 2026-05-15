@@ -583,16 +583,19 @@ function renderScenarioTest(
     // it skips the assignment when the value is `undefined` so seeded bindings
     // and earlier extracts in the same scenario aren't clobbered by a later step
     // whose response shape omits the field.
-    // Deployment steps are NOT skipped here: deploy() extracts the known semantic
-    // bindings internally, but the planner's aliasProducerExtractsToPlaceholders
-    // can attach extra extracts (e.g. placeholderAlias bindings for URL vars) to
-    // the same step. deploy() has no knowledge of these aliases, so the emitter
-    // must emit them. Re-emitting the hard-coded deploy() bindings is harmless
-    // because extractInto is a no-op when the response field is undefined, and
-    // overwrites with the same value when it is present.
-    if (step.extract?.length) {
+    // fields internally (processDefinitionKeyVar, deploymentKeyVar, tenantIdVar,
+    // etc.). Emitting those same extractInto() calls outside the helper would
+    // call resp.json() a second time and duplicate every assignment.
+    // Exception: placeholderAlias entries (note === 'placeholderAlias') bind to
+    // DIFFERENT ctx keys than deploy()'s hard-coded targets (e.g. an alias from
+    // processDefinitionKey → processDefinitionIdVar). deploy() has no knowledge
+    // of these aliases, so they must still be emitted here.
+    const effectiveExtracts = isDeploymentStep
+      ? (step.extract ?? []).filter((ex) => ex.note === 'placeholderAlias')
+      : (step.extract ?? []);
+    if (effectiveExtracts.length) {
       body.push(`    const json = await ${varName}.json();`);
-      for (const ex of step.extract) {
+      for (const ex of effectiveExtracts) {
         const optAcc = toOptionalAccessor(ex.fieldPath);
         body.push(`    extractInto(ctx, '${ex.bind}', json${optAcc});`);
       }
