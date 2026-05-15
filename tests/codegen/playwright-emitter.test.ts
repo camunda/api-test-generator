@@ -603,6 +603,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     // No inline extractInto — all extraction delegated to deploy()
     const extractCalls = c.match(/extractInto\(ctx,/g) ?? [];
     expect(extractCalls, 'extractInto must not be emitted inline for deploy steps').toHaveLength(0);
+    expect(c, 'extractInto must not be imported when deploy-step extracts are fully suppressed').not.toContain(
+      'import { extractInto',
+    );
   });
 });
 
