@@ -1,4 +1,5 @@
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
+import type { LoadedRoleBundle } from './playwright/roleRenderer.js';
 
 /**
  * Context passed to an {@link Emitter} on every invocation.
@@ -34,16 +35,32 @@ export interface EmitContext {
    */
   recordResponses?: boolean;
   /**
-   * OperationId of the deployment-gateway operation in the active config
-   * (per `artifact-kinds.json#operationRules[].role === "deploymentGateway"`,
-   * Lift 9 / #225). When set, the Playwright emitter routes 200-expected
-   * multipart steps for this op through the `deploy()` support helper;
-   * otherwise every multipart step takes the inline-request path.
-   *
-   * Optional — when omitted (e.g. unit tests that don't exercise the
-   * deployment routing), no step is treated as a deployment gateway.
+   * Resolver returning the ontological role (per the active config's
+   * artifact-kinds ABox) bound to `opId`, or `undefined` when no role is
+   * declared. The Playwright emitter uses this to route role-bound steps
+   * through `roleBundles` (Lift 12 / #231) instead of the generic
+   * per-method path. Optional — emitters that omit it produce a suite
+   * with no role-dispatched steps (every step takes the inline path).
    */
-  deploymentGatewayOpId?: string;
+  getRoleForOperation?: (opId: string) => string | undefined;
+  /**
+   * Loaded per-role template bundles for the active emitter, keyed by
+   * role name. Populated by the orchestrator via
+   * `loadRoleBundlesForActiveConfig` (Lift 12 / #231). Bound roles whose
+   * bundle is missing raise a hard error during rendering — there is no
+   * silent fallback.
+   */
+  roleBundles?: Map<string, LoadedRoleBundle>;
+  /**
+   * Per-role scope additions exposed to role templates as extra Mustache
+   * variables. Keyed by role name. The renderer merges these into
+   * `PlaywrightRoleScope` before rendering `call-site.tmpl`. For the
+   * `deploymentGateway` role (Lift 12 / Phase 4) this carries an
+   * `extracts` JSON literal computed from the role-bound op's
+   * `responseSemanticLeaves`. Optional and emitter-agnostic — future
+   * roles populate their own keys.
+   */
+  roleExtras?: Map<string, Record<string, unknown>>;
 }
 
 /**

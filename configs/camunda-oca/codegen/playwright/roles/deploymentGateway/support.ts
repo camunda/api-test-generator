@@ -1,17 +1,26 @@
-// Runtime helper for createDeployment multipart calls.
+// Runtime helper for the `deploymentGateway` role (Lift 12 / #231).
+//
+// Vendored into every emitted Playwright suite at
+// <outDir>/support/deploymentGateway.ts by the role-overlay materializer
+// (see path-analyser/src/codegen/playwright/materialize-support.ts). The
+// file is renamed on copy from this role directory's `support.ts` to
+// `deploymentGateway.ts` so role-owned helpers cannot collide with
+// built-in support files.
 //
 // Encapsulates the full deployment lifecycle in a single call:
 //   - resolve @@FILE: paths via resolveFixture()
-//   - build the multipart body, stripping tenantId when the default sentinel is active
-//   - POST /deployments with auth headers
+//   - build the multipart body, stripping fields per the strip rules
+//     supplied by the emitter (from globalContextSeeds)
+//   - POST <baseUrl> + the role-bound op's path with auth headers
 //   - throw a descriptive Error on any non-200 response
-//   - extract all known deployment response fields into ctx
-//   - return the APIResponse so callers can optionally call validateResponse()
+//   - walk the spec-derived `extracts` list and populate ctx via
+//     extractInto() — the helper has no hard-coded knowledge of which
+//     response fields are extracted; the list comes from the
+//     extractor's responseSemanticLeaves at codegen time
 //
-// This file is vendored verbatim into every generated Playwright suite under
-// <outDir>/support/deployment.ts by materializeSupport(). Keep it free of npm
-// package imports — only the co-vendored ./env, ./fixtures, and ./seeding
-// helpers are permitted.
+// Keep this file free of npm package imports — only the co-vendored
+// ./env, ./fixtures, and ./seeding helpers (built-in support, sibling
+// in the emitted suite) are permitted.
 
 import { authHeaders } from './env.js';
 import { resolveFixture } from './fixtures.js';
@@ -69,31 +78,49 @@ export interface DeployStripRule {
 }
 
 /**
- * Perform a createDeployment call and extract all known response fields into ctx.
+ * A response-field extraction directive: navigate `segments` on the response
+ * JSON and bind the value to `ctx[varName]` via `extractInto`. Computed at
+ * codegen time from the role-bound op's `responseSemanticLeaves` so the
+ * runtime helper carries zero spec-derived knowledge.
+ *
+ * `segments` mixes string property keys with number array indices. A `null`
+ * or `undefined` encountered partway short-circuits the walk and the
+ * variable is left untouched (extractInto skips undefined values).
+ */
+export interface DeployExtract {
+  varName: string;
+  segments: (string | number)[];
+}
+
+/**
+ * Perform a multipart deploy call against `path` and walk `extracts` against
+ * the response JSON.
  *
  * - Resolves `@@FILE:<path>` entries in `body.files` via resolveFixture().
- * - Strips fields whose resolved value equals the corresponding sentinel in `strips`
- *   (e.g. `{ fieldName: 'tenantId', sentinel: '<default>' }` for single-tenant
- *   deployments). Strips are derived by the emitter from `globalContextSeeds` so
- *   no domain-specific knowledge is hard-coded here.
- * - Throws a descriptive Error on any non-200 response (includes the response body
- *   for diagnosis).
- * - Extracts all known deployment response fields into ctx; extractInto() is a
- *   no-op for fields absent from the response, so pre-seeded ctx bindings are
- *   preserved.
+ * - Strips fields whose resolved value equals the corresponding sentinel in
+ *   `strips` (e.g. `{ fieldName: 'tenantId', sentinel: '<default>' }` for
+ *   single-tenant deployments). Strips are derived by the emitter from
+ *   `globalContextSeeds` so no domain-specific knowledge is hard-coded here.
+ * - Throws a descriptive Error on any non-200 response (includes the response
+ *   body for diagnosis).
+ * - Walks `extracts` against the parsed JSON and assigns each resolved value
+ *   to `ctx[ex.varName]` via `extractInto`. The walker short-circuits to
+ *   `undefined` on a null/missing segment; `extractInto` skips undefined
+ *   values so pre-seeded ctx bindings are preserved.
  * - Returns the APIResponse so callers can optionally call validateResponse().
  */
 export async function deploy(
   ctx: Record<string, unknown>,
   request: ApiRequestContextLike,
   body: DeployBody,
-  baseUrl: string,
-  strips?: DeployStripRule[],
+  url: string,
+  strips: DeployStripRule[],
+  extracts: DeployExtract[],
 ): Promise<ApiResponseLike> {
   const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};
 
   for (const [k, v] of Object.entries(body.fields ?? {})) {
-    if (strips?.some((s) => s.fieldName === k && String(v) === s.sentinel)) continue;
+    if (strips.some((s) => s.fieldName === k && String(v) === s.sentinel)) continue;
     if (v !== undefined && v !== null) multipart[k] = String(v);
   }
 
@@ -108,55 +135,36 @@ export async function deploy(
     }
   }
 
-  const resp = await request.post(`${baseUrl}/deployments`, {
+  const resp = await request.post(url, {
     headers: await authHeaders(),
     multipart,
   });
 
   if (resp.status() !== 200) {
     const text = await resp.text().catch(() => '(unreadable)');
-    throw new Error(`[createDeployment] expected HTTP 200, got ${resp.status()}: ${text}`);
+    throw new Error(`[deploy ${url}] expected HTTP 200, got ${resp.status()}: ${text}`);
   }
 
   const json = await resp.json();
 
-  // Extract all known deployment response fields. extractInto() skips
-  // undefined values, so fields absent from this response shape leave any
-  // pre-seeded ctx binding untouched.
-  extractInto(
-    ctx,
-    'processDefinitionIdVar',
-    json?.deployments?.[0]?.processDefinition?.processDefinitionId,
-  );
-  extractInto(
-    ctx,
-    'processDefinitionKeyVar',
-    json?.deployments?.[0]?.processDefinition?.processDefinitionKey,
-  );
-  extractInto(ctx, 'formKeyVar', json?.deployments?.[0]?.form?.formKey);
-  extractInto(ctx, 'deploymentKeyVar', json?.deploymentKey);
-  extractInto(ctx, 'tenantIdVar', json?.tenantId);
-  extractInto(
-    ctx,
-    'decisionDefinitionIdVar',
-    json?.deployments?.[0]?.decisionDefinition?.decisionDefinitionId,
-  );
-  extractInto(
-    ctx,
-    'decisionDefinitionKeyVar',
-    json?.deployments?.[0]?.decisionDefinition?.decisionDefinitionKey,
-  );
-  extractInto(
-    ctx,
-    'decisionRequirementsIdVar',
-    json?.deployments?.[0]?.decisionDefinition?.decisionRequirementsId,
-  );
-  extractInto(
-    ctx,
-    'decisionRequirementsKeyVar',
-    json?.deployments?.[0]?.decisionDefinition?.decisionRequirementsKey,
-  );
-  extractInto(ctx, 'formIdVar', json?.deployments?.[0]?.form?.formId);
+  for (const ex of extracts) {
+    let v: unknown = json;
+    for (const seg of ex.segments) {
+      if (v === null || v === undefined) {
+        v = undefined;
+        break;
+      }
+      if (typeof seg === 'number') {
+        v = Array.isArray(v) ? v[seg] : undefined;
+      } else if (typeof v === 'object') {
+        v = (v as Record<string, unknown>)[seg];
+      } else {
+        v = undefined;
+        break;
+      }
+    }
+    extractInto(ctx, ex.varName, v);
+  }
 
   return resp;
 }

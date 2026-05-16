@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   FIXTURES_DIR_NAME,
   materializeFixtures,
+  materializeRoleSupportFiles,
   materializeSupport,
   PROJECT_TEMPLATE_FILES,
   SUPPORT_DIR_NAME,
@@ -209,5 +210,83 @@ describe('materializeFixtures', () => {
     const candidate = path.resolve(supportDir, '..', 'fixtures', 'bpmn/service-task.bpmn');
     const buf = await fs.readFile(candidate);
     expect(buf.length).toBeGreaterThan(0);
+  });
+});
+
+describe('materializeRoleSupportFiles', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-role-support-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('copies a role support file into <outDir>/support/<role>.<ext>', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'role-src-'));
+    try {
+      const supportFile = path.join(srcDir, 'support.ts');
+      await fs.writeFile(supportFile, '// role helper\n', 'utf8');
+      const bundles = new Map([['myRole', { role: 'myRole', supportFilePath: supportFile }]]);
+      const copied = await materializeRoleSupportFiles(tmp, bundles);
+      expect(copied).toEqual(['myRole.ts']);
+      const content = await fs.readFile(path.join(tmp, SUPPORT_DIR_NAME, 'myRole.ts'), 'utf8');
+      expect(content).toBe('// role helper\n');
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
+  });
+
+  test('skips roles that have no support file', async () => {
+    const bundles = new Map([
+      ['noSupportRole', { role: 'noSupportRole', supportFilePath: undefined }],
+    ]);
+    const copied = await materializeRoleSupportFiles(tmp, bundles);
+    expect(copied).toEqual([]);
+  });
+
+  test('returns all copied basenames for multiple roles', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'role-src-'));
+    try {
+      const supportA = path.join(srcDir, 'supportA.ts');
+      const supportB = path.join(srcDir, 'supportB.js');
+      await fs.writeFile(supportA, '// A\n', 'utf8');
+      await fs.writeFile(supportB, '// B\n', 'utf8');
+      const bundles = new Map([
+        ['roleA', { role: 'roleA', supportFilePath: supportA }],
+        ['roleB', { role: 'roleB', supportFilePath: supportB }],
+      ]);
+      const copied = await materializeRoleSupportFiles(tmp, bundles);
+      expect(copied.sort()).toEqual(['roleA.ts', 'roleB.js'].sort());
+      expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'roleA.ts'))).toBe(true);
+      expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'roleB.js'))).toBe(true);
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
+  });
+
+  test('throws when a role name collides with a built-in support file basename', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'role-src-'));
+    try {
+      const supportFile = path.join(srcDir, 'support.ts');
+      await fs.writeFile(supportFile, '// role helper\n', 'utf8');
+      // 'env' is the stem of the built-in 'env.ts'
+      const bundles = new Map([['env', { role: 'env', supportFilePath: supportFile }]]);
+      await expect(materializeRoleSupportFiles(tmp, bundles)).rejects.toThrow(
+        /collides with the built-in support file/,
+      );
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
+  });
+
+  test('creates the support/ subdirectory when it does not exist', async () => {
+    const outDir = path.join(tmp, 'fresh');
+    await fs.mkdir(outDir);
+    const copied = await materializeRoleSupportFiles(outDir, new Map());
+    expect(existsSync(path.join(outDir, SUPPORT_DIR_NAME))).toBe(true);
+    expect(copied).toEqual([]);
   });
 });

@@ -16,7 +16,6 @@
 //     fixtures.ts
 //     seed-rules.json
 //     await-eventually.ts
-//     deployment.ts
 // ---------------------------------------------------------------------------
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -28,7 +27,6 @@ const SUPPORT_FILES = [
   'fixtures.ts',
   'seed-rules.json',
   'await-eventually.ts',
-  'deployment.ts',
 ];
 
 async function main() {

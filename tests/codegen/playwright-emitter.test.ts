@@ -8,6 +8,7 @@ import type {
   EndpointScenarioCollection,
   GlobalContextSeed,
 } from '../../path-analyser/src/types.ts';
+import { buildRoleDispatch } from './_helpers/roleDispatch.ts';
 
 // The tenant-related tests below all derive the emitter's universal-seed
 // behaviour from this fixture, mirroring the entry shipped in
@@ -541,7 +542,7 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
       suiteName: 'createDeployment',
       mode: 'feature',
       globalContextSeeds: [TENANT_SEED],
-      deploymentGatewayOpId: 'createDeployment',
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
     });
     const c = file.content;
     // Seed assignment still emitted (always needed)
@@ -594,7 +595,7 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
       outDir: '/unused',
       suiteName: 'createDeployment',
       mode: 'feature',
-      deploymentGatewayOpId: 'createDeployment',
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
     });
     const c = file.content;
     // deploy() call must be present
@@ -1145,9 +1146,9 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
       suiteName: 'createDeployment',
       mode: 'feature',
       recordResponses: false,
-      deploymentGatewayOpId: 'createDeployment',
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
     });
-    expect(src).toContain("import { deploy } from './support/deployment';");
+    expect(src).toContain("import { deploy } from './support/deploymentGateway';");
     expect(src).not.toContain('resolveFixture');
     // authHeaders is handled internally by deploy(); suite must not import it
     expect(src).not.toContain('authHeaders');
@@ -1165,7 +1166,7 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
       suiteName: 'createDeployment',
       mode: 'feature',
       recordResponses: false,
-      deploymentGatewayOpId: 'createDeployment',
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
     });
     expect(src).toContain('expect(resp1.status()).toBe(200)');
   });
@@ -1270,10 +1271,10 @@ describe('emitter: conditional import gating for deploy() and resolveFixture', (
         suiteName: 'createDeployment',
         mode: 'feature',
         recordResponses: false,
-        deploymentGatewayOpId: 'createDeployment',
+        ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
       },
     );
-    expect(src).toContain("import { deploy } from './support/deployment';");
+    expect(src).toContain("import { deploy } from './support/deploymentGateway';");
     expect(src).toContain("import { resolveFixture } from './support/fixtures';");
     // authHeaders is needed for the inline uploadDocument step
     expect(src).toContain('authHeaders');
