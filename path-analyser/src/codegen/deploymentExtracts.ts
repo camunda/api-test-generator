@@ -88,10 +88,16 @@ export function computeDeploymentExtracts(op: OperationNode | undefined): Deploy
       segments: fieldPathToSegments(l.fieldPath),
     }));
 
-  // Sort first by segments JSON (so a candidate with a "preferred" path —
-  // shorter/lexicographically earlier — comes before duplicates), then by
-  // varName. Dedup keeps the first occurrence per varName.
+  // Sort candidates so the "preferred" path wins during dedup: shorter
+  // segment paths first (top-level wins over nested), then lexicographic
+  // JSON of segments as a deterministic tie-breaker, then varName. Without
+  // the explicit length comparison, lexicographic JSON ordering does not
+  // guarantee shorter arrays sort earlier (e.g. ["a",0,"b"] compares
+  // before ["a",0] because `,` < `]`).
   candidates.sort((a, b) => {
+    if (a.segments.length !== b.segments.length) {
+      return a.segments.length - b.segments.length;
+    }
     const aS = JSON.stringify(a.segments);
     const bS = JSON.stringify(b.segments);
     if (aS !== bS) return aS < bS ? -1 : 1;

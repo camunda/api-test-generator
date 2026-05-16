@@ -93,8 +93,8 @@ describe('computeDeploymentExtracts', () => {
     expect(result[0].segments).toEqual(['items', 0, 'value']);
   });
 
-  test('deduplicates by varName, keeping the first occurrence under pre-dedup sort', () => {
-    // Two leaves produce the same varName. The pre-dedup sort puts
+  test('deduplicates by varName, preferring the shorter segments path', () => {
+    // Two leaves produce the same varName. The pre-dedup sort prefers
     // the shorter segments path first, so that one should be kept.
     const op = makeOp([
       {
@@ -112,9 +112,36 @@ describe('computeDeploymentExtracts', () => {
     ]);
     const result = computeDeploymentExtracts(op);
     expect(result).toHaveLength(1);
-    // The pre-dedup sort is lexicographic on JSON.stringify(segments), so
-    // `["deployments",0,"processDefinitionKey"]` < `["zzz",0,"processDefinitionKey"]`.
+    // Same length → lexicographic JSON tie-break picks `deployments` < `zzz`.
     expect(result[0].segments[0]).toBe('deployments');
+  });
+
+  test('dedup prefers a strictly shorter path even when JSON.stringify ordering would invert it', () => {
+    // `["a",0,"b"]` < `["a",0]` lexicographically (because `,` < `]`), so
+    // an explicit length comparison is required for "shorter path wins"
+    // to hold. Use leaves whose varName collides but paths differ in
+    // length: provider-true ensures both survive the filter.
+    const op = makeOp([
+      {
+        semantic: 'ProcessDefinitionKey',
+        // top-level (after stripping resource. prefix is N/A here)
+        fieldPath: 'a.processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'a[].deeper.processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
+    ]);
+    const result = computeDeploymentExtracts(op);
+    expect(result).toHaveLength(1);
+    // The 2-segment path must win over the 4-segment path even though
+    // ["a",0,"deeper","processDefinitionKey"] < ["a","processDefinitionKey"]
+    // lexicographically (because `,` < `]`).
+    expect(result[0].segments).toEqual(['a', 'processDefinitionKey']);
   });
 
   test('final result is sorted by varName for byte-stable output', () => {
