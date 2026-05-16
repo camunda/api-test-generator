@@ -8,3 +8,4 @@ test-results/
 .claw/
 csharp-sdk/**/obj/
 csharp-sdk/**/bin/
+api-test-generator.sln
