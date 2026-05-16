@@ -147,6 +147,12 @@ export const artifactKindsSchema = {
           description:
             'Top-level keys of the createDeployment response payload that this kind populates (e.g. `["processDefinition"]`, or `["decisionDefinition", "decisionRequirements"]` for a kind whose deployment yields two slices).',
         },
+        modelKind: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Optional discriminator naming the `GeneratedModelSpec` variant the planner should construct when this kind is selected (Lift 10 / #227). Conventional values: `bpmn`, `form`. The planner consults this field via the ABox to pick the model-spec shape, replacing hard-coded semantic→kind comparisons in `ensureArtifactBindings`. Until the `GeneratedModelSpec` discriminated union is generalised (Lift 13), only the conventional values produce model-spec entries; other values are silently ignored by the model-spec construction step.',
+        },
         description: {
           type: 'string',
           minLength: 1,

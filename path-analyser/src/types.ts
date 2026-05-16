@@ -615,6 +615,14 @@ export interface ArtifactKindSpec {
   producesSemantics?: string[];
   identifierType?: string;
   deploymentSlices?: string[]; // e.g., ["processDefinition"] or ["decisionDefinition","decisionRequirements"]
+  /**
+   * Optional discriminator selecting the `GeneratedModelSpec` variant the
+   * planner should construct when this artifact kind is bound to a chain
+   * (Lift 10 / #227). Conventional values: `'bpmn'`, `'form'`. Sourced
+   * from the artifact-kinds ABox so the planner does not need to encode
+   * a semantic→kind table that already exists in `semanticTypeMap`.
+   */
+  modelKind?: string;
 }
 
 /**
