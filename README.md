@@ -225,7 +225,7 @@ invariant if the property is observable at the chain or graph level. See
 ### Determinism
 
 Generator output is byte-reproducible **by default**. The seeding module
-(`path-analyser/src/codegen/support/seeding.ts`) uses `TEST_SEED` to seed all
+(`materializer/src/support/seeding.ts`) uses `TEST_SEED` to seed all
 `deterministicSuffix(...)` calls; if unset, it falls back to the constant
 `'snapshot-baseline'`, so `npm run pipeline` produces identical output across
 runs and machines without needing `TEST_SEED` to be set explicitly.
@@ -358,7 +358,7 @@ npm run observe:aggregate          # aggregate runtime observations
 #### Pluggable test emitters
 
 Suite generation is layered behind a small `Emitter` strategy interface
-(`path-analyser/src/codegen/emitter.ts`). The CLI selects an emitter via
+(`materializer/src/emitter.ts`). The CLI selects an emitter via
 `--target=<id>` and falls back to `playwright` when omitted:
 
 ```bash

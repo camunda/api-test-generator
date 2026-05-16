@@ -6,6 +6,7 @@
   "workspaces": [
     "semantic-graph-extractor",
     "path-analyser",
+    "materializer",
     "optional-responses",
     "request-validation"
   ],
@@ -16,12 +17,13 @@
     "build:ontology": "tsx scripts/build-ontology.ts",
     "extract-graph": "npm run build -w semantic-graph-extractor && node semantic-graph-extractor/dist/index.js",
     "build:analyser": "npm run build -w path-analyser",
+    "build:materializer": "npm run build:analyser && npm run build -w materializer",
     "build:request-validation": "npm run build -w request-validation",
     "generate:scenarios": "npm run build:analyser && node path-analyser/dist/src/index.js",
     "generate:request-validation": "npm run generate -w request-validation && npm run biome:fix-generated:request-validation",
     "generate:request-validation:shallow": "npm run generate:shallow -w request-validation && npm run biome:fix-generated:request-validation",
-    "codegen:playwright": "npm run build:analyser && node path-analyser/dist/src/codegen/index.js && npm run biome:fix-generated:codegen",
-    "codegen:playwright:all": "npm run build:analyser && node path-analyser/dist/src/codegen/index.js --all && npm run biome:fix-generated:codegen",
+    "codegen:playwright": "npm run build:materializer && node materializer/dist/src/index.js && npm run biome:fix-generated:codegen",
+    "codegen:playwright:all": "npm run build:materializer && node materializer/dist/src/index.js --all && npm run biome:fix-generated:codegen",
     "test:pw": "npm run test:pw:path-analyser && npm run test:pw:request-validation",
     "test:pw:path-analyser": "npx playwright test -c path-analyser/playwright.config.ts",
     "test:pw:request-validation": "tsx scripts/run-pw-request-validation.ts",

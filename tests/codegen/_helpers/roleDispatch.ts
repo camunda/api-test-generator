@@ -5,11 +5,11 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeDeploymentExtracts } from '../../../path-analyser/src/codegen/deploymentExtracts.ts';
+import { computeDeploymentExtracts } from '../../../materializer/src/deploymentExtracts.ts';
 import {
   type LoadedRoleBundle,
   loadRoleBundlesForActiveConfig,
-} from '../../../path-analyser/src/codegen/playwright/roleRenderer.ts';
+} from '../../../materializer/src/playwright/roleRenderer.ts';
 import { deriveArtifactKindsViews } from '../../../path-analyser/src/ontology/loader.ts';
 import {
   DEPLOYMENT_GATEWAY_ROLE,

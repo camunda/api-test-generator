@@ -32,7 +32,7 @@
 // so the extracted bindings flow into the same `ctx['...Var']` keys
 // downstream consumers expect.
 
-import type { OperationNode } from '../types.js';
+import type { OperationNode } from 'path-analyser/types';
 
 export interface DeploymentExtract {
   /** ctx binding name (e.g. `processDefinitionKeyVar`). */

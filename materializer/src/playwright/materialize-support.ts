@@ -11,7 +11,7 @@
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
 //                fixtures.ts, seed-rules.json, await-eventually.ts).
 //                Sources:
-//                path-analyser/src/codegen/support/, staged into
+//                materializer/src/support/, staged into
 //                dist/src/codegen/playwright/support-templates/ at
 //                build time.
 //                PLUS per-role overlays from
@@ -20,19 +20,19 @@
 //                — see materializeRoleSupportFiles().
 //   * project root — package.json, playwright.config.ts, tsconfig.json,
 //                    .env.example, README.md.
-//                    Sources: path-analyser/templates/.
+//                    Sources: materializer/templates/.
 //   * fixtures/ — BPMN/DMN/form files referenced by @@FILE:<rel-path>
 //                 markers in emitted tests. Sources:
 //                 configs/<config>/fixtures/ (per-config; #221 / Lift 11).
 //
 // Keep SUPPORT_TEMPLATE_FILES in sync with
-// path-analyser/scripts/copy-support-templates.js.
+// materializer/scripts/copy-support-templates.js.
 // ---------------------------------------------------------------------------
 import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getActiveConfigDir, getSpecBundleDir } from '../../configResolver.js';
+import { getActiveConfigDir, getSpecBundleDir } from 'path-analyser/configResolver';
 
 export const SUPPORT_TEMPLATE_FILES = [
   'env.ts',
@@ -71,7 +71,7 @@ function defaultTemplatesDir(): string {
 }
 
 /**
- * Locate the project-root template directory (path-analyser/templates/).
+ * Locate the project-root template directory (materializer/templates/).
  *
  * Walks up from this module's location looking for a `templates/` directory
  * containing `package.json`. Robust across both tsx (source) and dist runtime
@@ -326,7 +326,7 @@ export const RESPONSE_SCHEMAS_DIR_NAME = 'json-body-assertions';
  * Walk up from `startDir` looking for the bundled OpenAPI spec under the
  * active config's spec directory (#128 PR 2). Used so
  * `materializeResponseSchemas` works regardless of whether the codegen is
- * invoked from the repo root or from `path-analyser/`. Returns undefined
+ * invoked from the repo root or from `materializer/`. Returns undefined
  * if no repo root (one containing `configs.json`) is found.
  */
 function findDefaultSpecFile(startDir: string): string | undefined {

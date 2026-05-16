@@ -1,0 +1,22 @@
+{
+  "name": "materializer",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
+    "codegen:playwright": "npm run build && node dist/src/index.js",
+    "codegen:playwright:all": "npm run build && node dist/src/index.js --all",
+    "clean": "rimraf dist || rm -rf dist"
+  },
+  "dependencies": {
+    "mustache": "^4.2.0",
+    "path-analyser": "*"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.6"
+  }
+}

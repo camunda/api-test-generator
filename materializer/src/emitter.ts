@@ -1,4 +1,4 @@
-import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
+import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import type { LoadedRoleBundle } from './playwright/roleRenderer.js';
 
 /**

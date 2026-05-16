@@ -2,8 +2,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { EmitContext, EmittedFile, Emitter } from '../../path-analyser/src/codegen/emitter.ts';
-import { writeEmitted } from '../../path-analyser/src/codegen/orchestrator.ts';
+import type { EmitContext, EmittedFile, Emitter } from '../../materializer/src/emitter.ts';
+import { writeEmitted } from '../../materializer/src/orchestrator.ts';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
 
 const FIXTURE: EndpointScenarioCollection = {

@@ -3,7 +3,7 @@ import {
   PlaywrightEmitter,
   playwrightSuiteFileName,
   renderPlaywrightSuite,
-} from '../../path-analyser/src/codegen/playwright/emitter.ts';
+} from '../../materializer/src/playwright/emitter.ts';
 import type {
   EndpointScenarioCollection,
   GlobalContextSeed,
@@ -382,7 +382,7 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
 //
 //   1. A class-scoped source scan rejects reintroduction of the literals
 //      'tenantIdVar', 'tenantId', '<default>', or '__seededTenant' anywhere
-//      in path-analyser/src/codegen/playwright/emitter.ts.
+//      in materializer/src/playwright/emitter.ts.
 //   2. Parallel-entry test: a *second* globalContextSeeds entry produces
 //      parallel code with no further emitter changes — proving the loop is
 //      generic and not a one-off branch dressed up as a loop.
@@ -394,7 +394,7 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     const path = await import('node:path');
     const url = await import('node:url');
     const here = path.dirname(url.fileURLToPath(import.meta.url));
-    const emitterPath = path.resolve(here, '../../path-analyser/src/codegen/playwright/emitter.ts');
+    const emitterPath = path.resolve(here, '../../materializer/src/playwright/emitter.ts');
     const source = await fs.readFile(emitterPath, 'utf8');
     // Strip line comments so the issue/PR cross-references in JSDoc don't
     // false-positive. Block comments are kept intentionally — a block

@@ -6,7 +6,7 @@ import {
   emitPlaywrightSuite,
   PlaywrightEmitter,
   renderPlaywrightSuite,
-} from '../../path-analyser/src/codegen/playwright/emitter.ts';
+} from '../../materializer/src/playwright/emitter.ts';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
 
 // Class-scoped guard for the `recordResponses` codegen option

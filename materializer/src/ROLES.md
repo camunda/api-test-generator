@@ -27,7 +27,7 @@ field naming a helper or template.
 Adding a role: ABox entry + a directory per emitter that supports the
 role. Adding an emitter: the emitter walks `configs/<config>/codegen/
 <this-emitter>/roles/` at materialise time. Neither requires touching
-`path-analyser/src/codegen/` source.
+`materializer/src/` source.
 
 ## Dispatch
 
@@ -344,7 +344,7 @@ logic into the template.
 ## Materializer overlay (Phase 2)
 
 The Playwright materializer currently copies a fixed set of support
-files from `path-analyser/src/codegen/support/` into each emitted
+files from `materializer/src/support/` into each emitted
 suite's `playwright/support/`. Phase 2 extends this to:
 
 1. Copy the built-in support tree as today.
@@ -360,7 +360,7 @@ suite's `playwright/support/`. Phase 2 extends this to:
    within a config, but the materializer asserts it anyway as a
    defensive check.
 
-`deployment.ts` moves from `path-analyser/src/codegen/support/` into
+`deployment.ts` moves from `materializer/src/support/` into
 `configs/camunda-oca/codegen/playwright/roles/deploymentGateway/
 support.ts` in Phase 4, materializing as
 `playwright/support/deploymentGateway.ts`. The built-in support tree retains only files
@@ -369,7 +369,7 @@ that are genuinely generic across configs (`env.ts`, `fixtures.ts`,
 
 ## Renderer (Phase 3)
 
-`path-analyser/src/codegen/playwright/emitter.ts` is restructured so
+`materializer/src/playwright/emitter.ts` is restructured so
 that the step-rendering loop dispatches via a single lookup. Concretely:
 
 - A `renderStep(step, scope)` function that:
@@ -418,7 +418,7 @@ Added to `configs/camunda-oca/regression-invariants.test.ts`:
    a deployment response. Catches the originally-discussed
    `processDefinitionKeyVar`/`formKeyVar`/etc. coverage.
 4. **Emitter is role-agnostic.** A grep invariant over
-   `path-analyser/src/codegen/**/*.ts` (excluding `roles.ts` itself
+   `materializer/src/**/*.ts` (excluding `roles.ts` itself
    and any other type-surface files that are part of the role
    contract, but **including** all renderer/materializer/emitter
    sources) returns zero matches for `deploy|deployment|
@@ -435,7 +435,7 @@ Two guides:
 - **Adding a role** (`configs/README.md` addendum). Covers ABox entry,
   per-emitter directory layout, scope-variable reference, wrap-vs-replace
   pattern, naming conventions.
-- **Adding an emitter** (`path-analyser/src/codegen/README.md` or
+- **Adding an emitter** (`materializer/src/README.md` or
   similar). Covers how the emitter walks the per-config role tree,
   what scope it must provide, how to declare its scope contract in this
   file.

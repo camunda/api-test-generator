@@ -23,10 +23,10 @@ REST API by analysing the upstream OpenAPI spec. Two suites are emitted:
 - **Negative** request-validation tests (HTTP 400 expectations across ~24
   malformed-request kinds) via `request-validation`.
 
-Inputs flow through three workspaces in order:
-`semantic-graph-extractor` → `path-analyser` (+ `request-validation`)
-→ generated `*.spec.ts` files. The bundled OpenAPI spec is fetched by
-`camunda-schema-bundler` (a dev dependency).
+Inputs flow through four workspaces in order:
+`semantic-graph-extractor` → `path-analyser` → `materializer`
+(+ `request-validation` as a parallel pipeline). The bundled OpenAPI spec
+is fetched by `camunda-schema-bundler` (a dev dependency).
 
 ## Project layout
 
@@ -35,8 +35,9 @@ npm workspaces monorepo. Node `>=22`.
 | Path | Purpose |
 |---|---|
 | `semantic-graph-extractor/` | Parses bundled spec, emits `operation-dependency-graph.json` |
-| `path-analyser/` | BFS scenario planner + Playwright codegen (positive suite) |
+| `path-analyser/` | BFS scenario planner — emits scenario JSON |
 | `path-analyser/src/scenarioGenerator.ts` | Core BFS planner — `generateScenariosForEndpoint()` |
+| `materializer/` | Test-suite materialization — reads scenarios JSON + ABox views and emits Playwright suites (positive). Owns the Playwright emitter, role-templating renderer, and vendored support helpers. Depends on path-analyser only via published `exports` (loaders + types). |
 | `request-validation/` | Negative-test generator (HTTP 400 suite) |
 | `optional-responses/` | Optional response field analyser |
 | `tests/fixtures/extractor/` | Layer-1 hand-curated OpenAPI snippets |
@@ -156,9 +157,9 @@ Run `npm run lint` (or `npx biome check <files>`) before commit.
 
 ## TypeScript
 
-- Three workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
-  `path-analyser/tsconfig.json`, `request-validation/tsconfig.json`. CI
-  typechecks each in turn.
+- Four workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
+  `path-analyser/tsconfig.json`, `materializer/tsconfig.json`,
+  `request-validation/tsconfig.json`. CI typechecks each in turn.
 - Tests under `tests/**` import workspace sources directly (e.g.
   `../../../path-analyser/src/scenarioGenerator.ts`) and run via vitest with
   on-the-fly transformation — no separate test tsconfig.
@@ -365,6 +366,7 @@ Local equivalent of the CI gate. Run before every push:
 npm run lint
 npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
 npx tsc --noEmit -p path-analyser/tsconfig.json
+npx tsc --noEmit -p materializer/tsconfig.json
 npx tsc --noEmit -p request-validation/tsconfig.json
 TEST_SEED=snapshot-baseline npm run testsuite:generate
 npm run generate:request-validation
@@ -381,7 +383,8 @@ npm test
 > `scenarioGenerator.ts`).
 >
 > Any change under `semantic-graph-extractor/`, `path-analyser/`,
-> `request-validation/`, or any file under `configs/<name>/` (notably
+> `materializer/`, `request-validation/`, or any file under
+> `configs/<name>/` (notably
 > `domain-semantics.json`, `filter-providers.json`, `request-defaults.json`)
 > requires the regen. When in doubt, regen.
 >

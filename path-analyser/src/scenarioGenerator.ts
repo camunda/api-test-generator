@@ -1,5 +1,5 @@
 import { bindSemanticInput } from './bindSemanticInput.js';
-import { deterministicSuffix } from './codegen/support/seeding.js';
+import { deterministicSuffix } from './deterministicSuffix.js';
 import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
 import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
 import type {

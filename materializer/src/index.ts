@@ -5,19 +5,19 @@ import {
   getPlaywrightCodegenOptions,
   getPlaywrightSuiteDir,
   getVariantOutputDir,
-} from '../configResolver.js';
-import { loadGraph } from '../graphLoader.js';
+} from 'path-analyser/configResolver';
+import { loadGraph } from 'path-analyser/graphLoader';
 import {
   assertSafeGlobalContextSeeds,
   deriveArtifactKindsViews,
   deriveGlobalContextSeedsViews,
-} from '../ontology/loader.js';
+} from 'path-analyser/ontology/loader';
 import {
   DEPLOYMENT_GATEWAY_ROLE,
   findDeploymentGatewayOpId,
   getRoleForOperation,
-} from '../ontology/operationRoles.js';
-import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
+} from 'path-analyser/ontology/operationRoles';
+import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
 import { computeDeploymentExtracts } from './deploymentExtracts.js';
 import { writeEmitted } from './orchestrator.js';

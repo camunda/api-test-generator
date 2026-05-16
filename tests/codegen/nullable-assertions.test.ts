@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { renderPlaywrightSuite } from '../../path-analyser/src/codegen/playwright/emitter.ts';
+import { renderPlaywrightSuite } from '../../materializer/src/playwright/emitter.ts';
 import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
 
 // Class-of-defect regression test for response shape assertion verbosity.

@@ -9,7 +9,7 @@
 // emitter's materializeSupport() resolves them at codegen time.
 //
 // Output layout:
-//   dist/src/codegen/playwright/support-templates/
+//   dist/src/playwright/support-templates/
 //     env.ts
 //     recorder.ts
 //     seeding.ts
@@ -31,8 +31,8 @@ const SUPPORT_FILES = [
 
 async function main() {
   const root = process.cwd();
-  const srcDir = path.join(root, 'src/codegen/support');
-  const destDir = path.join(root, 'dist/src/codegen/playwright/support-templates');
+  const srcDir = path.join(root, 'src/support');
+  const destDir = path.join(root, 'dist/src/playwright/support-templates');
   await fs.mkdir(destDir, { recursive: true });
   for (const name of SUPPORT_FILES) {
     const src = path.join(srcDir, name);
