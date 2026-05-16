@@ -1595,12 +1595,11 @@ function ensureArtifactBindings(
         ? '__PENDING__'
         : `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     }
-    // If BPMN process definition -> ensure BPMN model spec exists
-    // Lift 10 / #227: dispatch driven by the ABox's `modelKind` field
-    // instead of a hard-coded `s === 'ProcessDefinitionKey'` /
-    // `s === 'FormKey'` literal. The `if (modelKind === 'bpmn'/'form')`
-    // branches stay because the `GeneratedModelSpec` discriminated union
-    // still carries kind-specific fields (Lift 13's concern).
+    // Resolve the GeneratedModelSpec variant for this semantic via the ABox
+    // (Lift 10 / #227): semantic → artifactKind → modelKind. The per-kind
+    // branches stay because the GeneratedModelSpec discriminated union still
+    // carries kind-specific fields (processDefinitionIdVar for bpmn,
+    // formKeyVar for form); generalising that union is Lift 13's concern.
     const modelKind = getModelKindForSemantic(graph.domain, s);
     if (modelKind === 'bpmn' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
       state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
