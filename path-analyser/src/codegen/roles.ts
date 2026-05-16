@@ -61,12 +61,20 @@ export interface PlaywrightRoleScope extends CommonRoleScope {
 }
 
 /**
- * Additional scope variables made available to `imports.tmpl` (on top of the
- * per-emitter call-site scope). The renderer computes these per
- * (spec-file, role) pair before rendering the imports template; see
- * ROLES.md § "Scope variables for imports.tmpl".
+ * Scope provided to `imports.tmpl`. Rendered **once per (spec-file, role)
+ * pair**, not once per step — therefore receives only the role-static
+ * subset of `CommonRoleScope` / per-emitter scopes, never per-step values
+ * (`respVar`, `body`, `extracts`, `operationId`, `pathTemplate`, etc.).
+ *
+ * Step-dependent imports are not a use case the contract supports: if a
+ * template's import block needs to differ between two steps of the same
+ * role in the same spec, that variation belongs inside the helper, not in
+ * the import template. The renderer enforces the narrower scope so that
+ * a typoed reference to a per-step variable fails loudly at codegen time.
  */
-export interface ImportsTemplateExtras {
+export interface ImportsTemplateScope {
+  /** The role identifier (e.g. `deploymentGateway`). */
+  roleName: string;
   /**
    * Renderer-computed relative path from the current spec file to
    * `playwright/support/<role>` (no extension). Typically

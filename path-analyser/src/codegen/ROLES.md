@@ -10,14 +10,16 @@ reference role, L3 invariants, and config-author docs.
 binding between the two is **directory existence** — never an ABox
 field naming a helper or template.
 
-- `configs/<config>/ontology/operation-roles.json` — ABox. Says
-  *"operation X plays role R."* `R` is an API-semantic name
-  (`deploymentGateway`; hypothetical `longPoll`, `webhookPublish`,
-  …). Free of any generator concept. **The directory name in the
-  codegen tree (see below) must match this identifier verbatim** —
-  the existing `deploymentGateway` role is the canonical example. No
-  normalisation between ABox identifiers and directory names is
-  performed; an exact-string match keeps the binding unambiguous.
+- `configs/<config>/ontology/artifact-kinds.json` — ABox. Under
+  `operationRules[].role`, says *"operation X plays role R."* `R` is
+  an API-semantic name (`deploymentGateway`; hypothetical `longPoll`,
+  `webhookPublish`, …). Free of any generator concept. **The
+  directory name in the codegen tree (see below) must match this
+  identifier verbatim** — the existing `deploymentGateway` role at
+  `configs/camunda-oca/ontology/artifact-kinds.json:52–56` is the
+  canonical example. No normalisation between ABox identifiers and
+  directory names is performed; an exact-string match keeps the
+  binding unambiguous.
 - `configs/<config>/codegen/<emitter>/roles/<role>/` — codegen tree.
   Owns the per-emitter implementation for that role. Directory
   existence is the binding; no JSON registry references it.
@@ -75,13 +77,17 @@ configs/<config>/codegen/<emitter>/roles/<role>/
 All three files are **per emitter** because they encode emitter-specific
 syntax (TypeScript helpers for Playwright; Java classes for the future
 Java SDK emitter; etc.). A role may have a directory for one emitter
-and not another — that simply means the emitter does not implement the
-role, and steps bound to it fall through to the generic path on that
-emitter (with a `--strict` flag option to error instead, TBD).
+and not another — in that case the role is not implemented on that
+emitter, and any step whose `roleFor(step.operationId)` resolves to the
+role fails the same materializer/dispatch validation described in
+"Dispatch" above (bound role with no template is always an error). The
+emitter does not silently fall back to the generic path.
 
 `support.<ext>` is copied into the emitted suite's vendored support tree
-by the materializer overlay (Phase 2). Multiple roles may ship multiple
-support files; collisions on file name are an error.
+by the materializer overlay (Phase 2). One role ships one support file
+(see "Helper materialization and imports" below for the
+single-file-per-role convention); a collision between a role's emitted
+filename and a built-in support file's basename is an error.
 
 `imports.tmpl` is aggregated per spec file: rendered once per distinct
 role appearing in the spec, deduplicated, injected at the top.
@@ -195,30 +201,43 @@ test('publish a process and start an instance', async ({ request, baseUrl }, ctx
 
 ### Scope variables for `imports.tmpl`
 
-`imports.tmpl` receives the same scope as `call-site.tmpl` (see the
-"Scope variables" section above), plus one additional variable
-specific to imports:
+`imports.tmpl` is rendered **once per `(spec-file, role)` pair** —
+not once per step. Per-step values like `respVar`, `body`, `extracts`,
+`operationId`, `pathTemplate` would be ambiguous in that scope (which
+step's value would they hold?) and step-dependent imports are not a
+use case the contract supports: if a template's import block needs to
+differ between two steps of the same role in the same spec, that is a
+signal to factor the variation into the helper, not into the import
+template.
+
+To enforce this unambiguously, `imports.tmpl` receives a **strict
+subset** of `call-site.tmpl`'s scope — only the role-static fields
+that have the same value for every step bound to the role in a given
+spec file:
 
 | Variable | Type | Description |
 |---|---|---|
+| `roleName` | string | The role identifier (e.g. `deploymentGateway`). |
 | `supportImportPath` | string | Renderer-computed relative path from the current spec file to `playwright/support/<role>` (no extension; Playwright/TypeScript resolves both `.ts` and `.js` per the suite's `tsconfig`). Typically `./support/<role>` for spec files at the suite root, `../support/<role>` for spec files in subdirectories. Authors should always interpolate this with triple-braces. |
 
-The renderer computes this once per `(spec-file, role)` pair before
-rendering `imports.tmpl`. Templates that hard-code the path break
-when spec-file nesting changes; always go through
-`{{{supportImportPath}}}`.
+Per-step variables (`respVar`, `body`, `extracts`, `operationId`,
+`pathTemplate`, `method`, `request`, `baseUrl`, `strips`, `ctx`,
+`defaultRender`) are **not** in `imports.tmpl` scope. Referencing
+them is a template-render error so that mistakes fail at codegen time
+rather than producing whichever step's value happened to win.
 
 ### Aggregation and deduplication
 
 Per emitted spec file:
 
 1. For each step whose role resolves to a role with templates under
-   the active emitter+config, the renderer records `(role,
-   supportImportPath)`.
+   the active emitter+config, the renderer records the role
+   identifier and the spec-file-relative `supportImportPath`.
 2. After all steps are rendered, the recorded role set is
-   deduplicated.
+   deduplicated by role identifier.
 3. For each distinct role in the set, `imports.tmpl` is rendered
-   once with the scope for that role.
+   once with the role-static scope (`roleName`,
+   `supportImportPath`).
 4. The rendered import blocks are concatenated, deduplicated as raw
    text (so two roles importing from the same path produce a single
    line), and injected into the spec file's import block below the
@@ -321,17 +340,6 @@ If a role finds itself needing indent-sensitive interpolation in
 multiple places, that is a signal to add an indented-render helper
 (`{{{defaultRenderIndented2}}}` etc.) rather than push indentation
 logic into the template.
-
-## Imports
-
-`imports.tmpl` receives the same scope as `call-site.tmpl`. Most
-imports are static and reference no scope variables; the template form
-exists so that, e.g., a future role can conditionally import based on
-emitter-specific scope.
-
-Rendered once per `(spec-file, role)` pair, deduplicated as raw text
-across roles within a spec file, injected at the top of the spec file
-below any emitter-generated banner.
 
 ## Materializer overlay (Phase 2)
 
