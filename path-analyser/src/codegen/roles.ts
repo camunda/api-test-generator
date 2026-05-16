@@ -13,7 +13,7 @@
 export interface CommonRoleScope {
   /** Response binding variable name allocated by the planner for this step (e.g. `resp42`). */
   respVar: string;
-  /** OpenAPI path template, e.g. `/deployments`. */
+  /** OpenAPI path template (e.g. the operation's `op.path`). */
   pathTemplate: string;
   /** Uppercase HTTP verb. */
   method: string;

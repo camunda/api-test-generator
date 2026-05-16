@@ -12,8 +12,12 @@ field naming a helper or template.
 
 - `configs/<config>/ontology/operation-roles.json` — ABox. Says
   *"operation X plays role R."* `R` is an API-semantic name
-  (`deployment-gateway`, hypothetical `long-poll`, `webhook-publish`,
-  …). Free of any generator concept.
+  (`deploymentGateway`; hypothetical `longPoll`, `webhookPublish`,
+  …). Free of any generator concept. **The directory name in the
+  codegen tree (see below) must match this identifier verbatim** —
+  the existing `deploymentGateway` role is the canonical example. No
+  normalisation between ABox identifiers and directory names is
+  performed; an exact-string match keeps the binding unambiguous.
 - `configs/<config>/codegen/<emitter>/roles/<role>/` — codegen tree.
   Owns the per-emitter implementation for that role. Directory
   existence is the binding; no JSON registry references it.
@@ -29,18 +33,35 @@ The renderer is one uniform lookup, not "default with overrides":
 
 ```
 for each step:
-  role = step.roleBinding              // may be undefined
-  if role and template(activeEmitter, role) exists:
+  role = roleFor(step.operationId)     // ABox lookup; may be undefined
+  if role is undefined:
+    render via generic per-method path
+  else if template(activeEmitter, role) exists:
     render via that role
   else:
-    render via generic per-method path
+    raise: role R is bound in the ABox for op O, but the active
+           emitter+config has no roles/R/ directory
 ```
 
 The generic per-method path is the dispatch entry for the
 **no-role-binding** key. It is not a fallback that roles "patch"; it is
 just the most-common entry in the dispatch table. Roles are
-first-class. Removing a role from a config falls through to the same
-generic entry that already serves every un-roled operation.
+first-class. Removing a role binding from a config falls through to the
+same generic entry that already serves every un-roled operation.
+
+**A bound role with no template is always an error.** This makes typos
+and missing-directory mistakes fail loudly at codegen time instead of
+silently producing a generic render that nobody asked for. There is
+no soft-fallback mode; if a future use case ever needs one, it must
+be opt-in and explicitly named ("emitter-skips-role").
+
+**Role resolution uses the existing ABox accessor by `operationId`.**
+The scenario `RequestStep` shape is not extended with a `roleBinding`
+field; roles are derived per step from
+`path-analyser/src/ontology/operationRoles.ts` (e.g.
+`roleFor(opId)` / `isDeploymentGatewayOp(opId)`-style accessors) so
+there is exactly one source of truth for which op plays which role.
+The renderer caches the lookup per step.
 
 ## Per-role directory contract
 
@@ -118,7 +139,7 @@ Templates choose between two patterns:
 
 The template emits its own call site, ignoring `{{{defaultRender}}}`.
 Used when the role's call shape diverges meaningfully from the generic
-one — e.g. the OCA `deployment-gateway` role wraps a multipart upload
+one — e.g. the OCA `deploymentGateway` role wraps a multipart upload
 with response-field extraction and an OCA-specific error envelope.
 
 ```hbs
@@ -129,7 +150,7 @@ const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUr
 
 The template interpolates `{{{defaultRender}}}` inside its own
 scaffolding. Used when the role decorates the request without changing
-its shape — e.g. a hypothetical `long-poll` role wraps the generic call
+its shape — e.g. a hypothetical `longPoll` role wraps the generic call
 in a retry-with-timeout loop.
 
 ```hbs
@@ -182,7 +203,7 @@ suite's `playwright/support/`. Phase 2 extends this to:
    namespacing their helpers.
 
 `deployment.ts` moves from `path-analyser/src/codegen/support/` into
-`configs/camunda-oca/codegen/playwright/roles/deployment-gateway/
+`configs/camunda-oca/codegen/playwright/roles/deploymentGateway/
 support.ts` in Phase 4. The built-in support tree retains only files
 that are genuinely generic across configs (`env.ts`, `fixtures.ts`,
 `seeding.ts`, `assert-json-body.ts`, `recorder.ts`).
@@ -194,9 +215,12 @@ that the step-rendering loop dispatches via a single lookup. Concretely:
 
 - A `renderStep(step, scope)` function that:
   1. Renders the generic per-method path into `scope.defaultRender`.
-  2. If `step.roleBinding` is set and a `call-site.tmpl` exists for
-     that role under the active emitter and config, renders the
-     template with `scope` and returns the result.
+  2. If `roleFor(step.operationId)` returns a role and a
+     `call-site.tmpl` exists for that role under the active emitter
+     and config, renders the template with `scope` and returns the
+     result. If the role is bound but no template exists, raises (see
+     "Dispatch" above — bound role with no template is always an
+     error).
   3. Otherwise returns `scope.defaultRender`.
 - All current `isDeploymentStep`-style branches in `emitter.ts` are
   deleted. The deployment-gateway behaviour comes entirely from the
@@ -223,23 +247,27 @@ baseline, modulo
 Added to `configs/camunda-oca/regression-invariants.test.ts`:
 
 1. **Role resolution.** For every scenario step in every generated
-   spec file, if the step has a `roleBinding`, then either
-   `configs/camunda-oca/codegen/playwright/roles/<role>/call-site.tmpl`
-   exists, or the dispatch path is the generic one. No silent
-   ambiguity.
+   spec file, if `roleFor(step.operationId)` returns a role, then
+   `configs/<config>/codegen/playwright/roles/<role>/call-site.tmpl`
+   exists. No silently-skipped role bindings.
 2. **Support coverage.** Every `support.<ext>` shipped under
    `configs/camunda-oca/codegen/playwright/roles/<role>/` is referenced
    from at least one emitted spec file (import or call).
-3. **Extracts cover consumers.** For the `deployment-gateway` op, the
+3. **Extracts cover consumers.** For the `deploymentGateway` op, the
    spec-derived extracts list contains a `varName` matching every
    binding var that any downstream step in any scenario consumes from
    a deployment response. Catches the originally-discussed
    `processDefinitionKeyVar`/`formKeyVar`/etc. coverage.
-4. **Emitter is role-agnostic.** `grep -RE
-   "deploy|deployment|createDeployment|processDefinitionKey|formKey|
-   decisionDefinitionKey|decisionRequirementsKey" path-analyser/src/
-   codegen/` returns zero matches. Encodes the API-agnostic-emitter
-   guarantee as a regression test.
+4. **Emitter is role-agnostic.** A grep invariant over
+   `path-analyser/src/codegen/**/*.ts` (excluding `roles.ts` itself
+   and any other type-surface files that are part of the role
+   contract, but **including** all renderer/materializer/emitter
+   sources) returns zero matches for `deploy|deployment|
+   createDeployment|processDefinitionKey|formKey|
+   decisionDefinitionKey|decisionRequirementsKey`. Markdown docs
+   (notably this file) are excluded from the invariant — they
+   intentionally name the canonical role to anchor the contract.
+   Encodes the API-agnostic-emitter guarantee as a regression test.
 
 ## Documentation (Phase 6)
 
@@ -258,7 +286,7 @@ Two guides:
 - Generalising other vendored support files (`env.ts`, `fixtures.ts`)
   beyond what Lift 11's CONFIG-env-driven approach already does.
   Addressed reactively, not as part of this initiative.
-- Adding new roles beyond `deployment-gateway`. New roles motivate
+- Adding new roles beyond `deploymentGateway`. New roles motivate
   themselves once we see them; this initiative is the infrastructure.
 - SDK emitter implementation. This initiative gives SDK emitters a
   place to land; the emitters themselves are tracked separately.
