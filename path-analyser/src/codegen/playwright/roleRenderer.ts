@@ -119,12 +119,22 @@ export function loadRoleBundlesForActiveConfig(repoRoot?: string): Map<string, L
     const importsPath = path.join(roleDir, 'imports.tmpl');
     // Discover support.<ext> by listing the directory — the role's helper
     // language (ts/js/java/...) is the role's choice, not the renderer's.
+    // Sort the entries for deterministic selection, and throw if more than
+    // one support.* file exists so the role directory has an unambiguous
+    // contract (non-deterministic filesystem ordering could silently select
+    // a different file across runs or machines).
+    const supportFiles = readdirSync(roleDir)
+      .filter((f) => f.startsWith('support.'))
+      .sort();
+    if (supportFiles.length > 1) {
+      throw new Error(
+        `roleRenderer: role directory ${roleDir} contains multiple support files: ` +
+          `${supportFiles.join(', ')}. Only one support.<ext> file is permitted per role.`,
+      );
+    }
     let supportPath: string | undefined;
-    for (const f of readdirSync(roleDir)) {
-      if (f.startsWith('support.')) {
-        supportPath = path.join(roleDir, f);
-        break;
-      }
+    if (supportFiles.length === 1) {
+      supportPath = path.join(roleDir, supportFiles[0]);
     }
     const matchPath = path.join(roleDir, 'match.json');
     let match: RoleMatchSpec | undefined;

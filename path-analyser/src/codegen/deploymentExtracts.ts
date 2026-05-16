@@ -21,8 +21,11 @@
 //     only ever read the first deployments[] entry, so preserve that
 //   - dedup by `varName`, keeping the first occurrence under the
 //     deterministic sort below (so an extract is bound to exactly one path)
-//   - sort by `JSON.stringify(segments)`, then varName, so the emitted JSON
-//     literal is byte-stable across runs and machines
+//   - sort by `JSON.stringify(segments)`, then varName, so the
+//     shortest/lexicographically-earliest path comes first during dedup;
+//     then stabilize the final deduplicated list with a second varName sort
+//     so the emitted JSON literal is byte-stable across runs and machines
+//     regardless of the order that responseSemanticLeaves are delivered
 //
 // `varName = <camelLower(semanticType)>Var` matches the convention used
 // throughout the planner (see `scenarioGenerator.ts:semanticToVarName()`)

@@ -155,25 +155,27 @@ async function run() {
   const deploymentGatewayOpId = findDeploymentGatewayOpId(
     artifactViews ? { operationArtifactRules: artifactViews.operationArtifactRules } : undefined,
   );
-  // Lift 12 / #231: per-role scope additions exposed to role templates as
-  // extra Mustache variables. For deploymentGateway, derive the
-  // spec-driven extracts list from the role-bound op's
-  // responseSemanticLeaves. The full operation graph is required because
-  // responseSemanticLeaves is loader-computed (not persisted in
-  // operation-dependency-graph.json), so we re-run loadGraph here.
-  if (emitter.id === 'playwright' && deploymentGatewayOpId) {
-    const graph = await loadGraph(baseDir);
-    const deployOp = graph.operations[deploymentGatewayOpId];
-    const extracts = computeDeploymentExtracts(deployOp);
-    roleExtras = new Map<string, Record<string, unknown>>();
-    roleExtras.set(DEPLOYMENT_GATEWAY_ROLE, { extracts: JSON.stringify(extracts) });
-    // Build the role-lookup closure over the same ABox view used by
-    // findDeploymentGatewayOpId so the emitter's role-dispatch path
-    // sees an identical ontology snapshot.
+  // Lift 12 / #231: wire role dispatch for all Playwright configs that ship
+  // an ABox view, regardless of whether a deploymentGateway op is bound.
+  // Gating getRoleForOperationFn on deploymentGatewayOpId would silently
+  // disable role dispatch for any config that defines roles other than
+  // deploymentGateway (or defines deploymentGateway roles but hasn't yet
+  // bound the gateway op).
+  if (emitter.id === 'playwright') {
     const domain = artifactViews
       ? { operationArtifactRules: artifactViews.operationArtifactRules }
       : undefined;
     getRoleForOperationFn = (opId: string) => getRoleForOperation(domain, opId);
+    // Gate the deploymentGateway-specific roleExtras on deploymentGatewayOpId
+    // since loading the full operation graph is only needed to compute the
+    // spec-driven extracts list for that role.
+    if (deploymentGatewayOpId) {
+      const graph = await loadGraph(baseDir);
+      const deployOp = graph.operations[deploymentGatewayOpId];
+      const extracts = computeDeploymentExtracts(deployOp);
+      roleExtras = new Map<string, Record<string, unknown>>();
+      roleExtras.set(DEPLOYMENT_GATEWAY_ROLE, { extracts: JSON.stringify(extracts) });
+    }
   }
 
   if (positional === '--all') {

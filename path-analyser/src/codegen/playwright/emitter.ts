@@ -503,6 +503,18 @@ function renderScenarioTest(
     // per-method (inline) path. The role's helper encapsulates body
     // building, auth, the HTTP request, status assertion, and any
     // role-specific response extraction. See ROLES.md.
+    // Pre-compute the generic inline lines so they are available as
+    // `defaultRender` in the role scope (wrap-pattern contract from ROLES.md)
+    // and as the body source for non-role steps.
+    const inlineLines = renderInlineStepLines({
+      step,
+      idx,
+      varName,
+      urlExpr,
+      method,
+      sentinelLocals,
+      awaitStepIndices,
+    });
     const roleMatch = findRoleForStep(step);
     if (roleMatch) {
       const tpl = JSON.stringify(
@@ -533,7 +545,9 @@ function renderScenarioTest(
         method: step.method.toUpperCase(),
         operationId: step.operationId,
         roleName: roleMatch.roleName,
-        defaultRender: '', // (#231 future: eager-rendered inline path; not consumed by deploymentGateway today)
+        // The eagerly-rendered inline path for this step so role templates
+        // can implement a wrap pattern via `{{{defaultRender}}}`.
+        defaultRender: inlineLines.join('\n'),
         ctx: 'ctx',
         request: 'request',
         baseUrl: 'baseUrl',
@@ -554,76 +568,7 @@ function renderScenarioTest(
         body.push(line ? `    ${line}` : '');
       }
     } else {
-      body.push(`    const url = baseUrl + ${urlExpr};`);
-      const bodyVar = `body${idx + 1}`;
-      if (step.bodyKind === 'json' && step.bodyTemplate) {
-        const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
-          /"\\?\$\{([^}]+)\}"/g,
-          (_, v) => `ctx["${v}"]`,
-        );
-        body.push(`    const ${bodyVar} = ${json};`);
-      } else if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-        // Non-createDeployment multipart template
-        const tpl = JSON.stringify(step.multipartTemplate, null, 4).replace(
-          /"\\?\$\{([^}]+)\}"/g,
-          (_, v) => `ctx["${v}"]`,
-        );
-        body.push(`    const ${bodyVar} = ${tpl};`);
-      }
-      const opts: string[] = [];
-      opts.push('headers: await authHeaders()');
-      if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
-      if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-        // Convert template to Playwright's expected multipart shape: a keyed object map.
-        // Field values are stringified (`String(v)`); file values are passed as
-        // `{ name, mimeType, buffer }`. The element type below mirrors the
-        // permissive subset of Playwright's `multipart` option that we actually
-        // emit, so the generated suite typechecks under `strict: true` when
-        // `request.post({ multipart })` is called.
-        body.push(
-          `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
-        );
-        body.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
-        // Emit a strip branch for every globalContextSeeds entry whose
-        // sentinel local was declared in the prologue. The emitter never
-        // hard-codes a field name here — the field name is the metadata key
-        // and the local was named after it.
-        for (const [fieldName, local] of sentinelLocals) {
-          body.push(`      if (k === '${fieldName}' && ${local}) continue;`);
-        }
-        body.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
-        body.push(`    }`);
-        body.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
-        if (typeof v === 'string' && v.startsWith('@@FILE:')) {
-          const p = v.slice('@@FILE:'.length);
-          const buf = await resolveFixture(p);
-          const name = p.split('/').pop() || 'file';
-          multipart[k] = { name, mimeType: 'application/octet-stream', buffer: buf };
-        } else {
-          multipart[k] = String(v);
-        }
-      }`);
-        opts.push('multipart: multipart');
-      }
-      // (#106) Eventually-consistent reads are wrapped with awaitEventually(),
-      // which retries the same request within a budget until the response is
-      // observably consistent (default predicate for POST .../search:
-      // `body.items.length > 0`; for GET: any 200) and returns the final
-      // APIResponse. Non-EC steps go straight through `request.${method}`.
-      if (awaitStepIndices.has(idx)) {
-        body.push(`    const ${varName} = await awaitEventually(`);
-        body.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
-        body.push(
-          `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
-        );
-        body.push(`    );`);
-      } else {
-        body.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
-      }
-      body.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
-      body.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
-      body.push(`    }`);
-      body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
+      for (const line of inlineLines) body.push(line);
     }
     // Record observation for this step (best-effort). Only capture response shapes for 200 responses.
     // For role-bound steps the helper throws on non-200, so __status is always 200 when this block runs.
@@ -715,6 +660,104 @@ function buildUrlExpression(pathTemplate: string): string {
     pathTemplate.replace(/\{([^}]+)\}/g, (_, p) => `\${ctx.${camelCase(p)}Var || '\${${p}}'}`) +
     '`'
   );
+}
+
+/**
+ * Render the generic per-step inline code lines. Used both as the body
+ * source for non-role steps (pushed directly onto the scenario body array)
+ * and as `defaultRender` in the role scope so role templates can implement
+ * a wrap pattern via `{{{defaultRender}}}` (see ROLES.md).
+ */
+interface InlineStepRenderInput {
+  step: RequestStep;
+  idx: number;
+  varName: string;
+  urlExpr: string;
+  method: string;
+  sentinelLocals: Map<string, string>;
+  awaitStepIndices: Set<number>;
+}
+function renderInlineStepLines({
+  step,
+  idx,
+  varName,
+  urlExpr,
+  method,
+  sentinelLocals,
+  awaitStepIndices,
+}: InlineStepRenderInput): string[] {
+  const lines: string[] = [];
+  const bodyVar = `body${idx + 1}`;
+  lines.push(`    const url = baseUrl + ${urlExpr};`);
+  if (step.bodyKind === 'json' && step.bodyTemplate) {
+    const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
+      /"\\?\$\{([^}]+)\}"/g,
+      (_, v) => `ctx["${v}"]`,
+    );
+    lines.push(`    const ${bodyVar} = ${json};`);
+  } else if (step.bodyKind === 'multipart' && step.multipartTemplate) {
+    // Non-createDeployment multipart template
+    const tpl = JSON.stringify(step.multipartTemplate, null, 4).replace(
+      /"\\?\$\{([^}]+)\}"/g,
+      (_, v) => `ctx["${v}"]`,
+    );
+    lines.push(`    const ${bodyVar} = ${tpl};`);
+  }
+  const opts: string[] = [];
+  opts.push('headers: await authHeaders()');
+  if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
+  if (step.bodyKind === 'multipart' && step.multipartTemplate) {
+    // Convert template to Playwright's expected multipart shape: a keyed object map.
+    // Field values are stringified (`String(v)`); file values are passed as
+    // `{ name, mimeType, buffer }`. The element type below mirrors the
+    // permissive subset of Playwright's `multipart` option that we actually
+    // emit, so the generated suite typechecks under `strict: true` when
+    // `request.post({ multipart })` is called.
+    lines.push(
+      `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
+    );
+    lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
+    // Emit a strip branch for every globalContextSeeds entry whose
+    // sentinel local was declared in the prologue. The emitter never
+    // hard-codes a field name here — the field name is the metadata key
+    // and the local was named after it.
+    for (const [fieldName, local] of sentinelLocals) {
+      lines.push(`      if (k === '${fieldName}' && ${local}) continue;`);
+    }
+    lines.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
+    lines.push(`    }`);
+    lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
+        if (typeof v === 'string' && v.startsWith('@@FILE:')) {
+          const p = v.slice('@@FILE:'.length);
+          const buf = await resolveFixture(p);
+          const name = p.split('/').pop() || 'file';
+          multipart[k] = { name, mimeType: 'application/octet-stream', buffer: buf };
+        } else {
+          multipart[k] = String(v);
+        }
+      }`);
+    opts.push('multipart: multipart');
+  }
+  // (#106) Eventually-consistent reads are wrapped with awaitEventually(),
+  // which retries the same request within a budget until the response is
+  // observably consistent (default predicate for POST .../search:
+  // `body.items.length > 0`; for GET: any 200) and returns the final
+  // APIResponse. Non-EC steps go straight through `request.${method}`.
+  if (awaitStepIndices.has(idx)) {
+    lines.push(`    const ${varName} = await awaitEventually(`);
+    lines.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
+    lines.push(
+      `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
+    );
+    lines.push(`    );`);
+  } else {
+    lines.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
+  }
+  lines.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
+  lines.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
+  lines.push(`    }`);
+  lines.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
+  return lines;
 }
 
 function escapeQuotes(s: string): string {
