@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import fsSync, { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   getFeatureOutputDir,
@@ -71,12 +71,35 @@ function printUsage(): void {
   );
 }
 
+// Walks up from process.cwd() to find the repo root, identified by the
+// presence of configs.json. Allows the CLI to be invoked from any
+// workspace (root, materializer/, path-analyser/) without per-cwd
+// special-casing — the legacy heuristic only worked when CWD was the
+// repo root or path-analyser/.
+function findRepoRoot(start: string): string {
+  let dir = path.resolve(start);
+  let parent = path.dirname(dir);
+  while (parent !== dir) {
+    if (fsSync.existsSync(path.join(dir, 'configs.json'))) return dir;
+    dir = parent;
+    parent = path.dirname(dir);
+  }
+  if (fsSync.existsSync(path.join(dir, 'configs.json'))) return dir;
+  throw new Error(
+    `Could not find repo root (no configs.json found walking up from ${start}). ` +
+      `Run from inside the api-test-generator repository.`,
+  );
+}
+
 async function run() {
   const { target, positional, help } = parseCliArgs(process.argv.slice(2));
-  const baseDir = process.cwd().endsWith('path-analyser')
-    ? process.cwd()
-    : path.resolve(process.cwd(), 'path-analyser');
-  const repoRoot = path.resolve(baseDir, '..');
+  const repoRoot = findRepoRoot(process.cwd());
+  // loadGraph / loadGlobalContextSeeds were carved out of the original
+  // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
+  // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
+  // Keep the contract; pass the conventional path so we don't churn the
+  // planner-side API in this PR.
+  const baseDir = path.join(repoRoot, 'path-analyser');
   // Per-config output partition (#128 PR 2): scenario inputs and the
   // emitted Playwright suite all live under generated/<config>/.
   const featureDir = getFeatureOutputDir(repoRoot);

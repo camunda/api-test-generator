@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "prebuild": "npm run build --workspace path-analyser",
     "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
     "codegen:playwright": "npm run build && node dist/src/index.js",
     "codegen:playwright:all": "npm run build && node dist/src/index.js --all",
