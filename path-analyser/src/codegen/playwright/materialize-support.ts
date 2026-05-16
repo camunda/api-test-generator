@@ -223,8 +223,8 @@ export async function materializeRoleSupportFiles(
     if (!bundle.supportFilePath) continue;
     if (builtInStems.has(roleName)) {
       throw new Error(
-        `materializeRoleSupportFiles: role '${roleName}' collides with a built-in support ` +
-          `file basename (${[...builtInStems].join(', ')}). Rename the role.`,
+        `materializeRoleSupportFiles: role '${roleName}' collides with the built-in support ` +
+          `file '${roleName}.*'. Rename the role.`,
       );
     }
     const ext = path.extname(bundle.supportFilePath);

@@ -28,8 +28,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Top-level import (vs. dynamic `await import`) — mustache is a small
-// CommonJS package with a default export carrying `render`. Cleanest at the
-// type system level is to use the namespace import.
+// CommonJS package with a default export carrying `render`.
 import Mustache from 'mustache';
 import { getActiveConfigDir } from '../../configResolver.js';
 import type { RequestStep } from '../../types.js';

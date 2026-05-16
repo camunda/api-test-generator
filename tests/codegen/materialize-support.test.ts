@@ -275,7 +275,7 @@ describe('materializeRoleSupportFiles', () => {
       // 'env' is the stem of the built-in 'env.ts'
       const bundles = new Map([['env', { role: 'env', supportFilePath: supportFile }]]);
       await expect(materializeRoleSupportFiles(tmp, bundles)).rejects.toThrow(
-        /collides with a built-in support file/,
+        /collides with the built-in support file/,
       );
     } finally {
       await fs.rm(srcDir, { recursive: true, force: true });
