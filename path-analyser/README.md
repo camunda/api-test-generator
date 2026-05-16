@@ -100,12 +100,12 @@ Note: multipart endpoints (e.g., createDeployment) use a small fixture located u
 
 ### Deployment Artifact Registry and Manifest
 
-- Registry file (editable): `api-test/path-analyser/fixtures/deployment-artifacts.json`
+- Registry file (editable): `api-test/configs/<config>/fixtures/deployment-artifacts.json`
   - Purpose: define deployable artifacts used by tests. The planner prefers these over generic defaults.
   - Shape:
     - `artifacts: Array<{ kind: string; path: string; description?: string; parameters?: Record<string, any> }>`
     - `kind` must match a domain artifact kind (e.g., `bpmnProcess`, `form`, `dmnDecision`, `dmnDrd`).
-    - `path` is relative to `api-test/path-analyser/fixtures/`.
+    - `path` is relative to `api-test/configs/<config>/fixtures/`.
     - `description` is free text to capture notable characteristics.
     - Optional `parameters` can seed scenario bindings (e.g., `{ jobType: "sampleJobType" }`).
   - Example entries are provided for BPMN, Form, and DMN.

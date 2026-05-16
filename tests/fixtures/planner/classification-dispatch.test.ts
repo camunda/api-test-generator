@@ -141,7 +141,8 @@ function makeFeatureScenario(overrides: Partial<EndpointScenario> = {}): Endpoin
 //     template references a registry entry with providesValues[<sem>]
 //
 // These tests use `bpmn/service-task.bpmn`, which is a real entry in
-// path-analyser/fixtures/deployment-artifacts.json with both ElementId
+// path-analyser/fixtures/deployment-artifacts.json (now
+// configs/<config>/fixtures/deployment-artifacts.json) with both ElementId
 // and JobType providesValues. The registry contents are themselves
 // guarded by the L3 invariants in regression-invariants.test.ts; this
 // L2 layer locks in the dispatch behaviour given a known-good registry.

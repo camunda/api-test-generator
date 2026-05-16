@@ -18,12 +18,15 @@ function errnoCode(err: unknown): string | undefined {
  * Read a fixture identified by a `@@FILE:`-relative path. Throws if no
  * candidate location resolves.
  *
- * Candidate order is intentionally a superset of the previous inline
- * resolver in the emitter. The previous code resolved relative to
- * `__dirname` of each emitted spec; this helper resolves relative to its
- * own `import.meta.url` (it lives under `<suite>/support/`) and also walks
- * up an extra level so it finds `path-analyser/fixtures/` regardless of
- * how the suite was vendored or invoked.
+ * The vendored `<suite>/fixtures/` directory (sibling to `<suite>/support/`,
+ * populated by `materializeFixtures`) is the primary source — the walk-up
+ * candidates from `import.meta.url` cover that and dist/generated-tests/
+ * layouts. The `process.cwd()`-relative candidates are an in-repo
+ * convenience for running generated suites from the api-test-generator
+ * checkout (#221 / Lift 11: per-config fixtures live at
+ * `configs/<config>/fixtures/`). The config name is read from
+ * `process.env.CONFIG` (defaulting to `camunda-oca`, matching
+ * `configs.json#default`) so the fallback works for any active config.
  *
  * Only `ENOENT` / `ENOTDIR` are treated as "try the next candidate".
  * Any other error (e.g. `EACCES` — file exists but is unreadable) is
@@ -35,13 +38,15 @@ export async function resolveFixture(p: string): Promise<Buffer> {
     throw new Error('Fixture path missing after @@FILE:');
   }
   const here = path.dirname(fileURLToPath(import.meta.url));
+  const activeConfig = process.env.CONFIG?.trim() || 'camunda-oca';
   const candidates: string[] = [
     p,
     path.resolve(process.cwd(), p),
     // When running from path-analyser/
     path.resolve(process.cwd(), 'fixtures', p),
-    // When running from repo root
-    path.resolve(process.cwd(), 'path-analyser/fixtures', p),
+    // When running from the api-test-generator repo root: per-config
+    // fixtures live under configs/<config>/fixtures (#221 / Lift 11).
+    path.resolve(process.cwd(), 'configs', activeConfig, 'fixtures', p),
     // Walk up from this helper (lives in <suite>/support/) looking for a
     // sibling fixtures/ directory. Three levels covers the standalone
     // vendored layout, dist/generated-tests/, and the repo-root layout.

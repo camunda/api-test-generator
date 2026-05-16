@@ -45,6 +45,7 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/` | Per-target generator configs (one directory per named config) |
 | `configs/camunda-oca/spec-pin.json` | Pinned upstream `specRef` + `expectedSpecHash` for the camunda-oca config |
 | `configs/camunda-oca/{domain-semantics,filter-providers,request-defaults}.json` | Domain rules, value providers, and request-body defaults for camunda-oca |
+| `configs/camunda-oca/fixtures/` | Deployment-artifact fixture registry + BPMN/DMN/Form files for camunda-oca (#221 / Lift 11) |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
