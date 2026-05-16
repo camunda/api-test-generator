@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import {
-  computeDeploymentExtracts,
-  type DeploymentExtract,
-} from '../../path-analyser/src/codegen/deploymentExtracts.ts';
+import { computeDeploymentExtracts } from '../../path-analyser/src/codegen/deploymentExtracts.ts';
 import type { OperationNode } from '../../path-analyser/src/types.ts';
 
 function makeOp(
@@ -30,7 +27,12 @@ describe('computeDeploymentExtracts', () => {
 
   test('keeps leaves where provider === true', () => {
     const op = makeOp([
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].processDefinitionKey', status: '200', provider: true },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
     ]);
     const result = computeDeploymentExtracts(op);
     expect(result).toHaveLength(1);
@@ -49,21 +51,36 @@ describe('computeDeploymentExtracts', () => {
 
   test('skips non-top-level leaves where provider === false', () => {
     const op = makeOp([
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].processDefinitionKey', status: '200', provider: false },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].processDefinitionKey',
+        status: '200',
+        provider: false,
+      },
     ]);
     expect(computeDeploymentExtracts(op)).toEqual([]);
   });
 
   test('skips leaves with .resource. in the fieldPath', () => {
     const op = makeOp([
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].resource.processDefinitionKey', status: '200', provider: true },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].resource.processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
     ]);
     expect(computeDeploymentExtracts(op)).toEqual([]);
   });
 
   test('skips leaves where status !== "200"', () => {
     const op = makeOp([
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].processDefinitionKey', status: '400', provider: true },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].processDefinitionKey',
+        status: '400',
+        provider: true,
+      },
     ]);
     expect(computeDeploymentExtracts(op)).toEqual([]);
   });
@@ -80,8 +97,18 @@ describe('computeDeploymentExtracts', () => {
     // Two leaves produce the same varName. The pre-dedup sort puts
     // the shorter segments path first, so that one should be kept.
     const op = makeOp([
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].processDefinitionKey', status: '200', provider: true },
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'zzz[].processDefinitionKey', status: '200', provider: true },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'zzz[].processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
     ]);
     const result = computeDeploymentExtracts(op);
     expect(result).toHaveLength(1);
@@ -116,11 +143,26 @@ describe('computeDeploymentExtracts', () => {
     const op = makeOp([
       { semantic: 'DeploymentKey', fieldPath: 'deploymentKey', status: '200', provider: false },
       { semantic: 'TenantId', fieldPath: 'tenantId', status: '200', provider: false },
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].processDefinition.processDefinitionKey', status: '200', provider: true },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].processDefinition.processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
       // .resource. path — should be skipped
-      { semantic: 'ProcessDefinitionKey', fieldPath: 'deployments[].resource.processDefinitionKey', status: '200', provider: true },
+      {
+        semantic: 'ProcessDefinitionKey',
+        fieldPath: 'deployments[].resource.processDefinitionKey',
+        status: '200',
+        provider: true,
+      },
       // non-provider nested — should be skipped
-      { semantic: 'InternalId', fieldPath: 'deployments[].internalId', status: '200', provider: false },
+      {
+        semantic: 'InternalId',
+        fieldPath: 'deployments[].internalId',
+        status: '200',
+        provider: false,
+      },
     ]);
     const result = computeDeploymentExtracts(op);
     const varNames = result.map((r) => r.varName);
