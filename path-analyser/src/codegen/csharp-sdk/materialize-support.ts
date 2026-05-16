@@ -16,7 +16,6 @@ import path from 'node:path';
 const CSPROJ = `<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Library</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -63,13 +62,45 @@ Auto-generated test suite targeting the Camunda REST API via
 
 ## Running the suite
 
-This is a .NET class library containing auto-generated test methods. To run them:
+This is a .NET class library containing auto-generated test methods. The recommended approach is to create a separate xUnit/NUnit test project that references this library:
 
-1. **From a test framework** (recommended):
-   Reference this library from an xUnit/NUnit test project and write test methods that call the static test methods in \`csharp/*.cs\`.
+### Setup test consumer project
 
-2. **Programmatically**:
-   Call the static methods in \`csharp/*.cs\` directly from a custom console app or integration test runner.
+\`\`\`bash
+# From the generated output directory
+dotnet new xunit -n CamundaTests.xUnit
+cd CamundaTests.xUnit
+dotnet add reference ../CamundaIntegrationTests.csproj
+\`\`\`
+
+### Write test wrapper
+
+\`\`\`csharp
+// CamundaTests.xUnit/CamundaSuiteTests.cs
+using Xunit;
+using CamundaIntegrationTests;
+
+public class CamundaSuiteTests
+{
+    [Fact]
+    public async Task ActivateJobsSuite() => await GeneratedSuite.ActivateJobsAsync();
+    
+    [Fact]
+    public async Task CreateProcessInstanceSuite() => await GeneratedSuite.CreateProcessInstanceAsync();
+    // ... more test methods
+}
+\`\`\`
+
+### Run tests
+
+\`\`\`bash
+cd CamundaTests.xUnit
+dotnet test
+\`\`\`
+
+### Alternative: Direct consumption
+
+You can also call the static methods directly from a custom console app or integration test runner without a formal test framework.
 
 ## Environment variables
 
@@ -83,7 +114,7 @@ This is a .NET class library containing auto-generated test methods. To run them
 
 /**
  * Materialize C# project scaffolding into `<outDir>/` so the emitted C# SDK
- * suite is self-contained and runnable in place (`cd <outDir> && dotnet run`).
+ * suite is self-contained and consumable via a test framework or custom runner.
  *
  * Idempotent: safe to call multiple times per emit run.
  *
