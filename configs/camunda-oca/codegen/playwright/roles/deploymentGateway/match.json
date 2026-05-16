@@ -1,0 +1,5 @@
+{
+  "_comment": "Gating conditions for the deploymentGateway role (Lift 12 / #231). A step is dispatched to this role only when its operationId carries the deploymentGateway ABox role AND every field below matches. Empty/omitted arrays match every value for that field. This keeps error-scenario createDeployment steps (e.g. expect 400) on the inline-request path, where the helper's 200-only contract doesn't apply.",
+  "bodyKinds": ["multipart"],
+  "expectedStatuses": [200]
+}

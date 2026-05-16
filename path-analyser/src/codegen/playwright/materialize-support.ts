@@ -9,11 +9,15 @@
 //
 // Three sets of assets are copied:
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
-//                fixtures.ts, seed-rules.json, await-eventually.ts,
-//                deployment.ts). Sources:
+//                fixtures.ts, seed-rules.json, await-eventually.ts).
+//                Sources:
 //                path-analyser/src/codegen/support/, staged into
 //                dist/src/codegen/playwright/support-templates/ at
 //                build time.
+//                PLUS per-role overlays from
+//                configs/<config>/codegen/playwright/roles/<role>/support.<ext>
+//                copied (renamed) to support/<role>.<ext>
+//                — see materializeRoleSupportFiles().
 //   * project root — package.json, playwright.config.ts, tsconfig.json,
 //                    .env.example, README.md.
 //                    Sources: path-analyser/templates/.
@@ -37,7 +41,6 @@ export const SUPPORT_TEMPLATE_FILES = [
   'fixtures.ts',
   'seed-rules.json',
   'await-eventually.ts',
-  'deployment.ts',
 ] as const;
 
 /** Files copied directly into <outDir>/ (project root scaffolding). */
@@ -169,6 +172,73 @@ export async function materializeSupport(
   }
 
   return destDir;
+}
+
+/**
+ * Vendor per-role helper files from the active config's role overlay
+ * (Lift 12 / #231) into `<outDir>/support/<role>.<ext>`.
+ *
+ * Walks `configs/<config>/codegen/playwright/roles/<role>/` directories
+ * via the role loader and, for each role whose directory contains a
+ * `support.<ext>` file, copies that file to the suite as `<role>.<ext>`.
+ * The rename collapses the per-role directory into a single suite-local
+ * file so role helpers cannot collide on basename and so the emitter's
+ * generated `import { ... } from './support/<role>'` line is stable.
+ *
+ * Raises when a role's helper basename (`<role>`) would collide with a
+ * built-in support file basename (e.g. a role named `env` or `seeding`),
+ * since the emitted suite imports built-ins as `./support/env`,
+ * `./support/seeding`, etc. and an overwrite would silently break the
+ * suite's imports. The error names both the role and the colliding
+ * built-in so the operator can rename the role.
+ *
+ * @param outDir       Same directory passed to {@link materializeSupport}.
+ * @param roleBundles  Loaded role bundles, as returned by
+ *                     `loadRoleBundlesForActiveConfig`. Decoupled from
+ *                     this module's loader so callers (codegen orchestrator
+ *                     + tests) construct the bundle map once and share it
+ *                     between the materializer and the renderer.
+ * @returns            The list of vendored file basenames (e.g.
+ *                     `['deploymentGateway.ts']`) for callers that want to
+ *                     assert what was copied.
+ */
+export async function materializeRoleSupportFiles(
+  outDir: string,
+  roleBundles: Map<string, { role: string; supportFilePath?: string }>,
+): Promise<string[]> {
+  const destDir = path.join(outDir, SUPPORT_DIR_NAME);
+  await fs.mkdir(destDir, { recursive: true });
+
+  // Build a quick lookup of built-in basenames (without extension) so we
+  // can detect role-vs-builtin collisions before any copy happens.
+  const builtInStems = new Set(
+    SUPPORT_TEMPLATE_FILES.map((f) => {
+      const dot = f.lastIndexOf('.');
+      return dot >= 0 ? f.slice(0, dot) : f;
+    }),
+  );
+
+  const copied: string[] = [];
+  for (const [roleName, bundle] of roleBundles) {
+    if (!bundle.supportFilePath) continue;
+    if (builtInStems.has(roleName)) {
+      throw new Error(
+        `materializeRoleSupportFiles: role '${roleName}' collides with a built-in support ` +
+          `file basename (${[...builtInStems].join(', ')}). Rename the role.`,
+      );
+    }
+    const ext = path.extname(bundle.supportFilePath);
+    const destName = `${roleName}${ext}`;
+    if (copied.includes(destName)) {
+      throw new Error(
+        `materializeRoleSupportFiles: role '${roleName}' produced duplicate destination ${destName}.`,
+      );
+    }
+    await fs.copyFile(bundle.supportFilePath, path.join(destDir, destName));
+    copied.push(destName);
+  }
+
+  return copied;
 }
 
 /** Subdirectory created under the emitter's outDir to hold BPMN/DMN/form

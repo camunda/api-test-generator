@@ -9,7 +9,14 @@ import type {
   RequestStep,
 } from '../../types.js';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
+import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
 import { materializeFixtures, materializeSupport } from './materialize-support.js';
+import {
+  type LoadedRoleBundle,
+  renderRoleCallSite,
+  renderRoleImports,
+  stepMatchesRole,
+} from './roleRenderer.js';
 
 interface EmitOptions {
   outDir: string;
@@ -29,11 +36,17 @@ interface EmitOptions {
    */
   recordResponses?: boolean;
   /**
-   * See {@link EmitContext.deploymentGatewayOpId}. Forwarded verbatim
-   * from the orchestrator. When present, multipart-200 steps for this
-   * operationId are routed through the `deploy()` support helper.
+   * See {@link EmitContext.getRoleForOperation}. Together with
+   * {@link roleBundles} drives the role-dispatch hook (Lift 12 / #231).
+   * When either is missing, every step takes the inline (no-role-bound)
+   * path — equivalent to the pre-Lift-12 behaviour minus the legacy
+   * `isDeploymentStep` branch.
    */
-  deploymentGatewayOpId?: string;
+  getRoleForOperation?: (opId: string) => string | undefined;
+  /** See {@link EmitContext.roleBundles}. */
+  roleBundles?: Map<string, LoadedRoleBundle>;
+  /** See {@link EmitContext.roleExtras}. */
+  roleExtras?: Map<string, Record<string, unknown>>;
 }
 
 /**
@@ -59,7 +72,9 @@ export function renderPlaywrightSuite(
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
     recordResponses?: boolean;
-    deploymentGatewayOpId?: string;
+    getRoleForOperation?: (opId: string) => string | undefined;
+    roleBundles?: Map<string, LoadedRoleBundle>;
+    roleExtras?: Map<string, Record<string, unknown>>;
   },
 ): string {
   return buildSuiteSource(collection, {
@@ -68,7 +83,9 @@ export function renderPlaywrightSuite(
     mode: opts.mode,
     globalContextSeeds: opts.globalContextSeeds,
     recordResponses: opts.recordResponses,
-    deploymentGatewayOpId: opts.deploymentGatewayOpId,
+    getRoleForOperation: opts.getRoleForOperation,
+    roleBundles: opts.roleBundles,
+    roleExtras: opts.roleExtras,
   });
 }
 
@@ -115,7 +132,9 @@ export const PlaywrightEmitter: Emitter = {
       mode: ctx.mode,
       globalContextSeeds: ctx.globalContextSeeds,
       recordResponses: ctx.recordResponses,
-      deploymentGatewayOpId: ctx.deploymentGatewayOpId,
+      getRoleForOperation: ctx.getRoleForOperation,
+      roleBundles: ctx.roleBundles,
+      roleExtras: ctx.roleExtras,
     });
     return [
       {
@@ -145,12 +164,32 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   }
   const lines: string[] = [];
   const suiteName = opts.suiteName || collection.endpoint.operationId;
-  // Lift 9 / #225: discriminator for the deployment-gateway routing
-  // (was a hard-coded `=== 'createDeployment'` literal). Sourced from the
-  // active-config artifact-kinds ABox by the orchestrator; an emitter
-  // invocation that does not supply it produces a suite with no
-  // deploy()-helper routing — every multipart step takes the inline path.
-  const deploymentGatewayOpId = opts.deploymentGatewayOpId;
+
+  // Lift 12 / #231: per-step role lookup. A step is dispatched to a role
+  // when (a) the active config's ABox maps its opId to a role name, AND
+  // (b) the role's loaded bundle is present, AND (c) the role's optional
+  // `match.json` gating permits the step's shape. Otherwise the step
+  // takes the generic per-method (inline) path. A step bound to a role
+  // whose bundle is missing raises in findRoleForStep — there is no
+  // silent fallback.
+  function findRoleForStep(
+    step: RequestStep,
+  ): { roleName: string; bundle: LoadedRoleBundle } | null {
+    if (!opts.getRoleForOperation || !opts.roleBundles) return null;
+    const roleName = opts.getRoleForOperation(step.operationId);
+    if (!roleName) return null;
+    const bundle = opts.roleBundles.get(roleName);
+    if (!bundle) {
+      throw new Error(
+        `Operation '${step.operationId}' is bound to role '${roleName}' in the active ABox, ` +
+          `but no template bundle is loaded for that role. Either add ` +
+          `configs/<config>/codegen/playwright/roles/${roleName}/call-site.tmpl ` +
+          `or remove the role binding from the operation rule.`,
+      );
+    }
+    if (!stepMatchesRole(step, bundle)) return null;
+    return { roleName, bundle };
+  }
 
   // Determine upfront whether any scenario will emit a validateResponse() call
   // so we can conditionally include the import and constant.
@@ -194,21 +233,16 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   if (recordResponses) {
     lines.push("import { recordResponse, sanitizeBody } from './support/recorder';");
   }
-  // extractInto is used in the per-step extract loop. For deploy() steps only
-  // placeholderAlias extracts are emitted (all others are handled internally by
-  // deploy()). Mirror that filter here so the import is not emitted when all
-  // extracts for a deployment step are non-alias entries — those generate no
-  // extractInto() calls in the suite, which would produce a Biome noUnusedImports
-  // error.
+  // extractInto is used in the per-step extract loop. For role-bound steps
+  // only placeholderAlias extracts are emitted (all others are handled
+  // internally by the role's helper). Mirror that filter here so the
+  // import is not emitted when all extracts for a roled step are non-alias
+  // entries — those generate no extractInto() calls in the suite, which
+  // would produce a Biome noUnusedImports error.
   const hasAnyExtract = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some((step) => {
-      const isDeployStep =
-        !!deploymentGatewayOpId &&
-        step.operationId === deploymentGatewayOpId &&
-        step.bodyKind === 'multipart' &&
-        !!step.multipartTemplate &&
-        step.expect.status === 200;
-      const relevant = isDeployStep
+      const role = findRoleForStep(step);
+      const relevant = role
         ? (step.extract ?? []).filter((ex) => ex.note === 'placeholderAlias')
         : (step.extract ?? []);
       return relevant.length > 0;
@@ -219,56 +253,54 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   } else {
     lines.push("import { seedBinding, initSpecSalt } from './support/seeding';");
   }
-  // deploy() is emitted for 200-expected multipart steps whose operationId
-  // matches the active config's deployment-gateway role (Lift 9 / #225);
-  // resolveFixture is emitted for any step that falls through to the inline
-  // multipart path — this includes non-deployment-gateway multipart steps
-  // AND deployment-gateway steps with a non-200 expected status (which are
-  // not routed through deploy()). Mirror the isDeploymentStep condition
-  // exactly so the two flags stay in sync.
-  const hasDeploymentMultipart = collection.scenarios.some((s) =>
-    (s.requestPlan ?? []).some(
-      (step) =>
-        !!deploymentGatewayOpId &&
-        step.operationId === deploymentGatewayOpId &&
-        step.bodyKind === 'multipart' &&
-        !!step.multipartTemplate &&
-        step.expect.status === 200,
-    ),
-  );
+  // resolveFixture is emitted for every step that falls through to the
+  // inline multipart path — i.e. multipart steps with no role match. Role
+  // helpers vendor their own fixture access internally.
   const hasOtherMultipart = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some(
-      (step) =>
-        step.bodyKind === 'multipart' &&
-        !!step.multipartTemplate &&
-        !(
-          !!deploymentGatewayOpId &&
-          step.operationId === deploymentGatewayOpId &&
-          step.expect.status === 200
-        ),
+      (step) => step.bodyKind === 'multipart' && !!step.multipartTemplate && !findRoleForStep(step),
     ),
   );
-  // authHeaders is used in inline request steps and awaitEventually witness blocks.
-  // deploy() calls authHeaders internally, so deploy()-only suites don't need this import.
+  // authHeaders is used in inline request steps and awaitEventually witness
+  // blocks. Role helpers call authHeaders internally, so role-only suites
+  // don't need this import.
   const hasInlineRequestStep = collection.scenarios.some((s) =>
-    (s.requestPlan ?? []).some(
-      (step) =>
-        !(
-          !!deploymentGatewayOpId &&
-          step.operationId === deploymentGatewayOpId &&
-          step.bodyKind === 'multipart' &&
-          !!step.multipartTemplate &&
-          step.expect.status === 200
-        ),
-    ),
+    (s.requestPlan ?? []).some((step) => !findRoleForStep(step)),
   );
   if (hasInlineRequestStep || needsAwaitEventually) {
     lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   } else {
     lines.push("import { buildBaseUrl } from './support/env';");
   }
-  if (hasDeploymentMultipart) {
-    lines.push("import { deploy } from './support/deployment';");
+  // Per-role imports (Lift 12 / #231): for every role used by at least one
+  // step in the collection, render the role's `imports.tmpl` once with a
+  // role-static scope ({ roleName, supportImportPath }). Roles without an
+  // `imports.tmpl` contribute nothing. The renderer trims trailing
+  // newlines so the emitted block sits cleanly alongside hand-written
+  // import lines.
+  const usedRoles = new Set<string>();
+  for (const s of collection.scenarios) {
+    for (const step of s.requestPlan ?? []) {
+      const role = findRoleForStep(step);
+      if (role) usedRoles.add(role.roleName);
+    }
+  }
+  // Deterministic emission order: alphabetical by role name. Avoids spec
+  // file churn when role discovery order changes between runs.
+  const sortedRoles = [...usedRoles].sort();
+  for (const roleName of sortedRoles) {
+    const bundle = opts.roleBundles?.get(roleName);
+    if (!bundle) continue;
+    const importsScope: ImportsTemplateScope = {
+      roleName,
+      supportImportPath: `./support/${roleName}`,
+    };
+    const rendered = renderRoleImports(bundle, importsScope).trim();
+    if (rendered) {
+      for (const line of rendered.split('\n')) {
+        if (line.trim()) lines.push(line);
+      }
+    }
   }
   if (hasOtherMultipart) {
     lines.push("import { resolveFixture } from './support/fixtures';");
@@ -290,7 +322,9 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   lines.push(`test.describe('${suiteName}', () => {`);
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario, seeds, recordResponses, deploymentGatewayOpId));
+    lines.push(
+      renderScenarioTest(scenario, seeds, recordResponses, findRoleForStep, opts.roleExtras),
+    );
   }
   lines.push('});');
   return lines.join('\n');
@@ -300,7 +334,8 @@ function renderScenarioTest(
   s: EndpointScenario,
   globalContextSeeds: readonly GlobalContextSeed[],
   recordResponses: boolean,
-  deploymentGatewayOpId: string | undefined,
+  findRoleForStep: (step: RequestStep) => { roleName: string; bundle: LoadedRoleBundle } | null,
+  roleExtras: Map<string, Record<string, unknown>> | undefined,
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
@@ -404,9 +439,9 @@ function renderScenarioTest(
   // sentinel.
   //
   // The local is only emitted when the scenario has at least one inline
-  // multipart step (i.e. a multipart step that is NOT routed through
-  // deploy()). deploy() steps pass strips as a JSON literal argument and
-  // never read the prologue local; omitting it for deploy-only scenarios
+  // multipart step (i.e. a multipart step that is NOT dispatched to a
+  // role). Role-bound steps pass strips as a JSON literal argument and
+  // never read the prologue local; omitting it for role-only scenarios
   // prevents an unused-variable error in the generated suite.
   //
   // Safety: `binding`, `fieldName`, `seedRule` are all required by the
@@ -416,14 +451,7 @@ function renderScenarioTest(
   // directly into emitted single-quoted TS string literals without an
   // escape pass.
   const hasInlineMultipartStep = (s.requestPlan ?? []).some(
-    (step) =>
-      step.bodyKind === 'multipart' &&
-      !!step.multipartTemplate &&
-      !(
-        !!deploymentGatewayOpId &&
-        step.operationId === deploymentGatewayOpId &&
-        step.expect.status === 200
-      ),
+    (step) => step.bodyKind === 'multipart' && !!step.multipartTemplate && !findRoleForStep(step),
   );
   const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
   for (const seed of globalContextSeeds) {
@@ -468,47 +496,63 @@ function renderScenarioTest(
     // confined to the callback.
     body.push(`  await test.step(${JSON.stringify(step.operationId)}, async () => {`);
 
-    // Deployment-gateway multipart steps use the deploy() helper which
-    // encapsulates multipart body building, @@FILE: resolution, auth, HTTP
-    // POST, status assertion (throws on non-200), and extraction of all
-    // known deployment response fields into ctx. This keeps each deployment
-    // step as a single declarative call instead of ~35 lines of boilerplate.
-    // Only route 200-expected steps through deploy(): the helper hard-codes a
-    // 200 assertion, so a step with a declared non-200 expected status must
-    // fall through to the normal request path where step.expect.status is honoured.
-    // Lift 9 / #225: the operationId is sourced from the active config's
-    // artifact-kinds ABox role lookup, not a hard-coded literal.
-    const isDeploymentStep =
-      !!deploymentGatewayOpId &&
-      step.operationId === deploymentGatewayOpId &&
-      step.bodyKind === 'multipart' &&
-      !!step.multipartTemplate &&
-      step.expect.status === 200;
-    if (isDeploymentStep && step.multipartTemplate) {
-      const tpl = JSON.stringify(step.multipartTemplate, null, 2).replace(
-        /"\\?\$\{([^}]+)\}"/g,
-        (_, v) => `ctx["${v}"]`,
-      );
-      // Indent all lines after the first so the object literal aligns under
-      // the opening `{` in the deploy() call.
-      const tplIndented = tpl
+    // Lift 12 / #231: per-step role dispatch. When the step's opId is bound
+    // to a role in the active config's ABox AND the role's `match.json`
+    // gating permits the step's shape, render the role's `call-site.tmpl`
+    // with the per-step scope. Otherwise fall through to the generic
+    // per-method (inline) path. The role's helper encapsulates body
+    // building, auth, the HTTP request, status assertion, and any
+    // role-specific response extraction. See ROLES.md.
+    const roleMatch = findRoleForStep(step);
+    if (roleMatch) {
+      const tpl = JSON.stringify(
+        step.multipartTemplate ?? step.bodyTemplate ?? {},
+        null,
+        2,
+      ).replace(/"\\?\$\{([^}]+)\}"/g, (_, v) => `ctx["${v}"]`);
+      // Indent all lines after the first so the body literal aligns under
+      // its opening `{` in the helper call.
+      const bodyIndented = tpl
         .split('\n')
         .map((line: string, i: number) => (i === 0 ? line : `    ${line}`))
         .join('\n');
-      // Derive strip rules from globalContextSeeds so deploy() has no
+      // Derive strip rules from globalContextSeeds so the helper has no
       // hard-coded domain knowledge about sentinel values or field names.
       const strips = globalContextSeeds
         .filter((seed) => seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined)
         .map((seed) => ({ fieldName: seed.fieldName, sentinel: seed.defaultSentinel }));
-      const stripsArg = strips.length > 0 ? `, ${JSON.stringify(strips)}` : '';
-      body.push(
-        `    const ${varName} = await deploy(ctx, request, ${tplIndented}, baseUrl${stripsArg});`,
-      );
-      // Explicit status assertion mirrors the normal request path so the
-      // generated suite's assertion pattern is consistent across all steps.
-      // deploy() also throws on non-200 with the response body, but the
-      // expect() call keeps the declared expectation visible in the test.
-      body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
+      const stripsLit = JSON.stringify(strips);
+      // Per-role data computed by the orchestrator (e.g. extracts derived
+      // from the role-bound op's responseSemanticLeaves for the
+      // deploymentGateway role). Roles that don't consume this simply
+      // ignore the scope variable in their template.
+      const extras = roleExtras?.get(roleMatch.roleName) ?? {};
+      const scope: PlaywrightRoleScope & Record<string, unknown> = {
+        respVar: varName,
+        pathTemplate: step.pathTemplate,
+        method: step.method.toUpperCase(),
+        operationId: step.operationId,
+        roleName: roleMatch.roleName,
+        defaultRender: '', // (#231 future: eager-rendered inline path; not consumed by deploymentGateway today)
+        ctx: 'ctx',
+        request: 'request',
+        baseUrl: 'baseUrl',
+        body: bodyIndented,
+        strips: stripsLit,
+        // `extracts` is a per-emitter scope variable (PlaywrightRoleScope):
+        // default to `[]` so a role bundle that hasn't been wired with
+        // per-role extras still renders. roleExtras may override.
+        extracts: '[]',
+        ...extras,
+        // Additional context vars used by the deploymentGateway template:
+        url: buildUrlExpression(step.pathTemplate),
+        expectedStatus: String(step.expect.status),
+      };
+      const rendered = renderRoleCallSite(roleMatch.bundle, scope);
+      // Indent each line to match the test-body depth (`    `).
+      for (const line of rendered.split('\n')) {
+        body.push(line ? `    ${line}` : '');
+      }
     } else {
       body.push(`    const url = baseUrl + ${urlExpr};`);
       const bodyVar = `body${idx + 1}`;
@@ -582,7 +626,7 @@ function renderScenarioTest(
       body.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
     }
     // Record observation for this step (best-effort). Only capture response shapes for 200 responses.
-    // For deploy() steps the helper throws on non-200, so __status is always 200 when this block runs.
+    // For role-bound steps the helper throws on non-200, so __status is always 200 when this block runs.
     if (recordResponses) {
       body.push(`    try {`);
       body.push(`      const __status = ${varName}.status();`);
@@ -628,15 +672,16 @@ function renderScenarioTest(
     // it skips the assignment when the value is `undefined` so seeded bindings
     // and earlier extracts in the same scenario aren't clobbered by a later step
     // whose response shape omits the field.
-    // deploy() steps: deploy() already extracts all known deployment response
-    // fields internally (processDefinitionKeyVar, deploymentKeyVar, tenantIdVar,
-    // etc.). Emitting those same extractInto() calls outside the helper would
-    // call resp.json() a second time and duplicate every assignment.
-    // Exception: placeholderAlias entries (note === 'placeholderAlias') bind to
-    // DIFFERENT ctx keys than deploy()'s hard-coded targets (e.g. an alias from
-    // processDefinitionKey → processDefinitionIdVar). deploy() has no knowledge
-    // of these aliases, so they must still be emitted here.
-    const effectiveExtracts = isDeploymentStep
+    // Role-bound steps: the role's helper handles its own response extraction
+    // internally (driven by per-role data threaded through roleExtras —
+    // e.g. the `extracts` list for deploymentGateway). Emitting the same
+    // extracts outside the helper would call resp.json() a second time and
+    // duplicate every assignment.
+    // Exception: placeholderAlias entries (note === 'placeholderAlias') bind
+    // to DIFFERENT ctx keys than the role helper's extracts (e.g. an alias
+    // from processDefinitionKey → processDefinitionIdVar). The role helper
+    // has no knowledge of these aliases, so they must still be emitted here.
+    const effectiveExtracts = roleMatch
       ? (step.extract ?? []).filter((ex) => ex.note === 'placeholderAlias')
       : (step.extract ?? []);
     if (effectiveExtracts.length) {

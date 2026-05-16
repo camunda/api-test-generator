@@ -6,21 +6,29 @@ import {
   getPlaywrightSuiteDir,
   getVariantOutputDir,
 } from '../configResolver.js';
+import { loadGraph } from '../graphLoader.js';
 import {
   assertSafeGlobalContextSeeds,
   deriveArtifactKindsViews,
   deriveGlobalContextSeedsViews,
 } from '../ontology/loader.js';
-import { findDeploymentGatewayOpId } from '../ontology/operationRoles.js';
+import {
+  DEPLOYMENT_GATEWAY_ROLE,
+  findDeploymentGatewayOpId,
+  getRoleForOperation,
+} from '../ontology/operationRoles.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
+import { computeDeploymentExtracts } from './deploymentExtracts.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
   materializeFixtures,
   materializeResponseSchemas,
+  materializeRoleSupportFiles,
   materializeSupport,
 } from './playwright/materialize-support.js';
+import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { getEmitter, listEmitters, registerEmitter } from './registry.js';
 
 // Built-in emitter registration. New emitters register themselves here.
@@ -104,15 +112,26 @@ async function run() {
   // forward it; non-Playwright targets see `undefined`, which the
   // EmitContext schema already treats as "use the default".
   let recordResponses: boolean | undefined;
-  // Vendor the runtime support helpers into <outDir>/support/ so the
-  // emitted suite is self-contained (no imports back into this generator).
-  // Only the Playwright emitter currently needs these; gate on the emitter id
-  // so future targets that don't depend on these helpers don't pay the cost.
+  // Lift 12 / #231: per-role template bundles for the active config's
+  // Playwright emitter. Loaded from configs/<config>/codegen/playwright/roles/
+  // and threaded into every EmitContext below. `undefined` for non-Playwright
+  // emitters (computed inside the gate below). Per-role scope additions
+  // (e.g. spec-derived `extracts` for deploymentGateway) live in
+  // `roleExtras`, keyed by role name.
+  let roleBundles: Map<string, import('./playwright/roleRenderer.js').LoadedRoleBundle> | undefined;
+  let roleExtras: Map<string, Record<string, unknown>> | undefined;
+  let getRoleForOperationFn: ((opId: string) => string | undefined) | undefined;
   if (emitter.id === 'playwright') {
     const codegenOpts = getPlaywrightCodegenOptions(repoRoot);
     recordResponses = codegenOpts.recordResponses;
     const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
     await materializeSupport(outDir, undefined, undefined, true, excludeSupportFiles);
+    // Lift 12 / #231: load per-role bundles and vendor their helper files
+    // alongside the built-in support files. Roles bound in the ABox but
+    // missing a bundle raise at render time (see roleRenderer.findRoleForStep
+    // in playwright/emitter.ts).
+    roleBundles = loadRoleBundlesForActiveConfig(repoRoot);
+    await materializeRoleSupportFiles(outDir, roleBundles);
     // Copy BPMN/DMN/form fixture files into <outDir>/fixtures/ so the suite
     // is self-contained: @@FILE:<rel-path> markers in emitted tests resolve
     // via support/fixtures.ts regardless of process.cwd().
@@ -136,6 +155,26 @@ async function run() {
   const deploymentGatewayOpId = findDeploymentGatewayOpId(
     artifactViews ? { operationArtifactRules: artifactViews.operationArtifactRules } : undefined,
   );
+  // Lift 12 / #231: per-role scope additions exposed to role templates as
+  // extra Mustache variables. For deploymentGateway, derive the
+  // spec-driven extracts list from the role-bound op's
+  // responseSemanticLeaves. The full operation graph is required because
+  // responseSemanticLeaves is loader-computed (not persisted in
+  // operation-dependency-graph.json), so we re-run loadGraph here.
+  if (emitter.id === 'playwright' && deploymentGatewayOpId) {
+    const graph = await loadGraph(baseDir);
+    const deployOp = graph.operations[deploymentGatewayOpId];
+    const extracts = computeDeploymentExtracts(deployOp);
+    roleExtras = new Map<string, Record<string, unknown>>();
+    roleExtras.set(DEPLOYMENT_GATEWAY_ROLE, { extracts: JSON.stringify(extracts) });
+    // Build the role-lookup closure over the same ABox view used by
+    // findDeploymentGatewayOpId so the emitter's role-dispatch path
+    // sees an identical ontology snapshot.
+    const domain = artifactViews
+      ? { operationArtifactRules: artifactViews.operationArtifactRules }
+      : undefined;
+    getRoleForOperationFn = (opId: string) => getRoleForOperation(domain, opId);
+  }
 
   if (positional === '--all') {
     let count = 0;
@@ -150,7 +189,9 @@ async function run() {
           mode: 'feature',
           globalContextSeeds,
           recordResponses,
-          deploymentGatewayOpId,
+          getRoleForOperation: getRoleForOperationFn,
+          roleBundles,
+          roleExtras,
         });
         count++;
       } catch (e) {
@@ -186,7 +227,9 @@ async function run() {
           mode: 'variant',
           globalContextSeeds,
           recordResponses,
-          deploymentGatewayOpId,
+          getRoleForOperation: getRoleForOperationFn,
+          roleBundles,
+          roleExtras,
         });
         variantCount++;
       } catch (e) {
@@ -225,7 +268,9 @@ async function run() {
     mode: 'feature',
     globalContextSeeds,
     recordResponses,
-    deploymentGatewayOpId,
+    getRoleForOperation: getRoleForOperationFn,
+    roleBundles,
+    roleExtras,
   });
   console.log('Generated test suite for', endpointOpId, 'at', outDir, `(target: ${emitter.id})`);
 }
