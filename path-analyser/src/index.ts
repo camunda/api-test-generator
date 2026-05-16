@@ -1559,22 +1559,59 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
   // root (#221 / Lift 11: `configs/<config>/fixtures/deployment-artifacts.json`).
   // Probe both repo-root and path-analyser-relative cwds so the script keeps
   // working from either invocation site, mirroring loadRequestDefaults().
+  //
+  // Only treat "configs.json absent at this candidate" and ENOENT/ENOTDIR
+  // on the registry file as "try the next candidate". Any other error
+  // (malformed JSON, EACCES, unknown CONFIG, malformed configs.json) is
+  // a real misconfiguration that we surface rather than silently falling
+  // back to an empty registry — an empty registry changes planner
+  // behaviour (no fixture selection, no providesValues seeding) and would
+  // be very confusing to debug.
   const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  let firstRealError: Error | undefined;
   for (const root of repoRootCandidates) {
+    let configDir: string;
     try {
-      const p = path.resolve(getActiveConfigDir(root), 'fixtures', 'deployment-artifacts.json');
-      const data = fsSync.readFileSync(p, 'utf8');
-      const json = JSON.parse(data);
-      const arr = Array.isArray(json?.artifacts) ? json.artifacts : Array.isArray(json) ? json : [];
-      artifactsRegistryCache = arr.map((e: ArtifactRegistryEntry) => ({
-        kind: e.kind,
-        path: e.path,
-        description: e.description,
-        providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
-        providesValues: normaliseProvidesValues(e.providesValues),
-      }));
-      return artifactsRegistryCache || [];
-    } catch {}
+      configDir = getActiveConfigDir(root);
+    } catch (err) {
+      // configs.json missing or unreadable at this candidate — try next.
+      // getActiveConfigDir throws "Failed to read configs.json at <p>: ENOENT…"
+      // for the missing-file case; treat any "configs.json"-mentioning error
+      // here as "wrong candidate root".
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('configs.json')) continue;
+      throw err;
+    }
+    const p = path.resolve(configDir, 'fixtures', 'deployment-artifacts.json');
+    let data: string;
+    try {
+      data = fsSync.readFileSync(p, 'utf8');
+    } catch (err) {
+      let code: string | undefined;
+      if (err && typeof err === 'object') {
+        const c = Reflect.get(err, 'code');
+        if (typeof c === 'string') code = c;
+      }
+      if (code === 'ENOENT' || code === 'ENOTDIR') continue;
+      firstRealError ??= err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
+    const json = JSON.parse(data);
+    const arr = Array.isArray(json?.artifacts) ? json.artifacts : Array.isArray(json) ? json : [];
+    artifactsRegistryCache = arr.map((e: ArtifactRegistryEntry) => ({
+      kind: e.kind,
+      path: e.path,
+      description: e.description,
+      providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
+      providesValues: normaliseProvidesValues(e.providesValues),
+    }));
+    return artifactsRegistryCache || [];
+  }
+  if (firstRealError) {
+    throw new Error(
+      `getArtifactsRegistry: failed to read deployment-artifacts.json under any of ` +
+        `[${repoRootCandidates.join(', ')}]: ${firstRealError.message}`,
+    );
   }
   artifactsRegistryCache = [];
   return artifactsRegistryCache;

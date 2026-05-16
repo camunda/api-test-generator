@@ -183,11 +183,15 @@ export const FIXTURES_DIR_NAME = 'fixtures';
  * containing `configs.json`) and then resolves the active config's
  * fixtures dir via `getActiveConfigDir`. This handles both tsx (source)
  * and dist runtime modes without a hard-coded depth.
+ *
+ * Throws if no `configs.json` is found in any ancestor: a hard-coded
+ * fallback would silently copy the wrong fixtures whenever this module
+ * was relocated or a non-default CONFIG was active.
  */
 function defaultFixturesSourceDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   let dir = here;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     if (existsSync(path.join(dir, 'configs.json'))) {
       return path.join(getActiveConfigDir(dir), 'fixtures');
     }
@@ -195,8 +199,10 @@ function defaultFixturesSourceDir(): string {
     if (parent === dir) break;
     dir = parent;
   }
-  // Fall back to a sensible relative path; copyDir will fail loudly if absent.
-  return path.resolve(here, '..', '..', '..', '..', '..', 'configs', 'camunda-oca', 'fixtures');
+  throw new Error(
+    `defaultFixturesSourceDir: could not locate a repo root (no configs.json found in any ancestor of ${here}). ` +
+      'Pass an explicit fixturesSourceDir to materializeFixtures().',
+  );
 }
 
 /**
