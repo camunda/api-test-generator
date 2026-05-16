@@ -366,12 +366,21 @@ Local equivalent of the CI gate. Run before every push:
 npm run lint
 npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
 npx tsc --noEmit -p path-analyser/tsconfig.json
+npm run build:analyser   # emits .d.ts that materializer's typecheck depends on
 npx tsc --noEmit -p materializer/tsconfig.json
 npx tsc --noEmit -p request-validation/tsconfig.json
 TEST_SEED=snapshot-baseline npm run testsuite:generate
 npm run generate:request-validation
 npm test
 ```
+
+> **The `build:analyser` step is mandatory before materializer typecheck.**
+> Materializer imports `from 'path-analyser/configResolver'` etc., which
+> NodeNext resolves via path-analyser's `exports` map to
+> `./dist/src/*.d.ts`. Those declarations only exist after `tsc` has
+> emitted them. CI builds path-analyser in the typecheck job for the
+> same reason; if you skip the build locally you'll miss CI failures
+> that a fresh clone would surface.
 
 > **`npm test` alone is not sufficient.** The Layer-3 invariants in
 > `configs/<config>/regression-invariants.test.ts` read regenerated
