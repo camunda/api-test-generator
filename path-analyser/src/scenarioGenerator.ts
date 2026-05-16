@@ -1,5 +1,6 @@
 import { bindSemanticInput } from './bindSemanticInput.js';
 import { deterministicSuffix } from './codegen/support/seeding.js';
+import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
 import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
 import type {
   ArtifactRule,
@@ -1595,11 +1596,17 @@ function ensureArtifactBindings(
         : `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     }
     // If BPMN process definition -> ensure BPMN model spec exists
-    if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
+    // Lift 10 / #227: dispatch driven by the ABox's `modelKind` field
+    // instead of a hard-coded `s === 'ProcessDefinitionKey'` /
+    // `s === 'FormKey'` literal. The `if (modelKind === 'bpmn'/'form')`
+    // branches stay because the `GeneratedModelSpec` discriminated union
+    // still carries kind-specific fields (Lift 13's concern).
+    const modelKind = getModelKindForSemantic(graph.domain, s);
+    if (modelKind === 'bpmn' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
       state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
     }
     if (
-      s === 'FormKey' &&
+      modelKind === 'form' &&
       !state.modelsDraft.find((m) => m.kind === 'form' && m.formKeyVar === varName)
     ) {
       state.modelsDraft.push({ kind: 'form', formKeyVar: varName });

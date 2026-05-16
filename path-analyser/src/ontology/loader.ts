@@ -376,6 +376,7 @@ export interface ArtifactKindsViews {
       producesSemantics?: string[];
       identifierType?: string;
       deploymentSlices?: string[];
+      modelKind?: string;
     }
   >;
   semanticTypeToArtifactKind: Record<string, string>;
@@ -408,6 +409,7 @@ export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews |
       deploymentSlices: k.deploymentSlices,
     };
     if (k.producibleStates !== undefined) entry.producibleStates = k.producibleStates;
+    if (k.modelKind !== undefined) entry.modelKind = k.modelKind;
     artifactKinds[k.name] = entry;
   }
   const semanticTypeToArtifactKind: Record<string, string> = {};

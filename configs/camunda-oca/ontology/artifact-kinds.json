@@ -11,6 +11,7 @@
       "producibleStates": ["ModelHasServiceTaskType", "ProcessInstanceCompleted"],
       "producesSemantics": ["ProcessDefinitionKey"],
       "deploymentSlices": ["processDefinition"],
+      "modelKind": "bpmn",
       "description": "A BPMN process model. Kind-level producesStates lists what EVERY bpmnProcess fixture deploys; producibleStates lists what SOME fixture of this kind can deliver (planner uses producesStates ∪ producibleStates for chain-feasibility BFS; the selector matches per-fixture providesStates in path-analyser/fixtures/deployment-artifacts.json at emission time, see #159)."
     },
     {
@@ -38,6 +39,7 @@
       "producesStates": ["FormDeployed"],
       "producesSemantics": ["FormKey"],
       "deploymentSlices": ["form"],
+      "modelKind": "form",
       "description": "A Camunda Forms JSON form definition."
     }
   ],

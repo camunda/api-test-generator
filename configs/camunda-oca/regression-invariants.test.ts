@@ -4718,6 +4718,23 @@ describeForThisConfig(
       expect(opsWithDeploymentGateway).toEqual(['createDeployment']);
     });
 
+    it('artifactKinds.bpmnProcess.modelKind === "bpmn" and form.modelKind === "form" (Lift 10 / #227)', async () => {
+      // The planner's `ensureArtifactBindings` chooses which
+      // GeneratedModelSpec variant to push (`{ kind: 'bpmn', ... }` vs
+      // `{ kind: 'form', ... }`) by walking semantic→artifactKind→modelKind
+      // through the ABox. If `bpmnProcess.modelKind` ever drifts from
+      // `'bpmn'` (or `form.modelKind` from `'form'`), the planner stops
+      // emitting deployment-model entries for those semantics — every
+      // process-instance / form-related scenario for camunda-oca silently
+      // loses its deployment model. Pin both values to the conventional
+      // GeneratedModelSpec discriminators.
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const kinds = graph.domain?.artifactKinds ?? {};
+      expect(kinds.bpmnProcess?.modelKind).toBe('bpmn');
+      expect(kinds.form?.modelKind).toBe('form');
+    });
+
     it('graph.domain.semanticTypeToArtifactKind matches the ABox `semanticTypeMap[]` (planner contract)', async () => {
       const { deriveArtifactKindsViews } = await import(
         '../../path-analyser/src/ontology/loader.js'

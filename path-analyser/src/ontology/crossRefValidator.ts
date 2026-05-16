@@ -57,6 +57,7 @@ const ArtifactKindSpecSchema = z
     producesStates: z.array(z.string()).optional(),
     producibleStates: z.array(z.string()).optional(),
     producesSemantics: z.array(z.string()).optional(),
+    modelKind: z.string().min(1).optional(),
   })
   .passthrough();
 
