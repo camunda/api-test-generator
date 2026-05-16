@@ -61,6 +61,23 @@ export interface PlaywrightRoleScope extends CommonRoleScope {
 }
 
 /**
+ * Additional scope variables made available to `imports.tmpl` (on top of the
+ * per-emitter call-site scope). The renderer computes these per
+ * (spec-file, role) pair before rendering the imports template; see
+ * ROLES.md § "Scope variables for imports.tmpl".
+ */
+export interface ImportsTemplateExtras {
+  /**
+   * Renderer-computed relative path from the current spec file to
+   * `playwright/support/<role>` (no extension). Typically
+   * `./support/<role>` for spec files at the suite root, `../support/<role>`
+   * for spec files in subdirectories. Authors should interpolate this with
+   * triple-braces to avoid HTML-escaping of `/`.
+   */
+  supportImportPath: string;
+}
+
+/**
  * Resolved on-disk shape of a per-role directory for one emitter, one
  * config. Produced by the materializer when it walks
  * `configs/<config>/codegen/<emitter>/roles/<role>/`.
