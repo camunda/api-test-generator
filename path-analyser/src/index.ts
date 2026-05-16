@@ -13,6 +13,7 @@ import {
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
+import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
 import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
@@ -744,9 +745,14 @@ export function bindModelDerivedFromFixture(
   // are out of scope here.
   const subShapes = endpoint?.optionalSubShapes ?? [];
   if (!subShapes.length) return;
-  // Find the first createDeployment step in the chain — single-deploy
-  // only in PR 1; multi-deploy is a follow-up.
-  const deployStep = steps.find((s) => s.operationId === 'createDeployment');
+  // Find the first deployment-gateway step in the chain — single-deploy
+  // only in PR 1; multi-deploy is a follow-up. The op is identified via
+  // the active config's artifact-kinds ABox role lookup
+  // (Lift 9 / #225) instead of a hard-coded `createDeployment` literal.
+  const deploymentGatewayOpId = findDeploymentGatewayOpId(graph.domain);
+  const deployStep = deploymentGatewayOpId
+    ? steps.find((s) => s.operationId === deploymentGatewayOpId)
+    : undefined;
   if (!deployStep) return;
   const fixture = fixtureFromDeployStep(deployStep);
   if (!fixture?.providesValues) return;
@@ -1433,8 +1439,12 @@ function buildRequestBodyFromCanonical(
       const rule = ruleId ? domainRules.find((r) => r.id === ruleId) : undefined;
       let kind = rule?.artifactKind;
       if (!kind) {
-        // Default to BPMN process for deployments when unspecified
-        if (opId === 'createDeployment') kind = 'bpmnProcess';
+        // Default to BPMN process for the deployment-gateway op when
+        // unspecified. Lift 9 / #225: the op is now resolved against the
+        // ABox role mapping; the bpmnProcess default for that op stays
+        // hard-coded here pending Lift 10 (#225 follow-up: derive the
+        // default from operationRules[op].rules[0].artifactKind).
+        if (isDeploymentGatewayOp(graph.domain, opId)) kind = 'bpmnProcess';
       }
       // Map artifact kind -> default fixture path
       const defaultFixtures: Record<string, string> = {
@@ -1731,16 +1741,20 @@ function chooseFixtureFromRegistry(
 }
 
 /**
- * Compute the set of runtime states the `createDeployment` step in a chain
+ * Compute the set of runtime states the deployment-gateway step in a chain
  * must provide. Walks every operation in the scenario chain, accumulating
  * required states from `operationRequirements.<op>.requires`, then subtracts
- * states produced by any non-deployment op in the chain (those are
- * satisfied by their own producer step, not by the deployment). The chain
- * is BFS-ordered with producers before their consumers, so a simple
+ * states produced by any non-deployment-gateway op in the chain (those are
+ * satisfied by their own producer step, not by the deployment gateway). The
+ * chain is BFS-ordered with producers before their consumers, so a simple
  * unordered subtraction is equivalent to a left-to-right walk here.
  *
+ * The deployment-gateway op is identified via `isDeploymentGatewayOp`
+ * (Lift 9 / #225 — see `ontology/operationRoles.ts`), not by a hard-coded
+ * operationId.
+ *
  * Returns the residual — states that have to come from the
- * `createDeployment` step's fixture selection. An empty set means any
+ * deployment-gateway step's fixture selection. An empty set means any
  * fixture of the right kind is acceptable.
  */
 function computeDeploymentRequiredStates(
@@ -1755,11 +1769,12 @@ function computeDeploymentRequiredStates(
     if (!req) continue;
     for (const s of req.requires ?? []) result.add(s);
   }
-  // States produced by non-deployment ops earlier in the chain are
-  // satisfied by their own producer step; the deployment doesn't need to
-  // provide them.
+  // States produced by non-deployment-gateway ops earlier in the chain are
+  // satisfied by their own producer step; the deployment gateway doesn't
+  // need to provide them. The deployment-gateway op is identified via the
+  // ABox role lookup (Lift 9 / #225) instead of a hard-coded literal.
   for (const opRef of scenario.operations) {
-    if (opRef.operationId === 'createDeployment') continue;
+    if (isDeploymentGatewayOp(domain, opRef.operationId)) continue;
     const req = opReqs[opRef.operationId];
     if (!req) continue;
     for (const s of req.produces ?? []) result.delete(s);

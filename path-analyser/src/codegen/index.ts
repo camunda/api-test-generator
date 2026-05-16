@@ -6,7 +6,12 @@ import {
   getPlaywrightSuiteDir,
   getVariantOutputDir,
 } from '../configResolver.js';
-import { assertSafeGlobalContextSeeds, deriveGlobalContextSeedsViews } from '../ontology/loader.js';
+import {
+  assertSafeGlobalContextSeeds,
+  deriveArtifactKindsViews,
+  deriveGlobalContextSeedsViews,
+} from '../ontology/loader.js';
+import { findDeploymentGatewayOpId } from '../ontology/operationRoles.js';
 import type { EndpointScenarioCollection, GlobalContextSeed } from '../types.js';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted } from './orchestrator.js';
@@ -121,6 +126,16 @@ async function run() {
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
   const globalContextSeeds = await loadGlobalContextSeeds(baseDir);
+  // Lift 9 / #225: discriminator for the deployment-gateway routing in
+  // the Playwright emitter, sourced from the active config's
+  // artifact-kinds ABox (`operationRules[].role === "deploymentGateway"`).
+  // `undefined` when no ABox is shipped, or when no rule declares the
+  // role — the emitter will then take the inline-multipart path for
+  // every step.
+  const artifactViews = deriveArtifactKindsViews(repoRoot);
+  const deploymentGatewayOpId = findDeploymentGatewayOpId(
+    artifactViews ? { operationArtifactRules: artifactViews.operationArtifactRules } : undefined,
+  );
 
   if (positional === '--all') {
     let count = 0;
@@ -135,6 +150,7 @@ async function run() {
           mode: 'feature',
           globalContextSeeds,
           recordResponses,
+          deploymentGatewayOpId,
         });
         count++;
       } catch (e) {
@@ -170,6 +186,7 @@ async function run() {
           mode: 'variant',
           globalContextSeeds,
           recordResponses,
+          deploymentGatewayOpId,
         });
         variantCount++;
       } catch (e) {
@@ -208,6 +225,7 @@ async function run() {
     mode: 'feature',
     globalContextSeeds,
     recordResponses,
+    deploymentGatewayOpId,
   });
   console.log('Generated test suite for', endpointOpId, 'at', outDir, `(target: ${emitter.id})`);
 }

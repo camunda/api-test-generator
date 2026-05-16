@@ -151,6 +151,9 @@ const modelDerivedDomain: DomainSemantics = {
   semanticTypes: {
     ElementId: { kind: 'modelDerived' },
   },
+  operationArtifactRules: {
+    createDeployment: { role: 'deploymentGateway' },
+  },
 };
 
 const endpointWithElementIdSubShape: OperationNode = makeOp('createProcessInstance', {

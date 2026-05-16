@@ -33,6 +33,17 @@ export interface EmitContext {
    * pre-config behaviour. Only the Playwright emitter consumes this today.
    */
   recordResponses?: boolean;
+  /**
+   * OperationId of the deployment-gateway operation in the active config
+   * (per `artifact-kinds.json#operationRules[].role === "deploymentGateway"`,
+   * Lift 9 / #225). When set, the Playwright emitter routes 200-expected
+   * multipart steps for this op through the `deploy()` support helper;
+   * otherwise every multipart step takes the inline-request path.
+   *
+   * Optional — when omitted (e.g. unit tests that don't exercise the
+   * deployment routing), no step is treated as a deployment gateway.
+   */
+  deploymentGatewayOpId?: string;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { bindSemanticInput } from './bindSemanticInput.js';
 import { deterministicSuffix } from './codegen/support/seeding.js';
+import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
 import type {
   ArtifactRule,
   EndpointScenario,
@@ -367,6 +368,16 @@ export function generateScenariosForEndpoint(
 
   const longChainsEnabled = !!opts.longChains?.enabled;
   const maxPreOps = opts.longChains?.maxPreOps ?? 25;
+  // Lift 9 / #225: the deployment-gateway operationId for the active config
+  // (per `artifact-kinds.json#operationRules[].role === "deploymentGateway"`).
+  // `undefined` when the ABox is absent or no rule declares the role —
+  // every special-case below then collapses to "no op is the deployment
+  // gateway". This is a behaviour change relative to the pre-Lift-9 code,
+  // which always special-cased the literal `'createDeployment'` opId. Unit
+  // tests that build minimal graphs and rely on the deployment special-
+  // casing must declare the role on their fixture domain (see
+  // `tests/fixtures/planner/classification-dispatch.test.ts`).
+  const deploymentGatewayOpId = findDeploymentGatewayOpId(graph.domain);
   while (queue.length && scenarios.length < max) {
     // biome-ignore lint/style/noNonNullAssertion: queue.length is checked in the loop predicate
     const state = queue.shift()!;
@@ -396,7 +407,7 @@ export function generateScenariosForEndpoint(
         let models = state.modelsDraft;
         let bindings = state.bindingsDraft;
         // Fallback simple heuristic if drafts absent
-        if (!models && state.ops.includes('createDeployment')) {
+        if (!models && deploymentGatewayOpId && state.ops.includes(deploymentGatewayOpId)) {
           // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
           bindings = { processDefinitionIdVar1: 'proc_${RANDOM}' };
           if (state.ops.includes('activateJobs'))
@@ -701,7 +712,7 @@ export function generateScenariosForEndpoint(
       // heuristic below writes to it for every producer.
       const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
       let workingState: State;
-      if (producerOpId === 'createDeployment') {
+      if (isDeploymentGatewayOp(graph.domain, producerOpId)) {
         const workingArtifactsApplied = state.artifactsApplied
           ? [...state.artifactsApplied]
           : undefined;
@@ -782,7 +793,7 @@ export function generateScenariosForEndpoint(
       // child without leaking into sibling candidates.
       let modelsDraft = workingState.modelsDraft;
       const bindingsDraft = workingState.bindingsDraft ?? {};
-      if (producerOpId === 'createDeployment' && !modelsDraft) {
+      if (isDeploymentGatewayOp(graph.domain, producerOpId) && !modelsDraft) {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
         modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
@@ -1205,7 +1216,7 @@ function deferForMissingDomainPrereqs(
     // clone the draft collections only on that path so non-deployment
     // candidates avoid the extra allocations on every BFS iteration.
     let workingState: State;
-    if (candidateOpId === 'createDeployment') {
+    if (isDeploymentGatewayOp(graph.domain, candidateOpId)) {
       const workingArtifactsApplied = state.artifactsApplied
         ? [...state.artifactsApplied]
         : undefined;
@@ -1294,7 +1305,7 @@ function deferForMissingDomainPrereqs(
     // models/bindings/artifactsApplied for the enqueued child state.
     let modelsDraft = workingState.modelsDraft;
     const bindingsDraft = workingState.bindingsDraft ?? {};
-    if (candidateOpId === 'createDeployment' && !modelsDraft) {
+    if (isDeploymentGatewayOp(graph.domain, candidateOpId) && !modelsDraft) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
       bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
       modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
@@ -1332,7 +1343,10 @@ function deferForMissingDomainPrereqs(
   return enqueued;
 }
 
-// Select minimal artifact rules for createDeployment based on unmet semantic needs.
+// Select minimal artifact rules for the deployment-gateway producer based
+// on unmet semantic needs. Callers gate on `isDeploymentGatewayOp` so the
+// producerNode passed here is always the deployment-gateway op for the
+// active config (Lift 9 / #225).
 function applyArtifactRuleSelection(
   graph: OperationGraph,
   producerNode: OperationNode,
@@ -1347,7 +1361,7 @@ function applyArtifactRuleSelection(
     });
     return;
   }
-  const ruleSpec = domain.operationArtifactRules.createDeployment;
+  const ruleSpec = domain.operationArtifactRules[producerNode.operationId];
   if (!ruleSpec) {
     producerNode.produces.forEach((s: string) => {
       newProduced.add(s);

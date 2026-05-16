@@ -383,6 +383,7 @@ export interface ArtifactKindsViews {
     string,
     {
       composable?: boolean;
+      role?: string;
       rules?: {
         id?: string;
         artifactKind: string;
@@ -417,6 +418,7 @@ export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews |
   for (const r of abox.operationRules) {
     const entry: ArtifactKindsViews['operationArtifactRules'][string] = {};
     if (r.composable !== undefined) entry.composable = r.composable;
+    if (r.role !== undefined) entry.role = r.role;
     if (r.rules !== undefined) {
       entry.rules = r.rules.map((rule) => {
         const out: NonNullable<

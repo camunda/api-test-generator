@@ -28,6 +28,12 @@ interface EmitOptions {
    * emitted suite.
    */
   recordResponses?: boolean;
+  /**
+   * See {@link EmitContext.deploymentGatewayOpId}. Forwarded verbatim
+   * from the orchestrator. When present, multipart-200 steps for this
+   * operationId are routed through the `deploy()` support helper.
+   */
+  deploymentGatewayOpId?: string;
 }
 
 /**
@@ -53,6 +59,7 @@ export function renderPlaywrightSuite(
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
     recordResponses?: boolean;
+    deploymentGatewayOpId?: string;
   },
 ): string {
   return buildSuiteSource(collection, {
@@ -61,6 +68,7 @@ export function renderPlaywrightSuite(
     mode: opts.mode,
     globalContextSeeds: opts.globalContextSeeds,
     recordResponses: opts.recordResponses,
+    deploymentGatewayOpId: opts.deploymentGatewayOpId,
   });
 }
 
@@ -107,6 +115,7 @@ export const PlaywrightEmitter: Emitter = {
       mode: ctx.mode,
       globalContextSeeds: ctx.globalContextSeeds,
       recordResponses: ctx.recordResponses,
+      deploymentGatewayOpId: ctx.deploymentGatewayOpId,
     });
     return [
       {
@@ -136,6 +145,12 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   }
   const lines: string[] = [];
   const suiteName = opts.suiteName || collection.endpoint.operationId;
+  // Lift 9 / #225: discriminator for the deployment-gateway routing
+  // (was a hard-coded `=== 'createDeployment'` literal). Sourced from the
+  // active-config artifact-kinds ABox by the orchestrator; an emitter
+  // invocation that does not supply it produces a suite with no
+  // deploy()-helper routing — every multipart step takes the inline path.
+  const deploymentGatewayOpId = opts.deploymentGatewayOpId;
 
   // Determine upfront whether any scenario will emit a validateResponse() call
   // so we can conditionally include the import and constant.
@@ -188,7 +203,8 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   const hasAnyExtract = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some((step) => {
       const isDeployStep =
-        step.operationId === 'createDeployment' &&
+        !!deploymentGatewayOpId &&
+        step.operationId === deploymentGatewayOpId &&
         step.bodyKind === 'multipart' &&
         !!step.multipartTemplate &&
         step.expect.status === 200;
@@ -203,15 +219,18 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   } else {
     lines.push("import { seedBinding, initSpecSalt } from './support/seeding';");
   }
-  // deploy() is emitted for 200-expected createDeployment multipart steps; resolveFixture
-  // is emitted for any step that falls through to the inline multipart path — this includes
-  // non-createDeployment multipart steps AND createDeployment steps with a non-200 expected
-  // status (which are not routed through deploy()). Mirror the isDeploymentStep condition
+  // deploy() is emitted for 200-expected multipart steps whose operationId
+  // matches the active config's deployment-gateway role (Lift 9 / #225);
+  // resolveFixture is emitted for any step that falls through to the inline
+  // multipart path — this includes non-deployment-gateway multipart steps
+  // AND deployment-gateway steps with a non-200 expected status (which are
+  // not routed through deploy()). Mirror the isDeploymentStep condition
   // exactly so the two flags stay in sync.
   const hasDeploymentMultipart = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some(
       (step) =>
-        step.operationId === 'createDeployment' &&
+        !!deploymentGatewayOpId &&
+        step.operationId === deploymentGatewayOpId &&
         step.bodyKind === 'multipart' &&
         !!step.multipartTemplate &&
         step.expect.status === 200,
@@ -222,7 +241,11 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
       (step) =>
         step.bodyKind === 'multipart' &&
         !!step.multipartTemplate &&
-        !(step.operationId === 'createDeployment' && step.expect.status === 200),
+        !(
+          !!deploymentGatewayOpId &&
+          step.operationId === deploymentGatewayOpId &&
+          step.expect.status === 200
+        ),
     ),
   );
   // authHeaders is used in inline request steps and awaitEventually witness blocks.
@@ -231,7 +254,8 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
     (s.requestPlan ?? []).some(
       (step) =>
         !(
-          step.operationId === 'createDeployment' &&
+          !!deploymentGatewayOpId &&
+          step.operationId === deploymentGatewayOpId &&
           step.bodyKind === 'multipart' &&
           !!step.multipartTemplate &&
           step.expect.status === 200
@@ -266,7 +290,7 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   lines.push(`test.describe('${suiteName}', () => {`);
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario, seeds, recordResponses));
+    lines.push(renderScenarioTest(scenario, seeds, recordResponses, deploymentGatewayOpId));
   }
   lines.push('});');
   return lines.join('\n');
@@ -276,6 +300,7 @@ function renderScenarioTest(
   s: EndpointScenario,
   globalContextSeeds: readonly GlobalContextSeed[],
   recordResponses: boolean,
+  deploymentGatewayOpId: string | undefined,
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
@@ -394,7 +419,11 @@ function renderScenarioTest(
     (step) =>
       step.bodyKind === 'multipart' &&
       !!step.multipartTemplate &&
-      !(step.operationId === 'createDeployment' && step.expect.status === 200),
+      !(
+        !!deploymentGatewayOpId &&
+        step.operationId === deploymentGatewayOpId &&
+        step.expect.status === 200
+      ),
   );
   const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
   for (const seed of globalContextSeeds) {
@@ -439,16 +468,19 @@ function renderScenarioTest(
     // confined to the callback.
     body.push(`  await test.step(${JSON.stringify(step.operationId)}, async () => {`);
 
-    // createDeployment multipart steps use the deploy() helper which encapsulates
-    // multipart body building, @@FILE: resolution, auth, HTTP POST, status
-    // assertion (throws on non-200), and extraction of all known deployment
-    // response fields into ctx. This keeps each deployment step as a single
-    // declarative call instead of ~35 lines of boilerplate.
+    // Deployment-gateway multipart steps use the deploy() helper which
+    // encapsulates multipart body building, @@FILE: resolution, auth, HTTP
+    // POST, status assertion (throws on non-200), and extraction of all
+    // known deployment response fields into ctx. This keeps each deployment
+    // step as a single declarative call instead of ~35 lines of boilerplate.
     // Only route 200-expected steps through deploy(): the helper hard-codes a
     // 200 assertion, so a step with a declared non-200 expected status must
     // fall through to the normal request path where step.expect.status is honoured.
+    // Lift 9 / #225: the operationId is sourced from the active config's
+    // artifact-kinds ABox role lookup, not a hard-coded literal.
     const isDeploymentStep =
-      step.operationId === 'createDeployment' &&
+      !!deploymentGatewayOpId &&
+      step.operationId === deploymentGatewayOpId &&
       step.bodyKind === 'multipart' &&
       !!step.multipartTemplate &&
       step.expect.status === 200;

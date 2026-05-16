@@ -165,6 +165,11 @@
           "type": "boolean",
           "description": "When true, the planner may compose multiple `rules` into a single deployment request via set-cover (e.g. `createDeployment` accepts a multi-file payload). Optional — mirrors the legacy `OperationArtifactRuleSpec.composable` contract; absence is treated as `false` by the planner."
         },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional ontological role this operation plays in the API surface. Used by the planner and Playwright emitter to discriminate special-case behaviour (e.g. multipart deployment routing) against the ABox instead of against a hard-coded operationId. Conventional values include `deploymentGateway` (the multipart deploy operation whose response surfaces deployed artifact identifiers). Lift 9 / #225: introduced to retire ~20 hard-coded `=== \"createDeployment\"` literals across `path-analyser/src/{scenarioGenerator,index,codegen/playwright/emitter}.ts`."
+        },
         "rules": {
           "type": "array",
           "minItems": 1,
