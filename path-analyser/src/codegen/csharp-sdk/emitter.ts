@@ -45,7 +45,10 @@ function renderCsharpSuite(
   lines.push(`    public static async Task ${pascalCase(suiteName)}Async()`);
   lines.push('    {');
   lines.push('        using var httpClient = new HttpClient();');
-  lines.push('        var baseUri = Environment.GetEnvironmentVariable("CAMUNDA_BASE_URL") ?? "http://localhost:8080/v2/";');
+  lines.push('        DotNetEnv.Env.TraversePath().Load();');
+  lines.push(
+    '        var baseUri = Environment.GetEnvironmentVariable("CAMUNDA_BASE_URL") ?? "http://localhost:8080/v2/";',
+  );
   lines.push('        var client = new OrchestrationClusterClient(');
   lines.push('            httpClient,');
   lines.push('            new ClientOptions { BaseUri = new Uri(baseUri) }');
