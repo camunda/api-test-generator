@@ -18,7 +18,8 @@
 //                    .env.example, README.md.
 //                    Sources: path-analyser/templates/.
 //   * fixtures/ — BPMN/DMN/form files referenced by @@FILE:<rel-path>
-//                 markers in emitted tests. Sources: path-analyser/fixtures/.
+//                 markers in emitted tests. Sources:
+//                 configs/<config>/fixtures/ (per-config; #221 / Lift 11).
 //
 // Keep SUPPORT_TEMPLATE_FILES in sync with
 // path-analyser/scripts/copy-support-templates.js.
@@ -27,7 +28,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getSpecBundleDir } from '../../configResolver.js';
+import { getActiveConfigDir, getSpecBundleDir } from '../../configResolver.js';
 
 export const SUPPORT_TEMPLATE_FILES = [
   'env.ts',
@@ -175,26 +176,27 @@ export async function materializeSupport(
 export const FIXTURES_DIR_NAME = 'fixtures';
 
 /**
- * Locate the generator's `fixtures/` directory.
+ * Locate the active config's `fixtures/` directory
+ * (#221 / Lift 11: `configs/<config>/fixtures/`).
  *
- * In both dist and source modes the fixtures live at `<pkg>/fixtures/`.
- * From `dist/src/codegen/playwright/` that is four parent hops up;
- * from `src/codegen/playwright/` it is three hops up. The search loop
- * handles both without a hard-coded depth.
+ * Walks up from this module's location looking for a repo root (one
+ * containing `configs.json`) and then resolves the active config's
+ * fixtures dir via `getActiveConfigDir`. This handles both tsx (source)
+ * and dist runtime modes without a hard-coded depth.
  */
 function defaultFixturesSourceDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   let dir = here;
   for (let i = 0; i < 6; i++) {
-    const candidate = path.join(dir, 'fixtures');
-    if (existsSync(path.join(candidate, 'bpmn'))) {
-      return candidate;
+    if (existsSync(path.join(dir, 'configs.json'))) {
+      return path.join(getActiveConfigDir(dir), 'fixtures');
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return path.resolve(here, '..', '..', '..', '..', 'fixtures');
+  // Fall back to a sensible relative path; copyDir will fail loudly if absent.
+  return path.resolve(here, '..', '..', '..', '..', '..', 'configs', 'camunda-oca', 'fixtures');
 }
 
 /**

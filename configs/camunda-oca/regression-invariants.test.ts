@@ -1521,7 +1521,13 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
       capabilities?: Record<string, unknown>;
       artifactKinds?: Record<string, ArtifactKindSpec>;
     }
-    const registryPath = join(REPO_ROOT, 'path-analyser', 'fixtures', 'deployment-artifacts.json');
+    const registryPath = join(
+      REPO_ROOT,
+      'configs',
+      'camunda-oca',
+      'fixtures',
+      'deployment-artifacts.json',
+    );
     const registryRaw = readFileSync(registryPath, 'utf8');
     // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
     const registry = JSON.parse(registryRaw) as { artifacts?: RegistryEntry[] };
@@ -4733,6 +4739,37 @@ describeForThisConfig(
       const kinds = graph.domain?.artifactKinds ?? {};
       expect(kinds.bpmnProcess?.modelKind).toBe('bpmn');
       expect(kinds.form?.modelKind).toBe('form');
+    });
+
+    it('every fixture registry entry resolves under configs/<config>/fixtures/ (Lift 11 / #221)', () => {
+      // After Lift 11 the fixture registry + BPMN/DMN/Form files live
+      // under `configs/<config>/fixtures/`. The loader resolves entry
+      // `path` relative to that directory. If anyone re-introduces an
+      // entry pointing outside the per-config fixtures tree (or to a
+      // file that hasn't been checked in), the planner would emit a
+      // Playwright suite that fails at runtime in `resolveFixture`.
+      // Pin both invariants statically.
+      interface RegistryEntry {
+        path: string;
+      }
+      const fixturesDir = join(REPO_ROOT, 'configs', 'camunda-oca', 'fixtures');
+      const registryPath = join(fixturesDir, 'deployment-artifacts.json');
+      const registryRaw = readFileSync(registryPath, 'utf8');
+      // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+      const registry = JSON.parse(registryRaw) as { artifacts?: RegistryEntry[] };
+      const missing: string[] = [];
+      for (const e of registry.artifacts ?? []) {
+        const resolved = join(fixturesDir, e.path);
+        const rel = relative(fixturesDir, resolved);
+        if (rel.startsWith('..') || rel === '' || rel.startsWith('/')) {
+          missing.push(`${e.path} (escapes configs/camunda-oca/fixtures/)`);
+          continue;
+        }
+        if (!existsSync(resolved)) {
+          missing.push(`${e.path} (file does not exist)`);
+        }
+      }
+      expect(missing).toEqual([]);
     });
 
     it('graph.domain.semanticTypeToArtifactKind matches the ABox `semanticTypeMap[]` (planner contract)', async () => {

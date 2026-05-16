@@ -606,7 +606,7 @@ export interface ArtifactKindSpec {
    * chain-feasibility BFS — a chain is satisfiable if requires can be
    * covered by `producesStates ∪ producibleStates`. The selector then
    * matches the chain's required states against per-entry `providesStates`
-   * in `path-analyser/fixtures/deployment-artifacts.json` to choose the
+   * in `configs/<config>/fixtures/deployment-artifacts.json` to choose the
    * fitting file. Example: bpmnProcess can produce `ModelHasServiceTaskType`
    * (via `service-task.bpmn`) or `ProcessInstanceCompleted` (via
    * `simple.bpmn`), but neither is unconditional.
@@ -627,7 +627,7 @@ export interface ArtifactKindSpec {
 
 /**
  * Single entry in the deployment artifact registry
- * (`path-analyser/fixtures/deployment-artifacts.json`). One entry per
+ * (`configs/<config>/fixtures/deployment-artifacts.json`). One entry per
  * checked-in BPMN/DMN/Form file the planner can deploy via
  * `createDeployment`. Loaded lazily and cached at module scope by
  * `getArtifactsRegistry()` in `path-analyser/src/index.ts`.

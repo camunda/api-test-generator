@@ -1,7 +1,7 @@
 import fsSync from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { bindSemanticInput } from './bindSemanticInput.js';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
 import {
@@ -1555,18 +1555,14 @@ function normaliseProvidesValues(input: unknown): Record<string, string[]> | und
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
   if (artifactsRegistryCache) return artifactsRegistryCache;
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    // Invoked from path-analyser
-    path.resolve(process.cwd(), 'fixtures', 'deployment-artifacts.json'),
-    // Invoked from repo root
-    path.resolve(process.cwd(), 'path-analyser', 'fixtures', 'deployment-artifacts.json'),
-    // Relative to compiled module (dist/src)
-    path.resolve(moduleDir, '../fixtures/deployment-artifacts.json'),
-    path.resolve(moduleDir, '../../fixtures/deployment-artifacts.json'),
-  ];
-  for (const p of candidates) {
+  // The fixture registry lives under the active config directory at the repo
+  // root (#221 / Lift 11: `configs/<config>/fixtures/deployment-artifacts.json`).
+  // Probe both repo-root and path-analyser-relative cwds so the script keeps
+  // working from either invocation site, mirroring loadRequestDefaults().
+  const repoRootCandidates = [process.cwd(), path.resolve(process.cwd(), '..')];
+  for (const root of repoRootCandidates) {
     try {
+      const p = path.resolve(getActiveConfigDir(root), 'fixtures', 'deployment-artifacts.json');
       const data = fsSync.readFileSync(p, 'utf8');
       const json = JSON.parse(data);
       const arr = Array.isArray(json?.artifacts) ? json.artifacts : Array.isArray(json) ? json : [];

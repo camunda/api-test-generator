@@ -132,7 +132,7 @@ export const artifactKindsSchema = {
           type: 'array',
           items: { type: 'string', minLength: 1 },
           description:
-            'Runtime states SOME fixture of this kind CAN deliver, conditional on which checked-in file the selector picks (#159). The planner reads `producesStates ∪ producibleStates` for chain-feasibility BFS; the per-fixture `providesStates` in `path-analyser/fixtures/deployment-artifacts.json` then narrows the choice at emission time. Optional — omit when no fixture offers any optional state.',
+            'Runtime states SOME fixture of this kind CAN deliver, conditional on which checked-in file the selector picks (#159). The planner reads `producesStates ∪ producibleStates` for chain-feasibility BFS; the per-fixture `providesStates` in `configs/<config>/fixtures/deployment-artifacts.json` then narrows the choice at emission time. Optional — omit when no fixture offers any optional state.',
         },
         producesSemantics: {
           type: 'array',
