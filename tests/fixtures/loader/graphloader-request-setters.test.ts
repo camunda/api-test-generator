@@ -9,11 +9,12 @@
  * semantic in its body, dedup'd, with no entries when no operation
  * declares a body semantic.
  *
- * These properties are what the planner's `bindClientMintedAttribute`
- * helper and the future setter-chain reuse pass consume; if either
- * regresses, attribute-classification scenarios silently revert to the
- * pre-PR-2 synthetic placeholder. The fixture is the smallest spec
- * that exercises each shape independently.
+ * These properties are what the variant suite's
+ * `generateOptionalSubShapeVariants` consumes via the `bindSemanticInput`
+ * chokepoint (and what the future setter-chain reuse pass will
+ * consume); if either regresses, attribute-classification variant
+ * scenarios silently revert to a synthetic placeholder. The fixture is
+ * the smallest spec that exercises each shape independently.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
