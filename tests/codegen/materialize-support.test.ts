@@ -350,6 +350,14 @@ describe('materializeRoleSupportFiles', () => {
       await expect(materializeRoleSupportFiles(tmp, bundles, extras)).rejects.toThrow(
         /\['extracts'\]/,
       );
+      // Extras present but the variable is `null` (Mustache renders
+      // null as empty string, same as undefined — must also raise).
+      const nullExtras = new Map<string, Record<string, unknown>>([
+        ['templatedRole', { extracts: null }],
+      ]);
+      await expect(materializeRoleSupportFiles(tmp, bundles, nullExtras)).rejects.toThrow(
+        /\['extracts'\]/,
+      );
     } finally {
       await fs.rm(srcDir, { recursive: true, force: true });
     }

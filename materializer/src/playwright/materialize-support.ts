@@ -284,10 +284,11 @@ function collectTemplateVariableNames(template: string): Set<string> {
 }
 
 /**
- * Throw if any Mustache variable referenced by `template` is missing
- * (or `undefined`) in `scope`. Prevents silently emitting broken
- * helpers like `const EXTRACTS = ;` when a hook provider forgot to
- * populate `roleExtras`.
+ * Throw if any Mustache variable referenced by `template` is missing,
+ * `undefined`, or `null` in `scope`. Mustache renders all three the same
+ * way — as an empty string — so accepting `null` here would let a
+ * provider that returned `null` silently produce a broken helper like
+ * `const EXTRACTS = ;`.
  */
 function assertTemplateVariablesResolved(
   template: string,
@@ -298,7 +299,7 @@ function assertTemplateVariablesResolved(
   const required = collectTemplateVariableNames(template);
   const missing: string[] = [];
   for (const name of required) {
-    if (!(name in scope) || scope[name] === undefined) missing.push(name);
+    if (!(name in scope) || scope[name] === undefined || scope[name] === null) missing.push(name);
   }
   if (missing.length > 0) {
     throw new Error(

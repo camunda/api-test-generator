@@ -191,10 +191,12 @@ export function loadRoleBundlesForActiveConfig(repoRoot?: string): Map<string, L
       callSiteTemplatePath: callSitePath,
       importsTemplatePath: existsSync(importsPath) ? importsPath : undefined,
       supportFilePath: supportPath,
-      // `supportBasename` is the FINAL emitted basename — strip the `.tmpl`
-      // suffix when the source is a template so downstream consumers
-      // (materializer, drift-detector invariants) see the same name a
-      // verbatim helper would have.
+      // `supportBasename` is the SOURCE helper basename with any
+      // trailing `.tmpl` suffix stripped (e.g. `'support.ts'` for both
+      // `support.ts` and `support.ts.tmpl`). The materializer reads it
+      // only to derive the file extension; the emitted destination is
+      // `<roleName><ext>` (e.g. `'deploymentGateway.ts'`) and is not
+      // stored on the bundle.
       supportBasename: supportPath ? path.basename(supportPath).replace(/\.tmpl$/, '') : undefined,
       supportIsTemplated,
       callSiteTemplate: readFileSync(callSitePath, 'utf8'),
