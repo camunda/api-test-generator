@@ -83,11 +83,26 @@
       "implicitAdds": [
         "ProcessInstanceExists"
       ],
+      "chainCleanupRequires": [
+        "ProcessInstanceCompleted"
+      ],
       "valueBindings": {
         "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
         "request.processDefinitionKey": "semantic:ProcessDefinitionKey",
         "response.processInstanceKey": "semantic:ProcessInstanceKey"
       }
+    },
+    {
+      "operationId": "completeJob",
+      "produces": [
+        "ProcessInstanceCompleted"
+      ]
+    },
+    {
+      "operationId": "cancelProcessInstance",
+      "produces": [
+        "ProcessInstanceCompleted"
+      ]
     },
     {
       "operationId": "activateJobs",

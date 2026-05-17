@@ -579,6 +579,24 @@ export interface OperationDomainRequirements {
   disjunctions?: string[][]; // sets where one of each required
   implicitAdds?: string[]; // states produced implicitly on success
   produces?: string[]; // produced states (override)
+  /**
+   * Post-condition hygiene states the chain SHOULD leave in place after
+   * this op runs, but which are NOT preconditions to the op (#249). Unlike
+   * `requires`, this field is invisible to the BFS scenario planner — it
+   * never gates feasibility, never schedules producer ops, and never
+   * filters the op out. Its sole consumer is the fixture selector
+   * (`computeDeploymentRequiredStates`), which unions these states into
+   * the deployment-gateway requirement set so a fixture that provides them
+   * is preferred. Subsequent ops in the chain whose `produces` /
+   * `implicitAdds` include the state discharge the hygiene requirement.
+   *
+   * Used to encode "this op creates a resource that should be driven to a
+   * terminal state by the end of the test" — e.g. `createProcessInstance`
+   * declares `chainCleanupRequires: ["ProcessInstanceCompleted"]` so the
+   * base scenario deploys a self-completing fixture instead of leaving an
+   * orphan running instance.
+   */
+  chainCleanupRequires?: string[];
   valueBindings?: Record<string, string>; // request field -> state.parameter mapping
 }
 

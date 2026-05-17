@@ -550,6 +550,7 @@ export interface RuntimeStatesViews {
       disjunctions?: string[][];
       implicitAdds?: string[];
       produces?: string[];
+      chainCleanupRequires?: string[];
       valueBindings?: Record<string, string>;
     }
   >;
@@ -584,6 +585,8 @@ export function deriveRuntimeStatesViews(repoRoot: string): RuntimeStatesViews |
     if (r.disjunctions !== undefined) entry.disjunctions = r.disjunctions.map((d) => [...d]);
     if (r.implicitAdds !== undefined) entry.implicitAdds = [...r.implicitAdds];
     if (r.produces !== undefined) entry.produces = [...r.produces];
+    if (r.chainCleanupRequires !== undefined)
+      entry.chainCleanupRequires = [...r.chainCleanupRequires];
     if (r.valueBindings !== undefined) entry.valueBindings = { ...r.valueBindings };
     operationRequirements[r.operationId] = entry;
   }

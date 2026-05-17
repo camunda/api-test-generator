@@ -1495,11 +1495,21 @@ function chooseFixtureFromRegistry(
 /**
  * Compute the set of runtime states the deployment-gateway step in a chain
  * must provide. Walks every operation in the scenario chain, accumulating
- * required states from `operationRequirements.<op>.requires`, then subtracts
+ * required states from `operationRequirements.<op>.requires` and from the
+ * post-condition hygiene set `chainCleanupRequires` (#249), then subtracts
  * states produced by any non-deployment-gateway op in the chain (those are
  * satisfied by their own producer step, not by the deployment gateway). The
  * chain is BFS-ordered with producers before their consumers, so a simple
  * unordered subtraction is equivalent to a left-to-right walk here.
+ *
+ * `chainCleanupRequires` differs from `requires` in that it is INVISIBLE to
+ * the BFS scenario planner — it never gates feasibility, never schedules a
+ * producer op, and never filters the consumer op out of the scenario set.
+ * It exists solely to bias fixture selection toward fixtures that leave the
+ * broker in the desired terminal state (e.g. a self-completing BPMN process
+ * for `createProcessInstance`'s base scenario, so the test doesn't strand
+ * a running instance). Subsequent ops in the chain whose `produces` /
+ * `implicitAdds` cover the state discharge the hygiene requirement.
  *
  * The deployment-gateway op is identified via `isDeploymentGatewayOp`
  * (Lift 9 / #225 — see `ontology/operationRoles.ts`), not by a hard-coded
@@ -1520,6 +1530,7 @@ function computeDeploymentRequiredStates(
     const req = opReqs[opRef.operationId];
     if (!req) continue;
     for (const s of req.requires ?? []) result.add(s);
+    for (const s of req.chainCleanupRequires ?? []) result.add(s);
   }
   // States produced by non-deployment-gateway ops earlier in the chain are
   // satisfied by their own producer step; the deployment gateway doesn't
