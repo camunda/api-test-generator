@@ -41,21 +41,21 @@ semantic-graph-extractor → path-analyser → materializer
 ```
 materializer/
 ├── src/
-│   ├── index.ts                  ← CLI entry (codegen:playwright[:all])
+│   ├── index.ts                  ← CLI entry + registers built-in emitters
+│   │                                and role-hook providers
 │   ├── cli-args.ts               ← argv parser
-│   ├── orchestrator.ts           ← per-operation emission driver
-│   ├── emitter.ts                ← Emitter strategy interface
-│   ├── registry.ts               ← built-in emitter registration
+│   ├── orchestrator.ts           ← per-operation emission driver + write
+│   │                                path safety (scaffold + emit)
 │   ├── roles.ts                  ← role-rendering type surface (operation
 │   │                                role *classification* lives in
 │   │                                path-analyser/ontology/operationRoles)
-│   ├── deploymentExtracts.ts     ← deployment-role extras (transitional;
-│   │                                will move behind the bundle interface
-│   │                                in #233)
+│   ├── deploymentExtracts.ts     ← computeDeploymentExtracts (consumed by
+│   │                                the deployment role hook provider)
 │   ├── playwright/
-│   │   ├── emitter.ts            ← Playwright spec emitter
+│   │   ├── emitter.ts            ← Playwright EmitterStrategy (emit + scaffold)
 │   │   ├── roleRenderer.ts       ← Mustache role-template renderer
-│   │   └── materialize-support.ts← vendors support/ + scaffolds project
+│   │   ├── materialize-support.ts← vendors support/ into the emitted suite
+│   │   └── hooks/deployment.ts   ← DeploymentRoleHookProvider
 │   └── support/                  ← runtime helpers vendored into every
 │                                    emitted suite (env, seeding, fixtures,
 │                                    await-eventually, recorder, seed-rules)
@@ -88,9 +88,11 @@ node dist/src/index.js --all
 
 ## Pluggable emitters
 
-Suite generation is layered behind the `Emitter` strategy interface in
-[`src/emitter.ts`](src/emitter.ts). The CLI selects an emitter via
-`--target=<id>` and falls back to `playwright` when omitted:
+Suite generation is layered behind the `EmitterStrategy` strategy
+contract published from
+[`@camunda8/emitter-sdk`](../emitter-sdk/README.md). The CLI selects
+an emitter via `--target=<id>` and falls back to `playwright` when
+omitted:
 
 ```bash
 node materializer/dist/src/index.js --target=playwright createWidget
@@ -98,9 +100,13 @@ node materializer/dist/src/index.js --target=playwright --all
 ```
 
 The current built-in is `playwright`. Additional targets register
-themselves through `registerEmitter()` and are listed in `--help`. The
-emitter contract is **experimental** and is being formalised in
-[#233](https://github.com/camunda/api-test-generator/issues/233).
+themselves through `registerEmitter()` at module load (see
+[`src/index.ts`](src/index.ts)) and are listed in `--help`.
+
+**Writing a new emitter** — see
+[`emitter-sdk/README.md`](../emitter-sdk/README.md) for the
+step-by-step authoring walk-through (purity / determinism / path-safety
+contracts, role dispatch, scaffolding, registration, tests).
 
 ## Role bundles
 
@@ -119,6 +125,38 @@ See [`src/ROLES.md`](src/ROLES.md) for the resolution algorithm and
 for the rendering pipeline. A role + a `support.<ext>` file is the
 override hook for replacing the generic per-step emission with a
 config-specific helper (e.g. the OCA deployment helper).
+
+### Adding a new role
+
+1. Pick a role name (camelCase by convention — e.g. `deploymentGateway`).
+2. Bind operations to the role in the active config's artifact-kinds
+   ABox at `configs/<config>/ontology/artifact-kinds.json`. The
+   planner reads this and exposes the binding via
+   `getRoleForOperation(opId)` to every emitter.
+3. Create the bundle directory at
+   `configs/<config>/codegen/<emitterId>/roles/<role>/` (one bundle
+   per active emitter; the Playwright bundle is the canonical
+   reference today).
+4. Write `call-site.tmpl` — the Mustache template that renders for any
+   step bound to this role. Available scope: per-step variables plus
+   any `roleExtras` your role consumes (see below). The
+   [`deploymentGateway` bundle](../configs/camunda-oca/codegen/playwright/roles/deploymentGateway/)
+   is a complete worked example.
+5. Optionally ship `support.<ext>` (vendored helper file),
+   `imports.tmpl` (extra imports), and `match.json` (gating rules).
+6. If your role needs spec-derived data (e.g. response-extracts
+   computed from the OpenAPI graph), implement a `RoleHookProvider`
+   per [`@camunda8/emitter-sdk`](../emitter-sdk/README.md), declare
+   `roleHooks: ['<hook-name>']` on your emitter, and register the
+   provider at materializer boot. The deployment hook at
+   [`src/playwright/hooks/deployment.ts`](src/playwright/hooks/deployment.ts)
+   is the reference implementation.
+7. Add an L3 invariant in
+   `configs/<config>/regression-invariants.test.ts` asserting that
+   every operation bound to the role has the bundle present and that
+   the bundle is imported by at least one emitted spec. See the
+   "role-template rendering contract" describe block for the existing
+   pattern.
 
 ## Determinism
 
@@ -140,6 +178,7 @@ with `npm test`.
 ## See also
 
 - [path-analyser/README.md](../path-analyser/README.md) — upstream planner
+- [emitter-sdk/README.md](../emitter-sdk/README.md) — stable emitter contract + authoring walk-through
+- [src/ROLES.md](src/ROLES.md) — role-template rendering design + implementation reference
 - [AGENTS.md](../AGENTS.md) — repo-wide operational guide
-- [#233](https://github.com/camunda/api-test-generator/issues/233) — stable `EmitterStrategy` contract (in progress)
 - [#235](https://github.com/camunda/api-test-generator/issues/235) — workspace split rationale
