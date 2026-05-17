@@ -118,6 +118,7 @@ Per-config role bundles live under
 | `call-site.tmpl` | yes | Mustache template rendered into the spec |
 | `imports.tmpl` | no | Additional imports prepended to the spec |
 | `support.<ext>` | no | Helper file vendored into the emitted suite as `support/<role>.<ext>` and imported by the call-site template |
+| `support.<ext>.tmpl` | no | Mustache template variant of the helper file. Rendered against the role's `roleExtras` entry at codegen time before being written as `support/<role>.<ext>`. Mutually exclusive with `support.<ext>`. Use this when the helper needs to bake in spec-derived constants (see the `deploymentGateway` `EXTRACTS` list). |
 | `match.json` | no | Match rules selecting which operations resolve to this role |
 
 See [`src/ROLES.md`](src/ROLES.md) for the resolution algorithm and
@@ -142,8 +143,11 @@ config-specific helper (e.g. the OCA deployment helper).
    any `roleExtras` your role consumes (see below). The
    [`deploymentGateway` bundle](../configs/camunda-oca/codegen/playwright/roles/deploymentGateway/)
    is a complete worked example.
-5. Optionally ship `support.<ext>` (vendored helper file),
-   `imports.tmpl` (extra imports), and `match.json` (gating rules).
+5. Optionally ship `support.<ext>` or `support.<ext>.tmpl` (vendored
+   helper file; the `.tmpl` form is rendered as Mustache against the
+   role's `roleExtras` at codegen time and is mutually exclusive with
+   the verbatim form), `imports.tmpl` (extra imports), and
+   `match.json` (gating rules).
 6. If your role needs spec-derived data (e.g. response-extracts
    computed from the OpenAPI graph), implement a `RoleHookProvider`
    per [`@camunda8/emitter-sdk`](../emitter-sdk/README.md), declare

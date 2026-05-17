@@ -2,10 +2,11 @@
 //
 // Vendored into every emitted Playwright suite at
 // <outDir>/support/deploymentGateway.ts by the role-overlay materializer
-// (see path-analyser/src/codegen/playwright/materialize-support.ts). The
-// file is renamed on copy from this role directory's `support.ts` to
-// `deploymentGateway.ts` so role-owned helpers cannot collide with
-// built-in support files.
+// (see materializer/src/playwright/materialize-support.ts). This source
+// file ships as `support.ts.tmpl` and is rendered as a Mustache template
+// at codegen time so the spec-derived `EXTRACTS` constant is baked into
+// the vendored helper instead of being threaded through every call-site
+// literal (#243).
 //
 // Encapsulates the full deployment lifecycle in a single call:
 //   - resolve @@FILE: paths via resolveFixture()
@@ -13,10 +14,11 @@
 //     supplied by the emitter (from globalContextSeeds)
 //   - POST <baseUrl> + the role-bound op's path with auth headers
 //   - throw a descriptive Error on any non-200 response
-//   - walk the spec-derived `extracts` list and populate ctx via
+//   - walk the spec-derived `EXTRACTS` constant and populate ctx via
 //     extractInto() — the helper has no hard-coded knowledge of which
-//     response fields are extracted; the list comes from the
-//     extractor's responseSemanticLeaves at codegen time
+//     response fields are extracted; the list is generated at codegen
+//     time from the extractor's responseSemanticLeaves and templated
+//     into this file's `EXTRACTS` literal below.
 //
 // Keep this file free of npm package imports — only the co-vendored
 // ./env, ./fixtures, and ./seeding helpers (built-in support, sibling
@@ -79,21 +81,32 @@ export interface DeployStripRule {
 
 /**
  * A response-field extraction directive: navigate `segments` on the response
- * JSON and bind the value to `ctx[varName]` via `extractInto`. Computed at
- * codegen time from the role-bound op's `responseSemanticLeaves` so the
- * runtime helper carries zero spec-derived knowledge.
+ * JSON and bind the value to `ctx[varName]` via `extractInto`.
  *
  * `segments` mixes string property keys with number array indices. A `null`
  * or `undefined` encountered partway short-circuits the walk and the
  * variable is left untouched (extractInto skips undefined values).
  */
-export interface DeployExtract {
+interface DeployExtract {
   varName: string;
   segments: (string | number)[];
 }
 
 /**
- * Perform a multipart deploy call against `path` and walk `extracts` against
+ * Spec-derived response-extracts list. Baked into this file at codegen time
+ * from the role-bound operation's `responseSemanticLeaves` via the
+ * `DeploymentRoleHookProvider` (`materializer/src/playwright/hooks/deployment.ts`)
+ * and the templated-support-file rendering path in `materializeRoleSupportFiles`
+ * (`materializer/src/playwright/materialize-support.ts`).
+ *
+ * Keeping the list inside the helper (rather than at every `deploy(...)`
+ * call site in the emitted suite) is the encapsulation the helper was
+ * introduced for — see #243.
+ */
+const EXTRACTS: DeployExtract[] = {{{extracts}}};
+
+/**
+ * Perform a multipart deploy call against `path` and walk `EXTRACTS` against
  * the response JSON.
  *
  * - Resolves `@@FILE:<path>` entries in `body.files` via resolveFixture().
@@ -103,7 +116,7 @@ export interface DeployExtract {
  *   `globalContextSeeds` so no domain-specific knowledge is hard-coded here.
  * - Throws a descriptive Error on any non-200 response (includes the response
  *   body for diagnosis).
- * - Walks `extracts` against the parsed JSON and assigns each resolved value
+ * - Walks `EXTRACTS` against the parsed JSON and assigns each resolved value
  *   to `ctx[ex.varName]` via `extractInto`. The walker short-circuits to
  *   `undefined` on a null/missing segment; `extractInto` skips undefined
  *   values so pre-seeded ctx bindings are preserved.
@@ -115,7 +128,6 @@ export async function deploy(
   body: DeployBody,
   url: string,
   strips: DeployStripRule[],
-  extracts: DeployExtract[],
 ): Promise<ApiResponseLike> {
   const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};
 
@@ -147,7 +159,7 @@ export async function deploy(
 
   const json = await resp.json();
 
-  for (const ex of extracts) {
+  for (const ex of EXTRACTS) {
     let v: unknown = json;
     for (const seg of ex.segments) {
       if (v === null || v === undefined) {

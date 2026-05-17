@@ -576,10 +576,11 @@ function renderScenarioTest(
         .filter((seed) => seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined)
         .map((seed) => ({ fieldName: seed.fieldName, sentinel: seed.defaultSentinel }));
       const stripsLit = JSON.stringify(strips);
-      // Per-role data computed by the orchestrator (e.g. extracts derived
-      // from the role-bound op's responseSemanticLeaves for the
-      // deploymentGateway role). Roles that don't consume this simply
-      // ignore the scope variable in their template.
+      // Per-role data computed by the orchestrator. The deployment-gateway
+      // hook's `extracts` payload is consumed by `materializeRoleSupportFiles`
+      // when rendering the templated helper (#243), so it is also threaded
+      // here for any future role template that wants to interpolate it
+      // directly. Roles that consume neither simply ignore the scope.
       const extras = roleExtras?.get(roleMatch.roleName) ?? {};
       const scope: PlaywrightRoleScope & Record<string, unknown> = {
         respVar: varName,
@@ -595,10 +596,6 @@ function renderScenarioTest(
         baseUrl: 'baseUrl',
         body: bodyIndented,
         strips: stripsLit,
-        // `extracts` is a per-emitter scope variable (PlaywrightRoleScope):
-        // default to `[]` so a role bundle that hasn't been wired with
-        // per-role extras still renders. roleExtras may override.
-        extracts: '[]',
         ...extras,
         // Additional context vars used by the deploymentGateway template:
         url: buildUrlExpression(step.pathTemplate),

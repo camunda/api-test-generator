@@ -446,7 +446,7 @@ These live under `configs/<active-config>/`:
 | `filter-providers.json` | Maps fields to value providers (`ctx`, `const`, `enumFirst`, etc.) |
 | `request-defaults.json` | Default values for request body fields per operation |
 | `fixtures/` | BPMN, DMN, and form files used by deployment tests, plus `deployment-artifacts.json` registry |
-| `codegen/playwright/roles/<role>/` | Per-role bundles consumed by the materializer (`call-site.tmpl`, optional `imports.tmpl`, `support.<ext>`, `match.json`) |
+| `codegen/playwright/roles/<role>/` | Per-role bundles consumed by the materializer (`call-site.tmpl`, optional `imports.tmpl`, `support.<ext>` or `support.<ext>.tmpl`, `match.json`) |
 
 ## Environment Variables
 

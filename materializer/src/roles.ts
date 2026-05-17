@@ -51,20 +51,13 @@ export interface PlaywrightRoleScope extends CommonRoleScope {
    * `globalContextSeeds`.
    */
   strips: string;
-  /**
-   * JSON literal expression for the spec-derived response-extracts list.
-   * Computed at codegen time from the role-bound operation's
-   * `responseSemanticLeaves` (Phase 4 / absorbs the original #230 scope).
-   * Roles that do not consume extracts simply ignore this in their template.
-   */
-  extracts: string;
 }
 
 /**
  * Scope provided to `imports.tmpl`. Rendered **once per (spec-file, role)
  * pair**, not once per step — therefore receives only the role-static
  * subset of `CommonRoleScope` / per-emitter scopes, never per-step values
- * (`respVar`, `body`, `extracts`, `operationId`, `pathTemplate`, etc.).
+ * (`respVar`, `body`, `operationId`, `pathTemplate`, etc.).
  *
  * Step-dependent imports are not a use case the contract supports: if a
  * template's import block needs to differ between two steps of the same

@@ -253,19 +253,32 @@ Playwright emitter's role-dispatch loop is at
 If your emitter declares `roleHooks: ['deployment']` (etc.), the
 orchestrator will invoke registered `RoleHookProvider`s before any
 `emit` call and populate `ctx.roleExtras.get('<role>')` with the
-provider's output. Spread it into your role-template scope:
+provider's output. Two places can consume the extras:
 
-```ts
-const extras = ctx.roleExtras?.get(role) ?? {};
-const rendered = mustache.render(bundle.callSiteTemplate, {
-  ...stepScope,
-  ...extras,        // e.g. { extracts: '[{varName: "deploymentKeyVar", ...}]' }
-});
-```
+1. **Call-site template scope.** Spread the extras into your
+   `call-site.tmpl` Mustache scope so per-step rendering can read them:
 
-The canonical example is the deployment role's `extracts` variable,
-computed once per CLI invocation by `DeploymentRoleHookProvider` at
-[`materializer/src/playwright/hooks/deployment.ts`](../materializer/src/playwright/hooks/deployment.ts).
+   ```ts
+   const extras = ctx.roleExtras?.get(role) ?? {};
+   const rendered = mustache.render(bundle.callSiteTemplate, {
+     ...stepScope,
+     ...extras,
+   });
+   ```
+
+2. **Templated support file (`support.<ext>.tmpl`).** If the extras are
+   constant across the whole CLI run (e.g. derived from the OpenAPI
+   graph, not from the individual step), prefer baking them into the
+   support file once instead of threading them through every call site.
+   The materializer renders the role's `support.<ext>.tmpl` against the
+   same extras map and writes the result to `support/<role>.<ext>`.
+
+   This is what the deployment role does: `extracts` is a spec-derived
+   constant, so `support.ts.tmpl` interpolates it as
+   `const EXTRACTS = {{{extracts}}};` and the call-site template never
+   sees it. See
+   [`materializer/src/playwright/hooks/deployment.ts`](../materializer/src/playwright/hooks/deployment.ts)
+   for the provider and #243 for the rationale.
 
 ### Step 6 — Implement `scaffold` (optional)
 
