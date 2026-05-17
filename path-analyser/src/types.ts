@@ -123,7 +123,6 @@ export interface OperationGraph {
   // affecting base-scenario planning, which still consults
   // `producersByType` (authoritative outputs only after #98).
   responseProducersByType?: Record<string, string[]>;
-  bootstrapSequences?: BootstrapSequence[];
   domain?: DomainSemantics; // loaded sidecar
   producersByState?: Record<string, string[]>; // domain state -> operations
   // Issue #104: parallel index of operations that *establish* a semantic
@@ -169,13 +168,6 @@ export interface OperationGraph {
   requestSettersByType?: Record<string, string[]>;
 }
 
-export interface BootstrapSequence {
-  name: string;
-  description?: string;
-  operations: string[]; // ordered operationIds
-  produces: string[]; // declared semantic types produced by the full sequence
-}
-
 export interface EndpointScenario {
   id: string;
   name?: string; // human-friendly short name
@@ -187,8 +179,6 @@ export interface EndpointScenario {
   cycleInvolved?: boolean;
   productionMap?: Record<string, string>; // semanticType -> operationId
   providerList?: Record<string, string[]>; // semanticType -> all producing opIds encountered
-  bootstrapSequencesUsed?: string[]; // names of bootstrap sequences contributing
-  bootstrapFull?: boolean; // true if a single bootstrap sequence satisfied all required semantic types
   hasEventuallyConsistent?: boolean; // true if any operation in chain is eventually consistent
   eventuallyConsistentCount?: number; // count of operations in chain that are eventually consistent
   // Domain scenario augmentation
