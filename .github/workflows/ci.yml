@@ -63,7 +63,7 @@ jobs:
         run: npx tsc --noEmit -p emitter-sdk/tsconfig.json
 
       - name: Build emitter-sdk (emit .d.ts for materializer typecheck)
-        run: npm run build:emitter-sdk
+        run: npm run build -w @camunda8/emitter-sdk
 
       - name: Typecheck (materializer)
         run: npx tsc --noEmit -p materializer/tsconfig.json
