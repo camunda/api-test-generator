@@ -157,7 +157,7 @@ function matchesJsonType(value: unknown, jsonType: string): boolean {
     case 'null':
       return value === null;
     default:
-      return true;
+      throw new Error(`Unsupported JSON schema type '${jsonType}'.`);
   }
 }
 
