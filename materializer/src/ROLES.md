@@ -1,8 +1,24 @@
 # Operation-role rendering (Lift 12 / #231)
 
-Status: **Phase 1 — design**. No runtime code is wired through yet. Phases
-2–6 implement the materializer overlay, renderer, deployment-gateway
-reference role, L3 invariants, and config-author docs.
+Status: **Phases 1–5 landed**. Phase 6 documentation (this file +
+[`materializer/README.md`](../README.md)) is the current pass.
+
+| Phase | Status | Where it landed |
+|---|---|---|
+| 1 — Design + types | ✅ | PR #232 |
+| 2 — Materializer overlay (`materializeRoleSupportFiles`) | ✅ | PR #234 |
+| 3 — Renderer (`roleRenderer.ts`) + `isDeploymentStep` removed | ✅ | PR #234 |
+| 4 — `deploymentGateway` reference role | ✅ | PR #234; spec-derived extracts moved behind `DeploymentRoleHookProvider` in #237 (#233 Step 6) |
+| 5 — L3 invariants | ✅ | This PR — three invariants in `configs/camunda-oca/regression-invariants.test.ts` under "role-template rendering contract (Lift 12 / #231 Phase 5)" |
+| 6 — Documentation | 🟡 | This refresh + `materializer/README.md` already cover the runtime contract; the explicit "Adding a role" + "Adding an emitter" how-to guides land alongside the first contributor request that needs them (YAGNI) |
+
+The renderer dispatches per step via `roleRenderer.findRoleForStep`, the
+overlay materializes per-role helpers via
+`materializeRoleSupportFiles`, and per-role compute hooks land their
+output in `ctx.roleExtras[<role>]` via the
+[`RoleHookProvider`](../../emitter-sdk/src/types.ts) registry — see
+[`materializer/src/playwright/hooks/deployment.ts`](playwright/hooks/deployment.ts)
+for the deployment-gateway reference provider.
 
 ## Principle
 
@@ -157,6 +173,11 @@ fine: the file is never imported by source code, only vendored. A
 lint exclusion or `// @ts-nocheck` may be appropriate here; Phase 4
 will decide.
 
+Resolved in Phase 4: source-tree role helpers use sibling relative
+imports (e.g. `import { ctx } from '../support/seeding'`) that
+resolve both in the source repo and after materialization. No
+`@ts-nocheck` was needed.
+
 Materialized layout (in each emitted Playwright suite):
 
 ```
@@ -289,7 +310,7 @@ extensions are documented in this file under the per-emitter section.
 | `baseUrl` | string | Name of the base-URL variable in scope (typically `baseUrl`). |
 | `body` | string | TypeScript expression evaluating to the request body for this step. JSON literal, multipart builder call, or `undefined`. |
 | `strips` | string | JSON literal expression for the strip-on-sentinel rules derived from `globalContextSeeds`. |
-| `extracts` | string | JSON literal expression for the response-extracts list (see "Wrap-or-replace" and Phase 4 / #230). |
+| `extracts` | string | JSON literal expression for the response-extracts list (see "Wrap-or-replace"; for `deploymentGateway`, computed by [`DeploymentRoleHookProvider`](playwright/hooks/deployment.ts) per #233 Step 6). |
 
 The exact scope contract for the Java SDK and any future emitter is
 defined when that emitter lands; this file is the canonical reference
@@ -333,7 +354,7 @@ buying anything observable.
 Mustache does not re-indent multi-line interpolated values. Templates
 that wrap multi-line `{{{defaultRender}}}` are responsible for placing
 the interpolation at the column they want, and the codegen
-post-formatter (Phase 3 will decide between Biome and Prettier here)
+post-formatter (Biome — decision resolved in Phase 3)
 normalises the result.
 
 If a role finds itself needing indent-sensitive interpolation in
@@ -341,104 +362,116 @@ multiple places, that is a signal to add an indented-render helper
 (`{{{defaultRenderIndented2}}}` etc.) rather than push indentation
 logic into the template.
 
-## Materializer overlay (Phase 2)
+## Materializer overlay (Phase 2, landed)
 
-The Playwright materializer currently copies a fixed set of support
-files from `materializer/src/support/` into each emitted
-suite's `playwright/support/`. Phase 2 extends this to:
+The Playwright materializer copies the built-in support tree from
+`materializer/src/support/` into each emitted suite's
+`playwright/support/`, then overlays per-role helpers via
+[`materializeRoleSupportFiles`](playwright/materialize-support.ts):
 
-1. Copy the built-in support tree as today.
-2. For every role active in the active config, copy
-   `configs/<config>/codegen/playwright/roles/<role>/support.<ext>`
-   to `playwright/support/<role>.<ext>` — **renamed on copy** so
-   role names (not the literal `support`) become the emitted
-   filenames. See "Helper materialization and imports" above.
-3. Error on file-name collisions: between a role's emitted name and
-   any built-in support file's basename, or between two roles'
-   emitted names. The first is prevented by reserving built-in
-   names; the second cannot occur because role names are unique
-   within a config, but the materializer asserts it anyway as a
-   defensive check.
+1. The built-in support tree is copied as documented in
+   [`materializer/README.md`](../README.md).
+2. For every role bundle loaded via
+   [`loadRoleBundlesForActiveConfig`](playwright/roleRenderer.ts)
+   whose directory carries a `support.<ext>` file, that file is
+   copied to `playwright/support/<role>.<ext>` — **renamed on copy**
+   so role names (not the literal `support`) become the emitted
+   filenames.
+3. Collisions error. A role name that matches a built-in support file's
+   stem (`env`, `seeding`, `fixtures`, `recorder`, `await-eventually`)
+   raises with the colliding name surfaced in the error message.
 
-`deployment.ts` moves from `materializer/src/support/` into
 `configs/camunda-oca/codegen/playwright/roles/deploymentGateway/
-support.ts` in Phase 4, materializing as
-`playwright/support/deploymentGateway.ts`. The built-in support tree retains only files
-that are genuinely generic across configs (`env.ts`, `fixtures.ts`,
-`seeding.ts`, `assert-json-body.ts`, `recorder.ts`).
+support.ts` materialises as `playwright/support/deploymentGateway.ts`.
+The built-in support tree retains only files that are generic across
+configs (`env.ts`, `fixtures.ts`, `seeding.ts`, `recorder.ts`,
+`await-eventually.ts`, `seed-rules.json`).
 
-## Renderer (Phase 3)
+## Renderer (Phase 3, landed)
 
-`materializer/src/playwright/emitter.ts` is restructured so
-that the step-rendering loop dispatches via a single lookup. Concretely:
+[`materializer/src/playwright/roleRenderer.ts`](playwright/roleRenderer.ts)
+owns role dispatch and rendering. Per step the renderer:
 
-- A `renderStep(step, scope)` function that:
-  1. Renders the generic per-method path into `scope.defaultRender`.
-  2. If `roleFor(step.operationId)` returns a role and a
-     `call-site.tmpl` exists for that role under the active emitter
-     and config, renders the template with `scope` and returns the
-     result. If the role is bound but no template exists, raises (see
-     "Dispatch" above — bound role with no template is always an
-     error).
-  3. Otherwise returns `scope.defaultRender`.
-- All current `isDeploymentStep`-style branches in `emitter.ts` are
-  deleted. The deployment-gateway behaviour comes entirely from the
-  role's template in Phase 4.
+1. Asks `getRoleForOperation(step.operationId)` (sourced from the active
+   config's artifact-kinds ABox) whether the step has a role binding.
+2. If a role bundle exists for that role under the active emitter+config
+   and its optional `match.json` gates accept the step's shape, renders
+   `call-site.tmpl` with the per-step scope and returns the result.
+3. If no role binding exists, the step takes the generic per-method path.
+4. If the step has a role binding but no bundle is loaded under the
+   active emitter, `findRoleForStep` raises — bound role with no
+   template is always an error, never a silent fallback.
 
-## Deployment-gateway reference implementation (Phase 4)
+All `isDeploymentStep`-style branches were deleted in Phase 3.
 
-End-to-end exercise of phases 1–3 with deployment-gateway. Includes
-the spec-derived extracts list (originally #230, absorbed here): the
-`extracts` scope variable is computed at codegen time from
-`op.responseSemanticLeaves` for the deployment-gateway operation
-(filter: `provider:true` OR depth-1; skip oneOf-flattened paths;
-dedup; deterministic order).
+## Deployment-gateway reference implementation (Phase 4, landed)
 
-Acceptance: byte-identical pipeline output relative to the pre-Phase-4
-baseline, modulo
+The `deploymentGateway` role at
+`configs/camunda-oca/codegen/playwright/roles/deploymentGateway/`
+exercises every phase end-to-end:
 
-- `deployment.ts` relocated from built-in support to the role
-  directory, and
-- the new `extracts` argument in each deploy() call site.
+- `support.ts` ships the `deploy()` helper that all `createDeployment`
+  call sites invoke.
+- `call-site.tmpl` renders the `deploy(...)` call with the per-step
+  scope.
+- `imports.tmpl` injects `import { deploy } from '<supportImportPath>'`
+  at the top of each spec that contains a deployment step.
+- `match.json` constrains the role to multipart-body `createDeployment`
+  calls with the expected response status set.
 
-## L3 invariants (Phase 5)
+The `extracts` argument to each `deploy()` call is computed once per
+CLI invocation by
+[`DeploymentRoleHookProvider`](playwright/hooks/deployment.ts)
+(`#233` Step 6 / #237). The provider walks
+`graph.operations[createDeployment].responseSemanticLeaves`, filters by
+provider/depth rules, dedupes, and threads the resulting list into
+`ctx.roleExtras['deploymentGateway']`. The renderer reads it back via
+the Mustache scope. No per-field knowledge lives in the emitter.
 
-Added to `configs/camunda-oca/regression-invariants.test.ts`:
+## L3 invariants (Phase 5, landed)
 
-1. **Role resolution.** For every scenario step in every generated
-   spec file, if `roleFor(step.operationId)` returns a role, then
+Three invariants in
+[`configs/camunda-oca/regression-invariants.test.ts`](../../configs/camunda-oca/regression-invariants.test.ts)
+under the describe block **"role-template rendering contract (Lift 12 /
+#231 Phase 5)"**:
+
+1. **Every ABox-bound role has a renderable role directory.** A role
+   appearing in any `operationRules[].role` must have a
    `configs/<config>/codegen/playwright/roles/<role>/call-site.tmpl`
-   exists. No silently-skipped role bindings.
-2. **Support coverage.** Every `support.<ext>` shipped under
-   `configs/camunda-oca/codegen/playwright/roles/<role>/` is referenced
-   from at least one emitted spec file (import or call).
-3. **Extracts cover consumers.** For the `deploymentGateway` op, the
-   spec-derived extracts list contains a `varName` matching every
-   binding var that any downstream step in any scenario consumes from
-   a deployment response. Catches the originally-discussed
-   `processDefinitionKeyVar`/`formKeyVar`/etc. coverage.
-4. **Emitter is role-agnostic.** A grep invariant over
-   `materializer/src/**/*.ts` (excluding `roles.ts` itself
-   and any other type-surface files that are part of the role
-   contract, but **including** all renderer/materializer/emitter
-   sources) returns zero matches for `deploy|deployment|
-   createDeployment|processDefinitionKey|formKey|
-   decisionDefinitionKey|decisionRequirementsKey`. Markdown docs
-   (notably this file) are excluded from the invariant — they
-   intentionally name the canonical role to anchor the contract.
-   Encodes the API-agnostic-emitter guarantee as a regression test.
+   present. Catches an ABox entry pointing at a deleted role directory.
+2. **Every active role bundle is imported by at least one emitted spec.**
+   Every role with a `support.<ext>` file must be `import`ed by at
+   least one emitted `.spec.ts`. Catches both dead role directories
+   (delete them) and unwired role dispatch (the planner is no longer
+   binding any operation to the role).
+3. **Spec-derived deploymentGateway extracts cover every downstream
+   binding consumer.** Two checks: a drift detector that every emitted
+   `deploy(...)` call's extracts list literal matches
+   `computeDeploymentExtracts(createDeployment)`, and a coverage check
+   that every `ctx.<...>Var` reference in a deployment-using spec has
+   a producer (deploy extract, `seedBinding`, `extractInto`, or direct
+   `ctx.<...>Var = …` assignment).
 
-## Documentation (Phase 6)
+The originally-drafted fourth invariant (a grep-ban over emitter source
+for deployment-specific identifiers) was retired in favour of invariant
+2: invariant 2 phrases the property as a positive coverage statement
+(every role's helper is used) rather than as a name-blacklist, which
+keeps the legitimate uses of `deployment` as an identifier in the
+registered hook provider intact while still failing closed if the role
+falls out of use.
 
-Two guides:
+## Documentation (Phase 6, ongoing)
 
-- **Adding a role** (`configs/README.md` addendum). Covers ABox entry,
-  per-emitter directory layout, scope-variable reference, wrap-vs-replace
-  pattern, naming conventions.
-- **Adding an emitter** ([`materializer/README.md`](../README.md)).
-  Covers how the emitter walks the per-config role tree,
-  what scope it must provide, how to declare its scope contract in this
-  file.
+[`materializer/README.md`](../README.md) is the runtime contract
+reference (how to register a new emitter, the role-bundle directory
+layout, the SDK `EmitterStrategy` / `RoleHookProvider` contracts). This
+file is the design reference; together they cover everything a
+contributor needs to add a new role on the existing Playwright emitter
+or stand up a new emitter that consumes the same role tree.
+
+The explicit "Adding a role" / "Adding an emitter" walk-throughs land
+alongside the first contributor request that needs them rather than
+pre-emptively (YAGNI).
 
 ## Out of scope
 
