@@ -105,6 +105,7 @@ const OperationDomainRequirementsSchema = z
     disjunctions: z.array(z.array(z.string())).optional(),
     implicitAdds: z.array(z.string()).optional(),
     produces: z.array(z.string()).optional(),
+    chainCleanupRequires: z.array(z.string()).optional(),
     valueBindings: z.record(z.string(), z.string()).optional(),
   })
   .passthrough();

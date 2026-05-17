@@ -1464,6 +1464,32 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     );
   });
 
+  it('createProcessInstance.feature.spec.ts deploys bpmn/simple.bpmn (chainCleanupRequires ProcessInstanceCompleted, #249)', () => {
+    // #249: createProcessInstance declares
+    // `chainCleanupRequires: ["ProcessInstanceCompleted"]` so the
+    // base-feature chain (createDeployment → createProcessInstance) picks a
+    // self-completing fixture. Without the hygiene declaration the tie-break
+    // between bpmn/simple.bpmn and bpmn/service-task.bpmn falls through to
+    // registry-array order — both have providesStates.length === 1 — and
+    // service-task wins, stranding a running instance the test never
+    // completes. The invariant fails closed: any fixture other than
+    // simple.bpmn means the hygiene encoding broke (or the residual logic
+    // in `computeDeploymentRequiredStates` dropped chainCleanupRequires
+    // from the union).
+    const spec = join(GENERATED_TESTS_DIR, 'createProcessInstance.feature.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(src, 'createProcessInstance base must deploy the self-completing fixture').toContain(
+      '@@FILE:bpmn/simple.bpmn',
+    );
+    expect(
+      src,
+      'createProcessInstance base must NOT deploy service-task.bpmn (would leave a hanging instance)',
+    ).not.toContain('@@FILE:bpmn/service-task.bpmn');
+  });
+
   it('deleteProcessInstance.feature.spec.ts injects an awaitEventually wait between createProcessInstance and deleteProcessInstance (#159 PR B)', () => {
     // PR B of #159: ProcessInstanceCompleted is declared `eventual: true`
     // with a `witness` shape that polls getProcessInstance until
