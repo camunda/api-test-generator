@@ -73,12 +73,15 @@ The materializer is invoked through root scripts; it is rarely run
 in isolation.
 
 ```bash
-# From the repo root — these run path-analyser then materializer:
+# From the repo root — these invoke the materializer workflow and build its
+# dependencies, but they do not emit fresh scenario JSON:
+# first run the planner/generator so generated/<config>/feature-output/
+# contains up-to-date scenarios.
 npm run codegen:playwright -- <operationId>
 npm run codegen:playwright:all
 
-# Or, manually, inside this workspace (after path-analyser has emitted
-# scenarios into generated/<config>/feature-output/):
+# Or, manually, inside this workspace (after generate:scenarios / the planner
+# has emitted scenarios into generated/<config>/feature-output/):
 npm run build
 node dist/src/index.js --all
 ```
