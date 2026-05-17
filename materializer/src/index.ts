@@ -66,7 +66,7 @@ function printUsage(): void {
     .map((e) => `${e.id} (${e.name})`)
     .join(', ');
   console.error(
-    'Usage: node dist/src/codegen/index.js [--target=<id>] <operationId>|--all\n' +
+    'Usage: node materializer/dist/src/index.js [--target=<id>] <operationId>|--all\n' +
       `Available targets: ${targets || '(none)'}`,
   );
 }

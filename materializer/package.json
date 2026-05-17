@@ -18,6 +18,7 @@
     "node": ">=22.0.0"
   },
   "devDependencies": {
-    "@types/mustache": "^4.2.6"
+    "@types/mustache": "^4.2.6",
+    "assert-json-body": "^1.7.1"
   }
 }
