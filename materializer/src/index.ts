@@ -101,7 +101,8 @@ function loadEmitterConfig(configDir: string, emitter: EmitterStrategy): Record<
 /**
  * Minimal JSON-Schema validator covering only the constructs used by
  * built-in emitter configSchemas (object, additionalProperties=false,
- * top-level `properties` map with leaf `type: boolean|string|number`).
+ * top-level `properties` map with leaf `type` values from the subset
+ * `boolean|string|number|integer|array|object|null`).
  * Keeps the SDK dependency-free — we deliberately avoid pulling in Ajv
  * for the small surface that emitter configs cover today. Schemas that
  * exceed this subset must extend this validator alongside.
