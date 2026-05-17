@@ -17,7 +17,7 @@ overlay materializes per-role helpers via
 `materializeRoleSupportFiles`, and per-role compute hooks land their
 output in `ctx.roleExtras[<role>]` via the
 [`RoleHookProvider`](../../emitter-sdk/src/types.ts) registry — see
-[`materializer/src/playwright/hooks/deployment.ts`](src/playwright/hooks/deployment.ts)
+[`materializer/src/playwright/hooks/deployment.ts`](playwright/hooks/deployment.ts)
 for the deployment-gateway reference provider.
 
 ## Principle
@@ -310,7 +310,7 @@ extensions are documented in this file under the per-emitter section.
 | `baseUrl` | string | Name of the base-URL variable in scope (typically `baseUrl`). |
 | `body` | string | TypeScript expression evaluating to the request body for this step. JSON literal, multipart builder call, or `undefined`. |
 | `strips` | string | JSON literal expression for the strip-on-sentinel rules derived from `globalContextSeeds`. |
-| `extracts` | string | JSON literal expression for the response-extracts list (see "Wrap-or-replace"; for `deploymentGateway`, computed by [`DeploymentRoleHookProvider`](src/playwright/hooks/deployment.ts) per #233 Step 6). |
+| `extracts` | string | JSON literal expression for the response-extracts list (see "Wrap-or-replace"; for `deploymentGateway`, computed by [`DeploymentRoleHookProvider`](playwright/hooks/deployment.ts) per #233 Step 6). |
 
 The exact scope contract for the Java SDK and any future emitter is
 defined when that emitter lands; this file is the canonical reference
@@ -367,12 +367,12 @@ logic into the template.
 The Playwright materializer copies the built-in support tree from
 `materializer/src/support/` into each emitted suite's
 `playwright/support/`, then overlays per-role helpers via
-[`materializeRoleSupportFiles`](src/playwright/materialize-support.ts):
+[`materializeRoleSupportFiles`](playwright/materialize-support.ts):
 
 1. The built-in support tree is copied as documented in
    [`materializer/README.md`](../README.md).
 2. For every role bundle loaded via
-   [`loadRoleBundlesForActiveConfig`](src/playwright/roleRenderer.ts)
+   [`loadRoleBundlesForActiveConfig`](playwright/roleRenderer.ts)
    whose directory carries a `support.<ext>` file, that file is
    copied to `playwright/support/<role>.<ext>` — **renamed on copy**
    so role names (not the literal `support`) become the emitted
@@ -389,7 +389,7 @@ configs (`env.ts`, `fixtures.ts`, `seeding.ts`, `recorder.ts`,
 
 ## Renderer (Phase 3, landed)
 
-[`materializer/src/playwright/roleRenderer.ts`](src/playwright/roleRenderer.ts)
+[`materializer/src/playwright/roleRenderer.ts`](playwright/roleRenderer.ts)
 owns role dispatch and rendering. Per step the renderer:
 
 1. Asks `getRoleForOperation(step.operationId)` (sourced from the active
@@ -421,7 +421,7 @@ exercises every phase end-to-end:
 
 The `extracts` argument to each `deploy()` call is computed once per
 CLI invocation by
-[`DeploymentRoleHookProvider`](src/playwright/hooks/deployment.ts)
+[`DeploymentRoleHookProvider`](playwright/hooks/deployment.ts)
 (`#233` Step 6 / #237). The provider walks
 `graph.operations[createDeployment].responseSemanticLeaves`, filters by
 provider/depth rules, dedupes, and threads the resulting list into

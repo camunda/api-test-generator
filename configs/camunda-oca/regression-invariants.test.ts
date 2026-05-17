@@ -5412,6 +5412,14 @@ describeForThisConfig(
                 `${spec}: deploy() extracts drift — missing=[${missing.join(',')}] extra=[${extra.join(',')}]`,
               );
             }
+          } else {
+            // No varName entries found — the extracts literal is empty or absent.
+            // A regression that wires an empty `[]` or an unwired roleExtra would
+            // produce zero varNames, silently skipping the comparison. Fail here so
+            // it is reported as drift rather than silently ignored.
+            driftFailures.push(
+              `${spec}: deploy() call contains no varName entries (extracts literal empty or missing) — expected [${[...producedVars].sort().join(',')}]`,
+            );
           }
           idx = end + 1;
         }
