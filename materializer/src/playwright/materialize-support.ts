@@ -348,12 +348,15 @@ export async function materializeRoleSupportFiles(
     }
     const sourceBasename = bundle.supportBasename;
     // The on-disk source filename may carry an extra `.tmpl` suffix when
-    // the role ships a templated helper (see roleRenderer: supportBasename
-    // is the *emitted* basename, stripped of `.tmpl`; supportFilePath is
-    // the *source* path on disk). Prefer the loader-provided source path
-    // for the read; fall back to reconstructing it from the role dir and
-    // the emitted basename + suffix for callers that hand-build bundles
-    // without supportFilePath.
+    // the role ships a templated helper. `supportBasename` is the SOURCE
+    // basename with any trailing `.tmpl` stripped (e.g. `'support.ts'`
+    // for both `support.ts` and `support.ts.tmpl`); `supportFilePath` is
+    // the full source path on disk including the `.tmpl` suffix.
+    // Prefer the loader-provided source path for the read; fall back to
+    // reconstructing it from the role dir and the source basename
+    // (+ `.tmpl`) for callers that hand-build bundles without
+    // supportFilePath. The emitted destination filename (`<roleName><ext>`)
+    // is constructed below at `destName`; neither field carries it.
     const sourceFilename = bundle.supportFilePath
       ? path.basename(bundle.supportFilePath)
       : `${sourceBasename}${bundle.supportIsTemplated ? '.tmpl' : ''}`;

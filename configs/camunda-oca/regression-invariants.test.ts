@@ -5375,12 +5375,19 @@ describeForThisConfig(
       // Locate the `const EXTRACTS: DeployExtract[] = [...]` literal and
       // scope varName extraction to its contents. The literal is the only
       // place in the helper where `varName:` appears.
+      //
+      // The hook serialises the list via JSON.stringify, which produces
+      // quoted keys (`"varName":"foo"`). Biome's post-codegen format pass
+      // (`biome:fix-generated:codegen`) rewrites them to unquoted
+      // (`varName: 'foo'`). Accept both forms so this invariant doesn't
+      // silently report every var as missing if the formatter is skipped
+      // or its output style changes.
       const extractsLiteralMatch = helperSrc.match(
         /const\s+EXTRACTS\s*:\s*DeployExtract\[\]\s*=\s*(\[[\s\S]*?\]);/,
       );
       const helperVars = new Set<string>();
       if (extractsLiteralMatch) {
-        const varNameInLiteralPattern = /varName:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
+        const varNameInLiteralPattern = /(?:"varName"|varName)\s*:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
         let m: RegExpExecArray | null;
         // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((m = varNameInLiteralPattern.exec(extractsLiteralMatch[1])) !== null) {
@@ -5406,7 +5413,7 @@ describeForThisConfig(
       const ctxSeedPattern = /\bctx\.([A-Za-z_$][\w$]*Var)\s*=/g;
       const seedBindingPattern = /\bseedBinding\(\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
       const extractIntoPattern = /\bextractInto\(\s*ctx\s*,\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
-      const varNameInLiteralPattern = /varName:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
+      const varNameInLiteralPattern = /(?:"varName"|varName)\s*:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
 
       for (const spec of specFiles) {
         const content = readFileSync(join(GENERATED_TESTS_DIR, spec), 'utf8');
