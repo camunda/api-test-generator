@@ -530,13 +530,6 @@ function renderScenarioTest(
     const method = step.method.toLowerCase();
     const isFinal = idx === requestPlan.length - 1;
     const hasShape = Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0;
-    // Ensure prerequisite createProcessInstance always supplies a processDefinitionKey when available
-    if (step.operationId === 'createProcessInstance' && step.bodyKind === 'json') {
-      if (!step.bodyTemplate || Object.keys(step.bodyTemplate).length === 0) {
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholder consumed by downstream emitter
-        step.bodyTemplate = { processDefinitionKey: '${processDefinitionKeyVar}' };
-      }
-    }
     // Each request step is wrapped in `await test.step(...)` so it shows
     // up as a labelled, collapsible group in the Playwright HTML report
     // and trace viewer, with per-step timing and failure attribution to
