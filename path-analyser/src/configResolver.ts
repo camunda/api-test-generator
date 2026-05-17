@@ -51,10 +51,9 @@ function loadConfigsIndex(repoRoot: string): ConfigsIndex {
  * Resolve the active config name against an already-loaded {@link ConfigsIndex}.
  *
  * Split out from {@link getActiveConfigName} so callers that also need other
- * fields from the index (e.g. {@link getPlaywrightCodegenOptions}) can load
- * `configs.json` exactly once per invocation. A second read could see a
- * different on-disk snapshot (TOCTOU), validate against one and look up the
- * config entry from another.
+ * fields from the index can load `configs.json` exactly once per invocation.
+ * A second read could see a different on-disk snapshot (TOCTOU), validate
+ * against one and look up the config entry from another.
  */
 function resolveActiveConfigName(index: ConfigsIndex): string {
   const fromEnv = process.env.CONFIG?.trim();
@@ -90,77 +89,6 @@ export function getActiveConfigName(repoRoot: string): string {
 
 export function getActiveConfigDir(repoRoot: string): string {
   return path.resolve(repoRoot, 'configs', getActiveConfigName(repoRoot));
-}
-
-/**
- * Options that control the Playwright emitter, sourced from
- * `configs.json#configs.<active>.codegen.playwright`.
- *
- * Every field is optional in the on-disk schema and has an explicit
- * default documented on the field. Missing `codegen` / `codegen.playwright`
- * blocks yield an all-defaults result without throwing.
- */
-export interface PlaywrightCodegenOptions {
-  /**
-   * When true, every emitted scenario step appends a `recordResponse({...})`
-   * call (and the suite imports `recordResponse`/`sanitizeBody` from
-   * `./support/recorder`). When false, neither the call nor the import is
-   * emitted, and `recorder.ts` is not vendored into the suite's `support/`
-   * directory.
-   *
-   * Default: false. The recorder is opt-in tooling for downstream
-   * response-shape diffing; suites that don't consume
-   * `dist/runtime-observations/responses.jsonl` get cleaner output and
-   * skip the per-step `fs.appendFile`.
-   */
-  recordResponses: boolean;
-}
-
-/**
- * Resolve the Playwright codegen options for the active config. Strict
- * shape-checking on the `codegen.playwright` block — a non-object, or a
- * non-boolean `recordResponses`, throws. Missing keys default.
- */
-export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegenOptions {
-  // Single-pass: load configs.json exactly once and resolve the active
-  // config name against that same snapshot. Calling getActiveConfigName()
-  // here would re-read the file and could observe a different on-disk
-  // state from the one we then index into below.
-  const index = loadConfigsIndex(repoRoot);
-  const name = resolveActiveConfigName(index);
-  const entry = index.configs[name];
-  if (!isRecord(entry)) {
-    return { recordResponses: false };
-  }
-  if (!('codegen' in entry)) {
-    return { recordResponses: false };
-  }
-  const codegen = entry.codegen;
-  if (!isRecord(codegen)) {
-    throw new Error(
-      `Malformed configs.json: configs.${name}.codegen must be an object, got ${typeof codegen}.`,
-    );
-  }
-  if (!('playwright' in codegen)) {
-    return { recordResponses: false };
-  }
-  const playwright = codegen.playwright;
-  if (!isRecord(playwright)) {
-    throw new Error(
-      `Malformed configs.json: configs.${name}.codegen.playwright must be an object, got ${typeof playwright}.`,
-    );
-  }
-  let recordResponses = false;
-  if ('recordResponses' in playwright) {
-    const v = playwright.recordResponses;
-    if (typeof v !== 'boolean') {
-      throw new Error(
-        `Malformed configs.json: configs.${name}.codegen.playwright.recordResponses must be a boolean, got ${typeof v}.`,
-      );
-    }
-    recordResponses = v;
-  }
-  return { recordResponses };
 }
 
 /**

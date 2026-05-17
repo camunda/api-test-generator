@@ -204,7 +204,7 @@ export async function materializeSupport(
  */
 export async function materializeRoleSupportFiles(
   outDir: string,
-  roleBundles: Map<string, { role: string; supportFilePath?: string }>,
+  roleBundles: Map<string, { dir: string; supportBasename?: string }>,
 ): Promise<string[]> {
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
   await fs.mkdir(destDir, { recursive: true });
@@ -220,21 +220,22 @@ export async function materializeRoleSupportFiles(
 
   const copied: string[] = [];
   for (const [roleName, bundle] of roleBundles) {
-    if (!bundle.supportFilePath) continue;
+    if (!bundle.supportBasename) continue;
     if (builtInStems.has(roleName)) {
       throw new Error(
         `materializeRoleSupportFiles: role '${roleName}' collides with the built-in support ` +
           `file '${roleName}.*'. Rename the role.`,
       );
     }
-    const ext = path.extname(bundle.supportFilePath);
+    const sourcePath = path.join(bundle.dir, bundle.supportBasename);
+    const ext = path.extname(bundle.supportBasename);
     const destName = `${roleName}${ext}`;
     if (copied.includes(destName)) {
       throw new Error(
         `materializeRoleSupportFiles: role '${roleName}' produced duplicate destination ${destName}.`,
       );
     }
-    await fs.copyFile(bundle.supportFilePath, path.join(destDir, destName));
+    await fs.copyFile(sourcePath, path.join(destDir, destName));
     copied.push(destName);
   }
 

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { EmitContext, EmitterStrategy } from '@camunda8/emitter-sdk';
 import type { EndpointScenarioCollection } from 'path-analyser/types';
-import type { EmitContext, Emitter } from './emitter.js';
 
 /**
  * Write all files emitted by an {@link Emitter} into `outDir`. Centralising
@@ -11,7 +11,7 @@ import type { EmitContext, Emitter } from './emitter.js';
  * Returns the absolute paths of files written, in emit order.
  */
 export async function writeEmitted(
-  emitter: Emitter,
+  emitter: EmitterStrategy,
   collection: EndpointScenarioCollection,
   ctx: EmitContext,
 ): Promise<string[]> {

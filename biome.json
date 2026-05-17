@@ -16,6 +16,7 @@
   "files": {
     "includes": [
       "path-analyser/src/**/*.ts",
+      "emitter-sdk/src/**/*.ts",
       "path-analyser/scripts/**/*.ts",
       "materializer/src/**/*.ts",
       "materializer/scripts/**/*.{ts,js}",
@@ -37,6 +38,7 @@
     "enabled": true,
     "includes": [
       "path-analyser/src/**/*.ts",
+      "emitter-sdk/src/**/*.ts",
       "path-analyser/scripts/**/*.ts",
       "materializer/src/**/*.ts",
       "materializer/scripts/**/*.{ts,js}",

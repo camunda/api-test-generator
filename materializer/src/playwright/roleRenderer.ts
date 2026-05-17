@@ -27,6 +27,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { LoadedRoleBundle as SdkLoadedRoleBundle } from '@camunda8/emitter-sdk';
 // Top-level import (vs. dynamic `await import`) — mustache is a small
 // CommonJS package with a default export carrying `render`.
 import Mustache from 'mustache';
@@ -53,14 +54,26 @@ interface RoleMatchSpec {
  * templates eagerly loaded. Templates are tiny (under 1KB each) so the
  * memory cost is negligible and avoids race conditions / repeated disk
  * reads during the per-step render loop.
+ *
+ * Structurally compatible with `@camunda8/emitter-sdk`'s
+ * `LoadedRoleBundle` — the materializer's internal type retains the
+ * loader-side path fields (`callSiteTemplatePath`, `supportFilePath`)
+ * used by the support-file vendoring step, while still satisfying the
+ * public SDK shape for assignment into `EmitContext.roleBundles`.
  */
 export interface LoadedRoleBundle extends RoleTemplateBundle {
+  /** Role name (matches the directory name and the ABox role identifier). */
+  roleName: string;
+  /** Absolute path to the role directory on disk. */
+  dir: string;
   /** Eagerly-loaded contents of `call-site.tmpl`. */
   callSiteTemplate: string;
   /** Eagerly-loaded contents of `imports.tmpl`, when present. */
   importsTemplate?: string;
   /** Parsed `match.json`, when present. */
   match?: RoleMatchSpec;
+  /** Basename of the vendored support file (e.g. `'deploymentGateway.ts'`), when present. */
+  supportBasename?: string;
 }
 
 /**
@@ -151,9 +164,12 @@ export function loadRoleBundlesForActiveConfig(repoRoot?: string): Map<string, L
 
     result.set(entry, {
       role: entry,
+      roleName: entry,
+      dir: roleDir,
       callSiteTemplatePath: callSitePath,
       importsTemplatePath: existsSync(importsPath) ? importsPath : undefined,
       supportFilePath: supportPath,
+      supportBasename: supportPath ? path.basename(supportPath) : undefined,
       callSiteTemplate: readFileSync(callSitePath, 'utf8'),
       importsTemplate: existsSync(importsPath) ? readFileSync(importsPath, 'utf8') : undefined,
       match,
@@ -169,7 +185,7 @@ export function loadRoleBundlesForActiveConfig(repoRoot?: string): Map<string, L
  * `bodyKind` and declared `expect.status`. Roles without a `match.json`
  * match every step that carries the role binding.
  */
-export function stepMatchesRole(step: RequestStep, bundle: LoadedRoleBundle): boolean {
+export function stepMatchesRole(step: RequestStep, bundle: SdkLoadedRoleBundle): boolean {
   const m = bundle.match;
   if (!m) return true;
   if (m.bodyKinds && m.bodyKinds.length > 0) {
@@ -194,7 +210,10 @@ export function stepMatchesRole(step: RequestStep, bundle: LoadedRoleBundle): bo
  * will corrupt TypeScript output. The renderer does not police this — it
  * is an authoring contract documented in ROLES.md.
  */
-export function renderRoleCallSite(bundle: LoadedRoleBundle, scope: PlaywrightRoleScope): string {
+export function renderRoleCallSite(
+  bundle: SdkLoadedRoleBundle,
+  scope: PlaywrightRoleScope,
+): string {
   return Mustache.render(bundle.callSiteTemplate, scope);
 }
 
@@ -204,7 +223,10 @@ export function renderRoleCallSite(bundle: LoadedRoleBundle, scope: PlaywrightRo
  * a distinct entry in the spec's import block, deduplicated by the
  * caller). Returns `''` when the role has no imports template.
  */
-export function renderRoleImports(bundle: LoadedRoleBundle, scope: ImportsTemplateScope): string {
+export function renderRoleImports(
+  bundle: SdkLoadedRoleBundle,
+  scope: ImportsTemplateScope,
+): string {
   if (!bundle.importsTemplate) return '';
   return Mustache.render(bundle.importsTemplate, scope);
 }

@@ -229,7 +229,7 @@ describe('materializeRoleSupportFiles', () => {
     try {
       const supportFile = path.join(srcDir, 'support.ts');
       await fs.writeFile(supportFile, '// role helper\n', 'utf8');
-      const bundles = new Map([['myRole', { role: 'myRole', supportFilePath: supportFile }]]);
+      const bundles = new Map([['myRole', { dir: srcDir, supportBasename: 'support.ts' }]]);
       const copied = await materializeRoleSupportFiles(tmp, bundles);
       expect(copied).toEqual(['myRole.ts']);
       const content = await fs.readFile(path.join(tmp, SUPPORT_DIR_NAME, 'myRole.ts'), 'utf8');
@@ -240,9 +240,7 @@ describe('materializeRoleSupportFiles', () => {
   });
 
   test('skips roles that have no support file', async () => {
-    const bundles = new Map([
-      ['noSupportRole', { role: 'noSupportRole', supportFilePath: undefined }],
-    ]);
+    const bundles = new Map([['noSupportRole', { dir: '/tmp', supportBasename: undefined }]]);
     const copied = await materializeRoleSupportFiles(tmp, bundles);
     expect(copied).toEqual([]);
   });
@@ -255,8 +253,8 @@ describe('materializeRoleSupportFiles', () => {
       await fs.writeFile(supportA, '// A\n', 'utf8');
       await fs.writeFile(supportB, '// B\n', 'utf8');
       const bundles = new Map([
-        ['roleA', { role: 'roleA', supportFilePath: supportA }],
-        ['roleB', { role: 'roleB', supportFilePath: supportB }],
+        ['roleA', { dir: srcDir, supportBasename: 'supportA.ts' }],
+        ['roleB', { dir: srcDir, supportBasename: 'supportB.js' }],
       ]);
       const copied = await materializeRoleSupportFiles(tmp, bundles);
       expect(copied.sort()).toEqual(['roleA.ts', 'roleB.js'].sort());
@@ -273,7 +271,7 @@ describe('materializeRoleSupportFiles', () => {
       const supportFile = path.join(srcDir, 'support.ts');
       await fs.writeFile(supportFile, '// role helper\n', 'utf8');
       // 'env' is the stem of the built-in 'env.ts'
-      const bundles = new Map([['env', { role: 'env', supportFilePath: supportFile }]]);
+      const bundles = new Map([['env', { dir: srcDir, supportBasename: 'support.ts' }]]);
       await expect(materializeRoleSupportFiles(tmp, bundles)).rejects.toThrow(
         /collides with the built-in support file/,
       );

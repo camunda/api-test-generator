@@ -46,6 +46,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('returns one EmittedFile per scenario collection with the expected file name', async () => {
     const files = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
@@ -57,6 +60,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('integration mode produces an integration.spec.ts file name', async () => {
     const files = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'integration',
     });
@@ -68,6 +74,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
     await expect(
       PlaywrightEmitter.emit(COLLECTION, {
         outDir: '/this/does/not/exist',
+        configName: 'test',
+        emitterConfig: {},
+        resolveConfigPath: (rel) => rel,
         suiteName: 'createWidget',
         mode: 'feature',
       }),
@@ -77,6 +86,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('rendered suite contains the expected Playwright preamble and describe block', async () => {
     const [file] = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
@@ -88,12 +100,16 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('renderPlaywrightSuite is byte-identical to the EmittedFile content', async () => {
     const [file] = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
     const direct = renderPlaywrightSuite(COLLECTION, {
       suiteName: 'createWidget',
       mode: 'feature',
+      recordResponses: false,
     });
     expect(file.content).toBe(direct);
   });
@@ -185,6 +201,9 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
   async function renderFirst(collection: EndpointScenarioCollection): Promise<string> {
     const [file] = await PlaywrightEmitter.emit(collection, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       globalContextSeeds: [TENANT_SEED],
@@ -312,6 +331,9 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
   async function renderFirst(collection: EndpointScenarioCollection): Promise<string> {
     const [file] = await PlaywrightEmitter.emit(collection, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
@@ -457,6 +479,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     };
     const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       globalContextSeeds: [TENANT_SEED, orgSeed],
@@ -476,6 +501,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
   test('without seeds the emitter writes no universal-seed prologue and no multipart strip branch', async () => {
     const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       // no globalContextSeeds
@@ -494,6 +522,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     };
     const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       globalContextSeeds: [seedOnly],
@@ -539,6 +570,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     };
     const [file] = await PlaywrightEmitter.emit(deployOnlyCollection, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createDeployment',
       mode: 'feature',
       globalContextSeeds: [TENANT_SEED],
@@ -593,6 +627,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     };
     const [file] = await PlaywrightEmitter.emit(deployWithExtracts, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createDeployment',
       mode: 'feature',
       ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
@@ -627,6 +664,9 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
     await expect(
       PlaywrightEmitter.emit(COLLECTION, {
         outDir: '/unused',
+        configName: 'test',
+        emitterConfig: {},
+        resolveConfigPath: (rel) => rel,
         suiteName: 'createWidget',
         mode: 'feature',
         globalContextSeeds: [badSeed],
