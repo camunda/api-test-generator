@@ -28,12 +28,17 @@ function minimalCtx(outDir: string): EmitContext {
 describe('PlaywrightEmitter.scaffold', () => {
   test('returns the five project-root templates as EmittedFiles in declaration order', async () => {
     if (!PlaywrightEmitter.scaffold) throw new Error('scaffold must be defined');
-    const ctx = minimalCtx('/tmp/ignored-scaffold-pure');
+    const outDir = path.join(
+      os.tmpdir(),
+      `ignored-scaffold-pure-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    await expect(fs.stat(outDir)).rejects.toThrow(/ENOENT/);
+    const ctx = minimalCtx(outDir);
     const files = await PlaywrightEmitter.scaffold(ctx);
     expect(files.map((f) => f.relativePath)).toEqual([...PROJECT_TEMPLATE_FILES]);
-    // Pure: no fs writes; verify nothing was created under the (non-existent)
-    // outDir. fs.stat throws ENOENT — that's the assertion.
-    await expect(fs.stat('/tmp/ignored-scaffold-pure')).rejects.toThrow(/ENOENT/);
+    // Pure: no fs writes; verify nothing was created under the generated
+    // outDir before or after calling scaffold().
+    await expect(fs.stat(outDir)).rejects.toThrow(/ENOENT/);
     for (const f of files) {
       expect(f.content.length).toBeGreaterThan(0);
     }
