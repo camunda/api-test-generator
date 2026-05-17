@@ -5,17 +5,18 @@ import type { ArtifactRegistryEntry, OperationGraph } from './types.js';
  * Unified classification + value-resolution dispatch (#162 PR 3).
  *
  * Single chokepoint for "where does the value of this semantic come
- * from?" reasoning. Both `bindModelDerivedFromFixture` and
- * `bindClientMintedAttribute` route through this module so the
+ * from?" reasoning. The variant suite
+ * (`generateOptionalSubShapeVariants`) routes through this module so
  * classification rules and per-classification value derivation live in
- * one place rather than being scattered across helper-specific
- * filters in `path-analyser/src/index.ts`.
+ * one place. (Issue #247 retired the dedicated feature-suite helpers
+ * `bindClientMintedAttribute` / `bindModelDerivedFromFixture` — they
+ * duplicated the variant-suite optional-population path and contaminated
+ * the feature `base` scenario.)
  *
  * Scope of PR 3 (refactor only, no behaviour change):
  *
  *   - Classifications 3 (`clientMintedAttribute`) and 5 (`modelDerived`)
  *     return a concrete `value` ready to bind into `scenario.bindings`.
- *     These were the two cases the existing helpers handled inline.
  *
  *   - Classifications 1 (`producerBound`), 2 (`clientMintedIdentifier`)
  *     and 4 (`externalBoundary`) are recognised but have no value
@@ -23,10 +24,6 @@ import type { ArtifactRegistryEntry, OperationGraph } from './types.js';
  *     for these classifications return only the `varName` so callers
  *     can verify "this is owned by another path" and bail out without
  *     overwriting the BFS-driven binding.
- *
- *   - PR 4 will extend the variant planner to call this module so
- *     populated optional sub-shapes flow through the same dispatch as
- *     feature-coverage scenarios.
  *
  *   - PR 5 will turn `'unclassified'` into a load-time diagnostic.
  */
@@ -118,9 +115,7 @@ export function classifySemantic(semantic: string, graph: OperationGraph): Seman
  *
  *   - `clientMintedAttribute`: produces a deterministic
  *     `fc:cma:<sem>:<suffix>` token using
- *     ``deterministicSuffix(`fc:cma:${operationId}:${semantic}`)``,
- *     matching the byte-stable mint formula from
- *     `bindClientMintedAttribute` PR 2.
+ *     ``deterministicSuffix(`fc:cma:${operationId}:${semantic}`)``.
  *
  *   - producerBound / clientMintedIdentifier / externalBoundary: returned
  *     with `varName` only. Callers should treat these as "owned by BFS"

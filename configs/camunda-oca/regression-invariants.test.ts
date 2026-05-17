@@ -5332,3 +5332,160 @@ describeForThisConfig('bundled-spec invariants: emitter is API-agnostic (#207)',
     ).toEqual([]);
   });
 });
+
+describeForThisConfig(
+  'bundled-spec invariants: feature base scenario contains only required fields (#247)',
+  () => {
+    // #247: the feature suite's "base" scenario (`feature-1`,
+    // `variantKey: "base"`, `optionals: []`) must emit a request body
+    // populated with required leaves only. Optional sub-shapes and
+    // top-level optional scalars belong to the variant suite
+    // (`generateOptionalSubShapeVariants`); injecting them into the
+    // feature base re-creates the duplication that the #162 PR 4
+    // suite-partition cut explicitly removed.
+    //
+    // This is a class-scoped guard: for every feature-output file whose
+    // base scenario has a final JSON-body POST/PUT/PATCH step, every
+    // top-level field in that body must correspond to a REQUIRED leaf
+    // in the endpoint's `requestBodySemanticTypes` (or have no
+    // semantic-type annotation at all, in which case it's either a
+    // schema-required scalar or a buildRequestBodyFromCanonical
+    // fallback — those are out of scope here). Any top-level field
+    // backed by an OPTIONAL semantic-typed leaf is an offender.
+
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+
+    interface BodySemanticLeaf {
+      semanticType: string;
+      fieldPath: string;
+      required: boolean;
+    }
+    interface FeatureRequestStep {
+      operationId: string;
+      method: string;
+      bodyKind?: string;
+      bodyTemplate?: unknown;
+    }
+    interface FeatureScenario {
+      id: string;
+      variantKey?: string;
+      strategy?: string;
+      requestPlan?: FeatureRequestStep[];
+    }
+    interface FeatureScenarioFile {
+      endpoint: { operationId: string; method: string; path: string };
+      scenarios: FeatureScenario[];
+    }
+    interface GraphOp {
+      operationId: string;
+      method: string;
+      path: string;
+      requestBodySemanticTypes?: BodySemanticLeaf[];
+    }
+    interface GraphFile {
+      operations: GraphOp[];
+    }
+
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphFile;
+    const opById = new Map<string, GraphOp>();
+    for (const op of graph.operations) opById.set(op.operationId, op);
+
+    interface Offender {
+      file: string;
+      scenarioId: string;
+      operationId: string;
+      field: string;
+      semantic: string;
+    }
+    const offenders: Offender[] = [];
+
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const collection = JSON.parse(
+        readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+      ) as FeatureScenarioFile;
+      const base = collection.scenarios.find(
+        (s) => s.strategy === 'featureCoverage' && s.variantKey === 'base',
+      );
+      if (!base) continue;
+      const steps = base.requestPlan ?? [];
+      if (steps.length === 0) continue;
+      const finalStep = steps[steps.length - 1];
+      if (finalStep.bodyKind !== 'json') continue;
+      const body = finalStep.bodyTemplate;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+
+      const op = opById.get(finalStep.operationId);
+      if (!op) continue;
+      const leaves = op.requestBodySemanticTypes ?? [];
+      // Build an index of top-level field → leaves that mention that
+      // top-level field. A field is an offender when EVERY semantic-typed
+      // occurrence of it is optional (i.e. no required leaf exists).
+      const topLevelLeaves = new Map<string, BodySemanticLeaf[]>();
+      for (const leaf of leaves) {
+        // First path segment, stripping `[]` array marker.
+        const top = (leaf.fieldPath.split('.')[0] ?? '').replace(/\[\]$/, '');
+        if (!top) continue;
+        const arr = topLevelLeaves.get(top) ?? [];
+        arr.push(leaf);
+        topLevelLeaves.set(top, arr);
+      }
+
+      for (const [field, value] of Object.entries(body)) {
+        const fieldLeaves = topLevelLeaves.get(field);
+        // No semantic-type annotation → not in scope (schema-required
+        // scalar or default-injection fallback).
+        if (!fieldLeaves || fieldLeaves.length === 0) continue;
+        // If ANY leaf under this top-level field is required, the
+        // field's presence in the body is justified.
+        if (fieldLeaves.some((l) => l.required)) continue;
+        // Empty scaffolding for schema-required object/array fields
+        // (`filter: {}`, `elements: []`) is the minimal-required body
+        // shape — every nested leaf is genuinely absent, so the
+        // optional-leakage we guard against here did not occur.
+        if (value === undefined || value === null) continue;
+        if (Array.isArray(value) && value.length === 0) continue;
+        if (
+          value !== null &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          Object.keys(value).length === 0
+        ) {
+          continue;
+        }
+        // Otherwise every leaf under this field is optional AND the
+        // value is non-empty — the feature base scenario is leaking
+        // variant coverage.
+        offenders.push({
+          file: f,
+          scenarioId: base.id,
+          operationId: finalStep.operationId,
+          field,
+          semantic: fieldLeaves.map((l) => l.semanticType).join(','),
+        });
+      }
+    }
+
+    it('every feature `base` scenario emits a body containing only required-leaf top-level fields', () => {
+      expect(
+        offenders,
+        `Found ${offenders.length} feature base scenarios whose bodyTemplate ` +
+          `contains a top-level field backed only by OPTIONAL semantic-typed leaves. ` +
+          `This is the regression #247 guards against — optional population belongs in the ` +
+          `variant suite (\`generateOptionalSubShapeVariants\`), not the feature base. ` +
+          `Offenders:\n${offenders
+            .map(
+              (o) =>
+                `  - ${o.file} :: ${o.scenarioId} (${o.operationId}) :: field "${o.field}" backed by [${o.semantic}]`,
+            )
+            .join('\n')}`,
+      ).toEqual([]);
+    });
+  },
+);
