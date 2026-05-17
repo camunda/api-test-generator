@@ -85,10 +85,22 @@ The renderer caches the lookup per step.
 
 ```
 configs/<config>/codegen/<emitter>/roles/<role>/
-  support.<ext>      # vendored verbatim into the emitted suite's support/ tree
-  call-site.tmpl     # Mustache template rendered at each step bound to this role
-  imports.tmpl       # optional; Mustache template producing import lines to inject
+  support.<ext>          # vendored verbatim into the emitted suite's support/ tree
+  support.<ext>.tmpl     # OR: Mustache template rendered against the role's roleExtras
+                         #     at codegen time, then written to support/<role>.<ext>
+                         #     (mutually exclusive with the verbatim form)
+  call-site.tmpl         # Mustache template rendered at each step bound to this role
+  imports.tmpl           # optional; Mustache template producing import lines to inject
 ```
+
+A role directory carries **either** `support.<ext>` (copied verbatim) **or**
+`support.<ext>.tmpl` (rendered as Mustache against the role's
+`roleExtras` entry before being written). The loader rejects a directory
+that contains both. The templated form is the right choice when the
+helper needs to bake in spec-derived constants that would otherwise have
+to be threaded through every call site — the `deploymentGateway` role's
+`EXTRACTS` list is the canonical example (see "Deployment-gateway
+reference implementation" below).
 
 All three files are **per emitter** because they encode emitter-specific
 syntax (TypeScript helpers for Playwright; Java classes for the future
@@ -149,22 +161,30 @@ Source layout (in the repo):
 
 ```
 configs/camunda-oca/codegen/playwright/roles/deploymentGateway/
-  support.ts        # contains `export async function deploy(...)`
+  support.ts.tmpl   # Mustache template; bakes EXTRACTS in via {{{extracts}}}
   call-site.tmpl
   imports.tmpl
 ```
 
-The helper itself imports built-in support as siblings:
+The templated helper imports built-in support as siblings and reads the
+baked-in `EXTRACTS` constant directly:
 
 ```ts
-// configs/camunda-oca/codegen/playwright/roles/deploymentGateway/support.ts
+// configs/camunda-oca/codegen/playwright/roles/deploymentGateway/support.ts.tmpl
 import { extractInto } from './seeding.js';
 import { resolveFile } from './fixtures.js';
 
+const EXTRACTS: DeployExtract[] = {{{extracts}}};
+
 export async function deploy(
-  ctx, request, body, baseUrl, strips, extracts,
-) { /* ... */ }
+  ctx, request, body, baseUrl, strips,
+) { /* loops EXTRACTS internally */ }
 ```
+
+`{{{extracts}}}` is interpolated once at codegen time from the
+deployment role's `roleExtras` entry (see "Deployment-gateway reference
+implementation" below). The emitted `support/deploymentGateway.ts`
+contains a literal array; no template syntax leaks into the suite.
 
 Note the `./seeding.js` and `./fixtures.js` imports — these resolve in
 the emitted suite because the file lands next to those built-ins
@@ -202,7 +222,7 @@ HTML-escaped.
 `call-site.tmpl` for the role:
 
 ```hbs
-const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}}, {{{strips}}}, {{{extracts}}});
+const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}}, {{{strips}}});
 ```
 
 Rendered spec file (excerpt):
@@ -215,15 +235,18 @@ import { deploy } from './support/deploymentGateway';
 
 test('publish a process and start an instance', async ({ request, baseUrl }, ctx) => {
   // ... earlier steps ...
-  const resp7 = await deploy(ctx, request, body7, baseUrl, STRIPS, EXTRACTS_7);
+  const resp7 = await deploy(ctx, request, body7, baseUrl, STRIPS);
   // ... later steps consume ctx.processDefinitionKeyVar ...
 });
 ```
 
+The extracts list does not appear at the call site — it is baked into
+`support/deploymentGateway.ts` once, by the templated support file.
+
 ### Scope variables for `imports.tmpl`
 
 `imports.tmpl` is rendered **once per `(spec-file, role)` pair** —
-not once per step. Per-step values like `respVar`, `body`, `extracts`,
+not once per step. Per-step values like `respVar`, `body`,
 `operationId`, `pathTemplate` would be ambiguous in that scope (which
 step's value would they hold?) and step-dependent imports are not a
 use case the contract supports: if a template's import block needs to
@@ -241,7 +264,7 @@ spec file:
 | `roleName` | string | The role identifier (e.g. `deploymentGateway`). |
 | `supportImportPath` | string | Renderer-computed relative path from the current spec file to `playwright/support/<role>` (no extension; Playwright/TypeScript resolves both `.ts` and `.js` per the suite's `tsconfig`). Typically `./support/<role>` for spec files at the suite root, `../support/<role>` for spec files in subdirectories. Authors should always interpolate this with triple-braces. |
 
-Per-step variables (`respVar`, `body`, `extracts`, `operationId`,
+Per-step variables (`respVar`, `body`, `operationId`,
 `pathTemplate`, `method`, `request`, `baseUrl`, `strips`, `ctx`,
 `defaultRender`) are **not** in `imports.tmpl` scope. Referencing
 them is a template-render error so that mistakes fail at codegen time
@@ -310,7 +333,12 @@ extensions are documented in this file under the per-emitter section.
 | `baseUrl` | string | Name of the base-URL variable in scope (typically `baseUrl`). |
 | `body` | string | TypeScript expression evaluating to the request body for this step. JSON literal, multipart builder call, or `undefined`. |
 | `strips` | string | JSON literal expression for the strip-on-sentinel rules derived from `globalContextSeeds`. |
-| `extracts` | string | JSON literal expression for the response-extracts list (see "Wrap-or-replace"; for `deploymentGateway`, computed by [`DeploymentRoleHookProvider`](playwright/hooks/deployment.ts) per #233 Step 6). |
+
+`roleExtras` populated by registered `RoleHookProvider`s is also spread
+into both the call-site scope and the support-file template scope (see
+"Deployment-gateway reference implementation" for the canonical
+example: `extracts` is consumed by the support-file template, not by
+the call-site template).
 
 The exact scope contract for the Java SDK and any future emitter is
 defined when that emitter lands; this file is the canonical reference
@@ -328,7 +356,7 @@ one — e.g. the OCA `deploymentGateway` role wraps a multipart upload
 with response-field extraction and an OCA-specific error envelope.
 
 ```hbs
-const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}}, {{{strips}}}, {{{extracts}}});
+const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}}, {{{strips}}});
 ```
 
 ### Wrap
@@ -373,16 +401,23 @@ The Playwright materializer copies the built-in support tree from
    [`materializer/README.md`](../README.md).
 2. For every role bundle loaded via
    [`loadRoleBundlesForActiveConfig`](playwright/roleRenderer.ts)
-   whose directory carries a `support.<ext>` file, that file is
-   copied to `playwright/support/<role>.<ext>` — **renamed on copy**
-   so role names (not the literal `support`) become the emitted
-   filenames.
+   whose directory carries a support file, that file lands at
+   `playwright/support/<role>.<ext>` — **renamed on copy** so role
+   names (not the literal `support`) become the emitted filenames.
+   - A bundle whose source is `support.<ext>` is copied byte-for-byte.
+   - A bundle whose source is `support.<ext>.tmpl` is rendered with
+     Mustache against `ctx.roleExtras.get(<role>) ?? {}` and the
+     result is written under the stripped basename. The orchestrator
+     defers this materialisation until **after** all
+     `RoleHookProvider`s have run, so spec-derived extras are visible
+     to the template.
 3. Collisions error. A role name that matches a built-in support file's
    stem (`env`, `seeding`, `fixtures`, `recorder`, `await-eventually`)
    raises with the colliding name surfaced in the error message.
 
 `configs/camunda-oca/codegen/playwright/roles/deploymentGateway/
-support.ts` materialises as `playwright/support/deploymentGateway.ts`.
+support.ts.tmpl` materialises as `playwright/support/deploymentGateway.ts`
+(the `.tmpl` suffix is stripped on render).
 The built-in support tree retains only files that are generic across
 configs (`env.ts`, `fixtures.ts`, `seeding.ts`, `recorder.ts`,
 `await-eventually.ts`, `seed-rules.json`).
@@ -410,23 +445,28 @@ The `deploymentGateway` role at
 `configs/camunda-oca/codegen/playwright/roles/deploymentGateway/`
 exercises every phase end-to-end:
 
-- `support.ts` ships the `deploy()` helper that all `createDeployment`
-  call sites invoke.
+- `support.ts.tmpl` ships the `deploy()` helper that all
+  `createDeployment` call sites invoke. The Mustache template bakes a
+  module-level `const EXTRACTS: DeployExtract[] = {{{extracts}}};` at
+  codegen time; `deploy()` reads `EXTRACTS` directly so call sites
+  don't carry the list.
 - `call-site.tmpl` renders the `deploy(...)` call with the per-step
-  scope.
+  scope (no `extracts` argument).
 - `imports.tmpl` injects `import { deploy } from '<supportImportPath>'`
   at the top of each spec that contains a deployment step.
 - `match.json` constrains the role to multipart-body `createDeployment`
   calls with the expected response status set.
 
-The `extracts` argument to each `deploy()` call is computed once per
-CLI invocation by
+The `extracts` value interpolated into `support.ts.tmpl` is computed
+once per CLI invocation by
 [`DeploymentRoleHookProvider`](playwright/hooks/deployment.ts)
 (`#233` Step 6 / #237). The provider walks
 `graph.operations[createDeployment].responseSemanticLeaves`, filters by
-provider/depth rules, dedupes, and threads the resulting list into
-`ctx.roleExtras['deploymentGateway']`. The renderer reads it back via
-the Mustache scope. No per-field knowledge lives in the emitter.
+provider/depth rules, dedupes, and writes the JSON literal into
+`ctx.roleExtras['deploymentGateway'].extracts`. The materializer reads
+it back when rendering the templated support file. No per-field
+knowledge lives in the emitter, and no per-field literal leaks into the
+call site (#243).
 
 ## L3 invariants (Phase 5, landed)
 
@@ -445,11 +485,15 @@ under the describe block **"role-template rendering contract (Lift 12 /
    (delete them) and unwired role dispatch (the planner is no longer
    binding any operation to the role).
 3. **Spec-derived deploymentGateway extracts cover every downstream
-   binding consumer.** Two checks: a drift detector that every emitted
-   `deploy(...)` call's extracts list literal matches
-   `computeDeploymentExtracts(createDeployment)`, and a coverage check
-   that every `ctx.<...>Var` reference in a deployment-using spec has
-   a producer (deploy extract, `seedBinding`, `extractInto`, or direct
+   binding consumer.** Three checks against the materialised
+   `support/deploymentGateway.ts` and the emitted specs: (a) a drift
+   detector that the helper's baked `EXTRACTS` constant's varName set
+   equals `computeDeploymentExtracts(createDeployment)`; (b) a
+   no-leakage assertion that no emitted spec contains a `varName:`
+   literal inside a `deploy(` argument list (catches a regression that
+   re-introduces the inlining — see #243); (c) a coverage check that
+   every `ctx.<...>Var` reference in a deployment-using spec has a
+   producer (deploy extract, `seedBinding`, `extractInto`, or direct
    `ctx.<...>Var = …` assignment).
 
 The originally-drafted fourth invariant (a grep-ban over emitter source
