@@ -5457,3 +5457,47 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig('bundled-spec invariants: emitter is API-agnostic (#207)', () => {
+  it('materializer/src/playwright/**/*.ts contains zero `operationId === "<literal>"` branches', async () => {
+    // #207: hard-coded `step.operationId === 'createDeployment'` or
+    // `step.operationId === 'createProcessInstance'` branches in the
+    // Playwright emitter coupled the materializer to specific
+    // Camunda OCA operations and blocked emitter reuse for any other
+    // API. Lift 9 / #225 removed the createDeployment branches by
+    // routing through the artifact-kinds ABox role; PR #231 + #237
+    // moved deploy() rendering behind the deploymentGateway role; and
+    // this PR moved the last surviving createProcessInstance default
+    // body injection into `configs/<config>/request-defaults.json`
+    // under `bodyDefaults`. The invariant locks the door behind that
+    // work — any future operationId literal in emitter source must
+    // either live behind a role bundle or behind a config map, not
+    // behind a string comparison.
+    const playwrightDir = join(REPO_ROOT, 'materializer', 'src', 'playwright');
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.isFile() && entry.name.endsWith('.ts')) sources.push(full);
+      }
+    };
+    walk(playwrightDir);
+    const opIdLiteralPattern = /operationId\s*===\s*['"][^'"]+['"]/g;
+    const failures: string[] = [];
+    for (const src of sources) {
+      const content = readFileSync(src, 'utf8');
+      const matches = content.match(opIdLiteralPattern);
+      if (matches && matches.length > 0) {
+        failures.push(`${relative(REPO_ROOT, src)}: ${matches.join(', ')}`);
+      }
+    }
+    expect(
+      failures,
+      `Found hard-coded operationId comparison(s) in materializer/src/playwright/. ` +
+        `Move the per-operation behaviour into a role bundle (configs/<config>/codegen/playwright/roles/<role>/) ` +
+        `or into a config map (e.g. request-defaults.json bodyDefaults). ` +
+        `See #207 for the contract.`,
+    ).toEqual([]);
+  });
+});
