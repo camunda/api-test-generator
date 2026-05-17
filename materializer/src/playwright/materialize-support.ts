@@ -7,7 +7,16 @@
 //   npm install
 //   API_BASE_URL=http://localhost:8080/v2 npm test
 //
-// Three sets of assets are copied:
+// Three sets of assets are produced for an emitted suite:
+//   * Project scaffolding (package.json, playwright.config.ts, tsconfig.json,
+//                          .env.example, README.md): owned by the emitter's
+//                          SDK `scaffold()` method (see PlaywrightEmitter).
+//                          The orchestrator writes the returned EmittedFile
+//                          list into <outDir>/. This module exposes the
+//                          pure file-list builder via
+//                          `loadProjectScaffoldingFiles()` so PlaywrightEmitter.scaffold
+//                          and the legacy `emitPlaywrightSuite` entrypoint
+//                          share the same template-discovery logic.
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
 //                fixtures.ts, seed-rules.json, await-eventually.ts).
 //                Sources:
@@ -18,9 +27,6 @@
 //                configs/<config>/codegen/playwright/roles/<role>/support.<ext>
 //                copied (renamed) to support/<role>.<ext>
 //                — see materializeRoleSupportFiles().
-//   * project root — package.json, playwright.config.ts, tsconfig.json,
-//                    .env.example, README.md.
-//                    Sources: materializer/templates/.
 //   * fixtures/ — BPMN/DMN/form files referenced by @@FILE:<rel-path>
 //                 markers in emitted tests. Sources:
 //                 configs/<config>/fixtures/ (per-config; #221 / Lift 11).
@@ -32,6 +38,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { EmittedFile } from '@camunda8/emitter-sdk';
 import { getActiveConfigDir, getSpecBundleDir } from 'path-analyser/configResolver';
 
 export const SUPPORT_TEMPLATE_FILES = [
@@ -94,27 +101,22 @@ function defaultProjectTemplatesDir(): string {
 }
 
 /**
- * Copy the runtime support templates AND project-root scaffolding into
- * `<outDir>/` so the emitted Playwright suite is self-contained and runnable
- * in place (`cd <outDir> && npm install && npm test`).
+ * Copy the runtime support templates into `<outDir>/support/` so the emitted
+ * Playwright suite has the helper modules it imports (env.ts, recorder.ts,
+ * seeding.ts, fixtures.ts, seed-rules.json, await-eventually.ts).
  *
- * Idempotent: safe to call multiple times per emit run.
+ * Idempotent: safe to call multiple times per emit run. Project-root
+ * scaffolding (package.json, playwright.config.ts, tsconfig.json,
+ * .env.example, README.md) is NOT written here — those files are produced
+ * by {@link PlaywrightEmitter.scaffold} and written by the orchestrator
+ * via the generic SDK scaffold path (#233 Step 7).
  *
  * @param outDir              Directory to materialize into (created if missing).
  * @param templatesDir        Optional override for the support-templates source
- *                            directory (env.ts, recorder.ts, seeding.ts,
- *                            seed-rules.json). Production callers should omit
- *                            this; it exists so tests can exercise the
+ *                            directory. Production callers should omit this;
+ *                            it exists so tests can exercise the
  *                            missing-template path without mutating
  *                            checked-in source files.
- * @param projectTemplatesDir Optional override for the project-root templates
- *                            (package.json, playwright.config.ts, tsconfig.json,
- *                            .env.example, README.md). Production callers
- *                            should omit this.
- * @param overwriteRoot       When false, root scaffolding files are only
- *                            written if they don't already exist. Support
- *                            files are always overwritten regardless.
- *                            Default: true.
  * @param excludeSupportFiles Optional list of support-template file names to
  *                            skip when copying into `<outDir>/support/`.
  *                            Used by callers that have configured the emitter
@@ -132,8 +134,6 @@ function defaultProjectTemplatesDir(): string {
 export async function materializeSupport(
   outDir: string,
   templatesDir?: string,
-  projectTemplatesDir?: string,
-  overwriteRoot: boolean = true,
   excludeSupportFiles?: readonly string[],
 ): Promise<string> {
   const srcDir = templatesDir ?? defaultTemplatesDir();
@@ -163,15 +163,32 @@ export async function materializeSupport(
     await fs.copyFile(path.join(srcDir, name), dest);
   }
 
-  // Project root scaffolding: overwritten by default; opt-out preserves user edits.
-  const projSrcDir = projectTemplatesDir ?? defaultProjectTemplatesDir();
-  for (const name of PROJECT_TEMPLATE_FILES) {
-    const dest = path.join(outDir, name);
-    if (!overwriteRoot && existsSync(dest)) continue;
-    await fs.copyFile(path.join(projSrcDir, name), dest);
-  }
-
   return destDir;
+}
+
+/**
+ * Read the Playwright project-root scaffolding templates into an in-memory
+ * {@link EmittedFile} list. Pure: no filesystem writes. Backs
+ * {@link PlaywrightEmitter.scaffold} so the orchestrator's generic
+ * scaffold-write path (see {@link writeScaffolded}) owns all actual writes.
+ *
+ * @param projectTemplatesDir Optional override for the source directory.
+ *                            Production callers should omit this; tests use
+ *                            it to point at a synthetic templates tree.
+ * @returns The five {@link PROJECT_TEMPLATE_FILES} as `EmittedFile`s, each
+ *          with `relativePath` equal to the file's basename (written into
+ *          `<ctx.outDir>/` directly).
+ */
+export async function loadProjectScaffoldingFiles(
+  projectTemplatesDir?: string,
+): Promise<EmittedFile[]> {
+  const srcDir = projectTemplatesDir ?? defaultProjectTemplatesDir();
+  const out: EmittedFile[] = [];
+  for (const name of PROJECT_TEMPLATE_FILES) {
+    const content = await fs.readFile(path.join(srcDir, name), 'utf8');
+    out.push({ relativePath: name, content });
+  }
+  return out;
 }
 
 /**

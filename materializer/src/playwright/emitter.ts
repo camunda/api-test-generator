@@ -15,7 +15,11 @@ import type {
   RequestStep,
 } from 'path-analyser/types';
 import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
-import { materializeFixtures, materializeSupport } from './materialize-support.js';
+import {
+  loadProjectScaffoldingFiles,
+  materializeFixtures,
+  materializeSupport,
+} from './materialize-support.js';
 import { renderRoleCallSite, renderRoleImports, stepMatchesRole } from './roleRenderer.js';
 
 interface EmitOptions {
@@ -111,7 +115,15 @@ export async function emitPlaywrightSuite(
   // Default true (preserves pre-config behaviour, matching renderPlaywrightSuite).
   const recordResponses = opts.recordResponses ?? true;
   const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
-  await materializeSupport(opts.outDir, undefined, undefined, true, excludeSupportFiles);
+  await materializeSupport(opts.outDir, undefined, excludeSupportFiles);
+  // Project-root scaffolding (package.json, playwright.config.ts, …) is no
+  // longer copied by materializeSupport (#233 Step 7). The legacy entrypoint
+  // bypasses the orchestrator's generic scaffold-write path, so inline the
+  // equivalent here: load via the same source-of-truth helper and write each
+  // file relative to opts.outDir.
+  for (const file of await loadProjectScaffoldingFiles()) {
+    await fs.writeFile(path.join(opts.outDir, file.relativePath), file.content, 'utf8');
+  }
   await materializeFixtures(opts.outDir);
   const file = path.join(opts.outDir, playwrightSuiteFileName(collection, opts.mode || 'feature'));
   const code = renderPlaywrightSuite(collection, opts);
@@ -147,6 +159,17 @@ export const PlaywrightEmitter: EmitterStrategy = {
           'When true, every emitted scenario step appends a recordResponse({...}) call and the suite imports recordResponse/sanitizeBody from ./support/recorder. Defaults to false; recorder.ts is also vendored conditionally.',
       },
     },
+  },
+  async scaffold(_ctx: EmitContext): Promise<EmittedFile[]> {
+    // Project-root scaffolding for the Playwright/REST suite. Returned as
+    // {@link EmittedFile}s so the orchestrator's generic write path
+    // (`writeScaffolded`) owns the actual fs writes — keeping this method
+    // pure and trivially testable.
+    //
+    // PROJECT_TEMPLATE_FILES (re-exported alongside this helper) is the
+    // source of truth for which files ship in the scaffold; the loader
+    // returns them in that order.
+    return loadProjectScaffoldingFiles();
   },
   async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
     const recordResponses =
