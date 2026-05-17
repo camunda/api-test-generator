@@ -10,7 +10,7 @@ import {
   PROJECT_TEMPLATE_FILES,
   SUPPORT_DIR_NAME,
   SUPPORT_TEMPLATE_FILES,
-} from '../../path-analyser/src/codegen/playwright/materialize-support.ts';
+} from '../../materializer/src/playwright/materialize-support.ts';
 
 describe('materializeSupport', () => {
   let tmp: string;

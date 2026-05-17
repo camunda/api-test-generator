@@ -1,4 +1,4 @@
-import { deterministicSuffix } from './codegen/support/seeding.js';
+import { deterministicSuffix } from './deterministicSuffix.js';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,

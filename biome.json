@@ -17,6 +17,8 @@
     "includes": [
       "path-analyser/src/**/*.ts",
       "path-analyser/scripts/**/*.ts",
+      "materializer/src/**/*.ts",
+      "materializer/scripts/**/*.{ts,js}",
       "request-validation/src/**/*.ts",
       "request-validation/scripts/**/*.ts",
       "semantic-graph-extractor/**/*.ts",
@@ -36,6 +38,8 @@
     "includes": [
       "path-analyser/src/**/*.ts",
       "path-analyser/scripts/**/*.ts",
+      "materializer/src/**/*.ts",
+      "materializer/scripts/**/*.{ts,js}",
       "request-validation/src/**/*.ts",
       "request-validation/scripts/**/*.ts",
       "semantic-graph-extractor/**/*.ts",

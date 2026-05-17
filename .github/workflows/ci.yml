@@ -56,6 +56,12 @@ jobs:
       - name: Typecheck (path-analyser)
         run: npx tsc --noEmit -p path-analyser/tsconfig.json
 
+      - name: Build path-analyser (emit .d.ts for materializer typecheck)
+        run: npm run build:analyser
+
+      - name: Typecheck (materializer)
+        run: npx tsc --noEmit -p materializer/tsconfig.json
+
       - name: Typecheck (request-validation)
         run: npx tsc --noEmit -p request-validation/tsconfig.json
 

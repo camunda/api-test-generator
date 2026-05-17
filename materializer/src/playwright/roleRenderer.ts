@@ -30,8 +30,8 @@ import { fileURLToPath } from 'node:url';
 // Top-level import (vs. dynamic `await import`) — mustache is a small
 // CommonJS package with a default export carrying `render`.
 import Mustache from 'mustache';
-import { getActiveConfigDir } from '../../configResolver.js';
-import type { RequestStep } from '../../types.js';
+import { getActiveConfigDir } from 'path-analyser/configResolver';
+import type { RequestStep } from 'path-analyser/types';
 import type { ImportsTemplateScope, PlaywrightRoleScope, RoleTemplateBundle } from '../roles.js';
 
 const ROLES_DIRNAME = 'roles';

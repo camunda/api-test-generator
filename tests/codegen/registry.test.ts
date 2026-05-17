@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test } from 'vitest';
-import type { Emitter } from '../../path-analyser/src/codegen/emitter.ts';
+import type { Emitter } from '../../materializer/src/emitter.ts';
 import {
   _resetEmittersForTests,
   getEmitter,
   listEmitters,
   registerEmitter,
-} from '../../path-analyser/src/codegen/registry.ts';
+} from '../../materializer/src/registry.ts';
 
 function stubEmitter(id: string, name = id): Emitter {
   return {

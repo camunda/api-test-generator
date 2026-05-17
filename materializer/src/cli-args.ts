@@ -5,7 +5,7 @@ export interface ParsedCliArgs {
 }
 
 /**
- * Parse `path-analyser/src/codegen/index.ts` CLI arguments.
+ * Parse `materializer/src/index.ts` CLI arguments.
  *
  * Supported flags:
  * - `--target=<id>` selects an emitter (default: `playwright`)

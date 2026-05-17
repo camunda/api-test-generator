@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { computeDeploymentExtracts } from '../../path-analyser/src/codegen/deploymentExtracts.ts';
+import { computeDeploymentExtracts } from '../../materializer/src/deploymentExtracts.ts';
 import type { OperationNode } from '../../path-analyser/src/types.ts';
 
 function makeOp(

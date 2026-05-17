@@ -1,272 +1,139 @@
 # Path Analyser
 
-Generates endpoint scenario chains that satisfy semantic type requirements using the operation dependency graph and can emit Playwright test suites from those scenarios.
+Generates endpoint scenario chains that satisfy semantic-type requirements,
+using the operation dependency graph emitted by
+[`semantic-graph-extractor`](../semantic-graph-extractor) plus the bundled
+OpenAPI spec and the active config's domain rules.
 
-## Overview / Current State
+This workspace **plans only**. It writes scenario JSON to disk; emission
+of runnable test suites is handled downstream by
+[`materializer`](../materializer). The split is described in
+[#235](https://github.com/camunda/api-test-generator/issues/235).
 
-The analyser ingests an operation dependency graph enriched with `operationMetadata` and optional `conditionalIdempotency` vendor extensions. It derives a bounded feature coverage scenario set per endpoint and now supports:
+## Pipeline position
 
-- Duplicate invocation scenarios:
-  - Conflict policy (`duplicatePolicy=conflict`) – second call expects 409.
-  - Conditional idempotent policy (`x-conditional-idempotency` with `duplicatePolicy=ignore`) – second call expects same success status (e.g. 200) with no side-effects (future verification planned).
-- Multi-step `requestPlan` sequences (e.g. duplicate tests) even if `operations[]` lists the logical endpoint once.
-- Centralized dynamic value seeding via `src/codegen/support/seed-rules.json` (configurable patterns, deterministic mode with `TEST_SEED`).
-- Automatic default tenant id injection using a seeding rule (`tenantIdVar -> <default>` unless provided or extracted).
+```
+semantic-graph-extractor → path-analyser → materializer
+                                ▲ (this workspace)
+```
+
+Inputs:
+- `generated/<config>/operation-dependency-graph.json` (from extractor)
+- `spec/<config>/bundled/rest-api.bundle.json` (from `camunda-schema-bundler`)
+- `configs/<config>/{domain-semantics,filter-providers,request-defaults}.json`
+- `configs/<config>/ontology/*.json` (ABoxes)
+- `configs/<config>/fixtures/deployment-artifacts.json`
+
+Outputs (all gitignored):
+- `generated/<config>/feature-output/<method>--<path>-scenarios.json` —
+  one scenario collection per endpoint
+- `generated/<config>/scenarios/index.json` — summary index
+- `generated/<config>/scenarios/deployment-artifacts.manifest.json` —
+  machine-readable artifact list referenced by generated scenarios
+
+## What it does
+
+Per endpoint, the planner derives a bounded feature-coverage scenario
+set, including:
+
+- **Dependency chains** — BFS from semantic-type requirements through
+  producers/establishers to the target operation.
+- **`requestPlan` sequences** — ordered steps with status expectations,
+  body/multipart templates, and `extract` bindings.
+- **Duplicate-invocation scenarios** —
+  - `duplicatePolicy=conflict` — second call expects 409.
+  - `x-conditional-idempotency` with `duplicatePolicy=ignore` —
+    second call expects the same success status.
+- **OneOf variants** and **negative union** variants.
+- **Deployment-artifact selection** for `createDeployment` (BPMN, Form,
+  DMN Decision, DMN DRD) via the per-config artifact registry, with
+  artifact-state matching against `producibleStates` /
+  `providesStates`.
+- **Default tenant-id injection** via a centralized seeding rule
+  (`tenantIdVar -> <default>`).
 
 Scenario JSON key fields:
-- `duplicateTest` – metadata for duplicate scenarios (`mode`, `policy`, `secondStatus`, optional `keyFields`, `windowField`).
-- `requestPlan` – ordered steps, each with status expectation, body/multipart templates, optional `extract` bindings.
-- `responseShapeFields` / `responseShapeSemantics` – drive final step assertions.
 
-Examples: See `generated/<config>/feature-output/post--messages--publication-scenarios.json` (conditional idempotent duplicate) and `post--tenants-scenarios.json` (conflict duplicate).
+- `endpoint` — operation metadata.
+- `requestPlan` — ordered steps; each carries status, body/multipart,
+  optional `extract` bindings, and `seedBindings` for pre-step seeding
+  ([#136](https://github.com/camunda/api-test-generator/issues/136)).
+- `duplicateTest` — `{ mode, policy, secondStatus, keyFields?, windowField? }`.
+- `responseShapeFields` / `responseShapeSemantics` — drive final-step
+  assertions.
 
-## Install
+Examples (after running the pipeline):
+`generated/<config>/feature-output/post--messages--publication-scenarios.json`
+(conditional idempotent duplicate) and `post--tenants-scenarios.json`
+(conflict duplicate).
 
-```bash
-npm install
-```
+## Build & run
 
-## Generate Scenarios
-
-```bash
-npm start   # shorthand for: npm run build && npm run generate:scenarios
-```
-
-This produces JSON files under `generated/<config>/feature-output/` (feature coverage enriched scenarios) and legacy raw scenario files (graph based) under `generated/<config>/scenarios/`.
-
-Structure:
-
-- `generated/<config>/feature-output/<method>--<path>-scenarios.json` – scenario collection for a single endpoint (feature coverage + metadata like `requestPlan`, `responseShapeFields`, oneOf variants, negative union variants, etc.).
-- `generated/<config>/scenarios/index.json` – summary of processed endpoints.
-
-Constraints / heuristics:
-
-- Max 20 scenarios per endpoint (feature coverage generator trims beyond this cap).
-- Cycles in the dependency graph: one extra traversal iteration is allowed to satisfy semantic dependencies before pruning to avoid infinite loops.
-
-## Generate Playwright Tests
-
-After scenarios are built you can emit a Playwright spec for a specific `operationId`, or all specs at once.
+The planner is invoked through root scripts; it is rarely run in isolation.
 
 ```bash
-npm run codegen:playwright -- <operationId>
-# Example:
-npm run codegen:playwright -- searchProcessInstances
-# All endpoints:
-npm run codegen:playwright:all
+# From the repo root:
+npm run extract-graph          # build extractor + emit dependency graph
+npm run generate:scenarios     # build planner + emit scenario JSON
+npm run testsuite:generate     # extract-graph + scenarios + Playwright codegen
+npm run pipeline               # fetch-spec + testsuite:generate + request-validation
 ```
 
-Outputs go to `generated/<config>/playwright/`:
-
-- `<operationId>.feature.spec.ts` – One test per scenario. Assertions include:
-  - Status code.
-  - Presence & type of top-level response fields for success scenarios.
-  - Deployment slice assertions for `createDeployment` (expected artifact slices).
-  - Duplicate invocation second-step status (conflict or conditional ignore).
-  - Single parse of JSON body reused across assertions.
-
-### Running the Generated Tests
-
-The emitted suite at `generated/<config>/playwright/` is now a self-contained, runnable Playwright project. Each codegen run materializes:
-
-- `package.json` (declares the `test` script and `@playwright/test` devDep)
-- `playwright.config.ts`
-- `tsconfig.json`
-- `.env.example` (documents `API_BASE_URL`)
-- `README.md` (run instructions)
-- `support/` (vendored runtime helpers — `env.ts`, `seeding.ts`, `fixtures.ts`, `seed-rules.json`, `await-eventually.ts`, and `recorder.ts` when `recordResponses` is enabled — see "Response Shape Recorder" below; the full list lives in `SUPPORT_TEMPLATE_FILES` in `materialize-support.ts`)
-
-So you can install and run the suite in place against any reachable Camunda cluster:
-
-```bash
-cd generated/<config>/playwright
-npm install
-API_BASE_URL=http://localhost:8080/v2 npm test
-```
-
-Alternatively you can still execute a single spec via the parent project's already-installed Playwright:
-
-```bash
-npx playwright test generated/<config>/playwright/searchProcessInstances.feature.spec.ts
-```
-
-Or run all generated specs from the parent project:
-
-```bash
-npx playwright test generated/<config>/playwright
-```
-
-Note: multipart endpoints (e.g., createDeployment) use a small fixture located under `fixtures/` by default. Adjust paths or variables as needed. Multipart requests are emitted using Playwright's keyed `multipart` object with `FilePayload` entries (`{ name, mimeType, buffer }`).
-
-### Deployment Artifact Registry and Manifest
-
-- Registry file (editable): `api-test/configs/<config>/fixtures/deployment-artifacts.json`
-  - Purpose: define deployable artifacts used by tests. The planner prefers these over generic defaults.
-  - Shape:
-    - `artifacts: Array<{ kind: string; path: string; description?: string; parameters?: Record<string, any> }>`
-    - `kind` must match a domain artifact kind (e.g., `bpmnProcess`, `form`, `dmnDecision`, `dmnDrd`).
-    - `path` is relative to `api-test/configs/<config>/fixtures/`.
-    - `description` is free text to capture notable characteristics.
-    - Optional `parameters` can seed scenario bindings (e.g., `{ jobType: "sampleJobType" }`).
-  - Example entries are provided for BPMN, Form, and DMN.
-
-- Output manifest (read-only, regenerated): `api-test/generated/<config>/scenarios/deployment-artifacts.manifest.json`
-  - Purpose: machine-readable list of artifacts referenced by generated scenarios/tests.
-  - Shape: `{ artifacts: [{ kind, path, description? }] }`
-  - Use this file to build artifacts programmatically for a CI test environment or pre-seed step.
-
-CreateDeployment coverage:
-- The feature generator emits one scenario per declared artifact rule (BPMN, Form, DMN Decision, DMN DRD) using the registry to select files. Assertions verify the corresponding deployment slices in the response.
-
-## Environment Variables
-
-The runtime uses a small env helper (`src/codegen/support/env.ts`):
-
-- `API_BASE_URL` – Base URL of the target API (default: `http://localhost:8080`).
-- `API_TOKEN` – Bearer token used for `Authorization` header (default: `dev-token`).
-- `TEST_SEED` – If set, enables deterministic seeded value generation (stable outputs for `seedBinding`).
-
-Example:
-
-```bash
-API_BASE_URL=https://api.example.com API_TOKEN=abc123 \
-  npx playwright test generated/<config>/playwright/searchProcessInstances.feature.spec.ts
-```
-
-## Response Shape Recorder
-
-Purpose
-
-- Capture real runtime responses from generated tests to inform schema defaults, error mappings, and which fields are actually present.
-- Persist a sanitized JSONL log you can aggregate into a compact summary.
-
-Configuration
-
-- The recorder is gated by `configs.<name>.codegen.playwright.recordResponses` in [configs.json](../configs.json). Default when omitted: `true`. The active `camunda-oca` config sets it to `false`, so the SDK example workflows that consume the emitted suite do not pay for the recorder boilerplate they never aggregate. Set it back to `true` for a config (or branch) to re-enable.
-- When disabled, the emitter omits the `recordResponse`/`sanitizeBody` import, every per-step `recordResponse({...})` block, and the `recorder.ts` vendoring under `support/`.
-
-How it works (when enabled)
-
-- The Playwright emitter automatically logs every request via two helpers:
-  - `recordResponse({...})` appends one JSON line per request to `dist/runtime-observations/responses.jsonl`.
-  - `sanitizeBody(value)` replaces concrete values with type-like placeholders (e.g., strings → "<string>").
-- Each observation includes: timestamp, operationId, scenarioId/name, stepIndex, isFinal, method, pathTemplate, status, expectedStatus, and optional sanitized `bodyShape`.
-- Logging is best-effort; recorder errors never fail tests.
-
-Paths
-
-- Runtime log: `dist/runtime-observations/responses.jsonl`
-- Aggregated summary: `dist/runtime-observations/summary.json`
-
-Usage
-
-1) Enable the recorder for the active config (set `configs.<name>.codegen.playwright.recordResponses` to `true` in `configs.json`), then generate and run tests:
-
-```bash
-npm run codegen:playwright -- <operationId>
-npx playwright test generated/<config>/playwright/<operationId>.feature.spec.ts
-```
-
-2) Aggregate observations into a per-operation summary:
-
-```bash
-npm run observe:aggregate
-```
-
-Or run end-to-end for all endpoints:
-
-```bash
-npm run observe:run
-```
-
-What the summary contains
-
-- Per operationId:
-  - Total request count and status distribution (overall and final-step only).
-  - Top-level response keys presence frequency across final responses.
-  - One sanitized example body per observed status code.
-
-Code references
-
-- Recorder: `src/codegen/support/recorder.ts`
-- Aggregator: `src/scripts/aggregate-observations.ts`
-- Emitter integration: `src/codegen/playwright/emitter.ts` (search for `recordResponse`)
-
-## Current Test Generation Scope
-
-Implemented:
-
-- Multi-step request plans.
-- Status code assertions (success / negative variants).
-- Field presence/type assertions for final responses.
-- Deployment slice assertions (createDeployment).
-- Duplicate invocation scenario generation (conflict & conditional ignore).
-- Centralized seeding (correlation keys, ids, names, tenant id default) via JSON registry.
-
-Planned / Upcoming:
-
-- Error schema (ProblemDetail) body assertions.
-- oneOf / union violation expansion.
-- Filter parameter population for search endpoints.
-- Path parameter binding resolution.
-- Duplicate conditional idempotency side-effect verification and response equality checks.
-- Tag-based selective execution (e.g. duplicate-only run).
-- Key field echo validation (request key appears in success / conflict error payload).
-
-## Seeding & Dynamic Data
-
-Dynamic test data is provided at runtime using `seedBinding(varName)` (`src/codegen/support/seeding.ts`) driven by `src/codegen/support/seed-rules.json`.
-
-Default `seed-rules.json`:
-
-```json
-{
-  "rules": [
-    { "match": "tenantIdVar", "template": "<default>" },
-    { "match": "/(correlation)/i", "template": "corr-${runId}-${counter:corr}-${rand:4}" },
-    { "match": "/(key|id)$/i", "template": "${var}-${runId}-${counter:id}-${rand:6}" },
-    { "match": "/name/i", "template": "${var}-${rand:8}" },
-    { "match": "*", "template": "${var}-${rand:6}" }
-  ]
-}
-```
-
-Template tokens:
-- `${var}` variable name
-- `${runId}` stable per generation run (deterministic under `TEST_SEED`)
-- `${counter:bucket}` incrementing counter per bucket
-- `${rand:n}` random base36 segment length `n` (deterministic under `TEST_SEED`)
-
-Auto-seeding occurs only if:
-1. Binding is `"__PENDING__"`.
-2. Placeholder `${varName}` appears in a request template.
-3. Binding is not satisfied via extraction earlier in the plan.
-
-## Configuration Files
-
-- `src/codegen/support/seed-rules.json` – seeding patterns.
-- `domain-semantics.json` / `.schema.json` – domain semantic definitions.
-- `fixtures/deployment-artifacts.json` – deployment artifact registry.
-- `generated/<config>/feature-output/*-scenarios.json` – generated scenario collections.
-
-## Regeneration Shortcut
-
-Rebuild everything (scenarios + tests):
-
-```bash
-npm run regenerate
-```
-
-## Development Notes
-
-Rebuild TypeScript before generating scenarios or code:
+Or, manually inside this workspace:
 
 ```bash
 npm run build
+node dist/src/index.js
 ```
 
-Then regenerate scenarios & tests as needed. The code generator scans `generated/<config>/feature-output/` for a file whose `endpoint.operationId` matches the provided argument.
+Constraints / heuristics:
+- Max 20 scenarios per endpoint (feature-coverage generator trims beyond this).
+- Cycles in the dependency graph: one extra traversal iteration is allowed
+  to satisfy semantic dependencies before pruning, avoiding infinite loops.
 
----
+## Determinism
 
-Feel free to extend the emitter in `src/codegen/playwright/emitter.ts` to add richer assertions or integrate additional frameworks.
+Scenarios are byte-reproducible. Any randomness during planning routes
+through the same `deterministicSuffix` helper used by the emitted
+runtime, seeded from `TEST_SEED` (default `'snapshot-baseline'`).
+
+> `path-analyser/src/deterministicSuffix.ts` is intentionally
+> duplicated with `materializer/src/support/seeding.ts`'s vendored
+> copy. The materializer copy is shipped verbatim into every emitted
+> suite and must stay self-contained; the algorithms must be kept
+> aligned. Both files carry headers documenting the duplication.
+
+## Public surface (for `materializer`)
+
+The following subpaths are published via `exports` in `package.json`
+so the [`materializer`](../materializer) workspace can typecheck against
+them with `NodeNext` resolution:
+
+| Subpath | Module |
+|---|---|
+| `path-analyser/configResolver` | active-config discovery |
+| `path-analyser/graphLoader` | parsed-graph loader + indexes |
+| `path-analyser/ontology/loader` | ABox loaders |
+| `path-analyser/ontology/operationRoles` | operation-role classification |
+| `path-analyser/types` | shared scenario / plan / graph types |
+
+`declaration: true` is enabled in `tsconfig.json` so these subpaths
+ship `.d.ts` files. **Nothing else is part of the public contract** —
+internal modules may move or change freely.
+
+## Configuration files (active config)
+
+| File | Purpose |
+|---|---|
+| `configs/<config>/domain-semantics.json` | Domain-level semantic requirements, runtime states, value bindings |
+| `configs/<config>/filter-providers.json` | Maps fields to value providers (`ctx`, `const`, `enumFirst`, etc.) |
+| `configs/<config>/request-defaults.json` | Default values for request body fields per operation |
+| `configs/<config>/fixtures/deployment-artifacts.json` | Per-config deployment artifact registry (BPMN/DMN/Form) |
+| `configs/<config>/ontology/*.json` | ABoxes consumed by the planner |
+
+## See also
+
+- [materializer/README.md](../materializer/README.md) — downstream suite emitter
+- [semantic-graph-extractor/README.md](../semantic-graph-extractor/README.md) — upstream graph extractor
+- [README.md](../README.md) — repo-wide overview and architecture diagram
+- [AGENTS.md](../AGENTS.md) — operational guide for contributors

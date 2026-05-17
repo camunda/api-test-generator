@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { EndpointScenarioCollection } from '../types.js';
+import type { EndpointScenarioCollection } from 'path-analyser/types';
 import type { EmitContext, Emitter } from './emitter.js';
 
 /**

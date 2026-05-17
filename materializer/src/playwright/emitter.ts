@@ -1,13 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { assertSafeGlobalContextSeeds } from '../../ontology/loader.js';
+import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
   EventualWaitSpec,
   GlobalContextSeed,
   RequestStep,
-} from '../../types.js';
+} from 'path-analyser/types';
 import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
 import { materializeFixtures, materializeSupport } from './materialize-support.js';

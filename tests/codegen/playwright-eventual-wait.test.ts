@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { renderPlaywrightSuite } from '../../path-analyser/src/codegen/playwright/emitter.ts';
+import { renderPlaywrightSuite } from '../../materializer/src/playwright/emitter.ts';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
 
 // Layer-2 guards for the eventual-state wait injection (#159 PR B).
