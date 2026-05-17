@@ -44,7 +44,7 @@ materializer/
 │   ├── index.ts                  ← CLI entry (codegen:playwright[:all])
 │   ├── cli-args.ts               ← argv parser
 │   ├── orchestrator.ts           ← per-operation emission driver
-│   ├── emitter.ts                ← Emitter strategy interface + registry
+│   ├── emitter.ts                ← Emitter strategy interface
 │   ├── registry.ts               ← built-in emitter registration
 │   ├── roles.ts                  ← role-rendering type surface (operation
 │   │                                role *classification* lives in
