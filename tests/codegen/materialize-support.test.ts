@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   FIXTURES_DIR_NAME,
+  loadProjectScaffoldingFiles,
   materializeFixtures,
   materializeRoleSupportFiles,
   materializeSupport,
@@ -37,24 +38,20 @@ describe('materializeSupport', () => {
     }
   });
 
-  test('writes project-root scaffolding files into <outDir>/', async () => {
+  test('does NOT write project-root scaffolding (delegated to PlaywrightEmitter.scaffold)', async () => {
+    // #233 Step 7: project-root files (package.json, playwright.config.ts,
+    // tsconfig.json, .env.example, README.md) moved off materializeSupport
+    // onto the EmitterStrategy.scaffold() SDK contract. The orchestrator now
+    // owns writing them via writeScaffolded(). Keep this assertion as a
+    // regression guard so a future refactor cannot silently re-introduce
+    // the project-template copy into materializeSupport.
     await materializeSupport(tmp);
     for (const name of PROJECT_TEMPLATE_FILES) {
-      const stat = await fs.stat(path.join(tmp, name));
-      expect(stat.size).toBeGreaterThan(0);
+      expect(
+        existsSync(path.join(tmp, name)),
+        `${name} must not be written by materializeSupport`,
+      ).toBe(false);
     }
-  });
-
-  test('emitted package.json declares a "test" script and @playwright/test devDep', async () => {
-    await materializeSupport(tmp);
-    const pkgRaw = await fs.readFile(path.join(tmp, 'package.json'), 'utf8');
-    // biome-ignore lint/plugin: test fixture parsing of known-good JSON
-    const pkg = JSON.parse(pkgRaw) as {
-      scripts?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-    };
-    expect(pkg.scripts?.test).toMatch(/playwright/);
-    expect(pkg.devDependencies?.['@playwright/test']).toBeTruthy();
   });
 
   test('is idempotent: a second call overwrites without error', async () => {
@@ -62,25 +59,6 @@ describe('materializeSupport', () => {
     await expect(materializeSupport(tmp)).resolves.toBe(path.join(tmp, SUPPORT_DIR_NAME));
     const supportEntries = await fs.readdir(path.join(tmp, SUPPORT_DIR_NAME));
     expect(supportEntries.sort()).toEqual([...SUPPORT_TEMPLATE_FILES].sort());
-    for (const name of PROJECT_TEMPLATE_FILES) {
-      expect(existsSync(path.join(tmp, name))).toBe(true);
-    }
-  });
-
-  test('overwriteRoot=false preserves user-edited root files but refreshes support/', async () => {
-    await materializeSupport(tmp);
-    // Simulate a user edit to a root file.
-    const userPkg = '{"name":"user-edited"}';
-    await fs.writeFile(path.join(tmp, 'package.json'), userPkg, 'utf8');
-
-    await materializeSupport(tmp, undefined, undefined, false);
-
-    expect(await fs.readFile(path.join(tmp, 'package.json'), 'utf8')).toBe(userPkg);
-    // Support files are still part of the contract — refreshed regardless.
-    for (const name of SUPPORT_TEMPLATE_FILES) {
-      const stat = await fs.stat(path.join(tmp, SUPPORT_DIR_NAME, name));
-      expect(stat.size).toBeGreaterThan(0);
-    }
   });
 
   test('respects the templatesDir override and copies from a custom support source', async () => {
@@ -99,28 +77,12 @@ describe('materializeSupport', () => {
     }
   });
 
-  test('respects the projectTemplatesDir override', async () => {
-    const fakeProj = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-proj-src-'));
-    try {
-      for (const name of PROJECT_TEMPLATE_FILES) {
-        await fs.writeFile(path.join(fakeProj, name), `fake-${name}`, 'utf8');
-      }
-      await materializeSupport(tmp, undefined, fakeProj);
-      for (const name of PROJECT_TEMPLATE_FILES) {
-        const content = await fs.readFile(path.join(tmp, name), 'utf8');
-        expect(content).toBe(`fake-${name}`);
-      }
-    } finally {
-      await fs.rm(fakeProj, { recursive: true, force: true });
-    }
-  });
-
   test('excludeSupportFiles skips listed files in support/ but keeps the rest', async () => {
-    // Exercises the gate behind configs.json#codegen.playwright.recordResponses=false:
+    // Exercises the gate behind codegen/playwright/config.json#recordResponses=false:
     // the call site drops recorder.ts when no recordResponse() call will be
     // emitted into the suite. Other support files must remain — they're part
     // of the suite's runtime contract regardless of the recorder option.
-    await materializeSupport(tmp, undefined, undefined, true, ['recorder.ts']);
+    await materializeSupport(tmp, undefined, ['recorder.ts']);
     const entries = (await fs.readdir(path.join(tmp, SUPPORT_DIR_NAME))).sort();
     const expected = SUPPORT_TEMPLATE_FILES.filter((f) => f !== 'recorder.ts').sort();
     expect(entries).toEqual(expected);
@@ -135,7 +97,7 @@ describe('materializeSupport', () => {
     // the stale recorder.ts is gone.
     await materializeSupport(tmp);
     expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'recorder.ts'))).toBe(true);
-    await materializeSupport(tmp, undefined, undefined, true, ['recorder.ts']);
+    await materializeSupport(tmp, undefined, ['recorder.ts']);
     expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'recorder.ts'))).toBe(false);
     // And the non-excluded files are still present.
     expect(existsSync(path.join(tmp, SUPPORT_DIR_NAME, 'seeding.ts'))).toBe(true);
@@ -146,9 +108,9 @@ describe('materializeSupport', () => {
     // would otherwise silently no-op and the caller would keep shipping
     // the helper they thought they were excluding. The validator surfaces
     // the bad name in the error message so the fix site is obvious.
-    await expect(
-      materializeSupport(tmp, undefined, undefined, true, ['no-such-file.ts']),
-    ).rejects.toThrow(/excludeSupportFiles contains unknown name "no-such-file\.ts"/);
+    await expect(materializeSupport(tmp, undefined, ['no-such-file.ts'])).rejects.toThrow(
+      /excludeSupportFiles contains unknown name "no-such-file\.ts"/,
+    );
   });
 
   test('fails with a clear filesystem error when a required support template is missing', async () => {
@@ -160,6 +122,44 @@ describe('materializeSupport', () => {
       await expect(materializeSupport(tmp, fakeSrc)).rejects.toThrow(/ENOENT|no such file/i);
     } finally {
       await fs.rm(fakeSrc, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('loadProjectScaffoldingFiles (#233 Step 7)', () => {
+  test('returns all PROJECT_TEMPLATE_FILES as in-memory EmittedFiles in declaration order', async () => {
+    const files = await loadProjectScaffoldingFiles();
+    expect(files.map((f) => f.relativePath)).toEqual([...PROJECT_TEMPLATE_FILES]);
+    for (const f of files) {
+      expect(f.content.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('package.json content declares a "test" script and @playwright/test devDep', async () => {
+    const files = await loadProjectScaffoldingFiles();
+    const pkgFile = files.find((f) => f.relativePath === 'package.json');
+    expect(pkgFile).toBeDefined();
+    // biome-ignore lint/plugin: test fixture parsing of known-good JSON
+    const pkg = JSON.parse(pkgFile?.content ?? '{}') as {
+      scripts?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(pkg.scripts?.test).toMatch(/playwright/);
+    expect(pkg.devDependencies?.['@playwright/test']).toBeTruthy();
+  });
+
+  test('respects the projectTemplatesDir override', async () => {
+    const fakeProj = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-proj-src-'));
+    try {
+      for (const name of PROJECT_TEMPLATE_FILES) {
+        await fs.writeFile(path.join(fakeProj, name), `fake-${name}`, 'utf8');
+      }
+      const files = await loadProjectScaffoldingFiles(fakeProj);
+      for (const f of files) {
+        expect(f.content).toBe(`fake-${f.relativePath}`);
+      }
+    } finally {
+      await fs.rm(fakeProj, { recursive: true, force: true });
     }
   });
 });

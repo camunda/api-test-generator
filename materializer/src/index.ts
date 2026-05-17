@@ -25,7 +25,7 @@ import {
 import { getRoleForOperation } from 'path-analyser/ontology/operationRoles';
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
-import { writeEmitted } from './orchestrator.js';
+import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import { DeploymentRoleHookProvider } from './playwright/hooks/deployment.js';
 import {
@@ -303,7 +303,7 @@ async function run() {
     const recordResponses =
       typeof emitterConfig.recordResponses === 'boolean' ? emitterConfig.recordResponses : false;
     const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
-    await materializeSupport(outDir, undefined, undefined, true, excludeSupportFiles);
+    await materializeSupport(outDir, undefined, excludeSupportFiles);
     // Lift 12 / #231: load per-role bundles and vendor their helper files
     // alongside the built-in support files. Roles bound in the ABox but
     // missing a bundle raise at render time (see roleRenderer.findRoleForStep
@@ -382,6 +382,16 @@ async function run() {
       roleExtras,
     };
   }
+
+  // #233 Step 7: one-shot project-root scaffolding via the SDK contract.
+  // Generic across emitters — Playwright today returns the five
+  // PROJECT_TEMPLATE_FILES; future SDK emitters (JS/C#/Python) return their
+  // own project framing. No-op when emitter.scaffold is omitted.
+  // Called once per CLI invocation, before any emit() call, per
+  // EmitterStrategy.scaffold's contract. suiteName/mode are unused by
+  // scaffold itself but are part of the shared EmitContext type; pass safe
+  // placeholders.
+  await writeScaffolded(emitter, buildCtx('', 'feature'));
 
   if (positional === '--all') {
     let count = 0;
