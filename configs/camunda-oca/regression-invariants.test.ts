@@ -5242,3 +5242,210 @@ describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
     });
   },
 );
+
+describeForThisConfig(
+  'bundled-spec invariants: role-template rendering contract (Lift 12 / #231 Phase 5)',
+  () => {
+    // Three invariants enumerated in #231's "Phases" section:
+    //   * Every roleBinding produced by the planner resolves to a
+    //     renderable role directory in the active config.
+    //   * Every active role's support.<ext> is referenced by at least
+    //     one emitted spec.
+    //   * Spec-derived extracts list for the deployment-gateway op
+    //     covers every binding var consumed by a downstream step.
+    //
+    // Together these lock in the SDK-level role-templating contract:
+    // an authoring error (ABox role pointing at a non-existent role
+    // directory; a role directory whose helper nothing imports; a
+    // missing extract starving a downstream binding) becomes a test
+    // failure with a named property rather than a silent runtime gap.
+
+    it('every ABox-bound role has a renderable role directory under configs/<config>/codegen/playwright/roles/', async () => {
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const rules = graph.domain?.operationArtifactRules ?? {};
+      const aboxRoles = new Set<string>();
+      for (const spec of Object.values(rules)) {
+        if (spec.role) aboxRoles.add(spec.role);
+      }
+      const rolesDir = join(REPO_ROOT, 'configs', CONFIG_NAME, 'codegen', 'playwright', 'roles');
+      const missing: string[] = [];
+      for (const role of aboxRoles) {
+        const callSite = join(rolesDir, role, 'call-site.tmpl');
+        if (!existsSync(callSite)) {
+          missing.push(`${role} (no ${relative(REPO_ROOT, callSite)})`);
+        }
+      }
+      expect(
+        missing,
+        `ABox role(s) without a renderable role directory under configs/${CONFIG_NAME}/codegen/playwright/roles/.` +
+          ' Either add the role directory (with call-site.tmpl) or remove the role from the ABox.',
+      ).toEqual([]);
+    });
+
+    it('every active role bundle is imported by at least one emitted spec', () => {
+      // A role directory whose support helper no emitted spec imports is
+      // either dead code (delete the directory) or unwired (the planner
+      // never produced a matching role binding — likely a regression in
+      // role dispatch). Either way, surface it here so the role tree
+      // stays in sync with the emitted suite.
+      //
+      // Convention (#231 design / materializeRoleSupportFiles): role
+      // helpers land at `support/<roleName>.<ext>` in the emitted suite,
+      // so a role is "used" iff at least one spec contains an import
+      // line referencing `./support/<roleName>` (with or without an
+      // extension).
+      const rolesDir = join(REPO_ROOT, 'configs', CONFIG_NAME, 'codegen', 'playwright', 'roles');
+      if (!existsSync(rolesDir)) return;
+      const roleNames = readdirSync(rolesDir).filter((entry) => {
+        const dir = join(rolesDir, entry);
+        try {
+          return readdirSync(dir).some((f) => f.startsWith('support.'));
+        } catch {
+          return false;
+        }
+      });
+      if (roleNames.length === 0) return;
+
+      // Collect import references across every emitted spec.
+      const specFiles = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.spec.ts'));
+      const referencedRoles = new Set<string>();
+      const importPattern = /from\s+['"]\.\/support\/([A-Za-z_$][\w$]*)(?:\.[a-zA-Z]+)?['"]/g;
+      for (const spec of specFiles) {
+        const content = readFileSync(join(GENERATED_TESTS_DIR, spec), 'utf8');
+        let m: RegExpExecArray | null;
+        while ((m = importPattern.exec(content)) !== null) {
+          referencedRoles.add(m[1]);
+        }
+      }
+      const unused = roleNames.filter((r) => !referencedRoles.has(r));
+      expect(
+        unused,
+        `Role(s) with a support.<ext> file whose vendored copy is not imported by any emitted spec — ` +
+          `either the role directory is dead and should be removed, or role dispatch is failing to bind any operation to it.`,
+      ).toEqual([]);
+    });
+
+    it('spec-derived deploymentGateway extracts cover every downstream binding consumer', async () => {
+      // The deploy() helper receives an extracts list at materialise
+      // time and writes `ctx[<varName>] = ...` for each entry. If a
+      // downstream step references a binding the extracts list does
+      // not produce, the suite runs against an undefined ctx slot —
+      // a silent test-time regression.
+      //
+      // Two-part check, both phrased over the actual emitted specs
+      // (the materialised contract — not the scenario JSON, which
+      // doesn't carry the extracts literal):
+      //   (a) Drift detector: every emitted `deploy(...)` call's
+      //       extracts list literal has the same varName set as
+      //       computeDeploymentExtracts(createDeployment). Catches a
+      //       regression where the emitter inlines a stale subset or
+      //       where the spec gains/loses an annotation without the
+      //       extract list following.
+      //   (b) Coverage: for every emitted spec whose chain is exactly
+      //       `[createDeployment, <consumer>]`, every `ctx.<...>Var`
+      //       reference in the consumer step body must be produced
+      //       either by computeDeploymentExtracts or by a
+      //       `seedBinding('<...>Var')` / `ctx.<...>Var = …`
+      //       assignment earlier in the same spec.
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const { computeDeploymentExtracts } = await import(
+        '../../materializer/src/deploymentExtracts.js'
+      );
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const opNode = Object.values(graph.operations).find(
+        (o) => o.operationId === 'createDeployment',
+      );
+      expect(opNode, 'createDeployment must be present in the loaded graph').toBeDefined();
+      if (!opNode) return;
+      const extracts = computeDeploymentExtracts(opNode);
+      const producedVars = new Set(extracts.map((e) => e.varName));
+
+      const specFiles = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.spec.ts'));
+      const driftFailures: string[] = [];
+      const coverageFailures: string[] = [];
+
+      // Match a `deploy(` call and capture everything up to its matching
+      // closing paren followed by `;`. The emitted form is stable: the
+      // extracts list is the only arg containing `varName:` literals.
+      const varNameInLiteralPattern = /varName:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
+      const ctxReadPattern = /\bctx\.([A-Za-z_$][\w$]*Var)\b/g;
+      const ctxSeedPattern = /\bctx\.([A-Za-z_$][\w$]*Var)\s*=/g;
+      const seedBindingPattern = /\bseedBinding\(\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
+
+      for (const spec of specFiles) {
+        const content = readFileSync(join(GENERATED_TESTS_DIR, spec), 'utf8');
+        if (!content.includes('deploy(')) continue;
+
+        // (a) Drift detector.
+        // Each `deploy(...)` call contains exactly the extracts literal —
+        // capture the substring from `deploy(` to the matching `);` at
+        // depth 0 to scope varName extraction per call.
+        let idx = 0;
+        while ((idx = content.indexOf('deploy(', idx)) !== -1) {
+          let depth = 0;
+          let end = -1;
+          for (let i = idx + 'deploy('.length - 1; i < content.length; i++) {
+            const ch = content[i];
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+              depth--;
+              if (depth === 0) {
+                end = i;
+                break;
+              }
+            }
+          }
+          if (end < 0) break;
+          const call = content.slice(idx, end + 1);
+          const callVars = new Set<string>();
+          let m: RegExpExecArray | null;
+          while ((m = varNameInLiteralPattern.exec(call)) !== null) {
+            callVars.add(m[1]);
+          }
+          if (callVars.size > 0) {
+            // Compare set-equality against producedVars.
+            const missing = [...producedVars].filter((v) => !callVars.has(v)).sort();
+            const extra = [...callVars].filter((v) => !producedVars.has(v)).sort();
+            if (missing.length || extra.length) {
+              driftFailures.push(
+                `${spec}: deploy() extracts drift — missing=[${missing.join(',')}] extra=[${extra.join(',')}]`,
+              );
+            }
+          }
+          idx = end + 1;
+        }
+
+        // (b) Coverage: collect everything the spec can produce
+        // (deploy() extracts ∪ seedBinding ∪ ctx.X = …) and verify
+        // every ctx.X read is producible.
+        const produced = new Set<string>(producedVars);
+        let s: RegExpExecArray | null;
+        while ((s = ctxSeedPattern.exec(content)) !== null) produced.add(s[1]);
+        while ((s = seedBindingPattern.exec(content)) !== null) produced.add(s[1]);
+        // Also count `extractInto(ctx, 'xVar', …)` as a producer.
+        const extractIntoPattern = /\bextractInto\(\s*ctx\s*,\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
+        while ((s = extractIntoPattern.exec(content)) !== null) produced.add(s[1]);
+
+        const reads = new Set<string>();
+        while ((s = ctxReadPattern.exec(content)) !== null) reads.add(s[1]);
+        const unproduced = [...reads].filter((v) => !produced.has(v)).sort();
+        if (unproduced.length > 0) {
+          coverageFailures.push(`${spec}: unproduced ctx reads [${unproduced.join(',')}]`);
+        }
+      }
+
+      expect(
+        driftFailures,
+        `Emitted deploy() extracts literal drifted from computeDeploymentExtracts(createDeployment) output. ` +
+          `Either the spec gained/lost an x-semantic-type / x-semantic-provider annotation on createDeployment and the ` +
+          `extract filter needs adjusting, or the emitter is hard-coding a stale subset.`,
+      ).toEqual([]);
+      expect(
+        coverageFailures,
+        `Emitted spec(s) reference ctx binding var(s) with no producer (no deploy() extract, no seedBinding, no ctx.X = …, no extractInto). ` +
+          `Either a downstream extractor is missing, or the consumer step is reading a binding that was never set.`,
+      ).toEqual([]);
+    });
+  },
+);
