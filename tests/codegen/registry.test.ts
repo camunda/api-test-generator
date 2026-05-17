@@ -1,16 +1,17 @@
-import { beforeEach, describe, expect, test } from 'vitest';
-import type { Emitter } from '../../materializer/src/emitter.ts';
+import type { EmitterStrategy } from '@camunda8/emitter-sdk';
 import {
-  _resetEmittersForTests,
+  _resetRegistriesForTests,
   getEmitter,
   listEmitters,
   registerEmitter,
-} from '../../materializer/src/registry.ts';
+} from '@camunda8/emitter-sdk';
+import { beforeEach, describe, expect, test } from 'vitest';
 
-function stubEmitter(id: string, name = id): Emitter {
+function stubEmitter(id: string, name = id): EmitterStrategy {
   return {
     id,
     name,
+    supportedConfigs: ['*'],
     async emit() {
       return [];
     },
@@ -19,7 +20,7 @@ function stubEmitter(id: string, name = id): Emitter {
 
 describe('emitter registry', () => {
   beforeEach(() => {
-    _resetEmittersForTests();
+    _resetRegistriesForTests();
   });
 
   test('register + retrieve by id', () => {
@@ -55,7 +56,7 @@ describe('emitter registry', () => {
 
   test('reset clears the registry (test-only helper)', () => {
     registerEmitter(stubEmitter('alpha'));
-    _resetEmittersForTests();
+    _resetRegistriesForTests();
     expect(listEmitters()).toEqual([]);
   });
 });

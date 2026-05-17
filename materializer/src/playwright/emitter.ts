@@ -1,5 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type {
+  EmitContext,
+  EmittedFile,
+  EmitterStrategy,
+  LoadedRoleBundle,
+} from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
@@ -8,15 +14,9 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
-import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
 import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
 import { materializeFixtures, materializeSupport } from './materialize-support.js';
-import {
-  type LoadedRoleBundle,
-  renderRoleCallSite,
-  renderRoleImports,
-  stepMatchesRole,
-} from './roleRenderer.js';
+import { renderRoleCallSite, renderRoleImports, stepMatchesRole } from './roleRenderer.js';
 
 interface EmitOptions {
   outDir: string;
@@ -120,18 +120,44 @@ export async function emitPlaywrightSuite(
 }
 
 /**
- * {@link Emitter} implementation for Playwright/REST tests. Pure: returns
+ * {@link EmitterStrategy} implementation for Playwright/REST tests. Pure: returns
  * an in-memory {@link EmittedFile} list and never touches the filesystem.
  */
-export const PlaywrightEmitter: Emitter = {
+export const PlaywrightEmitter: EmitterStrategy = {
   id: 'playwright',
   name: 'Playwright (REST)',
+  // Playwright/REST output is config-agnostic; every named config can target it.
+  supportedConfigs: ['*'],
+  // Per-role compute hooks this emitter consumes. The orchestrator
+  // finds a registered provider for each hook name and threads its
+  // output into `ctx.roleExtras[<role>]`. See
+  // `materializer/src/playwright/hooks/deployment.ts` for the
+  // deployment-gateway provider (#233 Step 6).
+  roleHooks: ['deployment'],
+  // Per-emitter knobs. Validated against this schema by the orchestrator
+  // before invocation; absent / partial files default to recordResponses=false.
+  configSchema: {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      recordResponses: {
+        type: 'boolean',
+        description:
+          'When true, every emitted scenario step appends a recordResponse({...}) call and the suite imports recordResponse/sanitizeBody from ./support/recorder. Defaults to false; recorder.ts is also vendored conditionally.',
+      },
+    },
+  },
   async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
+    const recordResponses =
+      typeof ctx.emitterConfig?.recordResponses === 'boolean'
+        ? ctx.emitterConfig.recordResponses
+        : false;
     const content = renderPlaywrightSuite(collection, {
       suiteName: ctx.suiteName,
       mode: ctx.mode,
       globalContextSeeds: ctx.globalContextSeeds,
-      recordResponses: ctx.recordResponses,
+      recordResponses,
       getRoleForOperation: ctx.getRoleForOperation,
       roleBundles: ctx.roleBundles,
       roleExtras: ctx.roleExtras,

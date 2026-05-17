@@ -4,13 +4,14 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "prebuild": "npm run build --workspace path-analyser",
+    "prebuild": "npm run build:emitter-sdk --prefix ..",
     "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
     "codegen:playwright": "npm run build && node dist/src/index.js",
     "codegen:playwright:all": "npm run build && node dist/src/index.js --all",
     "clean": "rimraf dist || rm -rf dist"
   },
   "dependencies": {
+    "@camunda8/emitter-sdk": "*",
     "mustache": "^4.2.0",
     "path-analyser": "*"
   },

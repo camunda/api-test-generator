@@ -1,8 +1,8 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import type { EmitContext, EmittedFile, Emitter } from '../../materializer/src/emitter.ts';
 import { writeEmitted } from '../../materializer/src/orchestrator.ts';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
 
@@ -13,10 +13,11 @@ const FIXTURE: EndpointScenarioCollection = {
   scenarios: [],
 };
 
-function buildEmitter(files: EmittedFile[]): Emitter {
+function buildEmitter(files: EmittedFile[]): EmitterStrategy {
   return {
     id: 'stub',
     name: 'stub',
+    supportedConfigs: ['*'],
     async emit() {
       return files;
     },
@@ -37,6 +38,9 @@ const ctx = (): EmitContext => ({
   outDir: tmp,
   suiteName: 'createWidget',
   mode: 'feature',
+  configName: 'test',
+  emitterConfig: {},
+  resolveConfigPath: (rel: string) => path.resolve(tmp, rel),
 });
 
 describe('orchestrator.writeEmitted', () => {

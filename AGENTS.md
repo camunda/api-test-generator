@@ -23,10 +23,13 @@ REST API by analysing the upstream OpenAPI spec. Two suites are emitted:
 - **Negative** request-validation tests (HTTP 400 expectations across ~24
   malformed-request kinds) via `request-validation`.
 
-Inputs flow through four workspaces in order:
-`semantic-graph-extractor` → `path-analyser` → `materializer`
-(+ `request-validation` as a parallel pipeline). The bundled OpenAPI spec
-is fetched by `camunda-schema-bundler` (a dev dependency).
+Inputs flow through the processing pipeline `semantic-graph-extractor`
+→ `path-analyser` → `materializer` (with `request-validation` as a
+parallel pipeline). The new `@camunda8/emitter-sdk` workspace is a
+contract dependency consumed by `materializer/` (and by external
+emitter packages) — it sits beside the pipeline, not inside it. The
+bundled OpenAPI spec is fetched by `camunda-schema-bundler` (a dev
+dependency).
 
 ## Project layout
 
@@ -38,6 +41,7 @@ npm workspaces monorepo. Node `>=22`.
 | `path-analyser/` | BFS scenario planner — emits scenario JSON |
 | `path-analyser/src/scenarioGenerator.ts` | Core BFS planner — `generateScenariosForEndpoint()` |
 | `materializer/` | Test-suite materialization — reads scenarios JSON + ABox views and emits Playwright suites (positive). Owns the Playwright emitter, role-templating renderer, and vendored support helpers. Depends on path-analyser only via published `exports` (loaders + types). |
+| `emitter-sdk/` | `@camunda8/emitter-sdk` — public contract package for SDK emitter contributors (JS/C#/Python OCA emitters). Defines `EmitterStrategy`, `EmitContext`, `EmittedFile`, `LoadedRoleBundle`, `RoleMatchSpec`, `JSONSchema`, `RoleHookProvider`, and the singleton registries. Consumed by `materializer/` and by external emitter packages. |
 | `request-validation/` | Negative-test generator (HTTP 400 suite) |
 | `optional-responses/` | Optional response field analyser |
 | `tests/fixtures/extractor/` | Layer-1 hand-curated OpenAPI snippets |
@@ -157,12 +161,14 @@ Run `npm run lint` (or `npx biome check <files>`) before commit.
 
 ## TypeScript
 
-- Four workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
-  `path-analyser/tsconfig.json`, `materializer/tsconfig.json`,
-  `request-validation/tsconfig.json`. CI typechecks each in turn, plus
-  a separate `tests/tsconfig.json` for the test sources (which import
-  workspace sources directly via `.ts` extensions; see
-  `allowImportingTsExtensions` in that file). CI runs
+- Five workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
+  `path-analyser/tsconfig.json`, `emitter-sdk/tsconfig.json`,
+  `materializer/tsconfig.json`, `request-validation/tsconfig.json`. CI
+  typechecks each in turn (and builds path-analyser + emitter-sdk before
+  the materializer typecheck so `.d.ts` files exist for the
+  subpath-exports resolution). A separate `tests/tsconfig.json` covers
+  the test sources (which import workspace sources directly via `.ts`
+  extensions; see `allowImportingTsExtensions` in that file); CI runs
   `npx tsc --noEmit -p tests/tsconfig.json` as its own gate.
 - **No `any`.** Narrow `unknown` with type guards.
 - **No unsafe type assertions.** `as T` is banned by the
@@ -367,7 +373,9 @@ Local equivalent of the CI gate. Run before every push:
 npm run lint
 npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
 npx tsc --noEmit -p path-analyser/tsconfig.json
-npm run build:analyser   # emits .d.ts that materializer's typecheck depends on
+npm run build:analyser   # emits .d.ts that emitter-sdk + materializer typechecks depend on
+npx tsc --noEmit -p emitter-sdk/tsconfig.json
+npm run build:emitter-sdk   # emits .d.ts that materializer's typecheck depends on
 npx tsc --noEmit -p materializer/tsconfig.json
 npx tsc --noEmit -p request-validation/tsconfig.json
 TEST_SEED=snapshot-baseline npm run testsuite:generate
@@ -375,13 +383,14 @@ npm run generate:request-validation
 npm test
 ```
 
-> **The `build:analyser` step is mandatory before materializer typecheck.**
-> Materializer imports `from 'path-analyser/configResolver'` etc., which
-> NodeNext resolves via path-analyser's `exports` map to
-> `./dist/src/*.d.ts`. Those declarations only exist after `tsc` has
-> emitted them. CI builds path-analyser in the typecheck job for the
-> same reason; if you skip the build locally you'll miss CI failures
-> that a fresh clone would surface.
+> **The `build:analyser` and `build:emitter-sdk` steps are mandatory
+> before the materializer typecheck.** Materializer imports
+> `from 'path-analyser/configResolver'` and
+> `from '@camunda8/emitter-sdk'`, both resolved via subpath `exports`
+> maps to `dist/**/*.d.ts`. Those declarations only exist after `tsc`
+> has emitted them. CI builds both in the typecheck job for the same
+> reason; if you skip the builds locally you'll miss CI failures that
+> a fresh clone would surface.
 
 > **`npm test` alone is not sufficient.** The Layer-3 invariants in
 > `configs/<config>/regression-invariants.test.ts` read regenerated

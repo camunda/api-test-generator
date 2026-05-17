@@ -56,8 +56,14 @@ jobs:
       - name: Typecheck (path-analyser)
         run: npx tsc --noEmit -p path-analyser/tsconfig.json
 
-      - name: Build path-analyser (emit .d.ts for materializer typecheck)
+      - name: Build path-analyser (emit .d.ts for emitter-sdk + materializer typecheck)
         run: npm run build:analyser
+
+      - name: Typecheck (emitter-sdk)
+        run: npx tsc --noEmit -p emitter-sdk/tsconfig.json
+
+      - name: Build emitter-sdk (emit .d.ts for materializer typecheck)
+        run: npm run build -w @camunda8/emitter-sdk
 
       - name: Typecheck (materializer)
         run: npx tsc --noEmit -p materializer/tsconfig.json
