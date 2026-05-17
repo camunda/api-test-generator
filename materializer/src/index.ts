@@ -147,8 +147,9 @@ function matchesJsonType(value: unknown, jsonType: string): boolean {
     case 'string':
       return typeof value === 'string';
     case 'number':
-    case 'integer':
       return typeof value === 'number';
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
     case 'array':
       return Array.isArray(value);
     case 'object':

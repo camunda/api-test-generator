@@ -55,7 +55,12 @@ export function listRoleHookProviders(): RoleHookProvider[] {
   return [...roleHookProviders.values()].sort((a, b) => a.hook.localeCompare(b.hook));
 }
 
-/** Test-only: clear both registries. Not exported from the package barrel. */
+/**
+ * Test-only: clear both registries. Exported from the package barrel
+ * for unit-test use, but not part of the stable public emitter contract —
+ * production emitters must not call this. The leading underscore signals
+ * the unsupported status.
+ */
 export function _resetRegistriesForTests(): void {
   emitters.clear();
   roleHookProviders.clear();

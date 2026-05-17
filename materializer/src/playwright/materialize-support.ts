@@ -227,8 +227,26 @@ export async function materializeRoleSupportFiles(
           `file '${roleName}.*'. Rename the role.`,
       );
     }
-    const sourcePath = path.join(bundle.dir, bundle.supportBasename);
-    const ext = path.extname(bundle.supportBasename);
+    const sourceBasename = bundle.supportBasename;
+    // Defensive: the loader produces a pure basename, but this function is
+    // exported from the package and could be called with hand-built bundles.
+    // Reject anything containing a path separator or `..` to prevent
+    // accidental traversal out of bundle.dir.
+    if (
+      sourceBasename.includes('/') ||
+      sourceBasename.includes('\\') ||
+      sourceBasename.includes('\0') ||
+      sourceBasename.split(/[\\/]/).includes('..') ||
+      path.basename(sourceBasename) !== sourceBasename
+    ) {
+      throw new Error(
+        `materializeRoleSupportFiles: role '${roleName}' supportBasename ${JSON.stringify(
+          sourceBasename,
+        )} is not a pure basename.`,
+      );
+    }
+    const sourcePath = path.join(bundle.dir, sourceBasename);
+    const ext = path.extname(sourceBasename);
     const destName = `${roleName}${ext}`;
     if (copied.includes(destName)) {
       throw new Error(

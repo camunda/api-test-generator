@@ -23,11 +23,13 @@ REST API by analysing the upstream OpenAPI spec. Two suites are emitted:
 - **Negative** request-validation tests (HTTP 400 expectations across ~24
   malformed-request kinds) via `request-validation`.
 
-Inputs flow through five workspaces in order:
-`semantic-graph-extractor` → `path-analyser` → `materializer`
-(consuming `@camunda8/emitter-sdk` for the EmitterStrategy contract)
-(+ `request-validation` as a parallel pipeline). The bundled OpenAPI spec
-is fetched by `camunda-schema-bundler` (a dev dependency).
+Inputs flow through the processing pipeline `semantic-graph-extractor`
+→ `path-analyser` → `materializer` (with `request-validation` as a
+parallel pipeline). The new `@camunda8/emitter-sdk` workspace is a
+contract dependency consumed by `materializer/` (and by external
+emitter packages) — it sits beside the pipeline, not inside it. The
+bundled OpenAPI spec is fetched by `camunda-schema-bundler` (a dev
+dependency).
 
 ## Project layout
 
