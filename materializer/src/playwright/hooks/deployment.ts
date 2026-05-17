@@ -5,6 +5,14 @@
 // for that hook, and the generic hook loop in the orchestrator pulls
 // `extracts` into `ctx.roleExtras[DEPLOYMENT_GATEWAY_ROLE]`.
 //
+// The `extracts` payload is consumed by `materializeRoleSupportFiles`
+// (`materializer/src/playwright/materialize-support.ts`) when it renders
+// the role's `support.ts.tmpl` against this provider's extras map — the
+// spec-derived `EXTRACTS` list is baked into the vendored
+// `<outDir>/support/deploymentGateway.ts` once per codegen run instead
+// of being threaded through every `deploy(...)` call-site literal
+// (#243).
+//
 // Lift 12 Phase 5 grep-invariant unblocker: with this extraction, the
 // only references to `computeDeploymentExtracts` and to the
 // `DEPLOYMENT_GATEWAY_ROLE` literal in the orchestrator surface live

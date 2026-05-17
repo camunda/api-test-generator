@@ -39,6 +39,7 @@ import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EmittedFile } from '@camunda8/emitter-sdk';
+import Mustache from 'mustache';
 import { getActiveConfigDir, getSpecBundleDir } from 'path-analyser/configResolver';
 
 export const SUPPORT_TEMPLATE_FILES = [
@@ -202,6 +203,14 @@ export async function loadProjectScaffoldingFiles(
  * file so role helpers cannot collide on basename and so the emitter's
  * generated `import { ... } from './support/<role>'` line is stable.
  *
+ * When a role's source helper is named `support.<ext>.tmpl`, it is treated
+ * as a Mustache template (logic-free, triple-brace interpolation) and
+ * rendered against the role's entry in `roleExtras` before write. The
+ * destination filename drops the `.tmpl` suffix. Templated helpers let the
+ * generator bake spec-derived constants (e.g. the deployment-gateway
+ * `EXTRACTS` list) into the vendored file at codegen time, instead of
+ * threading them through every call-site literal — see #243.
+ *
  * Raises when a role's helper basename (`<role>`) would collide with a
  * built-in support file basename (e.g. a role named `env` or `seeding`),
  * since the emitted suite imports built-ins as `./support/env`,
@@ -215,13 +224,30 @@ export async function loadProjectScaffoldingFiles(
  *                     this module's loader so callers (codegen orchestrator
  *                     + tests) construct the bundle map once and share it
  *                     between the materializer and the renderer.
+ * @param roleExtras   Per-role data computed by role-hook providers (e.g.
+ *                     `{ extracts: '[…]' }` from `DeploymentRoleHookProvider`).
+ *                     Used as the Mustache scope when rendering templated
+ *                     support files. Verbatim helpers ignore it. May be
+ *                     omitted when no hook providers are registered; a role
+ *                     whose support file is templated but has no extras
+ *                     entry renders against an empty scope (Mustache emits
+ *                     empty strings for unresolved variables).
  * @returns            The list of vendored file basenames (e.g.
  *                     `['deploymentGateway.ts']`) for callers that want to
  *                     assert what was copied.
  */
 export async function materializeRoleSupportFiles(
   outDir: string,
-  roleBundles: Map<string, { dir: string; supportBasename?: string }>,
+  roleBundles: Map<
+    string,
+    {
+      dir: string;
+      supportBasename?: string;
+      supportIsTemplated?: boolean;
+      supportFilePath?: string;
+    }
+  >,
+  roleExtras?: Map<string, Record<string, unknown>>,
 ): Promise<string[]> {
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
   await fs.mkdir(destDir, { recursive: true });
@@ -245,6 +271,16 @@ export async function materializeRoleSupportFiles(
       );
     }
     const sourceBasename = bundle.supportBasename;
+    // The on-disk source filename may carry an extra `.tmpl` suffix when
+    // the role ships a templated helper (see roleRenderer: supportBasename
+    // is the *emitted* basename, stripped of `.tmpl`; supportFilePath is
+    // the *source* path on disk). Prefer the loader-provided source path
+    // for the read; fall back to reconstructing it from the role dir and
+    // the emitted basename + suffix for callers that hand-build bundles
+    // without supportFilePath.
+    const sourceFilename = bundle.supportFilePath
+      ? path.basename(bundle.supportFilePath)
+      : `${sourceBasename}${bundle.supportIsTemplated ? '.tmpl' : ''}`;
     // Defensive: the loader produces a pure basename, but this function is
     // exported from the package and could be called with hand-built bundles.
     // Reject anything containing a path separator or `..` to prevent
@@ -254,15 +290,20 @@ export async function materializeRoleSupportFiles(
       sourceBasename.includes('\\') ||
       sourceBasename.includes('\0') ||
       sourceBasename.split(/[\\/]/).includes('..') ||
-      path.basename(sourceBasename) !== sourceBasename
+      path.basename(sourceBasename) !== sourceBasename ||
+      sourceFilename.includes('/') ||
+      sourceFilename.includes('\\') ||
+      sourceFilename.includes('\0') ||
+      sourceFilename.split(/[\\/]/).includes('..') ||
+      path.basename(sourceFilename) !== sourceFilename
     ) {
       throw new Error(
         `materializeRoleSupportFiles: role '${roleName}' supportBasename ${JSON.stringify(
           sourceBasename,
-        )} is not a pure basename.`,
+        )} (source filename ${JSON.stringify(sourceFilename)}) is not a pure basename.`,
       );
     }
-    const sourcePath = path.join(bundle.dir, sourceBasename);
+    const sourcePath = path.join(bundle.dir, sourceFilename);
     const ext = path.extname(sourceBasename);
     const destName = `${roleName}${ext}`;
     if (copied.includes(destName)) {
@@ -270,7 +311,14 @@ export async function materializeRoleSupportFiles(
         `materializeRoleSupportFiles: role '${roleName}' produced duplicate destination ${destName}.`,
       );
     }
-    await fs.copyFile(sourcePath, path.join(destDir, destName));
+    if (bundle.supportIsTemplated) {
+      const tmplSrc = await fs.readFile(sourcePath, 'utf8');
+      const scope = roleExtras?.get(roleName) ?? {};
+      const rendered = Mustache.render(tmplSrc, scope);
+      await fs.writeFile(path.join(destDir, destName), rendered, 'utf8');
+    } else {
+      await fs.copyFile(sourcePath, path.join(destDir, destName));
+    }
     copied.push(destName);
   }
 

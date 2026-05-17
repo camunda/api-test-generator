@@ -5326,28 +5326,36 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
-    it('spec-derived deploymentGateway extracts cover every downstream binding consumer', async () => {
-      // The deploy() helper receives an extracts list at materialise
-      // time and writes `ctx[<varName>] = ...` for each entry. If a
-      // downstream step references a binding the extracts list does
-      // not produce, the suite runs against an undefined ctx slot —
-      // a silent test-time regression.
+    it('spec-derived deploymentGateway EXTRACTS cover every downstream binding consumer', async () => {
+      // #243: the deploy() helper bakes the spec-derived response-extracts
+      // list into a module-level `const EXTRACTS = [...]` at codegen time
+      // (see materializer/src/playwright/materialize-support.ts —
+      // materializeRoleSupportFiles renders the role's
+      // `support.ts.tmpl` against the role's roleExtras entry). The
+      // helper itself owns extraction; call sites are extract-agnostic.
       //
-      // Two-part check, both phrased over the actual emitted specs
-      // (the materialised contract — not the scenario JSON, which
-      // doesn't carry the extracts literal):
-      //   (a) Drift detector: every emitted `deploy(...)` call's
-      //       extracts list literal has the same varName set as
+      // If a downstream step references a binding that EXTRACTS does not
+      // produce, the suite runs against an undefined ctx slot — a silent
+      // test-time regression.
+      //
+      // Three-part check:
+      //   (a) Drift detector: parse the materialised
+      //       <outDir>/support/deploymentGateway.ts and assert its
+      //       EXTRACTS literal's varName set equals
       //       computeDeploymentExtracts(createDeployment). Catches a
-      //       regression where the emitter inlines a stale subset or
-      //       where the spec gains/loses an annotation without the
-      //       extract list following.
-      //   (b) Coverage: for every emitted spec whose chain is exactly
-      //       `[createDeployment, <consumer>]`, every `ctx.<...>Var`
-      //       reference in the consumer step body must be produced
-      //       either by computeDeploymentExtracts or by a
-      //       `seedBinding('<...>Var')` / `ctx.<...>Var = …`
-      //       assignment earlier in the same spec.
+      //       regression where the materializer fails to render the
+      //       template, where the hook provider returns a stale subset,
+      //       or where the spec gains/loses an annotation without the
+      //       extract filter following.
+      //   (b) No-call-site-leakage detector: no emitted spec contains a
+      //       `varName:` literal inside a `deploy(` argument list. Catches
+      //       a regression where the call-site template starts inlining
+      //       extracts again, defeating the encapsulation #243 introduced.
+      //   (c) Coverage: every `ctx.<...>Var` read in a spec that uses
+      //       deploy() must be produced either by EXTRACTS, by a
+      //       `seedBinding('<...>Var')`, by a `ctx.<...>Var = …`
+      //       assignment, or by an explicit `extractInto(ctx, '...Var', …)`
+      //       earlier in the same spec.
       const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
       const { computeDeploymentExtracts } = await import(
         '../../materializer/src/deploymentExtracts.js'
@@ -5361,26 +5369,53 @@ describeForThisConfig(
       const extracts = computeDeploymentExtracts(opNode);
       const producedVars = new Set(extracts.map((e) => e.varName));
 
+      // (a) Drift detector against the single materialised helper.
+      const helperPath = join(GENERATED_TESTS_DIR, 'support', 'deploymentGateway.ts');
+      const helperSrc = readFileSync(helperPath, 'utf8');
+      // Locate the `const EXTRACTS: DeployExtract[] = [...]` literal and
+      // scope varName extraction to its contents. The literal is the only
+      // place in the helper where `varName:` appears.
+      const extractsLiteralMatch = helperSrc.match(
+        /const\s+EXTRACTS\s*:\s*DeployExtract\[\]\s*=\s*(\[[\s\S]*?\]);/,
+      );
+      const helperVars = new Set<string>();
+      if (extractsLiteralMatch) {
+        const varNameInLiteralPattern = /varName:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
+        let m: RegExpExecArray | null;
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
+        while ((m = varNameInLiteralPattern.exec(extractsLiteralMatch[1])) !== null) {
+          helperVars.add(m[1]);
+        }
+      }
+      const missingInHelper = [...producedVars].filter((v) => !helperVars.has(v)).sort();
+      const extraInHelper = [...helperVars].filter((v) => !producedVars.has(v)).sort();
+      expect(
+        { missing: missingInHelper, extra: extraInHelper },
+        `Materialised <outDir>/support/deploymentGateway.ts EXTRACTS literal drifted from computeDeploymentExtracts(createDeployment). ` +
+          `Either the spec gained/lost an x-semantic-type / x-semantic-provider annotation on createDeployment and the extract filter needs adjusting, ` +
+          `the materializer failed to render support.ts.tmpl against roleExtras, or the DeploymentRoleHookProvider returned a stale subset. ` +
+          `Helper path: ${helperPath}`,
+      ).toEqual({ missing: [], extra: [] });
+
+      // (b) + (c) walk emitted spec files.
       const specFiles = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.spec.ts'));
-      const driftFailures: string[] = [];
+      const leakageFailures: string[] = [];
       const coverageFailures: string[] = [];
 
-      // Match a `deploy(` call and capture everything up to its matching
-      // closing paren followed by `;`. The emitted form is stable: the
-      // extracts list is the only arg containing `varName:` literals.
-      const varNameInLiteralPattern = /varName:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
       const ctxReadPattern = /\bctx\.([A-Za-z_$][\w$]*Var)\b/g;
       const ctxSeedPattern = /\bctx\.([A-Za-z_$][\w$]*Var)\s*=/g;
       const seedBindingPattern = /\bseedBinding\(\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
+      const extractIntoPattern = /\bextractInto\(\s*ctx\s*,\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
+      const varNameInLiteralPattern = /varName:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
 
       for (const spec of specFiles) {
         const content = readFileSync(join(GENERATED_TESTS_DIR, spec), 'utf8');
         if (!content.includes('deploy(')) continue;
 
-        // (a) Drift detector.
-        // Each `deploy(...)` call contains exactly the extracts literal —
-        // capture the substring from `deploy(` to the matching `);` at
-        // depth 0 to scope varName extraction per call.
+        // (b) No-call-site-leakage. Walk every `deploy(...);` argument
+        // list and assert it carries no `varName:` literal. The helper
+        // owns extraction (#243); a varName literal here means the
+        // call-site template has started inlining extracts again.
         let idx = 0;
         while ((idx = content.indexOf('deploy(', idx)) !== -1) {
           let depth = 0;
@@ -5398,44 +5433,28 @@ describeForThisConfig(
           }
           if (end < 0) break;
           const call = content.slice(idx, end + 1);
-          const callVars = new Set<string>();
-          let m: RegExpExecArray | null;
-          while ((m = varNameInLiteralPattern.exec(call)) !== null) {
-            callVars.add(m[1]);
-          }
-          if (callVars.size > 0) {
-            // Compare set-equality against producedVars.
-            const missing = [...producedVars].filter((v) => !callVars.has(v)).sort();
-            const extra = [...callVars].filter((v) => !producedVars.has(v)).sort();
-            if (missing.length || extra.length) {
-              driftFailures.push(
-                `${spec}: deploy() extracts drift — missing=[${missing.join(',')}] extra=[${extra.join(',')}]`,
-              );
-            }
-          } else {
-            // No varName entries found — the extracts literal is empty or absent.
-            // A regression that wires an empty `[]` or an unwired roleExtra would
-            // produce zero varNames, silently skipping the comparison. Fail here so
-            // it is reported as drift rather than silently ignored.
-            driftFailures.push(
-              `${spec}: deploy() call contains no varName entries (extracts literal empty or missing) — expected [${[...producedVars].sort().join(',')}]`,
+          if (varNameInLiteralPattern.test(call)) {
+            leakageFailures.push(
+              `${spec}: deploy(...) call contains a varName: literal — extracts have leaked back into the call site, defeating the helper encapsulation (#243).`,
             );
           }
+          varNameInLiteralPattern.lastIndex = 0;
           idx = end + 1;
         }
 
-        // (b) Coverage: collect everything the spec can produce
-        // (deploy() extracts ∪ seedBinding ∪ ctx.X = …) and verify
-        // every ctx.X read is producible.
+        // (c) Coverage: producible set = EXTRACTS (baked into helper) ∪
+        // seedBinding ∪ ctx.X = … ∪ extractInto(ctx, 'xVar', …).
         const produced = new Set<string>(producedVars);
         let s: RegExpExecArray | null;
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = ctxSeedPattern.exec(content)) !== null) produced.add(s[1]);
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = seedBindingPattern.exec(content)) !== null) produced.add(s[1]);
-        // Also count `extractInto(ctx, 'xVar', …)` as a producer.
-        const extractIntoPattern = /\bextractInto\(\s*ctx\s*,\s*['"]([A-Za-z_$][\w$]*Var)['"]/g;
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = extractIntoPattern.exec(content)) !== null) produced.add(s[1]);
 
         const reads = new Set<string>();
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = ctxReadPattern.exec(content)) !== null) reads.add(s[1]);
         const unproduced = [...reads].filter((v) => !produced.has(v)).sort();
         if (unproduced.length > 0) {
@@ -5444,14 +5463,13 @@ describeForThisConfig(
       }
 
       expect(
-        driftFailures,
-        `Emitted deploy() extracts literal drifted from computeDeploymentExtracts(createDeployment) output. ` +
-          `Either the spec gained/lost an x-semantic-type / x-semantic-provider annotation on createDeployment and the ` +
-          `extract filter needs adjusting, or the emitter is hard-coding a stale subset.`,
+        leakageFailures,
+        `Emitted spec(s) inline an extracts literal at a deploy() call site. The encapsulation introduced in #243 moved the spec-derived EXTRACTS list into the materialised helper; ` +
+          `if the call-site template starts inlining them again, the duplication regresses.`,
       ).toEqual([]);
       expect(
         coverageFailures,
-        `Emitted spec(s) reference ctx binding var(s) with no producer (no deploy() extract, no seedBinding, no ctx.X = …, no extractInto). ` +
+        `Emitted spec(s) reference ctx binding var(s) with no producer (not in helper's EXTRACTS, no seedBinding, no ctx.X = …, no extractInto). ` +
           `Either a downstream extractor is missing, or the consumer step is reading a binding that was never set.`,
       ).toEqual([]);
     });

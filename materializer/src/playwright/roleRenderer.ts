@@ -74,6 +74,15 @@ export interface LoadedRoleBundle extends RoleTemplateBundle {
   match?: RoleMatchSpec;
   /** Basename of the vendored support file (e.g. `'deploymentGateway.ts'`), when present. */
   supportBasename?: string;
+  /**
+   * When true, the source file on disk is `support.<ext>.tmpl` (a Mustache
+   * template) and the materializer must render it against the role's
+   * {@link EmitContext.roleExtras} entry before writing it to the suite.
+   * When false (the default), the source is `support.<ext>` and is copied
+   * verbatim. Mutually exclusive — the loader rejects role directories
+   * that contain both forms.
+   */
+  supportIsTemplated?: boolean;
 }
 
 /**
@@ -129,24 +138,29 @@ export function loadRoleBundlesForActiveConfig(repoRoot?: string): Map<string, L
       );
     }
     const importsPath = path.join(roleDir, 'imports.tmpl');
-    // Discover support.<ext> by listing the directory — the role's helper
-    // language (ts/js/java/...) is the role's choice, not the renderer's.
-    // Sort the entries for deterministic selection, and throw if more than
-    // one support.* file exists so the role directory has an unambiguous
-    // contract (non-deterministic filesystem ordering could silently select
-    // a different file across runs or machines).
+    // Discover support.<ext> (verbatim) or support.<ext>.tmpl (Mustache
+    // template) by listing the directory — the role's helper language
+    // (ts/js/java/...) is the role's choice, not the renderer's. Sort the
+    // entries for deterministic selection, and throw if more than one
+    // support file exists so the role directory has an unambiguous
+    // contract (non-deterministic filesystem ordering could silently
+    // select a different file across runs or machines). The two forms
+    // are mutually exclusive: a role ships either a verbatim helper or a
+    // templated helper, not both.
     const supportFiles = readdirSync(roleDir)
       .filter((f) => f.startsWith('support.'))
       .sort();
     if (supportFiles.length > 1) {
       throw new Error(
         `roleRenderer: role directory ${roleDir} contains multiple support files: ` +
-          `${supportFiles.join(', ')}. Only one support.<ext> file is permitted per role.`,
+          `${supportFiles.join(', ')}. Only one support.<ext>[.tmpl] file is permitted per role.`,
       );
     }
     let supportPath: string | undefined;
+    let supportIsTemplated = false;
     if (supportFiles.length === 1) {
       supportPath = path.join(roleDir, supportFiles[0]);
+      supportIsTemplated = supportFiles[0].endsWith('.tmpl');
     }
     const matchPath = path.join(roleDir, 'match.json');
     let match: RoleMatchSpec | undefined;
@@ -169,7 +183,12 @@ export function loadRoleBundlesForActiveConfig(repoRoot?: string): Map<string, L
       callSiteTemplatePath: callSitePath,
       importsTemplatePath: existsSync(importsPath) ? importsPath : undefined,
       supportFilePath: supportPath,
-      supportBasename: supportPath ? path.basename(supportPath) : undefined,
+      // `supportBasename` is the FINAL emitted basename — strip the `.tmpl`
+      // suffix when the source is a template so downstream consumers
+      // (materializer, drift-detector invariants) see the same name a
+      // verbatim helper would have.
+      supportBasename: supportPath ? path.basename(supportPath).replace(/\.tmpl$/, '') : undefined,
+      supportIsTemplated,
       callSiteTemplate: readFileSync(callSitePath, 'utf8'),
       importsTemplate: existsSync(importsPath) ? readFileSync(importsPath, 'utf8') : undefined,
       match,

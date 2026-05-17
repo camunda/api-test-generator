@@ -304,15 +304,14 @@ async function run() {
       typeof emitterConfig.recordResponses === 'boolean' ? emitterConfig.recordResponses : false;
     const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
     await materializeSupport(outDir, undefined, excludeSupportFiles);
-    // Lift 12 / #231: load per-role bundles and vendor their helper files
-    // alongside the built-in support files. Roles bound in the ABox but
-    // missing a bundle raise at render time (see roleRenderer.findRoleForStep
-    // in playwright/emitter.ts). The wider materializer LoadedRoleBundle
-    // (which carries `supportFilePath`) is structurally a superset of the
-    // SDK shape, so we feed it straight into `materializeRoleSupportFiles`
-    // and assign the same map into ctx.roleBundles below.
+    // Lift 12 / #231: load per-role bundles. Vendoring the role helper
+    // files into <outDir>/support/ is deferred until after the role-hook
+    // loop below populates `roleExtras` — templated helpers
+    // (`support.<ext>.tmpl`, #243) are rendered against those extras at
+    // codegen time so spec-derived constants (e.g. the deployment-gateway
+    // `EXTRACTS` list) live inside the helper instead of being threaded
+    // through every call-site literal.
     roleBundles = loadRoleBundlesForActiveConfig(repoRoot);
-    await materializeRoleSupportFiles(outDir, roleBundles);
     // Copy BPMN/DMN/form fixture files into <outDir>/fixtures/ so the suite
     // is self-contained: @@FILE:<rel-path> markers in emitted tests resolve
     // via support/fixtures.ts regardless of process.cwd().
@@ -366,6 +365,18 @@ async function run() {
       process.exit(1);
     }
     roleExtras.set(provider.role, extras);
+  }
+
+  // #243: Vendor per-role helper files now that `roleExtras` is populated,
+  // so templated helpers (`support.<ext>.tmpl`) render against the same
+  // per-role data the call-site renderer sees. Roles bound in the ABox but
+  // missing a bundle raise at render time (see roleRenderer.findRoleForStep
+  // in playwright/emitter.ts). The wider materializer LoadedRoleBundle
+  // (which carries `supportFilePath` and `supportIsTemplated`) is
+  // structurally a superset of the SDK shape, so we feed it straight into
+  // `materializeRoleSupportFiles` and the same map into ctx.roleBundles.
+  if (emitter.id === 'playwright' && roleBundles) {
+    await materializeRoleSupportFiles(outDir, roleBundles, roleExtras);
   }
 
   function buildCtx(suiteName: string, mode: 'feature' | 'variant'): EmitContext {
