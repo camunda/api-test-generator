@@ -4,9 +4,11 @@ import {
   type EmitContext,
   type EmitterStrategy,
   getEmitter,
+  getRoleHookProvider,
   type LoadedRoleBundle,
   listEmitters,
   registerEmitter,
+  registerRoleHookProvider,
 } from '@camunda8/emitter-sdk';
 import {
   getActiveConfigDir,
@@ -15,22 +17,17 @@ import {
   getPlaywrightSuiteDir,
   getVariantOutputDir,
 } from 'path-analyser/configResolver';
-import { loadGraph } from 'path-analyser/graphLoader';
 import {
   assertSafeGlobalContextSeeds,
   deriveArtifactKindsViews,
   deriveGlobalContextSeedsViews,
 } from 'path-analyser/ontology/loader';
-import {
-  DEPLOYMENT_GATEWAY_ROLE,
-  findDeploymentGatewayOpId,
-  getRoleForOperation,
-} from 'path-analyser/ontology/operationRoles';
+import { getRoleForOperation } from 'path-analyser/ontology/operationRoles';
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
-import { computeDeploymentExtracts } from './deploymentExtracts.js';
 import { writeEmitted } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
+import { DeploymentRoleHookProvider } from './playwright/hooks/deployment.js';
 import {
   materializeFixtures,
   materializeResponseSchemas,
@@ -39,8 +36,11 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 
-// Built-in emitter registration. New emitters register themselves here.
+// Built-in emitter + role-hook provider registrations. New emitters /
+// providers register themselves here so the orchestrator's hook loop
+// can find them by name without hard-coding role knowledge.
 registerEmitter(PlaywrightEmitter);
+registerRoleHookProvider(DeploymentRoleHookProvider);
 
 // JSON.parse is a runtime contract boundary: the on-disk scenario files are
 // produced by the generator and conform structurally to EndpointScenarioCollection.
@@ -325,34 +325,46 @@ async function run() {
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
   const globalContextSeeds = await loadGlobalContextSeeds(baseDir);
-  // Lift 9 / #225: discriminator for the deployment-gateway routing in
-  // the Playwright emitter, sourced from the active config's
-  // artifact-kinds ABox (`operationRules[].role === "deploymentGateway"`).
-  // `undefined` when no ABox is shipped, or when no rule declares the
-  // role — the emitter will then take the inline-multipart path for
-  // every step.
+  // Lift 9 / #225: discriminator for the role-based dispatch in
+  // emitters, sourced from the active config's artifact-kinds ABox
+  // (`operationRules[].role`). `undefined` when no ABox is shipped —
+  // role dispatch then has nothing to do and emitters take their
+  // fallback path for every step.
   const artifactViews = deriveArtifactKindsViews(repoRoot);
-  const deploymentGatewayOpId = findDeploymentGatewayOpId(
-    artifactViews ? { operationArtifactRules: artifactViews.operationArtifactRules } : undefined,
-  );
-  // Lift 12 / #231: wire role dispatch for all Playwright configs that ship
-  // an ABox view, regardless of whether a deploymentGateway op is bound.
-  // Gating getRoleForOperationFn on deploymentGatewayOpId would silently
-  // disable role dispatch for any config that defines roles other than
-  // deploymentGateway (or defines deploymentGateway roles but hasn't yet
-  // bound the gateway op).
+  // Wire role dispatch + per-role extras for any emitter that opts in
+  // via `roleHooks`. Previously, the orchestrator hard-coded
+  // deployment-gateway knowledge inline; now it delegates to
+  // `RoleHookProvider`s registered against the SDK (see #233 Step 6).
   if (emitter.id === 'playwright') {
     const domain = artifactViews
       ? { operationArtifactRules: artifactViews.operationArtifactRules }
       : undefined;
     getRoleForOperationFn = (opId: string) => getRoleForOperation(domain, opId);
-    if (deploymentGatewayOpId) {
-      const graph = await loadGraph(baseDir);
-      const deployOp = graph.operations[deploymentGatewayOpId];
-      const extracts = computeDeploymentExtracts(deployOp);
-      roleExtras = new Map<string, Record<string, unknown>>();
-      roleExtras.set(DEPLOYMENT_GATEWAY_ROLE, { extracts: JSON.stringify(extracts) });
+  }
+  for (const hook of emitter.roleHooks ?? []) {
+    const provider = getRoleHookProvider(hook);
+    if (!provider) {
+      console.error(
+        `Emitter ${JSON.stringify(emitter.id)} declares roleHook ${JSON.stringify(
+          hook,
+        )} but no provider is registered for that hook name.`,
+      );
+      process.exit(1);
     }
+    const extras = await provider.compute({ repoRoot, configName });
+    if (extras === undefined) continue;
+    if (!roleExtras) roleExtras = new Map<string, Record<string, unknown>>();
+    if (roleExtras.has(provider.role)) {
+      console.error(
+        `Role-hook provider for hook ${JSON.stringify(
+          hook,
+        )} attempted to overwrite extras for role ${JSON.stringify(
+          provider.role,
+        )} already populated by an earlier hook. Hook providers must own disjoint roles.`,
+      );
+      process.exit(1);
+    }
+    roleExtras.set(provider.role, extras);
   }
 
   function buildCtx(suiteName: string, mode: 'feature' | 'variant'): EmitContext {

@@ -128,6 +128,12 @@ export const PlaywrightEmitter: EmitterStrategy = {
   name: 'Playwright (REST)',
   // Playwright/REST output is config-agnostic; every named config can target it.
   supportedConfigs: ['*'],
+  // Per-role compute hooks this emitter consumes. The orchestrator
+  // finds a registered provider for each hook name and threads its
+  // output into `ctx.roleExtras[<role>]`. See
+  // `materializer/src/playwright/hooks/deployment.ts` for the
+  // deployment-gateway provider (#233 Step 6).
+  roleHooks: ['deployment'],
   // Per-emitter knobs. Validated against this schema by the orchestrator
   // before invocation; absent / partial files default to recordResponses=false.
   configSchema: {
