@@ -46,7 +46,9 @@ materializer/
 │   ├── orchestrator.ts           ← per-operation emission driver
 │   ├── emitter.ts                ← Emitter strategy interface + registry
 │   ├── registry.ts               ← built-in emitter registration
-│   ├── roles.ts                  ← operation role resolution
+│   ├── roles.ts                  ← role-rendering type surface (operation
+│   │                                role *classification* lives in
+│   │                                path-analyser/ontology/operationRoles)
 │   ├── deploymentExtracts.ts     ← deployment-role extras (transitional;
 │   │                                will move behind the bundle interface
 │   │                                in #233)

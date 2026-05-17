@@ -435,8 +435,8 @@ Two guides:
 - **Adding a role** (`configs/README.md` addendum). Covers ABox entry,
   per-emitter directory layout, scope-variable reference, wrap-vs-replace
   pattern, naming conventions.
-- **Adding an emitter** (`materializer/src/README.md` or
-  similar). Covers how the emitter walks the per-config role tree,
+- **Adding an emitter** ([`materializer/README.md`](../README.md)).
+  Covers how the emitter walks the per-config role tree,
   what scope it must provide, how to declare its scope contract in this
   file.
 

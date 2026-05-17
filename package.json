@@ -22,7 +22,7 @@
     "generate:scenarios": "npm run build:analyser && node path-analyser/dist/src/index.js",
     "generate:request-validation": "npm run generate -w request-validation && npm run biome:fix-generated:request-validation",
     "generate:request-validation:shallow": "npm run generate:shallow -w request-validation && npm run biome:fix-generated:request-validation",
-    "codegen:playwright": "npm run build:materializer && node materializer/dist/src/index.js",
+    "codegen:playwright": "npm run build:materializer && node materializer/dist/src/index.js && npm run biome:fix-generated:codegen",
     "codegen:playwright:all": "npm run build:materializer && node materializer/dist/src/index.js --all && npm run biome:fix-generated:codegen",
     "test:pw": "npm run test:pw:path-analyser && npm run test:pw:request-validation",
     "test:pw:path-analyser": "npx playwright test -c path-analyser/playwright.config.ts",

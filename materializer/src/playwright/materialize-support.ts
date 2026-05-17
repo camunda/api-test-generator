@@ -12,7 +12,7 @@
 //                fixtures.ts, seed-rules.json, await-eventually.ts).
 //                Sources:
 //                materializer/src/support/, staged into
-//                dist/src/codegen/playwright/support-templates/ at
+//                dist/src/playwright/support-templates/ at
 //                build time.
 //                PLUS per-role overlays from
 //                configs/<config>/codegen/playwright/roles/<role>/support.<ext>
@@ -57,16 +57,16 @@ export const SUPPORT_DIR_NAME = 'support';
 
 function defaultTemplatesDir(): string {
   // import.meta.url resolves to the running module location:
-  //   - dist:  <pkg>/dist/src/codegen/playwright/materialize-support.js
-  //   - tsx :  <pkg>/src/codegen/playwright/materialize-support.ts
+  //   - dist:  <pkg>/dist/src/playwright/materialize-support.js
+  //   - tsx :  <pkg>/src/playwright/materialize-support.ts
   // Templates are staged next to the dist version by the build step. When
   // running from source via tsx, fall back to the canonical sources under
-  // src/codegen/support/.
+  // src/support/.
   const here = path.dirname(fileURLToPath(import.meta.url));
   if (here.includes(`${path.sep}dist${path.sep}`)) {
     return path.join(here, 'support-templates');
   }
-  // Source mode: walk up from src/codegen/playwright/ to src/codegen/support/.
+  // Source mode: walk up from src/playwright/ to src/support/.
   return path.resolve(here, '..', 'support');
 }
 

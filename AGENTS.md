@@ -159,10 +159,11 @@ Run `npm run lint` (or `npx biome check <files>`) before commit.
 
 - Four workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
   `path-analyser/tsconfig.json`, `materializer/tsconfig.json`,
-  `request-validation/tsconfig.json`. CI typechecks each in turn.
-- Tests under `tests/**` import workspace sources directly (e.g.
-  `../../../path-analyser/src/scenarioGenerator.ts`) and run via vitest with
-  on-the-fly transformation — no separate test tsconfig.
+  `request-validation/tsconfig.json`. CI typechecks each in turn, plus
+  a separate `tests/tsconfig.json` for the test sources (which import
+  workspace sources directly via `.ts` extensions; see
+  `allowImportingTsExtensions` in that file). CI runs
+  `npx tsc --noEmit -p tests/tsconfig.json` as its own gate.
 - **No `any`.** Narrow `unknown` with type guards.
 - **No unsafe type assertions.** `as T` is banned by the
   `plugins/no-unsafe-type-assertion.grit` Biome plugin in both `src/` and
