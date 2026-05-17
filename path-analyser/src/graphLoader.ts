@@ -19,7 +19,7 @@ import {
   loadRuntimeStatesAbox,
   loadSemanticsAbox,
 } from './ontology/loader.js';
-import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
+import type { DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
 class DomainSemanticsValidationFailure extends Error {
   constructor(message: string) {
@@ -88,9 +88,6 @@ interface RawGraphRoot {
   operationNodes?: Record<string, RawOp> | RawOp[];
   graph?: RawGraphRoot;
   data?: RawGraphRoot;
-  bootstrapSequences?: RawBootstrapSeq[];
-  bootstrap_sequences?: RawBootstrapSeq[];
-  sequences?: RawBootstrapSeq[];
   // Issue #134 / camunda/camunda#52320: upstream `semantic-kinds.json`
   // payload, attached by the extractor. Lets the planner identify
   // semantic types owned by an `external-entity` kind without
@@ -98,15 +95,6 @@ interface RawGraphRoot {
   kindRegistry?: {
     kinds?: Array<{ name?: string; shape?: string; identifiers?: string[] }>;
   };
-}
-
-interface RawBootstrapSeq {
-  name?: string;
-  id?: string;
-  description?: string;
-  desc?: string;
-  operations?: unknown[];
-  produces?: string[];
 }
 
 interface RawSchema {
@@ -299,28 +287,6 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     console.warn('[graphLoader] Loaded 0 operations. Check graph path / structure.');
   } else {
     // debug: normalization summary
-  }
-
-  // Bootstrap sequences (optional)
-  const bootstrapSequences: BootstrapSequence[] = [];
-  const rawSequences: RawBootstrapSeq[] = !Array.isArray(parsed)
-    ? parsed.bootstrapSequences || parsed.bootstrap_sequences || parsed.sequences || []
-    : [];
-  if (Array.isArray(rawSequences)) {
-    for (const seq of rawSequences) {
-      if (!seq) continue;
-      const name = seq.name || seq.id;
-      if (!name || !Array.isArray(seq.operations)) continue;
-      bootstrapSequences.push({
-        name,
-        description: seq.description || seq.desc,
-        operations: seq.operations.filter((o): o is string => typeof o === 'string'),
-        produces: Array.isArray(seq.produces) ? unique(seq.produces) : [],
-      });
-    }
-    if (bootstrapSequences.length) {
-      // debug: number of bootstrap sequences loaded
-    }
   }
 
   // Per-config ontology ABoxes (optional). Each file contributes one
@@ -630,7 +596,6 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     operations,
     producersByType,
     responseProducersByType,
-    bootstrapSequences,
     domain,
     producersByState,
     establishersByType: Object.keys(establishersByType).length ? establishersByType : undefined,

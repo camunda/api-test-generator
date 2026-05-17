@@ -401,41 +401,6 @@ export interface OperationDependencyGraph {
   operations: Map<string, Operation>;
   semanticTypes: Map<string, SemanticType>;
   edges: DependencyEdge[];
-  // NEW: Enhanced analysis results
-  semanticTypeLibrary?: SemanticTypeLibrary;
-  rootDependencyAnalysis?: RootOperationAnalysis;
-  crossContaminationMap?: CrossContaminationMap;
-}
-
-// NEW: Semantic Type Library interfaces
-export interface SemanticTypeLibrary {
-  semanticTypes: Map<string, SemanticTypeDefinition>;
-}
-
-export interface SemanticTypeDefinition {
-  name: string;
-  description?: string;
-  baseType: string;
-  format?: string;
-  pattern?: string;
-  minLength?: number;
-  maxLength?: number;
-  // NEW: Value libraries for test generation
-  validExamples: unknown[];
-  invalidExamples: InvalidExample[];
-  crossContaminationSources: string[]; // Other semantic types with same base type
-  generationRules: ValueGenerationRule[];
-}
-
-export interface InvalidExample {
-  value: unknown;
-  invalidationType: 'wrong_type' | 'wrong_format' | 'out_of_bounds' | 'wrong_semantic_type';
-  description: string;
-}
-
-export interface ValueGenerationRule {
-  type: 'random' | 'boundary' | 'pattern' | 'enum';
-  rule: string;
 }
 
 // Operation metadata vendor extension representation
@@ -454,34 +419,6 @@ export interface ConditionalIdempotencySpec {
   window: { field: string; unit: string };
   duplicatePolicy: string; // currently 'ignore'
   appliesWhen: string; // 'key-present'
-}
-
-// NEW: Root Dependency Analysis interfaces
-export interface RootOperationAnalysis {
-  deploymentOperations: string[]; // Operations that create foundational resources
-  setupOperations: string[]; // Operations that must run before others
-  entryPointOperations: string[]; // Operations with no dependencies
-  bootstrapSequences: BootstrapSequence[];
-  /**
-   * Bootstrap sequences declared in the active config's ABox that were
-   * silently dropped because at least one referenced operationId is
-   * absent from the parsed spec. Surfaced on the graph (and not just
-   * logged) so downstream tooling and L3 invariants can detect
-   * unexpected drops without scraping CI logs.
-   */
-  droppedBootstrapSequences: { name: string; missing: string[] }[];
-}
-
-export interface BootstrapSequence {
-  name: string;
-  description: string;
-  operations: string[]; // Ordered sequence of operations
-  produces: string[]; // Semantic types produced by this sequence
-}
-
-// NEW: Cross-contamination mapping
-export interface CrossContaminationMap {
-  [semanticType: string]: string[]; // Maps semantic type to potential contaminants
 }
 
 // Analysis result types

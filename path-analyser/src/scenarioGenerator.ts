@@ -40,8 +40,6 @@ interface State {
   ops: string[]; // operations before endpoint
   cycle: boolean;
   productionMap: Map<string, string>; // semanticType -> opId
-  bootstrapSequencesUsed: string[]; // contributing bootstrap sequences
-  bootstrapFull?: boolean; // this state derives from a single bootstrap that covers all required
   modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
   bindingsDraft?: Record<string, string>; // variable bindings
   // Issue #104: side index recording which semanticType each
@@ -261,7 +259,6 @@ export function generateScenariosForEndpoint(
     ops: [],
     cycle: false,
     productionMap: new Map(),
-    bootstrapSequencesUsed: [],
     providerList: {},
     artifactsApplied: [],
     // Issue #134: pre-seed bindingsDraft with the client-minted IDs
@@ -273,97 +270,7 @@ export function generateScenariosForEndpoint(
   };
 
   const queue: State[] = [initial];
-  const bootstrapScenarios: EndpointScenario[] = [];
 
-  // Seed states from bootstrap sequences (if any) whose produced set contributes to endpoint requirements.
-  if (graph.bootstrapSequences?.length) {
-    for (const seq of graph.bootstrapSequences) {
-      const seqOpsValid = seq.operations.every((opId) => graph.operations[opId]);
-      if (!seqOpsValid) continue;
-      const produced = new Set<string>(externalEntitySites);
-      for (const opId of seq.operations) {
-        graph.operations[opId].produces.forEach((s) => {
-          produced.add(s);
-        });
-      }
-      // Include declared produces on sequence definition (acts as union / override)
-      seq.produces.forEach((s) => {
-        produced.add(s);
-      });
-      // Only enqueue if it helps satisfy at least one needed semantic type (or endpoint has none -> still useful as canonical setup)
-      const helps = [...planningNeeded].some((s) => produced.has(s));
-      if (helps || planningNeeded.size === 0) {
-        const productionMap = new Map<string, string>();
-        for (const opId of seq.operations) {
-          graph.operations[opId].produces.forEach((s) => {
-            if (!productionMap.has(s)) productionMap.set(s, opId);
-          });
-        }
-        // Sequence state before endpoint
-        const bootstrapFull = [...required].every((r) => produced.has(r));
-        queue.push({
-          produced,
-          needed: new Set(planningNeeded),
-          domainStates: new Set(),
-          ops: [...seq.operations],
-          cycle: false,
-          productionMap,
-          bootstrapSequencesUsed: [seq.name],
-          bootstrapFull,
-          // Issue #134: carry the external-mint bindings into
-          // bootstrap-seeded states so scenarios that start from a
-          // bootstrap sequence still emit bound path/body variables
-          // for the external-mintable semantics that
-          // `planningNeeded` already removed from `needed`.
-          bindingsDraft: initial.bindingsDraft ? { ...initial.bindingsDraft } : undefined,
-        });
-        // Emit explicit bootstrap scenario if it alone satisfies all required semantic types
-        if (bootstrapFull) {
-          const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => {
-            producedSemanticTypes.add(s);
-          });
-          const opRefs = [
-            ...seq.operations.map((id) => toRef(graph.operations[id])),
-            toRef(endpoint),
-          ];
-          const evCount = opRefs.filter((o) => o.eventuallyConsistent).length;
-          bootstrapScenarios.push({
-            id: `bootstrap:${seq.name}`,
-            operations: opRefs,
-            producedSemanticTypes: [...producedSemanticTypes],
-            satisfiedSemanticTypes: [...initialNeeded],
-            productionMap: Object.fromEntries(productionMap.entries()),
-            bootstrapSequencesUsed: [seq.name],
-            bootstrapFull: true,
-            hasEventuallyConsistent: evCount > 0 || undefined,
-            eventuallyConsistentCount: evCount || undefined,
-          });
-        } else if (planningNeeded.size === 0) {
-          // For endpoints with no requirements we still include a bootstrap variant for reference
-          const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => {
-            producedSemanticTypes.add(s);
-          });
-          const opRefs = [
-            ...seq.operations.map((id) => toRef(graph.operations[id])),
-            toRef(endpoint),
-          ];
-          const evCount = opRefs.filter((o) => o.eventuallyConsistent).length;
-          bootstrapScenarios.push({
-            id: `bootstrap:${seq.name}`,
-            operations: opRefs,
-            producedSemanticTypes: [...producedSemanticTypes],
-            satisfiedSemanticTypes: [],
-            productionMap: Object.fromEntries(productionMap.entries()),
-            bootstrapSequencesUsed: [seq.name],
-            hasEventuallyConsistent: evCount > 0 || undefined,
-            eventuallyConsistentCount: evCount || undefined,
-          });
-        }
-      }
-    }
-  }
   const seen = new Set<string>(); // simple dedupe by produced+ops signature
   const completed: Map<string, EndpointScenario> = new Map();
 
@@ -447,10 +354,6 @@ export function generateScenariosForEndpoint(
           providerList: Object.keys(state.providerList || {}).length
             ? state.providerList
             : undefined,
-          bootstrapSequencesUsed: state.bootstrapSequencesUsed.length
-            ? [...state.bootstrapSequencesUsed]
-            : undefined,
-          bootstrapFull: state.bootstrapFull || undefined,
           hasEventuallyConsistent: eventuallyConsistentOps > 0 || undefined,
           eventuallyConsistentCount: eventuallyConsistentOps || undefined,
           domainStatesRequired: domainRequiredStates.length ? domainRequiredStates : undefined,
@@ -579,8 +482,6 @@ export function generateScenariosForEndpoint(
           ops: newOps,
           cycle: nextCycle,
           productionMap: newProductionMap,
-          bootstrapSequencesUsed: state.bootstrapSequencesUsed,
-          bootstrapFull: state.bootstrapFull,
           modelsDraft: state.modelsDraft,
           bindingsDraft: state.bindingsDraft,
         });
@@ -982,8 +883,6 @@ export function generateScenariosForEndpoint(
         ops: newOps,
         cycle: nextCycle,
         productionMap: newProductionMap,
-        bootstrapSequencesUsed: state.bootstrapSequencesUsed,
-        bootstrapFull: state.bootstrapFull,
         modelsDraft,
         bindingsDraft,
         establisherBindingSemantics,
@@ -999,15 +898,7 @@ export function generateScenariosForEndpoint(
     }
   }
 
-  scenarios.push(...bootstrapScenarios.filter((bs) => !scenarios.find((s) => s.id === bs.id)));
-  // Sort: full bootstrap first, then any bootstrap-used, then by length.
   scenarios.sort((a, b) => {
-    const aFull = a.bootstrapFull ? 1 : 0;
-    const bFull = b.bootstrapFull ? 1 : 0;
-    if (aFull !== bFull) return bFull - aFull; // full first
-    const aBoot = a.bootstrapSequencesUsed ? 1 : 0;
-    const bBoot = b.bootstrapSequencesUsed ? 1 : 0;
-    if (aBoot !== bBoot) return bBoot - aBoot; // any bootstrap before none
     return a.operations.length - b.operations.length;
   });
 
@@ -1321,8 +1212,6 @@ function deferForMissingDomainPrereqs(
       ops: newOps,
       cycle: nextCycle,
       productionMap: newProductionMap,
-      bootstrapSequencesUsed: state.bootstrapSequencesUsed,
-      bootstrapFull: state.bootstrapFull,
       modelsDraft,
       bindingsDraft,
       // Propagate scenario-metadata bookkeeping from `state` and update
@@ -1633,7 +1522,6 @@ function buildIntegrationScenarioName(
   _totalRequired: number,
 ): string {
   const parts: string[] = [];
-  if (state.bootstrapFull) parts.push('bootstrap');
   if (state.cycle) parts.push('cycle');
   if (state.artifactsApplied?.length) parts.push(state.artifactsApplied.join('+'));
   const tag = parts.length ? parts.join('/') : 'path';
@@ -1656,10 +1544,6 @@ function buildIntegrationScenarioDescription(
     segs.push(
       `${preOpCount} prerequisite operation(s) executed to satisfy ${totalRequired} required semantic type(s).`,
     );
-  if (state.bootstrapFull)
-    segs.push('Uses bootstrap sequence providing full coverage of required semantics.');
-  else if (state.bootstrapSequencesUsed?.length)
-    segs.push(`Bootstrap assistance: ${state.bootstrapSequencesUsed.join(', ')}.`);
   if (state.cycle) segs.push('Includes one allowed cycle repetition for semantic closure.');
   if (state.artifactsApplied?.length)
     segs.push(`Artifact bundle applied: ${state.artifactsApplied.join(', ')}.`);
