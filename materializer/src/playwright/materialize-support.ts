@@ -227,15 +227,90 @@ export async function loadProjectScaffoldingFiles(
  * @param roleExtras   Per-role data computed by role-hook providers (e.g.
  *                     `{ extracts: '[…]' }` from `DeploymentRoleHookProvider`).
  *                     Used as the Mustache scope when rendering templated
- *                     support files. Verbatim helpers ignore it. May be
- *                     omitted when no hook providers are registered; a role
- *                     whose support file is templated but has no extras
- *                     entry renders against an empty scope (Mustache emits
- *                     empty strings for unresolved variables).
+ *                     support files. Verbatim helpers ignore it. For
+ *                     templated helpers, **every Mustache variable
+ *                     referenced by the template must resolve to a
+ *                     non-`undefined` value in this map's entry for the
+ *                     role** — otherwise the renderer would silently
+ *                     emit a syntactically broken helper (e.g.
+ *                     `const EXTRACTS = ;` when `extracts` is missing),
+ *                     and downstream TypeScript would report a parse
+ *                     error far from the root cause. Unresolved variables
+ *                     raise immediately with the template path, the
+ *                     missing names, and the role name.
  * @returns            The list of vendored file basenames (e.g.
  *                     `['deploymentGateway.ts']`) for callers that want to
  *                     assert what was copied.
  */
+/**
+ * Walk a parsed Mustache token tree and collect the names of every
+ * variable referenced (`{{name}}`, `{{{name}}}`, `{{&name}}`), descending
+ * into section bodies (`{{#x}}…{{/x}}` and `{{^x}}…{{/x}}`). Used by
+ * {@link materializeRoleSupportFiles} to fail fast when a templated
+ * support helper references a variable that the role's `roleExtras`
+ * entry doesn't supply.
+ *
+ * Bracketed paths like `{{a.b}}` are reported as the top-level segment
+ * (`a`) since that is what must exist on the scope object.
+ */
+function collectTemplateVariableNames(template: string): Set<string> {
+  // Mustache.parse returns a nested token tree; each token is a tuple
+  // [type, name, start, end, children?, ...]. We only care about types
+  // 'name' (escaped interpolation), '&' (unescaped), '#' (section),
+  // '^' (inverted section). Recurse into children to catch nested usage.
+  // biome-ignore lint/plugin: parsed Mustache token shape is library-internal
+  const tokens = Mustache.parse(template) as unknown as Array<
+    [string, string, number, number, unknown[]?]
+  >;
+  const names = new Set<string>();
+  const VARIABLE_TYPES = new Set(['name', '&', '#', '^']);
+  const visit = (toks: Array<[string, string, number, number, unknown[]?]>): void => {
+    for (const t of toks) {
+      const type = t[0];
+      const name = t[1];
+      if (VARIABLE_TYPES.has(type) && typeof name === 'string' && name !== '.') {
+        const top = name.split('.')[0];
+        if (top) names.add(top);
+      }
+      const children = t[4];
+      if (Array.isArray(children)) {
+        // biome-ignore lint/plugin: parsed Mustache token shape is library-internal
+        visit(children as Array<[string, string, number, number, unknown[]?]>);
+      }
+    }
+  };
+  visit(tokens);
+  return names;
+}
+
+/**
+ * Throw if any Mustache variable referenced by `template` is missing
+ * (or `undefined`) in `scope`. Prevents silently emitting broken
+ * helpers like `const EXTRACTS = ;` when a hook provider forgot to
+ * populate `roleExtras`.
+ */
+function assertTemplateVariablesResolved(
+  template: string,
+  scope: Record<string, unknown>,
+  roleName: string,
+  templatePath: string,
+): void {
+  const required = collectTemplateVariableNames(template);
+  const missing: string[] = [];
+  for (const name of required) {
+    if (!(name in scope) || scope[name] === undefined) missing.push(name);
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `materializeRoleSupportFiles: templated support file ${templatePath} for role ` +
+        `'${roleName}' references Mustache variable(s) [${missing
+          .map((n) => `'${n}'`)
+          .join(', ')}] that are not present in roleExtras['${roleName}']. ` +
+        `Ensure a RoleHookProvider populates them, or rewrite the template to omit them.`,
+    );
+  }
+}
+
 export async function materializeRoleSupportFiles(
   outDir: string,
   roleBundles: Map<
@@ -314,6 +389,7 @@ export async function materializeRoleSupportFiles(
     if (bundle.supportIsTemplated) {
       const tmplSrc = await fs.readFile(sourcePath, 'utf8');
       const scope = roleExtras?.get(roleName) ?? {};
+      assertTemplateVariablesResolved(tmplSrc, scope, roleName, sourcePath);
       const rendered = Mustache.render(tmplSrc, scope);
       await fs.writeFile(path.join(destDir, destName), rendered, 'utf8');
     } else {

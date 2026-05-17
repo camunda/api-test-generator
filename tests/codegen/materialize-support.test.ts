@@ -287,4 +287,71 @@ describe('materializeRoleSupportFiles', () => {
     expect(existsSync(path.join(outDir, SUPPORT_DIR_NAME))).toBe(true);
     expect(copied).toEqual([]);
   });
+
+  test('renders a templated support file with roleExtras and writes the result (#243)', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'role-src-'));
+    try {
+      const supportFile = path.join(srcDir, 'support.ts.tmpl');
+      await fs.writeFile(
+        supportFile,
+        'const EXTRACTS = {{{extracts}}};\nexport const N = {{count}};\n',
+        'utf8',
+      );
+      const bundles = new Map([
+        [
+          'templatedRole',
+          {
+            dir: srcDir,
+            supportBasename: 'support.ts',
+            supportIsTemplated: true,
+            supportFilePath: supportFile,
+          },
+        ],
+      ]);
+      const extras = new Map<string, Record<string, unknown>>([
+        ['templatedRole', { extracts: "[{name: 'foo'}]", count: 7 }],
+      ]);
+      const copied = await materializeRoleSupportFiles(tmp, bundles, extras);
+      expect(copied).toEqual(['templatedRole.ts']);
+      const content = await fs.readFile(
+        path.join(tmp, SUPPORT_DIR_NAME, 'templatedRole.ts'),
+        'utf8',
+      );
+      expect(content).toBe("const EXTRACTS = [{name: 'foo'}];\nexport const N = 7;\n");
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
+  });
+
+  test('fails fast when a templated support file references variables missing from roleExtras (#243)', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'role-src-'));
+    try {
+      const supportFile = path.join(srcDir, 'support.ts.tmpl');
+      await fs.writeFile(supportFile, 'const EXTRACTS = {{{extracts}}};\n', 'utf8');
+      const bundles = new Map([
+        [
+          'templatedRole',
+          {
+            dir: srcDir,
+            supportBasename: 'support.ts',
+            supportIsTemplated: true,
+            supportFilePath: supportFile,
+          },
+        ],
+      ]);
+      // No roleExtras at all — missing.
+      await expect(materializeRoleSupportFiles(tmp, bundles)).rejects.toThrow(
+        /references Mustache variable\(s\) \['extracts'\] that are not present in roleExtras\['templatedRole'\]/,
+      );
+      // Extras present but the specific variable is missing.
+      const extras = new Map<string, Record<string, unknown>>([
+        ['templatedRole', { unrelated: 'value' }],
+      ]);
+      await expect(materializeRoleSupportFiles(tmp, bundles, extras)).rejects.toThrow(
+        /\['extracts'\]/,
+      );
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
+  });
 });

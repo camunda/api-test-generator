@@ -72,7 +72,15 @@ export interface LoadedRoleBundle extends RoleTemplateBundle {
   importsTemplate?: string;
   /** Parsed `match.json`, when present. */
   match?: RoleMatchSpec;
-  /** Basename of the vendored support file (e.g. `'deploymentGateway.ts'`), when present. */
+  /**
+   * Basename of the **source** helper file on disk, with any trailing
+   * `.tmpl` suffix stripped (e.g. `'support.ts'`; for a templated source
+   * `support.ts.tmpl` this is still `'support.ts'`). Used by
+   * {@link materializeRoleSupportFiles} only to derive the file extension
+   * via `path.extname` — the **emitted destination filename** is always
+   * `<roleName><ext>` (e.g. `'deploymentGateway.ts'`) and is not stored
+   * on the bundle. Treat this as the source basename, not the destination.
+   */
   supportBasename?: string;
   /**
    * When true, the source file on disk is `support.<ext>.tmpl` (a Mustache
