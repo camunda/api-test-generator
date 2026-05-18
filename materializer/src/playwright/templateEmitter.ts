@@ -287,16 +287,25 @@ function appendInlineRequestStep(
   // identifier (rather than the client-seeded one OCA edges happen to
   // use) would silently send `undefined` and the suite would 4xx at
   // runtime with no diagnostic at emit time.
-  for (const ex of step.extract ?? []) {
-    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
-      throw new Error(
-        `Refusing to emit extract for non-identifier bind name '${ex.bind}' (operationId=${step.operationId}).`,
+  const extracts = step.extract ?? [];
+  if (extracts.length > 0) {
+    // Parse the response body ONCE per step. A previous shape declared
+    // `const jsonN = await ${respVar}.json()` inside the per-extract
+    // loop, which redeclared the same identifier when a step had more
+    // than one extract and broke the strict-mode generated-suites
+    // typecheck. The per-endpoint emitter does the same single-parse
+    // pattern (materializer/src/playwright/emitter.ts).
+    lines.push(`      const json${idx + 1} = await ${respVar}.json();`);
+    for (const ex of extracts) {
+      if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
+        throw new Error(
+          `Refusing to emit extract for non-identifier bind name '${ex.bind}' (operationId=${step.operationId}).`,
+        );
+      }
+      lines.push(
+        `      extractInto(ctx, '${ex.bind}', ${buildOptionalAccessChain(`json${idx + 1}`, ex.fieldPath.split('.'))});`,
       );
     }
-    lines.push(`      const json${idx + 1} = await ${respVar}.json();`);
-    lines.push(
-      `      extractInto(ctx, '${ex.bind}', ${buildOptionalAccessChain(`json${idx + 1}`, ex.fieldPath.split('.'))});`,
-    );
   }
   lines.push('    });');
   // Planner-annotated eventual-state waits (#159 PR B) — emitted as a
@@ -343,9 +352,17 @@ function appendObserveStep(
   const accessChain = buildOptionalAccessChain('__body', step.assertion.arrayPath);
   lines.push(`      const __raw = ${accessChain};`);
   lines.push('      const __arr = Array.isArray(__raw) ? __raw : [];');
-  lines.push(
-    `      const __values = __arr.map((r) => (r as Record<string, unknown>)['${step.assertion.elementField}']);`,
-  );
+  // `elementField` can be a dotted path (e.g. `member.username` for
+  // `data.items[].member.username`) — see findMembershipArrayPath's
+  // field-path parsing doc. A literal `['member.username']` lookup
+  // would always miss; resolve via an optional-access chain per
+  // element instead.
+  const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
+  if (elementSegments.length === 0) {
+    throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
+  }
+  const elementAccess = buildOptionalAccessChain('r', elementSegments);
+  lines.push(`      const __values = __arr.map((r) => ${elementAccess});`);
   const bindingName = resolveBindingNameForSemantic(
     step.assertion.membershipSemanticType,
     scenarioBindings,
