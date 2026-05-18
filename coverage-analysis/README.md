@@ -1,5 +1,10 @@
 # Generator coverage analysis
 
+> **Status:** implementation-phase scaffolding. This directory exists to help
+> assess what the generator currently produces while it's being built. Once the
+> generator is delivered it can be deleted — the artifacts here are snapshots
+> and are not maintained as part of the product.
+
 Categorises the test files emitted under `generated/camunda-oca/playwright/` and
 produces a coverage matrix in the same shape as
 [`camunda/camunda/qa/c8-orchestration-cluster-e2e-test-suite/coverage-analysis/`](https://github.com/camunda/camunda/tree/main/qa/c8-orchestration-cluster-e2e-test-suite/coverage-analysis),
