@@ -93,6 +93,12 @@ export const artifactKindsSchema = {
       type: 'array',
       items: { $ref: '#/definitions/FileExtensionMapping' },
     },
+    nonArtifactWrapperKeys: {
+      type: 'array',
+      description:
+        'Optional acknowledgement list of top-level keys present on the createDeployment response payload that are NOT modelled as artifact-kind `deploymentSlices`. The Lift 16 / #256 L3 invariant asserts that (specKeys − union(deploymentSlices)) ⊆ this list, so every non-artifact-kind wrapper the upstream spec ships must be deliberately acknowledged with a rationale. Authors can land a new wrapper here without bumping artifact-kinds, but the rationale is mandatory so the next maintainer knows why the slice is intentionally unmodelled.',
+      items: { $ref: '#/definitions/NonArtifactWrapperKey' },
+    },
   },
   definitions: {
     ArtifactKind: {
@@ -278,6 +284,29 @@ export const artifactKindsSchema = {
           items: { type: 'string', minLength: 1 },
           description:
             'Candidate artifact kinds for files with this extension. Multiple entries express ambiguity (e.g. `.dmn` may carry a single decision or a full DRD); the selector then disambiguates per-fixture. Each entry must reference a name in `kinds`.',
+        },
+      },
+    },
+    NonArtifactWrapperKey: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['key', 'rationale'],
+      properties: {
+        '@type': {
+          description: 'Optional JSON-LD type IRI. Ignored by the loader.',
+          type: 'string',
+        },
+        key: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Top-level property name present on the createDeployment response payload that is intentionally not modelled as any artifact-kind `deploymentSlices` entry. Must reference a real property on the bundled spec — the Lift 16 / #256 L3 invariant checks the bidirectional containment.',
+        },
+        rationale: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Mandatory free-text explanation of why this wrapper key is intentionally unmodelled. The rationale is for the next maintainer reading the ABox; the L3 invariant only checks presence, not content.',
         },
       },
     },

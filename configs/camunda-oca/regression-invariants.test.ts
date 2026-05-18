@@ -5194,57 +5194,114 @@ describeForThisConfig(
     // ABox; this invariant locks the contract in.
     //
     // The assertion is bidirectional: the set of wrapper keys the
-    // extractor actually traversed on the bundled spec (visible as
-    // `nestedSlices` keys on the createDeployment response shape) must
-    // equal the union of `deploymentSlices` across artifact-kind
-    // entries. A drift in either direction is a defect:
-    //   * extractor saw a slice the ABox did not declare → the ABox is
-    //     incomplete and downstream consumers reading the ABox will
-    //     miss canonical fields.
-    //   * ABox declared a slice the extractor did not see → the ABox
-    //     holds a stale slice name that no upstream property backs.
-    it('union of artifact-kind deploymentSlices equals the set of wrapper keys observed on createDeployment', () => {
-      const extractionPath = join(
-        REPO_ROOT,
-        'path-analyser',
-        'dist',
-        'extraction',
-        'response-shapes.json',
-      );
-      if (!existsSync(extractionPath)) {
+    // extractor actually traversed on the bundled spec must equal the
+    // union of `deploymentSlices` across artifact-kind entries, modulo
+    // an explicit ABox-level allowlist of wrapper keys the upstream
+    // spec ships that are intentionally NOT modelled as artifact-kinds
+    // (`nonArtifactWrapperKeys`). The spec-derived set is computed here
+    // directly from the bundled OpenAPI (`paths.*.{method}` with
+    // operationId === 'createDeployment' → responses['200'].content[*].schema
+    // → properties.deployments.items → properties keys), NOT from the
+    // extractor output — `nestedSlices` in response-shapes.json is now
+    // itself filtered by `deploymentSlices`, so deriving from it would
+    // make the bidirectional check tautological on the ABox-missing
+    // direction (the extractor would never report a key the ABox hadn't
+    // already declared). Reading the spec directly breaks that cycle
+    // and surfaces real drift like the upstream `resource` envelope
+    // first acknowledged in this invariant's allowlist.
+    //
+    // Three assertions, each catching a distinct defect class:
+    //   1. declaredSlices ⊆ specKeys  — no stale ABox slice pointing at
+    //      a wrapper property the upstream spec doesn't ship.
+    //   2. (specKeys − declaredSlices) ⊆ allowlistKeys  — every wrapper
+    //      key the spec ships that isn't an artifact-kind slice has been
+    //      deliberately acknowledged with a rationale. Forces a future
+    //      spec addition to be a conscious decision (add it as an
+    //      artifact-kind, or add it to the allowlist with rationale).
+    //   3. allowlistKeys ⊆ specKeys  — no stale allowlist entry pointing
+    //      at a wrapper property the upstream spec has removed. Keeps
+    //      the rationale paper-trail honest.
+    it('artifact-kind deploymentSlices reconcile with createDeployment wrapper keys in the bundled spec (modulo declared non-artifact wrappers)', () => {
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
         throw new Error(
-          `Extraction output not found at ${extractionPath}. Run \`npm run testsuite:generate\` (or \`npm run pipeline\`) before running this invariant.`,
+          `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
         );
       }
-      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; structural shape is validated below.
-      const shapes = JSON.parse(readFileSync(extractionPath, 'utf8')) as Array<{
+      interface BundledSchema {
+        $ref?: string;
+        type?: string;
+        properties?: Record<string, BundledSchema>;
+        items?: BundledSchema;
+      }
+      interface BundledOp {
         operationId?: string;
-        nestedSlices?: Record<string, unknown>;
-      }>;
-      const createDeployment = shapes.find((s) => s?.operationId === 'createDeployment');
+        responses?: Record<string, { content?: Record<string, { schema?: BundledSchema }> }>;
+      }
+      interface BundledSpec {
+        paths?: Record<string, Record<string, BundledOp>>;
+        components?: { schemas?: Record<string, BundledSchema> };
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; the schema is structurally narrowed by the BundledSpec interface above and the lookups below are individually guarded.
+      const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as BundledSpec;
+      const components = spec.components?.schemas ?? {};
+      const resolveRef = (s: BundledSchema | undefined): BundledSchema | undefined => {
+        if (!s) return undefined;
+        if (!s.$ref) return s;
+        const name = s.$ref.split('/').pop();
+        return name ? components[name] : undefined;
+      };
+
+      let createDeploymentOp: BundledOp | undefined;
+      for (const methods of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(methods ?? {})) {
+          if (op?.operationId === 'createDeployment') {
+            createDeploymentOp = op;
+            break;
+          }
+        }
+        if (createDeploymentOp) break;
+      }
       expect(
-        createDeployment,
-        'createDeployment response shape not found in path-analyser/dist/extraction/response-shapes.json',
+        createDeploymentOp,
+        'createDeployment operation not found in bundled spec',
       ).toBeDefined();
-      if (!createDeployment) return;
-      const observedKeys = new Set(Object.keys(createDeployment.nestedSlices ?? {}));
+      if (!createDeploymentOp) return;
+
+      const successResponse =
+        createDeploymentOp.responses?.['200'] ?? createDeploymentOp.responses?.['201'];
+      const contentSchemas = Object.values(successResponse?.content ?? {});
+      const rootSchema = resolveRef(contentSchemas[0]?.schema);
+      const deploymentsProp = resolveRef(rootSchema?.properties?.deployments);
+      const deploymentItem = resolveRef(deploymentsProp?.items);
+      const specKeys = new Set(Object.keys(deploymentItem?.properties ?? {}));
+      expect(
+        specKeys.size,
+        'createDeployment response shape in the bundled spec has no deployments[] item properties — schema layout has changed and this invariant needs updating.',
+      ).toBeGreaterThan(0);
 
       const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'artifact-kinds.json');
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; ajv validates the shape at load time in production code paths.
       const abox = JSON.parse(readFileSync(aboxPath, 'utf8')) as {
         kinds: Array<{ deploymentSlices?: string[] }>;
+        nonArtifactWrapperKeys?: Array<{ key: string; rationale: string }>;
       };
       const declaredSlices = new Set(abox.kinds.flatMap((k) => k.deploymentSlices ?? []));
+      const allowlistKeys = new Set((abox.nonArtifactWrapperKeys ?? []).map((e) => e.key));
 
-      const onlyInExtractor = [...observedKeys].filter((k) => !declaredSlices.has(k)).sort();
-      const onlyInAbox = [...declaredSlices].filter((k) => !observedKeys.has(k)).sort();
+      const staleAboxSlices = [...declaredSlices].filter((k) => !specKeys.has(k)).sort();
+      const unacknowledgedSpecKeys = [...specKeys]
+        .filter((k) => !declaredSlices.has(k) && !allowlistKeys.has(k))
+        .sort();
+      const staleAllowlistKeys = [...allowlistKeys].filter((k) => !specKeys.has(k)).sort();
+
       expect(
-        { onlyInExtractor, onlyInAbox },
-        'Drift between artifact-kinds.json `deploymentSlices` and the wrapper keys the extractor observed on createDeployment. ' +
-          'Lift 16 / #256 made the ABox the source of truth — keep these two sets in sync. ' +
-          `onlyInExtractor=${JSON.stringify(onlyInExtractor)} means the extractor saw a slice not declared in any artifact-kind entry (add the slice to the appropriate kind's deploymentSlices). ` +
-          `onlyInAbox=${JSON.stringify(onlyInAbox)} means an artifact-kind declares a slice the upstream spec does not back (remove the stale entry, or wait for the upstream spec to publish the property).`,
-      ).toEqual({ onlyInExtractor: [], onlyInAbox: [] });
+        { staleAboxSlices, unacknowledgedSpecKeys, staleAllowlistKeys },
+        'Drift between artifact-kinds.json and the createDeployment wrapper keys in the bundled OpenAPI spec. ' +
+          'Lift 16 / #256 made the ABox the source of truth for the artifact-kind subset; non-artifact wrappers must be acknowledged in `nonArtifactWrapperKeys`. ' +
+          `staleAboxSlices=${JSON.stringify(staleAboxSlices)} means the ABox declares a deploymentSlice the upstream spec does not back (remove the stale entry). ` +
+          `unacknowledgedSpecKeys=${JSON.stringify(unacknowledgedSpecKeys)} means the spec ships a wrapper key that is neither modelled as an artifact-kind nor listed in nonArtifactWrapperKeys — add it to the appropriate kind's deploymentSlices, or add it to nonArtifactWrapperKeys with a rationale explaining why it is intentionally unmodelled. ` +
+          `staleAllowlistKeys=${JSON.stringify(staleAllowlistKeys)} means nonArtifactWrapperKeys still acknowledges a wrapper the spec has removed (delete the stale allowlist entry to keep the paper-trail honest).`,
+      ).toEqual({ staleAboxSlices: [], unacknowledgedSpecKeys: [], staleAllowlistKeys: [] });
     });
   },
 );
