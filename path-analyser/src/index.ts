@@ -8,6 +8,7 @@ import {
   getFeatureOutputDir,
   getScenariosDir,
   getTemplateScenariosDir,
+  getTemplateScenariosRootDir,
   getVariantOutputDir,
 } from './configResolver.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
@@ -490,12 +491,17 @@ async function main() {
   const edgesAbox = loadEdgesAbox(repoRoot);
   if (templatesAbox && edgesAbox) {
     const results = instantiateAllTemplates(graph, templatesAbox, edgesAbox, featureScenarioStash);
-    // Wipe + recreate per-template subdirectories so a removed
-    // edge / template can't leave a stale file behind.
+    // Wipe the ENTIRE templates partition first, then recreate the
+    // per-template subdirectories we actually produced. Deriving the
+    // wipe set from `results.map(r => r.templateName)` would miss
+    // templates removed from the ABox (or whose `appliesTo` changed
+    // to match no subject), leaving their previous per-template
+    // directory — and stale per-subject JSON inside it — on disk
+    // across runs. (#270 review.)
+    await rm(getTemplateScenariosRootDir(repoRoot), { recursive: true, force: true });
     const templatesByName = new Set(results.map((r) => r.templateName));
     for (const tplName of templatesByName) {
       const dir = getTemplateScenariosDir(repoRoot, tplName);
-      await rm(dir, { recursive: true, force: true });
       await mkdir(dir, { recursive: true });
     }
     for (const r of results) {

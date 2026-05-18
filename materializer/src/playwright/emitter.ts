@@ -22,6 +22,14 @@ import {
   materializeSupport,
 } from './materialize-support.js';
 import { renderRoleCallSite, renderRoleImports, stepMatchesRole } from './roleRenderer.js';
+import {
+  buildUrlExpression,
+  escapeQuotes,
+  renderEventualWait,
+  renderInlineStepLines,
+  stepNeedsAwaitForOp,
+  toOptionalAccessor,
+} from './stepRenderer.js';
 
 interface EmitOptions {
   outDir: string;
@@ -261,11 +269,16 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   //      rendered as a standalone `awaitEventually(...)` block after the
   //      producer's request/expect block; this trigger ensures the
   //      import is present even when no step is itself an EC read.
-  const needsAwaitEventually = collection.scenarios.some(
-    (s) =>
-      stepNeedsAwait(s).length > 0 ||
-      (s.requestPlan ?? []).some((step) => (step.eventualWaitsAfter?.length ?? 0) > 0),
-  );
+  const needsAwaitEventually = collection.scenarios.some((s) => {
+    const ecOps = new Set<string>();
+    for (const op of s.operations) {
+      if (op.eventuallyConsistent) ecOps.add(op.operationId);
+    }
+    return (
+      (s.requestPlan ?? []).some((step) => stepNeedsAwaitForOp(step, ecOps)) ||
+      (s.requestPlan ?? []).some((step) => (step.eventualWaitsAfter?.length ?? 0) > 0)
+    );
+  });
 
   // Default `recordResponses` to true so callers that omit the option keep
   // the pre-config behaviour. Threaded down into renderScenarioTest so the
@@ -524,7 +537,14 @@ function renderScenarioTest(
     return body.join('\n');
   }
   const requestPlan = s.requestPlan;
-  const awaitStepIndices = new Set(stepNeedsAwait(s));
+  // Source of truth for EC: each `s.operations[].eventuallyConsistent` (a flag
+  // the extractor stamps from the `x-eventually-consistent` vendor extension).
+  // The scenario-level summary fields are not populated for every scenario
+  // kind, so the per-op flag is consulted directly.
+  const ecOps = new Set<string>();
+  for (const op of s.operations) {
+    if (op.eventuallyConsistent) ecOps.add(op.operationId);
+  }
   requestPlan.forEach((step: RequestStep, idx: number) => {
     const varName = `resp${idx + 1}`;
     const urlExpr = buildUrlExpression(step.pathTemplate);
@@ -556,7 +576,7 @@ function renderScenarioTest(
       urlExpr,
       method,
       sentinelLocals,
-      awaitStepIndices,
+      shouldAwaitEventually: stepNeedsAwaitForOp(step, ecOps),
     });
     const roleMatch = findRoleForStep(step);
     if (roleMatch) {
@@ -691,258 +711,6 @@ function renderScenarioTest(
   });
   body.push('});');
   return body.join('\n');
-}
-
-function buildUrlExpression(pathTemplate: string): string {
-  // Replace {param} with string interpolation referencing ctx binding paramVar if exists
-  return (
-    '`' +
-    pathTemplate.replace(/\{([^}]+)\}/g, (_, p) => `\${ctx.${camelCase(p)}Var || '\${${p}}'}`) +
-    '`'
-  );
-}
-
-/**
- * Render the generic per-step inline code lines. Used both as the body
- * source for non-role steps (pushed directly onto the scenario body array)
- * and as `defaultRender` in the role scope so role templates can implement
- * a wrap pattern via `{{{defaultRender}}}` (see ROLES.md).
- */
-interface InlineStepRenderInput {
-  step: RequestStep;
-  idx: number;
-  varName: string;
-  urlExpr: string;
-  method: string;
-  sentinelLocals: Map<string, string>;
-  awaitStepIndices: Set<number>;
-}
-function renderInlineStepLines({
-  step,
-  idx,
-  varName,
-  urlExpr,
-  method,
-  sentinelLocals,
-  awaitStepIndices,
-}: InlineStepRenderInput): string[] {
-  const lines: string[] = [];
-  const bodyVar = `body${idx + 1}`;
-  lines.push(`    const url = baseUrl + ${urlExpr};`);
-  if (step.bodyKind === 'json' && step.bodyTemplate) {
-    const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
-      /"\\?\$\{([^}]+)\}"/g,
-      (_, v) => `ctx["${v}"]`,
-    );
-    lines.push(`    const ${bodyVar} = ${json};`);
-  } else if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-    // Non-createDeployment multipart template
-    const tpl = JSON.stringify(step.multipartTemplate, null, 4).replace(
-      /"\\?\$\{([^}]+)\}"/g,
-      (_, v) => `ctx["${v}"]`,
-    );
-    lines.push(`    const ${bodyVar} = ${tpl};`);
-  }
-  const opts: string[] = [];
-  opts.push('headers: await authHeaders()');
-  if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
-  if (step.bodyKind === 'multipart' && step.multipartTemplate) {
-    // Convert template to Playwright's expected multipart shape: a keyed object map.
-    // Field values are stringified (`String(v)`); file values are passed as
-    // `{ name, mimeType, buffer }`. The element type below mirrors the
-    // permissive subset of Playwright's `multipart` option that we actually
-    // emit, so the generated suite typechecks under `strict: true` when
-    // `request.post({ multipart })` is called.
-    lines.push(
-      `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
-    );
-    lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
-    // Emit a strip branch for every globalContextSeeds entry whose
-    // sentinel local was declared in the prologue. The emitter never
-    // hard-codes a field name here — the field name is the metadata key
-    // and the local was named after it.
-    for (const [fieldName, local] of sentinelLocals) {
-      lines.push(`      if (k === '${fieldName}' && ${local}) continue;`);
-    }
-    lines.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
-    lines.push(`    }`);
-    lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
-        if (typeof v === 'string' && v.startsWith('@@FILE:')) {
-          const p = v.slice('@@FILE:'.length);
-          const buf = await resolveFixture(p);
-          const name = p.split('/').pop() || 'file';
-          multipart[k] = { name, mimeType: 'application/octet-stream', buffer: buf };
-        } else {
-          multipart[k] = String(v);
-        }
-      }`);
-    opts.push('multipart: multipart');
-  }
-  // (#106) Eventually-consistent reads are wrapped with awaitEventually(),
-  // which retries the same request within a budget until the response is
-  // observably consistent (default predicate for POST .../search:
-  // `body.items.length > 0`; for GET: any 200) and returns the final
-  // APIResponse. Non-EC steps go straight through `request.${method}`.
-  if (awaitStepIndices.has(idx)) {
-    lines.push(`    const ${varName} = await awaitEventually(`);
-    lines.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
-    lines.push(
-      `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
-    );
-    lines.push(`    );`);
-  } else {
-    lines.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
-  }
-  lines.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
-  lines.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
-  lines.push(`    }`);
-  lines.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
-  return lines;
-}
-
-function escapeQuotes(s: string): string {
-  return s.replace(/'/g, "'");
-}
-function camelCase(s: string) {
-  return s.charAt(0).toLowerCase() + s.slice(1);
-}
-
-/**
- * Render a planner-annotated eventual-state wait as a sibling block to a
- * producer step (#159 PR B). The emitted code:
- *
- *   - resolves the witness URL with the same ctx-binding rewrite the
- *     request steps use (`buildUrlExpression`), so a witness referencing
- *     `{processInstanceKey}` picks up `ctx.processInstanceKeyVar` already
- *     extracted from the producer's response;
- *   - wraps the witness fetch in `awaitEventually(...)` with a structured
- *     predicate generated from the spec — no user-supplied predicate
- *     string is interpolated, so the on-disk config cannot smuggle
- *     arbitrary code into the emitted suite.
- *
- * Returns the source lines (no trailing newlines) for direct push onto
- * the scenario body buffer.
- *
- * Safety: the witness predicate's `path` is validated against
- * `/^[A-Za-z_$][A-Za-z0-9_$]*$/` by the domain-semantics validator
- * (`WitnessPredicateSchema`), so the bracket-access key emitted below
- * is identifier-safe. `equals` is constrained to string|number|boolean,
- * round-tripped through JSON.stringify, which produces a valid TS
- * literal for each of those scalar shapes.
- */
-function renderEventualWait(wait: EventualWaitSpec, idx: number): string[] {
-  const out: string[] = [];
-  const w = wait.witness;
-  const respVar = `witnessResp${idx + 1}`;
-  out.push(`  // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
-  out.push(`  {`);
-  out.push(`    const witnessUrl = baseUrl + ${buildUrlExpression(w.pathTemplate)};`);
-  const optionFields: string[] = [
-    `method: '${w.method.toUpperCase()}'`,
-    `operationId: '${w.operationId}'`,
-  ];
-  if (typeof w.waitUpToMs === 'number') optionFields.push(`waitUpToMs: ${w.waitUpToMs}`);
-  if (typeof w.pollIntervalMs === 'number')
-    optionFields.push(`pollIntervalMs: ${w.pollIntervalMs}`);
-  // Predicate body: narrow `unknown` to a record, read the configured
-  // top-level field, compare with the configured scalar. Indentation
-  // matches the surrounding `await awaitEventually(...)` call so the
-  // emitted file passes biome's formatter without a separate pass.
-  optionFields.push(`predicate: (body) => {
-        if (body === null || typeof body !== 'object') return false;
-        const v = (body as Record<string, unknown>)['${w.predicate.path}'];
-        return v === ${JSON.stringify(w.predicate.equals)};
-      }`);
-  const method = w.method.toLowerCase();
-  // Capture awaitEventually's return value and assert on the status the
-  // same way request-step blocks do. awaitEventually returns early
-  // (without throwing) on hard-fail statuses (400/401/403/409/422/5xx)
-  // so the caller can produce a useful diff via expect(...).toBe(200);
-  // ignoring the response (the pre-review shape) would let the scenario
-  // proceed to the consumer step and attribute the eventual failure to
-  // the wrong place. The 200 assertion below tags the failure to the
-  // witness wait. (#159 PR B review.)
-  out.push(`    const ${respVar} = await awaitEventually(`);
-  out.push(`      async () => request.${method}(witnessUrl, { headers: await authHeaders() }),`);
-  out.push(`      {`);
-  for (let i = 0; i < optionFields.length; i++) {
-    const sep = i === optionFields.length - 1 ? '' : ',';
-    out.push(`        ${optionFields[i]}${sep}`);
-  }
-  out.push(`      },`);
-  out.push(`    );`);
-  out.push(`    if (${respVar}.status() !== 200) {`);
-  out.push(
-    `      try { console.error('Witness response body:', await ${respVar}.text()); } catch {}`,
-  );
-  out.push(`    }`);
-  out.push(`    expect(${respVar}.status()).toBe(200);`);
-  out.push(`  }`);
-  return out;
-}
-
-/**
- * Decide which request steps in a scenario should be wrapped with
- * `awaitEventually(...)`. A step is wrapped iff:
- *
- *   1. its `operationId` is listed in `scenario.eventualConsistencyOps`
- *      (the planner marks ops whose authoritative outputs land in
- *      Operate/Tasklist secondary storage with indexing lag); AND
- *   2. it is a *read* step — `GET` or `POST .../search` — because the
- *      poller's retry semantics (404-on-GET, items.length predicate)
- *      apply to reads, not to writes. A write that is itself flagged
- *      EC returns 200 quickly; the lag manifests on the *next* read; AND
- *   3. it expects a `200` (we never poll an error scenario).
- *
- * Returns the set of step indices the emitter should wrap. Exposed
- * (un-exported, file-local) so the import-needed check at the top of
- * `buildSuiteSource` and the per-step wrap decision share one
- * predicate — they cannot drift.
- */
-function stepNeedsAwait(s: EndpointScenario): number[] {
-  if (!s.requestPlan) return [];
-  // Source of truth: each `s.operations[].eventuallyConsistent` (a flag the
-  // extractor stamps from the `x-eventually-consistent` vendor extension).
-  // The `s.eventualConsistencyOps`/`s.hasEventuallyConsistent` fields are
-  // *summaries* the planner computes for some scenario kinds (multi-step
-  // chains, trivial scenarios) but not all (featureCoverage scenarios
-  // leave them undefined). Reading the per-op flag directly avoids that
-  // gap.
-  const ecOps = new Set<string>();
-  for (const op of s.operations) {
-    if (op.eventuallyConsistent) ecOps.add(op.operationId);
-  }
-  if (ecOps.size === 0) return [];
-  const out: number[] = [];
-  for (let i = 0; i < s.requestPlan.length; i++) {
-    const step = s.requestPlan[i];
-    if (!ecOps.has(step.operationId)) continue;
-    if (step.expect.status !== 200) continue;
-    const method = step.method.toUpperCase();
-    const isReadShape =
-      method === 'GET' || (method === 'POST' && /\/search\/?$/.test(step.pathTemplate));
-    if (!isReadShape) continue;
-    out.push(i);
-  }
-  return out;
-}
-
-// Build an accessor using optional chaining for nested/array paths, e.g. a.b[0].c -> ?.a?.b?.[0]?.c
-function toOptionalAccessor(fieldPath: string): string {
-  // Similar to toPathAccessor but with optional chaining and safe array index segments
-  const parts = fieldPath.split('.');
-  return parts
-    .map((p, i) => {
-      const m = p.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(\[[0-9]+\])?$/);
-      if (m) {
-        const base = `${i === 0 ? '?.' : '?.'}${m[1]}`; // always prefix with ?.
-        const idx = m[2] ? `?.${m[2]}` : '';
-        return base + idx;
-      }
-      // fallback for unusual keys
-      return `?.['${p.replace(/'/g, "\\'")}']`;
-    })
-    .join('');
 }
 
 // Produce a seeded value expression for a binding variable name (string generation focus).

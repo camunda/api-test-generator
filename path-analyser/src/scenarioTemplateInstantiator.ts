@@ -224,6 +224,26 @@ function compileEdgeLifecycle(
 
   const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
 
+  // Aggregate the set of operationIds across all five steps whose source
+  // OperationSpec carries `eventuallyConsistent: true`. Threaded onto the
+  // compiled TemplateScenario so the emitter can wrap read-shape steps in
+  // `awaitEventually(...)` (the same predicate the per-endpoint emitter
+  // uses). Without this, lifecycle suites whose observe step targets an
+  // eventually-consistent search op would race the establish/revoke
+  // mutation. (#270 review.)
+  const allOpIds = new Set<string>([
+    ...prereqOps.map((o) => o.operationId),
+    edge.establishedBy,
+    edge.observableVia,
+    edge.revokedBy,
+  ]);
+  const eventuallyConsistentOps: string[] = [];
+  for (const opId of allOpIds) {
+    const op = graph.operations[opId];
+    if (op?.eventuallyConsistent) eventuallyConsistentOps.push(opId);
+  }
+  eventuallyConsistentOps.sort();
+
   const steps: TemplateStep[] = [
     {
       kind: 'prereqChain',
@@ -282,6 +302,7 @@ function compileEdgeLifecycle(
       subjectKind: 'Edge',
       steps,
       bindings,
+      eventuallyConsistentOps,
     },
   };
 }

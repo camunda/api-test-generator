@@ -6,6 +6,15 @@ import type {
   RequestStep,
   TemplateScenarioFile,
 } from 'path-analyser/types';
+import {
+  buildUrlExpression,
+  escapeQuotes,
+  reindent,
+  renderEventualWait,
+  renderInlineStepLines,
+  stepNeedsAwaitForOp,
+  toOptionalAccessor,
+} from './stepRenderer.js';
 
 /**
  * Per-suite globals used by the universal-seed prologue (Lift 22 / #270).
@@ -155,10 +164,16 @@ function renderLifecycleSuite(
     revoke.requestPlan,
     observeAbsent.requestPlan,
   ];
+  const ecOps = new Set<string>(scenario.eventuallyConsistentOps ?? []);
+  // `needsAwaitEventually` covers BOTH eventual-state waits (PR B style
+  // annotated waits) AND read-shape steps whose operationId is in the
+  // ABox EC set. The latter mirrors the per-endpoint emitter's wrap
+  // decision (`stepNeedsAwaitForOp`) so the two emitters cannot drift
+  // on which steps get awaitEventually() wrapping.
   const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
-  const needsAwaitEventually = allRequestSteps.some(
-    (rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0,
-  );
+  const needsAwaitEventually =
+    allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps));
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
@@ -210,7 +225,7 @@ function renderLifecycleSuite(
   let stepIdx = 0;
   for (const rp of prereq.requestPlan) {
     lines.push('');
-    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`);
+    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
     stepIdx++;
   }
 
@@ -221,12 +236,13 @@ function renderLifecycleSuite(
     establish.requestPlan,
     stepIdx,
     `invoke (establish): ${establish.operationId}`,
+    ecOps,
   );
   stepIdx++;
 
   // (5) observe present
   lines.push('');
-  appendObserveStep(lines, observePresent, scenario.bindings, stepIdx, 'observe (present)');
+  appendObserveStep(lines, observePresent, scenario.bindings, stepIdx, 'observe (present)', ecOps);
   stepIdx++;
 
   // (6) revoke invoke
@@ -236,12 +252,13 @@ function renderLifecycleSuite(
     revoke.requestPlan,
     stepIdx,
     `invoke (revoke): ${revoke.operationId}`,
+    ecOps,
   );
   stepIdx++;
 
   // (7) observe absent
   lines.push('');
-  appendObserveStep(lines, observeAbsent, scenario.bindings, stepIdx, 'observe (absent)');
+  appendObserveStep(lines, observeAbsent, scenario.bindings, stepIdx, 'observe (absent)', ecOps);
 
   lines.push('  });');
   lines.push('});');
@@ -249,72 +266,41 @@ function renderLifecycleSuite(
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Per-step rendering — delegates to the shared `stepRenderer` module so
+// the template and per-endpoint emitters cannot drift on placeholder
+// substitution, eventual-consistency wrapping, body emission, status
+// assertion, or extract shape (#270 review: avoid the divergence class).
+// ---------------------------------------------------------------------------
+
+const EXTRA_INDENT = '  '; // +2 spaces vs the shared renderer's 4-space baseline
+const WAIT_INDENT = '    '; // +4 spaces: waits indent at the inner test-step depth
+
 function appendInlineRequestStep(
   lines: string[],
   step: RequestStep,
   idx: number,
   label: string,
+  ecOps: ReadonlySet<string>,
 ): void {
   const respVar = `resp${idx + 1}`;
-  const bodyVar = `body${idx + 1}`;
   const urlExpr = buildUrlExpression(step.pathTemplate);
   const method = step.method.toLowerCase();
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
-  lines.push(`      const url = baseUrl + ${urlExpr};`);
-  const opts: string[] = ['headers: await authHeaders()'];
-  if (step.bodyKind === 'json' && step.bodyTemplate !== undefined) {
-    const json = JSON.stringify(step.bodyTemplate, null, 2).replace(
-      /"\$\{([^}]+)\}"/g,
-      (_, v) => `ctx['${v}']`,
-    );
-    // Indent the JSON literal so it lines up with the surrounding two-level
-    // (8-space) body — pretty-printing without this leaves the inner lines
-    // at column 0 and trips the suite's strict tsconfig include via Biome.
-    const indented = json.replace(/\n/g, '\n      ');
-    lines.push(`      const ${bodyVar} = ${indented};`);
-    opts.push(`data: ${bodyVar}`);
-  }
-  lines.push(`      const ${respVar} = await request.${method}(url, { ${opts.join(', ')} });`);
-  lines.push(`      if (${respVar}.status() !== ${step.expect.status}) {`);
-  lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
-  lines.push('      }');
-  lines.push(`      expect(${respVar}.status()).toBe(${step.expect.status});`);
-  // Response extraction. Mirrors the per-endpoint emitter's per-step
-  // extract loop so a planner-annotated extract (e.g. server-assigned
-  // RoleId echoed in the createRole response) flows back into ctx and
-  // is visible to later prereq / invoke / observe steps. Without this,
-  // a future template whose establisher consumes a server-generated
-  // identifier (rather than the client-seeded one OCA edges happen to
-  // use) would silently send `undefined` and the suite would 4xx at
-  // runtime with no diagnostic at emit time.
-  const extracts = step.extract ?? [];
-  if (extracts.length > 0) {
-    // Parse the response body ONCE per step. A previous shape declared
-    // `const jsonN = await ${respVar}.json()` inside the per-extract
-    // loop, which redeclared the same identifier when a step had more
-    // than one extract and broke the strict-mode generated-suites
-    // typecheck. The per-endpoint emitter does the same single-parse
-    // pattern (materializer/src/playwright/emitter.ts).
-    lines.push(`      const json${idx + 1} = await ${respVar}.json();`);
-    for (const ex of extracts) {
-      if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
-        throw new Error(
-          `Refusing to emit extract for non-identifier bind name '${ex.bind}' (operationId=${step.operationId}).`,
-        );
-      }
-      lines.push(
-        `      extractInto(ctx, '${ex.bind}', ${buildOptionalAccessChain(`json${idx + 1}`, ex.fieldPath.split('.'))});`,
-      );
-    }
-  }
+  // The shared `renderInlineStepLines` returns lines at 4-space indent
+  // (the per-endpoint emitter's baseline). Re-indent by +2 to fit the
+  // template suite's deeper nesting (`describe → test → test.step`).
+  const inline = renderInlineStepLines({
+    step,
+    idx,
+    varName: respVar,
+    urlExpr,
+    method,
+    shouldAwaitEventually: stepNeedsAwaitForOp(step, ecOps),
+  });
+  for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  appendExtracts(lines, step, respVar, idx, '      ');
   lines.push('    });');
-  // Planner-annotated eventual-state waits (#159 PR B) — emitted as a
-  // sibling block at the same indentation as the test step so the
-  // wait's locals stay isolated. None of the current OCA edges
-  // populate `eventualWaitsAfter`, but future Edge-scoped templates
-  // whose establishers transition through an eventual state will,
-  // and silently dropping the planner's annotation here would race
-  // the subsequent observe step.
   for (const wait of step.eventualWaitsAfter ?? []) {
     appendEventualWait(lines, wait, idx);
   }
@@ -326,37 +312,29 @@ function appendObserveStep(
   scenarioBindings: Record<string, string>,
   idx: number,
   label: string,
+  ecOps: ReadonlySet<string>,
 ): void {
   const respVar = `resp${idx + 1}`;
   const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
   const method = step.requestPlan.method.toLowerCase();
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
-  lines.push(`      const url = baseUrl + ${urlExpr};`);
-  const opts: string[] = ['headers: await authHeaders()'];
-  if (step.requestPlan.bodyKind === 'json' && step.requestPlan.bodyTemplate !== undefined) {
-    const json = JSON.stringify(step.requestPlan.bodyTemplate, null, 2).replace(
-      /"\$\{([^}]+)\}"/g,
-      (_, v) => `ctx['${v}']`,
-    );
-    const indented = json.replace(/\n/g, '\n      ');
-    lines.push(`      const body${idx + 1} = ${indented};`);
-    opts.push(`data: body${idx + 1}`);
-  }
-  lines.push(`      const ${respVar} = await request.${method}(url, { ${opts.join(', ')} });`);
-  lines.push(`      expect(${respVar}.status()).toBe(${step.requestPlan.expect.status});`);
-  // Body extraction + membership assertion. The array lives at `arrayPath`
-  // under the parsed JSON. `unknown` is preserved through the access chain;
-  // the per-step `.map(...)` callback type-asserts via a runtime guard so
-  // the emitted suite typechecks under `strict: true`.
+  const inline = renderInlineStepLines({
+    step: step.requestPlan,
+    idx,
+    varName: respVar,
+    urlExpr,
+    method,
+    shouldAwaitEventually: stepNeedsAwaitForOp(step.requestPlan, ecOps),
+  });
+  for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  // Membership assertion (template-unique). Walks the planner-declared
+  // arrayPath into the parsed body, projects each element via the
+  // `elementField` chain (dotted paths supported), and asserts
+  // presence/absence of the scenario-bound value.
   lines.push(`      const __body = await ${respVar}.json();`);
   const accessChain = buildOptionalAccessChain('__body', step.assertion.arrayPath);
   lines.push(`      const __raw = ${accessChain};`);
   lines.push('      const __arr = Array.isArray(__raw) ? __raw : [];');
-  // `elementField` can be a dotted path (e.g. `member.username` for
-  // `data.items[].member.username`) — see findMembershipArrayPath's
-  // field-path parsing doc. A literal `['member.username']` lookup
-  // would always miss; resolve via an optional-access chain per
-  // element instead.
   const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
   if (elementSegments.length === 0) {
     throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
@@ -369,99 +347,78 @@ function appendObserveStep(
   );
   const verb = step.assertion.expect === 'present' ? 'toContain' : 'not.toContain';
   lines.push(`      expect(__values).${verb}(ctx['${bindingName}']);`);
-  // Planner-annotated extracts on the observe step's request plan
-  // (mirrors the per-endpoint emitter's per-step extract loop). None
-  // of the current OCA edge observers populate `extract`, but the
-  // loader contract permits it and silently dropping the annotation
-  // would surface as a stale ctx for any consumer-of-observer
-  // template authored after Phase 2.
+  // Note: the shared `renderInlineStepLines` does not emit extracts —
+  // those live here at the appender layer so the membership assertion
+  // sits between the inline call and any planner-declared extracts.
+  // The observe step parses the body once for the membership read above;
+  // any extracts re-use `__body` rather than re-parsing.
   for (const ex of step.requestPlan.extract ?? []) {
     if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
       throw new Error(
         `Refusing to emit extract for non-identifier bind name '${ex.bind}' (observe operationId=${step.operationId}).`,
       );
     }
-    lines.push(
-      `      extractInto(ctx, '${ex.bind}', ${buildOptionalAccessChain('__body', ex.fieldPath.split('.'))});`,
-    );
+    lines.push(`      extractInto(ctx, '${ex.bind}', __body${toOptionalAccessor(ex.fieldPath)});`);
   }
   lines.push('    });');
-  // Symmetrical eventual-wait emission for the observe step's request
-  // plan; see `appendInlineRequestStep` for rationale.
   for (const wait of step.requestPlan.eventualWaitsAfter ?? []) {
     appendEventualWait(lines, wait, idx);
   }
 }
 
-function appendEventualWait(lines: string[], wait: EventualWaitSpec, stepIdx: number): void {
-  // #159 PR B-equivalent wait block, emitted at the same indentation as
-  // the sibling `test.step(...)` call so the wait's locals (`witnessUrl`,
-  // `witnessRespN`) stay out of the step's closure. The predicate body
-  // narrows `unknown` to a record before the top-level field read so the
-  // emitted suite typechecks under strict mode.
-  const respVar = `witnessResp${stepIdx + 1}`;
-  const w = wait.witness;
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(w.predicate.path)) {
-    throw new Error(
-      `Refusing to emit witness predicate with non-identifier path '${w.predicate.path}'.`,
+function appendExtracts(
+  lines: string[],
+  step: RequestStep,
+  respVar: string,
+  idx: number,
+  indent: string,
+): void {
+  const extracts = step.extract ?? [];
+  if (extracts.length === 0) return;
+  // Single-parse pattern: `await respVar.json()` once, then reuse.
+  // Matches the per-endpoint emitter (emitter.ts) so a multi-extract
+  // step cannot redeclare `jsonN` and break the strict-mode generated-
+  // suites typecheck.
+  const jsonVar = `json${idx + 1}`;
+  lines.push(`${indent}const ${jsonVar} = await ${respVar}.json();`);
+  for (const ex of extracts) {
+    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
+      throw new Error(
+        `Refusing to emit extract for non-identifier bind name '${ex.bind}' (operationId=${step.operationId}).`,
+      );
+    }
+    lines.push(
+      `${indent}extractInto(ctx, '${ex.bind}', ${jsonVar}${toOptionalAccessor(ex.fieldPath)});`,
     );
   }
-  lines.push(`    // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
-  lines.push('    {');
-  lines.push(`      const witnessUrl = baseUrl + ${buildUrlExpression(w.pathTemplate)};`);
-  const optionLines: string[] = [];
-  optionLines.push(`        method: '${w.method.toUpperCase()}',`);
-  optionLines.push(`        operationId: '${w.operationId}',`);
-  if (typeof w.waitUpToMs === 'number') {
-    optionLines.push(`        waitUpToMs: ${w.waitUpToMs},`);
+}
+
+function appendEventualWait(lines: string[], wait: EventualWaitSpec, stepIdx: number): void {
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(wait.witness.predicate.path)) {
+    throw new Error(
+      `Refusing to emit witness predicate with non-identifier path '${wait.witness.predicate.path}'.`,
+    );
   }
-  if (typeof w.pollIntervalMs === 'number') {
-    optionLines.push(`        pollIntervalMs: ${w.pollIntervalMs},`);
+  // Shared `renderEventualWait` emits at 2-space indent (sibling to the
+  // per-endpoint emitter's `test.step` at top-level). Template needs
+  // +4 spaces to sit as a sibling to its inner `await test.step(...)`.
+  for (const line of reindent(renderEventualWait(wait, stepIdx), WAIT_INDENT)) {
+    lines.push(line);
   }
-  optionLines.push('        predicate: (body) => {');
-  optionLines.push('          if (body === null || typeof body !== "object") return false;');
-  optionLines.push(`          const v = (body as Record<string, unknown>)['${w.predicate.path}'];`);
-  optionLines.push(`          return v === ${JSON.stringify(w.predicate.equals)};`);
-  optionLines.push('        },');
-  const method = w.method.toLowerCase();
-  lines.push(`      const ${respVar} = await awaitEventually(`);
-  lines.push(
-    `        async () => request.${method}(witnessUrl, { headers: await authHeaders() }),`,
-  );
-  lines.push('        {');
-  for (const ol of optionLines) lines.push(ol);
-  lines.push('        },');
-  lines.push('      );');
-  lines.push(`      if (${respVar}.status() !== 200) {`);
-  lines.push(
-    `        try { console.error('Witness response body:', await ${respVar}.text()); } catch {}`,
-  );
-  lines.push('      }');
-  lines.push(`      expect(${respVar}.status()).toBe(200);`);
-  lines.push('    }');
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Template-local helpers (not part of the shared step-renderer contract)
 // ---------------------------------------------------------------------------
-
-function buildUrlExpression(pathTemplate: string): string {
-  // `{paramName}` → `${ctx[paramNameVar] ?? '{paramName}'}`. The fallback to
-  // the literal placeholder is defensive: when a path-param binding is
-  // missing the broker will 4xx with a recognisable URL rather than the
-  // ambiguous string "undefined".
-  return (
-    '`' +
-    pathTemplate.replace(/\{([^}]+)\}/g, (_, p) => `\${ctx['${camelCase(p)}Var'] ?? '{${p}}'}`) +
-    '`'
-  );
-}
 
 function buildOptionalAccessChain(rootExpr: string, segments: readonly string[]): string {
   // Optional chain over a `unknown` root: cast each level to an indexable
-  // record. Keeps the emitted suite strict-mode clean because the array
-  // path may be deeply nested (`['data', 'rows']` etc.) and an intermediate
-  // `null` / `undefined` would otherwise throw at runtime.
+  // record. Used by the observe-step membership assertion's array-path
+  // walk and per-element field projection. Kept local because the
+  // per-endpoint emitter's extract path uses `toOptionalAccessor`
+  // (string-based dotted paths) instead; the membership assertion
+  // operates on an already-segmented path so a different shape is
+  // appropriate.
   let acc = rootExpr;
   for (const seg of segments) {
     acc = `(${acc} as Record<string, unknown> | null | undefined)?.['${seg}']`;
@@ -487,12 +444,4 @@ function resolveBindingNameForSemantic(
     );
   }
   return `${semanticType.charAt(0).toLowerCase()}${semanticType.slice(1)}Var`;
-}
-
-function escapeQuotes(s: string): string {
-  return s.replace(/'/g, "\\'");
-}
-
-function camelCase(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
 }

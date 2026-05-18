@@ -922,6 +922,17 @@ export interface TemplateScenario {
    * code paths apply unchanged.
    */
   bindings: Record<string, string>;
+  /**
+   * Aggregated set of `operationId`s in this template scenario whose
+   * source `OperationSpec.eventuallyConsistent` flag is `true` (i.e.
+   * the spec carries the `x-eventually-consistent` vendor extension).
+   * Threaded through so the template emitter can wrap read-shape steps
+   * in `awaitEventually(...)` exactly like the per-endpoint emitter
+   * does — without re-consulting the dependency graph at emission
+   * time. Empty list is permitted (and is the common case for OCA
+   * edges); the field is required to make the contract explicit.
+   */
+  eventuallyConsistentOps: string[];
 }
 
 /**
