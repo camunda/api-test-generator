@@ -5513,18 +5513,36 @@ describeForThisConfig(
       const fixtureKinds = new Set(registry.artifacts.map((a) => a.kind));
 
       const orphans: Array<{ operationId: string; kind: string }> = [];
+      const malformedRules: Array<{ operationId: string; ruleIndex: number }> = [];
       for (const opRule of abox.operationRules ?? []) {
-        for (const r of opRule.rules ?? []) {
-          if (r.artifactKind && !fixtureKinds.has(r.artifactKind)) {
+        const rules = opRule.rules ?? [];
+        for (let i = 0; i < rules.length; i++) {
+          const r = rules[i];
+          if (!r?.artifactKind) {
+            // The TBox declares `artifactKind` required on every
+            // ArtifactRule entry (ajv-validated by loadArtifactKindsAbox),
+            // so reaching here means the ABox was loaded through a path
+            // that bypassed schema validation. Treat it as a defect:
+            // a silently-skipped malformed rule will fail at runtime
+            // with the much less actionable "no fixture" error from
+            // path-analyser/src/index.ts.
+            malformedRules.push({ operationId: opRule.operationId, ruleIndex: i });
+            continue;
+          }
+          if (!fixtureKinds.has(r.artifactKind)) {
             orphans.push({ operationId: opRule.operationId, kind: r.artifactKind });
           }
         }
       }
       expect(
+        malformedRules,
+        `ABox operationRules contain entries with a missing/empty \`artifactKind\` — the TBox declares this field required (ajv-validated at load time), so its absence here means the file was loaded outside the validated path. Restore the \`artifactKind\` field on each malformed rule. Malformed: ${JSON.stringify(malformedRules)}`,
+      ).toEqual([]);
+      expect(
         orphans,
-        `Artifact-kind(s) referenced by an ABox operationArtifactRules entry have no fixture of that kind in fixtures/deployment-artifacts.json. ` +
+        `Artifact-kind(s) referenced by an ABox operationRules entry have no fixture of that kind in fixtures/deployment-artifacts.json. ` +
           `Lift 17 / #257 retired the silent OCA-flavoured default-fixtures map, so a missing fixture now throws at pipeline time. ` +
-          `Either add a fixture of the named kind, or remove the rule from operationArtifactRules. ` +
+          `Either add a fixture of the named kind, or remove the rule from operationRules. ` +
           `Orphans: ${JSON.stringify(orphans)}`,
       ).toEqual([]);
     });

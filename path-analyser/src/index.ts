@@ -1214,8 +1214,8 @@ function buildRequestBodyFromCanonical(
         // resolves to at least one registry fixture" catches the
         // recurring shape of this defect at build time.
         throw new Error(
-          `No deployment fixture available for operationId="${opId}", artifactKind="${kind ?? '(unresolved — declare operationArtifactRules.' + opId + '.rules[0].artifactKind in the ABox)'}". ` +
-            `Add a fixture entry of kind "${kind ?? '<kind>'}" to the active config's fixtures/deployment-artifacts.json, or declare a default ABox rule under operationArtifactRules.${opId}.rules. ` +
+          `No deployment fixture available for operationId="${opId}", artifactKind="${kind ?? '(unresolved — declare operationRules[operationId="' + opId + '"].rules[0].artifactKind in the active config\'s ontology/artifact-kinds.json ABox)'}". ` +
+            `Add a fixture entry of kind "${kind ?? '<kind>'}" to the active config's fixtures/deployment-artifacts.json, or declare a default ABox rule under operationRules[operationId="${opId}"].rules. ` +
             `Lift 17 / #257 removed the silent OCA-flavoured fallback (@@FILE:bpmn/simple.bpmn) that previously masked this case.`,
         );
       }
