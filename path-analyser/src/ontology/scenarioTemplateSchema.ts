@@ -77,7 +77,7 @@ export const scenarioTemplateSchema = {
     ScenarioTemplate: {
       type: 'object',
       additionalProperties: false,
-      required: ['name', 'appliesTo', 'steps', 'description'],
+      required: ['name', 'appliesTo', 'steps'],
       properties: {
         '@type': {
           description: 'Optional JSON-LD type IRI. Ignored by the loader.',

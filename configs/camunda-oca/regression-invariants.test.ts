@@ -6439,7 +6439,7 @@ describeForThisConfig(
       // against the subject's ABox entry. This invariant catches a
       // typo or a renamed role at encoding time, before the planner
       // (#270) ever runs.
-      const { loadScenarioTemplatesAbox, loadEdgesAbox } = await import(
+      const { loadScenarioTemplatesAbox } = await import(
         '../../path-analyser/src/ontology/loader.js'
       );
       const templates = loadScenarioTemplatesAbox(REPO_ROOT);
@@ -6481,13 +6481,26 @@ describeForThisConfig(
       const edges = loadEdgesAbox(REPO_ROOT);
       if (!templates) throw new Error('scenario-templates ABox missing');
       if (!edges) throw new Error('edges ABox missing');
+      // Phase 1 pins exactly one Edge-scoped template named
+      // `EdgeLifecycle` that applies uniformly to every edge. Pinning
+      // the name + sole-Edge-template shape catches a rename, an
+      // accidental scope change to a non-Edge kind, or a silent
+      // removal — any of which would otherwise pass a "≥ 1 Edge
+      // template" check while breaking #270's planner consumption.
       const edgeTemplates = templates.templates.filter((t) => t.appliesTo.kind === 'Edge');
-      expect(edgeTemplates.length, 'at least one Edge-scoped template must exist').toBeGreaterThan(
-        0,
-      );
-      // Phase 1 templates apply uniformly to every edge — there is no
-      // per-edge filter expression in the TBox. A future per-edge
-      // selector would refine this invariant rather than replace it.
+      expect(
+        edgeTemplates.length,
+        'Phase 1 expects exactly one Edge-scoped template; a future per-edge selector would refine this invariant rather than replace it',
+      ).toBe(1);
+      expect(
+        edgeTemplates[0].name,
+        "the sole Edge-scoped template must be named 'EdgeLifecycle' (Phase 1 / #269); rename requires updating planner consumption in #270",
+      ).toBe('EdgeLifecycle');
+      // Coverage is structural in Phase 1: templates apply uniformly
+      // to every edge — there is no per-edge filter expression in the
+      // TBox. Asserting the edge ABox is non-empty pins the "every
+      // edge is covered" intent against a future regression where
+      // edges.json gets accidentally cleared.
       expect(edges.edges.length).toBeGreaterThan(0);
     });
 

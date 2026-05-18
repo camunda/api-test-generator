@@ -41,8 +41,7 @@
       "required": [
         "name",
         "appliesTo",
-        "steps",
-        "description"
+        "steps"
       ],
       "properties": {
         "@type": {
