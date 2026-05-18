@@ -7,16 +7,20 @@ import {
   getActiveConfigDir,
   getFeatureOutputDir,
   getScenariosDir,
+  getTemplateScenariosDir,
+  getTemplateScenariosRootDir,
   getVariantOutputDir,
 } from './configResolver.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
+import { loadEdgesAbox, loadScenarioTemplatesAbox } from './ontology/loader.js';
 import { isDeploymentGatewayOp, isJobActivatorOp } from './ontology/operationRoles.js';
 import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
 } from './scenarioGenerator.js';
+import { instantiateAllTemplates, type ScenarioStash } from './scenarioTemplateInstantiator.js';
 import { computeSeedBindings } from './seedBindings.js';
 import type {
   ArtifactRegistryEntry,
@@ -165,6 +169,13 @@ async function main() {
   let processed = 0;
   // Aggregate deployment artifacts referenced by scenarios for manifest output
   const artifactsManifest = new Map<string, { kind: string; path: string; description?: string }>();
+  // #270: per-endpoint feature scenario stash. Populated as each
+  // endpoint is processed below with the first fully-planned feature
+  // scenario (`requestPlan` and `seedBindings` already stamped). The
+  // scenario template instantiator reads from this stash after the
+  // loop, so prereq-chain construction reuses the BFS planner's
+  // output verbatim instead of re-implementing it for templates.
+  const featureScenarioStash: ScenarioStash = new Map();
 
   for (const op of Object.values(graph.operations)) {
     // Generate scenarios for every endpoint, even if it has no semantic requirements.
@@ -307,7 +318,15 @@ async function main() {
         successStatusByOp,
       );
       s.seedBindings = computeSeedBindings(s);
-      // Validation: for JSON requests with oneOf groups, non-negative scenarios must set exactly one variant's required keys
+      // #270: a feature-coverage variant may be a better fit than a
+      // base scenario for a given operationId, but only the first
+      // entry we see is kept — feature scenarios are emitted in the
+      // same "base scenario first" order that the BFS planner
+      // produces, so the stash mirrors the canonical chain the
+      // existing per-endpoint suites would render.
+      if (!featureScenarioStash.has(op.operationId)) {
+        featureScenarioStash.set(op.operationId, s);
+      }
       try {
         const final = s.requestPlan?.[s.requestPlan.length - 1];
         const groups = requestIndex.byOperation[op.operationId] || [];
@@ -459,6 +478,50 @@ async function main() {
   }
 
   console.log(`Generated scenario files for ${processed} endpoints.`);
+
+  // #270 — Phase 2 of #268. After every endpoint has been planned and
+  // its feature scenario stashed, instantiate any ABox-declared
+  // scenario templates against their applicable subjects and write
+  // one JSON file per (template × subject) pair to
+  //   generated/<config>/scenarios/templates/<TemplateName>/<SubjectName>.json
+  // The output is purely additive — existing BFS-derived scenarios
+  // under generated/<config>/scenarios/*.json are untouched, so this
+  // step cannot perturb byte-stability of the per-endpoint suites.
+  const templatesAbox = loadScenarioTemplatesAbox(repoRoot);
+  const edgesAbox = loadEdgesAbox(repoRoot);
+  if (templatesAbox && edgesAbox) {
+    const results = instantiateAllTemplates(graph, templatesAbox, edgesAbox, featureScenarioStash);
+    // Wipe the ENTIRE templates partition first, then recreate the
+    // per-template subdirectories we actually produced. Deriving the
+    // wipe set from `results.map(r => r.templateName)` would miss
+    // templates removed from the ABox (or whose `appliesTo` changed
+    // to match no subject), leaving their previous per-template
+    // directory — and stale per-subject JSON inside it — on disk
+    // across runs. (#270 review.)
+    await rm(getTemplateScenariosRootDir(repoRoot), { recursive: true, force: true });
+    const templatesByName = new Set(results.map((r) => r.templateName));
+    for (const tplName of templatesByName) {
+      const dir = getTemplateScenariosDir(repoRoot, tplName);
+      await mkdir(dir, { recursive: true });
+    }
+    for (const r of results) {
+      const file: import('./types.js').TemplateScenarioFile = {
+        templateName: r.templateName,
+        subjectName: r.subjectName,
+        subjectKind: r.subjectKind,
+        scenario: r.scenario,
+      };
+      const dir = getTemplateScenariosDir(repoRoot, r.templateName);
+      await writeFile(
+        path.join(dir, `${r.subjectName}.json`),
+        JSON.stringify(file, null, 2),
+        'utf8',
+      );
+    }
+    console.log(
+      `Generated ${results.length} template scenario file(s) across ${templatesByName.size} template(s).`,
+    );
+  }
 }
 
 // Only auto-invoke main() when this module is executed directly as a

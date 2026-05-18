@@ -124,6 +124,27 @@ export function getScenariosDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'scenarios');
 }
 
+/**
+ * Root of the per-config template-scenarios partition (#270). The
+ * orchestrator wipes this entire tree before writing per-template
+ * subdirectories so an ABox template that's been removed (or whose
+ * `appliesTo` no longer matches any subject) can't leave a stale
+ * directory behind. Deriving the wipe set from current `results`
+ * would miss exactly those cases.
+ */
+export function getTemplateScenariosRootDir(repoRoot: string): string {
+  return path.join(getScenariosDir(repoRoot), 'templates');
+}
+
+/**
+ * Per-template subdirectory under the scenarios partition (#270).
+ * Layout: `generated/<config>/scenarios/templates/<TemplateName>/`.
+ * One JSON file per (template × subject) pair lands underneath.
+ */
+export function getTemplateScenariosDir(repoRoot: string, templateName: string): string {
+  return path.join(getTemplateScenariosRootDir(repoRoot), templateName);
+}
+
 export function getFeatureOutputDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'feature-output');
 }

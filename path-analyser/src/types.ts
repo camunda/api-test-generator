@@ -797,3 +797,156 @@ export interface GeneratedModelSpec {
    */
   metadata?: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// #270 — Scenario template instantiation (Phase 2 of #268).
+//
+// Template-derived scenarios are emitted alongside (not in place of) the
+// BFS-derived `EndpointScenario`s. They are written to
+// `generated/<config>/scenarios/templates/<TemplateName>/<EdgeName>.json`
+// and consumed by the Playwright emitter to produce
+// `generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts`.
+// The two output trees are independent — no field on `EndpointScenario`
+// is touched here.
+// ---------------------------------------------------------------------------
+
+/**
+ * A `PrereqChain` template step: a planned dependency chain that
+ * establishes everything a subsequent `InvokeStep` requires before it
+ * runs. Derived by delegating to `generateScenariosForEndpoint` against
+ * the target operationId and dropping the target itself (which is
+ * invoked by the following `InvokeStep`, not by the prereq chain).
+ *
+ * The `bindings`, `seedBindings` and `requestPlan` fields mirror the
+ * same-named fields on `EndpointScenario` so the emitter can reuse the
+ * existing per-step renderer.
+ */
+export interface PrereqChainStep {
+  kind: 'prereqChain';
+  /** OperationId the chain is intended to enable. Diagnostic only. */
+  targetOperationId: string;
+  /** Ordered list of prerequisite operations (target op excluded). */
+  operations: OperationRef[];
+  /** Same shape as `EndpointScenario.bindings`. */
+  bindings: Record<string, string>;
+  /** Same shape as `EndpointScenario.seedBindings`. */
+  seedBindings: string[];
+  /** Per-operation request plan, parallel to `operations`. */
+  requestPlan: RequestStep[];
+}
+
+/**
+ * A single-operation invocation. Carries the request plan for that one
+ * operation and a description of which scenario bindings flow into it
+ * (`inputs`) and which the response contributes back (`produces`).
+ */
+export interface InvokeStep {
+  kind: 'invoke';
+  operationId: string;
+  /** semanticType → binding name consumed by this invocation. */
+  inputs: Record<string, string>;
+  /** semanticType → binding name produced by this invocation. */
+  produces: Record<string, string>;
+  /** Request plan for THIS invocation only (one step). */
+  requestPlan: RequestStep;
+}
+
+/**
+ * A membership assertion against an observation operation's 2xx
+ * response. The assertion compiles to
+ * `expect(items.map(r => r.<elementField>)).[not.]toContain(<value>)`
+ * at emit time. `value` is sourced from the scenario binding table
+ * keyed by `membershipSemanticType`.
+ */
+export interface ObserveStep {
+  kind: 'observe';
+  operationId: string;
+  /**
+   * semanticType → binding name consumed by the observation call's
+   * inputs (path params / body). The scoping/membership split:
+   * `identifiedBy ∩ inputs` go here; the remaining identifiedBy
+   * member is the membership identifier asserted on the response.
+   */
+  inputs: Record<string, string>;
+  requestPlan: RequestStep;
+  assertion: {
+    kind: 'membership';
+    expect: 'present' | 'absent';
+    /**
+     * Path into the 2xx response body to the array carrying the
+     * membership rows. Each segment is a property name; the last
+     * segment names the array property itself (e.g. `['items']`).
+     */
+    arrayPath: string[];
+    /**
+     * Property name on each array element that carries the membership
+     * identifier value (e.g. `'username'` for RoleUserMembership).
+     */
+    elementField: string;
+    /**
+     * Semantic type of the membership identifier. The emitter
+     * resolves this against the scenario binding table to find the
+     * value being asserted.
+     */
+    membershipSemanticType: string;
+  };
+}
+
+export type TemplateStep = PrereqChainStep | InvokeStep | ObserveStep;
+
+/**
+ * A scenario produced by instantiating a `ScenarioTemplate` against a
+ * concrete subject (currently only `Edge`). The step list is a
+ * discriminated union; the binding table is the union of all bindings
+ * declared anywhere in the steps so consumers don't need to walk the
+ * step list to learn which symbolic names exist.
+ */
+export interface TemplateScenario {
+  /** Identifier of the template (e.g. `'EdgeLifecycle'`). */
+  templateName: string;
+  /** Identifier of the subject the template was instantiated against. */
+  subjectName: string;
+  subjectKind: 'Edge';
+  steps: TemplateStep[];
+  /**
+   * Aggregated semantic-type → binding-name map across all steps. The
+   * keys are semantic-type identifiers (e.g. `'Username'`, `'RoleId'`)
+   * and the values are the planner-minted binding names the runtime
+   * `ctx` is keyed by (e.g. `'usernameVar'`, `'roleIdVar'`). This
+   * intentionally diverges from `EndpointScenario.bindings` (whose
+   * keys ARE binding names and whose values are concrete placeholders
+   * like `'__PENDING__'` or literal values): the membership assertion
+   * on an `ObserveStep` is expressed in semantic-type terms
+   * (`assertion.membershipSemanticType`), and the emitter looks the
+   * binding name up directly in this map rather than re-deriving it
+   * from the semantic-type identifier — so a future change to the
+   * planner's naming convention requires no emitter change. The
+   * per-step `PrereqChainStep.bindings` map remains binding-name-keyed
+   * (mirrors `EndpointScenario.bindings`) so the existing per-endpoint
+   * emitter code paths apply unchanged.
+   */
+  bindings: Record<string, string>;
+  /**
+   * Aggregated set of `operationId`s in this template scenario whose
+   * source `OperationSpec.eventuallyConsistent` flag is `true` (i.e.
+   * the spec carries the `x-eventually-consistent` vendor extension).
+   * Threaded through so the template emitter can wrap read-shape steps
+   * in `awaitEventually(...)` exactly like the per-endpoint emitter
+   * does — without re-consulting the dependency graph at emission
+   * time. Empty list is permitted (and is the common case for OCA
+   * edges); the field is required to make the contract explicit.
+   */
+  eventuallyConsistentOps: string[];
+}
+
+/**
+ * Per-template, per-subject scenario file shape. One file per
+ * (template × subject) pair under
+ * `generated/<config>/scenarios/templates/<TemplateName>/<SubjectName>.json`.
+ */
+export interface TemplateScenarioFile {
+  templateName: string;
+  subjectName: string;
+  subjectKind: 'Edge';
+  scenario: TemplateScenario;
+}
