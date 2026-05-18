@@ -6395,3 +6395,211 @@ describeForThisConfig(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Scenario templates ABox (#268 Phase 1 / #269) — encoding only.
+//
+// ABox at `configs/<active>/ontology/scenario-templates.json`, validated
+// by the TBox authored as a TS const in
+// `path-analyser/src/ontology/scenarioTemplateSchema.ts`, loaded by
+// `path-analyser/src/ontology/loader.ts` (single source of truth: ajv
+// runtime validation + json-schema-to-ts type inference both consume
+// the same TS literal). The matching
+// `ontology/vocabulary/scenario-template.schema.json` is generated from
+// the TS const by `scripts/build-ontology.ts` for external
+// SPARQL/SHACL/OWL consumers.
+//
+// The dependency graph encodes data-flow (which ops, in what order);
+// templates encode temporal/modal assertions (what to assert between
+// or after those ops). Phase 1 ships the TBox + EdgeLifecycle template
+// for all 12 OCA edges as encoding only — there is no planner consumer
+// yet (#270 follows up). The invariants below pin that the encoding is
+// well-formed and that the observation-feasibility precondition holds
+// for every edge × Observe-step pair, so the #270 planner work lands
+// against a validated surface.
+describeForThisConfig(
+  'bundled-spec invariants: scenario-templates ABox (#268 Phase 1 / #269)',
+  () => {
+    it('loads the scenario-templates ABox via the generic loader (proves the load path)', async () => {
+      const { loadScenarioTemplatesAbox } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const abox = loadScenarioTemplatesAbox(REPO_ROOT);
+      expect(
+        abox,
+        'scenario-templates ABox must exist for the camunda-oca config (Phase 1 / #269)',
+      ).not.toBeNull();
+      expect(abox?.templates.length).toBeGreaterThan(0);
+    });
+
+    it('every template Step references a known role on its appliesTo subject ABox', async () => {
+      // Templates reference subject roles (e.g. `establishedBy`,
+      // `revokedBy`, `observableVia`) symbolically, not by raw
+      // operationId. The planner resolves them at instantiation time
+      // against the subject's ABox entry. This invariant catches a
+      // typo or a renamed role at encoding time, before the planner
+      // (#270) ever runs.
+      const { loadScenarioTemplatesAbox } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const templates = loadScenarioTemplatesAbox(REPO_ROOT);
+      if (!templates) throw new Error('scenario-templates ABox missing');
+      // Known subject-role fields per `appliesTo.kind`. Extending the
+      // template TBox with a new subject ABox requires extending this
+      // map AND the union in `AppliesTo.kind`.
+      const EDGE_ROLES = new Set(['establishedBy', 'revokedBy', 'observableVia']);
+      const offenders: string[] = [];
+      for (const tpl of templates.templates) {
+        const validRoles = tpl.appliesTo.kind === 'Edge' ? EDGE_ROLES : new Set<string>();
+        for (let i = 0; i < tpl.steps.length; i++) {
+          const step = tpl.steps[i];
+          const ref = step.kind === 'PrereqChain' ? step.for : step.op;
+          if (!validRoles.has(ref)) {
+            offenders.push(
+              `${tpl.name}.steps[${i}] (kind=${step.kind}) references role '${ref}' which is not a known field on '${tpl.appliesTo.kind}' subjects (known: ${[...validRoles].join(', ')})`,
+            );
+          }
+        }
+      }
+      expect(
+        offenders,
+        `Every template step's role reference must resolve to a known field on its appliesTo subject ABox. ` +
+          `For 'Edge' subjects, valid roles are: establishedBy, revokedBy, observableVia.`,
+      ).toEqual([]);
+    });
+
+    it('every edge in the edges ABox is covered by at least one EdgeLifecycle template (no edge silently unscoped)', async () => {
+      // Phase 1 has exactly one template (`EdgeLifecycle`) and it
+      // applies uniformly to all edges. The coverage check pins that
+      // intent so a future edge can't slip in without a corresponding
+      // template scope decision (either it is covered, or a new
+      // template / explicit opt-out is introduced).
+      const { loadScenarioTemplatesAbox, loadEdgesAbox } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const templates = loadScenarioTemplatesAbox(REPO_ROOT);
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!templates) throw new Error('scenario-templates ABox missing');
+      if (!edges) throw new Error('edges ABox missing');
+      // Phase 1 pins exactly one Edge-scoped template named
+      // `EdgeLifecycle` that applies uniformly to every edge. Pinning
+      // the name + sole-Edge-template shape catches a rename, an
+      // accidental scope change to a non-Edge kind, or a silent
+      // removal — any of which would otherwise pass a "≥ 1 Edge
+      // template" check while breaking #270's planner consumption.
+      const edgeTemplates = templates.templates.filter((t) => t.appliesTo.kind === 'Edge');
+      expect(
+        edgeTemplates.length,
+        'Phase 1 expects exactly one Edge-scoped template; a future per-edge selector would refine this invariant rather than replace it',
+      ).toBe(1);
+      expect(
+        edgeTemplates[0].name,
+        "the sole Edge-scoped template must be named 'EdgeLifecycle' (Phase 1 / #269); rename requires updating planner consumption in #270",
+      ).toBe('EdgeLifecycle');
+      // Coverage is structural in Phase 1: templates apply uniformly
+      // to every edge — there is no per-edge filter expression in the
+      // TBox. Asserting the edge ABox is non-empty pins the "every
+      // edge is covered" intent against a future regression where
+      // edges.json gets accidentally cleared.
+      expect(edges.edges.length).toBeGreaterThan(0);
+    });
+
+    it('every edge × Observe step is feasible: the observation op response carries the membership identifier inside an array (#268 walkthrough)', async () => {
+      // The #268 walkthrough showed that high-level present/absent
+      // predicates compile down to `expect(items.map(...))
+      // .[not.]toContain(value)` — but only if the observation op's
+      // 200 response actually carries the *membership* identifier
+      // (= edge.identifiedBy minus the observation op's input
+      // semantic types) inside an array. The response-extraction
+      // graph already encodes that as a `responseSemanticTypes['200']`
+      // entry with a `fieldPath` containing `[]`.
+      //
+      // This invariant is the gate for #270: if every (edge,
+      // ObserveStep) pair passes here, the planner can rely on the
+      // type-match heuristic (option 1 in the walkthrough) without
+      // needing the `observableVia.itemsAt` escape hatch.
+      const { loadScenarioTemplatesAbox, loadEdgesAbox } = await import(
+        '../../path-analyser/src/ontology/loader.js'
+      );
+      const templates = loadScenarioTemplatesAbox(REPO_ROOT);
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!templates) throw new Error('scenario-templates ABox missing');
+      if (!edges) throw new Error('edges ABox missing');
+      loadGraph();
+      const opById = cachedOperationById;
+      if (!opById) throw new Error('graph not loaded');
+      const offenders: string[] = [];
+      const edgeTemplates = templates.templates.filter((t) => t.appliesTo.kind === 'Edge');
+      for (const tpl of edgeTemplates) {
+        for (const edge of edges.edges) {
+          for (let i = 0; i < tpl.steps.length; i++) {
+            const step = tpl.steps[i];
+            if (step.kind !== 'Observe') continue;
+            // Resolve the observation operationId via the edge.
+            // The TBox restricts Edge ObserveStep.op to one of the
+            // edge roles; in practice it's `observableVia` for
+            // Phase 1 but we look up via a narrowing switch so the
+            // edge field access remains type-safe (no `as` cast).
+            const role = step.op;
+            let opId: string;
+            switch (role) {
+              case 'establishedBy':
+                opId = edge.establishedBy;
+                break;
+              case 'revokedBy':
+                opId = edge.revokedBy;
+                break;
+              case 'observableVia':
+                opId = edge.observableVia;
+                break;
+              default:
+                offenders.push(
+                  `${tpl.name} × ${edge.name}: Observe step references unknown edge role '${role}'`,
+                );
+                continue;
+            }
+            const op = opById.get(opId);
+            if (!op) {
+              offenders.push(`${tpl.name} × ${edge.name}: operationId '${opId}' not in graph`);
+              continue;
+            }
+            // Feasibility check: for every membership-candidate
+            // identifiedBy type, the observation op's 200 response
+            // must carry it as a field inside an array (i.e. `[]`
+            // in the fieldPath). This is what compiles to
+            // `expect(items.map(...)).toContain(value)` at #270.
+            //
+            // Note we deliberately do NOT exclude identifiedBy
+            // types that also appear as request-body filter inputs
+            // (e.g. `searchMappingRulesForRole` accepts
+            // `filter.mappingRuleId` AND returns
+            // `items[].mappingRuleId` — the filter is optional and
+            // doesn't disqualify the response field from being the
+            // membership locator). The actually-load-bearing
+            // property is "appears in an array-nested response
+            // field"; the scoping/membership split is a #270
+            // planner concern at instantiation time.
+            const responses = op.responseSemanticTypes?.['200'] ?? [];
+            const arrayNestedSemanticTypes = new Set(
+              responses.filter((r) => r.fieldPath.includes('[]')).map((r) => r.semanticType),
+            );
+            const observable = edge.identifiedBy.filter((s) => arrayNestedSemanticTypes.has(s));
+            if (observable.length === 0) {
+              offenders.push(
+                `${tpl.name} × ${edge.name}: observation op '${opId}' 200 response has no array-nested field carrying any identifiedBy type (${edge.identifiedBy.join(', ')}); got: ${responses
+                  .map((r) => `${r.semanticType}@${r.fieldPath}`)
+                  .join(', ')}`,
+              );
+            }
+          }
+        }
+      }
+      expect(
+        offenders,
+        `Every (edge × Observe step) pair must be feasible at the response-shape level. ` +
+          `This is the gate for #270 — if it fails for any pair, the planner cannot compile present/absent ` +
+          `to a concrete assertion without an explicit array-locator escape hatch on the edge.`,
+      ).toEqual([]);
+    });
+  },
+);
