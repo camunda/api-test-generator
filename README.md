@@ -359,6 +359,14 @@ emits a self-contained, runnable Playwright project under
 `package.json`, `playwright.config.ts`, `tsconfig.json`, vendored
 runtime helpers (`support/`), fixtures, and a README.
 
+Template-derived suites (`#268` Phase 2 / `#270`) land under
+`generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts` —
+one per ABox-declared edge. Each suite runs the full lifecycle
+(establish → present-observe → revoke → absent-observe) and is sourced
+from `generated/<config>/scenarios/templates/EdgeLifecycle/<EdgeName>.json`,
+which the planner instantiates from the EdgeLifecycle TBox template
+(see `ontology/README.md`).
+
 ```bash
 npm run codegen:playwright -- <operationId>
 npm run codegen:playwright:all
