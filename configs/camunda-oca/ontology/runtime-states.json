@@ -87,9 +87,7 @@
         "ProcessInstanceCompleted"
       ],
       "valueBindings": {
-        "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
-        "request.processDefinitionKey": "semantic:ProcessDefinitionKey",
-        "response.processInstanceKey": "semantic:ProcessInstanceKey"
+        "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId"
       }
     },
     {
@@ -141,14 +139,6 @@
       "requires": [
         "ProcessInstanceCompleted"
       ]
-    },
-    {
-      "operationId": "createDeployment",
-      "valueBindings": {
-        "response.deployments[].processDefinition.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId",
-        "response.deployments[].processDefinition.processDefinitionKey": "semantic:ProcessDefinitionKey",
-        "response.deployments[].form.formKey": "FormDeployed.formKey"
-      }
     },
     {
       "operationId": "searchProcessDefinitions",

@@ -5515,3 +5515,106 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig(
+  'bundled-spec invariants: response extract autoderivation parity (#251)',
+  () => {
+    // Class-scoped invariant pinning the refactor in #251.
+    //
+    // Defect class avoided: when the planner drops the ABox-declared
+    // `response.*` valueBindings (which the spec already encodes via
+    // `x-semantic-provider: [...]` on the response container schemas,
+    // surfaced into the graph as `responseSemanticLeaves[].provider`),
+    // the emitted `step.extract` blocks must still bind every
+    // identifier-shaped semantic that earlier steps need to satisfy
+    // downstream URL placeholders and request bodies. Forgetting any
+    // of these pairs reintroduces the "${...Var}" leak class that
+    // motivated the original ABox entries.
+    //
+    // The invariant lists the specific (operationId, fieldPath, bind)
+    // triples the ABox used to encode. Each triple must appear on the
+    // matching prerequisite step in at least one emitted feature
+    // scenario. Asserting per-triple (rather than over the full
+    // extract list per step) keeps the guard stable across legitimate
+    // planner changes that add or reorder unrelated extracts.
+    interface ExtractLite {
+      fieldPath: string;
+      bind: string;
+    }
+    interface RequestStepLite {
+      operationId: string;
+      extract?: ExtractLite[];
+    }
+    interface ScenarioLite {
+      requestPlan?: RequestStepLite[];
+    }
+    interface CollectionLite {
+      scenarios: ScenarioLite[];
+    }
+
+    const requiredTriples: { operationId: string; fieldPath: string; bind: string }[] = [
+      // createDeployment — formerly declared in
+      // configs/camunda-oca/ontology/runtime-states.json valueBindings.
+      // `[0]` matches the planner's `[]` -> `[0]` first-element
+      // normalisation (path-analyser/src/index.ts).
+      {
+        operationId: 'createDeployment',
+        fieldPath: 'deployments[0].processDefinition.processDefinitionId',
+        bind: 'processDefinitionIdVar',
+      },
+      {
+        operationId: 'createDeployment',
+        fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+        bind: 'processDefinitionKeyVar',
+      },
+      {
+        operationId: 'createDeployment',
+        fieldPath: 'deployments[0].form.formKey',
+        bind: 'formKeyVar',
+      },
+      // createProcessInstance — formerly `response.processInstanceKey`.
+      {
+        operationId: 'createProcessInstance',
+        fieldPath: 'processInstanceKey',
+        bind: 'processInstanceKeyVar',
+      },
+    ];
+
+    it('every triple from the retired ABox response.* valueBindings is still emitted by some scenario', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature-output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      const seenTriples = new Set<string>();
+      for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const file = JSON.parse(
+          readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+        ) as CollectionLite;
+        for (const sc of file.scenarios) {
+          for (const step of sc.requestPlan ?? []) {
+            for (const ex of step.extract ?? []) {
+              seenTriples.add(`${step.operationId}::${ex.fieldPath}::${ex.bind}`);
+            }
+          }
+        }
+      }
+      const missing = requiredTriples.filter(
+        (t) => !seenTriples.has(`${t.operationId}::${t.fieldPath}::${t.bind}`),
+      );
+      expect(
+        missing,
+        `Missing ${missing.length} (operationId, fieldPath, bind) triple(s) ` +
+          `that the retired ABox response.* valueBindings used to encode. ` +
+          `If the planner's responseSemanticTypes-driven extract emission ` +
+          `(path-analyser/src/index.ts ~540-565) regresses, these binds ` +
+          `disappear from the prereq step and downstream URL/body templates ` +
+          `leak unresolved \`\${...Var}\` literals. Missing:\n${missing
+            .map((t) => `  - ${t.operationId} :: ${t.fieldPath} -> ${t.bind}`)
+            .join('\n')}`,
+      ).toEqual([]);
+    });
+  },
+);
