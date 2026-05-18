@@ -1,5 +1,6 @@
 import fsSync, { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   type EmitContext,
   type EmitterStrategy,
@@ -7,6 +8,7 @@ import {
   getRoleHookProvider,
   type LoadedRoleBundle,
   listEmitters,
+  type RoleHookProvider,
   registerEmitter,
   registerRoleHookProvider,
 } from '@camunda8/emitter-sdk';
@@ -27,7 +29,6 @@ import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyse
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
-import { DeploymentRoleHookProvider } from './playwright/hooks/deployment.js';
 import {
   materializeFixtures,
   materializeResponseSchemas,
@@ -36,11 +37,64 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 
-// Built-in emitter + role-hook provider registrations. New emitters /
-// providers register themselves here so the orchestrator's hook loop
-// can find them by name without hard-coding role knowledge.
+// Built-in emitter registrations. RoleHookProviders are no longer
+// registered statically here: every provider lives next to its role
+// bundle under configs/<config>/codegen/playwright/roles/<role>/hook.ts
+// and is discovered + registered at run time by `discoverRoleHooks`
+// (Lift 19 / #261). This keeps the materializer a generic orchestrator
+// — the previously hard-coded role-hook provider import
+// pulled OCA-specific knowledge into a package that is supposed to be
+// config-agnostic.
 registerEmitter(PlaywrightEmitter);
-registerRoleHookProvider(DeploymentRoleHookProvider);
+
+/**
+ * Walk the active config's role bundles and register any role-hook
+ * providers shipped alongside them.
+ *
+ * Conventions enforced here:
+ *   - A hook lives at `<roleDir>/hook.ts` and default-exports a
+ *     `RoleHookProvider`.
+ *   - `provider.role` must equal the role directory name, so the role
+ *     dispatcher in the emitter (which keys `roleExtras` by role) and
+ *     the directory layout cannot drift.
+ *
+ * The build/runtime gap is bridged via tsx (see `codegen:playwright`
+ * scripts) — dynamic imports of `.ts` files only resolve when the
+ * orchestrator is run under tsx, which is why the codegen scripts no
+ * longer invoke `node materializer/dist/src/index.js` directly.
+ */
+async function discoverRoleHooks(roleBundles: Map<string, LoadedRoleBundle>): Promise<void> {
+  for (const [roleName, bundle] of roleBundles) {
+    const hookPath = path.join(bundle.dir, 'hook.ts');
+    if (!fsSync.existsSync(hookPath)) continue;
+    const mod = await import(pathToFileURL(hookPath).href);
+    if (!isRoleHookProvider(mod.default)) {
+      throw new Error(
+        `Role hook ${hookPath} must default-export a RoleHookProvider with { hook: string, role: string, compute: function }.`,
+      );
+    }
+    const provider: RoleHookProvider = mod.default;
+    if (provider.role !== roleName) {
+      throw new Error(
+        `Role hook ${hookPath} declares role ${JSON.stringify(provider.role)} ` +
+          `but lives under directory ${JSON.stringify(roleName)} — these must agree, ` +
+          `otherwise the emitter will look for ctx.roleExtras[${JSON.stringify(roleName)}] ` +
+          `and find nothing.`,
+      );
+    }
+    registerRoleHookProvider(provider);
+  }
+}
+
+function isRoleHookProvider(value: unknown): value is RoleHookProvider {
+  if (typeof value !== 'object' || value === null) return false;
+  if (!('hook' in value) || !('role' in value) || !('compute' in value)) return false;
+  // biome-ignore lint/plugin: runtime contract boundary for a dynamic-imported module
+  const v = value as { hook: unknown; role: unknown; compute: unknown };
+  return (
+    typeof v.hook === 'string' && typeof v.role === 'string' && typeof v.compute === 'function'
+  );
+}
 
 // JSON.parse is a runtime contract boundary: the on-disk scenario files are
 // produced by the generator and conform structurally to EndpointScenarioCollection.
@@ -203,7 +257,7 @@ function printUsage(): void {
     .map((e) => `${e.id} (${e.name})`)
     .join(', ');
   console.error(
-    'Usage: node materializer/dist/src/index.js [--target=<id>] <operationId>|--all\n' +
+    'Usage: tsx materializer/src/index.ts [--target=<id>] <operationId>|--all\n' +
       `Available targets: ${targets || '(none)'}`,
   );
 }
@@ -312,6 +366,11 @@ async function run() {
     // `EXTRACTS` list) live inside the helper instead of being threaded
     // through every call-site literal.
     roleBundles = loadRoleBundlesForActiveConfig(repoRoot);
+    // Lift 19 / #261: per-config role-hook discovery. Replaces the
+    // static `registerRoleHookProvider(...)` for the deployment role
+    // call at module load. Must run before the `emitter.roleHooks`
+    // loop below resolves providers via `getRoleHookProvider(hook)`.
+    await discoverRoleHooks(roleBundles);
     // Copy BPMN/DMN/form fixture files into <outDir>/fixtures/ so the suite
     // is self-contained: @@FILE:<rel-path> markers in emitted tests resolve
     // via support/fixtures.ts regardless of process.cwd().

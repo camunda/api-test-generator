@@ -5426,7 +5426,7 @@ describeForThisConfig(
       //       earlier in the same spec.
       const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
       const { computeDeploymentExtracts } = await import(
-        '../../materializer/src/deploymentExtracts.js'
+        '../../configs/camunda-oca/codegen/playwright/roles/deploymentGateway/hook.ts'
       );
       const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
       const opNode = Object.values(graph.operations).find(
@@ -6175,6 +6175,135 @@ describeForThisConfig(
           `The materializer must skip every binding whose value is still PENDING_BINDING — that guard lives in materializer/src/playwright/emitter.ts (the \`if (v === PENDING_BINDING) continue\` inside the "Seed scenario bindings" loop) and the per-scenario runtime seed list comes from computeSeedBindings in path-analyser/src/seedBindings.ts. ` +
           `A leak here means one of those guards regressed and the literal sentinel string will end up in a live API call. ` +
           `Offenders: ${JSON.stringify(offenders.slice(0, 10))}${offenders.length > 10 ? ` (and ${offenders.length - 10} more)` : ''}`,
+      ).toEqual([]);
+    });
+  },
+);
+
+describeForThisConfig(
+  'bundled-spec invariants: per-config role-hook discovery (Lift 19 / #261)',
+  () => {
+    // Lift 19 / #261 retired the static
+    // `registerRoleHookProvider(DeploymentRoleHookProvider)` call at
+    // materializer module load. RoleHookProviders now live alongside
+    // the role bundle they belong to (configs/<config>/codegen/
+    // playwright/roles/<role>/hook.ts) and are discovered at run time
+    // by `discoverRoleHooks` in materializer/src/index.ts.
+    //
+    // The two invariants below pin both halves of that contract:
+    //   1. Every role bundle's hook.ts (if present) default-exports a
+    //      well-formed RoleHookProvider whose `role` matches the
+    //      directory name and whose `hook` is one the active Playwright
+    //      emitter declares it consumes. Without this, an emitted suite
+    //      would silently miss the per-role extras the helper templates
+    //      depend on.
+    //   2. The materializer package source must not reference any
+    //      role-specific identifier (e.g. DEPLOYMENT_GATEWAY_ROLE,
+    //      findDeploymentGatewayOpId, computeDeploymentExtracts). This
+    //      is a class-scoped guard against re-introducing OCA-specific
+    //      logic into the generic orchestrator under a different role
+    //      name later on.
+    it('every role bundle hook.ts default-exports a valid RoleHookProvider matching the directory name', async () => {
+      const { loadRoleBundlesForActiveConfig } = await import(
+        '../../materializer/src/playwright/roleRenderer.ts'
+      );
+      const { PlaywrightEmitter } = await import('../../materializer/src/playwright/emitter.ts');
+      const { getEmitter, registerEmitter } = await import('@camunda8/emitter-sdk');
+      // The PlaywrightEmitter is registered as a module side-effect of
+      // materializer/src/index.ts (the orchestrator entrypoint). This
+      // invariant runs in isolation and doesn't import that entrypoint
+      // (importing it would execute the CLI), so register manually.
+      // Idempotent: registerEmitter is a no-op if already registered.
+      registerEmitter(PlaywrightEmitter);
+      const roleBundles = loadRoleBundlesForActiveConfig(REPO_ROOT);
+      const playwright = getEmitter('playwright');
+      expect(playwright, 'playwright emitter must be registered').toBeDefined();
+      const declaredHooks = new Set<string>(playwright?.roleHooks ?? []);
+      const issues: string[] = [];
+      for (const [roleName, bundle] of roleBundles) {
+        const hookPath = join(bundle.dir, 'hook.ts');
+        if (!existsSync(hookPath)) continue;
+        const mod = await import(hookPath);
+        const provider: unknown = mod.default;
+        if (
+          typeof provider !== 'object' ||
+          provider === null ||
+          !('hook' in provider) ||
+          !('role' in provider) ||
+          !('compute' in provider)
+        ) {
+          issues.push(`${hookPath}: default export is not a RoleHookProvider`);
+          continue;
+        }
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const p = provider as { hook: unknown; role: unknown; compute: unknown };
+        if (
+          typeof p.hook !== 'string' ||
+          typeof p.role !== 'string' ||
+          typeof p.compute !== 'function'
+        ) {
+          issues.push(`${hookPath}: hook/role/compute have wrong types`);
+          continue;
+        }
+        if (p.role !== roleName) {
+          issues.push(
+            `${hookPath}: provider.role is ${JSON.stringify(p.role)} but the directory is ${JSON.stringify(roleName)}`,
+          );
+        }
+        if (!declaredHooks.has(p.hook)) {
+          issues.push(
+            `${hookPath}: hook ${JSON.stringify(p.hook)} is not declared in playwright emitter.roleHooks (${JSON.stringify([...declaredHooks])})`,
+          );
+        }
+      }
+      expect(
+        issues,
+        `Per-config role-hook contract violations (Lift 19 / #261). ` +
+          `Every hook.ts must default-export a RoleHookProvider whose role matches the directory name and whose hook is declared by the emitter.`,
+      ).toEqual([]);
+    });
+
+    it('materializer package source contains no role-specific identifiers (class-scoped guard)', () => {
+      // Walk materializer/src/**/*.ts and grep for any role-specific
+      // identifier. The previous static-registration design pulled the
+      // `DeploymentRoleHookProvider` from
+      // `materializer/src/playwright/hooks/deployment.ts` and the
+      // OCA-specific `computeDeploymentExtracts` from
+      // `materializer/src/deploymentExtracts.ts` into the orchestrator.
+      // Lift 19 / #261 relocated both. If a future provider ships under
+      // a different role name but lands in the materializer package
+      // again, this invariant fires before the OCA-coupling drift can
+      // re-establish itself.
+      const FORBIDDEN = [
+        'DEPLOYMENT_GATEWAY_ROLE',
+        'findDeploymentGatewayOpId',
+        'computeDeploymentExtracts',
+        'DeploymentRoleHookProvider',
+      ];
+      const SRC_ROOT = join(REPO_ROOT, 'materializer', 'src');
+      const offenders: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          if (!entry.name.endsWith('.ts')) continue;
+          const src = readFileSync(full, 'utf8');
+          for (const id of FORBIDDEN) {
+            if (src.includes(id)) {
+              offenders.push(`${relative(REPO_ROOT, full)}: contains '${id}'`);
+            }
+          }
+        }
+      };
+      walk(SRC_ROOT);
+      expect(
+        offenders,
+        `Materializer package source must remain generic — no role-specific identifiers. ` +
+          `Lift 19 / #261 moved DeploymentRoleHookProvider out of the materializer because the orchestrator is supposed to discover hooks per config, not hard-code them. ` +
+          `Forbidden identifiers: ${JSON.stringify(FORBIDDEN)}.`,
       ).toEqual([]);
     });
   },

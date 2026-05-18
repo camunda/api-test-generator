@@ -16,7 +16,7 @@ import { describe, expect, test } from 'vitest';
 import {
   DEPLOYMENT_HOOK,
   DeploymentRoleHookProvider,
-} from '../../materializer/src/playwright/hooks/deployment.ts';
+} from '../../configs/camunda-oca/codegen/playwright/roles/deploymentGateway/hook.ts';
 
 describe('DeploymentRoleHookProvider (SDK RoleHookProvider contract, #233 Step 6)', () => {
   test('declares stable hook + role names', () => {

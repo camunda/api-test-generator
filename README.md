@@ -282,7 +282,7 @@ npm run generate:request-validation
 
 1. `npm run lint` — Biome
 2. `tsc --noEmit` against each workspace tsconfig
-3. Builds (`build:analyser`, `build:materializer`, `build:request-validation`)
+3. Builds for downstream consumers (`build:analyser`, `build -w @camunda8/emitter-sdk`) — needed so the materializer typecheck can resolve `.d.ts` for the subpath `exports`
 4. `npm run fetch-spec:ref` at the pinned `specRef`
 5. Full pipeline regeneration with `TEST_SEED=snapshot-baseline`
 6. `npm test` — spec-pin guard, layered regression, and unit tests
@@ -373,9 +373,11 @@ interface (`materializer/src/emitter.ts`). The CLI selects an emitter
 via `--target=<id>` and falls back to `playwright` when omitted:
 
 ```bash
-node materializer/dist/src/index.js --target=playwright createWidget
-node materializer/dist/src/index.js --target=playwright --all
+tsx materializer/src/index.ts --target=playwright createWidget
+tsx materializer/src/index.ts --target=playwright --all
 ```
+
+The codegen scripts (`npm run codegen:playwright`, `npm run codegen:playwright:all`) invoke the materializer via `tsx` so config-side role hooks (`configs/<config>/codegen/playwright/roles/<role>/hook.ts`, Lift 19 / #261) load transparently alongside the materializer source.
 
 The current built-in is `playwright`. Additional targets (e.g. SDK-based
 suites — see [#8](https://github.com/camunda/api-test-generator/issues/8))

@@ -6,8 +6,8 @@
   "scripts": {
     "prebuild": "npm run build:emitter-sdk --prefix ..",
     "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
-    "codegen:playwright": "npm run build && node dist/src/index.js",
-    "codegen:playwright:all": "npm run build && node dist/src/index.js --all",
+    "codegen:playwright": "npm run prebuild && tsx src/index.ts",
+    "codegen:playwright:all": "npm run prebuild && tsx src/index.ts --all",
     "clean": "rimraf dist || rm -rf dist"
   },
   "dependencies": {
