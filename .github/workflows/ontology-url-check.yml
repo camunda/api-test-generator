@@ -1,0 +1,56 @@
+name: Ontology URL resolution check
+
+# Periodic and on-demand HEAD-check of every published TBox `$id` URL
+# and every per-config ABox `$schema` URL. This catches a regression
+# in the Pages publish path (deploy stuck, branch protections changed,
+# Pages disabled, paths-filter mis-tuned) before external consumers
+# notice the 404.
+#
+# Runs separately from PR CI because (a) it depends on network egress
+# from GitHub Actions to `camunda.github.io`, and (b) a brand-new
+# slice in a PR will not be deployed until the PR is merged — so
+# gating PR merge on URL resolution would be a deadlock.
+
+on:
+  schedule:
+    # Weekly on Monday 06:00 UTC. Cheap enough; frequent enough to
+    # catch a regression within a few days of merge.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ontology-url-check
+  cancel-in-progress: false
+
+jobs:
+  url-check:
+    name: HEAD every published ontology URL
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run URL-resolution invariants
+        env:
+          # Opt-in flag consumed by the network-gated invariants in
+          # `configs/<config>/regression-invariants.test.ts`. The same
+          # tests `skipIf` it in PR CI, where running them would be
+          # both flaky (network) and useless (un-merged content is
+          # not yet deployed).
+          RUN_ONTOLOGY_URL_CHECK: '1'
+        run: npx vitest run configs/camunda-oca/regression-invariants.test.ts -t 'ontology URL resolution'
