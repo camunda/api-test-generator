@@ -1,4 +1,5 @@
 import { deterministicSuffix } from './deterministicSuffix.js';
+import { isJobActivatorOp } from './ontology/operationRoles.js';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
@@ -71,12 +72,12 @@ export function generateFeatureCoverageForEndpoint(
   // convention. The feature suite shrinks to: base, oneOf-minimal,
   // negative-empty, and duplicate-test carve-outs.
 
-  // Negative empty-result variant: only for search-like endpoints (query style or activateJobs) with no required semantics
+  // Negative empty-result variant: only for search-like endpoints (query style or jobActivator) with no required semantics
   const isSearchLike =
     endpoint.method.toUpperCase() === 'POST' &&
     (/\/search$/.test(endpoint.path) ||
       /search/i.test(endpoint.operationId) ||
-      endpoint.operationId === 'activateJobs');
+      isJobActivatorOp(graph.domain, endpoint.operationId));
   if (options.generateNegative && required.length === 0 && isSearchLike) {
     variants.push({
       endpointId: endpointOpId,

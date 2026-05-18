@@ -681,14 +681,29 @@ export interface OperationArtifactRuleSpec {
   composable?: boolean; // if true, generator composes artifacts via set cover
   /**
    * Optional ontological role this operation plays in the API surface
-   * (Lift 9 / #225). The planner and Playwright emitter consult this
-   * field via `findOpIdByRole` / `isDeploymentGatewayOp` to discriminate
+   * (Lift 9 / #225, extended by Lift 14 / #254). The planner and
+   * Playwright emitter consult this field via `findOpIdByRole` /
+   * `isDeploymentGatewayOp` / `isJobActivatorOp` to discriminate
    * special-case behaviour against the ABox instead of a hard-coded
-   * operationId. Conventional values include `deploymentGateway` —
-   * the multipart deploy operation whose response surfaces deployed
-   * artifact identifiers.
+   * operationId. Conventional values: `deploymentGateway` (the
+   * multipart deploy operation whose response surfaces deployed
+   * artifact identifiers); `jobActivator` (the operation that
+   * activates jobs produced by service tasks in a deployed BPMN
+   * process — search-like, requires service-task wiring in the BPMN
+   * model draft, has a non-existent-job-type override for empty
+   * negatives).
    */
   role?: string;
+  /**
+   * Optional flag indicating that the declared `role` is consumed
+   * only by the planner and not by the per-step Playwright emitter
+   * dispatch (Lift 14 / #254). When `true`, the materializer treats
+   * the role as informational and does not require a
+   * `configs/<config>/codegen/playwright/roles/<role>/` bundle. When
+   * `false` or omitted, the role is emitter-dispatched and the
+   * bundle must exist (Lift 12 / #231 contract).
+   */
+  plannerOnly?: boolean;
 }
 
 export interface ArtifactRule {

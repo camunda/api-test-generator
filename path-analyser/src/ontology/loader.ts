@@ -385,6 +385,7 @@ export interface ArtifactKindsViews {
     {
       composable?: boolean;
       role?: string;
+      plannerOnly?: boolean;
       rules?: {
         id?: string;
         artifactKind: string;
@@ -421,6 +422,7 @@ export function deriveArtifactKindsViews(repoRoot: string): ArtifactKindsViews |
     const entry: ArtifactKindsViews['operationArtifactRules'][string] = {};
     if (r.composable !== undefined) entry.composable = r.composable;
     if (r.role !== undefined) entry.role = r.role;
+    if (r.plannerOnly !== undefined) entry.plannerOnly = r.plannerOnly;
     if (r.rules !== undefined) {
       entry.rules = r.rules.map((rule) => {
         const out: NonNullable<
