@@ -55,22 +55,32 @@ No dependencies beyond the Python stdlib. Re-run after any change under
 - **Prerequisite** — entity-based, copied from upstream's mapping; for
   membership ops it's parent + member (e.g. `tenant + client`).
 
-## Comparison with upstream (snapshot at the time these files were generated)
+## Comparison with upstream
+
+Upstream snapshot:
+[camunda/camunda#53387](https://github.com/camunda/camunda/pull/53387) (head
+`7cf8bc1`), which regenerates `coverage_matrix.csv` so the `total` column
+equals unique-test count (previously double-counted multi-labeled tests). Variant
+columns are label-occurrences, so a test tagged `happy-path|filter` shows up in
+both.
 
 |  | upstream | generator |
 |---|---:|---:|
-| Unique tests | 1001 | 518 |
+| Unique tests | **1001** | **518** |
 | Entities | 33 | 37 |
-| Happy-path | 173 | 185 |
-| Negative (400/401/403/404/409) | 575 | **0** |
-| Pagination-sort + filter | 138 | **0** |
+| Happy-path (occurrences) | 173 | 185 |
+| Negative (400/401/403/404/409, occurrences) | 547 | **0** |
+| Unique tests with any negative label | 543 | **0** |
+| Pagination-sort + filter (occurrences) | 138 | **0** |
+| Unique tests with pagination/filter label | 135 | **0** |
 | Observe-absence | 2 | 26 |
 | Data-driven / oneOf variants | 5 | **295** |
 
-The ~483-test gap is concentrated in **negative paths** (575 tests missing) and
-**search refinement** (138 tests missing). The generator already exceeds upstream
-on input-shape variants (`data-driven` +290) and `observe-absence` (+24).
-See `gaps.md` for the categorised list.
+The **483-test gap** is concentrated in **negative paths** (543 unique upstream
+tests have a negative label; generator has 0) and **search refinement** (135
+unique upstream tests have pagination/filter; generator has 0). The generator
+already exceeds upstream on input-shape variants (`data-driven` +290) and
+`observe-absence` (+24). See `gaps.md` for the categorised list.
 
 ## Limitations
 
