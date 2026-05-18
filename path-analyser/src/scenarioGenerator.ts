@@ -1,5 +1,6 @@
 import { bindSemanticInput } from './bindSemanticInput.js';
 import { deterministicSuffix } from './deterministicSuffix.js';
+import { buildBpmnModelSpec, buildModelSpec, findModelSpec } from './modelSpecBuilders.js';
 import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
 import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
 import type {
@@ -322,13 +323,12 @@ export function generateScenariosForEndpoint(
             // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
             bindings.jobTypeVar1 = 'jobType_${RANDOM}';
           models = [
-            {
-              kind: 'bpmn',
-              processDefinitionIdVar: 'processDefinitionIdVar1',
-              serviceTasks: state.ops.includes('activateJobs')
+            buildBpmnModelSpec(
+              'processDefinitionIdVar1',
+              state.ops.includes('activateJobs')
                 ? [{ id: 'task1', typeVar: 'jobTypeVar1' }]
                 : undefined,
-            },
+            ),
           ];
         }
         const scenario: EndpointScenario = {
@@ -698,7 +698,7 @@ export function generateScenariosForEndpoint(
       if (isDeploymentGatewayOp(graph.domain, producerOpId) && !modelsDraft) {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
-        modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
+        modelsDraft = [buildBpmnModelSpec('processDefinitionIdVar1')];
       }
       // Identifier heuristic: assign vars for newly added semantics ending with 'Key'.
       // Only applies to semantics that have no authoritative producer — producerBound
@@ -1200,7 +1200,7 @@ function deferForMissingDomainPrereqs(
     if (isDeploymentGatewayOp(graph.domain, candidateOpId) && !modelsDraft) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
       bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
-      modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
+      modelsDraft = [buildBpmnModelSpec('processDefinitionIdVar1')];
     }
     const sig = signature(newOps, newProduced, newNeeded, nextCycle);
     if (seen.has(sig)) continue;
@@ -1485,19 +1485,15 @@ function ensureArtifactBindings(
         : `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     }
     // Resolve the GeneratedModelSpec variant for this semantic via the ABox
-    // (Lift 10 / #227): semantic → artifactKind → modelKind. The per-kind
-    // branches stay because the GeneratedModelSpec discriminated union still
-    // carries kind-specific fields (processDefinitionIdVar for bpmn,
-    // formKeyVar for form); generalising that union is Lift 13's concern.
+    // (Lift 10 / #227): semantic → artifactKind → modelKind. Lift 13 / #253:
+    // the per-kind arms collapsed into a single generic builder, so any
+    // ABox-declared `modelKind` value (not just `bpmn` / `form`) produces a
+    // model-spec entry. Per-kind primary-binding-role names live in
+    // `modelSpecBuilders.ts`; new kinds register there without editing this
+    // call site.
     const modelKind = getModelKindForSemantic(graph.domain, s);
-    if (modelKind === 'bpmn' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
-      state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
-    }
-    if (
-      modelKind === 'form' &&
-      !state.modelsDraft.find((m) => m.kind === 'form' && m.formKeyVar === varName)
-    ) {
-      state.modelsDraft.push({ kind: 'form', formKeyVar: varName });
+    if (modelKind && !findModelSpec(state.modelsDraft, modelKind, varName)) {
+      state.modelsDraft.push(buildModelSpec(modelKind, varName));
     }
   }
 }

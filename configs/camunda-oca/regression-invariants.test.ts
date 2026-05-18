@@ -5618,3 +5618,152 @@ describeForThisConfig(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Lift 13 (#253): generalised GeneratedModelSpec shape.
+//
+// Before Lift 13, the planner emitted closed-union `models[]` entries like
+// `{ kind: 'bpmn', processDefinitionIdVar: 'X' }` / `{ kind: 'form',
+// formKeyVar: 'X' }`. The closed union meant any ABox `modelKind` value
+// outside `'bpmn'` / `'form'` was silently dropped by the construction
+// branches in `ensureArtifactBindings`. Lift 13 generalises the type to
+// `{ kind: string; bindings: Record<string, string>; metadata?: ... }` and
+// replaces the per-kind arms with a single generic builder so any declared
+// `modelKind` produces a structured entry.
+//
+// These invariants pin the new shape on the emitted scenario JSON; they
+// were red on `main` (where the legacy union shape ships) and went green
+// after Lift 13 landed.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
+  'bundled-spec invariants: GeneratedModelSpec generic shape (Lift 13 / #253)',
+  () => {
+    interface ModelSpecLite {
+      kind: string;
+      bindings?: Record<string, string>;
+      metadata?: Record<string, unknown>;
+      // Legacy fields that must NOT appear after Lift 13.
+      processDefinitionIdVar?: string;
+      formKeyVar?: string;
+      serviceTasks?: unknown;
+    }
+    interface ScenarioWithModels {
+      id?: string;
+      models?: ModelSpecLite[];
+    }
+    interface CollectionWithModels {
+      scenarios: ScenarioWithModels[];
+    }
+
+    function loadAllModelsEntries(): { file: string; scenarioId: string; spec: ModelSpecLite }[] {
+      if (!existsSync(SCENARIOS_DIR)) {
+        throw new Error(
+          `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      const out: { file: string; scenarioId: string; spec: ModelSpecLite }[] = [];
+      for (const f of readdirSync(SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const file = JSON.parse(
+          readFileSync(join(SCENARIOS_DIR, f), 'utf8'),
+        ) as CollectionWithModels;
+        for (const sc of file.scenarios) {
+          for (const m of sc.models ?? []) {
+            out.push({ file: f, scenarioId: sc.id ?? '?', spec: m });
+          }
+        }
+      }
+      return out;
+    }
+
+    it('every emitted models[] entry uses the generic { kind, bindings } shape (no legacy top-level fields)', () => {
+      const offenders: string[] = [];
+      for (const { file, scenarioId, spec } of loadAllModelsEntries()) {
+        if (typeof spec.kind !== 'string' || spec.kind.length === 0) {
+          offenders.push(`${file}::${scenarioId} — missing/empty 'kind'`);
+          continue;
+        }
+        if (!spec.bindings || typeof spec.bindings !== 'object') {
+          offenders.push(`${file}::${scenarioId} — missing 'bindings' map`);
+          continue;
+        }
+        if (spec.processDefinitionIdVar !== undefined) {
+          offenders.push(
+            `${file}::${scenarioId} — legacy top-level 'processDefinitionIdVar' still present (should live in bindings.processDefinitionId)`,
+          );
+        }
+        if (spec.formKeyVar !== undefined) {
+          offenders.push(
+            `${file}::${scenarioId} — legacy top-level 'formKeyVar' still present (should live in bindings.formKey)`,
+          );
+        }
+        if (spec.serviceTasks !== undefined) {
+          offenders.push(
+            `${file}::${scenarioId} — legacy top-level 'serviceTasks' still present (should live in metadata.serviceTasks)`,
+          );
+        }
+        for (const [role, varName] of Object.entries(spec.bindings)) {
+          if (typeof varName !== 'string' || varName.length === 0) {
+            offenders.push(
+              `${file}::${scenarioId} — bindings['${role}'] is not a non-empty string`,
+            );
+          }
+        }
+      }
+      expect(
+        offenders,
+        `Found ${offenders.length} models[] entries violating the Lift 13 generic shape:\n${offenders.slice(0, 20).join('\n')}`,
+      ).toEqual([]);
+    });
+
+    it('every realised models[] kind is declared in the ABox (no orphan kinds; the generic builder dispatches by ABox modelKind)', async () => {
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const kinds = graph.domain?.artifactKinds ?? {};
+      const declaredModelKinds = new Set<string>();
+      for (const k of Object.values(kinds)) {
+        if (k.modelKind) declaredModelKinds.add(k.modelKind);
+      }
+      // Sanity: the ABox declares at least one modelKind (otherwise this
+      // invariant is vacuous).
+      expect(declaredModelKinds.size).toBeGreaterThan(0);
+
+      const seenKinds = new Set<string>();
+      for (const { spec } of loadAllModelsEntries()) {
+        seenKinds.add(spec.kind);
+      }
+      // Every kind the planner actually emits to models[] must be a kind
+      // the ABox declares. Before Lift 13 this was a tautology: only the
+      // hard-coded `'bpmn'`/`'form'` arms could emit, and both were known
+      // ABox values. After Lift 13 the generic builder dispatches by
+      // whatever `modelKind` the ABox returns, so if a typo or stale entry
+      // ever sneaks a kind into models[] that nothing declares, the
+      // structural symmetry breaks — that's the regression this guards.
+      const orphans = [...seenKinds].filter((k) => !declaredModelKinds.has(k));
+      expect(
+        orphans,
+        `Emitted models[] entries reference kind(s) [${orphans.join(', ')}] not declared in artifact-kinds.json. ABox declares: [${[...declaredModelKinds].join(', ')}]`,
+      ).toEqual([]);
+    });
+
+    it('bpmn entries bind processDefinitionId; form entries bind formKey (planner-internal role conventions)', () => {
+      const offenders: string[] = [];
+      for (const { file, scenarioId, spec } of loadAllModelsEntries()) {
+        if (spec.kind === 'bpmn' && !spec.bindings?.processDefinitionId) {
+          offenders.push(
+            `${file}::${scenarioId} — bpmn entry missing bindings.processDefinitionId`,
+          );
+        }
+        if (spec.kind === 'form' && !spec.bindings?.formKey) {
+          offenders.push(`${file}::${scenarioId} — form entry missing bindings.formKey`);
+        }
+      }
+      expect(
+        offenders,
+        `Per-kind binding-role conventions violated:\n${offenders.slice(0, 20).join('\n')}`,
+      ).toEqual([]);
+    });
+  },
+);

@@ -719,15 +719,39 @@ export interface ExtendedGenerationOpts {
   additionalNeeded?: string[];
 }
 
-export type GeneratedModelSpec = BpmnModelSpec | FormModelSpec;
-
-export interface BpmnModelSpec {
-  kind: 'bpmn';
-  processDefinitionIdVar: string;
-  serviceTasks?: { id: string; typeVar: string }[];
-}
-
-export interface FormModelSpec {
-  kind: 'form';
-  formKeyVar: string;
+/**
+ * A model-spec entry describing one synthesized model the planner needs to
+ * deploy as part of a scenario.
+ *
+ * The shape is intentionally **open** over `kind` so any ABox-declared
+ * `modelKind` value produces a structured entry, not just the hard-coded
+ * `bpmn` / `form` discriminants the planner originally hand-rolled. Per-kind
+ * extensions (e.g. BPMN's service-task metadata) live in `metadata`;
+ * consumers that care about a specific kind narrow via the `kind` tag and
+ * reach into `metadata` with their own decoder.
+ *
+ * Lift 13 / #253: the previous closed union `BpmnModelSpec | FormModelSpec`
+ * caused the planner to silently drop any ABox `modelKind` value outside
+ * those two literals (the caveat originally noted on `modelKind` in
+ * `artifactKindsSchema.ts`). Removing the union closes that gap and lets a
+ * new `modelKind` declared in the ABox flow end-to-end without editing
+ * `scenarioGenerator.ts`.
+ */
+export interface GeneratedModelSpec {
+  /** ABox-declared kind discriminator (e.g. `'bpmn'`, `'form'`). */
+  kind: string;
+  /**
+   * Map of binding-role → binding variable name. Role names are
+   * planner-internal conventions per kind (see
+   * `path-analyser/src/modelSpecBuilders.ts`): `bpmn` uses
+   * `processDefinitionId`; `form` uses `formKey`. Consumers that round-trip
+   * scenario JSON should treat unknown roles as opaque pass-through data.
+   */
+  bindings: Record<string, string>;
+  /**
+   * Optional per-kind structured extension. Currently used only by the
+   * `bpmn` kind to carry `serviceTasks` (id → job-type-binding pairs the
+   * runtime worker needs to honour). Consumers narrow via `kind`.
+   */
+  metadata?: Record<string, unknown>;
 }

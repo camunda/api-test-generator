@@ -151,7 +151,7 @@ export const artifactKindsSchema = {
           type: 'string',
           minLength: 1,
           description:
-            'Optional discriminator naming the `GeneratedModelSpec` variant the planner should construct when this kind is selected (Lift 10 / #227). Conventional values: `bpmn`, `form`. The planner consults this field via the ABox to pick the model-spec shape, replacing hard-coded semantic→kind comparisons in `ensureArtifactBindings`. Until the `GeneratedModelSpec` discriminated union is generalised (Lift 13), only the conventional values produce model-spec entries; other values are silently ignored by the model-spec construction step.',
+            'Optional discriminator naming the `GeneratedModelSpec` variant the planner should construct when this kind is selected (Lift 10 / #227). Conventional values: `bpmn`, `form`. The planner consults this field via the ABox to pick the model-spec shape, replacing hard-coded semantic→kind comparisons in `ensureArtifactBindings`. Lift 13 / #253: any value declared here produces a structured `models[]` entry of the form `{ kind, bindings: { <primary-role>: <varName> } }`; per-kind primary-binding-role names live in `path-analyser/src/modelSpecBuilders.ts` (`bpmn` → `processDefinitionId`, `form` → `formKey`, others default to `identifier`).',
         },
         description: {
           type: 'string',
