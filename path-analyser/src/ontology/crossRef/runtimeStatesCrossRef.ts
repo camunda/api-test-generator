@@ -9,10 +9,7 @@
 
 import type { DomainSemantics } from '../../types.js';
 import type { CrossRefIssue, SliceCrossRefModule } from './types.js';
-
-function declaredStates(d: DomainSemantics): Set<string> {
-  return new Set([...Object.keys(d.runtimeStates ?? {}), ...Object.keys(d.capabilities ?? {})]);
-}
+import { declaredStates } from './util.js';
 
 function witnessOf(d: DomainSemantics): Map<string, string> {
   const m = new Map<string, string>();

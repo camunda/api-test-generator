@@ -5,10 +5,7 @@
 
 import type { DomainSemantics } from '../../types.js';
 import type { CrossRefIssue, SliceCrossRefModule } from './types.js';
-
-function declaredStates(d: DomainSemantics): Set<string> {
-  return new Set([...Object.keys(d.runtimeStates ?? {}), ...Object.keys(d.capabilities ?? {})]);
-}
+import { declaredStates } from './util.js';
 
 export function checkSemanticTypeWitnessTargetResolves(d: DomainSemantics): CrossRefIssue[] {
   const declared = declaredStates(d);
