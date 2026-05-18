@@ -4030,15 +4030,17 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
     ).toEqual([]);
   });
 
-  it("the ABox file's $schema field resolves to the published TBox JSON (external tooling layout check)", () => {
+  it("the ABox file's $schema field is the canonical published TBox URL (external tooling layout check)", () => {
     // External JSON Schema tooling reads `$schema` from the ABox file
-    // to find the TBox. If the field drifts (typo, wrong relative
-    // path, missing) external validators silently skip validation
-    // even though the in-process loader is still happy. This invariant
-    // resolves the field as a path relative to the ABox and asserts
-    // the resulting absolute path is the published TBox file.
+    // to find the TBox. If the field drifts (typo, wrong slice URL,
+    // missing) external validators silently skip validation even
+    // though the in-process loader is still happy. Since #272 the
+    // `$schema` is the absolute published Pages URL; this invariant
+    // pins the specific edges-ABox → edge.schema.json binding. The
+    // generic prefix-shape check lives in the '#272' invariant block
+    // and applies to every ABox.
     const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'edges.json');
-    const expectedTboxPath = join(REPO_ROOT, 'ontology', 'vocabulary', 'edge.schema.json');
+    const expectedSchemaUrl = 'https://camunda.github.io/api-test-generator/ns/v1/edge.schema.json';
     interface AboxHeader {
       $schema?: unknown;
     }
@@ -4047,11 +4049,10 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
     const schemaField = aboxJson.$schema;
     expect(typeof schemaField, 'ABox must declare a string `$schema` field').toBe('string');
     if (typeof schemaField !== 'string') return;
-    const resolved = join(aboxPath, '..', schemaField);
     expect(
-      resolved,
-      `ABox $schema='${schemaField}' resolves to '${resolved}', expected the published TBox at '${expectedTboxPath}'.`,
-    ).toBe(expectedTboxPath);
+      schemaField,
+      `ABox $schema must be the canonical published TBox URL '${expectedSchemaUrl}'; got '${schemaField}'.`,
+    ).toBe(expectedSchemaUrl);
   });
 
   it('the ABox @context maps every TBox term to the v1 ns IRI (JSON-LD contract for external RDF tooling)', () => {
@@ -6603,3 +6604,108 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig('bundled-spec invariants: ontology publishing surface (#272)', () => {
+  // The committed TBox `$id` URLs and per-config ABox `$schema`
+  // URLs are the public contract surface for external SPARQL /
+  // SHACL / OWL / IDE consumers. These invariants pin the URL
+  // convention so the contract cannot silently drift.
+  const ONTOLOGY_URL_PREFIX = 'https://camunda.github.io/api-test-generator/ns/v1/';
+
+  it('every TBox `$id` follows the canonical ontology URL convention', () => {
+    // External consumers dereference ontology terms by `$id`. If a
+    // TBox slice declares a different prefix (e.g. raw.* or a
+    // branch URL), the IRI loses its stable identity even if the
+    // file happens to be reachable.
+    const vocabDir = join(REPO_ROOT, 'ontology', 'vocabulary');
+    const files = readdirSync(vocabDir).filter((f) => f.endsWith('.schema.json'));
+    expect(files.length, 'expected at least one TBox to exist').toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const parsed: unknown = JSON.parse(readFileSync(join(vocabDir, file), 'utf-8'));
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        !('$id' in parsed) ||
+        typeof parsed.$id !== 'string'
+      ) {
+        offenders.push(`${file}: missing or non-string $id`);
+        continue;
+      }
+      const expected = `${ONTOLOGY_URL_PREFIX}${file}`;
+      if (parsed.$id !== expected) {
+        offenders.push(`${file}: $id is '${parsed.$id}', expected '${expected}'`);
+      }
+    }
+    expect(
+      offenders,
+      `Every TBox '$id' must be '${ONTOLOGY_URL_PREFIX}<filename>'; this URL is the published Pages identifier and the ontology IRI.`,
+    ).toEqual([]);
+  });
+
+  it('every per-config ABox `$schema` follows the canonical ontology URL convention', () => {
+    // The earlier mix of absolute (broken) and relative (IDE-only)
+    // `$schema` URLs across ABoxes was the symptom that surfaced
+    // #272. Pinning the convention here stops it creeping back in.
+    const aboxDir = join(REPO_ROOT, 'configs', 'camunda-oca', 'ontology');
+    const files = readdirSync(aboxDir).filter((f) => f.endsWith('.json'));
+    expect(files.length, 'expected at least one ABox to exist').toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const parsed: unknown = JSON.parse(readFileSync(join(aboxDir, file), 'utf-8'));
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        !('$schema' in parsed) ||
+        typeof parsed.$schema !== 'string'
+      ) {
+        offenders.push(`${file}: missing or non-string $schema`);
+        continue;
+      }
+      const schemaUrl = parsed.$schema;
+      if (!schemaUrl.startsWith(ONTOLOGY_URL_PREFIX) || !schemaUrl.endsWith('.schema.json')) {
+        offenders.push(
+          `${file}: $schema is '${schemaUrl}', expected '${ONTOLOGY_URL_PREFIX}<slice>.schema.json'`,
+        );
+      }
+    }
+    expect(
+      offenders,
+      `Every ABox '$schema' must be an absolute '${ONTOLOGY_URL_PREFIX}<slice>.schema.json' URL so IDEs and external consumers resolve through the published Pages site.`,
+    ).toEqual([]);
+  });
+
+  describe('ontology URL resolution (network — gated by RUN_ONTOLOGY_URL_CHECK)', () => {
+    // Network-gated check. Runs only in the scheduled
+    // `ontology-url-check.yml` workflow, never in PR CI: a brand-new
+    // slice in a PR is not yet deployed (deploy happens on merge),
+    // and PR CI must not depend on network egress.
+    const shouldRun = process.env.RUN_ONTOLOGY_URL_CHECK === '1';
+
+    it.skipIf(!shouldRun)(
+      'every published TBox URL HEADs 200',
+      async () => {
+        const vocabDir = join(REPO_ROOT, 'ontology', 'vocabulary');
+        const files = readdirSync(vocabDir).filter((f) => f.endsWith('.schema.json'));
+        const offenders: string[] = [];
+        for (const file of files) {
+          const url = `${ONTOLOGY_URL_PREFIX}${file}`;
+          try {
+            const res = await fetch(url, { method: 'HEAD' });
+            if (res.status !== 200) {
+              offenders.push(`${url}: HTTP ${res.status}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            offenders.push(`${url}: fetch failed — ${msg}`);
+          }
+        }
+        expect(
+          offenders,
+          'Every committed TBox $id URL must resolve to HTTP 200 on the published Pages site. Check publish-ontology.yml run history if this fails.',
+        ).toEqual([]);
+      },
+      60_000,
+    );
+  });
+});

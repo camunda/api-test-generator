@@ -1,0 +1,111 @@
+name: Publish ontology to GitHub Pages
+
+# Publishes the committed JSON Schema TBoxes under `ontology/vocabulary/`
+# so that the absolute `$id` URLs they declare actually resolve:
+#
+#   https://camunda.github.io/api-test-generator/ns/v1/<slice>.schema.json
+#
+# This makes good on the contract documented in every
+# `path-analyser/src/ontology/*Schema.ts` header: the JSON Schema
+# artefacts exist specifically so external SPARQL/SHACL/OWL/IDE
+# consumers can fetch them by URL.
+#
+# Setup requirement (one-time, repo admin):
+#   Settings → Pages → Source = "GitHub Actions". Until this is set,
+#   the `deploy` job will fail with "Get Pages site failed" — that is
+#   the expected, well-documented signal. Subsequent runs after the
+#   toggle is flipped will succeed without any change to this file.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ontology/**'
+      - 'path-analyser/src/ontology/**Schema.ts'
+      - 'scripts/build-ontology.ts'
+      - '.github/workflows/publish-ontology.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one in-flight deploy at a time; cancel superseded runs so
+# rapid pushes coalesce to the latest content.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build publishable site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Regenerate ontology artefacts from TS source
+        # Defence-in-depth against a drifted commit: regenerate the
+        # JSON before publishing rather than trusting whatever is on
+        # disk. A regression invariant already gates this in PR CI,
+        # but publishing is the contract surface so we double-check.
+        run: npm run build:ontology
+
+      - name: Assemble publish directory
+        # The TBox `$id` URLs are of the form
+        # `https://camunda.github.io/api-test-generator/ns/v1/<slice>.schema.json`.
+        # GitHub Pages for a project repo serves at
+        # `https://camunda.github.io/<repo>/`, so the on-disk layout
+        # mirroring the URL is `public/ns/v1/<slice>.schema.json`.
+        run: |
+          set -euo pipefail
+          mkdir -p public/ns/v1
+          cp ontology/vocabulary/*.schema.json public/ns/v1/
+          cp ontology/README.md public/index.md 2>/dev/null || true
+          # Minimal landing page so visiting the root URL is not a 404.
+          # Listing is generated from the publish directory so it stays
+          # in sync with whatever was just copied.
+          {
+            echo '<!doctype html><meta charset="utf-8"><title>api-test-generator ontology</title>'
+            echo '<h1>api-test-generator ontology vocabulary</h1>'
+            echo '<p>Canonical JSON Schema TBoxes under <code>/ns/v1/</code>. The TS sources of truth live in '
+            echo '<a href="https://github.com/camunda/api-test-generator/tree/main/path-analyser/src/ontology">'
+            echo '<code>path-analyser/src/ontology/</code></a>.</p>'
+            echo '<h2>Vocabulary</h2><ul>'
+            for f in public/ns/v1/*.schema.json; do
+              name="$(basename "$f")"
+              echo "<li><a href=\"ns/v1/${name}\"><code>ns/v1/${name}</code></a></li>"
+            done
+            echo '</ul>'
+          } > public/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
