@@ -2,7 +2,11 @@ import { bindSemanticInput } from './bindSemanticInput.js';
 import { deterministicSuffix } from './deterministicSuffix.js';
 import { buildBpmnModelSpec, buildModelSpec, findModelSpec } from './modelSpecBuilders.js';
 import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
-import { findDeploymentGatewayOpId, isDeploymentGatewayOp } from './ontology/operationRoles.js';
+import {
+  findDeploymentGatewayOpId,
+  findJobActivatorOpId,
+  isDeploymentGatewayOp,
+} from './ontology/operationRoles.js';
 import type {
   ArtifactRule,
   EndpointScenario,
@@ -287,6 +291,13 @@ export function generateScenariosForEndpoint(
   // casing must declare the role on their fixture domain (see
   // `tests/fixtures/planner/classification-dispatch.test.ts`).
   const deploymentGatewayOpId = findDeploymentGatewayOpId(graph.domain);
+  // Lift 14 / #254: the job-activator operationId for the active config
+  // (per `artifact-kinds.json#operationRules[].role === "jobActivator"`).
+  // When the role is declared on an op present in the BFS state, the
+  // fallback model-spec draft must include a service task whose `type`
+  // is bound to the activator's request `type` filter so the deployed
+  // BPMN actually surfaces a job for the activation to pick up.
+  const jobActivatorOpId = findJobActivatorOpId(graph.domain);
   while (queue.length && scenarios.length < max) {
     // biome-ignore lint/style/noNonNullAssertion: queue.length is checked in the loop predicate
     const state = queue.shift()!;
@@ -319,15 +330,14 @@ export function generateScenariosForEndpoint(
         if (!models && deploymentGatewayOpId && state.ops.includes(deploymentGatewayOpId)) {
           // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
           bindings = { processDefinitionIdVar1: 'proc_${RANDOM}' };
-          if (state.ops.includes('activateJobs'))
+          const includesJobActivator = !!(jobActivatorOpId && state.ops.includes(jobActivatorOpId));
+          if (includesJobActivator)
             // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
             bindings.jobTypeVar1 = 'jobType_${RANDOM}';
           models = [
             buildBpmnModelSpec(
               'processDefinitionIdVar1',
-              state.ops.includes('activateJobs')
-                ? [{ id: 'task1', typeVar: 'jobTypeVar1' }]
-                : undefined,
+              includesJobActivator ? [{ id: 'task1', typeVar: 'jobTypeVar1' }] : undefined,
             ),
           ];
         }

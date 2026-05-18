@@ -12,7 +12,7 @@ import {
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
-import { isDeploymentGatewayOp } from './ontology/operationRoles.js';
+import { isDeploymentGatewayOp, isJobActivatorOp } from './ontology/operationRoles.js';
 import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
@@ -274,7 +274,7 @@ async function main() {
       const isSearchLikeOp =
         (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
         /search/i.test(op.operationId) ||
-        op.operationId === 'activateJobs';
+        isJobActivatorOp(graph.domain, op.operationId);
       const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
       const skipGraft = isSearchLikeOp && isEmptyNeg;
       if (
@@ -1084,7 +1084,7 @@ function buildRequestBodyFromCanonical(
         }
       }
       // For search-like empty-negative scenarios, allow provider-injected optional filters to drive an empty result
-      const isSearchLikeOp = opId === 'activateJobs' || /search/i.test(opId);
+      const isSearchLikeOp = isJobActivatorOp(graph.domain, opId) || /search/i.test(opId);
       const isEmptyNeg = scenario?.expectedResult && scenario.expectedResult.kind === 'empty';
       if (isSearchLikeOp && isEmptyNeg) {
         for (const f of nodes.filter((n) => !n.required && !n.path.includes('[]'))) {
@@ -1136,9 +1136,9 @@ function buildRequestBodyFromCanonical(
       if (!leafSet.has('jobType')) delete template.jobType;
     }
     // Scenario-specific overrides
-    // For activateJobs negative-empty scenarios, use config-driven non-existent job type and short requestTimeout
+    // For job-activator negative-empty scenarios, use config-driven non-existent job type and short requestTimeout
     if (
-      opId === 'activateJobs' &&
+      isJobActivatorOp(graph.domain, opId) &&
       scenario?.expectedResult &&
       scenario.expectedResult.kind === 'empty'
     ) {

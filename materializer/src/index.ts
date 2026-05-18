@@ -22,7 +22,7 @@ import {
   deriveArtifactKindsViews,
   deriveGlobalContextSeedsViews,
 } from 'path-analyser/ontology/loader';
-import { getRoleForOperation } from 'path-analyser/ontology/operationRoles';
+import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRoles';
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
@@ -339,7 +339,7 @@ async function run() {
     const domain = artifactViews
       ? { operationArtifactRules: artifactViews.operationArtifactRules }
       : undefined;
-    getRoleForOperationFn = (opId: string) => getRoleForOperation(domain, opId);
+    getRoleForOperationFn = (opId: string) => getEmitterRoleForOperation(domain, opId);
   }
   for (const hook of emitter.roleHooks ?? []) {
     const provider = getRoleHookProvider(hook);

@@ -61,6 +61,12 @@
         { "id": "dmn", "artifactKind": "dmnDecision" },
         { "id": "drd", "artifactKind": "dmnDrd" }
       ]
+    },
+    {
+      "@type": "OperationArtifactRule",
+      "operationId": "activateJobs",
+      "role": "jobActivator",
+      "plannerOnly": true
     }
   ],
   "fileExtensionMap": [

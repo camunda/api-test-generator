@@ -5098,6 +5098,11 @@ describeForThisConfig(
       const rules = graph.domain?.operationArtifactRules ?? {};
       const aboxRoles = new Set<string>();
       for (const spec of Object.values(rules)) {
+        // Lift 14 / #254: planner-only roles (e.g. `jobActivator`) are
+        // not dispatched to a Playwright call-site template, so they
+        // don't require a role bundle under
+        // `configs/<config>/codegen/playwright/roles/`.
+        if (spec.plannerOnly) continue;
         if (spec.role) aboxRoles.add(spec.role);
       }
       const rolesDir = join(REPO_ROOT, 'configs', CONFIG_NAME, 'codegen', 'playwright', 'roles');
@@ -5111,7 +5116,7 @@ describeForThisConfig(
       expect(
         missing,
         `ABox role(s) without a renderable role directory under configs/${CONFIG_NAME}/codegen/playwright/roles/.` +
-          ' Either add the role directory (with call-site.tmpl) or remove the role from the ABox.',
+          ' Either add the role directory (with call-site.tmpl), set `plannerOnly: true` on the rule (if the role is consumed only by the planner), or remove the role from the ABox.',
       ).toEqual([]);
     });
 
@@ -5764,6 +5769,30 @@ describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
         offenders,
         `Per-kind binding-role conventions violated:\n${offenders.slice(0, 20).join('\n')}`,
       ).toEqual([]);
+    });
+
+    it('exactly one operation has role "jobActivator" and it is `activateJobs` (Lift 14 / #254)', async () => {
+      // The job-activator role discriminates the operation that
+      // activates (polls for / leases) jobs produced by service tasks
+      // in a deployed BPMN process. The planner consults it in three
+      // places that previously hard-coded the literal `'activateJobs'`
+      // operationId: search-like negative-empty coverage in
+      // `featureCoverageGenerator.ts` and `index.ts`, service-task
+      // wiring in the fallback BPMN model-spec draft in
+      // `scenarioGenerator.ts`, and non-existent-job-type overrides on
+      // empty-negative scenarios in `index.ts`. Two operations with the
+      // role would make the service-task wiring fork ambiguous; zero
+      // would silently disable the negative-empty coverage for the
+      // operation. The role must map to `activateJobs` for the
+      // camunda-oca config because that is the upstream job-activation
+      // endpoint.
+      const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+      const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+      const rules = graph.domain?.operationArtifactRules ?? {};
+      const opsWithJobActivator = Object.entries(rules)
+        .filter(([, spec]) => spec.role === 'jobActivator')
+        .map(([opId]) => opId);
+      expect(opsWithJobActivator).toEqual(['activateJobs']);
     });
   },
 );
