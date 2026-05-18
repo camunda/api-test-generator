@@ -74,19 +74,32 @@ async function main() {
   // Pre-#251 this guard validated `domain.operationRequirements[*].valueBindings['response.*']`
   // LHSs against the canonical shape. Those entries were retired in
   // #251 once the planner began auto-deriving response extracts from
-  // `responseSemanticLeaves` (sourced from `x-semantic-provider` on
-  // the spec), so the guard now reads from the same source the planner
-  // uses — the graph — instead of from the ABox.
+  // the dependency graph (`responseSemanticTypes` / `responseSemanticLeaves`,
+  // both populated from `x-semantic-type` on response fields; the
+  // `provider` flag tracked here is the authoritative-producer signal
+  // sourced from the container's `x-semantic-provider: [...]` array).
+  // The guard now reads from the same source the planner uses — the
+  // graph — instead of from the ABox.
   const validationErrors: string[] = [];
   for (const [opId, op] of Object.entries(graph.operations)) {
     const leaves = op.responseSemanticLeaves;
     if (!leaves?.length) continue;
+    const providerLeaves = leaves.filter((l) => l.provider);
+    if (providerLeaves.length === 0) continue;
     const shape = canonical[opId];
-    if (!shape) continue;
+    if (!shape) {
+      // An op with `provider:true` response leaves MUST have a 2xx
+      // JSON response shape; otherwise the extractor lifted a leaf
+      // from a response the bundler didn't materialise — a true
+      // extractor↔bundler divergence. Fail loud rather than skip.
+      validationErrors.push(
+        `${opId}: extractor reported ${providerLeaves.length} provider:true response leaf(s) but bundler produced no canonical response shape`,
+      );
+      continue;
+    }
     const respSet = new Set((shape.response || []).map((n) => n.path));
     const seen = new Set<string>();
-    for (const leaf of leaves) {
-      if (!leaf.provider) continue;
+    for (const leaf of providerLeaves) {
       if (seen.has(leaf.fieldPath)) continue;
       seen.add(leaf.fieldPath);
       if (!respSet.has(leaf.fieldPath)) {
@@ -490,9 +503,15 @@ function buildRequestPlan(
     // The legacy `response.*` valueBindings-driven extract block was
     // retired in #251 — the ABox no longer carries `response.*` entries
     // because the planner now auto-derives the equivalent extracts from
-    // `graph.operations[opId].responseSemanticTypes` (sourced from
-    // `x-semantic-provider` on the spec). See the producer-step block
-    // further down.
+    // `graph.operations[opId].responseSemanticTypes` (populated from
+    // `x-semantic-type` on response field schemas). See the producer-
+    // step block further down. (The authoritative-producer signal
+    // sourced from `x-semantic-provider: [...]` lives on
+    // `responseSemanticLeaves[].provider`, not on
+    // `responseSemanticTypes` entries; the auto-derive intentionally
+    // emits an extract for every annotated leaf, not just
+    // provider:true ones, because some scenarios consume non-provider
+    // identifier echoes for downstream filters.)
     // Canonical request body synthesis for POST/PUT/PATCH using requestByMediaType
     if (['POST', 'PUT', 'PATCH'].includes(opRef.method)) {
       const plan = buildRequestBodyFromCanonical(
@@ -523,28 +542,22 @@ function buildRequestPlan(
       }
       if (extract.length) step.extract = (step.extract || []).concat(extract);
     }
-    // Non-final producer steps: emit semantic-labeled extracts using the
-    // dependency graph's `responseSemanticTypes` (which captures nested
-    // fieldPaths like `metadata.processInstanceKey`, unlike
-    // `extractSchemas.flattenTopLevelFields` which only sees top-level).
-    // Without this, a grafted prerequisite chain could exist but never
-    // populate the URL var, leaving `${...Var}` literally in the emitted
-    // URL.
     // Producer-step auto-derive: emit semantic-labeled extracts from
-    // the dependency graph's `responseSemanticTypes` (which captures
-    // nested fieldPaths like `metadata.processInstanceKey`, unlike
-    // `extractSchemas.flattenTopLevelFields` which only sees top-level).
-    // Without this, a grafted prerequisite chain could exist but never
-    // populate the URL var, leaving `${...Var}` literally in the
-    // emitted URL.
+    // the dependency graph's `responseSemanticTypes` (populated from
+    // `x-semantic-type` on response field schemas, including nested
+    // paths like `metadata.processInstanceKey` — unlike
+    // `extractSchemas.flattenTopLevelFields`, which only sees
+    // top-level). Without this, a grafted prerequisite chain could
+    // exist but never populate the URL var, leaving `${...Var}`
+    // literally in the emitted URL.
     //
     // Pre-#251 the equivalent extracts on FINAL steps were also seeded
-    // by the now-retired ABox `response.*` valueBindings (see the block
-    // higher up in this function). Final-step behaviour is preserved
-    // by `resp.fields` (top-level leaves) above; nested leaves on a
-    // final step were extracted into ctx vars that no later step
-    // consumes, so dropping them is behaviour-preserving for runtime
-    // semantics. The L3 invariant in
+    // by the now-retired ABox `response.*` valueBindings (see the
+    // comment higher up in this function). Final-step behaviour is
+    // preserved by `resp.fields` (top-level leaves) above; nested
+    // leaves on a final step were extracted into ctx vars that no
+    // later step consumes, so dropping them is behaviour-preserving
+    // for runtime semantics. The L3 invariant in
     // configs/camunda-oca/regression-invariants.test.ts pins the
     // specific (op, fieldPath, bind) triples that downstream URL and
     // body templates rely on (each of which appears as a non-final
