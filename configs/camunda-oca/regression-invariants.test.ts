@@ -5468,6 +5468,70 @@ describeForThisConfig('bundled-spec invariants: emitter is API-agnostic (#207)',
 });
 
 describeForThisConfig(
+  'bundled-spec invariants: artifact-kind fixture resolvability (Lift 17 / #257)',
+  () => {
+    // Pre-Lift 17, `path-analyser/src/index.ts` carried a hard-coded
+    //   const defaultFixtures: Record<string, string> = {
+    //     bpmnProcess: '@@FILE:bpmn/simple.bpmn',
+    //     form:        '@@FILE:forms/simple.form',
+    //     dmnDecision: '@@FILE:dmn/decision.dmn',
+    //     dmnDrd:      '@@FILE:dmn/drd.dmn',
+    //   };
+    // map plus a `'@@FILE:bpmn/simple.bpmn'` second-fallback that masked
+    // any registry miss. Both were OCA-flavoured and would silently
+    // coerce a second-API config's deployment to a BPMN file. Lift 17
+    // retired both — `chooseFixtureFromRegistry` now throws on a miss.
+    //
+    // This invariant fails the build *before* anyone runs the pipeline
+    // against a misconfigured ABox: every artifact-kind named by an
+    // `operationArtifactRules[op].rules[*].artifactKind` (which includes
+    // the ABox-derived default for a deployment-gateway op,
+    // `rules[0].artifactKind`) must resolve to at least one entry of
+    // that kind in the per-config `fixtures/deployment-artifacts.json`.
+    // The recurring shape of the defect was "kind referenced but no
+    // fixture of that kind exists"; this is the class-scoped guard.
+    it('every artifact-kind referenced by operationArtifactRules has at least one fixture in deployment-artifacts.json', () => {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; ajv validates the shape at load time in production code paths.
+      const abox = JSON.parse(
+        readFileSync(
+          join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'artifact-kinds.json'),
+          'utf8',
+        ),
+      ) as {
+        operationRules: Array<{
+          operationId: string;
+          rules?: Array<{ artifactKind?: string }>;
+        }>;
+      };
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; the planner's own loader narrows the same payload.
+      const registry = JSON.parse(
+        readFileSync(
+          join(REPO_ROOT, 'configs', CONFIG_NAME, 'fixtures', 'deployment-artifacts.json'),
+          'utf8',
+        ),
+      ) as { artifacts: Array<{ kind: string }> };
+      const fixtureKinds = new Set(registry.artifacts.map((a) => a.kind));
+
+      const orphans: Array<{ operationId: string; kind: string }> = [];
+      for (const opRule of abox.operationRules ?? []) {
+        for (const r of opRule.rules ?? []) {
+          if (r.artifactKind && !fixtureKinds.has(r.artifactKind)) {
+            orphans.push({ operationId: opRule.operationId, kind: r.artifactKind });
+          }
+        }
+      }
+      expect(
+        orphans,
+        `Artifact-kind(s) referenced by an ABox operationArtifactRules entry have no fixture of that kind in fixtures/deployment-artifacts.json. ` +
+          `Lift 17 / #257 retired the silent OCA-flavoured default-fixtures map, so a missing fixture now throws at pipeline time. ` +
+          `Either add a fixture of the named kind, or remove the rule from operationArtifactRules. ` +
+          `Orphans: ${JSON.stringify(orphans)}`,
+      ).toEqual([]);
+    });
+  },
+);
+
+describeForThisConfig(
   'bundled-spec invariants: feature base scenario contains only required fields (#247)',
   () => {
     // #247: the feature suite's "base" scenario (`feature-1`,

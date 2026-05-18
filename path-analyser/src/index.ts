@@ -1181,21 +1181,17 @@ function buildRequestBodyFromCanonical(
       const domainRules = graph.domain?.operationArtifactRules?.[opId]?.rules || [];
       const rule = ruleId ? domainRules.find((r) => r.id === ruleId) : undefined;
       let kind = rule?.artifactKind;
-      if (!kind) {
-        // Default to BPMN process for the deployment-gateway op when
-        // unspecified. Lift 9 / #225: the op is now resolved against the
-        // ABox role mapping; the bpmnProcess default for that op stays
-        // hard-coded here pending Lift 10 (#225 follow-up: derive the
-        // default from operationRules[op].rules[0].artifactKind).
-        if (isDeploymentGatewayOp(graph.domain, opId)) kind = 'bpmnProcess';
+      if (!kind && isDeploymentGatewayOp(graph.domain, opId)) {
+        // Lift 17 / #257: derive the deployment-gateway's default
+        // artifact kind from the ABox
+        // (`operationArtifactRules[op].rules[0].artifactKind`) instead
+        // of a hard-coded `'bpmnProcess'`. Lift 9 / #225 routed the
+        // *operation lookup* through the ABox; this completes the chain
+        // so the *kind* is also ABox-sourced. A second-API config whose
+        // deployment-gateway op produces a different default artifact
+        // kind no longer silently coerces to BPMN.
+        kind = graph.domain?.operationArtifactRules?.[opId]?.rules?.[0]?.artifactKind;
       }
-      // Map artifact kind -> default fixture path
-      const defaultFixtures: Record<string, string> = {
-        bpmnProcess: '@@FILE:bpmn/simple.bpmn',
-        form: '@@FILE:forms/simple.form',
-        dmnDecision: '@@FILE:dmn/decision.dmn',
-        dmnDrd: '@@FILE:dmn/drd.dmn',
-      };
       // Pick the registry entry whose effective providesStates covers the
       // states this createDeployment step must produce for the chain (#159).
       // requiredStates is derived from operationRequirements.<op>.requires
@@ -1210,7 +1206,20 @@ function buildRequestBodyFromCanonical(
         kind ? (graph.domain?.artifactKinds?.[kind]?.producesStates ?? []) : [],
       );
       const regHit = chooseFixtureFromRegistry(kind, requiredStates, kindLevelProvides);
-      const fileRef = regHit?.ref || defaultFixtures[kind || ''] || '@@FILE:bpmn/simple.bpmn';
+      if (!regHit) {
+        // Lift 17 / #257 retired the hard-coded `defaultFixtures` map
+        // and the `'@@FILE:bpmn/simple.bpmn'` second-fallback that
+        // previously masked this misconfiguration. The L3 invariant
+        // "every artifact-kind referenced by an operationArtifactRule
+        // resolves to at least one registry fixture" catches the
+        // recurring shape of this defect at build time.
+        throw new Error(
+          `No deployment fixture available for operationId="${opId}", artifactKind="${kind ?? '(unresolved — declare operationArtifactRules.' + opId + '.rules[0].artifactKind in the ABox)'}". ` +
+            `Add a fixture entry of kind "${kind ?? '<kind>'}" to the active config's fixtures/deployment-artifacts.json, or declare a default ABox rule under operationArtifactRules.${opId}.rules. ` +
+            `Lift 17 / #257 removed the silent OCA-flavoured fallback (@@FILE:bpmn/simple.bpmn) that previously masked this case.`,
+        );
+      }
+      const fileRef = regHit.ref;
       // Bind jobType from the chosen fixture for later use in the request
       // body (`activateJobs.type`, `completeJob`/`failJob`/`throwJobError`
       // path params, etc.). After #164 the SOLE source is
