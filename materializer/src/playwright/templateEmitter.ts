@@ -1,6 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ObserveStep, RequestStep, TemplateScenarioFile } from 'path-analyser/types';
+import type {
+  EventualWaitSpec,
+  ObserveStep,
+  RequestStep,
+  TemplateScenarioFile,
+} from 'path-analyser/types';
 
 /**
  * Per-suite globals used by the universal-seed prologue (Lift 22 / #270).
@@ -137,10 +142,33 @@ function renderLifecycleSuite(
     throw new Error(`Step 4 of ${file.subjectName} must be an absent-observe step.`);
   }
 
+  // Collect every RequestStep the suite will render so the per-suite
+  // import list reflects the actual code paths emitted below. The
+  // emitter has three optional helpers (extractInto, awaitEventually)
+  // whose imports must be omitted when unused — otherwise the
+  // strict-mode generated-suites typecheck flags
+  // `noUnusedImports` and CI fails.
+  const allRequestSteps: RequestStep[] = [
+    ...prereq.requestPlan,
+    establish.requestPlan,
+    observePresent.requestPlan,
+    revoke.requestPlan,
+    observeAbsent.requestPlan,
+  ];
+  const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
+  const needsAwaitEventually = allRequestSteps.some(
+    (rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0,
+  );
+
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
   lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
-  lines.push("import { initSpecSalt, seedBinding } from '../support/seeding';");
+  const seedingImports = ['initSpecSalt', 'seedBinding'];
+  if (needsExtractInto) seedingImports.push('extractInto');
+  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from '../support/await-eventually';");
+  }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
   lines.push('');
@@ -251,7 +279,36 @@ function appendInlineRequestStep(
   lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
   lines.push('      }');
   lines.push(`      expect(${respVar}.status()).toBe(${step.expect.status});`);
+  // Response extraction. Mirrors the per-endpoint emitter's per-step
+  // extract loop so a planner-annotated extract (e.g. server-assigned
+  // RoleId echoed in the createRole response) flows back into ctx and
+  // is visible to later prereq / invoke / observe steps. Without this,
+  // a future template whose establisher consumes a server-generated
+  // identifier (rather than the client-seeded one OCA edges happen to
+  // use) would silently send `undefined` and the suite would 4xx at
+  // runtime with no diagnostic at emit time.
+  for (const ex of step.extract ?? []) {
+    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
+      throw new Error(
+        `Refusing to emit extract for non-identifier bind name '${ex.bind}' (operationId=${step.operationId}).`,
+      );
+    }
+    lines.push(`      const json${idx + 1} = await ${respVar}.json();`);
+    lines.push(
+      `      extractInto(ctx, '${ex.bind}', ${buildOptionalAccessChain(`json${idx + 1}`, ex.fieldPath.split('.'))});`,
+    );
+  }
   lines.push('    });');
+  // Planner-annotated eventual-state waits (#159 PR B) — emitted as a
+  // sibling block at the same indentation as the test step so the
+  // wait's locals stay isolated. None of the current OCA edges
+  // populate `eventualWaitsAfter`, but future Edge-scoped templates
+  // whose establishers transition through an eventual state will,
+  // and silently dropping the planner's annotation here would race
+  // the subsequent observe step.
+  for (const wait of step.eventualWaitsAfter ?? []) {
+    appendEventualWait(lines, wait, idx);
+  }
 }
 
 function appendObserveStep(
@@ -295,7 +352,76 @@ function appendObserveStep(
   );
   const verb = step.assertion.expect === 'present' ? 'toContain' : 'not.toContain';
   lines.push(`      expect(__values).${verb}(ctx['${bindingName}']);`);
+  // Planner-annotated extracts on the observe step's request plan
+  // (mirrors the per-endpoint emitter's per-step extract loop). None
+  // of the current OCA edge observers populate `extract`, but the
+  // loader contract permits it and silently dropping the annotation
+  // would surface as a stale ctx for any consumer-of-observer
+  // template authored after Phase 2.
+  for (const ex of step.requestPlan.extract ?? []) {
+    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(ex.bind)) {
+      throw new Error(
+        `Refusing to emit extract for non-identifier bind name '${ex.bind}' (observe operationId=${step.operationId}).`,
+      );
+    }
+    lines.push(
+      `      extractInto(ctx, '${ex.bind}', ${buildOptionalAccessChain('__body', ex.fieldPath.split('.'))});`,
+    );
+  }
   lines.push('    });');
+  // Symmetrical eventual-wait emission for the observe step's request
+  // plan; see `appendInlineRequestStep` for rationale.
+  for (const wait of step.requestPlan.eventualWaitsAfter ?? []) {
+    appendEventualWait(lines, wait, idx);
+  }
+}
+
+function appendEventualWait(lines: string[], wait: EventualWaitSpec, stepIdx: number): void {
+  // #159 PR B-equivalent wait block, emitted at the same indentation as
+  // the sibling `test.step(...)` call so the wait's locals (`witnessUrl`,
+  // `witnessRespN`) stay out of the step's closure. The predicate body
+  // narrows `unknown` to a record before the top-level field read so the
+  // emitted suite typechecks under strict mode.
+  const respVar = `witnessResp${stepIdx + 1}`;
+  const w = wait.witness;
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(w.predicate.path)) {
+    throw new Error(
+      `Refusing to emit witness predicate with non-identifier path '${w.predicate.path}'.`,
+    );
+  }
+  lines.push(`    // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
+  lines.push('    {');
+  lines.push(`      const witnessUrl = baseUrl + ${buildUrlExpression(w.pathTemplate)};`);
+  const optionLines: string[] = [];
+  optionLines.push(`        method: '${w.method.toUpperCase()}',`);
+  optionLines.push(`        operationId: '${w.operationId}',`);
+  if (typeof w.waitUpToMs === 'number') {
+    optionLines.push(`        waitUpToMs: ${w.waitUpToMs},`);
+  }
+  if (typeof w.pollIntervalMs === 'number') {
+    optionLines.push(`        pollIntervalMs: ${w.pollIntervalMs},`);
+  }
+  optionLines.push('        predicate: (body) => {');
+  optionLines.push('          if (body === null || typeof body !== "object") return false;');
+  optionLines.push(`          const v = (body as Record<string, unknown>)['${w.predicate.path}'];`);
+  optionLines.push(`          return v === ${JSON.stringify(w.predicate.equals)};`);
+  optionLines.push('        },');
+  const method = w.method.toLowerCase();
+  lines.push(`      const ${respVar} = await awaitEventually(`);
+  lines.push(
+    `        async () => request.${method}(witnessUrl, { headers: await authHeaders() }),`,
+  );
+  lines.push('        {');
+  for (const ol of optionLines) lines.push(ol);
+  lines.push('        },');
+  lines.push('      );');
+  lines.push(`      if (${respVar}.status() !== 200) {`);
+  lines.push(
+    `        try { console.error('Witness response body:', await ${respVar}.text()); } catch {}`,
+  );
+  lines.push('      }');
+  lines.push(`      expect(${respVar}.status()).toBe(200);`);
+  lines.push('    }');
 }
 
 // ---------------------------------------------------------------------------

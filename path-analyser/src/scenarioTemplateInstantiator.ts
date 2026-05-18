@@ -309,6 +309,18 @@ export function instantiateAllTemplates(
   const errors: string[] = [];
   for (const tpl of templates.templates) {
     if (tpl.appliesTo.kind !== 'Edge') continue;
+    // Phase-2 hard-codes the EdgeLifecycle compilation pipeline rather
+    // than walking `tpl.steps`. New Edge-scoped templates therefore need
+    // their own compiler (Phases 3-5 of #268). Refuse-by-default so an
+    // unrecognised template name fails loudly instead of silently
+    // re-emitting EdgeLifecycle's shape against the wrong vocabulary.
+    if (tpl.name !== 'EdgeLifecycle') {
+      throw new Error(
+        `No compiler registered for scenario template '${tpl.name}'. ` +
+          `Phase 2 (#270) only ships the EdgeLifecycle compiler; additional ` +
+          `Edge-scoped templates need their own dispatch in instantiateAllTemplates.`,
+      );
+    }
     for (const edge of edges.edges) {
       const compiled = compileEdgeLifecycle(tpl, edge, graph, stash);
       if ('error' in compiled) {

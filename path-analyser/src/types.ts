@@ -908,7 +908,19 @@ export interface TemplateScenario {
   subjectName: string;
   subjectKind: 'Edge';
   steps: TemplateStep[];
-  /** Aggregated bindings across all steps; same shape as EndpointScenario.bindings. */
+  /**
+   * Aggregated semantic-type → placeholder map across all steps. The
+   * keys are semantic-type identifiers (e.g. `'Username'`, `'RoleId'`)
+   * — NOT binding names. This intentionally diverges from
+   * `EndpointScenario.bindings` (which is binding-name-keyed) because
+   * the membership assertion on an `ObserveStep` is expressed in
+   * semantic-type terms (`assertion.membershipSemanticType`) and the
+   * emitter resolves the ctx binding name from the semantic type via
+   * the planner's `<camelSemantic>Var` naming convention. The per-step
+   * `PrereqChainStep.bindings` map remains binding-name-keyed (mirrors
+   * `EndpointScenario.bindings`) so the existing per-endpoint emitter
+   * code paths apply unchanged.
+   */
   bindings: Record<string, string>;
 }
 
