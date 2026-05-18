@@ -909,17 +909,21 @@ export interface TemplateScenario {
   subjectKind: 'Edge';
   steps: TemplateStep[];
   /**
-   * Aggregated semantic-type → placeholder map across all steps. The
+   * Aggregated semantic-type → binding-name map across all steps. The
    * keys are semantic-type identifiers (e.g. `'Username'`, `'RoleId'`)
-   * — NOT binding names. This intentionally diverges from
-   * `EndpointScenario.bindings` (which is binding-name-keyed) because
-   * the membership assertion on an `ObserveStep` is expressed in
-   * semantic-type terms (`assertion.membershipSemanticType`) and the
-   * emitter resolves the ctx binding name from the semantic type via
-   * the planner's `<camelSemantic>Var` naming convention. The per-step
-   * `PrereqChainStep.bindings` map remains binding-name-keyed (mirrors
-   * `EndpointScenario.bindings`) so the existing per-endpoint emitter
-   * code paths apply unchanged.
+   * and the values are the planner-minted binding names the runtime
+   * `ctx` is keyed by (e.g. `'usernameVar'`, `'roleIdVar'`). This
+   * intentionally diverges from `EndpointScenario.bindings` (whose
+   * keys ARE binding names and whose values are concrete placeholders
+   * like `'__PENDING__'` or literal values): the membership assertion
+   * on an `ObserveStep` is expressed in semantic-type terms
+   * (`assertion.membershipSemanticType`), and the emitter looks the
+   * binding name up directly in this map rather than re-deriving it
+   * from the semantic-type identifier — so a future change to the
+   * planner's naming convention requires no emitter change. The
+   * per-step `PrereqChainStep.bindings` map remains binding-name-keyed
+   * (mirrors `EndpointScenario.bindings`) so the existing per-endpoint
+   * emitter code paths apply unchanged.
    */
   bindings: Record<string, string>;
   /**

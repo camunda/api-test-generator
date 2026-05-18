@@ -334,7 +334,17 @@ function appendObserveStep(
   lines.push(`      const __body = await ${respVar}.json();`);
   const accessChain = buildOptionalAccessChain('__body', step.assertion.arrayPath);
   lines.push(`      const __raw = ${accessChain};`);
-  lines.push('      const __arr = Array.isArray(__raw) ? __raw : [];');
+  // Fail loudly when the planner-declared arrayPath does not resolve to
+  // an array — the previous silent `Array.isArray(__raw) ? __raw : []`
+  // fallback would let an absent-observe assertion pass against a
+  // malformed response (e.g. server returned 200 with an unexpected
+  // shape), masking real defects. (#274 review.)
+  lines.push('      if (!Array.isArray(__raw)) {');
+  lines.push(
+    `        throw new Error('Observe assertion at arrayPath ${JSON.stringify(step.assertion.arrayPath).replace(/'/g, "\\'")} expected an array but got: ' + JSON.stringify(__raw));`,
+  );
+  lines.push('      }');
+  lines.push('      const __arr: unknown[] = __raw;');
   const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
   if (elementSegments.length === 0) {
     throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
@@ -430,18 +440,21 @@ function resolveBindingNameForSemantic(
   semanticType: string,
   bindings: Record<string, string>,
 ): string {
-  // `TemplateScenario.bindings` is semantic-type-keyed (e.g. `'Username' →
-  // '__PENDING__'`) while the runtime ctx is binding-name-keyed
-  // (`ctx['usernameVar']`). Convention (#270): the BFS planner names
-  // bindings `<camelSemantic>Var`. Verify the *semantic type* exists in
-  // the scenario binding table to catch instantiator drift early —
-  // without this, a missing entry would silently emit `ctx[undefined]`.
-  if (!(semanticType in bindings)) {
+  // `TemplateScenario.bindings` is semantic-type-keyed: each value is the
+  // binding name the planner minted for that semantic (e.g.
+  // `{ 'Username': 'usernameVar' }`). Read the map directly rather than
+  // re-deriving the binding name from the semantic-type identifier — the
+  // map is the authoritative source, and recomputing here would emit the
+  // wrong ctx key if the planner's naming convention ever diverged from
+  // the `<camelSemantic>Var` rule (e.g. for a semantic whose canonical
+  // binding name had a suffix the convention doesn't cover).
+  const bindingName = bindings[semanticType];
+  if (bindingName === undefined) {
     throw new Error(
       `Membership assertion for semantic type '${semanticType}' is not present ` +
         `in the scenario binding table. Known semantic types: ` +
         `${Object.keys(bindings).join(', ')}.`,
     );
   }
-  return `${semanticType.charAt(0).toLowerCase()}${semanticType.slice(1)}Var`;
+  return bindingName;
 }

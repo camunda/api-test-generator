@@ -47,7 +47,12 @@ export function camelCase(s: string): string {
 }
 
 export function escapeQuotes(s: string): string {
-  return s.replace(/'/g, "'");
+  // Escape for embedding in a single-quoted TS string literal: backslashes
+  // first (otherwise they'd swallow the apostrophe-escaping backslash we
+  // add next), then apostrophes. The previous shape (`'` → `'`) was a
+  // no-op typo that would have emitted invalid TypeScript for any label
+  // containing an apostrophe (e.g. "user's profile"). (#274 review.)
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 /**
