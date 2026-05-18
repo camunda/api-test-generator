@@ -58,11 +58,10 @@ No dependencies beyond the Python stdlib. Re-run after any change under
 ## Comparison with upstream
 
 Upstream snapshot:
-[camunda/camunda#53387](https://github.com/camunda/camunda/pull/53387) (head
-`7cf8bc1`), which regenerates `coverage_matrix.csv` so the `total` column
-equals unique-test count (previously double-counted multi-labeled tests). Variant
-columns are label-occurrences, so a test tagged `happy-path|filter` shows up in
-both.
+[camunda/camunda#53387](https://github.com/camunda/camunda/pull/53387)
+(head `7cf8bc1`). In its `coverage_matrix.csv` the `total` column equals
+unique-test count; variant columns are label-occurrences, so a test tagged
+`happy-path|filter` shows up in both.
 
 |  | upstream | generator |
 |---|---:|---:|
