@@ -64,18 +64,33 @@ async function main() {
   const graph = await loadGraph(baseDir);
   // Build canonical deep schema shapes (requests + responses)
   const canonical = await buildCanonicalShapes(path.resolve(baseDir, '../'));
-  // Validate domain valueBindings against canonical response paths (fail-hard soon; warn now)
+  // Drift guard: every response-side semantic leaf reported by the
+  // extractor must resolve in the canonical response shape produced by
+  // the bundler. Mismatch points at an extractor↔bundler divergence
+  // (e.g. one walked through an allOf branch the other didn't), which
+  // would silently produce response extracts whose fieldPath cannot be
+  // navigated at runtime.
+  //
+  // Pre-#251 this guard validated `domain.operationRequirements[*].valueBindings['response.*']`
+  // LHSs against the canonical shape. Those entries were retired in
+  // #251 once the planner began auto-deriving response extracts from
+  // `responseSemanticLeaves` (sourced from `x-semantic-provider` on
+  // the spec), so the guard now reads from the same source the planner
+  // uses — the graph — instead of from the ABox.
   const validationErrors: string[] = [];
-  const opReqs = graph.domain?.operationRequirements || {};
-  for (const [opId, req] of Object.entries(opReqs)) {
-    if (!req.valueBindings) continue;
+  for (const [opId, op] of Object.entries(graph.operations)) {
+    const leaves = op.responseSemanticLeaves;
+    if (!leaves?.length) continue;
     const shape = canonical[opId];
-    const respSet = new Set((shape?.response || []).map((n) => n.path));
-    for (const key of Object.keys(req.valueBindings)) {
-      if (!key.startsWith('response.')) continue;
-      const raw = key.slice('response.'.length).replace(/\[\]/g, '[]');
-      if (!respSet.has(raw)) {
-        validationErrors.push(`${opId}: '${raw}' not in canonical response shape`);
+    if (!shape) continue;
+    const respSet = new Set((shape.response || []).map((n) => n.path));
+    const seen = new Set<string>();
+    for (const leaf of leaves) {
+      if (!leaf.provider) continue;
+      if (seen.has(leaf.fieldPath)) continue;
+      seen.add(leaf.fieldPath);
+      if (!respSet.has(leaf.fieldPath)) {
+        validationErrors.push(`${opId}: '${leaf.fieldPath}' not in canonical response shape`);
       }
     }
   }
@@ -472,34 +487,12 @@ function buildRequestPlan(
         ),
       },
     };
-    // Domain valueBindings driven response extraction (non-final steps included)
-    const opDom = graph.domain?.operationRequirements?.[opRef.operationId];
-    if (opDom?.valueBindings) {
-      const extracts: { fieldPath: string; bind: string; note?: string }[] = [];
-      for (const [k, v] of Object.entries(opDom.valueBindings)) {
-        if (!k.startsWith('response.')) continue; // only handle response mappings here
-        const fieldPathRaw = k.slice('response.'.length); // canonical path with [] markers
-        const norm = fieldPathRaw.replace(/\[\]/g, '[0]'); // first element access for arrays
-        // #70: under the new grammar `semantic:<SemanticType>`, the binding
-        // variable is derived from the LHS field-path leaf instead of from
-        // the RHS state.parameter pair (which the typed-dataflow lens replaces).
-        const mapping = v;
-        const isSemantic = mapping.startsWith('semantic:');
-        const paramPart = isSemantic
-          ? (fieldPathRaw.split('.').pop() ?? '')
-          : (mapping.split('.').pop() ?? '');
-        let bind = `${camelCase(paramPart)}Var`;
-        if (k.endsWith('$key')) {
-          // explicit key semantic mapping
-          bind = `${camelCase(paramPart.replace(/Id$/, 'Key'))}Var`;
-        }
-        // Ensure binding variable exists in scenario.bindings placeholder if not set
-        scenario.bindings ||= {};
-        if (!scenario.bindings[bind]) scenario.bindings[bind] = `__PENDING__`;
-        extracts.push({ fieldPath: norm, bind, note: 'domainBinding' });
-      }
-      if (extracts.length) step.extract = extracts;
-    }
+    // The legacy `response.*` valueBindings-driven extract block was
+    // retired in #251 — the ABox no longer carries `response.*` entries
+    // because the planner now auto-derives the equivalent extracts from
+    // `graph.operations[opId].responseSemanticTypes` (sourced from
+    // `x-semantic-provider` on the spec). See the producer-step block
+    // further down.
     // Canonical request body synthesis for POST/PUT/PATCH using requestByMediaType
     if (['POST', 'PUT', 'PATCH'].includes(opRef.method)) {
       const plan = buildRequestBodyFromCanonical(
@@ -537,6 +530,25 @@ function buildRequestPlan(
     // Without this, a grafted prerequisite chain could exist but never
     // populate the URL var, leaving `${...Var}` literally in the emitted
     // URL.
+    // Producer-step auto-derive: emit semantic-labeled extracts from
+    // the dependency graph's `responseSemanticTypes` (which captures
+    // nested fieldPaths like `metadata.processInstanceKey`, unlike
+    // `extractSchemas.flattenTopLevelFields` which only sees top-level).
+    // Without this, a grafted prerequisite chain could exist but never
+    // populate the URL var, leaving `${...Var}` literally in the
+    // emitted URL.
+    //
+    // Pre-#251 the equivalent extracts on FINAL steps were also seeded
+    // by the now-retired ABox `response.*` valueBindings (see the block
+    // higher up in this function). Final-step behaviour is preserved
+    // by `resp.fields` (top-level leaves) above; nested leaves on a
+    // final step were extracted into ctx vars that no later step
+    // consumes, so dropping them is behaviour-preserving for runtime
+    // semantics. The L3 invariant in
+    // configs/camunda-oca/regression-invariants.test.ts pins the
+    // specific (op, fieldPath, bind) triples that downstream URL and
+    // body templates rely on (each of which appears as a non-final
+    // prereq in some scenario, where this block emits it).
     if (!isFinal) {
       const stepNode = graph.operations[opRef.operationId];
       const stepSuccess = successStatusByOp[opRef.operationId];
@@ -550,8 +562,7 @@ function buildRequestPlan(
           // semantic-graph-extractor emits array item paths with `[]`
           // markers (schema-analyzer.ts: `${fieldPath}[]`). The Playwright
           // emitter's accessor builder expects numeric indices, so
-          // normalise to first-element access — same convention used for
-          // domainBinding extracts above.
+          // normalise to first-element access.
           const fieldPath = entry.fieldPath.replace(/\[\]/g, '[0]');
           extract.push({
             fieldPath,
