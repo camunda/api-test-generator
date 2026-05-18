@@ -225,7 +225,7 @@ export async function loadProjectScaffoldingFiles(
  *                     + tests) construct the bundle map once and share it
  *                     between the materializer and the renderer.
  * @param roleExtras   Per-role data computed by role-hook providers (e.g.
- *                     `{ extracts: '[…]' }` from `DeploymentRoleHookProvider`).
+ *                     `{ extracts: '[…]' }` from a deploymentGateway role hook).
  *                     Used as the Mustache scope when rendering templated
  *                     support files. Verbatim helpers ignore it. For
  *                     templated helpers, **every Mustache variable

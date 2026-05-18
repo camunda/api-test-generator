@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { computeDeploymentExtracts } from '../../materializer/src/deploymentExtracts.ts';
+import { computeDeploymentExtracts } from '../../configs/camunda-oca/codegen/playwright/roles/deploymentGateway/hook.ts';
 import type { OperationNode } from '../../path-analyser/src/types.ts';
 
 function makeOp(

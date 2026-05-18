@@ -5,7 +5,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeDeploymentExtracts } from '../../../materializer/src/deploymentExtracts.ts';
+import { computeDeploymentExtracts } from '../../../configs/camunda-oca/codegen/playwright/roles/deploymentGateway/hook.ts';
 import {
   type LoadedRoleBundle,
   loadRoleBundlesForActiveConfig,
