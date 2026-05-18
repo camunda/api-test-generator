@@ -31,6 +31,7 @@ import type {
   RequestStep,
   ResponseShapeSummary,
 } from './types.js';
+import { PENDING_BINDING } from './types.js';
 import { normalizeEndpointFileName } from './utils.js';
 
 function isPlainRecord(v: unknown): v is Record<string, unknown> {
@@ -717,7 +718,7 @@ function mergePopulatesSubShapeIntoFinalBody(
     const bind = `${camelCase(semantic)}Var`;
     setLeafPlaceholder(body, leafPath, `\${${bind}}`);
     scenario.bindings ||= {};
-    if (!scenario.bindings[bind]) scenario.bindings[bind] = '__PENDING__';
+    if (!scenario.bindings[bind]) scenario.bindings[bind] = PENDING_BINDING;
   }
   finalStep.bodyTemplate = body;
 }
@@ -814,7 +815,7 @@ function aliasProducerExtractsToPlaceholders(
         note: 'placeholderAlias',
       });
       scenario.bindings ||= {};
-      if (!scenario.bindings[placeholderVar]) scenario.bindings[placeholderVar] = '__PENDING__';
+      if (!scenario.bindings[placeholderVar]) scenario.bindings[placeholderVar] = PENDING_BINDING;
       break;
     }
   }
@@ -1021,7 +1022,7 @@ function buildRequestBodyFromCanonical(
           const hasBinding = !!(bindingMap[mappedName] || semanticParam);
           if (hasBinding) {
             scenario.bindings ||= {};
-            if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
+            if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
             template[name] = `${'${'}${varName}}`;
           } else if (defaults && Object.hasOwn(defaults, name)) {
             template[name] = defaults[name];
@@ -1034,7 +1035,7 @@ function buildRequestBodyFromCanonical(
             template[name] = [];
           } else {
             scenario.bindings ||= {};
-            if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
+            if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
             template[name] = `${'${'}${varName}}`;
             if (!bindingMap[mappedName]) missing.push(name);
           }
@@ -1065,7 +1066,7 @@ function buildRequestBodyFromCanonical(
           : !!(bindingMap[normalizedPath] || semanticParam);
         if (hasBinding) {
           scenario.bindings ||= {};
-          if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
+          if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
           template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
           template[leaf] = defaults[leaf];
@@ -1078,7 +1079,7 @@ function buildRequestBodyFromCanonical(
           template[leaf] = [];
         } else {
           scenario.bindings ||= {};
-          if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
+          if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
           template[leaf] = `${'${'}${varName}}`;
           if (!bindingMap[normalizedPath]) missing.push(normalizedPath);
         }
@@ -1121,7 +1122,7 @@ function buildRequestBodyFromCanonical(
       if (allowedFields && !allowedFields.has(leaf)) continue;
       const varName = `${camelCase(param)}Var`;
       scenario.bindings ||= {};
-      if (!scenario.bindings[varName]) scenario.bindings[varName] = '__PENDING__';
+      if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
       if (template[leaf] === undefined) {
         template[leaf] = `${'${'}${varName}}`;
       }
@@ -1155,7 +1156,7 @@ function buildRequestBodyFromCanonical(
       template.requestTimeout = shortTimeout;
       // Seed binding for completeness, though template uses a literal
       scenario.bindings ||= {};
-      if (!scenario.bindings.jobTypeVar || scenario.bindings.jobTypeVar === '__PENDING__') {
+      if (!scenario.bindings.jobTypeVar || scenario.bindings.jobTypeVar === PENDING_BINDING) {
         scenario.bindings.jobTypeVar = nonExistentType;
       }
     }
@@ -1253,7 +1254,7 @@ function buildRequestBodyFromCanonical(
       const node = nodes.find((n) => n.path === seed.fieldName);
       if (!node) continue;
       scenario.bindings ||= {};
-      if (!scenario.bindings[seed.binding]) scenario.bindings[seed.binding] = '__PENDING__';
+      if (!scenario.bindings[seed.binding]) scenario.bindings[seed.binding] = PENDING_BINDING;
       template.fields[seed.fieldName] = `\${${seed.binding}}`;
     }
     // Derive expected deployment slices using domain sidecar mapping (explicit). Fallback to heuristic later in emitter.

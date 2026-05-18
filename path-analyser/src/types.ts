@@ -1,3 +1,22 @@
+/**
+ * Sentinel value the planner writes into `EndpointScenario.bindings[v]`
+ * when a binding is declared but not yet produced — a placeholder until
+ * an upstream producer (a prior step's response extraction, a seed-rule
+ * literal, or a fixture-provided value) fills it in. Comparisons against
+ * this value happen in the materializer (skip emitting literal request
+ * fields whose value is still pending) and in `seedBindings` (skip
+ * promoting `__PENDING__` placeholders to literal-seed bindings).
+ *
+ * Lift 18 / #258 hoisted the previously-duplicated `'__PENDING__'`
+ * literal into this single declaration. A planner-side L3 invariant
+ * asserts no scenario JSON ever ships this sentinel as a binding value
+ * (it is internal-only; presence in emitted output would be a bug).
+ *
+ * Imported by the materializer via the `path-analyser/types` subpath
+ * export so the two workspaces share one source of truth.
+ */
+export const PENDING_BINDING = '__PENDING__';
+
 export interface OperationRef {
   operationId: string;
   method: string;
