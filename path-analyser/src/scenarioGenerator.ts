@@ -17,6 +17,7 @@ import type {
   OperationNode,
   OperationRef,
 } from './types.js';
+import { PENDING_BINDING } from './types.js';
 
 // Back-compat generation options
 interface GenerationOpts {
@@ -721,7 +722,7 @@ export function generateScenariosForEndpoint(
           if (!bindingsDraft[varName]) {
             const isProducerBound = (graph.producersByType[s]?.length ?? 0) > 0;
             bindingsDraft[varName] = isProducerBound
-              ? '__PENDING__'
+              ? PENDING_BINDING
               : `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
           }
         }
@@ -1491,7 +1492,7 @@ function ensureArtifactBindings(
       // client-minted) get a deterministic literal for pre-seeding.
       const isProducerBound = (graph.producersByType[s]?.length ?? 0) > 0;
       state.bindingsDraft[varName] = isProducerBound
-        ? '__PENDING__'
+        ? PENDING_BINDING
         : `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     }
     // Resolve the GeneratedModelSpec variant for this semantic via the ABox

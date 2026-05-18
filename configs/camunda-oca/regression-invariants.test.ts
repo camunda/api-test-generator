@@ -6109,3 +6109,73 @@ describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
     });
   },
 );
+
+describeForThisConfig(
+  'bundled-spec invariants: PENDING_BINDING sentinel hygiene (Lift 18 / #258)',
+  () => {
+    // Lift 18 / #258 hoisted the previously-duplicated `'__PENDING__'`
+    // string literal into a single `PENDING_BINDING` const in
+    // path-analyser/src/types.ts. The sentinel is the planner's
+    // internal placeholder for "binding declared but not yet produced
+    // — a later step's response extraction, a seed-rule literal, or a
+    // runtime-seeded value will fill it in before the materializer
+    // emits a request that reads it".
+    //
+    // Its presence in scenario JSON IS contractual: the materializer
+    // reads `scenario.bindings[v] === PENDING_BINDING` to skip emitting
+    // a literal `ctx.set(v, '__PENDING__')` line, and
+    // `computeSeedBindings` (path-analyser/src/seedBindings.ts) returns
+    // exactly the still-PENDING bindings as the per-scenario runtime
+    // seed list (#136). Scanning scenario JSON for the sentinel would
+    // therefore be the wrong leak detector — it'd fire constantly on
+    // legitimate planner output.
+    //
+    // The real contract: NO emitted Playwright suite file ever contains
+    // the literal sentinel. If the materializer's skip guard regresses
+    // (or a future emitter omits the analogous skip), the sentinel will
+    // leak into a generated `.spec.ts` as either a `ctx.set('foo',
+    // '__PENDING__')` line or a request-body field — either way the
+    // literal string flows into a live API call and produces a
+    // baffling test failure. This invariant locks the post-emit
+    // hygiene in across the entire generated suite.
+    it('no emitted Playwright suite file contains the PENDING_BINDING sentinel string', () => {
+      const playwrightDir = getPlaywrightSuiteDir(REPO_ROOT);
+      if (!existsSync(playwrightDir)) {
+        throw new Error(
+          `Playwright suite directory not found at ${playwrightDir}. Run 'npm run pipeline' first.`,
+        );
+      }
+      const walk = (dir: string): string[] => {
+        const out: string[] = [];
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) out.push(...walk(full));
+          else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.js'))) {
+            out.push(full);
+          }
+        }
+        return out;
+      };
+      const offenders: Array<{ file: string; line: number; snippet: string }> = [];
+      for (const file of walk(playwrightDir)) {
+        const lines = readFileSync(file, 'utf8').split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes('__PENDING__')) {
+            offenders.push({
+              file: relative(REPO_ROOT, file),
+              line: i + 1,
+              snippet: lines[i].trim().slice(0, 200),
+            });
+          }
+        }
+      }
+      expect(
+        offenders,
+        `Emitted Playwright suite file(s) contain the PENDING_BINDING sentinel ('__PENDING__'). ` +
+          `The materializer must skip every binding whose value is still PENDING_BINDING — that guard lives in materializer/src/playwright/emitter.ts (the \`if (v === PENDING_BINDING) continue\` inside the "Seed scenario bindings" loop) and the per-scenario runtime seed list comes from computeSeedBindings in path-analyser/src/seedBindings.ts. ` +
+          `A leak here means one of those guards regressed and the literal sentinel string will end up in a live API call. ` +
+          `Offenders: ${JSON.stringify(offenders.slice(0, 10))}${offenders.length > 10 ? ` (and ${offenders.length - 10} more)` : ''}`,
+      ).toEqual([]);
+    });
+  },
+);

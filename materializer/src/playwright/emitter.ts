@@ -14,6 +14,7 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
+import { PENDING_BINDING } from 'path-analyser/types';
 import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
 import {
   loadProjectScaffoldingFiles,
@@ -447,7 +448,7 @@ function renderScenarioTest(
   if (s.bindings && Object.keys(s.bindings).length) {
     body.push('  // Seed scenario bindings');
     for (const [k, v] of Object.entries(s.bindings)) {
-      if (v === '__PENDING__') continue; // handled by seedBindings below
+      if (v === PENDING_BINDING) continue; // handled by seedBindings below
       // Literal bindings flow into ctx unconditionally so any later
       // step (or the same step's body) can read the planner-minted
       // value before any extract overwrites it. The seedBindings list

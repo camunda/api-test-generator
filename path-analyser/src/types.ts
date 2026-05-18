@@ -1,3 +1,30 @@
+/**
+ * Sentinel value the planner writes into `EndpointScenario.bindings[v]`
+ * when a binding is declared but not yet produced — a placeholder
+ * meaning "a later step's response extraction, a seed-rule literal, or
+ * a runtime-seeded value will fill this in before any step that reads
+ * it is emitted".
+ *
+ * The sentinel IS contractual in scenario JSON: the materializer reads
+ * `scenario.bindings[v] === PENDING_BINDING` to skip emitting a literal
+ * `ctx.set(v, '__PENDING__')` line, and `computeSeedBindings`
+ * (`path-analyser/src/seedBindings.ts`) returns exactly the still-PENDING
+ * bindings as the per-scenario runtime seed list (#136). Stripping the
+ * sentinel from scenario output would break both contracts.
+ *
+ * What MUST stay free of the sentinel is the *emitted* output (a
+ * generated Playwright `.spec.ts` containing `'__PENDING__'` means the
+ * materializer's skip guard or the seedBindings filter regressed and
+ * the string will flow into a live API call). Lift 18 / #258 added an
+ * L3 invariant that scans `generated/<config>/playwright/` for the
+ * literal — see "PENDING_BINDING sentinel hygiene" in
+ * `configs/<config>/regression-invariants.test.ts`.
+ *
+ * Imported by the materializer via the `path-analyser/types` subpath
+ * export so the two workspaces share one source of truth.
+ */
+export const PENDING_BINDING = '__PENDING__';
+
 export interface OperationRef {
   operationId: string;
   method: string;
