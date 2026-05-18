@@ -1,0 +1,45 @@
+{
+  "$schema": "../../../ontology/vocabulary/scenario-template.schema.json",
+  "@context": {
+    "@vocab": "https://camunda.github.io/api-test-generator/ns/v1/",
+    "templates": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/templates",
+      "@container": "@set"
+    },
+    "appliesTo": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/appliesTo"
+    },
+    "steps": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/steps",
+      "@container": "@list"
+    },
+    "kind": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/kind"
+    },
+    "op": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/op"
+    },
+    "for": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/for"
+    },
+    "expect": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/expect"
+    }
+  },
+  "version": 1,
+  "templates": [
+    {
+      "@type": "ScenarioTemplate",
+      "name": "EdgeLifecycle",
+      "appliesTo": { "kind": "Edge" },
+      "description": "Establish an edge instance, verify it is observable via the edge's observableVia operation, revoke the edge instance, verify it is no longer observable. Applies to every edge in the edges ABox; consumes establishedBy, revokedBy, and observableVia (all required on the Edge TBox since #224). The high-level present/absent expectations compile down to toContain / not.toContain assertions on the membership identifier (per the #268 walkthrough): the planner uses the scenario binding context to source the value and the response-extraction graph to locate the array path inside the observation op's 200 response.",
+      "steps": [
+        { "kind": "PrereqChain", "for": "establishedBy" },
+        { "kind": "Invoke", "op": "establishedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "present" },
+        { "kind": "Invoke", "op": "revokedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "absent" }
+      ]
+    }
+  ]
+}

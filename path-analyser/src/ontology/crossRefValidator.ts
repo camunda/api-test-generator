@@ -9,6 +9,7 @@ import {
   GLOBAL_CONTEXT_SEEDS_CROSS_REF,
 } from './crossRef/globalContextSeedsCrossRef.js';
 import { RUNTIME_STATES_CROSS_REF } from './crossRef/runtimeStatesCrossRef.js';
+import { SCENARIO_TEMPLATE_CROSS_REF } from './crossRef/scenarioTemplateCrossRef.js';
 import { SEMANTICS_CROSS_REF } from './crossRef/semanticsCrossRef.js';
 import type { SliceCrossRefModule } from './crossRef/types.js';
 
@@ -61,6 +62,7 @@ export const CROSS_REF_MODULES: readonly SliceCrossRefModule[] = [
   RUNTIME_STATES_CROSS_REF,
   SEMANTICS_CROSS_REF,
   GLOBAL_CONTEXT_SEEDS_CROSS_REF,
+  SCENARIO_TEMPLATE_CROSS_REF,
 ];
 
 // Public-boundary structural validator for `globalContextSeeds`. Kept

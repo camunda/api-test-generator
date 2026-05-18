@@ -20,6 +20,7 @@ import { edgeSchema } from '../path-analyser/src/ontology/edgeSchema.ts';
 import { entityKindsSchema } from '../path-analyser/src/ontology/entityKindsSchema.ts';
 import { globalContextSeedsSchema } from '../path-analyser/src/ontology/globalContextSeedsSchema.ts';
 import { runtimeStatesSchema } from '../path-analyser/src/ontology/runtimeStatesSchema.ts';
+import { scenarioTemplateSchema } from '../path-analyser/src/ontology/scenarioTemplateSchema.ts';
 import { semanticsSchema } from '../path-analyser/src/ontology/semanticsSchema.ts';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,6 +54,10 @@ const ARTIFACTS: OntologyArtifact[] = [
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'global-context-seeds.schema.json'),
     schema: globalContextSeedsSchema,
+  },
+  {
+    jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'scenario-template.schema.json'),
+    schema: scenarioTemplateSchema,
   },
 ];
 

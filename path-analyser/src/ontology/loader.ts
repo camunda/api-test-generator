@@ -8,6 +8,7 @@ import { edgeSchema } from './edgeSchema.js';
 import { entityKindsSchema } from './entityKindsSchema.js';
 import { globalContextSeedsSchema } from './globalContextSeedsSchema.js';
 import { runtimeStatesSchema } from './runtimeStatesSchema.js';
+import { scenarioTemplateSchema } from './scenarioTemplateSchema.js';
 import { semanticsSchema } from './semanticsSchema.js';
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,10 @@ export type IdentifierEntry = NonNullable<SemanticsAbox['identifiers']>[number];
 export type GlobalContextSeedsAbox = FromSchema<typeof globalContextSeedsSchema>;
 export type GlobalContextSeedEntry = GlobalContextSeedsAbox['seeds'][number];
 
+export type ScenarioTemplatesAbox = FromSchema<typeof scenarioTemplateSchema>;
+export type ScenarioTemplate = ScenarioTemplatesAbox['templates'][number];
+export type ScenarioTemplateStep = ScenarioTemplate['steps'][number];
+
 // `Ajv` is the named export pointing at the constructor; the namespace
 // also has a self-referential default but the named export is the
 // least error-prone form under module=nodenext.
@@ -72,6 +77,7 @@ const validateRuntimeStatesAbox = ajv.compile<RuntimeStatesAbox>(runtimeStatesSc
 const validateSemanticsAbox = ajv.compile<SemanticsAbox>(semanticsSchema);
 const validateGlobalContextSeedsAbox =
   ajv.compile<GlobalContextSeedsAbox>(globalContextSeedsSchema);
+const validateScenarioTemplatesAbox = ajv.compile<ScenarioTemplatesAbox>(scenarioTemplateSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
   return (errors ?? [])
@@ -906,4 +912,61 @@ export function assertSafeGlobalContextSeeds(seeds: unknown): void {
       );
     }
   }
+}
+
+/**
+ * Load and validate the scenario-templates ABox file for the active
+ * config (#268 Phase 1 / #269).
+ *
+ * The ABox describes declarative test-step templates the planner
+ * instantiates against subjects from other ABoxes (currently only
+ * `Edge`). The dependency graph encodes data-flow (which ops, in what
+ * order); templates encode temporal/modal assertions (what to assert
+ * between or after those ops) — a property the graph fundamentally
+ * cannot express.
+ *
+ * @returns the parsed ABox, or `null` if no `scenario-templates.json`
+ *   ships under `configs/<active>/ontology/`. A missing file is
+ *   non-fatal: callers should treat it as "no template-derived
+ *   scenarios". There is no planner consumer in #269 — this loader
+ *   exists so #270 can land without further loader work.
+ * @throws if the file exists but does not validate against the TBox or
+ *   contains duplicate template names.
+ */
+export function loadScenarioTemplatesAbox(repoRoot: string): ScenarioTemplatesAbox | null {
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'scenario-templates.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse scenario-templates ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateScenarioTemplatesAbox(parsed)) {
+    throw new Error(
+      `Scenario-templates ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateScenarioTemplatesAbox.errors)}`,
+    );
+  }
+  const dupeNames = duplicates(parsed.templates.map((t) => t.name));
+  if (dupeNames.length > 0) {
+    throw new Error(
+      `Scenario-templates ABox at ${aboxPath} has duplicate template name(s): ${dupeNames.join(', ')}`,
+    );
+  }
+  return parsed;
 }
