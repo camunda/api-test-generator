@@ -70,6 +70,16 @@ export interface EmitTemplateSuitesOptions {
  * Returns the absolute paths of files written, in emit order.
  */
 export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promise<string[]> {
+  // Validate the two seed fields this emitter interpolates directly into
+  // single-quoted TS string literals (binding + seedRule) so a malformed
+  // or hostile seed value cannot produce invalid (or unsafe) generated
+  // code. The per-endpoint emitter's `assertSafeGlobalContextSeeds`
+  // helper expects the full GlobalContextSeed schema (fieldName,
+  // defaultSentinel, …) which this entry point does not see — callers
+  // project to the narrow {binding, seedRule} shape on the way in. The
+  // local check below covers the same risk surface (string-literal
+  // injection) for that narrower payload. (#274 review.)
+  assertSafeTemplateSeeds(opts.globalContextSeeds);
   let entries: string[];
   try {
     entries = await fs.readdir(opts.scenariosDir);
@@ -274,7 +284,12 @@ function renderLifecycleSuite(
 // ---------------------------------------------------------------------------
 
 const EXTRA_INDENT = '  '; // +2 spaces vs the shared renderer's 4-space baseline
-const WAIT_INDENT = '    '; // +4 spaces: waits indent at the inner test-step depth
+// Shared `renderEventualWait` emits at 2-space outer indent. Template
+// suite's `await test.step(...)` calls live at 4-space depth (inside
+// `describe → test`), so waits become true siblings of the step at
+// +2 spaces re-indent — NOT +4 (which would over-indent them past the
+// step body). (#274 review.)
+const WAIT_INDENT = '  ';
 
 function appendInlineRequestStep(
   lines: string[],
@@ -457,4 +472,43 @@ function resolveBindingNameForSemantic(
     );
   }
   return bindingName;
+}
+
+// ---------------------------------------------------------------------------
+// Seed validation (string-literal-injection defence)
+// ---------------------------------------------------------------------------
+
+// Identifier-like: lowercase/uppercase letters, digits, underscore, dash,
+// dollar; must start with a letter, underscore, or dollar. Covers every
+// binding name and seedRule the planner emits today (Lift-22 universal
+// seeds, per-edge generated seeds) without permitting characters that
+// could break out of a single-quoted TS string literal (quote, backslash,
+// newline, template-literal markers).
+const SAFE_SEED_TOKEN = /^[A-Za-z_$][A-Za-z0-9_$-]*$/;
+
+function assertSafeTemplateSeeds(seeds: readonly TemplateGlobalContextSeed[] | undefined): void {
+  if (seeds === undefined) return;
+  if (!Array.isArray(seeds)) {
+    throw new Error(
+      `globalContextSeeds must be an array when provided (received ${
+        seeds === null ? 'null' : typeof seeds
+      }).`,
+    );
+  }
+  for (let i = 0; i < seeds.length; i++) {
+    const s = seeds[i];
+    if (s === null || typeof s !== 'object') {
+      throw new Error(`globalContextSeeds[${i}] must be an object.`);
+    }
+    if (typeof s.binding !== 'string' || !SAFE_SEED_TOKEN.test(s.binding)) {
+      throw new Error(
+        `globalContextSeeds[${i}].binding must match ${SAFE_SEED_TOKEN.source} (got ${JSON.stringify(s.binding)}).`,
+      );
+    }
+    if (typeof s.seedRule !== 'string' || !SAFE_SEED_TOKEN.test(s.seedRule)) {
+      throw new Error(
+        `globalContextSeeds[${i}].seedRule must match ${SAFE_SEED_TOKEN.source} (got ${JSON.stringify(s.seedRule)}).`,
+      );
+    }
+  }
 }
