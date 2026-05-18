@@ -1,16 +1,24 @@
 /**
  * Sentinel value the planner writes into `EndpointScenario.bindings[v]`
- * when a binding is declared but not yet produced — a placeholder until
- * an upstream producer (a prior step's response extraction, a seed-rule
- * literal, or a fixture-provided value) fills it in. Comparisons against
- * this value happen in the materializer (skip emitting literal request
- * fields whose value is still pending) and in `seedBindings` (skip
- * promoting `__PENDING__` placeholders to literal-seed bindings).
+ * when a binding is declared but not yet produced — a placeholder
+ * meaning "a later step's response extraction, a seed-rule literal, or
+ * a runtime-seeded value will fill this in before any step that reads
+ * it is emitted".
  *
- * Lift 18 / #258 hoisted the previously-duplicated `'__PENDING__'`
- * literal into this single declaration. A planner-side L3 invariant
- * asserts no scenario JSON ever ships this sentinel as a binding value
- * (it is internal-only; presence in emitted output would be a bug).
+ * The sentinel IS contractual in scenario JSON: the materializer reads
+ * `scenario.bindings[v] === PENDING_BINDING` to skip emitting a literal
+ * `ctx.set(v, '__PENDING__')` line, and `computeSeedBindings`
+ * (`path-analyser/src/seedBindings.ts`) returns exactly the still-PENDING
+ * bindings as the per-scenario runtime seed list (#136). Stripping the
+ * sentinel from scenario output would break both contracts.
+ *
+ * What MUST stay free of the sentinel is the *emitted* output (a
+ * generated Playwright `.spec.ts` containing `'__PENDING__'` means the
+ * materializer's skip guard or the seedBindings filter regressed and
+ * the string will flow into a live API call). Lift 18 / #258 added an
+ * L3 invariant that scans `generated/<config>/playwright/` for the
+ * literal — see "PENDING_BINDING sentinel hygiene" in
+ * `configs/<config>/regression-invariants.test.ts`.
  *
  * Imported by the materializer via the `path-analyser/types` subpath
  * export so the two workspaces share one source of truth.
