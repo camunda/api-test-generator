@@ -4040,8 +4040,7 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
     // generic prefix-shape check lives in the '#272' invariant block
     // and applies to every ABox.
     const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'edges.json');
-    const expectedSchemaUrl =
-      'https://camunda.github.io/api-test-generator/ns/v1/edge.schema.json';
+    const expectedSchemaUrl = 'https://camunda.github.io/api-test-generator/ns/v1/edge.schema.json';
     interface AboxHeader {
       $schema?: unknown;
     }
