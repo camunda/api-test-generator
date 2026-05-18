@@ -5179,6 +5179,77 @@ describeForThisConfig('bundled-spec invariants: cross-ref module coverage (Lift 
 });
 
 describeForThisConfig(
+  'bundled-spec invariants: createDeployment slice-name source-of-truth (Lift 16 / #256)',
+  () => {
+    // Pre-Lift 16, `path-analyser/src/extractSchemas.ts` hard-coded the
+    // wrapper-property names of each `DeploymentResult.deployments[]`
+    // entry — `processDefinition`, `decisionDefinition`,
+    // `decisionRequirements`, `form` — inside the otherwise API-agnostic
+    // extractor. Lift 12 had already added the same facts to the
+    // per-config `artifact-kinds.json` ABox as `kinds[*].deploymentSlices`,
+    // so the literal was shipped-but-ignored duplication that broke the
+    // promise of a config-driven generator (a second API with a
+    // different slice set could not be supported without patching
+    // extractor source). Lift 16 sources the slice-name set from the
+    // ABox; this invariant locks the contract in.
+    //
+    // The assertion is bidirectional: the set of wrapper keys the
+    // extractor actually traversed on the bundled spec (visible as
+    // `nestedSlices` keys on the createDeployment response shape) must
+    // equal the union of `deploymentSlices` across artifact-kind
+    // entries. A drift in either direction is a defect:
+    //   * extractor saw a slice the ABox did not declare → the ABox is
+    //     incomplete and downstream consumers reading the ABox will
+    //     miss canonical fields.
+    //   * ABox declared a slice the extractor did not see → the ABox
+    //     holds a stale slice name that no upstream property backs.
+    it('union of artifact-kind deploymentSlices equals the set of wrapper keys observed on createDeployment', () => {
+      const extractionPath = join(
+        REPO_ROOT,
+        'path-analyser',
+        'dist',
+        'extraction',
+        'response-shapes.json',
+      );
+      if (!existsSync(extractionPath)) {
+        throw new Error(
+          `Extraction output not found at ${extractionPath}. Run \`npm run testsuite:generate\` (or \`npm run pipeline\`) before running this invariant.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; structural shape is validated below.
+      const shapes = JSON.parse(readFileSync(extractionPath, 'utf8')) as Array<{
+        operationId?: string;
+        nestedSlices?: Record<string, unknown>;
+      }>;
+      const createDeployment = shapes.find((s) => s?.operationId === 'createDeployment');
+      expect(
+        createDeployment,
+        'createDeployment response shape not found in path-analyser/dist/extraction/response-shapes.json',
+      ).toBeDefined();
+      if (!createDeployment) return;
+      const observedKeys = new Set(Object.keys(createDeployment.nestedSlices ?? {}));
+
+      const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'artifact-kinds.json');
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; ajv validates the shape at load time in production code paths.
+      const abox = JSON.parse(readFileSync(aboxPath, 'utf8')) as {
+        kinds: Array<{ deploymentSlices?: string[] }>;
+      };
+      const declaredSlices = new Set(abox.kinds.flatMap((k) => k.deploymentSlices ?? []));
+
+      const onlyInExtractor = [...observedKeys].filter((k) => !declaredSlices.has(k)).sort();
+      const onlyInAbox = [...declaredSlices].filter((k) => !observedKeys.has(k)).sort();
+      expect(
+        { onlyInExtractor, onlyInAbox },
+        'Drift between artifact-kinds.json `deploymentSlices` and the wrapper keys the extractor observed on createDeployment. ' +
+          'Lift 16 / #256 made the ABox the source of truth — keep these two sets in sync. ' +
+          `onlyInExtractor=${JSON.stringify(onlyInExtractor)} means the extractor saw a slice not declared in any artifact-kind entry (add the slice to the appropriate kind's deploymentSlices). ` +
+          `onlyInAbox=${JSON.stringify(onlyInAbox)} means an artifact-kind declares a slice the upstream spec does not back (remove the stale entry, or wait for the upstream spec to publish the property).`,
+      ).toEqual({ onlyInExtractor: [], onlyInAbox: [] });
+    });
+  },
+);
+
+describeForThisConfig(
   'bundled-spec invariants: role-template rendering contract (Lift 12 / #231 Phase 5)',
   () => {
     // Three invariants enumerated in #231's "Phases" section:
