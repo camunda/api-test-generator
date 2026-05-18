@@ -3,7 +3,7 @@
  * fetch-python-sdk-map — sparse-clone camunda/orchestration-cluster-api-python
  * and extract examples/operation-map.json.
  *
- * Mirrors scripts/fetch-js-sdk-map.ts pattern. Outputs to spec/python-sdk/
+ * Mirrors scripts/fetch-js-sdk-map.js pattern. Outputs to spec/python-sdk/
  * per the CONFIG-partitioned layout.
  *
  * Outputs:
@@ -13,12 +13,16 @@
  * Env vars:
  *   PYTHON_SDK_REF     Commit/branch/tag to fetch (default: main)
  */
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+
+const REPO_URL = 'https://github.com/camunda/orchestration-cluster-api-python.git';
+const FILE_PATH = 'examples/operation-map.json';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(__filename, '../..');
@@ -36,138 +40,65 @@ function computeHash(content: string): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
-function execCommand(cmd: string, options?: Record<string, unknown>): string {
-  try {
-    return execSync(cmd, { encoding: 'utf-8', ...options }).trim();
-  } catch (error) {
-    // biome-ignore lint/plugin: error is caught from execSync; status/stderr/stdout are the Node.js SpawnSyncReturns fields
-    const err = error as { status: number; stderr: Buffer; stdout: Buffer };
-    console.error(`Command failed: ${cmd}`);
-    console.error(err.stderr?.toString() || err.stdout?.toString() || String(error));
-    throw error;
-  }
-}
+const pythonSdkRef = process.env.PYTHON_SDK_REF ?? 'main';
+const pythonSdkDir = join(REPO_ROOT, 'spec/python-sdk');
+const operationMapPath = join(pythonSdkDir, 'operation-map.json');
+const metadataPath = join(pythonSdkDir, 'sdk-metadata.json');
+const tmpDir = join(tmpdir(), `python-sdk-map-${Date.now()}`);
 
-async function main(): Promise<void> {
-  const pythonSdkRef = process.env.PYTHON_SDK_REF ?? 'main';
-  const pythonSdkDir = join(REPO_ROOT, 'spec/python-sdk');
-  const tempCloneDir = join(REPO_ROOT, '.tmp-python-sdk-clone');
-  const operationMapPath = join(pythonSdkDir, 'operation-map.json');
-  const metadataPath = join(pythonSdkDir, 'sdk-metadata.json');
+console.log(`[fetch-python-sdk-map] Fetching ${FILE_PATH} from ${REPO_URL} @ ${pythonSdkRef}`);
 
-  console.error(`[fetch-python-sdk-map] ref=${pythonSdkRef}, output=${pythonSdkDir}`);
+try {
+  mkdirSync(tmpDir, { recursive: true });
 
-  // Clean up any prior temp directory
-  if (process.platform === 'win32') {
-    // Windows rmdir with recursion
-    try {
-      execCommand(`rmdir /s /q "${tempCloneDir}"`, { shell: true });
-    } catch {
-      // Directory may not exist
-    }
-  } else {
-    try {
-      rmSync(tempCloneDir, { recursive: true, force: true });
-    } catch {
-      // Directory may not exist
-    }
-  }
+  // Sparse clone: fetch only examples/operation-map.json to keep it fast.
+  execFileSync('git', ['init', '--quiet', tmpDir], { stdio: 'inherit' });
+  execFileSync('git', ['-C', tmpDir, 'remote', 'add', 'origin', REPO_URL], { stdio: 'inherit' });
+  execFileSync('git', ['-C', tmpDir, 'config', 'core.sparseCheckout', 'true'], {
+    stdio: 'inherit',
+  });
 
-  try {
-    // Sparse-clone workflow:
-    // 1. Clone with --no-checkout to defer file materialization
-    // 2. Configure sparse checkout cone mode
-    // 3. Set sparse patterns to include only examples/
-    // 4. Checkout to materialize files
-    console.error('[fetch-python-sdk-map] sparse-cloning...');
-    execCommand(
-      `git clone --no-checkout --depth=1 https://github.com/camunda/orchestration-cluster-api-python.git "${tempCloneDir}"`,
-      {
-        shell: true,
-        cwd: REPO_ROOT,
-      },
-    );
+  // Write sparse-checkout pattern before fetch
+  const sparseFile = join(tmpDir, '.git', 'info', 'sparse-checkout');
+  writeFileSync(sparseFile, `${FILE_PATH}\n`, 'utf8');
 
-    // Fetch the specific ref if not main
-    if (pythonSdkRef !== 'main') {
-      execCommand(`git fetch origin "${pythonSdkRef}:refs/remotes/origin/${pythonSdkRef}"`, {
-        cwd: tempCloneDir,
-      });
-      execCommand(`git checkout ${pythonSdkRef}`, {
-        cwd: tempCloneDir,
-      });
-    } else {
-      execCommand('git checkout main', {
-        cwd: tempCloneDir,
-      });
-    }
+  execFileSync('git', ['-C', tmpDir, 'fetch', '--depth', '1', 'origin', pythonSdkRef], {
+    stdio: 'inherit',
+  });
+  execFileSync('git', ['-C', tmpDir, 'checkout', 'FETCH_HEAD', '--', FILE_PATH], {
+    stdio: 'inherit',
+  });
 
-    // Configure sparse checkout for cone mode
-    execCommand('git config core.sparseCheckoutCone true', {
-      cwd: tempCloneDir,
-    });
+  // Resolve the ref to a full commit SHA
+  const resolvedRef = execFileSync('git', ['-C', tmpDir, 'rev-parse', 'FETCH_HEAD'], {
+    encoding: 'utf-8',
+  }).trim();
+  console.log(`[fetch-python-sdk-map] resolved ref: ${resolvedRef}`);
 
-    // Initialize sparse checkout
-    execCommand('git sparse-checkout init --cone', {
-      cwd: tempCloneDir,
-    });
+  // Ensure output directory exists and move the file into place
+  mkdirSync(pythonSdkDir, { recursive: true });
+  renameSync(join(tmpDir, FILE_PATH), operationMapPath);
+  console.log(`[fetch-python-sdk-map] Written to ${operationMapPath}`);
 
-    // Set sparse patterns: only examples/
-    execCommand('git sparse-checkout set examples', {
-      cwd: tempCloneDir,
-    });
-
-    // Resolve the ref to a full commit SHA
-    const resolvedRef = execCommand('git rev-parse HEAD', {
-      cwd: tempCloneDir,
-    });
-    console.error(`[fetch-python-sdk-map] resolved ref: ${resolvedRef}`);
-
-    // Read the operation-map.json
-    const sourceMapPath = join(tempCloneDir, 'examples/operation-map.json');
-    let operationMapContent: string;
-    try {
-      operationMapContent = readFileSync(sourceMapPath, 'utf-8');
-    } catch (_error) {
-      throw new Error(`Failed to read operation-map.json from cloned repo at ${sourceMapPath}`);
-    }
-
-    // Ensure output directory exists
-    mkdirSync(pythonSdkDir, { recursive: true });
-
-    // Write operation-map.json
-    writeFileSync(operationMapPath, operationMapContent, 'utf-8');
-    console.error(`[fetch-python-sdk-map] wrote ${operationMapPath}`);
-
-    // Write metadata
-    const metadata: SdkMetadata = {
-      sdkRef: resolvedRef,
-      operationMapHash: computeHash(operationMapContent),
-      fetchedAt: new Date().toISOString(),
-    };
-    writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
-    console.error(`[fetch-python-sdk-map] wrote ${metadataPath}`);
-  } finally {
-    // Clean up temp clone
-    if (process.platform === 'win32') {
-      try {
-        execCommand(`rmdir /s /q "${tempCloneDir}"`, { shell: true });
-      } catch {
-        // May fail; best effort
-      }
-    } else {
-      try {
-        rmSync(tempCloneDir, { recursive: true, force: true });
-      } catch {
-        // May fail; best effort
-      }
-    }
-  }
-
-  console.error('[fetch-python-sdk-map] done');
-}
-
-main().catch((error) => {
-  console.error('Fatal error:', error);
+  // Write metadata
+  const operationMapContent = readFileSync(operationMapPath, 'utf-8');
+  const metadata: SdkMetadata = {
+    sdkRef: resolvedRef,
+    operationMapHash: computeHash(operationMapContent),
+    fetchedAt: new Date().toISOString(),
+  };
+  writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
+  console.log(`[fetch-python-sdk-map] Written metadata to ${metadataPath}`);
+} catch (err) {
+  console.error(
+    '[fetch-python-sdk-map] Failed:',
+    err instanceof Error ? err.message : String(err),
+  );
   process.exit(1);
-});
+} finally {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    // Non-fatal cleanup failure.
+  }
+}
