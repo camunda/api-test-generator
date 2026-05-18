@@ -3852,13 +3852,100 @@ describeForThisConfig('bundled-spec invariants: edges ABox cross-references (#20
       }
     }
 
-    const offenders: { edge: string; field: 'establishedBy' | 'observableVia'; op: string }[] = [];
+    const offenders: {
+      edge: string;
+      field: 'establishedBy' | 'revokedBy' | 'observableVia';
+      op: string;
+    }[] = [];
     for (const e of abox.edges) {
       if (!opIds.has(e.establishedBy)) {
         offenders.push({ edge: e.name, field: 'establishedBy', op: e.establishedBy });
       }
+      if (!opIds.has(e.revokedBy)) {
+        offenders.push({ edge: e.name, field: 'revokedBy', op: e.revokedBy });
+      }
       if (!opIds.has(e.observableVia)) {
         offenders.push({ edge: e.name, field: 'observableVia', op: e.observableVia });
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('every edge.revokedBy is a DELETE on the same path as edge.establishedBy is a PUT on (#224)', async () => {
+    // Symmetric counterpart of `establishedBy` (Lift 1 / #201). Edge
+    // revocation operations are encoded so the planner can scope
+    // cleanup and so test suites can both create and destroy edge
+    // instances. The contract enforced here mirrors the spec
+    // convention for membership endpoints: PUT /entityA/{idA}/entityB/{idB}
+    // establishes the edge, DELETE on the *same path* with the same
+    // identifier tuple revokes it. Drift in either direction (PUT used
+    // for revoker, DELETE on a different path) silently produces
+    // unrunnable cleanup steps once the planner consumes `revokedBy`.
+    const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+    const abox = loadEdgesAbox(REPO_ROOT);
+    if (!abox) throw new Error('edges ABox missing');
+
+    if (!existsSync(BUNDLED_SPEC_PATH)) {
+      throw new Error(
+        `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as {
+      paths?: Record<string, Record<string, { operationId?: string }>>;
+    };
+    // Build an opId → { method, path } index once.
+    const opIndex = new Map<string, { method: string; path: string }>();
+    for (const [p, pathItem] of Object.entries(spec.paths ?? {})) {
+      for (const [method, op] of Object.entries(pathItem)) {
+        if (op && typeof op === 'object' && typeof op.operationId === 'string') {
+          opIndex.set(op.operationId, { method: method.toLowerCase(), path: p });
+        }
+      }
+    }
+
+    const offenders: {
+      edge: string;
+      issue: string;
+      establishedBy: string;
+      revokedBy: string;
+    }[] = [];
+    for (const e of abox.edges) {
+      if (e.revokedBy === e.establishedBy) {
+        offenders.push({
+          edge: e.name,
+          issue: 'revokedBy === establishedBy (must be the symmetric inverse operation)',
+          establishedBy: e.establishedBy,
+          revokedBy: e.revokedBy,
+        });
+        continue;
+      }
+      const est = opIndex.get(e.establishedBy);
+      const rev = opIndex.get(e.revokedBy);
+      if (!est || !rev) continue; // existence check is the prior invariant's job
+      if (est.method !== 'put') {
+        offenders.push({
+          edge: e.name,
+          issue: `establishedBy operation is ${est.method.toUpperCase()} but membership establishers must be PUT`,
+          establishedBy: e.establishedBy,
+          revokedBy: e.revokedBy,
+        });
+      }
+      if (rev.method !== 'delete') {
+        offenders.push({
+          edge: e.name,
+          issue: `revokedBy operation is ${rev.method.toUpperCase()} but membership revokers must be DELETE`,
+          establishedBy: e.establishedBy,
+          revokedBy: e.revokedBy,
+        });
+      }
+      if (est.path !== rev.path) {
+        offenders.push({
+          edge: e.name,
+          issue: `revokedBy path ${JSON.stringify(rev.path)} differs from establishedBy path ${JSON.stringify(est.path)} (must be identical so the same identifier tuple keys both ops)`,
+          establishedBy: e.establishedBy,
+          revokedBy: e.revokedBy,
+        });
       }
     }
     expect(offenders).toEqual([]);

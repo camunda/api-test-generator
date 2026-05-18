@@ -43,6 +43,7 @@
         "endpoints",
         "identifiedBy",
         "establishedBy",
+        "revokedBy",
         "observableVia",
         "description"
       ],
@@ -90,6 +91,11 @@
           "type": "string",
           "minLength": 1,
           "description": "operationId of the (single) API operation that creates an instance of this edge."
+        },
+        "revokedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "operationId of the (single) API operation that revokes (destroys) an instance of this edge — the symmetric inverse of `establishedBy`. By convention this operation is `DELETE` on the same path as the establisher (which is `PUT`), keyed by the same identifier tuple. Required: every encoded edge must be revocable so the planner can scope cleanup and so #224-style symmetry is enforceable as an L3 invariant."
         },
         "observableVia": {
           "type": "string",
