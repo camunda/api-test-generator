@@ -5075,6 +5075,109 @@ describe.skipIf(CONFIG_NAME !== 'camunda-oca')(
   },
 );
 
+describeForThisConfig('bundled-spec invariants: cross-ref module coverage (Lift 15 / #255)', () => {
+  // Pre-Lift 15, `path-analyser/src/ontology/crossRefValidator.ts` hand-
+  // encoded the merged-domain shape as zod `.passthrough()` schemas — a
+  // parallel encoding of the per-slice TBoxes that silently drifted
+  // whenever a slice schema added a property. Lift 15 split the cross-
+  // reference invariants into one module per slice under
+  // `path-analyser/src/ontology/crossRef/<slice>CrossRef.ts`, registered
+  // in `CROSS_REF_MODULES`. This invariant is the build-time guard the
+  // issue called for: every `*Schema.ts` slice must have a corresponding
+  // cross-ref module registered, even if it ships zero checks (an
+  // explicit `noChecksRationale` is required in that case so the empty
+  // module is a deliberate declaration, not an oversight).
+  //
+  // Adding a new slice schema without a corresponding cross-ref module
+  // — or removing a slice's cross-ref module — fails this test with a
+  // named-slice message pointing at the property the author needs to
+  // restore. The class-scoped guard against the original drift defect.
+
+  it('every per-slice TBox under path-analyser/src/ontology/*Schema.ts has a corresponding cross-ref module registered in CROSS_REF_MODULES', async () => {
+    const ontologyDir = join(REPO_ROOT, 'path-analyser', 'src', 'ontology');
+    const sliceFiles = readdirSync(ontologyDir)
+      .filter((f) => f.endsWith('Schema.ts'))
+      .sort();
+    const sliceStems = sliceFiles.map((f) => f.replace(/Schema\.ts$/, ''));
+
+    // Sanity check that the per-slice TBoxes the issue references are
+    // discovered. If `*Schema.ts` is ever renamed (e.g. to `.tbox.ts`)
+    // this invariant must be updated or it would silently match nothing.
+    expect(
+      sliceStems.length,
+      'no `*Schema.ts` slice files discovered — the file-naming convention may have changed',
+    ).toBeGreaterThanOrEqual(6);
+    for (const required of [
+      'edge',
+      'entityKinds',
+      'artifactKinds',
+      'runtimeStates',
+      'semantics',
+      'globalContextSeeds',
+    ]) {
+      expect(sliceStems, `slice ${required}Schema.ts must exist`).toContain(required);
+    }
+
+    const { CROSS_REF_MODULES } = await import(
+      '../../path-analyser/src/ontology/crossRefValidator.js'
+    );
+    const registered = new Set(CROSS_REF_MODULES.map((m) => m.slice));
+
+    const missing: string[] = [];
+    for (const stem of sliceStems) {
+      if (!registered.has(stem)) {
+        missing.push(stem);
+      }
+    }
+    expect(
+      missing,
+      `slices missing a registered cross-ref module under path-analyser/src/ontology/crossRef/<slice>CrossRef.ts: ${missing.join(', ')}. ` +
+        'Adding a TBox slice without considering cross-reference invariants is the drift defect Lift 15 / #255 was filed to prevent. ' +
+        'Create the module (even a stub with `checks: []` and a `noChecksRationale` explaining why no cross-refs are needed) and register it in CROSS_REF_MODULES.',
+    ).toEqual([]);
+  });
+
+  it('every cross-ref module with no checks ships an explicit noChecksRationale', async () => {
+    const { CROSS_REF_MODULES } = await import(
+      '../../path-analyser/src/ontology/crossRefValidator.js'
+    );
+    const undocumentedEmpties: string[] = [];
+    for (const mod of CROSS_REF_MODULES) {
+      if (mod.checks.length === 0 && !mod.noChecksRationale?.trim()) {
+        undocumentedEmpties.push(mod.slice);
+      }
+    }
+    expect(
+      undocumentedEmpties,
+      `cross-ref modules with no checks must document why via a non-empty noChecksRationale: ${undocumentedEmpties.join(', ')}. ` +
+        'An empty module without a rationale is indistinguishable from an unfinished/forgotten cross-ref check.',
+    ).toEqual([]);
+  });
+
+  it('every registered cross-ref module corresponds to an actual *Schema.ts slice file', async () => {
+    const { CROSS_REF_MODULES } = await import(
+      '../../path-analyser/src/ontology/crossRefValidator.js'
+    );
+    const ontologyDir = join(REPO_ROOT, 'path-analyser', 'src', 'ontology');
+    const sliceStems = new Set(
+      readdirSync(ontologyDir)
+        .filter((f) => f.endsWith('Schema.ts'))
+        .map((f) => f.replace(/Schema\.ts$/, '')),
+    );
+    const orphans: string[] = [];
+    for (const mod of CROSS_REF_MODULES) {
+      if (!sliceStems.has(mod.slice)) {
+        orphans.push(mod.slice);
+      }
+    }
+    expect(
+      orphans,
+      `cross-ref modules registered for slice names with no matching path-analyser/src/ontology/<slice>Schema.ts file: ${orphans.join(', ')}. ` +
+        'Either the slice was removed (delete the cross-ref module too) or the slice stem was misspelt in the SliceCrossRefModule registration.',
+    ).toEqual([]);
+  });
+});
+
 describeForThisConfig(
   'bundled-spec invariants: role-template rendering contract (Lift 12 / #231 Phase 5)',
   () => {
