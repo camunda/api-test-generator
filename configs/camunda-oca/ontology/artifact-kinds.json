@@ -74,5 +74,12 @@
     { "@type": "FileExtensionMapping", "extension": ".dmn", "artifactKinds": ["dmnDecision", "dmnDrd"] },
     { "@type": "FileExtensionMapping", "extension": ".form", "artifactKinds": ["form"] },
     { "@type": "FileExtensionMapping", "extension": ".json", "artifactKinds": ["form"] }
+  ],
+  "nonArtifactWrapperKeys": [
+    {
+      "@type": "NonArtifactWrapperKey",
+      "key": "resource",
+      "rationale": "Generic legacy envelope (DeploymentResourceResult). DeploymentMetadataResult ships this property alongside the four typed slices (processDefinition, decisionDefinition, decisionRequirements, form); every typed slice carries the same semantically-meaningful fields in a typed shape, and `resource.resourceKey` is the oneOf union of the four typed keys. The test-generator extracts semantics from the typed slices and intentionally ignores `resource` — modelling it as an artifact-kind would duplicate the typed coverage without adding a distinct deployment shape. Acknowledged here so the Lift 16 / #256 bidirectional drift check stays green; if the upstream spec ever drops `resource`, remove this entry to keep the allowlist honest."
+    }
   ]
 }

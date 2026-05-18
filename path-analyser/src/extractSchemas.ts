@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { getSpecBundleDir } from './configResolver.js';
+import { loadArtifactKindsAbox } from './ontology/loader.js';
 import type {
   ExtractedRequestVariantsIndex,
   RequestOneOfGroupSummary,
@@ -60,6 +61,19 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
   const repoRoot = path.resolve(baseDir, '..');
   const specPath =
     process.env.OPENAPI_SPEC_PATH || path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json');
+  // Lift 16 / #256: the wrapper-property names on each `deployments[]`
+  // entry (e.g. `processDefinition`, `decisionRequirements`, `form`) are
+  // OCA-specific facts that already live in the per-config
+  // `artifact-kinds.json` ABox as `kinds[*].deploymentSlices`. Source
+  // them from there instead of a hard-coded literal so a second-API
+  // config can supply a disjoint slice set without touching this file.
+  // Falls back to an empty set when the ABox is unavailable (e.g.
+  // isolated test repos without a `configs.json`); the per-slice walker
+  // below already tolerates absent keys via `if (!sProp) continue`.
+  const artifactKindsAbox = loadArtifactKindsAbox(repoRoot);
+  const deploymentSliceNames = artifactKindsAbox
+    ? Array.from(new Set(artifactKindsAbox.kinds.flatMap((k) => k.deploymentSlices ?? [])))
+    : [];
   const raw = await fs.readFile(specPath, 'utf8');
   // biome-ignore lint/plugin: YAML.parse returns unknown; this is the single boundary where the parsed spec is narrowed to its known top-level shape.
   const doc = YAML.parse(raw) as OpenAPISchemaObject;
@@ -141,12 +155,7 @@ export async function extractResponseAndRequestVariants(baseDir: string, semanti
               ? resolveSchema(deployments.items, components)
               : undefined;
           const itemObj = items?.$ref ? resolveSchema(items, components) : items;
-          const sliceNames = [
-            'processDefinition',
-            'decisionDefinition',
-            'decisionRequirements',
-            'form',
-          ];
+          const sliceNames = deploymentSliceNames;
           if (itemObj?.properties) {
             for (const slice of sliceNames) {
               const sProp = itemObj.properties[slice];
