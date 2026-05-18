@@ -6529,6 +6529,17 @@ describeForThisConfig(
       loadGraph();
       const opById = cachedOperationById;
       if (!opById) throw new Error('graph not loaded');
+      // Reconstruct the minimal OperationGraph shape the shared
+      // `findMembershipArrayPath` helper expects. The full
+      // OperationGraph carries dozens of fields the helper doesn't
+      // touch; we only need `operations[opId].responseSemanticTypes`
+      // and a stable narrow contract, so build a synthetic slice and
+      // pass it through. Keeps the single-source-of-truth helper
+      // honest: if a future change makes it consult more graph
+      // fields, this fixture surfaces the missing wiring.
+      const { findMembershipArrayPath } = await import(
+        '../../path-analyser/src/ontology/observeArrayPath.js'
+      );
       const offenders: string[] = [];
       const edgeTemplates = templates.templates.filter((t) => t.appliesTo.kind === 'Edge');
       for (const tpl of edgeTemplates) {
@@ -6580,12 +6591,14 @@ describeForThisConfig(
             // property is "appears in an array-nested response
             // field"; the scoping/membership split is a #270
             // planner concern at instantiation time.
-            const responses = op.responseSemanticTypes?.['200'] ?? [];
-            const arrayNestedSemanticTypes = new Set(
-              responses.filter((r) => r.fieldPath.includes('[]')).map((r) => r.semanticType),
-            );
-            const observable = edge.identifiedBy.filter((s) => arrayNestedSemanticTypes.has(s));
-            if (observable.length === 0) {
+            //
+            // Implementation note: this invariant uses the same
+            // `findMembershipArrayPath` helper the #270 planner
+            // calls, so a divergence between "feasible at L3" and
+            // "planner can locate" is impossible by construction.
+            const locator = findMembershipArrayPath(op, edge.identifiedBy);
+            if (locator === null) {
+              const responses = op.responseSemanticTypes?.['200'] ?? [];
               offenders.push(
                 `${tpl.name} × ${edge.name}: observation op '${opId}' 200 response has no array-nested field carrying any identifiedBy type (${edge.identifiedBy.join(', ')}); got: ${responses
                   .map((r) => `${r.semanticType}@${r.fieldPath}`)
@@ -6709,3 +6722,258 @@ describeForThisConfig('bundled-spec invariants: ontology publishing surface (#27
     );
   });
 });
+
+// ===========================================================================
+// #270 Phase 2: template-derived scenarios + edges Playwright suite.
+//
+// The instantiator (path-analyser/src/scenarioTemplateInstantiator.ts) compiles
+// every (template × edge) pair declared in the ABoxes into a TemplateScenario
+// JSON file under generated/<config>/scenarios/templates/<TemplateName>/<EdgeName>.json,
+// and the Playwright emitter materialises one
+// generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts per edge.
+//
+// These invariants pin the structural contract of that output — coverage
+// (every edge has a JSON + a .spec.ts), shape (5 steps in the established →
+// observe(present) → revoke → observe(absent) order), assertion
+// well-formedness (membershipSemanticType ∈ edge.identifiedBy, non-empty
+// arrayPath / elementField), and binding-table closure (the membership
+// value is sourced from a known binding rather than invented at emit
+// time). The L3 layer plus the green/green refactor discipline keeps the
+// template surface honest as the planner grows.
+// ===========================================================================
+describeForThisConfig(
+  'bundled-spec invariants: template-derived scenarios (#268 Phase 2 / #270)',
+  () => {
+    const TEMPLATES_ROOT = join(SCENARIOS_DIR, 'templates');
+    const EDGE_LIFECYCLE_DIR = join(TEMPLATES_ROOT, 'EdgeLifecycle');
+    const EDGES_SUITE_DIR = join(GENERATED_TESTS_DIR, 'edges');
+
+    interface TemplateScenarioFile {
+      templateName: string;
+      subjectName: string;
+      subjectKind: string;
+      scenario: {
+        templateName: string;
+        subjectName: string;
+        subjectKind: string;
+        steps: TemplateStep[];
+        bindings: Record<string, string>;
+      };
+    }
+    interface PrereqChainStep {
+      kind: 'prereqChain';
+      targetOperationId: string;
+      operations: { operationId: string }[];
+      bindings: Record<string, string>;
+      seedBindings: string[];
+      requestPlan: unknown[];
+    }
+    interface InvokeStep {
+      kind: 'invoke';
+      operationId: string;
+      inputs: Record<string, string>;
+      produces: Record<string, string>;
+      requestPlan: unknown;
+    }
+    interface ObserveStep {
+      kind: 'observe';
+      operationId: string;
+      inputs: Record<string, string>;
+      requestPlan: unknown;
+      assertion: {
+        kind: 'membership';
+        expect: 'present' | 'absent';
+        arrayPath: string[];
+        elementField: string;
+        membershipSemanticType: string;
+      };
+    }
+    type TemplateStep = PrereqChainStep | InvokeStep | ObserveStep;
+
+    function loadTemplateFile(edgeName: string): TemplateScenarioFile {
+      const p = join(EDGE_LIFECYCLE_DIR, `${edgeName}.json`);
+      if (!existsSync(p)) {
+        throw new Error(
+          `Template scenario JSON not found at ${p}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON; downstream invariants validate structure.
+      return JSON.parse(readFileSync(p, 'utf8')) as TemplateScenarioFile;
+    }
+
+    it('every edge in the edges ABox has a generated EdgeLifecycle template scenario JSON', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      if (!existsSync(EDGE_LIFECYCLE_DIR)) {
+        throw new Error(
+          `EdgeLifecycle template scenarios directory not found at ${EDGE_LIFECYCLE_DIR}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      const present = new Set(
+        readdirSync(EDGE_LIFECYCLE_DIR)
+          .filter((f) => f.endsWith('.json'))
+          .map((f) => f.slice(0, -'.json'.length)),
+      );
+      const missing = edges.edges.filter((e) => !present.has(e.name)).map((e) => e.name);
+      expect(
+        missing,
+        `Every edge in edges.json must have a corresponding ${EDGE_LIFECYCLE_DIR}/<edge>.json. ` +
+          `Missing edges indicate the instantiator skipped a (template × edge) pair.`,
+      ).toEqual([]);
+    });
+
+    it('every emitted EdgeLifecycle scenario has the canonical 5-step shape (prereqChain → invoke → observe(present) → invoke → observe(absent))', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      const offenders: string[] = [];
+      for (const edge of edges.edges) {
+        const file = loadTemplateFile(edge.name);
+        const steps = file.scenario.steps;
+        if (steps.length !== 5) {
+          offenders.push(`${edge.name}: expected 5 steps, got ${steps.length}`);
+          continue;
+        }
+        const kinds = steps.map((s) => s.kind).join(',');
+        if (kinds !== 'prereqChain,invoke,observe,invoke,observe') {
+          offenders.push(
+            `${edge.name}: expected step kinds prereqChain,invoke,observe,invoke,observe; got ${kinds}`,
+          );
+          continue;
+        }
+        const inv1 = steps[1];
+        const obs1 = steps[2];
+        const inv2 = steps[3];
+        const obs2 = steps[4];
+        if (inv1.kind !== 'invoke' || inv1.operationId !== edge.establishedBy) {
+          offenders.push(
+            `${edge.name}: step[1] must invoke establishedBy (${edge.establishedBy}); got ${inv1.kind === 'invoke' ? inv1.operationId : inv1.kind}`,
+          );
+        }
+        if (obs1.kind !== 'observe' || obs1.operationId !== edge.observableVia) {
+          offenders.push(
+            `${edge.name}: step[2] must observe observableVia (${edge.observableVia}); got ${obs1.kind === 'observe' ? obs1.operationId : obs1.kind}`,
+          );
+        } else if (obs1.assertion.expect !== 'present') {
+          offenders.push(
+            `${edge.name}: step[2] observe.expect must be 'present'; got '${obs1.assertion.expect}'`,
+          );
+        }
+        if (inv2.kind !== 'invoke' || inv2.operationId !== edge.revokedBy) {
+          offenders.push(
+            `${edge.name}: step[3] must invoke revokedBy (${edge.revokedBy}); got ${inv2.kind === 'invoke' ? inv2.operationId : inv2.kind}`,
+          );
+        }
+        if (obs2.kind !== 'observe' || obs2.operationId !== edge.observableVia) {
+          offenders.push(
+            `${edge.name}: step[4] must observe observableVia (${edge.observableVia}); got ${obs2.kind === 'observe' ? obs2.operationId : obs2.kind}`,
+          );
+        } else if (obs2.assertion.expect !== 'absent') {
+          offenders.push(
+            `${edge.name}: step[4] observe.expect must be 'absent'; got '${obs2.assertion.expect}'`,
+          );
+        }
+      }
+      expect(
+        offenders,
+        'Every EdgeLifecycle scenario must follow the 5-step canonical shape — the template TBox + #270 planner enforce this jointly.',
+      ).toEqual([]);
+    });
+
+    it('every observe step has a well-formed membership assertion (membershipSemanticType ∈ identifiedBy, non-empty arrayPath, non-empty elementField)', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      const offenders: string[] = [];
+      for (const edge of edges.edges) {
+        const file = loadTemplateFile(edge.name);
+        const identifiedBy = new Set(edge.identifiedBy);
+        for (const [i, step] of file.scenario.steps.entries()) {
+          if (step.kind !== 'observe') continue;
+          const a = step.assertion;
+          if (!identifiedBy.has(a.membershipSemanticType)) {
+            offenders.push(
+              `${edge.name}: step[${i}] membershipSemanticType '${a.membershipSemanticType}' is not in edge.identifiedBy (${edge.identifiedBy.join(', ')})`,
+            );
+          }
+          if (!Array.isArray(a.arrayPath) || a.arrayPath.length === 0) {
+            offenders.push(`${edge.name}: step[${i}] assertion.arrayPath must be non-empty`);
+          }
+          if (typeof a.elementField !== 'string' || a.elementField.length === 0) {
+            offenders.push(
+              `${edge.name}: step[${i}] assertion.elementField must be a non-empty string`,
+            );
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Every observe step assertion must be well-formed: membership semantic in identifiedBy, non-empty arrayPath, non-empty elementField.',
+      ).toEqual([]);
+    });
+
+    it('every observe.membershipSemanticType has a matching entry in the scenario binding table (the asserted value is sourced from a known binding, not invented at emit time)', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      const offenders: string[] = [];
+      for (const edge of edges.edges) {
+        const file = loadTemplateFile(edge.name);
+        const bindings = file.scenario.bindings ?? {};
+        for (const [i, step] of file.scenario.steps.entries()) {
+          if (step.kind !== 'observe') continue;
+          const sem = step.assertion.membershipSemanticType;
+          if (!(sem in bindings)) {
+            offenders.push(
+              `${edge.name}: step[${i}] membershipSemanticType '${sem}' has no entry in scenario.bindings ({${Object.keys(bindings).join(', ')}}). ` +
+                'Without a binding, the emitter has no value to assert.',
+            );
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Every observe membership identifier must round-trip through the scenario binding table so the emitter can resolve the asserted value via ctx[<bindingName>].',
+      ).toEqual([]);
+    });
+
+    it('RoleUserMembership observe pins arrayPath=[items] and elementField=username (ambiguity-stability guard for findMembershipArrayPath)', () => {
+      // Stability guard for the array-locator heuristic: when more than
+      // one identifiedBy semantic appears array-nested in the same
+      // response, the helper returns the FIRST match. If a future
+      // change re-shuffles iteration order or extractor output, the
+      // chosen path for RoleUserMembership flips silently — this
+      // invariant catches that.
+      const file = loadTemplateFile('RoleUserMembership');
+      const observeSteps = file.scenario.steps.filter(
+        (s): s is ObserveStep => s.kind === 'observe',
+      );
+      expect(observeSteps.length).toBe(2);
+      for (const obs of observeSteps) {
+        expect(obs.assertion.arrayPath).toEqual(['items']);
+        expect(obs.assertion.elementField).toBe('username');
+        expect(obs.assertion.membershipSemanticType).toBe('Username');
+      }
+    });
+
+    it('every edge has a generated Playwright lifecycle suite under generated/<config>/playwright/edges/', async () => {
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      if (!existsSync(EDGES_SUITE_DIR)) {
+        throw new Error(
+          `Edges lifecycle suite directory not found at ${EDGES_SUITE_DIR}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      const present = new Set(readdirSync(EDGES_SUITE_DIR));
+      const missing = edges.edges
+        .filter((e) => !present.has(`${e.name}.lifecycle.spec.ts`))
+        .map((e) => e.name);
+      expect(
+        missing,
+        `Every edge in edges.json must have a corresponding ${EDGES_SUITE_DIR}/<edge>.lifecycle.spec.ts.`,
+      ).toEqual([]);
+    });
+  },
+);

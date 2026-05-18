@@ -124,6 +124,15 @@ export function getScenariosDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'scenarios');
 }
 
+/**
+ * Per-template subdirectory under the scenarios partition (#270).
+ * Layout: `generated/<config>/scenarios/templates/<TemplateName>/`.
+ * One JSON file per (template × subject) pair lands underneath.
+ */
+export function getTemplateScenariosDir(repoRoot: string, templateName: string): string {
+  return path.join(getScenariosDir(repoRoot), 'templates', templateName);
+}
+
 export function getFeatureOutputDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'feature-output');
 }
