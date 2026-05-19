@@ -31,13 +31,13 @@ import type {
  *
  *   - **PrereqChain delegates to the existing BFS planner.** The
  *     instantiator does not reinvent dependency-chain construction; it
- *     pulls the already-planned feature scenario for the establisher
- *     out of the per-operation stash that the CLI built earlier in
- *     the same run. That scenario carries the BFS-derived
+ *     pulls the already-planned canonical scenario for the establisher
+ *     out of the per-operation canonical map that the CLI built
+ *     earlier in the same run. That scenario carries the BFS-derived
  *     `operations`, `requestPlan`, `bindings`, and `seedBindings` —
  *     everything the prereq chain needs.
  *
- *   - **Invoke and Observe steps reuse the per-operation feature
+ *   - **Invoke and Observe steps reuse the per-operation canonical
  *     scenario's final RequestStep.** The CLI invokes
  *     `buildRequestPlan` for every endpoint exactly once, regardless
  *     of how many templates reference it. The instantiator looks up
@@ -65,13 +65,18 @@ function bindingNameFor(semantic: string): string {
 }
 
 /**
- * Stash of already-planned scenarios keyed by operationId. The CLI
- * populates one entry per endpoint *after* it has called
- * `buildRequestPlan`/`computeSeedBindings` on the first feature
- * scenario, so by the time the instantiator runs every entry has a
- * fully-populated `requestPlan` and `seedBindings`.
+ * Per-operation canonical-scenario map keyed by operationId. The CLI
+ * populates one entry per endpoint with the planner's authoritative
+ * scenario (the same `chainSource` that supplies feature variant
+ * inheritance — see `index.ts` `canonicalByEndpoint`). By the time
+ * the instantiator runs every entry has a fully-populated
+ * `operations`, `bindings`, `requestPlan`, and `seedBindings`.
+ *
+ * Renamed from `ScenarioStash` in #288 Phase 3b when the per-operation
+ * cache was unified into a single canonical source (also consumed by
+ * `featureCoverageGenerator.buildScenarioFromVariant`).
  */
-export type ScenarioStash = Map<string, EndpointScenario>;
+export type CanonicalScenarioMap = Map<string, EndpointScenario>;
 
 /**
  * Produce the canonical 5-step {@link TemplateScenario} for one
@@ -79,7 +84,7 @@ export type ScenarioStash = Map<string, EndpointScenario>;
  *
  * Returns `null` if any of the three referenced operations
  * (establishedBy, revokedBy, observableVia) is missing from the
- * stash, or if the observation op has no array-nested membership
+ * canonical, or if the observation op has no array-nested membership
  * field. The caller surfaces the error with the edge name so the
  * diagnostic points at the row instead of the helper.
  */
@@ -87,22 +92,22 @@ function compileEdgeLifecycle(
   template: ScenarioTemplate,
   edge: Edge,
   graph: OperationGraph,
-  stash: ScenarioStash,
+  canonical: CanonicalScenarioMap,
 ): { scenario: TemplateScenario } | { error: string } {
-  const establishScenario = stash.get(edge.establishedBy);
-  const revokeScenario = stash.get(edge.revokedBy);
-  const observeScenario = stash.get(edge.observableVia);
+  const establishScenario = canonical.get(edge.establishedBy);
+  const revokeScenario = canonical.get(edge.revokedBy);
+  const observeScenario = canonical.get(edge.observableVia);
   if (!establishScenario)
     return {
-      error: `${template.name} × ${edge.name}: no stashed scenario for establishedBy='${edge.establishedBy}'`,
+      error: `${template.name} × ${edge.name}: no canonical scenario for establishedBy='${edge.establishedBy}'`,
     };
   if (!revokeScenario)
     return {
-      error: `${template.name} × ${edge.name}: no stashed scenario for revokedBy='${edge.revokedBy}'`,
+      error: `${template.name} × ${edge.name}: no canonical scenario for revokedBy='${edge.revokedBy}'`,
     };
   if (!observeScenario)
     return {
-      error: `${template.name} × ${edge.name}: no stashed scenario for observableVia='${edge.observableVia}'`,
+      error: `${template.name} × ${edge.name}: no canonical scenario for observableVia='${edge.observableVia}'`,
     };
 
   const establishPlan = establishScenario.requestPlan;
@@ -171,7 +176,7 @@ function compileEdgeLifecycle(
   // Helper: map an op's required semantics to {semanticType: bindingName}.
   // Used by Invoke and Observe alike. We consult the graph for the
   // op's `requires.required`; the bindingName follows the camelCase
-  // convention so callers don't need to inspect the stashed scenario
+  // convention so callers don't need to inspect the canonical scenario
   // bindings (the union table built above is the source of truth at
   // emit time; this map is the per-step view onto it).
   const inputsFor = (opId: string): Record<string, string> => {
@@ -324,13 +329,13 @@ export interface TemplateInstantiationResult {
  *
  * Returns `null`-flavoured `{ error }` if any of the three referenced
  * operations (establishedBy, observableVia, revokedBy) is missing from
- * the stash. The caller surfaces the error with the entity-kind name.
+ * the canonical. The caller surfaces the error with the entity-kind name.
  */
 function compileEntityLifecycle(
   template: ScenarioTemplate,
   kind: EntityKind,
   graph: OperationGraph,
-  stash: ScenarioStash,
+  canonical: CanonicalScenarioMap,
 ): { scenario: TemplateScenario } | { error: string } {
   // EntityLifecycle only applies to shape: "entity" rows; the schema
   // forbids the triple on shape: "external-entity" so this is also a
@@ -356,20 +361,20 @@ function compileEntityLifecycle(
     };
   }
 
-  const establishScenario = stash.get(establishOpId);
-  const revokeScenario = stash.get(revokeOpId);
-  const observeScenario = stash.get(observeOpId);
+  const establishScenario = canonical.get(establishOpId);
+  const revokeScenario = canonical.get(revokeOpId);
+  const observeScenario = canonical.get(observeOpId);
   if (!establishScenario)
     return {
-      error: `${template.name} × ${kind.name}: no stashed scenario for establishedBy='${establishOpId}'`,
+      error: `${template.name} × ${kind.name}: no canonical scenario for establishedBy='${establishOpId}'`,
     };
   if (!revokeScenario)
     return {
-      error: `${template.name} × ${kind.name}: no stashed scenario for revokedBy='${revokeOpId}'`,
+      error: `${template.name} × ${kind.name}: no canonical scenario for revokedBy='${revokeOpId}'`,
     };
   if (!observeScenario)
     return {
-      error: `${template.name} × ${kind.name}: no stashed scenario for observableVia='${observeOpId}'`,
+      error: `${template.name} × ${kind.name}: no canonical scenario for observableVia='${observeOpId}'`,
     };
 
   const establishPlan = establishScenario.requestPlan;
@@ -515,7 +520,7 @@ export function instantiateAllTemplates(
   graph: OperationGraph,
   templates: ScenarioTemplatesAbox,
   edges: EdgesAbox,
-  stash: ScenarioStash,
+  canonical: CanonicalScenarioMap,
   entityKinds: EntityKindsAbox | null,
 ): TemplateInstantiationResult[] {
   const out: TemplateInstantiationResult[] = [];
@@ -535,7 +540,7 @@ export function instantiateAllTemplates(
         );
       }
       for (const edge of edges.edges) {
-        const compiled = compileEdgeLifecycle(tpl, edge, graph, stash);
+        const compiled = compileEdgeLifecycle(tpl, edge, graph, canonical);
         if ('error' in compiled) {
           errors.push(compiled.error);
           continue;
@@ -565,7 +570,7 @@ export function instantiateAllTemplates(
         // here (not an error) because the template applies to the
         // whole ABox and the schema already classified them out.
         if (kind.shape !== 'entity') continue;
-        const compiled = compileEntityLifecycle(tpl, kind, graph, stash);
+        const compiled = compileEntityLifecycle(tpl, kind, graph, canonical);
         if ('error' in compiled) {
           errors.push(compiled.error);
           continue;

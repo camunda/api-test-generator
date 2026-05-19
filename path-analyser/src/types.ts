@@ -323,6 +323,13 @@ export interface FeatureVariantSpec {
     policy: string;
     secondStatus?: number;
   };
+  // #288 Phase 3b — opt out of the canonical chain inheritance.
+  // Defaults to true (omitted ⇒ inherit). The only current consumer
+  // is the search-empty-negative variant, which deliberately omits
+  // prerequisites so the search returns empty at runtime. Replaces
+  // the ad-hoc `isSearchLikeOp && isEmptyNeg` regex previously
+  // applied to every variant in `index.ts`.
+  inheritChainPrereqs?: boolean;
 }
 
 export interface GenerationSummary {
