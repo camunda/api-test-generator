@@ -7094,3 +7094,250 @@ describeForThisConfig(
     });
   },
 );
+
+// ===========================================================================
+// Issue #288 Phase 0 — feature-scenario coverage audit.
+//
+// `path-analyser/src/featureCoverageGenerator.ts::buildScenarioFromVariant`
+// is the builder being unified under issue #288. Before the Phase 1
+// refactor (inherit planner bindings) can land, the AGENTS.md
+// green/green discipline requires named invariants that lock in the
+// behaviour we want preserved across the refactor. The existing
+// invariants above already cover variantKey allowlists, establisher
+// body-identifier seeding (#136 / #152), and scenario↔spec
+// materialisation. The block below adds the gaps:
+//
+//   1. `expectedResult.kind` is derived from variantKey (negative
+//      variants → 'empty'; everything else → 'nonEmpty'). Currently
+//      'error' is dormant (no `duplicatePolicy` configured for
+//      camunda-oca) so it is asserted as a *future* allowed value
+//      rather than a present one.
+//   2. `syntheticBindings` is *defined* (as an array) iff the
+//      scenario is a `neg` variant. Locks the structural presence;
+//      Phase 1 will tighten the content assertion once planner
+//      bindings flow through.
+//   3. Per-endpoint feature-scenario count never exceeds the
+//      MAX_FEATURE_SCENARIOS cap (90) — locks the documented cap.
+//   4. `neg`-variantKey scenarios are only emitted for endpoints
+//      that match the search-like gate
+//      (`featureCoverageGenerator.ts:76-81`): POST plus
+//      (path ends `/search` OR opId matches /search/i OR
+//      the operation is a jobActivator). Locks the gating rule so
+//      the unification refactor cannot silently widen it.
+//
+// All four invariants must be GREEN against the current
+// (pre-refactor) generated output. They become regression guards for
+// the Phase 1 / Phase 2 unification PRs.
+// ===========================================================================
+describeForThisConfig(
+  'bundled-spec invariants: feature-scenario coverage audit (#288 Phase 0)',
+  () => {
+    interface FeatureScenarioAudit {
+      id: string;
+      variantKey?: string;
+      expectedResult?: { kind?: string };
+      syntheticBindings?: string[];
+      duplicateTest?: { mode?: string };
+    }
+    interface FeatureCollectionAudit {
+      endpoint: { operationId: string };
+      scenarios: FeatureScenarioAudit[];
+    }
+
+    function loadAllFeatureCollections(): { file: string; collection: FeatureCollectionAudit }[] {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature scenarios directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      const out: { file: string; collection: FeatureCollectionAudit }[] = [];
+      for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+        const collection = JSON.parse(
+          readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8'),
+        ) as FeatureCollectionAudit;
+        out.push({ file: f, collection });
+      }
+      return out;
+    }
+
+    it('every feature scenario `expectedResult.kind` matches its variantKey class (Phase 0 #288)', () => {
+      // Rule from `featureCoverageGenerator.ts`:
+      //   - negative search-empty variant → 'empty'
+      //   - duplicateTest mode='conflict'  → 'error'   (currently dormant for camunda-oca)
+      //   - duplicateTest mode='conditional' → 'nonEmpty'
+      //   - everything else (base / oneOf=*) → 'nonEmpty'
+      interface Offender {
+        file: string;
+        id: string;
+        variantKey?: string;
+        actual?: string;
+        expected: string;
+      }
+      const offenders: Offender[] = [];
+      for (const { file, collection } of loadAllFeatureCollections()) {
+        for (const s of collection.scenarios) {
+          const vk = s.variantKey;
+          const dupMode = s.duplicateTest?.mode;
+          let expected: string;
+          if (dupMode === 'conflict') expected = 'error';
+          else if (dupMode === 'conditional') expected = 'nonEmpty';
+          else if (vk === 'neg') expected = 'empty';
+          else expected = 'nonEmpty';
+          const actual = s.expectedResult?.kind;
+          if (actual !== expected) {
+            offenders.push({ file, id: s.id, variantKey: vk, actual, expected });
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Every feature scenario must carry an `expectedResult.kind` derived from its variantKey/duplicateTest class. A mismatch means the builder dropped or reassigned the expectedResult during variant materialisation.',
+      ).toEqual([]);
+    });
+
+    it('`syntheticBindings` is defined (as array) iff the scenario is a `neg` variant (Phase 0 #288)', () => {
+      // Structural invariant: today the negative-empty variant is the
+      // only kind that ships a `syntheticBindings` array (currently
+      // empty because `buildScenarioFromVariant` constructs bindings
+      // from `variant.optionals` only, and the neg variant carries
+      // `optionals: []`). Phase 1 of #288 will populate the array
+      // contents from inherited planner bindings; this invariant
+      // locks in the structural presence/absence so the field
+      // doesn't silently disappear or leak onto non-neg variants
+      // during the refactor.
+      interface Offender {
+        file: string;
+        id: string;
+        variantKey?: string;
+        reason: string;
+      }
+      const offenders: Offender[] = [];
+      let negScanned = 0;
+      let nonNegScanned = 0;
+      for (const { file, collection } of loadAllFeatureCollections()) {
+        for (const s of collection.scenarios) {
+          const isNeg = s.variantKey === 'neg';
+          if (isNeg) negScanned++;
+          else nonNegScanned++;
+          const sb = s.syntheticBindings;
+          if (isNeg) {
+            if (!Array.isArray(sb)) {
+              offenders.push({
+                file,
+                id: s.id,
+                variantKey: s.variantKey,
+                reason: 'neg scenario must have syntheticBindings: [] (or populated array)',
+              });
+            }
+          } else {
+            if (sb !== undefined) {
+              offenders.push({
+                file,
+                id: s.id,
+                variantKey: s.variantKey,
+                reason: 'non-neg scenario must not carry syntheticBindings',
+              });
+            }
+          }
+        }
+      }
+      // Sanity floor: the bundled spec has multiple search endpoints
+      // and many non-search endpoints. If either count drops to zero
+      // the invariant is silently vacuous.
+      expect(negScanned).toBeGreaterThanOrEqual(5);
+      expect(nonNegScanned).toBeGreaterThanOrEqual(50);
+      expect(
+        offenders,
+        '`syntheticBindings` must be defined (as an array) exactly when the scenario is a `neg` (search-empty-negative) variant.',
+      ).toEqual([]);
+    });
+
+    it('no feature collection exceeds the MAX_FEATURE_SCENARIOS cap of 90 (Phase 0 #288)', () => {
+      // Mirror of `MAX_FEATURE_SCENARIOS = 90` in
+      // path-analyser/src/index.ts. Locks the documented per-endpoint
+      // cap so the unification refactor cannot silently uncap (or
+      // tighten) feature output.
+      const MAX_FEATURE_SCENARIOS = 90;
+      const offenders: { file: string; count: number }[] = [];
+      for (const { file, collection } of loadAllFeatureCollections()) {
+        if (collection.scenarios.length > MAX_FEATURE_SCENARIOS) {
+          offenders.push({ file, count: collection.scenarios.length });
+        }
+      }
+      expect(
+        offenders,
+        `Feature collections must not exceed MAX_FEATURE_SCENARIOS=${MAX_FEATURE_SCENARIOS}. A higher count means the cap in path-analyser/src/index.ts has regressed or the variant enumerator no longer truncates.`,
+      ).toEqual([]);
+    });
+
+    it('`neg`-variantKey scenarios are only emitted for search-like endpoints (Phase 0 #288)', () => {
+      // Mirror of the gating rule in
+      // path-analyser/src/featureCoverageGenerator.ts:76-81:
+      //   POST method AND (path ends `/search` OR opId matches /search/i
+      //   OR the operation is a jobActivator).
+      // jobActivator membership is read from the per-config ABox so
+      // this assertion stays in sync with the role classifier without
+      // duplicating its logic.
+      interface OperationArtifactRule {
+        operationId?: string;
+        role?: string;
+      }
+      interface ArtifactKindsAbox {
+        operationRules?: OperationArtifactRule[];
+      }
+      interface GraphAudit {
+        operations: OperationNode[];
+      }
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphAudit;
+      const opsById = new Map(graph.operations.map((o) => [o.operationId, o]));
+      const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'artifact-kinds.json');
+      const jobActivatorIds = new Set<string>();
+      if (existsSync(aboxPath)) {
+        // biome-ignore lint/plugin: runtime contract boundary for parsed ABox JSON
+        const abox = JSON.parse(readFileSync(aboxPath, 'utf8')) as ArtifactKindsAbox;
+        for (const r of abox.operationRules ?? []) {
+          if (r.role === 'jobActivator' && r.operationId) jobActivatorIds.add(r.operationId);
+        }
+      }
+
+      function isSearchLike(opId: string): boolean {
+        const op = opsById.get(opId);
+        if (!op) return false;
+        if (op.method.toUpperCase() !== 'POST') return false;
+        if (/\/search$/.test(op.path)) return true;
+        if (/search/i.test(op.operationId)) return true;
+        if (jobActivatorIds.has(opId)) return true;
+        return false;
+      }
+
+      const offenders: { file: string; id: string; operationId: string }[] = [];
+      let negScanned = 0;
+      for (const { file, collection } of loadAllFeatureCollections()) {
+        for (const s of collection.scenarios) {
+          if (s.variantKey !== 'neg') continue;
+          negScanned++;
+          if (!isSearchLike(collection.endpoint.operationId)) {
+            offenders.push({
+              file,
+              id: s.id,
+              operationId: collection.endpoint.operationId,
+            });
+          }
+        }
+      }
+      expect(negScanned).toBeGreaterThanOrEqual(5);
+      expect(
+        offenders,
+        '`neg` (search-empty-negative) variant must only be emitted for search-like endpoints (POST + /search$ OR opId matches /search/i OR jobActivator role). A non-search endpoint shipping `neg` means the gating rule in featureCoverageGenerator.ts has widened.',
+      ).toEqual([]);
+    });
+  },
+);
