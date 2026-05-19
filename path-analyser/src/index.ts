@@ -24,7 +24,7 @@ import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
 } from './scenarioGenerator.js';
-import { instantiateAllTemplates, type ScenarioStash } from './scenarioTemplateInstantiator.js';
+import { instantiateAllTemplates } from './scenarioTemplateInstantiator.js';
 import { computeSeedBindings } from './seedBindings.js';
 import type {
   ArtifactRegistryEntry,
@@ -202,24 +202,13 @@ async function main() {
   let processed = 0;
   // Aggregate deployment artifacts referenced by scenarios for manifest output
   const artifactsManifest = new Map<string, { kind: string; path: string; description?: string }>();
-  // #270: per-endpoint feature scenario stash. Populated as each
-  // endpoint is processed below with the first fully-planned feature
-  // scenario (`requestPlan` and `seedBindings` already stamped). The
-  // scenario template instantiator reads from this stash after the
-  // loop, so prereq-chain construction reuses the BFS planner's
-  // output verbatim instead of re-implementing it for templates.
-  const featureScenarioStash: ScenarioStash = new Map();
-
-  // #288 Phase 3a — additive canonical-scenario cache. Captures the
-  // planner's authoritative scenario (`chainSource` after the
-  // producer-authority filter, falling back to the first integration
-  // candidate, falling back to the first scenario) for every endpoint,
-  // independent of the feature-overlay path. Phase 3b will switch the
-  // template instantiator + `buildScenarioFromVariant` to read from
-  // here and delete `featureScenarioStash` plus the chain-graft /
-  // donor-binding inherit blocks below. For 3a the cache is purely
-  // additive: populated but consumed only by the equivalence
-  // assertion at the end of the feature loop.
+  // #288 Phase 3b — canonical-scenario cache. Captures the planner's
+  // authoritative scenario (`chainSource` after the producer-authority
+  // filter, falling back to the first integration candidate, falling
+  // back to the first scenario) for every endpoint. Consumed by
+  // `generateFeatureCoverageForEndpoint` (variants inherit operations
+  // + bindings) and by `instantiateAllTemplates` after the loop
+  // (template prereq chains).
   const canonicalByEndpoint: Map<string, EndpointScenario> = new Map();
 
   for (const op of Object.values(graph.operations)) {
@@ -254,15 +243,6 @@ async function main() {
     }
     const fileName = normalizeEndpointFileName(op.method, op.path);
     await writeFile(path.join(outputDir, fileName), JSON.stringify(collection, null, 2), 'utf8');
-    // Feature coverage scenarios (enhanced with integration chain + rudimentary body synthesis)
-    const featureCollection = generateFeatureCoverageForEndpoint(graph, op.operationId, {
-      requestVariants: requestIndex.byOperation[op.operationId],
-    });
-    // Final guardrail: enforce max scenarios per endpoint (cap 90)
-    const MAX_FEATURE_SCENARIOS = 90;
-    if (featureCollection.scenarios.length > MAX_FEATURE_SCENARIOS) {
-      featureCollection.scenarios = featureCollection.scenarios.slice(0, MAX_FEATURE_SCENARIOS);
-    }
     // Choose a representative integration scenario to supply the
     // dependency chain. Shortest non-`unsatisfied` chain with >1 ops,
     // *gated on producer authority for the endpoint's required types*.
@@ -283,6 +263,12 @@ async function main() {
     // length-only sort when no such chain exists, so endpoints whose
     // required types have no authoritative producer anywhere in the
     // graph (an upstream-spec gap) are not regressed.
+    //
+    // #288 Phase 3b: this block runs BEFORE `generateFeatureCoverageForEndpoint`
+    // so the canonical scenario can be passed in as the source of
+    // operations + bindings inheritance for every variant. The
+    // post-call graft/donor-binding-inherit blocks have been deleted
+    // in favour of inheritance at variant-construction time.
     const integrationCandidates = collection.scenarios.filter((sc) => sc.id !== 'unsatisfied');
     const requiredTypes = collection.requiredSemanticTypes ?? [];
     // Restrict the authoritative-producer check to required types that
@@ -317,72 +303,75 @@ async function main() {
       [...authoritativeMultiOp].sort(byLength)[0] ||
       [...multiOpCandidates].sort(byLength)[0] ||
       integrationCandidates[0];
-    // #288 Phase 3a — populate canonical cache for this endpoint.
-    // Prefers the same authoritative chain source the graft block
-    // below uses; falls back to the first integration candidate, then
-    // any scenario, so endpoints with no planned chain (single-op or
-    // unsatisfied-only) still have an entry. Phase 3b will consume.
+    // Canonical scenario for this endpoint — fed into
+    // `generateFeatureCoverageForEndpoint` below and into the template
+    // instantiator after the loop. Falls back to any scenario so
+    // single-op / unsatisfied-only endpoints still have an entry.
     const canonicalForEndpoint = chainSource || integrationCandidates[0] || collection.scenarios[0];
     if (canonicalForEndpoint) {
-      canonicalByEndpoint.set(op.operationId, canonicalForEndpoint);
+      // #288 Phase 3b — hydrate the canonical entry with `requestPlan`
+      // + `seedBindings` if the planner did not already do so.
+      // The planner's `if (resp)` augmentation block above only runs
+      // when the endpoint has a response shape, so 204 No-Content
+      // endpoints (cancelProcessInstance, completeJob, deleteUser, …)
+      // arrive here without a plan. Pre-3b this didn't matter because
+      // `featureScenarioStash` held the feature scenario (always
+      // hydrated post-`buildRequestPlan`); 3b's template instantiator
+      // reads from `canonicalByEndpoint` instead and refuses to
+      // compile templates whose referenced scenarios lack a plan.
+      //
+      // The hydration runs on a SHALLOW CLONE rather than the live
+      // `canonicalForEndpoint` reference, because `buildRequestPlan`
+      // has side-effects that mutate `scenario.bindings` (body-builder
+      // synthesises missing required-field placeholders, jobTypeVar
+      // for artifact deploys, globalContextSeeds entries, etc.). The
+      // original planner scenario is what feature-variant overlays
+      // inherit bindings from — mutating it would shift the per-
+      // variant binding-key insertion order in `feature-output/`,
+      // perturbing files we want to keep byte-identical across the
+      // refactor. The clone gets the plan; templates read it from
+      // the clone via `canonicalByEndpoint`.
+      let canonicalEntry = canonicalForEndpoint;
+      if (!canonicalForEndpoint.requestPlan) {
+        canonicalEntry = {
+          ...canonicalForEndpoint,
+          bindings: { ...(canonicalForEndpoint.bindings ?? {}) },
+        };
+        canonicalEntry.requestPlan = buildRequestPlan(
+          canonicalEntry,
+          resp,
+          graph,
+          canonical,
+          requestIndex.byOperation,
+          successStatusByOp,
+        );
+        canonicalEntry.seedBindings = computeSeedBindings(canonicalEntry);
+      }
+      canonicalByEndpoint.set(op.operationId, canonicalEntry);
     }
-    // The chain-graft + requestPlan synthesis must run for every endpoint,
-    // not just those with a response shape. Operations with a
-    // 204 No-Content response (cancelProcessInstance, completeJob,
-    // resolveIncident, deleteRole, deleteUser, …) used to fall into the
-    // `if (resp)` branch's else and be left as a single-step scenario, which
-    // the emitter then rendered with literal `${var}` placeholders in URLs.
-    // The response-shape assignments below are still gated on `resp` because
-    // they have no meaning when the response body is empty.
+
+    // Feature coverage scenarios (enhanced with integration chain + rudimentary body synthesis)
+    const featureCollection = generateFeatureCoverageForEndpoint(graph, op.operationId, {
+      requestVariants: requestIndex.byOperation[op.operationId],
+      // #288 Phase 3b — variants inherit operations + bindings from
+      // the canonical scenario at construction time, unless a variant
+      // explicitly sets `inheritChainPrereqs: false` (currently only
+      // search-empty-negative).
+      canonical: canonicalForEndpoint,
+    });
+    // Final guardrail: enforce max scenarios per endpoint (cap 90)
+    const MAX_FEATURE_SCENARIOS = 90;
+    if (featureCollection.scenarios.length > MAX_FEATURE_SCENARIOS) {
+      featureCollection.scenarios = featureCollection.scenarios.slice(0, MAX_FEATURE_SCENARIOS);
+    }
+    // #288 Phase 3b — the chain-graft and donor-binding-inherit blocks
+    // that previously lived here have been moved into
+    // `buildScenarioFromVariant` (`featureCoverageGenerator.ts`),
+    // which now clones the canonical scenario's operations + bindings
+    // before applying variant overlay. The post-pass below only adds
+    // per-scenario response-shape data and rebuilds requestPlan +
+    // seedBindings against the final (overlay-merged) bindings.
     for (const s of featureCollection.scenarios) {
-      // Graft chain if available and feature scenario currently only has endpoint op
-      // Special-case: for search-like empty-negative, skip grafting to produce an empty result without prerequisites
-      const isSearchLikeOp =
-        (op.method.toUpperCase() === 'POST' && /\/search$/.test(op.path)) ||
-        /search/i.test(op.operationId) ||
-        isJobActivatorOp(graph.domain, op.operationId);
-      const isEmptyNeg = s.expectedResult && s.expectedResult.kind === 'empty';
-      const skipGraft = isSearchLikeOp && isEmptyNeg;
-      if (
-        !skipGraft &&
-        chainSource &&
-        s.operations.length === 1 &&
-        chainSource.operations.length > 1
-      ) {
-        s.operations = chainSource.operations.map((o) => ({ ...o }));
-      }
-      // #288 Phase 1: inherit planner-computed bindings (external-mints
-      // for `acceptsExternal` edges + non-edge establisher self-mints
-      // for path/query/header identifiers) from the donor planner
-      // scenario. Without this, `buildScenarioFromVariant` starts with
-      // `bindings = {}` and only adds variant `optionals`, dropping
-      // required-prereq identifiers like `tenantIdVar` (self-establisher
-      // path param on updateTenantClusterVariable) and `clientIdVar`
-      // (external-entity placeholder), which then leak into emitted
-      // URLs as literal `${...Var}` at runtime. Variant bindings win on
-      // overlap so optional-variant overrides (e.g. `${var}Nonexistent`
-      // for the search-empty-negative variant) are preserved.
-      //
-      // Donor selection mirrors the chain-source pick above: prefer the
-      // authoritative multi-op chain, falling back to any other planner
-      // scenario for this endpoint. The donor's bindings always
-      // represent the canonical scenario for *this* endpoint, so the
-      // merge is meaningful even when no chain graft happened (donor
-      // scenario was single-op).
-      //
-      // Skip the inherit when `skipGraft` is true (search-empty-negative)
-      // for symmetry with the operations graft — the negative variant
-      // deliberately omits prerequisites so the search returns empty.
-      // In practice the donor's bindings are empty for search-like
-      // endpoints (which gate on `required.length === 0`), so the merge
-      // would be a no-op anyway; the explicit skip keeps the intent
-      // legible.
-      if (!skipGraft) {
-        const donor = chainSource || integrationCandidates[0];
-        if (donor?.bindings) {
-          s.bindings = { ...donor.bindings, ...(s.bindings ?? {}) };
-        }
-      }
       if (resp) {
         s.responseShapeSemantics = resp.producedSemantics || undefined;
         s.responseShapeFields = resp.fields.map((f) => ({
@@ -404,15 +393,6 @@ async function main() {
         successStatusByOp,
       );
       s.seedBindings = computeSeedBindings(s);
-      // #270: a feature-coverage variant may be a better fit than a
-      // base scenario for a given operationId, but only the first
-      // entry we see is kept — feature scenarios are emitted in the
-      // same "base scenario first" order that the BFS planner
-      // produces, so the stash mirrors the canonical chain the
-      // existing per-endpoint suites would render.
-      if (!featureScenarioStash.has(op.operationId)) {
-        featureScenarioStash.set(op.operationId, s);
-      }
       try {
         const final = s.requestPlan?.[s.requestPlan.length - 1];
         const groups = requestIndex.byOperation[op.operationId] || [];
@@ -545,32 +525,6 @@ async function main() {
     processed++;
   }
 
-  // #288 Phase 3a — equivalence assertion: the canonical cache must
-  // hold, for every endpoint with a feature-output stash entry, a
-  // scenario whose prereq operations (everything before the endpoint
-  // itself) match the stash's prereq operations exactly. This is the
-  // green/green contract for Phase 3b: when the stash is deleted and
-  // consumers switch to `canonicalByEndpoint`, the byte-identical
-  // regen against the 3a baseline (combined with this assertion
-  // having passed in 3a) proves the two were the same all along.
-  // Delete this assertion at the end of Phase 3b alongside the stash
-  // itself.
-  for (const [opId, stashed] of featureScenarioStash) {
-    const canonical = canonicalByEndpoint.get(opId);
-    if (!canonical) {
-      throw new Error(
-        `#288 Phase 3a invariant: canonicalByEndpoint missing entry for '${opId}' even though featureScenarioStash has one. The cache must be populated for every endpoint that produces a feature scenario.`,
-      );
-    }
-    const canonicalPrereqs = canonical.operations.slice(0, -1).map((o) => o.operationId);
-    const stashPrereqs = stashed.operations.slice(0, -1).map((o) => o.operationId);
-    if (canonicalPrereqs.join('|') !== stashPrereqs.join('|')) {
-      throw new Error(
-        `#288 Phase 3a invariant: canonical prereq chain for '${opId}' diverges from stash. canonical=[${canonicalPrereqs.join(',')}] stash=[${stashPrereqs.join(',')}]. Phase 3b cannot safely consume the cache while these disagree.`,
-      );
-    }
-  }
-
   const summary: GenerationSummary = {
     generatedAt: new Date().toISOString(),
     nodeVersion: process.version,
@@ -607,7 +561,7 @@ async function main() {
       graph,
       templatesAbox,
       edgesAbox,
-      featureScenarioStash,
+      canonicalByEndpoint,
       entityKindsAboxForTemplates,
     );
     // Wipe the ENTIRE templates partition first, then recreate the
