@@ -248,18 +248,20 @@ PREREQ_BY_ENTITY = {
     # New in v2
     'agent-instance': 'unknown',
 }
+def _camel_to_kebab(s):
+    # 'MappingRule' -> 'mapping-rule', 'Group' -> 'group'
+    return re.sub(r'(?<!^)(?=[A-Z])', '-', s).lower()
+
 def prerequisite_of(op_id, entity):
     m = MEMBERSHIP_OP_RE.match(op_id)
     if m:
-        member = m.group(2)
-        parent = m.group(4)
-        return f'{parent.lower()} + {member.lower()}'
+        return f'{_camel_to_kebab(m.group(4))} + {_camel_to_kebab(m.group(2))}'
     m2 = MEMBERSHIP_LIST_RE.match(op_id)
     if m2:
         # e.g. searchClientsForTenant -> member=clients, parent=tenant
         members = op_id[len('search'):].split('For' if 'For' in op_id else 'In')[0]
-        parent = m2.group(2).lower()
-        member = members.lower().rstrip('s')
+        parent = _camel_to_kebab(m2.group(2))
+        member = _camel_to_kebab(members).rstrip('s')
         return f'{parent} + {member}'
     return PREREQ_BY_ENTITY.get(entity, 'unknown')
 
@@ -730,8 +732,12 @@ for cat in cat_order:
             key=lambda r: (step_idx.get(r['form_step'], 999), r['file'], r['line']),
         )
         for r in sorted_rows:
-            fp.write(f'| {r["form_step"]} | {r["variants"] or "—"} | '
-                     f'`{r["file"]}:{r["line"]}` | {r["test_name"]} |\n')
+            # Use ', ' between labels so multi-label variants (e.g.
+            # 'happy-path|observe-absence') don't break the markdown table.
+            variants_cell = r['variants'].replace('|', ', ') if r['variants'] else '—'
+            test_name_cell = r['test_name'].replace('|', r'\|')
+            fp.write(f'| {r["form_step"]} | {variants_cell} | '
+                     f'`{r["file"]}:{r["line"]}` | {test_name_cell} |\n')
         fp.write('\n')
 
 fp.close()

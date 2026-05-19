@@ -85,7 +85,7 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 
 |  | upstream | generator |
 |---|---:|---:|
-| Unique tests | 1001 | **1607** |
+| Unique tests | 1001 | **1617** |
 | Entities | 33 | 37 |
 | Happy-path (occurrences) | 173 | 201 |
 | Bad-request (400, occurrences) | 195 | **1071** |
@@ -98,7 +98,7 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 | Observe-absence | 2 | 38 |
 | Data-driven / oneOf variants | 5 | **302** |
 
-**The generator emits 606 more tests than upstream.** It massively exceeds
+**The generator emits 616 more tests than upstream.** It massively exceeds
 upstream on 400 bad-request coverage (the `request-validation` emitter alone
 produces 1071 tests across 17 violation kinds: `additional-prop`,
 `constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`,

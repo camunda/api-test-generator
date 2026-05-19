@@ -51,8 +51,8 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | delete | happy-path | `deleteGlobalClusterVariable.feature.spec.ts:8` | feature-1 - deleteGlobalClusterVariable - base (1) |
 | delete | happy-path | `deleteTenantClusterVariable.feature.spec.ts:8` | feature-1 - deleteTenantClusterVariable - base (1) |
 | observe-absence | observe-absence | `searchClusterVariables.feature.spec.ts:37` | feature-2 - searchClusterVariables - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/GlobalClusterVariable.lifecycle.spec.ts:9` | establish GlobalClusterVariable, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `entities/TenantClusterVariable.lifecycle.spec.ts:9` | establish TenantClusterVariable, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/GlobalClusterVariable.lifecycle.spec.ts:9` | establish GlobalClusterVariable, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/TenantClusterVariable.lifecycle.spec.ts:9` | establish TenantClusterVariable, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:18` | createGlobalClusterVariable - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:39` | createGlobalClusterVariable - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:54` | createGlobalClusterVariable - Param name wrong type (#1) |
@@ -121,7 +121,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateMappingRule.feature.spec.ts:11` | feature-1 - updateMappingRule - base (1) |
 | delete | happy-path | `deleteMappingRule.feature.spec.ts:8` | feature-1 - deleteMappingRule - base (1) |
 | observe-absence | observe-absence | `searchMappingRule.feature.spec.ts:37` | feature-2 - searchMappingRule - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/MappingRule.lifecycle.spec.ts:9` | establish MappingRule, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/MappingRule.lifecycle.spec.ts:9` | establish MappingRule, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:18` | createMappingRule - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:39` | createMappingRule - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:54` | createMappingRule - Param claimName wrong type (#1) |
@@ -180,7 +180,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateGlobalTaskListener.feature.spec.ts:11` | feature-1 - updateGlobalTaskListener - base (1) |
 | delete | happy-path | `deleteGlobalTaskListener.feature.spec.ts:8` | feature-1 - deleteGlobalTaskListener - base (1) |
 | observe-absence | observe-absence | `searchGlobalTaskListeners.feature.spec.ts:37` | feature-2 - searchGlobalTaskListeners - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/GlobalTaskListener.lifecycle.spec.ts:9` | establish GlobalTaskListener, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/GlobalTaskListener.lifecycle.spec.ts:9` | establish GlobalTaskListener, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:18` | createGlobalTaskListener - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:38` | createGlobalTaskListener - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:53` | createGlobalTaskListener - Param id wrong type (#1) |
@@ -240,7 +240,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateTenant.feature.spec.ts:11` | feature-1 - updateTenant - base (1) |
 | delete | happy-path | `deleteTenant.feature.spec.ts:8` | feature-1 - deleteTenant - base (1) |
 | observe-absence | observe-absence | `searchTenants.feature.spec.ts:35` | feature-2 - searchTenants - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/Tenant.lifecycle.spec.ts:9` | establish Tenant, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/Tenant.lifecycle.spec.ts:9` | establish Tenant, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:189` | createTenant - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:208` | createTenant - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:223` | createTenant - Param name wrong type (#1) |
@@ -292,7 +292,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | data-driven | `updateAuthorization.feature.spec.ts:119` | feature-3 - updateAuthorization - oneOf group0 variant2 (3) |
 | delete | happy-path | `deleteAuthorization.feature.spec.ts:8` | feature-1 - deleteAuthorization - base (1) |
 | observe-absence | observe-absence | `searchAuthorizations.feature.spec.ts:37` | feature-2 - searchAuthorizations - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/Authorization.lifecycle.spec.ts:9` | establish Authorization, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/Authorization.lifecycle.spec.ts:9` | establish Authorization, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:18` | createAuthorization - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:35` | createAuthorization - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:50` | createAuthorization - Missing body |
@@ -337,7 +337,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateRole.feature.spec.ts:11` | feature-1 - updateRole - base (1) |
 | delete | happy-path | `deleteRole.feature.spec.ts:8` | feature-1 - deleteRole - base (1) |
 | observe-absence | observe-absence | `searchRoles.feature.spec.ts:35` | feature-2 - searchRoles - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/Role.lifecycle.spec.ts:9` | establish Role, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/Role.lifecycle.spec.ts:9` | establish Role, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/roles-validation-api-tests.spec.ts:151` | createRole - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/roles-validation-api-tests.spec.ts:170` | createRole - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/roles-validation-api-tests.spec.ts:185` | createRole - Param name wrong type (#1) |
@@ -384,7 +384,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateGroup.feature.spec.ts:11` | feature-1 - updateGroup - base (1) |
 | delete | happy-path | `deleteGroup.feature.spec.ts:8` | feature-1 - deleteGroup - base (1) |
 | observe-absence | observe-absence | `searchGroups.feature.spec.ts:35` | feature-2 - searchGroups - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/Group.lifecycle.spec.ts:9` | establish Group, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/Group.lifecycle.spec.ts:9` | establish Group, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/groups-validation-api-tests.spec.ts:123` | createGroup - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/groups-validation-api-tests.spec.ts:142` | createGroup - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/groups-validation-api-tests.spec.ts:157` | createGroup - Param groupId wrong type (#1) |
@@ -430,7 +430,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateUser.feature.spec.ts:11` | feature-1 - updateUser - base (1) |
 | delete | happy-path | `deleteUser.feature.spec.ts:8` | feature-1 - deleteUser - base (1) |
 | observe-absence | observe-absence | `searchUsers.feature.spec.ts:35` | feature-2 - searchUsers - negative empty (2) |
-| lifecycle | happy-path|observe-absence | `entities/User.lifecycle.spec.ts:9` | establish User, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/User.lifecycle.spec.ts:9` | establish User, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/users-validation-api-tests.spec.ts:18` | createUser - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/users-validation-api-tests.spec.ts:37` | createUser - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/users-validation-api-tests.spec.ts:52` | createUser - Param password wrong type (#1) |
@@ -476,7 +476,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | create | data-driven | `createDocuments.variant.spec.ts:74` | variant-2 - createDocuments - bpmn #1 |
 | observe-present-get | happy-path | `getDocument.feature.spec.ts:9` | feature-1 - getDocument - base (1) |
 | delete | happy-path | `deleteDocument.feature.spec.ts:9` | feature-1 - deleteDocument - base (1) |
-| lifecycle | happy-path|observe-absence | `entities/Document.lifecycle.spec.ts:9` | establish Document, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `entities/Document.lifecycle.spec.ts:9` | establish Document, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/documents-validation-api-tests.spec.ts:18` | createDocument - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/documents-validation-api-tests.spec.ts:38` | createDocument - Missing body |
 | negative-create | bad-request | `request-validation/documents-validation-api-tests.spec.ts:55` | createDocument - Missing file |
@@ -497,7 +497,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 ### `tenant` — 82 tests
 
-- **Prerequisite to create**: tenant + client, tenant + group, tenant + groupid, tenant + mappingrule, tenant + role, tenant + user
+- **Prerequisite to create**: tenant + client, tenant + group, tenant + group-id, tenant + mapping-rule, tenant + role, tenant + user
 - **Files**: `assignClientToTenant.feature.spec.ts`, `assignGroupToTenant.feature.spec.ts`, `assignMappingRuleToTenant.feature.spec.ts`, `assignRoleToTenant.feature.spec.ts`, `assignUserToTenant.feature.spec.ts`, `edges/TenantClientMembership.lifecycle.spec.ts`, `edges/TenantGroupMembership.lifecycle.spec.ts`, `edges/TenantMappingRuleMembership.lifecycle.spec.ts`, `edges/TenantRoleMembership.lifecycle.spec.ts`, `edges/TenantUserMembership.lifecycle.spec.ts`, `request-validation/tenants-validation-api-tests.spec.ts`, `searchClientsForTenant.feature.spec.ts`, `searchClientsForTenant.variant.spec.ts`, `searchGroupIdsForTenant.feature.spec.ts`, `searchGroupIdsForTenant.variant.spec.ts`, `searchMappingRulesForTenant.feature.spec.ts`, `searchMappingRulesForTenant.variant.spec.ts`, `searchRolesForTenant.feature.spec.ts`, `searchRolesForTenant.variant.spec.ts`, `searchUsersForTenant.feature.spec.ts`, `searchUsersForTenant.variant.spec.ts`, `unassignClientFromTenant.feature.spec.ts`, `unassignGroupFromTenant.feature.spec.ts`, `unassignMappingRuleFromTenant.feature.spec.ts`, `unassignRoleFromTenant.feature.spec.ts`, `unassignUserFromTenant.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 17
 - **Form-step counts**: observe-present-search=17, mutate=5, delete=5, lifecycle=5, negative-update=10, negative-delete=10, negative-search=30
@@ -532,11 +532,11 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | delete | happy-path | `unassignMappingRuleFromTenant.feature.spec.ts:8` | feature-1 - unassignMappingRuleFromTenant - base (1) |
 | delete | happy-path | `unassignRoleFromTenant.feature.spec.ts:8` | feature-1 - unassignRoleFromTenant - base (1) |
 | delete | happy-path | `unassignUserFromTenant.feature.spec.ts:8` | feature-1 - unassignUserFromTenant - base (1) |
-| lifecycle | happy-path|observe-absence | `edges/TenantClientMembership.lifecycle.spec.ts:9` | establish TenantClientMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/TenantGroupMembership.lifecycle.spec.ts:9` | establish TenantGroupMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/TenantMappingRuleMembership.lifecycle.spec.ts:9` | establish TenantMappingRuleMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/TenantRoleMembership.lifecycle.spec.ts:9` | establish TenantRoleMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/TenantUserMembership.lifecycle.spec.ts:9` | establish TenantUserMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/TenantClientMembership.lifecycle.spec.ts:9` | establish TenantClientMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/TenantGroupMembership.lifecycle.spec.ts:9` | establish TenantGroupMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/TenantMappingRuleMembership.lifecycle.spec.ts:9` | establish TenantMappingRuleMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/TenantRoleMembership.lifecycle.spec.ts:9` | establish TenantRoleMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/TenantUserMembership.lifecycle.spec.ts:9` | establish TenantUserMembership, observe present, revoke, observe absent |
 | negative-update | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:18` | assignClientToTenant - Path param clientId pattern violation |
 | negative-update | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:35` | assignClientToTenant - Path param tenantId pattern violation |
 | negative-update | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:52` | assignGroupToTenant - Path param groupId length-max violation |
@@ -590,7 +590,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 ### `role` — 65 tests
 
-- **Prerequisite to create**: client + role, group + role, mappingrule + role, role + client, role + group, role + mappingrule, role + user, user + role
+- **Prerequisite to create**: client + role, group + role, mapping-rule + role, role + client, role + group, role + mapping-rule, role + user, user + role
 - **Files**: `assignRoleToClient.feature.spec.ts`, `assignRoleToGroup.feature.spec.ts`, `assignRoleToMappingRule.feature.spec.ts`, `assignRoleToUser.feature.spec.ts`, `edges/RoleClientMembership.lifecycle.spec.ts`, `edges/RoleGroupMembership.lifecycle.spec.ts`, `edges/RoleMappingRuleMembership.lifecycle.spec.ts`, `edges/RoleUserMembership.lifecycle.spec.ts`, `request-validation/roles-validation-api-tests.spec.ts`, `searchClientsForRole.feature.spec.ts`, `searchClientsForRole.variant.spec.ts`, `searchGroupsForRole.feature.spec.ts`, `searchGroupsForRole.variant.spec.ts`, `searchMappingRulesForRole.feature.spec.ts`, `searchMappingRulesForRole.variant.spec.ts`, `searchUsersForRole.feature.spec.ts`, `searchUsersForRole.variant.spec.ts`, `unassignRoleFromClient.feature.spec.ts`, `unassignRoleFromGroup.feature.spec.ts`, `unassignRoleFromMappingRule.feature.spec.ts`, `unassignRoleFromUser.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 13
 - **Form-step counts**: observe-present-search=13, mutate=4, delete=4, lifecycle=4, negative-update=8, negative-delete=8, negative-search=24
@@ -619,10 +619,10 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | delete | happy-path | `unassignRoleFromGroup.feature.spec.ts:8` | feature-1 - unassignRoleFromGroup - base (1) |
 | delete | happy-path | `unassignRoleFromMappingRule.feature.spec.ts:8` | feature-1 - unassignRoleFromMappingRule - base (1) |
 | delete | happy-path | `unassignRoleFromUser.feature.spec.ts:8` | feature-1 - unassignRoleFromUser - base (1) |
-| lifecycle | happy-path|observe-absence | `edges/RoleClientMembership.lifecycle.spec.ts:9` | establish RoleClientMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/RoleGroupMembership.lifecycle.spec.ts:9` | establish RoleGroupMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/RoleMappingRuleMembership.lifecycle.spec.ts:9` | establish RoleMappingRuleMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/RoleUserMembership.lifecycle.spec.ts:9` | establish RoleUserMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/RoleClientMembership.lifecycle.spec.ts:9` | establish RoleClientMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/RoleGroupMembership.lifecycle.spec.ts:9` | establish RoleGroupMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/RoleMappingRuleMembership.lifecycle.spec.ts:9` | establish RoleMappingRuleMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/RoleUserMembership.lifecycle.spec.ts:9` | establish RoleUserMembership, observe present, revoke, observe absent |
 | negative-update | bad-request | `request-validation/roles-validation-api-tests.spec.ts:18` | assignRoleToClient - Path param clientId pattern violation |
 | negative-update | bad-request | `request-validation/roles-validation-api-tests.spec.ts:35` | assignRoleToClient - Path param roleId pattern violation |
 | negative-update | bad-request | `request-validation/roles-validation-api-tests.spec.ts:52` | assignRoleToGroup - Path param groupId length-max violation |
@@ -666,7 +666,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 ### `group` — 59 tests
 
-- **Prerequisite to create**: group + client, group + mappingrule, group + role, group + user
+- **Prerequisite to create**: group + client, group + mapping-rule, group + role, group + user
 - **Files**: `assignClientToGroup.feature.spec.ts`, `assignMappingRuleToGroup.feature.spec.ts`, `assignUserToGroup.feature.spec.ts`, `edges/GroupClientMembership.lifecycle.spec.ts`, `edges/GroupMappingRuleMembership.lifecycle.spec.ts`, `edges/GroupUserMembership.lifecycle.spec.ts`, `request-validation/groups-validation-api-tests.spec.ts`, `searchClientsForGroup.feature.spec.ts`, `searchClientsForGroup.variant.spec.ts`, `searchMappingRulesForGroup.feature.spec.ts`, `searchMappingRulesForGroup.variant.spec.ts`, `searchRolesForGroup.feature.spec.ts`, `searchRolesForGroup.variant.spec.ts`, `searchUsersForGroup.feature.spec.ts`, `searchUsersForGroup.variant.spec.ts`, `unassignClientFromGroup.feature.spec.ts`, `unassignMappingRuleFromGroup.feature.spec.ts`, `unassignUserFromGroup.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 14
 - **Form-step counts**: observe-present-search=14, mutate=3, delete=3, lifecycle=3, negative-update=6, negative-delete=6, negative-search=24
@@ -694,9 +694,9 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | delete | happy-path | `unassignClientFromGroup.feature.spec.ts:8` | feature-1 - unassignClientFromGroup - base (1) |
 | delete | happy-path | `unassignMappingRuleFromGroup.feature.spec.ts:8` | feature-1 - unassignMappingRuleFromGroup - base (1) |
 | delete | happy-path | `unassignUserFromGroup.feature.spec.ts:8` | feature-1 - unassignUserFromGroup - base (1) |
-| lifecycle | happy-path|observe-absence | `edges/GroupClientMembership.lifecycle.spec.ts:9` | establish GroupClientMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/GroupMappingRuleMembership.lifecycle.spec.ts:9` | establish GroupMappingRuleMembership, observe present, revoke, observe absent |
-| lifecycle | happy-path|observe-absence | `edges/GroupUserMembership.lifecycle.spec.ts:9` | establish GroupUserMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/GroupClientMembership.lifecycle.spec.ts:9` | establish GroupClientMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/GroupMappingRuleMembership.lifecycle.spec.ts:9` | establish GroupMappingRuleMembership, observe present, revoke, observe absent |
+| lifecycle | happy-path, observe-absence | `edges/GroupUserMembership.lifecycle.spec.ts:9` | establish GroupUserMembership, observe present, revoke, observe absent |
 | negative-update | bad-request | `request-validation/groups-validation-api-tests.spec.ts:18` | assignClientToGroup - Path param clientId pattern violation |
 | negative-update | bad-request | `request-validation/groups-validation-api-tests.spec.ts:35` | assignClientToGroup - Path param groupId length-max violation |
 | negative-update | bad-request | `request-validation/groups-validation-api-tests.spec.ts:53` | assignMappingRuleToGroup - Path param groupId length-max violation |
