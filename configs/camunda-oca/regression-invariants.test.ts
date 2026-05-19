@@ -1352,6 +1352,63 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
 });
 
 describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () => {
+  it('no emitted Playwright suite uses the legacy `=== undefined` guard around `seedBinding(` (#286)', () => {
+    // Class-scoped guard for the #286 normalisation. Pre-#286 the
+    // per-scenario seedBindings loop in BOTH emitters emitted
+    //
+    //   if (ctx['<k>'] === undefined) { ctx['<k>'] = seedBinding('<k>'); }
+    //
+    // while the universal-seed prologue used the terse `??` form.
+    // #286 collapses both paths through `materializer/src/playwright/
+    // ctxSeeding.ts` and emits the `??` form uniformly. This
+    // invariant rejects any reappearance of the verbose form across
+    // every emitted suite — feature, variant, AND lifecycle (entities/
+    // and edges/ subdirectories) — so a future emitter contributor
+    // who copies the old shape (or biome:fix-generated rewriting a
+    // `??` into `if`) is caught by the regen, not by review.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    function* walkSpecs(dir: string): Generator<string> {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          yield* walkSpecs(full);
+        } else if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
+          yield full;
+        }
+      }
+    }
+    // Matches both the single-line form (`if (ctx['x'] === undefined)
+    // { ctx['x'] = seedBinding('x'); }`) and the multi-line form the
+    // template emitter used pre-#286 (`if (ctx['x'] === undefined) {\n
+    // ctx['x'] = seedBinding('x');\n }`). The `[\s\S]*?` allows the
+    // newline-separated body without depending on the `s` flag.
+    const legacyPattern = /===\s*undefined[\s\S]*?seedBinding\s*\(/;
+    const offenders: string[] = [];
+    for (const full of walkSpecs(GENERATED_TESTS_DIR)) {
+      const src = readFileSync(full, 'utf8');
+      // Restrict the search to spans that wouldn't accidentally
+      // match unrelated `=== undefined` checks followed by a seed
+      // many lines later: take the body line by line and only flag
+      // matches within a 3-line sliding window.
+      const lines = src.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const window = lines.slice(i, i + 3).join('\n');
+        if (legacyPattern.test(window) && window.includes('ctx[')) {
+          offenders.push(`${relative(REPO_ROOT, full)}:${i + 1}`);
+          break;
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Every emitted Playwright suite must seed bindings via the terse `??` form (#286). The legacy `=== undefined` guard means an emitter regressed to the pre-#286 shape; both `materializer/src/playwright/emitter.ts` and `templateEmitter.ts` must call `emitCtxSeeding` from `materializer/src/playwright/ctxSeeding.ts`.',
+    ).toEqual([]);
+  });
+
   it('no generated test contains a stray __invalidEnum sentinel object (#39)', () => {
     // Layer-3 mirror of the targeted enum-violation test in
     // tests/request-validation/. Catches any future analyser that

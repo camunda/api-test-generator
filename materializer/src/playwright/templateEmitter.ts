@@ -6,6 +6,7 @@ import type {
   RequestStep,
   TemplateScenarioFile,
 } from 'path-analyser/types';
+import { emitCtxSeeding } from './ctxSeeding.js';
 import {
   buildUrlExpression,
   escapeQuotes,
@@ -247,26 +248,17 @@ function renderLifecycleSuite(
   lines.push('    const baseUrl = buildBaseUrl();');
   lines.push('    const ctx: Record<string, unknown> = {};');
 
-  // (1) universal-seed prologue
-  const globalSeedNames = new Set(globalContextSeeds.map((s) => s.binding));
-  for (const seed of globalContextSeeds) {
-    lines.push(
-      `    ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? seedBinding('${seed.seedRule}');`,
-    );
-  }
-
-  // (2) per-scenario seedBindings (filtered to avoid double-seeding globals)
-  const seedNames = (prereq.seedBindings ?? []).filter((n) => !globalSeedNames.has(n));
-  for (const name of seedNames) {
-    lines.push(`    if (ctx['${name}'] === undefined) {`);
-    lines.push(`      ctx['${name}'] = seedBinding('${name}');`);
-    lines.push('    }');
-  }
-  for (const [k, v] of Object.entries(prereq.bindings)) {
-    if (v === '__PENDING__') continue;
-    if (globalSeedNames.has(k)) continue; // already covered by prologue
-    lines.push(`    ctx['${k}'] = ${JSON.stringify(v)};`);
-  }
+  // Canonical seeding: literals → planner seedBindings → universal
+  // prologue. Shared with `emitter.ts` via `emitCtxSeeding` (#286) so
+  // the two emitters can no longer drift on form or ordering.
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+    }),
+  );
 
   // (3) prereqChain inline
   let stepIdx = 0;

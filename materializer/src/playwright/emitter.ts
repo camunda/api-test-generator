@@ -13,8 +13,8 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
-import { PENDING_BINDING } from 'path-analyser/types';
 import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
+import { emitCtxSeeding } from './ctxSeeding.js';
 import {
   loadProjectScaffoldingFiles,
   materializeFixtures,
@@ -443,68 +443,26 @@ function renderScenarioTest(
   //      the global-context-seeds ABox): every emitted scenario must seed
   //      certain universal bindings (e.g. the default-tenant identifier
   //      under single-tenant mode). Handled by the "universal-seed
-  //      prologue" further down.
+  //      prologue" appended after planner-driven seeds.
   //
-  // When the same binding name appears in BOTH lists, the universal-seed
-  // prologue is authoritative (#157): its `??` form is strictly more
-  // defensive (covers `null` and `undefined`), uses the explicit
-  // `seedRule` from the config (which can differ from the binding name),
-  // and runs unconditionally before step 0. We therefore filter such
-  // names out of `seedBindingsList` so the redundant `=== undefined`
-  // guard isn't emitted. The `bindings` loop still emits literal
-  // (non-PENDING) values; the seedBindings list never contains literals
-  // (computeSeedBindings filters them out), so the loops are
-  // non-overlapping.
-  const globalSeedNames = new Set(globalContextSeeds.map((seed) => seed.binding));
-  const seedBindingsList = (s.seedBindings ?? []).filter((k) => !globalSeedNames.has(k));
-  if (s.bindings && Object.keys(s.bindings).length) {
-    body.push('  // Seed scenario bindings');
-    for (const [k, v] of Object.entries(s.bindings)) {
-      if (v === PENDING_BINDING) continue; // handled by seedBindings below
-      // Literal bindings flow into ctx unconditionally so any later
-      // step (or the same step's body) can read the planner-minted
-      // value before any extract overwrites it. The seedBindings list
-      // never contains literals (computeSeedBindings filters them
-      // out), so emitting both is safe.
-      body.push(`  ctx['${k}'] = ${JSON.stringify(v)};`);
-    }
-  }
-  if (seedBindingsList.length) {
-    if (!s.bindings || !Object.keys(s.bindings).length) {
-      body.push('  // Seed scenario bindings');
-    }
-    for (const k of seedBindingsList) {
-      // `=== undefined` (not `??`) so a literal-bound binding above
-      // that happens to share a name with a seedBindings entry — not
-      // possible today (computeSeedBindings filters literals) but
-      // belt-and-braces — does not get re-seeded.
-      body.push(`  if (ctx['${k}'] === undefined) { ctx['${k}'] = seedBinding('${k}'); }`);
-    }
-  }
-  // Universal-seed prologue derived from the global-context-seeds ABox.
-  // Each entry emits a single nullish-coalesced assignment that is idempotent
-  // over both bindings-loop outcomes above:
-  //   - literal binding (`ctx['<k>'] = "value";`) — `??` short-circuits, value preserved
-  //   - no assignment at all (fresh `ctx`) — `??` falls through to seedBinding(...)
-  // The seedBindings loop above no longer overlaps with this prologue
-  // (#157 — globalContextSeeds names are filtered out of seedBindingsList),
-  // so this is the authoritative pre-step-0 seeder for every entry here.
-  // `??` (not `=== undefined`) is intentional: any nullish binding value
-  // (`null` or `undefined`) is treated as missing and triggers seeding.
-  // The planner does not currently emit `null` literals in `s.bindings`
-  // for any global seed; revisit before tightening to `=== undefined`
-  // if a future seed ever needs `null` to remain distinct from "missing".
-  //
-  // Entries that declare a defaultSentinel + stripFromMultipartWhenDefault
-  // also emit a `__<fieldName>IsDefault` local that drives the multipart
-  // skip branch below — this is the only place the emitter knows about the
-  // sentinel.
-  //
-  // The local is only emitted when the scenario has at least one inline
-  // multipart step (i.e. a multipart step that is NOT dispatched to a
-  // role). Role-bound steps pass strips as a JSON literal argument and
-  // never read the prologue local; omitting it for role-only scenarios
-  // prevents an unused-variable error in the generated suite.
+  // Both sources flow through the shared `emitCtxSeeding` helper (#286)
+  // so a future schema change cannot drift the two emitters apart
+  // again. The helper emits in canonical order — literals → planner
+  // seedBindings → prologue — and every seeded line uses the terse
+  // `??` form; see materializer/src/playwright/ctxSeeding.ts for why
+  // `??` is safe at each step.
+  body.push(
+    ...emitCtxSeeding({
+      indent: '  ',
+      bindings: s.bindings,
+      seedBindings: s.seedBindings,
+      globalContextSeeds,
+    }),
+  );
+  // Multipart-sentinel locals (`__<fieldName>IsDefault`) are emitted
+  // alongside the prologue entries that drive them — only this
+  // emitter knows the sentinel exists, so the helper deliberately
+  // doesn't see this concern.
   //
   // Safety: `binding`, `fieldName`, `seedRule` are all required by the
   // domain-semantics validator (#87) to match `/^[A-Za-z_$][A-Za-z0-9_$]*$/`,
@@ -512,14 +470,17 @@ function renderScenarioTest(
   // backslashes, or line terminators. That lets us interpolate them
   // directly into emitted single-quoted TS string literals without an
   // escape pass.
+  //
+  // The local is only emitted when the scenario has at least one inline
+  // multipart step (i.e. a multipart step that is NOT dispatched to a
+  // role). Role-bound steps pass strips as a JSON literal argument and
+  // never read the prologue local; omitting it for role-only scenarios
+  // prevents an unused-variable error in the generated suite.
   const hasInlineMultipartStep = (s.requestPlan ?? []).some(
     (step) => step.bodyKind === 'multipart' && !!step.multipartTemplate && !findRoleForStep(step),
   );
   const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
   for (const seed of globalContextSeeds) {
-    body.push(
-      `  ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? seedBinding('${seed.seedRule}');`,
-    );
     if (
       hasInlineMultipartStep &&
       seed.stripFromMultipartWhenDefault &&
