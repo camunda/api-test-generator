@@ -42,11 +42,12 @@ The analyser reads from `spec/camunda-oca/bundled/rest-api.bundle.json` and
 you need to populate them first:
 
 ```sh
-npm install                          # one-time, brings in tooling deps
-npm run pipeline                     # fetch spec + generate scenarios + emit feature/variant/lifecycle playwright tests
-npm run generate:request-validation  # emit request-validation tests
+npm install                            # one-time, brings in tooling deps
+npm run pipeline                       # fetch spec + generate scenarios + emit feature/variant/lifecycle playwright tests + request-validation
 python3 coverage-analysis/build_coverage.py
 ```
+
+(`npm run pipeline` already chains `fetch-spec → testsuite:generate → generate:request-validation`, so the request-validation emitter does not need a separate invocation.)
 
 If `spec/camunda-oca/bundled/` and `generated/camunda-oca/` are already
 populated locally, only the last command is required to refresh the
