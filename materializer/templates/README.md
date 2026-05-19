@@ -28,15 +28,11 @@ Each test that expects a success response calls `validateResponse(...)` from [`a
 
 ### Regenerating `responses.json` against a different spec
 
-If you want to validate against a different OpenAPI spec, place it next to this `package.json` (for example as `openapi.json`) and run:
-
-```bash
-npm run responses:regenerate
-```
-
-The default script targets `./openapi.json` and writes to `./json-body-assertions/`. To use a different path, invoke the CLI directly:
+`responses.json` is produced by the api-test-generator codegen step from the bundled Camunda OpenAPI spec, then shipped here. If you want to validate against a different spec (for example, an unreleased build) without re-running the upstream codegen, invoke the [`assert-json-body`](https://www.npmjs.com/package/assert-json-body) CLI directly against your spec:
 
 ```bash
 npx assert-json-body extract --specFile=path/to/spec.json --outputDir=./json-body-assertions
 ```
+
+There is intentionally no `npm run` wrapper for this — the regenerator's input (the spec) is not part of the suite, so a default-arg script would be misleading. The next codegen run will overwrite any local regeneration.
 

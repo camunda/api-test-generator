@@ -1409,6 +1409,41 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     ).toEqual([]);
   });
 
+  it('generated package.json has no script that points at a file the codegen does not ship', () => {
+    // The pre-fix `responses:regenerate` script pointed at
+    // `./openapi.json`, which the codegen never wrote next to the
+    // suite's package.json. Running `npm run responses:regenerate`
+    // out of the box failed with "Local spec file not found". This
+    // invariant rejects any script in the generated package.json
+    // whose command-line references a literal `./openapi.json` (or
+    // any other file the codegen does not materialise alongside
+    // package.json). Class-scoped: any reintroduction of the same
+    // dead-on-arrival shape — under any script name — fails.
+    const pkgPath = join(GENERATED_TESTS_DIR, 'package.json');
+    if (!existsSync(pkgPath)) {
+      throw new Error(
+        `Generated package.json not found at ${pkgPath}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const pkgRaw = readFileSync(pkgPath, 'utf8');
+    const pkgParsed: unknown = JSON.parse(pkgRaw);
+    function isRecord(v: unknown): v is Record<string, unknown> {
+      return typeof v === 'object' && v !== null && !Array.isArray(v);
+    }
+    const scripts = isRecord(pkgParsed) && isRecord(pkgParsed.scripts) ? pkgParsed.scripts : {};
+    const offenders: { name: string; command: string }[] = [];
+    for (const [name, raw] of Object.entries(scripts)) {
+      if (typeof raw !== 'string') continue;
+      if (/(^|\s|=)\.\/(openapi\.json)(\s|$)/.test(raw)) {
+        offenders.push({ name, command: raw });
+      }
+    }
+    expect(
+      offenders,
+      'No script in the generated package.json may reference `./openapi.json` — the codegen does not materialise that file next to the suite, so any such script fails on first invocation. To regenerate `responses.json` against a different spec, use the npx command documented in README.md instead.',
+    ).toEqual([]);
+  });
+
   it('no generated test contains a stray __invalidEnum sentinel object (#39)', () => {
     // Layer-3 mirror of the targeted enum-violation test in
     // tests/request-validation/. Catches any future analyser that
