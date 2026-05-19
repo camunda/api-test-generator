@@ -5579,7 +5579,6 @@ describeForThisConfig(
       if (extractsLiteralMatch) {
         const varNameInLiteralPattern = /(?:"varName"|varName)\s*:\s*['"]([A-Za-z_$][\w$]*)['"]/g;
         let m: RegExpExecArray | null;
-        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((m = varNameInLiteralPattern.exec(extractsLiteralMatch[1])) !== null) {
           helperVars.add(m[1]);
         }
@@ -5643,15 +5642,11 @@ describeForThisConfig(
         // seedBinding ∪ ctx.X = … ∪ extractInto(ctx, 'xVar', …).
         const produced = new Set<string>(producedVars);
         let s: RegExpExecArray | null;
-        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = ctxSeedPattern.exec(content)) !== null) produced.add(s[1]);
-        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = seedBindingPattern.exec(content)) !== null) produced.add(s[1]);
-        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = extractIntoPattern.exec(content)) !== null) produced.add(s[1]);
 
         const reads = new Set<string>();
-        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop
         while ((s = ctxReadPattern.exec(content)) !== null) reads.add(s[1]);
         const unproduced = [...reads].filter((v) => !produced.has(v)).sort();
         if (unproduced.length > 0) {
