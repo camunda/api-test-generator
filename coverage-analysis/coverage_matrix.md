@@ -117,7 +117,7 @@ Legend: ✓ = at least 1, blank = 0.
 | batch-operation-item | search | 10 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
 | system | get | 9 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | clock | create | 7 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
-| clock | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
+| clock | update | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | authentication | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | license | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | status | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
@@ -234,7 +234,7 @@ Legend: ✓ = at least 1, blank = 0.
 | batch-operation-item | search | 10 | 1 | 5 |  |  |  |  | 2 | 1 | 1 | 3 |  |
 | system | get | 9 | 2 | 7 |  |  |  |  |  |  |  |  |  |
 | clock | create | 7 | 1 | 6 |  |  |  |  |  |  |  |  |  |
-| clock | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
+| clock | update | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | authentication | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | license | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | status | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |

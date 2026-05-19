@@ -12,10 +12,11 @@ Scans every generator test source and emits, next to this script:
   - coverage_matrix.md, gaps.md, category_breakdown.md
 
 Test sources scanned:
-  - generated/camunda-oca/playwright/*.feature.spec.ts         (feature emitter, happy + observe-absence)
-  - generated/camunda-oca/playwright/*.variant.spec.ts         (variant emitter, schema/input variants)
-  - generated/camunda-oca/playwright/edges/*.lifecycle.spec.ts (edge lifecycle: establish -> present -> revoke -> absent)
-  - generated/camunda-oca/request-validation/*.spec.ts         (negative request-validation, all bad-request)
+  - generated/camunda-oca/playwright/*.feature.spec.ts            (feature emitter, happy + observe-absence)
+  - generated/camunda-oca/playwright/*.variant.spec.ts            (variant emitter, schema/input variants)
+  - generated/camunda-oca/playwright/edges/*.lifecycle.spec.ts    (edge lifecycle: establish -> present -> revoke -> absent)
+  - generated/camunda-oca/playwright/entities/*.lifecycle.spec.ts (entity lifecycle: create -> present -> update -> present -> delete -> absent)
+  - generated/camunda-oca/request-validation/*.spec.ts            (negative request-validation, all bad-request)
 """
 import csv
 import json
@@ -101,8 +102,10 @@ def entity_of_path(path):
 OP_RULES = [
     ('search',   re.compile(r'^(search|list)', re.I)),
     ('create',   re.compile(r'^(create|deploy|publish|broadcast|pin|register|add|activate|correlate|evaluate)', re.I)),
-    ('delete',   re.compile(r'^(delete|remove|unassign|cancel|reset)', re.I)),
-    ('update',   re.compile(r'^(update|assign|complete|migrate|modify|resolve|fail|resume|suspend|patch|put)', re.I)),
+    ('delete',   re.compile(r'^(delete|remove|unassign|cancel)', re.I)),
+    # `reset` is an admin state reset (e.g. resetClock = POST /clock/reset), not entity deletion —
+    # classify as update so it doesn't show up as a missing observe-absence in gaps.md.
+    ('update',   re.compile(r'^(update|assign|complete|migrate|modify|resolve|fail|resume|suspend|patch|put|reset)', re.I)),
     ('get',      re.compile(r'^(get|fetch|retrieve|read)', re.I)),
 ]
 def operation_of(op_id, method, path):

@@ -14,7 +14,7 @@ upstream tests are the matching slice of category **A. Entity Lifecycle
 ## The 10 generated tests
 
 Each test runs the full lifecycle in **one** `test()` block:
-`establish → observe present → revoke → observe absent`. One test per entity
+`create → present → update → present → delete → absent`. One test per entity
 spec; cluster-variables has two namespace variants (global / per-tenant).
 
 | spec file | entity slug |

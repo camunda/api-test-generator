@@ -6,7 +6,7 @@ Computed across **1617** generated test declarations in **37** entities.
 
 Entities that have both `create` and `delete` tests but no test tagged `observe-absence` (no negative-after-delete check).
 
-- **clock** — has create+delete but no `observe-absence` test
+- _(none)_
 
 ## Entities with no unauthorized (401) coverage
 

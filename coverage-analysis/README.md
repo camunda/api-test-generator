@@ -24,7 +24,7 @@ so the two suites can be diffed directly. Answers the questions in
 
 ## Test sources scanned
 
-The generator emits tests into three locations; `build_coverage.py` scans all of them:
+The generator emits tests into five locations; `build_coverage.py` scans all of them:
 
 | location | emitter | tag in `tests.csv` `source` column |
 |---|---|---|

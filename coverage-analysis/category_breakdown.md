@@ -2036,13 +2036,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Prerequisite to create**: none
 - **Files**: `pinClock.feature.spec.ts`, `request-validation/clock-validation-api-tests.spec.ts`, `resetClock.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 0
-- **Form-step counts**: create=1, delete=1, negative-create=6
+- **Form-step counts**: create=1, mutate=1, negative-create=6
 - **Variants**: happy-path=2, bad-request=6
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `pinClock.feature.spec.ts:8` | feature-1 - pinClock - base (1) |
-| delete | happy-path | `resetClock.feature.spec.ts:8` | feature-1 - resetClock - base (1) |
+| mutate | happy-path | `resetClock.feature.spec.ts:8` | feature-1 - resetClock - base (1) |
 | negative-create | bad-request | `request-validation/clock-validation-api-tests.spec.ts:18` | pinClock - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/clock-validation-api-tests.spec.ts:36` | pinClock - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/clock-validation-api-tests.spec.ts:51` | pinClock - Param timestamp wrong type (#1) |
