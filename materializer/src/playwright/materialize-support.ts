@@ -20,7 +20,7 @@
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
 //                fixtures.ts, seed-rules.json, await-eventually.ts).
 //                Sources:
-//                materializer/src/support/, staged into
+//                materializer/src/playwright/support/, staged into
 //                dist/src/playwright/support-templates/ at
 //                build time.
 //                PLUS per-role overlays from
@@ -69,13 +69,14 @@ function defaultTemplatesDir(): string {
   //   - tsx :  <pkg>/src/playwright/materialize-support.ts
   // Templates are staged next to the dist version by the build step. When
   // running from source via tsx, fall back to the canonical sources under
-  // src/support/.
+  // src/playwright/support/ (co-located with the rest of the Playwright
+  // emitter machinery).
   const here = path.dirname(fileURLToPath(import.meta.url));
   if (here.includes(`${path.sep}dist${path.sep}`)) {
     return path.join(here, 'support-templates');
   }
-  // Source mode: walk up from src/playwright/ to src/support/.
-  return path.resolve(here, '..', 'support');
+  // Source mode: src/playwright/support/ sits alongside this module.
+  return path.join(here, 'support');
 }
 
 /**

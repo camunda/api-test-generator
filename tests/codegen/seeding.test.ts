@@ -1,7 +1,7 @@
-// Tests for materializer/src/support/seeding.ts
+// Tests for materializer/src/playwright/support/seeding.ts
 // Focus: per-spec-file salt (#175) — cross-worker id collision prevention.
 import { afterEach, describe, expect, test } from 'vitest';
-import { initSpecSalt, seedBinding } from '../../materializer/src/support/seeding.ts';
+import { initSpecSalt, seedBinding } from '../../materializer/src/playwright/support/seeding.ts';
 
 describe('seeding: per-spec-file salt (#175)', () => {
   afterEach(() => {

@@ -3,7 +3,7 @@
 // machines.
 //
 // NOTE: this is intentionally duplicated with the runtime-side
-// `materializer/src/support/seeding.ts`'s `deterministicSuffix`. That
+// `materializer/src/playwright/support/seeding.ts`'s `deterministicSuffix`. That
 // file is vendored verbatim into every emitted Playwright suite and
 // MUST stay self-contained (no cross-workspace imports). When the
 // algorithm changes, update both copies and verify the

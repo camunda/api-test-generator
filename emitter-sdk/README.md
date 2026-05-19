@@ -225,7 +225,7 @@ calls the runtime `seedBinding(ctx, name)` helper for each entry, which
 either reads an env var or generates a deterministic suffix via the
 shared `seeding.ts` runtime. Your emitter's equivalent prologue should
 do the same — the seed inputs are config-agnostic, so the runtime
-helpers in [`materializer/src/support/`](../materializer/src/support/)
+helpers in [`materializer/src/playwright/support/`](../materializer/src/playwright/support/)
 are good references for the algorithm even if you re-implement them
 in another language.
 
@@ -370,7 +370,7 @@ produce comes back as `EmittedFile[]`. The orchestrator owns the write.
 Output must be byte-reproducible. `TEST_SEED` (defaulting to
 `'snapshot-baseline'`) is the only entropy source for any randomised
 content (suffixes, IDs). The runtime helper
-[`materializer/src/support/seeding.ts`](../materializer/src/support/seeding.ts)
+[`materializer/src/playwright/support/seeding.ts`](../materializer/src/playwright/support/seeding.ts)
 documents the algorithm.
 
 ### Path safety
