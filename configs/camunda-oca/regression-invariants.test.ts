@@ -660,32 +660,18 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
-  // Skipped: new cluster-variables endpoint family in pinned spec
-  // (camunda/camunda PR #52322) leaves placeholders unbound; tracked at #138.
-  //
-  // Phase 1 of #288 (PR that lands this comment update) closed the
-  // feature-output binding-inheritance gap: `buildScenarioFromVariant`
-  // now inherits the planner's external mints + establisher self-mints
-  // from the donor chain scenario via the orchestrator. As a result the
-  // class-1 case below (external-entity identifiers like `clientIdVar`)
-  // is fully closed, and the class-2 case (self-establisher path-param
-  // root) is closed for endpoints whose self-establish path identifier
-  // is the variable's OWN identifier.
-  //
-  // One offender remains: `post--cluster-variables--tenants--{tenantId}`.
-  // Root cause is a deeper planner self-establish modelling issue —
-  // `createTenantClusterVariable` declares `establishes.identifiedBy[]`
-  // with `{in: path, name: tenantId, semanticType: TenantId}` AND
-  // `{in: body, name: name, semanticType: ClusterVariableName}`, which
-  // the planner treats as a single composite identifier (self-minting
-  // BOTH). But `tenantId` is semantically a foreign-key reference to
-  // an existing tenant, not part of the variable's own identity. The
-  // planner therefore neither chains in `createTenant` nor mints
-  // `tenantIdVar` externally for this endpoint. Fixing this requires
-  // distinguishing "owned identity" from "scoping foreign-key" in the
-  // establisher semantic graph — out of scope for #288 Phase 1
-  // (binding inheritance) and tracked separately under #288 Phase 2.
-  it.skip('every feature-output scenario binds or chains every {placeholder} whose path parameter has a recognised semanticType', () => {
+  // #138 — closed by #288 Phase 2 (graphLoader filters
+  // `establishes.identifiedBy[]` by the entity-kinds ABox `identifiers`
+  // field, so foreign-key path params like `tenantId` on
+  // `createTenantClusterVariable` remain in `requires.required` and the
+  // planner chains in `createTenant` to mint `tenantIdVar`). Phase 1
+  // (PR #291) closed the orchestrator-side binding-inheritance gap;
+  // Phase 2 (this PR) closes the planner-side composite-identifier
+  // modelling gap. Combined, every feature-output scenario now binds or
+  // chains every path-placeholder whose parameter has a recognised
+  // semanticType. Class-scoped guard remains active to catch regressions
+  // in either layer.
+  it('every feature-output scenario binds or chains every {placeholder} whose path parameter has a recognised semanticType', () => {
     // Class-scoped guard for the "un-extracted ${var} in URL" defect family:
     // when an endpoint's response analyser produces no shape (typically for
     // 204 No-Content operations like cancelProcessInstance, completeJob,
@@ -1154,23 +1140,18 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     ).toEqual([]);
   });
 
-  // Skipped: new cluster-variables endpoint family in pinned spec
-  // (camunda/camunda PR #52322) lacks an authoritative producer; tracked at #138.
-  //
-  // Phase 1 of #288 (binding inheritance) does not address chain
-  // selection — `chainSource` in `path-analyser/src/index.ts` still
-  // falls back to the shortest multi-op planner scenario when no
-  // chain in `authoritativeMultiOp` covers every required type. For
-  // the tenant-cluster-variable family the planner DOES produce an
-  // authoritative chain (`createTenant -> createTenantClusterVariable
-  // -> updateTenantClusterVariable`) but the selector's
-  // `isAuthoritativeChain` predicate rejects it because the establisher
-  // self-mint pushes TenantId onto `op.produces` (graphLoader.ts:752-762)
-  // without setting `providerMap.TenantId = true`. The mismatch is
-  // tracked under #288 Phase 2 (chain selection + establisher-self-mint
-  // authority): broaden the chain-selector to count establisher
-  // self-mints as authoritative for `requires` resolution.
-  it.skip('every feature scenario chain contains an authoritative producer for each requiredSemanticType', () => {
+  // #138 — closed by #288 Phase 2. Root cause was that
+  // `createTenant` (which both establishes the Tenant kind AND
+  // authoritatively returns `tenantId` with provider:true in its 201
+  // response) was silently dropped from `producersByType.TenantId`
+  // because the establisher-skip in graphLoader filtered out every
+  // self-minted semantic type — including those an op also legitimately
+  // returns as a `provider:true` response leaf. The fix narrows the
+  // skip to entries that are ONLY synthesised (`!providerMap[st]`), so
+  // an op that double-qualifies as both establisher and authoritative
+  // producer stays in the producer index and `isAuthoritativeChain`
+  // selects a chain containing it.
+  it('every feature scenario chain contains an authoritative producer for each requiredSemanticType', () => {
     // Chain-selector correctness guard. The feature-output stage in
     // `path-analyser/src/index.ts` chooses one integration scenario from
     // the planner output to graft as the dependency chain in front of

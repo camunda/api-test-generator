@@ -135,6 +135,19 @@ async function main() {
 
   // Enrich requirements from OpenAPI hints
   const hints = await loadOpenApiSemanticHints(baseDir);
+  // #288 Phase 2: rebuild the kind→identifiers map locally so the
+  // post-hint re-application of the establisher self-satisfaction drop
+  // uses the same "owned identifier only" filter that graphLoader
+  // applied during normalisation. Without this, foreign-key components
+  // (e.g. `tenantId` on createTenantClusterVariable) get suppressed
+  // from `requires.required` again here, undoing the Phase 2 fix and
+  // letting BFS plan a single-op scenario with no chain to mint the
+  // foreign key.
+  const entityKindsAboxForFilter = loadEntityKindsAbox(path.resolve(baseDir, '..'));
+  const kindIdentifiersByKind: Map<string, Set<string>> | null =
+    entityKindsAboxForFilter !== null
+      ? new Map(entityKindsAboxForFilter.kinds.map((k) => [k.name, new Set(k.identifiers)]))
+      : null;
   for (const [opId, op] of Object.entries(graph.operations)) {
     const hint = hints[opId];
     if (hint) {
@@ -163,7 +176,18 @@ async function main() {
     // are skipped — their `identifiedBy` components are pre-existing
     // inputs and the hint-derived `requires` for them is correct.
     if (op.establishes && op.establishes.shape !== 'edge') {
-      const established = new Set(op.establishes.identifiedBy.map((i) => i.semanticType));
+      // #288 Phase 2: mirror the kind-identifier filter applied in
+      // graphLoader.normalizeOp — only TRUE identifiers of the
+      // established kind get suppressed here. Foreign-key components
+      // (e.g. `tenantId` on `createTenantClusterVariable`) remain in
+      // `requires` so BFS chains in the establisher of the referenced
+      // entity (`createTenant`).
+      const kindIdentifiers = kindIdentifiersByKind?.get(op.establishes.kind);
+      const established = new Set(
+        op.establishes.identifiedBy
+          .filter((i) => !kindIdentifiers || kindIdentifiers.has(i.semanticType))
+          .map((i) => i.semanticType),
+      );
       op.requires.required = op.requires.required.filter((s) => !established.has(s));
       op.requires.optional = op.requires.optional.filter((s) => !established.has(s));
     }

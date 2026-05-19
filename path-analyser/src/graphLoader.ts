@@ -143,6 +143,24 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // back to the legacy spec-annotation behaviour for backward compat.
   const edgeEstablishers = loadEdgeEstablishers(repoRoot);
 
+  // #288 Phase 2: load the entity-kinds ABox up front so `normalizeOp`
+  // can distinguish "owned identifier" from "scoping foreign-key" in
+  // `establishes.identifiedBy[]`. Example: `createTenantClusterVariable`
+  // declares `identifiedBy = [{TenantId, path}, {ClusterVariableName,
+  // body}]`. Only `ClusterVariableName` is genuinely client-minted by
+  // this op — `tenantId` is a foreign-key reference to an existing
+  // Tenant that must exist first. The ABox is the authoritative source
+  // for which semantic types are TRUE identifiers of a given kind
+  // (`TenantClusterVariable.identifiers = ['ClusterVariableName']`).
+  // When the ABox is absent (legacy configs, tmpDir tests),
+  // `kindIdentifiersByKind` is `null` and `normalizeOp` falls back to
+  // the legacy "all identifiedBy are self-minted" behaviour.
+  const entityKindsAbox = loadEntityKindsAbox(repoRoot);
+  const kindIdentifiersByKind: Map<string, Set<string>> | null =
+    entityKindsAbox !== null
+      ? new Map(entityKindsAbox.kinds.map((k) => [k.name, new Set(k.identifiers)]))
+      : null;
+
   const operations: Record<string, OperationNode> = {};
 
   // Support multiple possible root shapes
@@ -185,11 +203,11 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         console.warn('[graphLoader] Skipping node without operationId/id/name:', Object.keys(op));
         continue;
       }
-      operations[opId] = normalizeOp(opId, op, edgeEstablishers);
+      operations[opId] = normalizeOp(opId, op, edgeEstablishers, kindIdentifiersByKind);
     }
   } else {
     for (const [opId, op] of Object.entries(candidateOps)) {
-      operations[opId] = normalizeOp(opId, op, edgeEstablishers);
+      operations[opId] = normalizeOp(opId, op, edgeEstablishers, kindIdentifiersByKind);
     }
   }
 
@@ -239,18 +257,47 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // clean while preserving per-op satisfaction tracking.
     const synthesisedFromEstablishes = new Set<string>();
     if (op.establishes && op.establishes.shape !== 'edge') {
+      const kindIdentifiers = kindIdentifiersByKind?.get(op.establishes.kind);
       for (const id of op.establishes.identifiedBy) {
+        // #288 Phase 2: only treat components that are TRUE identifiers
+        // of the kind as synthesised — mirroring the filter applied in
+        // `normalizeOp`. Without this, the foreign-key components have
+        // already been removed from `op.produces` upstream but the
+        // synthesised-set check below could still spuriously suppress
+        // them from `producersByType` had they snuck in.
+        if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
         synthesisedFromEstablishes.add(id.semanticType);
       }
     }
     for (const st of op.produces) {
-      if (synthesisedFromEstablishes.has(st)) continue;
+      // #288 Phase 2: an op that establishes type T AND authoritatively
+      // returns T in a 2xx response (provider:true) is legitimately a
+      // producer — its server-echoed value is the canonical source for
+      // downstream chains. `createTenant` is the motivating example:
+      // it establishes Tenant via body.tenantId (client-minted) AND
+      // its 201 response carries `tenantId` with provider:true. The
+      // earlier blanket skip of every synthesised entry kept
+      // createTenant out of `producersByType.TenantId`, which made
+      // `isAuthoritativeChain` exempt `TenantId` from gating and let
+      // the chain selector pick `createTenantClusterVariable` (a
+      // non-authoritative establisher) instead of `createTenant`.
+      if (synthesisedFromEstablishes.has(st) && !(op.providerMap?.[st] === true)) continue;
       const list = producersByType[st] ?? [];
       list.push(op.operationId);
       producersByType[st] = list;
     }
     if (op.establishes && op.establishes.shape !== 'edge') {
+      const kindIdentifiers = kindIdentifiersByKind?.get(op.establishes.kind);
       for (const id of op.establishes.identifiedBy) {
+        // #288 Phase 2: a foreign-key component (e.g. `tenantId` on
+        // createTenantClusterVariable) is NOT an entry this op
+        // establishes — it's a value the op consumes. Skip the
+        // foreign-key entries when building `establishersByType` so
+        // that index keeps its "registers a client-minted value"
+        // contract: querying `establishersByType.TenantId` returns only
+        // ops that genuinely mint a Tenant identifier (`createTenant`),
+        // not ops that scope under one.
+        if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
         const list = establishersByType[id.semanticType] ?? [];
         if (!list.includes(op.operationId)) list.push(op.operationId);
         establishersByType[id.semanticType] = list;
@@ -637,7 +684,12 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   return graph;
 }
 
-function normalizeOp(opId: string, op: RawOp, edgeEstablishers: Set<string> | null): OperationNode {
+function normalizeOp(
+  opId: string,
+  op: RawOp,
+  edgeEstablishers: Set<string> | null,
+  kindIdentifiersByKind: Map<string, Set<string>> | null,
+): OperationNode {
   // Extract produced semantic types.
   // Priority:
   // 1. Explicit fields (producesSemanticTypes / producesSemanticType / produces / outputsSemanticTypes)
@@ -756,7 +808,20 @@ function normalizeOp(opId: string, op: RawOp, edgeEstablishers: Set<string> | nu
   const establishes = normalizeEstablishes(op.establishes, opId, edgeEstablishers);
   const establishedSemantics = new Set<string>();
   if (establishes && establishes.shape !== 'edge') {
+    // #288 Phase 2: distinguish "owned identifier" from "scoping
+    // foreign-key" inside `identifiedBy[]`. The entity-kinds ABox lists
+    // the kind's TRUE identifiers (e.g. TenantClusterVariable.identifiers
+    // = ['ClusterVariableName']). Components present in `identifiedBy`
+    // but NOT in the kind's identifiers set are foreign-key references
+    // to other entities (e.g. `tenantId` path param on
+    // createTenantClusterVariable) and must remain in `requires` so the
+    // planner chains in the establisher of the referenced entity
+    // (createTenant). When the ABox doesn't list this kind (or no ABox
+    // is available), fall back to the legacy "all identifiedBy are
+    // self-minted" behaviour for backward compatibility.
+    const kindIdentifiers = kindIdentifiersByKind?.get(establishes.kind);
     for (const id of establishes.identifiedBy) {
+      if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
       produces.push(id.semanticType);
       establishedSemantics.add(id.semanticType);
     }
