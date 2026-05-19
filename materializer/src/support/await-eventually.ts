@@ -33,6 +33,20 @@ export interface AwaitEventuallyOptions {
   method: string;
   /** Operation id for error messages and tracing. */
   operationId: string;
+  /**
+   * #280 — Invert the success polarity for the GET-by-id absent-observe
+   * step in EntityLifecycle. When `true`:
+   *   - 404 is the SUCCESS terminator (the entity is gone as expected).
+   *   - 200 means the entity is still visible; keep polling within
+   *     budget (the indexer hasn't propagated the delete yet).
+   *   - 4xx/5xx hard-fail rules are unchanged (400/401/403/409/422/5xx
+   *     return immediately so the caller's status assertion produces a
+   *     useful diff).
+   * Default `false` preserves existing behaviour (404 = transient retry,
+   * 200 = success). Only meaningful for GETs; non-GET callers should
+   * not set this.
+   */
+  expect404?: boolean;
 }
 
 export interface EventualConsistencyTimeoutInfo {
@@ -125,6 +139,7 @@ export async function awaitEventually<R extends ApiResponseLike>(
   const pollIntervalMs = Math.max(POLL_FLOOR_MS, options.pollIntervalMs ?? DEFAULT_POLL_MS);
   const isGet = options.method.toUpperCase() === 'GET';
   const predicate = options.predicate;
+  const expect404 = options.expect404 === true;
 
   if (waitUpToMs <= 0) return fetch();
 
@@ -143,6 +158,32 @@ export async function awaitEventually<R extends ApiResponseLike>(
     // assertion produces a clean diff.
     if (ABORT_IMMEDIATE_STATUSES.has(status) || status >= 500) {
       return resp;
+    }
+
+    // expect404 mode (#280): 404 is the success terminator, 200 means
+    // keep polling. Evaluated before the default 404-retry branch so
+    // the polarity flip wins. Non-404/200 statuses fall through to the
+    // standard branches below (429 retry, etc.).
+    if (expect404 && isGet) {
+      if (status === 404) return resp;
+      if (status === 200) {
+        try {
+          lastBody = truncate(await resp.text());
+        } catch {
+          /* ignore */
+        }
+        if (remaining <= 0) {
+          throw new EventualConsistencyTimeoutError({
+            operationId: options.operationId,
+            attempts,
+            elapsedMs: elapsed,
+            lastStatus: status,
+            lastBody,
+          });
+        }
+        await sleep(Math.min(pollIntervalMs, remaining));
+        continue;
+      }
     }
 
     // 404 on GET — the typical "indexer hasn't caught up yet" signal.

@@ -857,6 +857,12 @@ export interface InvokeStep {
  * `expect(items.map(r => r.<elementField>)).[not.]toContain(<value>)`
  * at emit time. `value` is sourced from the scenario binding table
  * keyed by `membershipSemanticType`.
+ *
+ * #280 — `statusOnly` covers EntityLifecycle observation: the entity is
+ * looked up by id (GET-by-id), so visibility is asserted on the HTTP
+ * status alone (`present` → 200, `absent` → 404). No body inspection,
+ * no array walk. `expectedStatus` is materialised eagerly so the
+ * emitter doesn't have to re-derive it from `expect`.
  */
 export interface ObserveStep {
   kind: 'observe';
@@ -865,31 +871,45 @@ export interface ObserveStep {
    * semanticType → binding name consumed by the observation call's
    * inputs (path params / body). The scoping/membership split:
    * `identifiedBy ∩ inputs` go here; the remaining identifiedBy
-   * member is the membership identifier asserted on the response.
+   * member is the membership identifier asserted on the response
+   * (for `membership` assertions). For `statusOnly` assertions all
+   * required inputs (typically a single identifier path param) appear
+   * here; the assertion targets status only and consults no binding.
    */
   inputs: Record<string, string>;
   requestPlan: RequestStep;
-  assertion: {
-    kind: 'membership';
-    expect: 'present' | 'absent';
-    /**
-     * Path into the 2xx response body to the array carrying the
-     * membership rows. Each segment is a property name; the last
-     * segment names the array property itself (e.g. `['items']`).
-     */
-    arrayPath: string[];
-    /**
-     * Property name on each array element that carries the membership
-     * identifier value (e.g. `'username'` for RoleUserMembership).
-     */
-    elementField: string;
-    /**
-     * Semantic type of the membership identifier. The emitter
-     * resolves this against the scenario binding table to find the
-     * value being asserted.
-     */
-    membershipSemanticType: string;
-  };
+  assertion:
+    | {
+        kind: 'membership';
+        expect: 'present' | 'absent';
+        /**
+         * Path into the 2xx response body to the array carrying the
+         * membership rows. Each segment is a property name; the last
+         * segment names the array property itself (e.g. `['items']`).
+         */
+        arrayPath: string[];
+        /**
+         * Property name on each array element that carries the membership
+         * identifier value (e.g. `'username'` for RoleUserMembership).
+         */
+        elementField: string;
+        /**
+         * Semantic type of the membership identifier. The emitter
+         * resolves this against the scenario binding table to find the
+         * value being asserted.
+         */
+        membershipSemanticType: string;
+      }
+    | {
+        kind: 'statusOnly';
+        expect: 'present' | 'absent';
+        /**
+         * HTTP status code the observation is expected to return.
+         * `present` → 200 (entity visible). `absent` → 404 (entity gone).
+         * The emitter emits `expect(resp.status()).toBe(<expectedStatus>)`.
+         */
+        expectedStatus: 200 | 404;
+      };
 }
 
 export type TemplateStep = PrereqChainStep | InvokeStep | ObserveStep;
@@ -906,7 +926,7 @@ export interface TemplateScenario {
   templateName: string;
   /** Identifier of the subject the template was instantiated against. */
   subjectName: string;
-  subjectKind: 'Edge';
+  subjectKind: 'Edge' | 'Entity';
   steps: TemplateStep[];
   /**
    * Aggregated semantic-type → binding-name map across all steps. The
@@ -947,6 +967,6 @@ export interface TemplateScenario {
 export interface TemplateScenarioFile {
   templateName: string;
   subjectName: string;
-  subjectKind: 'Edge';
+  subjectKind: 'Edge' | 'Entity';
   scenario: TemplateScenario;
 }

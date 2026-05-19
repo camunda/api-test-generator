@@ -10,7 +10,6 @@ import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
-  EventualWaitSpec,
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';

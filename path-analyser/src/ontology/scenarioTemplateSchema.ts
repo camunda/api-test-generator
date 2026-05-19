@@ -109,14 +109,14 @@ export const scenarioTemplateSchema = {
     },
     AppliesTo: {
       description:
-        'Discriminator naming the subject ABox the template is instantiated against. Currently only `Edge` is recognised (#269 Phase 1); extending the union is how future subject ABoxes (resources, state-transitions, …) opt in to template-driven scenario emission.',
+        'Discriminator naming the subject ABox the template is instantiated against. `Edge` instantiates against the edges ABox (#269 Phase 1). `Entity` (#280) instantiates against the entity-kinds ABox, restricted to `shape: "entity"` rows (those carry the required `establishedBy`/`observableVia`/`revokedBy` triple). Extending the union is how future subject ABoxes (resources, state-transitions, …) opt in to template-driven scenario emission.',
       type: 'object',
       additionalProperties: false,
       required: ['kind'],
       properties: {
         kind: {
           type: 'string',
-          enum: ['Edge'],
+          enum: ['Edge', 'Entity'],
         },
       },
     },
@@ -167,13 +167,13 @@ export const scenarioTemplateSchema = {
           type: 'string',
           minLength: 1,
           description:
-            "Subject-role name (e.g. `observableVia`). At instantiation time the planner resolves this to the subject's observation operationId, invokes it, and asserts on the response per `expect`.",
+            "Subject-role name (e.g. `observableVia`). At instantiation time the planner resolves this to the subject's observation operationId, invokes it, and asserts on the response per `expect`. The concrete assertion shape is chosen by `appliesTo.kind`: for `Edge` it is a projection-search membership check (`toContain` / `not.toContain` on the configured array path); for `Entity` (#280) it is a get-by-id status check (`expect: 'present'` → status 200; `expect: 'absent'` → status 404).",
         },
         expect: {
           type: 'string',
           enum: ['present', 'absent'],
           description:
-            "High-level membership predicate. `present` asserts the subject instance (identified by the subject's `identifiedBy` tuple) appears in the response; `absent` asserts it does not. The planner compiles this to a concrete `toContain` / `not.toContain` assertion at instantiation time, using the binding context to source the lookup value and the response-extraction graph to locate the array path. Lower-level predicates (e.g. raw `status: 404`) are deliberately NOT in scope for Phase 1 — they belong on future template kinds applicable to non-edge subjects (resource lifecycle, etc.).",
+            "High-level membership predicate. `present` asserts the subject instance is visible to the observer; `absent` asserts it is not. The emitter compiles this to a concrete assertion at instantiation time based on the template's `appliesTo.kind` (see ObserveStep.op above).",
         },
       },
     },

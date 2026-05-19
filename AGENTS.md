@@ -159,6 +159,31 @@ Biome 2.4.12 owns both linting and formatting. Config: [biome.json](biome.json).
 
 Run `npm run lint` (or `npx biome check <files>`) before commit.
 
+### Zero tolerance for warnings
+
+`npm run lint` must report **zero warnings and zero infos** — not just
+zero errors. Warnings are latent bugs or stale code (unused imports,
+redundant suppressions, dead biome-ignore comments, style nudges); they
+accumulate silently and erode the signal of the lint gate. Treat every
+warning as a hard failure and clear it before you commit.
+
+Fix warnings **at the root**, not by suppressing them:
+
+- An unused import means dead code — delete the import (and any other
+  artefacts left behind by the same refactor).
+- A redundant `// biome-ignore …` comment means the rule no longer
+  fires on that site — delete the comment.
+- A `useTemplate` warning means a string concat should be a template
+  literal — rewrite the expression.
+- A `noExplicitAny`/`noImplicitAnyLet`/`noEvolvingTypes` warning means
+  the type is wrong — narrow it.
+
+Add a `// biome-ignore lint/<rule>: <reason>` suppression only when the
+rule is genuinely wrong for the call site (e.g. a runtime contract
+boundary parsing `unknown` JSON), and always include a concrete
+justification. Reviewers will reject suppressions added to silence a
+warning that has a real fix.
+
 ## TypeScript
 
 - Five workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,

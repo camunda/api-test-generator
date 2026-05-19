@@ -10,6 +10,9 @@
       "identifiers": [
         "RoleId"
       ],
+      "establishedBy": "createRole",
+      "observableVia": "getRole",
+      "revokedBy": "deleteRole",
       "description": "A role entity, identified by its client-minted roleId."
     },
     {
@@ -19,6 +22,9 @@
       "identifiers": [
         "Username"
       ],
+      "establishedBy": "createUser",
+      "observableVia": "getUser",
+      "revokedBy": "deleteUser",
       "description": "A user entity, identified by its client-minted username."
     },
     {
@@ -28,6 +34,9 @@
       "identifiers": [
         "TenantId"
       ],
+      "establishedBy": "createTenant",
+      "observableVia": "getTenant",
+      "revokedBy": "deleteTenant",
       "description": "A tenant entity, identified by its client-minted tenantId."
     },
     {
@@ -37,6 +46,9 @@
       "identifiers": [
         "GroupId"
       ],
+      "establishedBy": "createGroup",
+      "observableVia": "getGroup",
+      "revokedBy": "deleteGroup",
       "description": "A group entity, identified by its client-minted groupId."
     },
     {
@@ -46,6 +58,9 @@
       "identifiers": [
         "MappingRuleId"
       ],
+      "establishedBy": "createMappingRule",
+      "observableVia": "getMappingRule",
+      "revokedBy": "deleteMappingRule",
       "description": "A mapping rule entity, identified by its client-minted mappingRuleId."
     },
     {
@@ -55,6 +70,9 @@
       "identifiers": [
         "GlobalListenerId"
       ],
+      "establishedBy": "createGlobalTaskListener",
+      "observableVia": "getGlobalTaskListener",
+      "revokedBy": "deleteGlobalTaskListener",
       "description": "A global user task listener entity, identified by its client-minted id (a GlobalListenerId)."
     },
     {
@@ -64,6 +82,9 @@
       "identifiers": [
         "ClusterVariableName"
       ],
+      "establishedBy": "createGlobalClusterVariable",
+      "observableVia": "getGlobalClusterVariable",
+      "revokedBy": "deleteGlobalClusterVariable",
       "description": "A global-scoped cluster variable, identified by its client-minted name (a ClusterVariableName). Established by createGlobalClusterVariable."
     },
     {
@@ -73,7 +94,34 @@
       "identifiers": [
         "ClusterVariableName"
       ],
+      "establishedBy": "createTenantClusterVariable",
+      "observableVia": "getTenantClusterVariable",
+      "revokedBy": "deleteTenantClusterVariable",
       "description": "A tenant-scoped cluster variable, identified by the (tenantId, name) tuple. Established by createTenantClusterVariable. Only ClusterVariableName is listed in 'identifiers' here because TenantId is owned by the Tenant entity and must remain single-owner for the edge-derivation rule; the Tenant requirement of tenant-scoped operations is expressed via the tenantId path parameter."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Authorization",
+      "shape": "entity",
+      "identifiers": [
+        "AuthorizationKey"
+      ],
+      "establishedBy": "createAuthorization",
+      "observableVia": "getAuthorization",
+      "revokedBy": "deleteAuthorization",
+      "description": "An authorization entity, identified by its server-minted authorizationKey. Granted by createAuthorization (server mints the key)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Document",
+      "shape": "entity",
+      "identifiers": [
+        "DocumentId"
+      ],
+      "establishedBy": "createDocument",
+      "observableVia": "getDocument",
+      "revokedBy": "deleteDocument",
+      "description": "A document entity, identified by its server-minted documentId. Established by uploading via createDocument (POST /documents)."
     },
     {
       "@type": "EntityKind",

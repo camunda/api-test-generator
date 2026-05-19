@@ -1,6 +1,8 @@
 import type {
   Edge,
   EdgesAbox,
+  EntityKind,
+  EntityKindsAbox,
   ScenarioTemplate,
   ScenarioTemplatesAbox,
 } from './ontology/loader.js';
@@ -310,8 +312,192 @@ function compileEdgeLifecycle(
 export interface TemplateInstantiationResult {
   templateName: string;
   subjectName: string;
-  subjectKind: 'Edge';
+  subjectKind: 'Edge' | 'Entity';
   scenario: TemplateScenario;
+}
+
+/**
+ * #280 — Produce the canonical 5-step {@link TemplateScenario} for one
+ * (`EntityLifecycle` template × entity kind) pair. Parallel to
+ * {@link compileEdgeLifecycle}; differs only in the observe assertion
+ * shape (status-only by-id instead of array membership search).
+ *
+ * Returns `null`-flavoured `{ error }` if any of the three referenced
+ * operations (establishedBy, observableVia, revokedBy) is missing from
+ * the stash. The caller surfaces the error with the entity-kind name.
+ */
+function compileEntityLifecycle(
+  template: ScenarioTemplate,
+  kind: EntityKind,
+  graph: OperationGraph,
+  stash: ScenarioStash,
+): { scenario: TemplateScenario } | { error: string } {
+  // EntityLifecycle only applies to shape: "entity" rows; the schema
+  // forbids the triple on shape: "external-entity" so this is also a
+  // type guard for the field reads below.
+  if (kind.shape !== 'entity') {
+    return {
+      error: `${template.name} × ${kind.name}: appliesTo Entity templates only apply to shape: "entity" kinds, got shape: "${kind.shape}"`,
+    };
+  }
+  const establishOpId = kind.establishedBy;
+  const observeOpId = kind.observableVia;
+  const revokeOpId = kind.revokedBy;
+  if (
+    typeof establishOpId !== 'string' ||
+    typeof observeOpId !== 'string' ||
+    typeof revokeOpId !== 'string'
+  ) {
+    // Schema enforces presence on shape: entity; defensive check
+    // narrows the optional-by-FromSchema types for the rest of the
+    // compiler.
+    return {
+      error: `${template.name} × ${kind.name}: missing one of establishedBy/observableVia/revokedBy on shape: "entity" kind (schema bug?)`,
+    };
+  }
+
+  const establishScenario = stash.get(establishOpId);
+  const revokeScenario = stash.get(revokeOpId);
+  const observeScenario = stash.get(observeOpId);
+  if (!establishScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no stashed scenario for establishedBy='${establishOpId}'`,
+    };
+  if (!revokeScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no stashed scenario for revokedBy='${revokeOpId}'`,
+    };
+  if (!observeScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no stashed scenario for observableVia='${observeOpId}'`,
+    };
+
+  const establishPlan = establishScenario.requestPlan;
+  const revokePlan = revokeScenario.requestPlan;
+  const observePlan = observeScenario.requestPlan;
+  if (!establishPlan?.length || !revokePlan?.length || !observePlan?.length)
+    return {
+      error: `${template.name} × ${kind.name}: one of the referenced scenarios is missing a requestPlan`,
+    };
+
+  const establishOps = establishScenario.operations;
+  if (establishOps.length !== establishPlan.length) {
+    return {
+      error: `${template.name} × ${kind.name}: establishedBy scenario operations.length (${establishOps.length}) ≠ requestPlan.length (${establishPlan.length}); duplicate invocation on an establisher is unsupported`,
+    };
+  }
+  const prereqOps: OperationRef[] = establishOps.slice(0, -1).map((o) => ({ ...o }));
+  const prereqPlan: RequestStep[] = establishPlan.slice(0, -1);
+
+  const bindings: Record<string, string> = {};
+  const aggregateBindingNames = new Set<string>([
+    ...Object.keys(establishScenario.bindings ?? {}),
+    ...(establishScenario.seedBindings ?? []),
+  ]);
+  for (const bindName of aggregateBindingNames) {
+    const sem = bindName.endsWith('Var')
+      ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
+      : bindName;
+    bindings[sem] = bindName;
+  }
+
+  const inputsFor = (opId: string): Record<string, string> => {
+    const op = graph.operations[opId];
+    const result: Record<string, string> = {};
+    for (const sem of op?.requires.required ?? []) {
+      result[sem] = bindingNameFor(sem);
+    }
+    return result;
+  };
+  const producesFor = (opId: string): Record<string, string> => {
+    const op = graph.operations[opId];
+    const result: Record<string, string> = {};
+    for (const leaf of op?.responseSemanticLeaves ?? []) {
+      if (!leaf.provider) continue;
+      result[leaf.semantic] = bindingNameFor(leaf.semantic);
+    }
+    return result;
+  };
+
+  // Observe inputs: every required semantic of the observation op.
+  // For typical get-by-id endpoints (GET /users/{username}) that's a
+  // single path-param identifier. No "membership identifier minus
+  // scoping" split exists for by-id observation — the identifier IS
+  // the input, and visibility is asserted on status alone.
+  const observeInputs = inputsFor(observeOpId);
+
+  const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
+
+  const allOpIds = new Set<string>([
+    ...prereqOps.map((o) => o.operationId),
+    establishOpId,
+    observeOpId,
+    revokeOpId,
+  ]);
+  const eventuallyConsistentOps: string[] = [];
+  for (const opId of allOpIds) {
+    const op = graph.operations[opId];
+    if (op?.eventuallyConsistent) eventuallyConsistentOps.push(opId);
+  }
+  eventuallyConsistentOps.sort();
+
+  const steps: TemplateStep[] = [
+    {
+      kind: 'prereqChain',
+      targetOperationId: establishOpId,
+      operations: prereqOps,
+      bindings: { ...(establishScenario.bindings ?? {}) },
+      seedBindings: [...(establishScenario.seedBindings ?? [])],
+      requestPlan: prereqPlan,
+    },
+    {
+      kind: 'invoke',
+      operationId: establishOpId,
+      inputs: inputsFor(establishOpId),
+      produces: producesFor(establishOpId),
+      requestPlan: lastOf(establishPlan),
+    },
+    {
+      kind: 'observe',
+      operationId: observeOpId,
+      inputs: observeInputs,
+      requestPlan: lastOf(observePlan),
+      assertion: {
+        kind: 'statusOnly',
+        expect: 'present',
+        expectedStatus: 200,
+      },
+    },
+    {
+      kind: 'invoke',
+      operationId: revokeOpId,
+      inputs: inputsFor(revokeOpId),
+      produces: producesFor(revokeOpId),
+      requestPlan: lastOf(revokePlan),
+    },
+    {
+      kind: 'observe',
+      operationId: observeOpId,
+      inputs: observeInputs,
+      requestPlan: lastOf(observePlan),
+      assertion: {
+        kind: 'statusOnly',
+        expect: 'absent',
+        expectedStatus: 404,
+      },
+    },
+  ];
+
+  return {
+    scenario: {
+      templateName: template.name,
+      subjectName: kind.name,
+      subjectKind: 'Entity',
+      steps,
+      bindings,
+      eventuallyConsistentOps,
+    },
+  };
 }
 
 /**
@@ -319,42 +505,88 @@ export interface TemplateInstantiationResult {
  * given ABoxes. Throws if any pair fails to compile — failures here
  * indicate a misconfiguration that the L3 invariants should have
  * caught upstream (#269), so the loud failure mode is intentional.
+ *
+ * `entityKinds` is consulted only by `Entity`-applicable templates
+ * (#280). Configs without an entity-kinds ABox may pass `null` and
+ * any Entity templates will be skipped (and surface as a no-op rather
+ * than a failure — same shape as the Edge path when edges is empty).
  */
 export function instantiateAllTemplates(
   graph: OperationGraph,
   templates: ScenarioTemplatesAbox,
   edges: EdgesAbox,
   stash: ScenarioStash,
+  entityKinds: EntityKindsAbox | null,
 ): TemplateInstantiationResult[] {
   const out: TemplateInstantiationResult[] = [];
   const errors: string[] = [];
   for (const tpl of templates.templates) {
-    if (tpl.appliesTo.kind !== 'Edge') continue;
-    // Phase-2 hard-codes the EdgeLifecycle compilation pipeline rather
-    // than walking `tpl.steps`. New Edge-scoped templates therefore need
-    // their own compiler (Phases 3-5 of #268). Refuse-by-default so an
-    // unrecognised template name fails loudly instead of silently
-    // re-emitting EdgeLifecycle's shape against the wrong vocabulary.
-    if (tpl.name !== 'EdgeLifecycle') {
-      throw new Error(
-        `No compiler registered for scenario template '${tpl.name}'. ` +
-          `Phase 2 (#270) only ships the EdgeLifecycle compiler; additional ` +
-          `Edge-scoped templates need their own dispatch in instantiateAllTemplates.`,
-      );
-    }
-    for (const edge of edges.edges) {
-      const compiled = compileEdgeLifecycle(tpl, edge, graph, stash);
-      if ('error' in compiled) {
-        errors.push(compiled.error);
-        continue;
+    if (tpl.appliesTo.kind === 'Edge') {
+      // Phase-2 hard-codes the EdgeLifecycle compilation pipeline rather
+      // than walking `tpl.steps`. New Edge-scoped templates therefore need
+      // their own compiler (Phases 3-5 of #268). Refuse-by-default so an
+      // unrecognised template name fails loudly instead of silently
+      // re-emitting EdgeLifecycle's shape against the wrong vocabulary.
+      if (tpl.name !== 'EdgeLifecycle') {
+        throw new Error(
+          `No compiler registered for scenario template '${tpl.name}'. ` +
+            `Phase 2 (#270) only ships the EdgeLifecycle compiler; additional ` +
+            `Edge-scoped templates need their own dispatch in instantiateAllTemplates.`,
+        );
       }
-      out.push({
-        templateName: tpl.name,
-        subjectName: edge.name,
-        subjectKind: 'Edge',
-        scenario: compiled.scenario,
-      });
+      for (const edge of edges.edges) {
+        const compiled = compileEdgeLifecycle(tpl, edge, graph, stash);
+        if ('error' in compiled) {
+          errors.push(compiled.error);
+          continue;
+        }
+        out.push({
+          templateName: tpl.name,
+          subjectName: edge.name,
+          subjectKind: 'Edge',
+          scenario: compiled.scenario,
+        });
+      }
+      continue;
     }
+    if (tpl.appliesTo.kind === 'Entity') {
+      if (tpl.name !== 'EntityLifecycle') {
+        throw new Error(
+          `No compiler registered for scenario template '${tpl.name}'. ` +
+            `#280 only ships the EntityLifecycle compiler; additional ` +
+            `Entity-scoped templates need their own dispatch in instantiateAllTemplates.`,
+        );
+      }
+      if (entityKinds === null) continue;
+      for (const kind of entityKinds.kinds) {
+        // Skip shape: "external-entity" kinds — the all-or-nothing
+        // schema rule guarantees they have none of the triple, so
+        // they can't satisfy EntityLifecycle. Silent skip is correct
+        // here (not an error) because the template applies to the
+        // whole ABox and the schema already classified them out.
+        if (kind.shape !== 'entity') continue;
+        const compiled = compileEntityLifecycle(tpl, kind, graph, stash);
+        if ('error' in compiled) {
+          errors.push(compiled.error);
+          continue;
+        }
+        out.push({
+          templateName: tpl.name,
+          subjectName: kind.name,
+          subjectKind: 'Entity',
+          scenario: compiled.scenario,
+        });
+      }
+      continue;
+    }
+    // Exhaustiveness: a future appliesTo.kind value reaches here. The
+    // current union is `'Edge' | 'Entity'`, so this branch is unreachable
+    // today; the `never` annotation makes the TS compiler keep us honest
+    // when the enum grows.
+    const exhaustive: never = tpl.appliesTo.kind;
+    throw new Error(
+      `No dispatch registered for scenario template appliesTo.kind='${String(exhaustive)}' (template '${tpl.name}'). Extend instantiateAllTemplates.`,
+    );
   }
   if (errors.length > 0) {
     throw new Error(
