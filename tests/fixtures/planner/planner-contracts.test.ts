@@ -421,7 +421,7 @@ const fixtureSubShapeVariant: OperationGraph = makeGraph([
 describe('planner contracts: optional sub-shape variants (#37)', () => {
   it('emits a variant scenario per sub-shape leaf with warm-up + producer + final', () => {
     const variants = generateOptionalSubShapeVariants(fixtureSubShapeVariant, 'createOrder', {
-      maxChainAlternatives: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios.length).toBeGreaterThan(0);
     const variant = variants.scenarios[0];
@@ -503,7 +503,7 @@ describe('planner contracts: variant planner respects success-status producer fi
     // 4xx-only producer must NOT appear in the chain — the variant has
     // exactly one operation (the endpoint itself).
     const variants = generateOptionalSubShapeVariants(fixtureErrorOnlyProducer, 'placeOrder', {
-      maxChainAlternatives: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios).toHaveLength(1);
     const [scenario] = variants.scenarios;
@@ -514,17 +514,17 @@ describe('planner contracts: variant planner respects success-status producer fi
 });
 
 // ---------------------------------------------------------------------------
-// Fixture J: variant planner caps emission at opts.maxChainAlternatives (#37)
+// Fixture J: variant planner caps emission at opts.maxVariantsPerEndpoint (#37)
 // ---------------------------------------------------------------------------
 //
 // Endpoint `bulkCreate` has THREE semantic-typed optional leaves under
 // the same sub-shape. Without the cap, the planner emits one variant
-// per leaf (3 variants). With `maxChainAlternatives: 2`, only the first 2 are
-// emitted.
+// per leaf (3 variants). With `maxVariantsPerEndpoint: 2`, only the first 2
+// are emitted.
 //
 // Class-scoped guarantee: a future endpoint with N semantic-typed
-// optional leaves cannot produce more than `opts.maxChainAlternatives` variant
-// scenario files.
+// optional leaves cannot produce more than `opts.maxVariantsPerEndpoint`
+// variant scenario files.
 const fixtureMaxVariantsCap: OperationGraph = makeGraph([
   makeOp('mintFoo', {
     produces: ['Foo'],
@@ -562,24 +562,24 @@ const fixtureMaxVariantsCap: OperationGraph = makeGraph([
   }),
 ]);
 
-describe('planner contracts: variant emission respects maxChainAlternatives cap (#37)', () => {
-  it('uncapped (maxChainAlternatives = 10) emits one variant per semantic leaf', () => {
+describe('planner contracts: variant emission respects maxVariantsPerEndpoint cap (#37)', () => {
+  it('uncapped (maxVariantsPerEndpoint = 10) emits one variant per semantic leaf', () => {
     const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
-      maxChainAlternatives: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios.length).toBe(3);
   });
 
-  it('caps emission at maxChainAlternatives = 2', () => {
+  it('caps emission at maxVariantsPerEndpoint = 2', () => {
     const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
-      maxChainAlternatives: 2,
+      maxVariantsPerEndpoint: 2,
     });
     expect(variants.scenarios.length).toBe(2);
   });
 
-  it('caps emission at maxChainAlternatives = 0 (emit nothing)', () => {
+  it('caps emission at maxVariantsPerEndpoint = 0 (emit nothing)', () => {
     const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
-      maxChainAlternatives: 0,
+      maxVariantsPerEndpoint: 0,
     });
     expect(variants.scenarios).toEqual([]);
   });
@@ -702,7 +702,7 @@ describe('planner contracts: producerBound semantics must be __PENDING__ in bind
 describe('planner contracts: variant planner non-overlap producer fallback (#37)', () => {
   it('emits a producer→endpoint variant with no warm-up when the producer needs nothing from the endpoint', () => {
     const variants = generateOptionalSubShapeVariants(fixtureNonOverlapVariant, 'createOrder', {
-      maxChainAlternatives: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios.length).toBeGreaterThan(0);
     const variant = variants.scenarios[0];

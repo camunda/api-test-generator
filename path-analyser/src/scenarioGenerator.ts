@@ -16,6 +16,7 @@ import type {
   OperationGraph,
   OperationNode,
   OperationRef,
+  VariantGenerationOpts,
 } from './types.js';
 import { PENDING_BINDING } from './types.js';
 
@@ -1617,7 +1618,7 @@ function gatherDomainPrerequisites(
 export function generateOptionalSubShapeVariants(
   graph: OperationGraph,
   endpointOpId: string,
-  opts: GenerationOpts,
+  opts: VariantGenerationOpts,
 ): EndpointScenarioCollection {
   const endpoint = graph.operations[endpointOpId];
   if (!endpoint) {
@@ -1632,14 +1633,14 @@ export function generateOptionalSubShapeVariants(
   const subShapes = endpoint.optionalSubShapes ?? [];
   const collectionScenarios: EndpointScenario[] = [];
   const seenVariantKeys = new Set<string>();
-  // Cap total variants emitted per endpoint at `opts.maxChainAlternatives`. The
-  // inner `generateScenariosForEndpoint` call below intentionally pins
-  // its own `maxChainAlternatives: 1` (one chain per variant), so the outer
-  // cap is what bounds variant count for endpoints with many
+  // Cap total variants emitted per endpoint at `opts.maxVariantsPerEndpoint`.
+  // The inner `generateScenariosForEndpoint` calls below intentionally pin
+  // their own `maxChainAlternatives: 1` (one chain per variant), so this
+  // outer cap is what bounds variant count for endpoints with many
   // semantic-typed optional leaves. Without this cap, a future spec
   // change could blow up `dist/variant-output/` with one file per
   // (subShape × leaf) pair.
-  const maxVariants = Math.max(0, opts.maxChainAlternatives | 0);
+  const maxVariants = Math.max(0, opts.maxVariantsPerEndpoint | 0);
 
   outer: for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
@@ -1771,7 +1772,7 @@ function tryProducerChainVariant(args: {
   graph: OperationGraph;
   endpoint: OperationNode;
   endpointOpId: string;
-  opts: GenerationOpts;
+  opts: VariantGenerationOpts;
   leaf: { fieldPath: string; semantic: string };
   producerCandidates: string[];
 }): EndpointScenario | undefined {
