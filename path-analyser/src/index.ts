@@ -214,7 +214,7 @@ async function main() {
   for (const op of Object.values(graph.operations)) {
     // Generate scenarios for every endpoint, even if it has no semantic requirements.
     const collection = generateScenariosForEndpoint(graph, op.operationId, {
-      maxScenarios: 20,
+      maxChainAlternatives: 20,
     });
     // Augment scenarios with response shape
     const resp = responseByOp[op.operationId];
@@ -359,11 +359,13 @@ async function main() {
       // search-empty-negative).
       canonical: canonicalForEndpoint,
     });
-    // Final guardrail: enforce max scenarios per endpoint (cap 90)
-    const MAX_FEATURE_SCENARIOS = 90;
-    if (featureCollection.scenarios.length > MAX_FEATURE_SCENARIOS) {
-      featureCollection.scenarios = featureCollection.scenarios.slice(0, MAX_FEATURE_SCENARIOS);
-    }
+    // Per-endpoint variant cap is enforced inside
+    // `generateFeatureCoverageForEndpoint` (via `maxVariantOverlays`,
+    // default 35), not here. The 90-cap previously at this site
+    // (`MAX_FEATURE_SCENARIOS = 90`) was structurally unreachable
+    // because the inner cap of 35 already truncates first; it was
+    // removed in #288 Phase 3c. #292 will lift the variant cap into
+    // per-config configuration.
     // #288 Phase 3b — the chain-graft and donor-binding-inherit blocks
     // that previously lived here have been moved into
     // `buildScenarioFromVariant` (`featureCoverageGenerator.ts`),
@@ -472,7 +474,7 @@ async function main() {
     // have populated-shape coverage.
     if (op.optionalSubShapes?.length) {
       const variantCollection = generateOptionalSubShapeVariants(graph, op.operationId, {
-        maxScenarios: 20,
+        maxVariantsPerEndpoint: 20,
       });
       // Augment with response shape (when available) so downstream codegen
       // has the same metadata as base/feature scenarios. The requestPlan

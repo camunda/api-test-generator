@@ -16,12 +16,13 @@ import type {
   OperationGraph,
   OperationNode,
   OperationRef,
+  VariantGenerationOpts,
 } from './types.js';
 import { PENDING_BINDING } from './types.js';
 
 // Back-compat generation options
 interface GenerationOpts {
-  maxScenarios: number;
+  maxChainAlternatives: number;
   longChains?: { enabled: boolean; maxPreOps: number };
   // Issue #37: when planning an optional sub-shape variant, the endpoint
   // itself is allowed to appear as a producer in the BFS (i.e. the
@@ -88,7 +89,7 @@ Maintain a state with:
  - cycle flag
 Expand BFS for breadth ordering (naturally tends toward shorter chains first).
 Cycle handling: allow one repeat of any operation already in path (sets cycle flag), then block further repeats of that same op.
-Stop when maxScenarios collected or queue empty.
+Stop when maxChainAlternatives collected or queue empty.
 */
 export function generateScenariosForEndpoint(
   graph: OperationGraph,
@@ -229,7 +230,7 @@ export function generateScenariosForEndpoint(
       : new Set([...initialNeeded].filter((s) => !externalEntitySites.includes(s)));
 
   const scenarios: EndpointScenario[] = [];
-  const max = opts.maxScenarios;
+  const max = opts.maxChainAlternatives;
 
   if (missing.length > 0) {
     scenarios.push({
@@ -1617,7 +1618,7 @@ function gatherDomainPrerequisites(
 export function generateOptionalSubShapeVariants(
   graph: OperationGraph,
   endpointOpId: string,
-  opts: GenerationOpts,
+  opts: VariantGenerationOpts,
 ): EndpointScenarioCollection {
   const endpoint = graph.operations[endpointOpId];
   if (!endpoint) {
@@ -1632,14 +1633,14 @@ export function generateOptionalSubShapeVariants(
   const subShapes = endpoint.optionalSubShapes ?? [];
   const collectionScenarios: EndpointScenario[] = [];
   const seenVariantKeys = new Set<string>();
-  // Cap total variants emitted per endpoint at `opts.maxScenarios`. The
-  // inner `generateScenariosForEndpoint` call below intentionally pins
-  // its own `maxScenarios: 1` (one chain per variant), so the outer
-  // cap is what bounds variant count for endpoints with many
+  // Cap total variants emitted per endpoint at `opts.maxVariantsPerEndpoint`.
+  // The inner `generateScenariosForEndpoint` calls below intentionally pin
+  // their own `maxChainAlternatives: 1` (one chain per variant), so this
+  // outer cap is what bounds variant count for endpoints with many
   // semantic-typed optional leaves. Without this cap, a future spec
   // change could blow up `dist/variant-output/` with one file per
   // (subShape × leaf) pair.
-  const maxVariants = Math.max(0, opts.maxScenarios | 0);
+  const maxVariants = Math.max(0, opts.maxVariantsPerEndpoint | 0);
 
   outer: for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
@@ -1701,7 +1702,7 @@ export function generateOptionalSubShapeVariants(
         // (`<sem>_<suffix>`).
         const planned = generateScenariosForEndpoint(graph, endpointOpId, {
           ...opts,
-          maxScenarios: 1,
+          maxChainAlternatives: 1,
         });
         const baseScenario = planned.scenarios[0];
         if (!baseScenario || planned.unsatisfied) continue;
@@ -1771,7 +1772,7 @@ function tryProducerChainVariant(args: {
   graph: OperationGraph;
   endpoint: OperationNode;
   endpointOpId: string;
-  opts: GenerationOpts;
+  opts: VariantGenerationOpts;
   leaf: { fieldPath: string; semantic: string };
   producerCandidates: string[];
 }): EndpointScenario | undefined {
@@ -1832,7 +1833,7 @@ function tryProducerChainVariant(args: {
     ...opts,
     allowEndpointAsProducer: true,
     additionalNeeded: [...additional],
-    maxScenarios: 1,
+    maxChainAlternatives: 1,
   });
   const scenario = planned.scenarios[0];
   if (!scenario || planned.unsatisfied) return undefined;

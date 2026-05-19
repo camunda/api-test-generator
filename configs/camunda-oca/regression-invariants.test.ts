@@ -7106,8 +7106,9 @@ describeForThisConfig(
 //      scenario is a `neg` variant. Locks the structural presence;
 //      Phase 1 will tighten the content assertion once planner
 //      bindings flow through.
-//   3. Per-endpoint feature-scenario count never exceeds the
-//      MAX_FEATURE_SCENARIOS cap (90) — locks the documented cap.
+//   3. Per-endpoint feature-scenario count never exceeds
+//      `maxVariantOverlays` (35) — the only remaining structural
+//      cap after Phase 3c retired the unreachable outer 90-cap.
 //   4. `neg`-variantKey scenarios are only emitted for endpoints
 //      that match the search-like gate
 //      (`featureCoverageGenerator.ts:76-81`): POST plus
@@ -7244,21 +7245,24 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
-    it('no feature collection exceeds the MAX_FEATURE_SCENARIOS cap of 90 (Phase 0 #288)', () => {
-      // Mirror of `MAX_FEATURE_SCENARIOS = 90` in
-      // path-analyser/src/index.ts. Locks the documented per-endpoint
-      // cap so the unification refactor cannot silently uncap (or
-      // tighten) feature output.
-      const MAX_FEATURE_SCENARIOS = 90;
+    it('no feature collection exceeds maxVariantOverlays (35) (Phase 0 #288)', () => {
+      // Mirror of `maxVariantOverlays ?? 35` in
+      // path-analyser/src/featureCoverageGenerator.ts — the only
+      // remaining structural bound on per-endpoint feature scenarios
+      // after #288 Phase 3c retired the (unreachable) outer 90-cap.
+      // Locks the documented per-endpoint cap so the unification
+      // refactor cannot silently uncap (or tighten) feature output.
+      // #292 will lift this into per-config configuration.
+      const MAX_VARIANT_OVERLAYS = 35;
       const offenders: { file: string; count: number }[] = [];
       for (const { file, collection } of loadAllFeatureCollections()) {
-        if (collection.scenarios.length > MAX_FEATURE_SCENARIOS) {
+        if (collection.scenarios.length > MAX_VARIANT_OVERLAYS) {
           offenders.push({ file, count: collection.scenarios.length });
         }
       }
       expect(
         offenders,
-        `Feature collections must not exceed MAX_FEATURE_SCENARIOS=${MAX_FEATURE_SCENARIOS}. A higher count means the cap in path-analyser/src/index.ts has regressed or the variant enumerator no longer truncates.`,
+        `Feature collections must not exceed maxVariantOverlays=${MAX_VARIANT_OVERLAYS}. A higher count means the cap in path-analyser/src/featureCoverageGenerator.ts has regressed or the variant enumerator no longer truncates.`,
       ).toEqual([]);
     });
 

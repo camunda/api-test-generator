@@ -761,9 +761,25 @@ export interface LongChainConfig {
 }
 
 export interface ExtendedGenerationOpts {
-  maxScenarios: number;
+  maxChainAlternatives: number;
   longChains?: LongChainConfig;
   // Issue #37: see scenarioGenerator GenerationOpts for semantics.
+  allowEndpointAsProducer?: boolean;
+  additionalNeeded?: string[];
+}
+
+/**
+ * Options consumed by `generateOptionalSubShapeVariants` (the variant
+ * suite emitter). Distinct from `ExtendedGenerationOpts` because the
+ * outer cap here bounds *variant scenarios per endpoint* (one per
+ * subShape × leaf pair), not chain alternatives — those are pinned to
+ * `maxChainAlternatives: 1` for every inner planner call. Splitting
+ * the option types (#288 Phase 3c review) keeps the two semantically
+ * distinct caps from sharing a misleading name.
+ */
+export interface VariantGenerationOpts {
+  maxVariantsPerEndpoint: number;
+  longChains?: LongChainConfig;
   allowEndpointAsProducer?: boolean;
   additionalNeeded?: string[];
 }

@@ -16,7 +16,7 @@ interface FeatureCoverageOptions {
   generateNegative: boolean;
   requestVariants?: RequestOneOfGroupSummary[]; // injected extracted request variant groups
   // Cap total scenarios per endpoint for feature coverage
-  maxScenariosPerEndpoint?: number;
+  maxVariantOverlays?: number;
   // #288 Phase 3b — the planner's authoritative scenario for this
   // endpoint, used as the source of `operations` and `bindings` for
   // every variant that inherits the chain (i.e. everything except
@@ -32,7 +32,7 @@ const DEFAULT_OPTS: FeatureCoverageOptions = {
   maxOptionalPairs: 20,
   includeAllOptionalsThreshold: 5,
   generateNegative: true,
-  maxScenariosPerEndpoint: 35,
+  maxVariantOverlays: 35,
 };
 
 export function generateFeatureCoverageForEndpoint(
@@ -163,7 +163,7 @@ export function generateFeatureCoverageForEndpoint(
     buildScenarioFromVariant(graph, endpointOpId, v, i + 1, options.canonical),
   );
   // Enforce global cap per endpoint
-  const cap = options.maxScenariosPerEndpoint ?? 35;
+  const cap = options.maxVariantOverlays ?? 35;
   if (scenarios.length > cap) scenarios = scenarios.slice(0, cap);
 
   return {
