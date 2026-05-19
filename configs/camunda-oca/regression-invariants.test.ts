@@ -7,6 +7,7 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
+  getActivePlannerConfig,
   getFeatureOutputDir,
   getGraphDir,
   getPlaywrightSuiteDir,
@@ -7264,6 +7265,46 @@ describeForThisConfig(
         offenders,
         `Feature collections must not exceed maxVariantOverlays=${MAX_VARIANT_OVERLAYS}. A higher count means the cap in path-analyser/src/featureCoverageGenerator.ts has regressed or the variant enumerator no longer truncates.`,
       ).toEqual([]);
+    });
+
+    it('camunda-oca resolves planner caps to {20, 20} (#292)', () => {
+      // #292 lifted the two `20` hard-codes in
+      // path-analyser/src/index.ts into the per-config `planner`
+      // block in configs.json. Two narrow assertions here:
+      //
+      //   1. The OCA config explicitly declares a `planner` block.
+      //      Without this check, `getActivePlannerConfig` would
+      //      silently fall back to defaults if someone deleted the
+      //      block — passing the resolved-value assertion below
+      //      while making the config no longer self-documenting.
+      //   2. The resolved values are pinned to {20, 20} so an
+      //      accidental edit (e.g. dropping the cap to 2 while
+      //      iterating) is caught here rather than via a 412-file
+      //      generated/ diff.
+      //
+      // To intentionally tune these for OCA, update both
+      // `configs.json` AND the constants below in the same commit
+      // so the regen and the guard move together.
+      const configsRaw = readFileSync(join(REPO_ROOT, 'configs.json'), 'utf8');
+      const configsParsed: unknown = JSON.parse(configsRaw);
+      function isRecord(v: unknown): v is Record<string, unknown> {
+        return typeof v === 'object' && v !== null && !Array.isArray(v);
+      }
+      function getOcaPlanner(parsed: unknown): unknown {
+        if (!isRecord(parsed) || !isRecord(parsed.configs)) return undefined;
+        const oca = parsed.configs['camunda-oca'];
+        if (!isRecord(oca)) return undefined;
+        return oca.planner;
+      }
+      const ocaPlanner = getOcaPlanner(configsParsed);
+      expect(
+        ocaPlanner,
+        'configs.json must explicitly declare a `planner` block for camunda-oca; deleting it would silently fall back to defaults and erase the self-documenting per-config caps.',
+      ).toBeDefined();
+
+      const cfg = getActivePlannerConfig(REPO_ROOT);
+      expect(cfg.maxChainAlternatives).toBe(20);
+      expect(cfg.maxVariantsPerEndpoint).toBe(20);
     });
 
     it('search-empty-negative scenarios are only emitted for search-like endpoints (Phase 0 #288)', () => {

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
 import {
   getActiveConfigDir,
+  getActivePlannerConfig,
   getFeatureOutputDir,
   getScenariosDir,
   getTemplateScenariosDir,
@@ -211,10 +212,18 @@ async function main() {
   // (template prereq chains).
   const canonicalByEndpoint: Map<string, EndpointScenario> = new Map();
 
+  // #292 — per-config planner caps. Resolved once per pipeline run so
+  // every endpoint sees the same caps; the two literals previously
+  // hard-coded here (BFS chain alternatives + variant scenarios per
+  // endpoint) now flow from `configs/<active>/`'s `planner` block via
+  // `getActivePlannerConfig`. Absent block → defaults preserve the
+  // pre-#292 emission shape.
+  const plannerConfig = getActivePlannerConfig(repoRoot);
+
   for (const op of Object.values(graph.operations)) {
     // Generate scenarios for every endpoint, even if it has no semantic requirements.
     const collection = generateScenariosForEndpoint(graph, op.operationId, {
-      maxChainAlternatives: 20,
+      maxChainAlternatives: plannerConfig.maxChainAlternatives,
     });
     // Augment scenarios with response shape
     const resp = responseByOp[op.operationId];
@@ -474,7 +483,7 @@ async function main() {
     // have populated-shape coverage.
     if (op.optionalSubShapes?.length) {
       const variantCollection = generateOptionalSubShapeVariants(graph, op.operationId, {
-        maxVariantsPerEndpoint: 20,
+        maxVariantsPerEndpoint: plannerConfig.maxVariantsPerEndpoint,
       });
       // Augment with response shape (when available) so downstream codegen
       // has the same metadata as base/feature scenarios. The requestPlan

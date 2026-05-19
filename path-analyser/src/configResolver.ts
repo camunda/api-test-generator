@@ -160,3 +160,68 @@ export function getPlaywrightSuiteDir(repoRoot: string): string {
 export function getRequestValidationSuiteDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'request-validation');
 }
+
+/**
+ * Per-config planner caps (#292).
+ *
+ * Field names mirror the internal option keys consumed by
+ * `generateScenariosForEndpoint` (`maxChainAlternatives`) and
+ * `generateOptionalSubShapeVariants` (`maxVariantsPerEndpoint`) so the
+ * config key is the option key — no translation layer.
+ *
+ * Defaults preserve the pre-#292 hard-codes so a config without a
+ * `planner` block (or with a partial one) keeps the same emission
+ * shape it had before the lift.
+ *
+ * NOT exposed here: the two inner `maxChainAlternatives: 1` caps inside
+ * variant planning in `scenarioGenerator.ts`. Those are load-bearing
+ * strategy constants (one producer chain per variant leaf is the whole
+ * point of the variant emitter), not a budget — lifting them into
+ * config would invite a user to break the strategy by raising them.
+ */
+export interface PlannerConfig {
+  maxChainAlternatives: number;
+  maxVariantsPerEndpoint: number;
+}
+
+const PLANNER_DEFAULTS: PlannerConfig = {
+  maxChainAlternatives: 20,
+  maxVariantsPerEndpoint: 20,
+};
+
+function readPositiveInt(
+  raw: Record<string, unknown>,
+  key: keyof PlannerConfig,
+  configName: string,
+): number | undefined {
+  if (!Object.hasOwn(raw, key)) return undefined;
+  const v = raw[key];
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) {
+    throw new Error(
+      `Malformed configs.json: configs.${configName}.planner.${key} must be a positive integer; got ${JSON.stringify(v)}.`,
+    );
+  }
+  return v;
+}
+
+export function getActivePlannerConfig(repoRoot: string): PlannerConfig {
+  const index = loadConfigsIndex(repoRoot);
+  const name = resolveActiveConfigName(index);
+  const entry = index.configs[name];
+  if (!isRecord(entry)) return { ...PLANNER_DEFAULTS };
+  const planner = entry.planner;
+  if (planner === undefined) return { ...PLANNER_DEFAULTS };
+  if (!isRecord(planner)) {
+    throw new Error(
+      `Malformed configs.json: configs.${name}.planner must be an object when present.`,
+    );
+  }
+  return {
+    maxChainAlternatives:
+      readPositiveInt(planner, 'maxChainAlternatives', name) ??
+      PLANNER_DEFAULTS.maxChainAlternatives,
+    maxVariantsPerEndpoint:
+      readPositiveInt(planner, 'maxVariantsPerEndpoint', name) ??
+      PLANNER_DEFAULTS.maxVariantsPerEndpoint,
+  };
+}

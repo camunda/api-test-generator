@@ -1702,6 +1702,11 @@ export function generateOptionalSubShapeVariants(
         // (`<sem>_<suffix>`).
         const planned = generateScenariosForEndpoint(graph, endpointOpId, {
           ...opts,
+          // #292: NOT a budget — this is a load-bearing strategy
+          // constant. The variant emitter's contract is "one producer
+          // chain per variant leaf"; raising it would emit multiple
+          // chains for the same variant, which is the wrong shape.
+          // Deliberately not surfaced via per-config planner caps.
           maxChainAlternatives: 1,
         });
         const baseScenario = planned.scenarios[0];
@@ -1833,6 +1838,9 @@ function tryProducerChainVariant(args: {
     ...opts,
     allowEndpointAsProducer: true,
     additionalNeeded: [...additional],
+    // #292: NOT a budget — see the matching note at the bare-endpoint
+    // fallback above. One producer chain per variant leaf is the
+    // strategy, not a tunable cap.
     maxChainAlternatives: 1,
   });
   const scenario = planned.scenarios[0];

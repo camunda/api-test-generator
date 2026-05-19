@@ -7,6 +7,11 @@
       "spec": {
         "source": "github:camunda/camunda",
         "$comment": "Pinned ref + expected hash live in configs/camunda-oca/spec-pin.json (kept as a separate file to preserve the spec-pin bump procedure documented in tests/regression/spec-pin.setup.ts)."
+      },
+      "planner": {
+        "$comment": "Per-config planner caps (#292). Field names mirror the internal option keys (`maxChainAlternatives`, `maxVariantsPerEndpoint`) so the config key === the option key — no translation layer. The two inner `maxChainAlternatives: 1` caps inside variant planning are NOT exposed here; they are load-bearing strategy constants (one producer chain per variant leaf) documented in path-analyser/src/scenarioGenerator.ts.",
+        "maxChainAlternatives": 20,
+        "maxVariantsPerEndpoint": 20
       }
     }
   }
