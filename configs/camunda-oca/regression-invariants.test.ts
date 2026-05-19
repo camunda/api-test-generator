@@ -7272,7 +7272,7 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
-    it('`neg`-variantKey scenarios are only emitted for search-like endpoints (Phase 0 #288)', () => {
+    it('search-empty-negative scenarios are only emitted for search-like endpoints (Phase 0 #288)', () => {
       // Mirror of the gating rule in
       // path-analyser/src/featureCoverageGenerator.ts:76-81:
       //   POST method AND (path ends `/search` OR opId matches /search/i
@@ -7280,6 +7280,16 @@ describeForThisConfig(
       // jobActivator membership is read from the per-config ABox so
       // this assertion stays in sync with the role classifier without
       // duplicating its logic.
+      //
+      // Important: `variantKey === 'neg'` alone is too coarse —
+      // `buildVariantKey` emits `'neg'` for ANY `variant.negative`
+      // variant, which includes the duplicate-policy conflict
+      // variant (`expectedResult: 'error'`, `duplicateTest.mode:
+      // 'conflict'`). Conflict variants are NOT gated by the
+      // search-like rule and would (legitimately) fire on non-search
+      // create endpoints once a `duplicatePolicy` is configured.
+      // We therefore target the search-empty case specifically:
+      //   variantKey === 'neg' && !duplicateTest && expectedResult.kind === 'empty'.
       interface OperationArtifactRule {
         operationId?: string;
         role?: string;
@@ -7287,16 +7297,7 @@ describeForThisConfig(
       interface ArtifactKindsAbox {
         operationRules?: OperationArtifactRule[];
       }
-      interface GraphAudit {
-        operations: OperationNode[];
-      }
-      if (!existsSync(GRAPH_PATH)) {
-        throw new Error(
-          `Graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
-        );
-      }
-      // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
-      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphAudit;
+      const graph = loadGraph();
       const opsById = new Map(graph.operations.map((o) => [o.operationId, o]));
       const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'artifact-kinds.json');
       const jobActivatorIds = new Set<string>();
@@ -7319,11 +7320,18 @@ describeForThisConfig(
       }
 
       const offenders: { file: string; id: string; operationId: string }[] = [];
-      let negScanned = 0;
+      let searchEmptyNegScanned = 0;
       for (const { file, collection } of loadAllFeatureCollections()) {
         for (const s of collection.scenarios) {
+          // Search-empty case: `neg` variantKey, no duplicateTest,
+          // expectedResult is `empty`. This excludes the (currently
+          // dormant) duplicate-conflict variant which shares the
+          // `neg` variantKey but has `expectedResult: 'error'` and a
+          // `duplicateTest.mode: 'conflict'` payload.
           if (s.variantKey !== 'neg') continue;
-          negScanned++;
+          if (s.duplicateTest) continue;
+          if (s.expectedResult?.kind !== 'empty') continue;
+          searchEmptyNegScanned++;
           if (!isSearchLike(collection.endpoint.operationId)) {
             offenders.push({
               file,
@@ -7333,10 +7341,10 @@ describeForThisConfig(
           }
         }
       }
-      expect(negScanned).toBeGreaterThanOrEqual(5);
+      expect(searchEmptyNegScanned).toBeGreaterThanOrEqual(5);
       expect(
         offenders,
-        '`neg` (search-empty-negative) variant must only be emitted for search-like endpoints (POST + /search$ OR opId matches /search/i OR jobActivator role). A non-search endpoint shipping `neg` means the gating rule in featureCoverageGenerator.ts has widened.',
+        'search-empty-negative variant (variantKey=neg, no duplicateTest, expectedResult=empty) must only be emitted for search-like endpoints (POST + /search$ OR opId matches /search/i OR jobActivator role). A non-search endpoint shipping it means the gating rule in featureCoverageGenerator.ts has widened.',
       ).toEqual([]);
     });
   },
