@@ -393,7 +393,7 @@ logic into the template.
 ## Materializer overlay (Phase 2, landed)
 
 The Playwright materializer copies the built-in support tree from
-`materializer/src/support/` into each emitted suite's
+`materializer/src/playwright/support/` into each emitted suite's
 `playwright/support/`, then overlays per-role helpers via
 [`materializeRoleSupportFiles`](playwright/materialize-support.ts):
 

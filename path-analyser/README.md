@@ -98,7 +98,7 @@ through the same `deterministicSuffix` helper used by the emitted
 runtime, seeded from `TEST_SEED` (default `'snapshot-baseline'`).
 
 > `path-analyser/src/deterministicSuffix.ts` is intentionally
-> duplicated with `materializer/src/support/seeding.ts`'s vendored
+> duplicated with `materializer/src/playwright/support/seeding.ts`'s vendored
 > copy. The materializer copy is shipped verbatim into every emitted
 > suite and must stay self-contained; the algorithms must be kept
 > aligned. Both files carry headers documenting the duplication.

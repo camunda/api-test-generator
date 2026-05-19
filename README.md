@@ -231,7 +231,7 @@ invariant if the property is observable at the chain or graph level. See
 ### Determinism
 
 Generator output is byte-reproducible **by default**. The seeding module
-(`materializer/src/support/seeding.ts`) uses `TEST_SEED` to seed all
+(`materializer/src/playwright/support/seeding.ts`) uses `TEST_SEED` to seed all
 `deterministicSuffix(...)` calls; if unset, it falls back to the constant
 `'snapshot-baseline'`, so `npm run pipeline` produces identical output across
 runs and machines without needing `TEST_SEED` to be set explicitly.

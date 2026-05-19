@@ -165,7 +165,7 @@ config-specific helper (e.g. the OCA deployment helper).
 ## Determinism
 
 Suites are byte-reproducible. The runtime helper
-`src/support/seeding.ts` seeds all `deterministicSuffix(...)` calls
+`src/playwright/support/seeding.ts` seeds all `deterministicSuffix(...)` calls
 with `TEST_SEED`, defaulting to the constant `'snapshot-baseline'`
 when unset. This file is shipped **verbatim** into every emitted suite
 and must stay self-contained — including its own copy of

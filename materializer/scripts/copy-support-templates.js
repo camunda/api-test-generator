@@ -3,10 +3,10 @@
 // Stages the runtime support templates that the Playwright emitter vendors
 // into every generated test suite.
 //
-// The canonical sources live in src/codegen/support/ (some are also imported
-// at generation time by analyser code — e.g. deterministicSuffix). This
-// script copies them as-is into a templates directory under dist/ where the
-// emitter's materializeSupport() resolves them at codegen time.
+// The canonical sources live in src/playwright/support/ (some are also
+// imported at generation time by analyser code — e.g. deterministicSuffix).
+// This script copies them as-is into a templates directory under dist/ where
+// the emitter's materializeSupport() resolves them at codegen time.
 //
 // Output layout:
 //   dist/src/playwright/support-templates/
@@ -31,7 +31,7 @@ const SUPPORT_FILES = [
 
 async function main() {
   const root = process.cwd();
-  const srcDir = path.join(root, 'src/support');
+  const srcDir = path.join(root, 'src/playwright/support');
   const destDir = path.join(root, 'dist/src/playwright/support-templates');
   await fs.mkdir(destDir, { recursive: true });
   for (const name of SUPPORT_FILES) {
