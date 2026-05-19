@@ -7,6 +7,7 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
+  getActivePlannerConfig,
   getFeatureOutputDir,
   getGraphDir,
   getPlaywrightSuiteDir,
@@ -7264,6 +7265,26 @@ describeForThisConfig(
         offenders,
         `Feature collections must not exceed maxVariantOverlays=${MAX_VARIANT_OVERLAYS}. A higher count means the cap in path-analyser/src/featureCoverageGenerator.ts has regressed or the variant enumerator no longer truncates.`,
       ).toEqual([]);
+    });
+
+    it('camunda-oca resolves planner caps to {20, 20} (#292)', () => {
+      // #292 lifted the two `20` hard-codes in
+      // path-analyser/src/index.ts into the per-config `planner`
+      // block in configs.json. This invariant locks the resolved
+      // values for camunda-oca so an accidental config edit (e.g.
+      // dropping the cap to 2 while iterating, or deleting the
+      // block entirely and silently changing what's emitted) is
+      // caught here rather than via a 412-file generated/ diff.
+      //
+      // The defaults in `getActivePlannerConfig` are deliberately
+      // the same numbers — so this assertion holds whether the
+      // block is present (explicit config) or absent (falls back
+      // to defaults). To intentionally tune these for OCA, update
+      // both `configs.json` AND the constants below in the same
+      // commit so the regen and the guard move together.
+      const cfg = getActivePlannerConfig(REPO_ROOT);
+      expect(cfg.maxChainAlternatives).toBe(20);
+      expect(cfg.maxVariantsPerEndpoint).toBe(20);
     });
 
     it('search-empty-negative scenarios are only emitted for search-like endpoints (Phase 0 #288)', () => {
