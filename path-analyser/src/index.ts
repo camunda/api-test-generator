@@ -210,6 +210,18 @@ async function main() {
   // output verbatim instead of re-implementing it for templates.
   const featureScenarioStash: ScenarioStash = new Map();
 
+  // #288 Phase 3a — additive canonical-scenario cache. Captures the
+  // planner's authoritative scenario (`chainSource` after the
+  // producer-authority filter, falling back to the first integration
+  // candidate, falling back to the first scenario) for every endpoint,
+  // independent of the feature-overlay path. Phase 3b will switch the
+  // template instantiator + `buildScenarioFromVariant` to read from
+  // here and delete `featureScenarioStash` plus the chain-graft /
+  // donor-binding inherit blocks below. For 3a the cache is purely
+  // additive: populated but consumed only by the equivalence
+  // assertion at the end of the feature loop.
+  const canonicalByEndpoint: Map<string, EndpointScenario> = new Map();
+
   for (const op of Object.values(graph.operations)) {
     // Generate scenarios for every endpoint, even if it has no semantic requirements.
     const collection = generateScenariosForEndpoint(graph, op.operationId, {
@@ -305,6 +317,15 @@ async function main() {
       [...authoritativeMultiOp].sort(byLength)[0] ||
       [...multiOpCandidates].sort(byLength)[0] ||
       integrationCandidates[0];
+    // #288 Phase 3a — populate canonical cache for this endpoint.
+    // Prefers the same authoritative chain source the graft block
+    // below uses; falls back to the first integration candidate, then
+    // any scenario, so endpoints with no planned chain (single-op or
+    // unsatisfied-only) still have an entry. Phase 3b will consume.
+    const canonicalForEndpoint = chainSource || integrationCandidates[0] || collection.scenarios[0];
+    if (canonicalForEndpoint) {
+      canonicalByEndpoint.set(op.operationId, canonicalForEndpoint);
+    }
     // The chain-graft + requestPlan synthesis must run for every endpoint,
     // not just those with a response shape. Operations with a
     // 204 No-Content response (cancelProcessInstance, completeJob,
@@ -522,6 +543,32 @@ async function main() {
         ?.missingSemanticTypes,
     });
     processed++;
+  }
+
+  // #288 Phase 3a — equivalence assertion: the canonical cache must
+  // hold, for every endpoint with a feature-output stash entry, a
+  // scenario whose prereq operations (everything before the endpoint
+  // itself) match the stash's prereq operations exactly. This is the
+  // green/green contract for Phase 3b: when the stash is deleted and
+  // consumers switch to `canonicalByEndpoint`, the byte-identical
+  // regen against the 3a baseline (combined with this assertion
+  // having passed in 3a) proves the two were the same all along.
+  // Delete this assertion at the end of Phase 3b alongside the stash
+  // itself.
+  for (const [opId, stashed] of featureScenarioStash) {
+    const canonical = canonicalByEndpoint.get(opId);
+    if (!canonical) {
+      throw new Error(
+        `#288 Phase 3a invariant: canonicalByEndpoint missing entry for '${opId}' even though featureScenarioStash has one. The cache must be populated for every endpoint that produces a feature scenario.`,
+      );
+    }
+    const canonicalPrereqs = canonical.operations.slice(0, -1).map((o) => o.operationId);
+    const stashPrereqs = stashed.operations.slice(0, -1).map((o) => o.operationId);
+    if (canonicalPrereqs.join('|') !== stashPrereqs.join('|')) {
+      throw new Error(
+        `#288 Phase 3a invariant: canonical prereq chain for '${opId}' diverges from stash. canonical=[${canonicalPrereqs.join(',')}] stash=[${stashPrereqs.join(',')}]. Phase 3b cannot safely consume the cache while these disagree.`,
+      );
+    }
   }
 
   const summary: GenerationSummary = {
