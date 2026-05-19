@@ -761,7 +761,7 @@ export interface LongChainConfig {
 }
 
 export interface ExtendedGenerationOpts {
-  maxScenarios: number;
+  maxChainAlternatives: number;
   longChains?: LongChainConfig;
   // Issue #37: see scenarioGenerator GenerationOpts for semantics.
   allowEndpointAsProducer?: boolean;

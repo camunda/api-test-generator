@@ -308,7 +308,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
   describe('simple establisher chain (createUser → getUser)', () => {
     it('produces a satisfied chain whose first step is the establisher', () => {
       const result = generateScenariosForEndpoint(fixtureSimpleEstablisherChain, 'getUser', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       expect(result.unsatisfied).toBeFalsy();
       expect(result.scenarios.length).toBeGreaterThan(0);
@@ -318,7 +318,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
 
     it('seeds a shared usernameVar binding consumed by both steps', () => {
       const result = generateScenariosForEndpoint(fixtureSimpleEstablisherChain, 'getUser', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       const scenario = result.scenarios[0];
       expect(scenario.bindings).toBeDefined();
@@ -335,7 +335,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
   describe('establisher endpoint plans the trivial chain', () => {
     it('createUser as endpoint plans without chasing a producer for its own Username', () => {
       const result = generateScenariosForEndpoint(fixtureSimpleEstablisherChain, 'createUser', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       expect(result.unsatisfied).toBeFalsy();
       expect(result.scenarios.length).toBeGreaterThan(0);
@@ -350,7 +350,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixtureCompositeEstablisherChain,
         'getTenantClusterVariable',
-        { maxScenarios: 10 },
+        { maxChainAlternatives: 10 },
       );
       expect(result.unsatisfied).toBeFalsy();
       const ops = opIdsOf(result.scenarios[0]);
@@ -361,7 +361,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixtureCompositeEstablisherChain,
         'getTenantClusterVariable',
-        { maxScenarios: 10 },
+        { maxChainAlternatives: 10 },
       );
       const bindings = result.scenarios[0].bindings ?? {};
       expect(bindings.tenantIdVar).toBeDefined();
@@ -374,7 +374,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixtureEdgeRequiresComponentChains,
         'assignUserToGroup',
-        { maxScenarios: 10 },
+        { maxChainAlternatives: 10 },
       );
       expect(result.unsatisfied).toBeFalsy();
       const ops = opIdsOf(result.scenarios[0]);
@@ -401,7 +401,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
   describe('placeholder-name mismatch (establisher mints `username`, consumer uses `{userKey}`)', () => {
     it('aliases the establisher value under the consumer-derived path-placeholder var', () => {
       const result = generateScenariosForEndpoint(fixturePlaceholderNameMismatch, 'getUserByKey', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       expect(result.unsatisfied).toBeFalsy();
       expect(result.scenarios.length).toBeGreaterThan(0);
@@ -429,7 +429,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixtureBodyCollisionSameName,
         'linkThingToWidget',
-        { maxScenarios: 10 },
+        { maxChainAlternatives: 10 },
       );
       // No satisfied chain should contain BOTH establishers — that
       // would imply they shared the `nameVar` slot.
@@ -446,7 +446,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixturePathSuffixSameName,
         'linkThingToWidgetByIds',
-        { maxScenarios: 10 },
+        { maxChainAlternatives: 10 },
       );
       expect(result.unsatisfied).toBeFalsy();
       const scenario = result.scenarios.find((s) => {
@@ -477,7 +477,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixtureAliasPollutionAcrossEndpoints,
         'assignUserToRole',
-        { maxScenarios: 20 },
+        { maxChainAlternatives: 20 },
       );
       expect(result.unsatisfied).toBeFalsy();
       const satisfied = result.scenarios.find((s) => {
@@ -603,7 +603,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
 
     it('mints a client-side GroupId and tags externalEntitySites when no producer exists', () => {
       const result = generateScenariosForEndpoint(fixtureBimodalNoProducer, 'assignGroupToRole', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       expect(result.unsatisfied).toBeFalsy();
       const scenario = result.scenarios[0];
@@ -617,7 +617,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
 
     it('prefers the in-graph producer when one exists (no regression, no externalEntitySites tag)', () => {
       const result = generateScenariosForEndpoint(fixtureBimodalWithProducer, 'assignGroupToRole', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       expect(result.unsatisfied).toBeFalsy();
       const scenario = result.scenarios[0];
@@ -635,7 +635,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixturePartialBimodalNoProducers,
         'assignUserToGroup',
-        { maxScenarios: 10 },
+        { maxChainAlternatives: 10 },
       );
       // Username has no producer/establisher AND is not flagged
       // bimodal — the scenario must be unsatisfied with Username
@@ -686,7 +686,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
         externalEntityIdentifiers: new Set(['ClientId']),
       };
       const result = generateScenariosForEndpoint(fixtureKindScoped, 'assignRoleToClient', {
-        maxScenarios: 10,
+        maxChainAlternatives: 10,
       });
       expect(result.unsatisfied).toBeFalsy();
       const scenario = result.scenarios[0];
@@ -711,7 +711,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       const result = generateScenariosForEndpoint(
         fixtureAliasPollutionAcrossEndpoints,
         'assignUserToRole',
-        { maxScenarios: 20 },
+        { maxChainAlternatives: 20 },
       );
       const satisfied = result.scenarios.find((s) => {
         const ops = opIdsOf(s);
@@ -738,7 +738,7 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       // producers only" — establishers must stay in `establishersByType`.
       const graph = fixtureSimpleEstablisherChain;
       const beforeUsername = [...(graph.producersByType.Username ?? [])];
-      generateScenariosForEndpoint(graph, 'getUser', { maxScenarios: 10 });
+      generateScenariosForEndpoint(graph, 'getUser', { maxChainAlternatives: 10 });
       const afterUsername = graph.producersByType.Username ?? [];
       // The establisher (`createUser`) must NOT have leaked into the
       // global producer index for Username.
