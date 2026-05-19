@@ -1,6 +1,6 @@
 # api-test-generator — Coverage matrix (entity × operation × variant)
 
-Total test declarations: **518** across **37** entities.
+Total test declarations: **1567** across **37** entities.
 
 Variants are first-match labels derived from the generator's emitter suffix (`base`, `negative empty`, `bpmn|dmn|drd|form|path|cycle/...`, `oneOf ...`, `scenario`). See `build_coverage.py` for the rule table.
 
@@ -10,103 +10,106 @@ Legend: ✓ = at least 1, blank = 0.
 
 | entity | op | total | happy | bad-req | 401 | 403 | 404 | conflict | pagin/sort | filter | absence | data-driven | unlabeled |
 |--|--|--:|--|--|--|--|--|--|--|--|--|--|--|
-| process-instance | create | 8 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| process-instance | get | 4 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| process-instance | update | 50 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| process-instance | delete | 24 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| process-instance | search | 21 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| tenant | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| tenant | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| tenant | update | 6 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| tenant | delete | 6 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| tenant | search | 22 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| role | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| role | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| role | update | 5 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| role | delete | 5 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| role | search | 18 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| group | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| group | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| group | update | 4 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| group | delete | 4 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| group | search | 18 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| job | create | 4 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| job | get | 9 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| job | update | 6 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| job | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| decision-instance | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| decision-instance | delete | 12 | ✓ |  |  |  |  |  |  |  |  | ✓ | ✓ |
-| decision-instance | search | 14 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| process-definition | get | 21 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| process-definition | search | 6 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| element-instance | create | 3 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| element-instance | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| element-instance | search | 21 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| user-task | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user-task | update | 3 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user-task | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user-task | search | 14 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| audit-log | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| audit-log | search | 17 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ | ✓ |
-| resource | create | 5 |  |  |  |  |  |  |  |  |  | ✓ |  |
+| process-instance | create | 14 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| process-instance | get | 8 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| process-instance | update | 148 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| process-instance | delete | 74 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| process-instance | search | 38 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| job | create | 32 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| job | get | 67 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| job | update | 30 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| job | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| tenant | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| tenant | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| tenant | update | 23 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| tenant | delete | 17 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| tenant | search | 57 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| tenant | lifecycle | 10 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
+| role | create | 14 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| role | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| role | update | 20 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| role | delete | 14 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| role | search | 47 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| role | lifecycle | 8 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
+| group | create | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| group | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| group | update | 17 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| group | delete | 11 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| group | search | 47 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| group | lifecycle | 6 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
+| decision-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| decision-instance | delete | 50 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |
+| decision-instance | search | 20 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| process-definition | get | 59 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| process-definition | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| user-task | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user-task | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user-task | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user-task | search | 44 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| cluster-variables | create | 27 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| cluster-variables | get | 5 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| cluster-variables | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| cluster-variables | delete | 5 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| cluster-variables | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| element-instance | create | 19 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| element-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| element-instance | search | 34 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| mapping-rule | create | 21 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| mapping-rule | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| mapping-rule | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| mapping-rule | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| mapping-rule | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| global-task-listener | create | 22 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| global-task-listener | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| global-task-listener | update | 12 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| global-task-listener | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| global-task-listener | search | 9 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| incident | get | 19 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| incident | update | 9 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| incident | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| authorization | create | 10 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| authorization | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| authorization | update | 11 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| authorization | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| authorization | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| resource | create | 13 |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | resource | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| resource | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| resource | search | 7 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| decision-definition | create | 4 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| decision-definition | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| decision-definition | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| authorization | create | 3 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| authorization | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| authorization | update | 3 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
-| authorization | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| authorization | search | 4 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| cluster-variables | create | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | update | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | delete | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | search | 4 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| incident | get | 3 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| incident | update | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| incident | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| document | create | 7 | ✓ |  |  |  |  |  |  |  |  | ✓ |  |
+| resource | delete | 8 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| resource | search | 12 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| user | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user | update | 5 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user | search | 9 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| message | create | 30 | ✓ | ✓ |  |  |  |  |  |  |  |  | ✓ |
+| decision-definition | create | 11 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
+| decision-definition | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| decision-definition | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| audit-log | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| audit-log | search | 22 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |
+| document | create | 18 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | document | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | document | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | update | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | search | 5 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| agent-instance | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| agent-instance | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ | ✓ |
-| variable | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| variable | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ | ✓ |
+| variable | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| variable | search | 14 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |
+| setup | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| conditional | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |
+| agent-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| agent-instance | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |
+| decision-requirements | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| decision-requirements | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| signal | create | 14 | ✓ | ✓ |  |  |  |  |  |  |  |  | ✓ |
 | batch-operation | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | update | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| batch-operation | search | 4 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| global-task-listener | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | update | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | search | 4 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| user | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user | update | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| user | search | 4 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| decision-requirements | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| decision-requirements | search | 6 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| correlated-message-subscription | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| message-subscriptions | search | 8 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| batch-operation-item | search | 5 | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |  |
-| message | create | 4 | ✓ |  |  |  |  |  |  |  |  |  | ✓ |
-| conditional | create | 3 | ✓ |  |  |  |  |  |  |  |  | ✓ | ✓ |
-| signal | create | 2 | ✓ |  |  |  |  |  |  |  |  |  | ✓ |
-| system | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| clock | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
+| batch-operation | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| correlated-message-subscription | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| message-subscriptions | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| batch-operation-item | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| system | get | 9 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| clock | create | 7 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | clock | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| setup | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| expression | create | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
+| expression | create | 7 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | authentication | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | license | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | status | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
@@ -116,103 +119,106 @@ Legend: ✓ = at least 1, blank = 0.
 
 | entity | op | total | happy | bad-req | 401 | 403 | 404 | conflict | pagin/sort | filter | absence | data-driven | unlabeled |
 |--|--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| process-instance | create | 8 | 1 |  |  |  |  |  |  |  |  | 7 |  |
-| process-instance | get | 4 | 4 |  |  |  |  |  |  |  |  |  |  |
-| process-instance | update | 50 | 6 |  |  |  |  |  |  |  |  | 44 |  |
-| process-instance | delete | 24 | 4 |  |  |  |  |  |  |  |  | 20 |  |
-| process-instance | search | 21 | 2 |  |  |  |  |  |  |  | 1 | 18 |  |
-| tenant | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| tenant | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| tenant | update | 6 | 6 |  |  |  |  |  |  |  |  |  |  |
-| tenant | delete | 6 | 6 |  |  |  |  |  |  |  |  |  |  |
-| tenant | search | 22 | 6 |  |  |  |  |  |  |  | 1 | 15 |  |
-| role | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| role | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| role | update | 5 | 5 |  |  |  |  |  |  |  |  |  |  |
-| role | delete | 5 | 5 |  |  |  |  |  |  |  |  |  |  |
-| role | search | 18 | 5 |  |  |  |  |  |  |  | 1 | 12 |  |
-| group | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| group | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| group | update | 4 | 4 |  |  |  |  |  |  |  |  |  |  |
-| group | delete | 4 | 4 |  |  |  |  |  |  |  |  |  |  |
-| group | search | 18 | 5 |  |  |  |  |  |  |  | 1 | 12 |  |
-| job | create | 4 | 2 |  |  |  |  |  |  |  | 1 | 1 |  |
-| job | get | 9 | 5 |  |  |  |  |  |  |  |  | 4 |  |
-| job | update | 6 | 3 |  |  |  |  |  |  |  |  | 3 |  |
-| job | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 6 |  |
-| decision-instance | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| decision-instance | delete | 12 | 2 |  |  |  |  |  |  |  |  | 9 | 1 |
-| decision-instance | search | 14 | 1 |  |  |  |  |  |  |  | 1 | 12 |  |
-| process-definition | get | 21 | 7 |  |  |  |  |  |  |  |  | 14 |  |
-| process-definition | search | 6 | 1 |  |  |  |  |  |  |  | 1 | 4 |  |
-| element-instance | create | 3 | 2 |  |  |  |  |  |  |  |  | 1 |  |
-| element-instance | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| element-instance | search | 21 | 2 |  |  |  |  |  |  |  | 1 | 18 |  |
-| user-task | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| user-task | update | 3 | 3 |  |  |  |  |  |  |  |  |  |  |
-| user-task | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| user-task | search | 14 | 4 |  |  |  |  |  |  |  | 1 | 9 |  |
-| audit-log | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| audit-log | search | 17 | 1 |  |  |  |  |  |  |  | 1 | 11 | 4 |
-| resource | create | 5 |  |  |  |  |  |  |  |  |  | 5 |  |
+| process-instance | create | 14 | 1 | 6 |  |  |  |  |  |  |  | 7 |  |
+| process-instance | get | 8 | 4 | 4 |  |  |  |  |  |  |  |  |  |
+| process-instance | update | 148 | 6 | 98 |  |  |  |  |  |  |  | 44 |  |
+| process-instance | delete | 74 | 4 | 50 |  |  |  |  |  |  |  | 20 |  |
+| process-instance | search | 38 | 2 | 17 |  |  |  |  |  |  | 1 | 18 |  |
+| job | create | 32 | 2 | 28 |  |  |  |  |  |  | 1 | 1 |  |
+| job | get | 67 | 5 | 58 |  |  |  |  |  |  |  | 4 |  |
+| job | update | 30 | 3 | 24 |  |  |  |  |  |  |  | 3 |  |
+| job | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
+| tenant | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |
+| tenant | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| tenant | update | 23 | 6 | 17 |  |  |  |  |  |  |  |  |  |
+| tenant | delete | 17 | 6 | 11 |  |  |  |  |  |  |  |  |  |
+| tenant | search | 57 | 6 | 35 |  |  |  |  |  |  | 1 | 15 |  |
+| tenant | lifecycle | 10 | 5 |  |  |  |  |  |  |  | 5 |  |  |
+| role | create | 14 | 1 | 13 |  |  |  |  |  |  |  |  |  |
+| role | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| role | update | 20 | 5 | 15 |  |  |  |  |  |  |  |  |  |
+| role | delete | 14 | 5 | 9 |  |  |  |  |  |  |  |  |  |
+| role | search | 47 | 5 | 29 |  |  |  |  |  |  | 1 | 12 |  |
+| role | lifecycle | 8 | 4 |  |  |  |  |  |  |  | 4 |  |  |
+| group | create | 13 | 1 | 12 |  |  |  |  |  |  |  |  |  |
+| group | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| group | update | 17 | 4 | 13 |  |  |  |  |  |  |  |  |  |
+| group | delete | 11 | 4 | 7 |  |  |  |  |  |  |  |  |  |
+| group | search | 47 | 5 | 29 |  |  |  |  |  |  | 1 | 12 |  |
+| group | lifecycle | 6 | 3 |  |  |  |  |  |  |  | 3 |  |  |
+| decision-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| decision-instance | delete | 50 | 2 | 38 |  |  |  |  |  |  |  | 9 | 1 |
+| decision-instance | search | 20 | 1 | 6 |  |  |  |  |  |  | 1 | 12 |  |
+| process-definition | get | 59 | 7 | 38 |  |  |  |  |  |  |  | 14 |  |
+| process-definition | search | 11 | 1 | 5 |  |  |  |  |  |  | 1 | 4 |  |
+| user-task | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
+| user-task | update | 13 | 3 | 10 |  |  |  |  |  |  |  |  |  |
+| user-task | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| user-task | search | 44 | 4 | 30 |  |  |  |  |  |  | 1 | 9 |  |
+| cluster-variables | create | 27 | 2 | 25 |  |  |  |  |  |  |  |  |  |
+| cluster-variables | get | 5 | 2 | 3 |  |  |  |  |  |  |  |  |  |
+| cluster-variables | update | 13 | 2 | 11 |  |  |  |  |  |  |  |  |  |
+| cluster-variables | delete | 5 | 2 | 3 |  |  |  |  |  |  |  |  |  |
+| cluster-variables | search | 10 | 1 | 6 |  |  |  |  |  |  | 1 | 2 |  |
+| element-instance | create | 19 | 2 | 16 |  |  |  |  |  |  |  | 1 |  |
+| element-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| element-instance | search | 34 | 2 | 13 |  |  |  |  |  |  | 1 | 18 |  |
+| mapping-rule | create | 21 | 1 | 20 |  |  |  |  |  |  |  |  |  |
+| mapping-rule | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| mapping-rule | update | 13 | 1 | 12 |  |  |  |  |  |  |  |  |  |
+| mapping-rule | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| mapping-rule | search | 10 | 1 | 5 |  |  |  |  |  |  | 1 | 3 |  |
+| global-task-listener | create | 22 | 1 | 21 |  |  |  |  |  |  |  |  |  |
+| global-task-listener | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| global-task-listener | update | 12 | 1 | 11 |  |  |  |  |  |  |  |  |  |
+| global-task-listener | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| global-task-listener | search | 9 | 1 | 5 |  |  |  |  |  |  | 1 | 2 |  |
+| incident | get | 19 | 3 | 16 |  |  |  |  |  |  |  |  |  |
+| incident | update | 9 | 1 | 8 |  |  |  |  |  |  |  |  |  |
+| incident | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
+| authorization | create | 10 | 1 | 7 |  |  |  |  |  |  |  | 2 |  |
+| authorization | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| authorization | update | 11 | 1 | 8 |  |  |  |  |  |  |  | 2 |  |
+| authorization | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| authorization | search | 11 | 1 | 7 |  |  |  |  |  |  | 1 | 2 |  |
+| resource | create | 13 |  | 8 |  |  |  |  |  |  |  | 5 |  |
 | resource | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| resource | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| resource | search | 7 | 1 |  |  |  |  |  |  |  | 1 | 5 |  |
-| decision-definition | create | 4 | 1 |  |  |  |  |  |  |  |  | 3 |  |
-| decision-definition | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| decision-definition | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 6 |  |
-| authorization | create | 3 | 1 |  |  |  |  |  |  |  |  | 2 |  |
-| authorization | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| authorization | update | 3 | 1 |  |  |  |  |  |  |  |  | 2 |  |
-| authorization | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| authorization | search | 4 | 1 |  |  |  |  |  |  |  | 1 | 2 |  |
-| cluster-variables | create | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | update | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | delete | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| cluster-variables | search | 4 | 1 |  |  |  |  |  |  |  | 1 | 2 |  |
-| incident | get | 3 | 3 |  |  |  |  |  |  |  |  |  |  |
-| incident | update | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| incident | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 6 |  |
-| document | create | 7 | 3 |  |  |  |  |  |  |  |  | 4 |  |
+| resource | delete | 8 | 1 | 7 |  |  |  |  |  |  |  |  |  |
+| resource | search | 12 | 1 | 5 |  |  |  |  |  |  | 1 | 5 |  |
+| user | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |
+| user | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| user | update | 5 | 1 | 4 |  |  |  |  |  |  |  |  |  |
+| user | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| user | search | 9 | 1 | 5 |  |  |  |  |  |  | 1 | 2 |  |
+| message | create | 30 | 2 | 26 |  |  |  |  |  |  |  |  | 2 |
+| decision-definition | create | 11 | 1 | 7 |  |  |  |  |  |  |  | 3 |  |
+| decision-definition | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
+| decision-definition | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
+| audit-log | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| audit-log | search | 22 | 1 | 5 |  |  |  |  |  |  | 1 | 11 | 4 |
+| document | create | 18 | 3 | 11 |  |  |  |  |  |  |  | 4 |  |
 | document | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | document | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | update | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| mapping-rule | search | 5 | 1 |  |  |  |  |  |  |  | 1 | 3 |  |
-| agent-instance | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| agent-instance | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 5 | 1 |
-| variable | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| variable | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 4 | 2 |
+| variable | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| variable | search | 14 | 1 | 6 |  |  |  |  |  |  | 1 | 4 | 2 |
+| setup | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |
+| conditional | create | 15 | 1 | 12 |  |  |  |  |  |  |  | 1 | 1 |
+| agent-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| agent-instance | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 5 | 1 |
+| decision-requirements | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
+| decision-requirements | search | 11 | 1 | 5 |  |  |  |  |  |  | 1 | 4 |  |
+| signal | create | 14 | 1 | 12 |  |  |  |  |  |  |  |  | 1 |
 | batch-operation | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | update | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| batch-operation | search | 4 | 1 |  |  |  |  |  |  |  | 1 | 2 |  |
-| global-task-listener | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | update | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| global-task-listener | search | 4 | 1 |  |  |  |  |  |  |  | 1 | 2 |  |
-| user | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| user | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| user | update | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| user | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| user | search | 4 | 1 |  |  |  |  |  |  |  | 1 | 2 |  |
-| decision-requirements | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| decision-requirements | search | 6 | 1 |  |  |  |  |  |  |  | 1 | 4 |  |
-| correlated-message-subscription | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 6 |  |
-| message-subscriptions | search | 8 | 1 |  |  |  |  |  |  |  | 1 | 6 |  |
-| batch-operation-item | search | 5 | 1 |  |  |  |  |  |  |  | 1 | 3 |  |
-| message | create | 4 | 2 |  |  |  |  |  |  |  |  |  | 2 |
-| conditional | create | 3 | 1 |  |  |  |  |  |  |  |  | 1 | 1 |
-| signal | create | 2 | 1 |  |  |  |  |  |  |  |  |  | 1 |
-| system | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
-| clock | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
+| batch-operation | search | 10 | 1 | 6 |  |  |  |  |  |  | 1 | 2 |  |
+| correlated-message-subscription | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
+| message-subscriptions | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
+| batch-operation-item | search | 10 | 1 | 5 |  |  |  |  |  |  | 1 | 3 |  |
+| system | get | 9 | 2 | 7 |  |  |  |  |  |  |  |  |  |
+| clock | create | 7 | 1 | 6 |  |  |  |  |  |  |  |  |  |
 | clock | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| setup | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| expression | create | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
+| expression | create | 7 | 1 | 6 |  |  |  |  |  |  |  |  |  |
 | authentication | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | license | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | status | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |

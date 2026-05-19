@@ -15,12 +15,23 @@ so the two suites can be diffed directly. Answers the questions in
 
 | file | what it is |
 |---|---|
-| `build_coverage.py` | Walks the generated specs, resolves each `operationId` against `spec/camunda-oca/bundled/rest-api.bundle.json`, classifies entity/operation/variant/category/form-step/prerequisite, and writes the artifacts below. |
-| `tests.csv` | One row per `test()` declaration. Columns: `file, line, entity, category, operation, form_step, prerequisite, method, path, operationId, variants, test_name`. |
+| `build_coverage.py` | Walks every generator test source, resolves each `operationId` against `spec/camunda-oca/bundled/rest-api.bundle.json`, classifies entity/operation/variant/category/form-step/prerequisite, and writes the artifacts below. |
+| `tests.csv` | One row per `test()` declaration. Columns: `file, line, source, entity, category, operation, form_step, prerequisite, method, path, operationId, variants, test_name`. |
 | `coverage_matrix.csv` | `entity × operation` grid with variant counts. Same columns as the upstream matrix. |
 | `coverage_matrix.md` | Markdown view of the matrix: at-a-glance ✓ table + counts-per-cell. |
 | `gaps.md` | Heuristic gap report: entities missing 401/403/400/404/409 coverage, missing observe-after-delete, search ops with no pagination/sort/filter. |
 | `category_breakdown.md` | Per-category breakdown (Form, prerequisite, observation channel split, form-step counts, per-test table with `file:line`). Mirrors upstream `category_breakdown.md`. |
+
+## Test sources scanned
+
+The generator emits tests into three locations; `build_coverage.py` scans all of them:
+
+| location | emitter | tag in `tests.csv` `source` column |
+|---|---|---|
+| `generated/camunda-oca/playwright/<operationId>.feature.spec.ts` | feature emitter (happy path + basic shape) | `feature` |
+| `generated/camunda-oca/playwright/<operationId>.variant.spec.ts` | variant emitter (schema/input variations: `bpmn`, `oneOf …`, etc.) | `variant` |
+| `generated/camunda-oca/playwright/edges/<EdgeName>.lifecycle.spec.ts` | edge lifecycle template (`establish → observe present → revoke → observe absent`) | `lifecycle` |
+| `generated/camunda-oca/request-validation/<entity>-validation-api-tests.spec.ts` | request-validation emitter (negative schema cases, all bad-request) | `request-validation` |
 
 ## Regenerate
 
@@ -65,21 +76,41 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 
 |  | upstream | generator |
 |---|---:|---:|
-| Unique tests | **1001** | **518** |
+| Unique tests | 1001 | **1567** |
 | Entities | 33 | 37 |
-| Happy-path (occurrences) | 173 | 185 |
-| Negative (400/401/403/404/409, occurrences) | 547 | **0** |
-| Unique tests with any negative label | 543 | **0** |
-| Pagination-sort + filter (occurrences) | 138 | **0** |
-| Unique tests with pagination/filter label | 135 | **0** |
-| Observe-absence | 2 | 26 |
+| Happy-path (occurrences) | 173 | 197 |
+| Bad-request (400, occurrences) | 195 | **1037** |
+| Unauthorized (401) | 165 | **0** |
+| Not-found (404) | 127 | **0** |
+| Filter | 85 | **0** |
+| Pagination-sort | 53 | **0** |
+| Conflict (409) | 31 | **0** |
+| Forbidden (403) | 29 | **0** |
+| Observe-absence | 2 | 38 |
 | Data-driven / oneOf variants | 5 | **295** |
 
-The **483-test gap** is concentrated in **negative paths** (543 unique upstream
-tests have a negative label; generator has 0) and **search refinement** (135
-unique upstream tests have pagination/filter; generator has 0). The generator
-already exceeds upstream on input-shape variants (`data-driven` +290) and
-`observe-absence` (+24). See `gaps.md` for the categorised list.
+**The generator emits 566 more tests than upstream.** It massively exceeds
+upstream on 400 bad-request coverage (the `request-validation` emitter alone
+produces 1037 tests across 17 violation kinds: `additional-prop`,
+`constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`,
+`missing-required`, `missing-required-combo`, `oneof-ambiguous`,
+`oneof-cross-bleed`, `oneof-none-match`, `param-constraint-violation`,
+`param-missing`, `param-type-mismatch`, `type-mismatch`, `union`,
+`unique-items-violation`, and `additional-prop-general`).
+
+The buckets where the generator currently emits zero tests:
+
+- **401 unauthorized** (165 in upstream) — needs deployment-mode-aware auth
+  context, see `camunda/camunda#52511`.
+- **403 forbidden** (29 in upstream) — needs RBAC ABox + restricted-token
+  test infrastructure.
+- **404 not-found** (127 in upstream) — fake-ID variant on path params; computable.
+- **409 conflict** (31 in upstream) — needs `duplicatePolicy` ABox slice
+  (designed in 8.8, not yet landed; see #277).
+- **Pagination + sort** (53 in upstream) — computable from declared params.
+- **Filter** (85 in upstream) — computable from filter schemas on search ops.
+
+See `gaps.md` for the categorised per-entity list.
 
 ## Limitations
 

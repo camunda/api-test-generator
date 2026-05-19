@@ -6,9 +6,16 @@ c8-orchestration-cluster-e2e-test-suite/coverage-analysis/coverage_matrix.csv.
 Run from this script's directory:
     python3 build_coverage.py
 
-Scans ../generated/camunda-oca/playwright/*.spec.ts and emits, next to this script:
-  - tests.csv           : per-test labels (file, line, entity, operation, variants, test_name)
+Scans every generator test source and emits, next to this script:
+  - tests.csv           : per-test labels (file, line, source, entity, operation, variants, test_name, ...)
   - coverage_matrix.csv : entity x operation grid, variant counts (same columns as upstream)
+  - coverage_matrix.md, gaps.md, category_breakdown.md
+
+Test sources scanned:
+  - generated/camunda-oca/playwright/*.feature.spec.ts         (feature emitter, happy + observe-absence)
+  - generated/camunda-oca/playwright/*.variant.spec.ts         (variant emitter, schema/input variants)
+  - generated/camunda-oca/playwright/edges/*.lifecycle.spec.ts (edge lifecycle: establish -> present -> revoke -> absent)
+  - generated/camunda-oca/request-validation/*.spec.ts         (negative request-validation, all bad-request)
 """
 import csv
 import json
@@ -18,6 +25,9 @@ from collections import defaultdict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PLAYWRIGHT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'generated', 'camunda-oca', 'playwright'))
+EDGES_DIR = os.path.join(PLAYWRIGHT_DIR, 'edges')
+REQVAL_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'generated', 'camunda-oca', 'request-validation'))
+EDGES_ABOX = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'configs', 'camunda-oca', 'ontology', 'edges.json'))
 SPEC_PATH = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'spec', 'camunda-oca', 'bundled', 'rest-api.bundle.json'))
 OUT = SCRIPT_DIR
 
@@ -272,42 +282,66 @@ def variants_of(test_name):
 TEST_RE = re.compile(
     r"""(?m)^[ \t]*test(?:\.(?:skip|only|fixme|fail))?\s*\(\s*['"`]([^'"`]+)['"`]"""
 )
-SPEC_FILE_RE = re.compile(r'^(?P<op>[A-Za-z][A-Za-z0-9]*)\.(feature|variant)\.spec\.ts$')
+# playwright/<operationId>.feature.spec.ts  /  <operationId>.variant.spec.ts
+SPEC_FILE_RE = re.compile(r'^(?P<op>[A-Za-z][A-Za-z0-9]*)\.(?P<src>feature|variant)\.spec\.ts$')
+# playwright/edges/<EdgeName>.lifecycle.spec.ts
+EDGE_FILE_RE = re.compile(r'^(?P<edge>[A-Za-z][A-Za-z0-9]*)\.lifecycle\.spec\.ts$')
+# request-validation/<entity-slug>-validation-api-tests.spec.ts  (test names start with operationId)
+REQVAL_TEST_NAME_RE = re.compile(r'^(?P<op>[A-Za-z][A-Za-z0-9]*)\s*-\s*(?P<desc>.*)$')
+
+# Load edge ABox so we can map an EdgeName (e.g. RoleUserMembership) to its
+# establishedBy operationId (assignRoleToUser) -> entity (role) via the spec.
+def load_edge_index():
+    try:
+        edges = json.load(open(EDGES_ABOX))
+    except FileNotFoundError:
+        return {}
+    idx = {}
+    for e in edges.get('edges', []):
+        name = e.get('name')
+        eb = e.get('establishedBy')
+        op_id = eb.get('operationId') if isinstance(eb, dict) else eb
+        if name and op_id:
+            idx[name] = op_id
+    return idx
+
+EDGE_INDEX = load_edge_index()
+
+def read_tests(path):
+    with open(path, encoding='utf-8') as fp:
+        content = fp.read()
+    out = []
+    for tm in TEST_RE.finditer(content):
+        out.append((tm.group(1), content.count('\n', 0, tm.start()) + 1))
+    return out
+
+def resolve_op(op_id):
+    """operationId -> (method, path, entity, operation). Falls back to 'unknown' if not in spec."""
+    method_path = OPS.get(op_id)
+    if not method_path:
+        return '', '', 'unknown', 'other'
+    method, path = method_path
+    return method, path, entity_of_path(path), operation_of(op_id, method, path)
 
 rows = []
 unresolved_ops = set()
+
+# --- 5a. playwright/*.feature.spec.ts and *.variant.spec.ts ---
 for f in sorted(os.listdir(PLAYWRIGHT_DIR)):
     m = SPEC_FILE_RE.match(f)
     if not m:
         continue
     op_id = m.group('op')
-    method_path = OPS.get(op_id)
-    if not method_path:
+    source = m.group('src')  # 'feature' or 'variant'
+    method, path, entity, operation = resolve_op(op_id)
+    if entity == 'unknown':
         unresolved_ops.add(op_id)
-        method = ''
-        path = ''
-        entity = 'unknown'
-        operation = 'other'
-    else:
-        method, path = method_path
-        entity = entity_of_path(path)
-        operation = operation_of(op_id, method, path)
-
-    full = os.path.join(PLAYWRIGHT_DIR, f)
-    with open(full, encoding='utf-8') as fp:
-        content = fp.read()
-    for tm in TEST_RE.finditer(content):
-        name = tm.group(1)
-        line_no = content.count('\n', 0, tm.start()) + 1
+    for name, line_no in read_tests(os.path.join(PLAYWRIGHT_DIR, f)):
         variants = variants_of(name)
         rows.append({
-            'file': f,
-            'line': line_no,
-            'entity': entity,
-            'operation': operation,
-            'method': method,
-            'path': path,
-            'operationId': op_id,
+            'file': f, 'line': line_no, 'source': source,
+            'entity': entity, 'operation': operation,
+            'method': method, 'path': path, 'operationId': op_id,
             'category': category_of(op_id, entity),
             'form_step': form_step_of(operation, variants),
             'prerequisite': prerequisite_of(op_id, entity),
@@ -315,10 +349,67 @@ for f in sorted(os.listdir(PLAYWRIGHT_DIR)):
             'test_name': name,
         })
 
+# --- 5b. playwright/edges/*.lifecycle.spec.ts ---
+# Each test exercises establish -> observe present -> revoke -> observe absent,
+# so we tag it with multi-label variants (happy-path|observe-absence) and a
+# dedicated 'lifecycle' form step. Entity comes from the establishedBy op's path.
+if os.path.isdir(EDGES_DIR):
+    for f in sorted(os.listdir(EDGES_DIR)):
+        m = EDGE_FILE_RE.match(f)
+        if not m:
+            continue
+        edge_name = m.group('edge')
+        op_id = EDGE_INDEX.get(edge_name, '')
+        if op_id:
+            method, path, entity, operation = resolve_op(op_id)
+        else:
+            method, path, entity, operation = '', '', 'unknown', 'lifecycle'
+        for name, line_no in read_tests(os.path.join(EDGES_DIR, f)):
+            rows.append({
+                'file': f'edges/{f}', 'line': line_no, 'source': 'lifecycle',
+                'entity': entity, 'operation': 'lifecycle',
+                'method': method, 'path': path, 'operationId': op_id,
+                'category': 'B. Membership/Association',
+                'form_step': 'lifecycle',
+                'prerequisite': prerequisite_of(op_id, entity) if op_id else 'unknown',
+                'variants': 'happy-path|observe-absence',
+                'test_name': name,
+            })
+
+# --- 5c. request-validation/*.spec.ts ---
+# Every test in this emitter is a bad-request negative. Test names start with
+# the operationId: '<operationId> - <kind description>'. Each kind (Missing
+# body, Additional prop, oneOf ambiguous, ...) is recorded as the form_step
+# detail; the matrix variant is uniformly 'bad-request'.
+if os.path.isdir(REQVAL_DIR):
+    for f in sorted(os.listdir(REQVAL_DIR)):
+        if not f.endswith('.spec.ts'):
+            continue
+        for name, line_no in read_tests(os.path.join(REQVAL_DIR, f)):
+            tm = REQVAL_TEST_NAME_RE.match(name)
+            op_id = tm.group('op') if tm else ''
+            desc = tm.group('desc').strip() if tm else ''
+            if op_id:
+                method, path, entity, operation = resolve_op(op_id)
+                if entity == 'unknown':
+                    unresolved_ops.add(op_id)
+            else:
+                method, path, entity, operation = '', '', 'unknown', 'other'
+            rows.append({
+                'file': f'request-validation/{f}', 'line': line_no, 'source': 'request-validation',
+                'entity': entity, 'operation': operation,
+                'method': method, 'path': path, 'operationId': op_id,
+                'category': category_of(op_id, entity),
+                'form_step': f'negative-{operation}' if operation in ('create','get','update','delete','search') else 'negative-other',
+                'prerequisite': prerequisite_of(op_id, entity),
+                'variants': 'bad-request',
+                'test_name': name,
+            })
+
 # ---------- 6. write tests.csv ----------
 tests_csv = os.path.join(OUT, 'tests.csv')
 with open(tests_csv, 'w', newline='', encoding='utf-8') as fp:
-    w = csv.DictWriter(fp, fieldnames=['file','line','entity','category','operation','form_step','prerequisite','method','path','operationId','variants','test_name'])
+    w = csv.DictWriter(fp, fieldnames=['file','line','source','entity','category','operation','form_step','prerequisite','method','path','operationId','variants','test_name'])
     w.writeheader()
     w.writerows(rows)
 print(f"wrote {tests_csv} ({len(rows)} test declarations)")
@@ -329,7 +420,7 @@ if unresolved_ops:
 # Same columns as upstream coverage_matrix.csv so the two files can be diffed.
 variant_cols = ['happy-path','bad-request','unauthorized','forbidden','not-found',
                 'conflict','pagination-sort','filter','observe-absence','data-driven','unlabeled']
-op_order = ['create','get','update','delete','search','other','parameterized']
+op_order = ['create','get','update','delete','search','lifecycle','other','parameterized']
 
 matrix = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 entity_totals = defaultdict(int)
@@ -500,7 +591,10 @@ cat_order = [
 ]
 form_step_order = [
     'create', 'observe-present-get', 'observe-present-search', 'mutate',
-    'delete', 'observe-absence', 'other',
+    'delete', 'observe-absence', 'lifecycle',
+    'negative-create', 'negative-get', 'negative-update', 'negative-delete',
+    'negative-search', 'negative-other',
+    'other',
 ]
 variant_order = [
     'happy-path', 'observe-absence', 'data-driven', 'unlabeled',
