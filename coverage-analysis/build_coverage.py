@@ -530,9 +530,17 @@ var_keys    = ['happy-path','bad-request','unauthorized','forbidden','not-found'
 with open(md_path, 'w', encoding='utf-8') as fp:
     fp.write('# api-test-generator — Coverage matrix (entity × operation × variant)\n\n')
     fp.write(f'Total test declarations: **{len(rows)}** across **{len(entity_totals)}** entities.\n\n')
-    fp.write('Variants are first-match labels derived from the generator\'s emitter suffix '
-             '(`base`, `negative empty`, `bpmn|dmn|drd|form|path|cycle/...`, `oneOf ...`, `scenario`). '
-             'See `build_coverage.py` for the rule table.\n\n')
+    fp.write('Variants are multi-label — a test can carry more than one tag, so '
+             'matrix columns are **not** mutually exclusive (a lifecycle test tagged '
+             '`happy-path|observe-absence` counts in both columns, but only once in '
+             '`total`). Labels come from three sources: (1) test-name suffix '
+             '(`base` → `happy-path`, `negative empty` → `observe-absence`, '
+             '`bpmn`/`dmn`/`drd`/`form`/`path`/`cycle/...`/`oneOf ...` → `data-driven`, '
+             '`variant-N - scenario` → `unlabeled`), '
+             '(2) test-body shape (`page: {` / `sort: [` → `pagination-sort`, '
+             '`filter: {` → `filter`), and (3) fixed labels for the lifecycle and '
+             'request-validation emitters (`happy-path|observe-absence` and '
+             '`bad-request` respectively). See `build_coverage.py` for the rule table.\n\n')
     fp.write('Legend: ✓ = at least 1, blank = 0.\n\n')
 
     fp.write('## At-a-glance presence (✓ = ≥1 test)\n\n')
@@ -609,12 +617,16 @@ with open(gaps_path, 'w', encoding='utf-8') as fp:
 
     fp.write('\n## Search ops with no pagination/sort or filter coverage\n\n')
     fp.write('Search operations that have tests but none labeled `pagination-sort` or `filter`.\n\n')
+    any_search_gap = False
     for ent in sorted(entity_totals):
         cell = matrix_variants[ent].get('search', {})
         if not cell:
             continue
         if cell.get('pagination-sort', 0) == 0 and cell.get('filter', 0) == 0:
             fp.write(f'- {ent} (search): no pagination-sort/filter labels\n')
+            any_search_gap = True
+    if not any_search_gap:
+        fp.write('- _(none)_\n')
 print(f"wrote {gaps_path}")
 
 # ---------- 10. category_breakdown.md ----------

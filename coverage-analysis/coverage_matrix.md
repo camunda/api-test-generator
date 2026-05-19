@@ -2,7 +2,7 @@
 
 Total test declarations: **1617** across **37** entities.
 
-Variants are first-match labels derived from the generator's emitter suffix (`base`, `negative empty`, `bpmn|dmn|drd|form|path|cycle/...`, `oneOf ...`, `scenario`). See `build_coverage.py` for the rule table.
+Variants are multi-label — a test can carry more than one tag, so matrix columns are **not** mutually exclusive (a lifecycle test tagged `happy-path|observe-absence` counts in both columns, but only once in `total`). Labels come from three sources: (1) test-name suffix (`base` → `happy-path`, `negative empty` → `observe-absence`, `bpmn`/`dmn`/`drd`/`form`/`path`/`cycle/...`/`oneOf ...` → `data-driven`, `variant-N - scenario` → `unlabeled`), (2) test-body shape (`page: {` / `sort: [` → `pagination-sort`, `filter: {` → `filter`), and (3) fixed labels for the lifecycle and request-validation emitters (`happy-path|observe-absence` and `bad-request` respectively). See `build_coverage.py` for the rule table.
 
 Legend: ✓ = at least 1, blank = 0.
 
