@@ -95,13 +95,13 @@ Legend: ✓ = at least 1, blank = 0.
 | decision-definition | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | decision-definition | search | 13 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
 | audit-log | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
-| audit-log | search | 22 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
+| audit-log | search | 22 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ | ✓ |
 | document | create | 18 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | document | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | document | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | document | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | variable | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
-| variable | search | 14 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
+| variable | search | 14 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ | ✓ |
 | setup | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | conditional | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-requirements | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
@@ -212,13 +212,13 @@ Legend: ✓ = at least 1, blank = 0.
 | decision-definition | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
 | decision-definition | search | 13 | 1 | 5 |  |  |  |  | 2 | 4 | 1 | 6 |  |
 | audit-log | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
-| audit-log | search | 22 | 1 | 5 |  |  |  |  | 2 | 13 | 1 | 11 |  |
+| audit-log | search | 22 | 1 | 5 |  |  |  |  | 2 | 13 | 1 | 11 | 4 |
 | document | create | 18 | 3 | 11 |  |  |  |  |  |  |  | 4 |  |
 | document | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | document | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | document | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | variable | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
-| variable | search | 14 | 1 | 6 |  |  |  |  | 2 | 4 | 1 | 4 |  |
+| variable | search | 14 | 1 | 6 |  |  |  |  | 2 | 4 | 1 | 4 | 2 |
 | setup | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |
 | conditional | create | 15 | 1 | 12 |  |  |  |  |  |  |  | 2 |  |
 | decision-requirements | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |

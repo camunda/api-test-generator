@@ -384,9 +384,13 @@ for f in sorted(os.listdir(PLAYWRIGHT_DIR)):
         variants = variants_of(name)
         # Augment with body-detected shape variants (pagination/filter) —
         # these are observable from the request body, not the test name.
+        # `unlabeled` is preserved alongside extras because it describes the
+        # NAME classification ("no info derivable from test name"); a dynamic
+        # `variant-N - scenario` test that also has a filter body is both
+        # name-unlabeled and body-filter, so it carries both labels.
         extras = body_extra_variants(body)
         if extras:
-            base = [] if variants == 'unlabeled' else variants.split('|')
+            base = variants.split('|')
             variants = '|'.join(base + [e for e in extras if e not in base])
         rows.append({
             'file': f, 'line': line_no, 'source': source,

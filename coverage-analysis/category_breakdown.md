@@ -1750,25 +1750,25 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getAuditLog.feature.spec.ts`, `request-validation/auditlogs-validation-api-tests.spec.ts`, `searchAuditLogs.feature.spec.ts`, `searchAuditLogs.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 16
 - **Form-step counts**: observe-present-get=1, observe-present-search=16, observe-absence=1, negative-get=1, negative-search=5
-- **Variants**: happy-path=2, observe-absence=1, data-driven=11, bad-request=6, pagination-sort=2, filter=13
+- **Variants**: happy-path=2, observe-absence=1, data-driven=11, unlabeled=4, bad-request=6, pagination-sort=2, filter=13
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getAuditLog.feature.spec.ts:12` | feature-1 - getAuditLog - base (1) |
 | observe-present-search | happy-path | `searchAuditLogs.feature.spec.ts:12` | feature-1 - searchAuditLogs - base (1) |
-| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:13` | variant-1 - scenario |
+| observe-present-search | unlabeled, filter | `searchAuditLogs.variant.spec.ts:13` | variant-1 - scenario |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:42` | variant-2 - searchAuditLogs - bpmn #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:92` | variant-3 - searchAuditLogs - bpmn #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:163` | variant-4 - searchAuditLogs - bpmn #1 |
-| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:265` | variant-5 - scenario |
-| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:293` | variant-6 - scenario |
+| observe-present-search | unlabeled, filter | `searchAuditLogs.variant.spec.ts:265` | variant-5 - scenario |
+| observe-present-search | unlabeled, filter | `searchAuditLogs.variant.spec.ts:293` | variant-6 - scenario |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:322` | variant-7 - searchAuditLogs - form #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:371` | variant-8 - searchAuditLogs - bpmn #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:421` | variant-9 - searchAuditLogs - bpmn #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:523` | variant-10 - searchAuditLogs - drd #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:572` | variant-11 - searchAuditLogs - dmn #1 |
 | observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:621` | variant-12 - searchAuditLogs - dmn #1 |
-| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:697` | variant-13 - scenario |
+| observe-present-search | unlabeled, filter | `searchAuditLogs.variant.spec.ts:697` | variant-13 - scenario |
 | observe-present-search | data-driven, pagination-sort | `searchAuditLogs.variant.spec.ts:725` | variant-14 - searchAuditLogs - path #1 |
 | observe-present-search | data-driven, pagination-sort | `searchAuditLogs.variant.spec.ts:777` | variant-15 - searchAuditLogs - path #1 |
 | observe-absence | observe-absence | `searchAuditLogs.feature.spec.ts:35` | feature-2 - searchAuditLogs - negative empty (2) |
@@ -1785,15 +1785,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getVariable.feature.spec.ts`, `request-validation/variables-validation-api-tests.spec.ts`, `searchVariables.feature.spec.ts`, `searchVariables.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 7
 - **Form-step counts**: observe-present-get=1, observe-present-search=7, observe-absence=1, negative-get=1, negative-search=6
-- **Variants**: happy-path=2, observe-absence=1, data-driven=4, bad-request=7, pagination-sort=2, filter=4
+- **Variants**: happy-path=2, observe-absence=1, data-driven=4, unlabeled=2, bad-request=7, pagination-sort=2, filter=4
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getVariable.feature.spec.ts:12` | feature-1 - getVariable - base (1) |
 | observe-present-search | happy-path | `searchVariables.feature.spec.ts:12` | feature-1 - searchVariables - base (1) |
 | observe-present-search | data-driven, filter | `searchVariables.variant.spec.ts:13` | variant-1 - searchVariables - path #1 |
-| observe-present-search | filter | `searchVariables.variant.spec.ts:64` | variant-2 - scenario |
-| observe-present-search | filter | `searchVariables.variant.spec.ts:93` | variant-3 - scenario |
+| observe-present-search | unlabeled, filter | `searchVariables.variant.spec.ts:64` | variant-2 - scenario |
+| observe-present-search | unlabeled, filter | `searchVariables.variant.spec.ts:93` | variant-3 - scenario |
 | observe-present-search | data-driven, filter | `searchVariables.variant.spec.ts:122` | variant-4 - searchVariables - bpmn #1 |
 | observe-present-search | data-driven, pagination-sort | `searchVariables.variant.spec.ts:191` | variant-5 - searchVariables - path #1 |
 | observe-present-search | data-driven, pagination-sort | `searchVariables.variant.spec.ts:243` | variant-6 - searchVariables - path #1 |
