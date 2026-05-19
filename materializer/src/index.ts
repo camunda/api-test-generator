@@ -508,29 +508,42 @@ async function run() {
         console.warn('Skipping variant file (parse/emission failed):', f, msg);
       }
     }
-    // Template-derived suites (Lift 22 / #270). One Playwright suite per
-    // edge under `<playwrightSuiteDir>/edges/`. Only the Playwright emitter
-    // wires this — other emitters opt in by implementing their own
-    // template-aware renderer. The scenarios are produced by the planner
-    // (`scenarioTemplateInstantiator.ts`); if the directory is missing
-    // (older planner runs, configs that don't ship an EdgeLifecycle
-    // template), `emitTemplateSuites` no-ops.
+    // Template-derived suites (Lift 22 / #270; extended in #280 with
+    // EntityLifecycle). One Playwright suite per subject under
+    // `<playwrightSuiteDir>/edges/` (Edge templates) or
+    // `<playwrightSuiteDir>/entities/` (Entity templates). Only the
+    // Playwright emitter wires this — other emitters opt in by
+    // implementing their own template-aware renderer. The scenarios
+    // are produced by the planner (`scenarioTemplateInstantiator.ts`);
+    // if a directory is missing (older planner runs, configs that
+    // don't ship the corresponding template), `emitTemplateSuites`
+    // no-ops.
     let lifecycleCount = 0;
     if (emitter.id === PlaywrightEmitter.id) {
+      const seedsArg = globalContextSeeds.map((s) => ({
+        binding: s.binding,
+        seedRule: s.seedRule,
+      }));
       const edgesOutDir = path.join(outDir, 'edges');
       // Wipe the per-template subdir for the same reason the parent
       // `outDir` is wiped above: stale specs from a previous spec version
       // must not survive into the current run.
       await fs.rm(edgesOutDir, { recursive: true, force: true });
-      const written = await emitTemplateSuites({
+      const edgesWritten = await emitTemplateSuites({
         scenariosDir: getTemplateScenariosDir(repoRoot, 'EdgeLifecycle'),
         outDir: edgesOutDir,
-        globalContextSeeds: globalContextSeeds.map((s) => ({
-          binding: s.binding,
-          seedRule: s.seedRule,
-        })),
+        globalContextSeeds: seedsArg,
       });
-      lifecycleCount = written.length;
+      lifecycleCount += edgesWritten.length;
+
+      const entitiesOutDir = path.join(outDir, 'entities');
+      await fs.rm(entitiesOutDir, { recursive: true, force: true });
+      const entitiesWritten = await emitTemplateSuites({
+        scenariosDir: getTemplateScenariosDir(repoRoot, 'EntityLifecycle'),
+        outDir: entitiesOutDir,
+        globalContextSeeds: seedsArg,
+      });
+      lifecycleCount += entitiesWritten.length;
     }
     console.log(
       `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites) in ${outDir} (target: ${emitter.id})`,

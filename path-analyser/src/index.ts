@@ -14,7 +14,11 @@ import {
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
-import { loadEdgesAbox, loadScenarioTemplatesAbox } from './ontology/loader.js';
+import {
+  loadEdgesAbox,
+  loadEntityKindsAbox,
+  loadScenarioTemplatesAbox,
+} from './ontology/loader.js';
 import { isDeploymentGatewayOp, isJobActivatorOp } from './ontology/operationRoles.js';
 import {
   generateOptionalSubShapeVariants,
@@ -489,8 +493,15 @@ async function main() {
   // step cannot perturb byte-stability of the per-endpoint suites.
   const templatesAbox = loadScenarioTemplatesAbox(repoRoot);
   const edgesAbox = loadEdgesAbox(repoRoot);
+  const entityKindsAboxForTemplates = loadEntityKindsAbox(repoRoot);
   if (templatesAbox && edgesAbox) {
-    const results = instantiateAllTemplates(graph, templatesAbox, edgesAbox, featureScenarioStash);
+    const results = instantiateAllTemplates(
+      graph,
+      templatesAbox,
+      edgesAbox,
+      featureScenarioStash,
+      entityKindsAboxForTemplates,
+    );
     // Wipe the ENTIRE templates partition first, then recreate the
     // per-template subdirectories we actually produced. Deriving the
     // wipe set from `results.map(r => r.templateName)` would miss

@@ -51,21 +51,25 @@ export interface EmitTemplateSuitesOptions {
 }
 
 /**
- * Read every EdgeLifecycle template scenario JSON from `scenariosDir` and
- * write one Playwright suite per edge to `outDir`. The emitted suite shape
- * is:
+ * Read every lifecycle template scenario JSON from `scenariosDir` and
+ * write one Playwright suite per subject to `outDir`. Handles both
+ * EdgeLifecycle (membership-search observe) and EntityLifecycle
+ * (#280 — get-by-id status observe); dispatch is by
+ * `TemplateScenarioFile.subjectKind` ('Edge' vs 'Entity').
  *
- *   1. universal-seed prologue (one `ctx.<binding> ??= seedBinding(...)` per
- *      configured GlobalContextSeed),
- *   2. one `seedBinding('<name>')` per `PrereqChainStep.seedBindings` entry
- *      not already covered by (1),
+ * Suite shape (both templates share steps 1–4, differ on 5/7):
+ *   1. universal-seed prologue (one `ctx.<binding> ??= seedBinding(...)`
+ *      per configured GlobalContextSeed),
+ *   2. one `seedBinding('<name>')` per `PrereqChainStep.seedBindings`
+ *      entry not already covered by (1),
  *   3. inline render of each `PrereqChainStep.requestPlan` step,
  *   4. inline render of the `InvokeStep.requestPlan` (the establisher),
- *   5. inline render of the present-`ObserveStep` plus its membership
- *      assertion (`.toContain`),
+ *   5. inline render of the present-`ObserveStep` (membership assertion
+ *      for Edge / get-by-id status 200 assertion for Entity),
  *   6. inline render of the revoke `InvokeStep.requestPlan`,
- *   7. inline render of the absent-`ObserveStep` plus its membership
- *      assertion (`.not.toContain`).
+ *   7. inline render of the absent-`ObserveStep` (membership assertion
+ *      for Edge / get-by-id status 404 assertion with expect404-mode
+ *      awaitEventually for Entity).
  *
  * Returns the absolute paths of files written, in emit order.
  */
@@ -139,9 +143,16 @@ function renderLifecycleSuite(
   // guarantee this on `npm test`, but the emitter is its own entry point
   // (materializer CLI, future per-suite invocations) and must not produce
   // a syntactically valid spec that secretly elides a step.
+  const subjectKind = file.subjectKind;
+  if (subjectKind !== 'Edge' && subjectKind !== 'Entity') {
+    throw new Error(
+      `Unknown subjectKind '${String(subjectKind)}' on template scenario for ${file.subjectName}.`,
+    );
+  }
+  const templateLabel = subjectKind === 'Edge' ? 'EdgeLifecycle' : 'EntityLifecycle';
   if (steps.length !== 5) {
     throw new Error(
-      `EdgeLifecycle template ${file.subjectName} must have exactly 5 steps; got ${steps.length}.`,
+      `${templateLabel} template ${file.subjectName} must have exactly 5 steps; got ${steps.length}.`,
     );
   }
   const [prereq, establish, observePresent, revoke, observeAbsent] = steps;
@@ -159,6 +170,19 @@ function renderLifecycleSuite(
   }
   if (observeAbsent.kind !== 'observe' || observeAbsent.assertion.expect !== 'absent') {
     throw new Error(`Step 4 of ${file.subjectName} must be an absent-observe step.`);
+  }
+  // Per-subject assertion-kind consistency check. The instantiator
+  // pairs Edge templates with `membership` assertions and Entity
+  // templates with `statusOnly`; a divergence here means a bad
+  // scenario file slipped past validation.
+  const expectedAssertionKind = subjectKind === 'Edge' ? 'membership' : 'statusOnly';
+  if (
+    observePresent.assertion.kind !== expectedAssertionKind ||
+    observeAbsent.assertion.kind !== expectedAssertionKind
+  ) {
+    throw new Error(
+      `${templateLabel} ${file.subjectName}: expected observe assertion kind '${expectedAssertionKind}', got present='${observePresent.assertion.kind}' / absent='${observeAbsent.assertion.kind}'.`,
+    );
   }
 
   // Collect every RequestStep the suite will render so the per-suite
@@ -180,10 +204,26 @@ function renderLifecycleSuite(
   // ABox EC set. The latter mirrors the per-endpoint emitter's wrap
   // decision (`stepNeedsAwaitForOp`) so the two emitters cannot drift
   // on which steps get awaitEventually() wrapping.
+  //
+  // For EntityLifecycle (#280), the absent-observe step's requestPlan
+  // expects 200 (the per-endpoint scenario's planned shape), so the
+  // standard `stepNeedsAwaitForOp` predicate evaluates against the
+  // wrong target status. We separately consult `ecOps.has(observeOpId)`
+  // for any Entity observe-by-id step so the import is included.
   const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
   const needsAwaitEventually =
     allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
-    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps));
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps)) ||
+    (subjectKind === 'Entity' &&
+      (ecOps.has(observePresent.operationId) || ecOps.has(observeAbsent.operationId)));
+  // Multipart steps (e.g. createDocument) inline a `resolveFixture(...)`
+  // call on the @@FILE: branch. Without this import the generated suite
+  // fails the strict-mode typecheck. Roles aren't in scope for template
+  // suites today (no role bundles wired into emitTemplateSuites), so
+  // every multipart step falls through to the inline path.
+  const needsResolveFixture = allRequestSteps.some(
+    (rp) => rp.bodyKind === 'multipart' && !!rp.multipartTemplate,
+  );
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
@@ -193,6 +233,9 @@ function renderLifecycleSuite(
   lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
   if (needsAwaitEventually) {
     lines.push("import { awaitEventually } from '../support/await-eventually';");
+  }
+  if (needsResolveFixture) {
+    lines.push("import { resolveFixture } from '../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
@@ -219,12 +262,6 @@ function renderLifecycleSuite(
     lines.push(`      ctx['${name}'] = seedBinding('${name}');`);
     lines.push('    }');
   }
-  // Literal bindings from the BFS scenario (non-PENDING) flow into ctx so a
-  // later step can read the planner-minted value before any extract overwrites
-  // it. PENDING entries are covered by the seedBindings loop above. Iterates
-  // `prereq.bindings` (binding-name-keyed, same shape as
-  // `EndpointScenario.bindings`) — NOT `scenario.bindings`, which is
-  // semantic-type-keyed and would resolve to meaningless ctx keys.
   for (const [k, v] of Object.entries(prereq.bindings)) {
     if (v === '__PENDING__') continue;
     if (globalSeedNames.has(k)) continue; // already covered by prologue
@@ -329,6 +366,84 @@ function appendObserveStep(
   label: string,
   ecOps: ReadonlySet<string>,
 ): void {
+  if (step.assertion.kind === 'statusOnly') {
+    appendObserveByIdStatusStep(lines, step, idx, label, ecOps);
+    return;
+  }
+  appendObserveMembershipStep(lines, step, scenarioBindings, idx, label, ecOps);
+}
+
+/**
+ * #280 — EntityLifecycle observe rendering: GET-by-id with a
+ * status-only assertion (no body inspection, no membership search).
+ *
+ * For eventually-consistent observation ops, the absent case
+ * (`expectedStatus === 404`) wraps the fetch in
+ * `awaitEventually({ expect404: true })` so 404 becomes the success
+ * terminator and 200 keeps polling. The present case wraps in default
+ * awaitEventually (404 = retry, 200 = success). For non-EC ops both
+ * cases emit a plain `request.get(...)` call.
+ */
+function appendObserveByIdStatusStep(
+  lines: string[],
+  step: ObserveStep,
+  idx: number,
+  label: string,
+  ecOps: ReadonlySet<string>,
+): void {
+  if (step.assertion.kind !== 'statusOnly') {
+    throw new Error(
+      `appendObserveByIdStatusStep called with assertion.kind='${step.assertion.kind}'`,
+    );
+  }
+  const respVar = `resp${idx + 1}`;
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const method = step.requestPlan.method.toLowerCase();
+  const expectedStatus = step.assertion.expectedStatus;
+  const isEC = ecOps.has(step.operationId);
+  // Only retry on a status mismatch when the op is EC. For the
+  // present case we use default awaitEventually behaviour (404 →
+  // retry, 200 → success). For the absent case we flip polarity with
+  // `expect404: true` (200 → keep polling, 404 → success).
+  const wrap = isEC;
+  const useExpect404 = isEC && expectedStatus === 404;
+
+  lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
+  lines.push(`      const url = baseUrl + ${urlExpr};`);
+  if (wrap) {
+    lines.push(`      const ${respVar} = await awaitEventually(`);
+    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        {`);
+    lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
+    lines.push(`          operationId: '${step.operationId}',`);
+    if (useExpect404) lines.push(`          expect404: true,`);
+    lines.push(`        },`);
+    lines.push(`      );`);
+  } else {
+    lines.push(
+      `      const ${respVar} = await request.${method}(url, { headers: await authHeaders() });`,
+    );
+  }
+  lines.push(`      if (${respVar}.status() !== ${expectedStatus}) {`);
+  lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
+  lines.push('      }');
+  lines.push(`      expect(${respVar}.status()).toBe(${expectedStatus});`);
+  lines.push('    });');
+}
+
+function appendObserveMembershipStep(
+  lines: string[],
+  step: ObserveStep,
+  scenarioBindings: Record<string, string>,
+  idx: number,
+  label: string,
+  ecOps: ReadonlySet<string>,
+): void {
+  if (step.assertion.kind !== 'membership') {
+    throw new Error(
+      `appendObserveMembershipStep called with assertion.kind='${step.assertion.kind}'`,
+    );
+  }
   const respVar = `resp${idx + 1}`;
   const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
   const method = step.requestPlan.method.toLowerCase();

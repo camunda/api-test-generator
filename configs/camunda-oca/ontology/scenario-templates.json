@@ -40,6 +40,19 @@
         { "kind": "Invoke", "op": "revokedBy" },
         { "kind": "Observe", "op": "observableVia", "expect": "absent" }
       ]
+    },
+    {
+      "@type": "ScenarioTemplate",
+      "name": "EntityLifecycle",
+      "appliesTo": { "kind": "Entity" },
+      "description": "Establish an entity instance (create), verify it is visible by GET-by-id (status 200), revoke it (delete), verify it is no longer visible by GET-by-id (status 404). Applies to every shape: 'entity' kind in the entity-kinds ABox; consumes establishedBy, observableVia, revokedBy (all-or-nothing-required on the EntityKind TBox since #280). The present/absent expectations compile to status-only assertions: present → expect(resp.status()).toBe(200); absent → expect(resp.status()).toBe(404). For eventually-consistent observableVia operations, both observe steps are wrapped in awaitEventually — the absent step uses the expect404 flag so 404 becomes the success terminator.",
+      "steps": [
+        { "kind": "PrereqChain", "for": "establishedBy" },
+        { "kind": "Invoke", "op": "establishedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "present" },
+        { "kind": "Invoke", "op": "revokedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "absent" }
+      ]
     }
   ]
 }

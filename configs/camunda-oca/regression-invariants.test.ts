@@ -4229,8 +4229,15 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
       if (k && typeof k.name === 'string') specNames.add(k.name);
     }
     const aboxOnly = abox.kinds.map((k) => k.name).filter((n) => !specNames.has(n));
+    // ABox-authoritative additions: kinds that this config classifies
+    // but the upstream spec does not yet annotate via `x-semantic-kind`
+    // (e.g. server-minted resources whose existence is only implied by
+    // path-param conventions). These are deliberate ABox-only entries
+    // and must not trip the spec-vs-abox drift check.
+    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document']);
+    const unaccounted = aboxOnly.filter((n) => !ABOX_AUTHORITATIVE_KINDS.has(n));
     expect(
-      aboxOnly,
+      unaccounted,
       'entity-kinds ABox lists kind names that the spec semantic-kinds.json does not — either the ABox is stale or the spec was regenerated against a ref that retired the kind',
     ).toEqual([]);
   });
@@ -4288,6 +4295,9 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
       requires?: { required?: unknown; optional?: unknown };
       produces?: unknown;
       establishes?: { identifiedBy?: { semanticType?: unknown }[] };
+      parameters?: { semanticType?: unknown }[];
+      requestBodySemanticTypes?: { semanticType?: unknown }[];
+      responseSemanticTypes?: Record<string, { semanticType?: unknown }[]>;
     }
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
@@ -4314,6 +4324,30 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
       if (est && Array.isArray(est.identifiedBy)) {
         for (const id of est.identifiedBy) {
           if (id && typeof id.semanticType === 'string') referenced.add(id.semanticType);
+        }
+      }
+      // Also scan the raw spec-surface fields: a kind whose identifier
+      // type appears in a path/query parameter or in any request/response
+      // body semantic type is plainly "in use" by the API, even if the
+      // upstream spec hasn't annotated the producing operation with
+      // `x-semantic-establishes` yet (e.g. Authorization, Document).
+      if (Array.isArray(op.parameters)) {
+        for (const p of op.parameters) {
+          if (p && typeof p.semanticType === 'string') referenced.add(p.semanticType);
+        }
+      }
+      if (Array.isArray(op.requestBodySemanticTypes)) {
+        for (const r of op.requestBodySemanticTypes) {
+          if (r && typeof r.semanticType === 'string') referenced.add(r.semanticType);
+        }
+      }
+      if (op.responseSemanticTypes && typeof op.responseSemanticTypes === 'object') {
+        for (const arr of Object.values(op.responseSemanticTypes)) {
+          if (Array.isArray(arr)) {
+            for (const r of arr) {
+              if (r && typeof r.semanticType === 'string') referenced.add(r.semanticType);
+            }
+          }
         }
       }
     }
@@ -6449,9 +6483,19 @@ describeForThisConfig(
       // template TBox with a new subject ABox requires extending this
       // map AND the union in `AppliesTo.kind`.
       const EDGE_ROLES = new Set(['establishedBy', 'revokedBy', 'observableVia']);
+      // Entity-subject templates resolve symbolic roles against the
+      // entity-kinds ABox triple introduced in #280 (issue #280 /
+      // EntityLifecycle). Extending this map is mandatory whenever a
+      // new subject-shape's ABox grows a new role field.
+      const ENTITY_ROLES = new Set(['establishedBy', 'revokedBy', 'observableVia']);
       const offenders: string[] = [];
       for (const tpl of templates.templates) {
-        const validRoles = tpl.appliesTo.kind === 'Edge' ? EDGE_ROLES : new Set<string>();
+        const validRoles =
+          tpl.appliesTo.kind === 'Edge'
+            ? EDGE_ROLES
+            : tpl.appliesTo.kind === 'Entity'
+              ? ENTITY_ROLES
+              : new Set<string>();
         for (let i = 0; i < tpl.steps.length; i++) {
           const step = tpl.steps[i];
           const ref = step.kind === 'PrereqChain' ? step.for : step.op;
@@ -6465,7 +6509,8 @@ describeForThisConfig(
       expect(
         offenders,
         `Every template step's role reference must resolve to a known field on its appliesTo subject ABox. ` +
-          `For 'Edge' subjects, valid roles are: establishedBy, revokedBy, observableVia.`,
+          `For 'Edge' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
+          `For 'Entity' subjects, valid roles are: establishedBy, revokedBy, observableVia.`,
       ).toEqual([]);
     });
 

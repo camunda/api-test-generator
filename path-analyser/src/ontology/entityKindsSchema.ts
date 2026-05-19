@@ -30,6 +30,19 @@
 // for completeness so `x-semantic-kind` can eventually be retired
 // upstream and so the coverage gates have a complete inventory.
 //
+// #280 — EntityLifecycle template inputs. `shape: "entity"` kinds carry
+// an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/
+// `revokedBy`) consumed by the EntityLifecycle scenario template to
+// emit create→observe present→delete→observe absent lifecycle suites
+// (see `configs/<config>/ontology/scenario-templates.json`). The
+// all-or-nothing rule is structural lint: an entity that can be created
+// but not deleted, or mutated but not observed, is a product
+// anti-pattern that should surface at ABox-load time rather than
+// silently producing a partial test suite. `shape: "external-entity"`
+// kinds (e.g. Client) must NOT carry any of the three — they are
+// minted outside the API and have no in-API lifecycle. The Draft-07
+// `if/then/else` on `shape` below encodes both rules.
+//
 // JSON-LD (`@context`, `@type`) is accepted and preserved verbatim but
 // not interpreted by the loader — same convention as `edgeSchema.ts`.
 
@@ -38,7 +51,7 @@ export const entityKindsSchema = {
   $id: 'https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json',
   title: 'Entity-kinds ABox (api-test-generator ontology, v1)',
   description:
-    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of two shapes (`entity` for in-API-managed, `external-entity` for identifiers minted outside the API); and (for both shapes) a list of semantic identifier-type names that identify it. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
+    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of two shapes (`entity` for in-API-managed, `external-entity` for identifiers minted outside the API); and (for both shapes) a list of semantic identifier-type names that identify it. `shape: "entity"` kinds additionally carry an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/`revokedBy`) consumed by the EntityLifecycle scenario template (#280) — asymmetric subsets surface as ABox-load validation errors (the resource-leak / write-only smells are product anti-patterns the generator refuses to silently paper over). `shape: "external-entity"` kinds (e.g. Client) must NOT carry any of the three. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, CRUD op methods being POST/GET/DELETE, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
   type: 'object',
   additionalProperties: false,
   required: ['version', 'kinds'],
@@ -92,11 +105,55 @@ export const entityKindsSchema = {
               'Semantic identifier-type name (matching the `semanticType` values used in `x-semantic-establishes.identifiedBy` upstream).',
           },
         },
+        establishedBy: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#280 — operationId of the canonical create operation for this entity kind (e.g. `createUser` for `User`). Conventionally a `POST` returning 201. Required on `shape: "entity"`; forbidden on `shape: "external-entity"` (the all-or-nothing rule is enforced by the if/then/else below).',
+        },
+        observableVia: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#280 — operationId of the canonical get-by-id operation for this entity kind (e.g. `getUser` for `User`). Conventionally a `GET` returning 200, accepting the entity\'s identifier(s) as path parameters. Required on `shape: "entity"`; forbidden on `shape: "external-entity"`.',
+        },
+        revokedBy: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#280 — operationId of the canonical delete operation for this entity kind (e.g. `deleteUser` for `User`). Conventionally a `DELETE` returning 204. Required on `shape: "entity"`; forbidden on `shape: "external-entity"`. ProcessInstance (cancel/delete divergence) is intentionally excluded here — see follow-up #281.',
+        },
         description: {
           type: 'string',
           minLength: 1,
         },
       },
+      // All-or-nothing CRUD triple gated by shape (#280).
+      //   - shape=entity: all three of establishedBy/observableVia/revokedBy are required.
+      //   - shape=external-entity: none of the three may be present.
+      // Draft-07 if/then/else: the `if` clause matches by `shape` only
+      // (no extra `required`), then branches set the all-or-nothing
+      // constraint on the same instance.
+      allOf: [
+        {
+          if: { properties: { shape: { const: 'entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: { required: ['establishedBy', 'observableVia', 'revokedBy'] },
+        },
+        {
+          if: { properties: { shape: { const: 'external-entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: {
+            not: {
+              anyOf: [
+                { required: ['establishedBy'] },
+                { required: ['observableVia'] },
+                { required: ['revokedBy'] },
+              ],
+            },
+          },
+        },
+      ],
     },
   },
 } as const;
