@@ -35,7 +35,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createGlobalClusterVariable.feature.spec.ts`, `createTenantClusterVariable.feature.spec.ts`, `deleteGlobalClusterVariable.feature.spec.ts`, `deleteTenantClusterVariable.feature.spec.ts`, `entities/GlobalClusterVariable.lifecycle.spec.ts`, `entities/TenantClusterVariable.lifecycle.spec.ts`, `getGlobalClusterVariable.feature.spec.ts`, `getTenantClusterVariable.feature.spec.ts`, `request-validation/clustervariables-validation-api-tests.spec.ts`, `searchClusterVariables.feature.spec.ts`, `searchClusterVariables.variant.spec.ts`, `updateGlobalClusterVariable.feature.spec.ts`, `updateTenantClusterVariable.feature.spec.ts`
 - **Observation channel**: GET = 2, Search = 3
 - **Form-step counts**: create=2, observe-present-get=2, observe-present-search=3, mutate=2, delete=2, observe-absence=1, lifecycle=2, negative-create=25, negative-get=3, negative-update=11, negative-delete=3, negative-search=6
-- **Variants**: happy-path=11, observe-absence=3, data-driven=2, bad-request=48
+- **Variants**: happy-path=11, observe-absence=3, data-driven=2, bad-request=48, pagination-sort=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -44,8 +44,8 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getGlobalClusterVariable.feature.spec.ts:12` | feature-1 - getGlobalClusterVariable - base (1) |
 | observe-present-get | happy-path | `getTenantClusterVariable.feature.spec.ts:12` | feature-1 - getTenantClusterVariable - base (1) |
 | observe-present-search | happy-path | `searchClusterVariables.feature.spec.ts:12` | feature-1 - searchClusterVariables - base (1) |
-| observe-present-search | data-driven | `searchClusterVariables.variant.spec.ts:12` | variant-1 - searchClusterVariables - path #1 |
-| observe-present-search | data-driven | `searchClusterVariables.variant.spec.ts:66` | variant-2 - searchClusterVariables - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClusterVariables.variant.spec.ts:12` | variant-1 - searchClusterVariables - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClusterVariables.variant.spec.ts:66` | variant-2 - searchClusterVariables - path #1 |
 | mutate | happy-path | `updateGlobalClusterVariable.feature.spec.ts:11` | feature-1 - updateGlobalClusterVariable - base (1) |
 | mutate | happy-path | `updateTenantClusterVariable.feature.spec.ts:11` | feature-1 - updateTenantClusterVariable - base (1) |
 | delete | happy-path | `deleteGlobalClusterVariable.feature.spec.ts:8` | feature-1 - deleteGlobalClusterVariable - base (1) |
@@ -108,16 +108,16 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createMappingRule.feature.spec.ts`, `deleteMappingRule.feature.spec.ts`, `entities/MappingRule.lifecycle.spec.ts`, `getMappingRule.feature.spec.ts`, `request-validation/mappingrules-validation-api-tests.spec.ts`, `searchMappingRule.feature.spec.ts`, `searchMappingRule.variant.spec.ts`, `updateMappingRule.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 4
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=20, negative-get=1, negative-update=12, negative-delete=1, negative-search=5
-- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=39
+- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=39, pagination-sort=2, filter=1
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createMappingRule.feature.spec.ts:11` | feature-1 - createMappingRule - base (1) |
 | observe-present-get | happy-path | `getMappingRule.feature.spec.ts:12` | feature-1 - getMappingRule - base (1) |
 | observe-present-search | happy-path | `searchMappingRule.feature.spec.ts:12` | feature-1 - searchMappingRule - base (1) |
-| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:12` | variant-1 - searchMappingRule - path #1 |
-| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:107` | variant-2 - searchMappingRule - path #1 |
-| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:161` | variant-3 - searchMappingRule - path #1 |
+| observe-present-search | data-driven, filter | `searchMappingRule.variant.spec.ts:12` | variant-1 - searchMappingRule - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRule.variant.spec.ts:107` | variant-2 - searchMappingRule - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRule.variant.spec.ts:161` | variant-3 - searchMappingRule - path #1 |
 | mutate | happy-path | `updateMappingRule.feature.spec.ts:11` | feature-1 - updateMappingRule - base (1) |
 | delete | happy-path | `deleteMappingRule.feature.spec.ts:8` | feature-1 - deleteMappingRule - base (1) |
 | observe-absence | observe-absence | `searchMappingRule.feature.spec.ts:37` | feature-2 - searchMappingRule - negative empty (2) |
@@ -168,15 +168,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createGlobalTaskListener.feature.spec.ts`, `deleteGlobalTaskListener.feature.spec.ts`, `entities/GlobalTaskListener.lifecycle.spec.ts`, `getGlobalTaskListener.feature.spec.ts`, `request-validation/globaltasklisteners-validation-api-tests.spec.ts`, `searchGlobalTaskListeners.feature.spec.ts`, `searchGlobalTaskListeners.variant.spec.ts`, `updateGlobalTaskListener.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=21, negative-get=1, negative-update=11, negative-delete=1, negative-search=5
-- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=39
+- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=39, pagination-sort=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createGlobalTaskListener.feature.spec.ts:11` | feature-1 - createGlobalTaskListener - base (1) |
 | observe-present-get | happy-path | `getGlobalTaskListener.feature.spec.ts:12` | feature-1 - getGlobalTaskListener - base (1) |
 | observe-present-search | happy-path | `searchGlobalTaskListeners.feature.spec.ts:12` | feature-1 - searchGlobalTaskListeners - base (1) |
-| observe-present-search | data-driven | `searchGlobalTaskListeners.variant.spec.ts:12` | variant-1 - searchGlobalTaskListeners - path #1 |
-| observe-present-search | data-driven | `searchGlobalTaskListeners.variant.spec.ts:66` | variant-2 - searchGlobalTaskListeners - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGlobalTaskListeners.variant.spec.ts:12` | variant-1 - searchGlobalTaskListeners - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGlobalTaskListeners.variant.spec.ts:66` | variant-2 - searchGlobalTaskListeners - path #1 |
 | mutate | happy-path | `updateGlobalTaskListener.feature.spec.ts:11` | feature-1 - updateGlobalTaskListener - base (1) |
 | delete | happy-path | `deleteGlobalTaskListener.feature.spec.ts:8` | feature-1 - deleteGlobalTaskListener - base (1) |
 | observe-absence | observe-absence | `searchGlobalTaskListeners.feature.spec.ts:37` | feature-2 - searchGlobalTaskListeners - negative empty (2) |
@@ -227,16 +227,16 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createTenant.feature.spec.ts`, `deleteTenant.feature.spec.ts`, `entities/Tenant.lifecycle.spec.ts`, `getTenant.feature.spec.ts`, `request-validation/tenants-validation-api-tests.spec.ts`, `searchTenants.feature.spec.ts`, `searchTenants.variant.spec.ts`, `updateTenant.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 4
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=14, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
-- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=28
+- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=28, pagination-sort=2, filter=1
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createTenant.feature.spec.ts:11` | feature-1 - createTenant - base (1) |
 | observe-present-get | happy-path | `getTenant.feature.spec.ts:12` | feature-1 - getTenant - base (1) |
 | observe-present-search | happy-path | `searchTenants.feature.spec.ts:12` | feature-1 - searchTenants - base (1) |
-| observe-present-search | data-driven | `searchTenants.variant.spec.ts:12` | variant-1 - searchTenants - path #1 |
-| observe-present-search | data-driven | `searchTenants.variant.spec.ts:63` | variant-2 - searchTenants - path #1 |
-| observe-present-search | data-driven | `searchTenants.variant.spec.ts:115` | variant-3 - searchTenants - path #1 |
+| observe-present-search | data-driven, filter | `searchTenants.variant.spec.ts:12` | variant-1 - searchTenants - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchTenants.variant.spec.ts:63` | variant-2 - searchTenants - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchTenants.variant.spec.ts:115` | variant-3 - searchTenants - path #1 |
 | mutate | happy-path | `updateTenant.feature.spec.ts:11` | feature-1 - updateTenant - base (1) |
 | delete | happy-path | `deleteTenant.feature.spec.ts:8` | feature-1 - deleteTenant - base (1) |
 | observe-absence | observe-absence | `searchTenants.feature.spec.ts:35` | feature-2 - searchTenants - negative empty (2) |
@@ -276,7 +276,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createAuthorization.feature.spec.ts`, `deleteAuthorization.feature.spec.ts`, `entities/Authorization.lifecycle.spec.ts`, `getAuthorization.feature.spec.ts`, `request-validation/authorizations-validation-api-tests.spec.ts`, `searchAuthorizations.feature.spec.ts`, `searchAuthorizations.variant.spec.ts`, `updateAuthorization.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
 - **Form-step counts**: create=3, observe-present-get=1, observe-present-search=3, mutate=3, delete=1, observe-absence=1, lifecycle=1, negative-create=7, negative-get=1, negative-update=8, negative-delete=1, negative-search=7
-- **Variants**: happy-path=6, observe-absence=2, data-driven=6, bad-request=24
+- **Variants**: happy-path=6, observe-absence=2, data-driven=6, bad-request=24, pagination-sort=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -285,8 +285,8 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | create | data-driven | `createAuthorization.feature.spec.ts:94` | feature-3 - createAuthorization - oneOf group0 variant2 (3) |
 | observe-present-get | happy-path | `getAuthorization.feature.spec.ts:12` | feature-1 - getAuthorization - base (1) |
 | observe-present-search | happy-path | `searchAuthorizations.feature.spec.ts:12` | feature-1 - searchAuthorizations - base (1) |
-| observe-present-search | data-driven | `searchAuthorizations.variant.spec.ts:12` | variant-1 - searchAuthorizations - path #1 |
-| observe-present-search | data-driven | `searchAuthorizations.variant.spec.ts:66` | variant-2 - searchAuthorizations - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchAuthorizations.variant.spec.ts:12` | variant-1 - searchAuthorizations - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchAuthorizations.variant.spec.ts:66` | variant-2 - searchAuthorizations - path #1 |
 | mutate | happy-path | `updateAuthorization.feature.spec.ts:8` | feature-1 - updateAuthorization - base (1) |
 | mutate | data-driven | `updateAuthorization.feature.spec.ts:63` | feature-2 - updateAuthorization - oneOf group0 variant1 (2) |
 | mutate | data-driven | `updateAuthorization.feature.spec.ts:119` | feature-3 - updateAuthorization - oneOf group0 variant2 (3) |
@@ -324,16 +324,16 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createRole.feature.spec.ts`, `deleteRole.feature.spec.ts`, `entities/Role.lifecycle.spec.ts`, `getRole.feature.spec.ts`, `request-validation/roles-validation-api-tests.spec.ts`, `searchRoles.feature.spec.ts`, `searchRoles.variant.spec.ts`, `updateRole.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 4
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=13, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
-- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=27
+- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=27, pagination-sort=2, filter=1
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createRole.feature.spec.ts:11` | feature-1 - createRole - base (1) |
 | observe-present-get | happy-path | `getRole.feature.spec.ts:12` | feature-1 - getRole - base (1) |
 | observe-present-search | happy-path | `searchRoles.feature.spec.ts:12` | feature-1 - searchRoles - base (1) |
-| observe-present-search | data-driven | `searchRoles.variant.spec.ts:12` | variant-1 - searchRoles - path #1 |
-| observe-present-search | data-driven | `searchRoles.variant.spec.ts:105` | variant-2 - searchRoles - path #1 |
-| observe-present-search | data-driven | `searchRoles.variant.spec.ts:157` | variant-3 - searchRoles - path #1 |
+| observe-present-search | data-driven, filter | `searchRoles.variant.spec.ts:12` | variant-1 - searchRoles - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchRoles.variant.spec.ts:105` | variant-2 - searchRoles - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchRoles.variant.spec.ts:157` | variant-3 - searchRoles - path #1 |
 | mutate | happy-path | `updateRole.feature.spec.ts:11` | feature-1 - updateRole - base (1) |
 | delete | happy-path | `deleteRole.feature.spec.ts:8` | feature-1 - deleteRole - base (1) |
 | observe-absence | observe-absence | `searchRoles.feature.spec.ts:35` | feature-2 - searchRoles - negative empty (2) |
@@ -372,15 +372,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createGroup.feature.spec.ts`, `deleteGroup.feature.spec.ts`, `entities/Group.lifecycle.spec.ts`, `getGroup.feature.spec.ts`, `request-validation/groups-validation-api-tests.spec.ts`, `searchGroups.feature.spec.ts`, `searchGroups.variant.spec.ts`, `updateGroup.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=12, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
-- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=26
+- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=26, pagination-sort=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createGroup.feature.spec.ts:11` | feature-1 - createGroup - base (1) |
 | observe-present-get | happy-path | `getGroup.feature.spec.ts:12` | feature-1 - getGroup - base (1) |
 | observe-present-search | happy-path | `searchGroups.feature.spec.ts:12` | feature-1 - searchGroups - base (1) |
-| observe-present-search | data-driven | `searchGroups.variant.spec.ts:12` | variant-1 - searchGroups - path #1 |
-| observe-present-search | data-driven | `searchGroups.variant.spec.ts:64` | variant-2 - searchGroups - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGroups.variant.spec.ts:12` | variant-1 - searchGroups - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGroups.variant.spec.ts:64` | variant-2 - searchGroups - path #1 |
 | mutate | happy-path | `updateGroup.feature.spec.ts:11` | feature-1 - updateGroup - base (1) |
 | delete | happy-path | `deleteGroup.feature.spec.ts:8` | feature-1 - deleteGroup - base (1) |
 | observe-absence | observe-absence | `searchGroups.feature.spec.ts:35` | feature-2 - searchGroups - negative empty (2) |
@@ -418,15 +418,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createUser.feature.spec.ts`, `deleteUser.feature.spec.ts`, `entities/User.lifecycle.spec.ts`, `getUser.feature.spec.ts`, `request-validation/users-validation-api-tests.spec.ts`, `searchUsers.feature.spec.ts`, `searchUsers.variant.spec.ts`, `updateUser.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=14, negative-get=1, negative-update=4, negative-delete=1, negative-search=5
-- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=25
+- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=25, pagination-sort=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createUser.feature.spec.ts:11` | feature-1 - createUser - base (1) |
 | observe-present-get | happy-path | `getUser.feature.spec.ts:12` | feature-1 - getUser - base (1) |
 | observe-present-search | happy-path | `searchUsers.feature.spec.ts:12` | feature-1 - searchUsers - base (1) |
-| observe-present-search | data-driven | `searchUsers.variant.spec.ts:12` | variant-1 - searchUsers - path #1 |
-| observe-present-search | data-driven | `searchUsers.variant.spec.ts:64` | variant-2 - searchUsers - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsers.variant.spec.ts:12` | variant-1 - searchUsers - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsers.variant.spec.ts:64` | variant-2 - searchUsers - path #1 |
 | mutate | happy-path | `updateUser.feature.spec.ts:11` | feature-1 - updateUser - base (1) |
 | delete | happy-path | `deleteUser.feature.spec.ts:8` | feature-1 - deleteUser - base (1) |
 | observe-absence | observe-absence | `searchUsers.feature.spec.ts:35` | feature-2 - searchUsers - negative empty (2) |
@@ -501,27 +501,27 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignClientToTenant.feature.spec.ts`, `assignGroupToTenant.feature.spec.ts`, `assignMappingRuleToTenant.feature.spec.ts`, `assignRoleToTenant.feature.spec.ts`, `assignUserToTenant.feature.spec.ts`, `edges/TenantClientMembership.lifecycle.spec.ts`, `edges/TenantGroupMembership.lifecycle.spec.ts`, `edges/TenantMappingRuleMembership.lifecycle.spec.ts`, `edges/TenantRoleMembership.lifecycle.spec.ts`, `edges/TenantUserMembership.lifecycle.spec.ts`, `request-validation/tenants-validation-api-tests.spec.ts`, `searchClientsForTenant.feature.spec.ts`, `searchClientsForTenant.variant.spec.ts`, `searchGroupIdsForTenant.feature.spec.ts`, `searchGroupIdsForTenant.variant.spec.ts`, `searchMappingRulesForTenant.feature.spec.ts`, `searchMappingRulesForTenant.variant.spec.ts`, `searchRolesForTenant.feature.spec.ts`, `searchRolesForTenant.variant.spec.ts`, `searchUsersForTenant.feature.spec.ts`, `searchUsersForTenant.variant.spec.ts`, `unassignClientFromTenant.feature.spec.ts`, `unassignGroupFromTenant.feature.spec.ts`, `unassignMappingRuleFromTenant.feature.spec.ts`, `unassignRoleFromTenant.feature.spec.ts`, `unassignUserFromTenant.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 17
 - **Form-step counts**: observe-present-search=17, mutate=5, delete=5, lifecycle=5, negative-update=10, negative-delete=10, negative-search=30
-- **Variants**: happy-path=20, observe-absence=5, data-driven=12, bad-request=50
+- **Variants**: happy-path=20, observe-absence=5, data-driven=12, bad-request=50, pagination-sort=10, filter=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-search | happy-path | `searchClientsForTenant.feature.spec.ts:12` | feature-1 - searchClientsForTenant - base (1) |
-| observe-present-search | data-driven | `searchClientsForTenant.variant.spec.ts:12` | variant-1 - searchClientsForTenant - path #1 |
-| observe-present-search | data-driven | `searchClientsForTenant.variant.spec.ts:88` | variant-2 - searchClientsForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClientsForTenant.variant.spec.ts:12` | variant-1 - searchClientsForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClientsForTenant.variant.spec.ts:88` | variant-2 - searchClientsForTenant - path #1 |
 | observe-present-search | happy-path | `searchGroupIdsForTenant.feature.spec.ts:12` | feature-1 - searchGroupIdsForTenant - base (1) |
-| observe-present-search | data-driven | `searchGroupIdsForTenant.variant.spec.ts:12` | variant-1 - searchGroupIdsForTenant - path #1 |
-| observe-present-search | data-driven | `searchGroupIdsForTenant.variant.spec.ts:88` | variant-2 - searchGroupIdsForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGroupIdsForTenant.variant.spec.ts:12` | variant-1 - searchGroupIdsForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGroupIdsForTenant.variant.spec.ts:88` | variant-2 - searchGroupIdsForTenant - path #1 |
 | observe-present-search | happy-path | `searchMappingRulesForTenant.feature.spec.ts:12` | feature-1 - searchMappingRulesForTenant - base (1) |
-| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:12` | variant-1 - searchMappingRulesForTenant - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:126` | variant-2 - searchMappingRulesForTenant - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:203` | variant-3 - searchMappingRulesForTenant - path #1 |
+| observe-present-search | data-driven, filter | `searchMappingRulesForTenant.variant.spec.ts:12` | variant-1 - searchMappingRulesForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRulesForTenant.variant.spec.ts:126` | variant-2 - searchMappingRulesForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRulesForTenant.variant.spec.ts:203` | variant-3 - searchMappingRulesForTenant - path #1 |
 | observe-present-search | happy-path | `searchRolesForTenant.feature.spec.ts:12` | feature-1 - searchRolesForTenant - base (1) |
-| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:12` | variant-1 - searchRolesForTenant - path #1 |
-| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:126` | variant-2 - searchRolesForTenant - path #1 |
-| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:203` | variant-3 - searchRolesForTenant - path #1 |
+| observe-present-search | data-driven, filter | `searchRolesForTenant.variant.spec.ts:12` | variant-1 - searchRolesForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchRolesForTenant.variant.spec.ts:126` | variant-2 - searchRolesForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchRolesForTenant.variant.spec.ts:203` | variant-3 - searchRolesForTenant - path #1 |
 | observe-present-search | happy-path | `searchUsersForTenant.feature.spec.ts:12` | feature-1 - searchUsersForTenant - base (1) |
-| observe-present-search | data-driven | `searchUsersForTenant.variant.spec.ts:12` | variant-1 - searchUsersForTenant - path #1 |
-| observe-present-search | data-driven | `searchUsersForTenant.variant.spec.ts:88` | variant-2 - searchUsersForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsersForTenant.variant.spec.ts:12` | variant-1 - searchUsersForTenant - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsersForTenant.variant.spec.ts:88` | variant-2 - searchUsersForTenant - path #1 |
 | mutate | happy-path | `assignClientToTenant.feature.spec.ts:8` | feature-1 - assignClientToTenant - base (1) |
 | mutate | happy-path | `assignGroupToTenant.feature.spec.ts:8` | feature-1 - assignGroupToTenant - base (1) |
 | mutate | happy-path | `assignMappingRuleToTenant.feature.spec.ts:8` | feature-1 - assignMappingRuleToTenant - base (1) |
@@ -594,23 +594,23 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignRoleToClient.feature.spec.ts`, `assignRoleToGroup.feature.spec.ts`, `assignRoleToMappingRule.feature.spec.ts`, `assignRoleToUser.feature.spec.ts`, `edges/RoleClientMembership.lifecycle.spec.ts`, `edges/RoleGroupMembership.lifecycle.spec.ts`, `edges/RoleMappingRuleMembership.lifecycle.spec.ts`, `edges/RoleUserMembership.lifecycle.spec.ts`, `request-validation/roles-validation-api-tests.spec.ts`, `searchClientsForRole.feature.spec.ts`, `searchClientsForRole.variant.spec.ts`, `searchGroupsForRole.feature.spec.ts`, `searchGroupsForRole.variant.spec.ts`, `searchMappingRulesForRole.feature.spec.ts`, `searchMappingRulesForRole.variant.spec.ts`, `searchUsersForRole.feature.spec.ts`, `searchUsersForRole.variant.spec.ts`, `unassignRoleFromClient.feature.spec.ts`, `unassignRoleFromGroup.feature.spec.ts`, `unassignRoleFromMappingRule.feature.spec.ts`, `unassignRoleFromUser.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 13
 - **Form-step counts**: observe-present-search=13, mutate=4, delete=4, lifecycle=4, negative-update=8, negative-delete=8, negative-search=24
-- **Variants**: happy-path=16, observe-absence=4, data-driven=9, bad-request=40
+- **Variants**: happy-path=16, observe-absence=4, data-driven=9, bad-request=40, pagination-sort=8, filter=1
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-search | happy-path | `searchClientsForRole.feature.spec.ts:12` | feature-1 - searchClientsForRole - base (1) |
-| observe-present-search | data-driven | `searchClientsForRole.variant.spec.ts:12` | variant-1 - searchClientsForRole - path #1 |
-| observe-present-search | data-driven | `searchClientsForRole.variant.spec.ts:86` | variant-2 - searchClientsForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClientsForRole.variant.spec.ts:12` | variant-1 - searchClientsForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClientsForRole.variant.spec.ts:86` | variant-2 - searchClientsForRole - path #1 |
 | observe-present-search | happy-path | `searchGroupsForRole.feature.spec.ts:12` | feature-1 - searchGroupsForRole - base (1) |
-| observe-present-search | data-driven | `searchGroupsForRole.variant.spec.ts:12` | variant-1 - searchGroupsForRole - path #1 |
-| observe-present-search | data-driven | `searchGroupsForRole.variant.spec.ts:86` | variant-2 - searchGroupsForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGroupsForRole.variant.spec.ts:12` | variant-1 - searchGroupsForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchGroupsForRole.variant.spec.ts:86` | variant-2 - searchGroupsForRole - path #1 |
 | observe-present-search | happy-path | `searchMappingRulesForRole.feature.spec.ts:12` | feature-1 - searchMappingRulesForRole - base (1) |
-| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:12` | variant-1 - searchMappingRulesForRole - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:124` | variant-2 - searchMappingRulesForRole - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:199` | variant-3 - searchMappingRulesForRole - path #1 |
+| observe-present-search | data-driven, filter | `searchMappingRulesForRole.variant.spec.ts:12` | variant-1 - searchMappingRulesForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRulesForRole.variant.spec.ts:124` | variant-2 - searchMappingRulesForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRulesForRole.variant.spec.ts:199` | variant-3 - searchMappingRulesForRole - path #1 |
 | observe-present-search | happy-path | `searchUsersForRole.feature.spec.ts:12` | feature-1 - searchUsersForRole - base (1) |
-| observe-present-search | data-driven | `searchUsersForRole.variant.spec.ts:12` | variant-1 - searchUsersForRole - path #1 |
-| observe-present-search | data-driven | `searchUsersForRole.variant.spec.ts:86` | variant-2 - searchUsersForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsersForRole.variant.spec.ts:12` | variant-1 - searchUsersForRole - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsersForRole.variant.spec.ts:86` | variant-2 - searchUsersForRole - path #1 |
 | mutate | happy-path | `assignRoleToClient.feature.spec.ts:8` | feature-1 - assignRoleToClient - base (1) |
 | mutate | happy-path | `assignRoleToGroup.feature.spec.ts:8` | feature-1 - assignRoleToGroup - base (1) |
 | mutate | happy-path | `assignRoleToMappingRule.feature.spec.ts:8` | feature-1 - assignRoleToMappingRule - base (1) |
@@ -670,24 +670,24 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignClientToGroup.feature.spec.ts`, `assignMappingRuleToGroup.feature.spec.ts`, `assignUserToGroup.feature.spec.ts`, `edges/GroupClientMembership.lifecycle.spec.ts`, `edges/GroupMappingRuleMembership.lifecycle.spec.ts`, `edges/GroupUserMembership.lifecycle.spec.ts`, `request-validation/groups-validation-api-tests.spec.ts`, `searchClientsForGroup.feature.spec.ts`, `searchClientsForGroup.variant.spec.ts`, `searchMappingRulesForGroup.feature.spec.ts`, `searchMappingRulesForGroup.variant.spec.ts`, `searchRolesForGroup.feature.spec.ts`, `searchRolesForGroup.variant.spec.ts`, `searchUsersForGroup.feature.spec.ts`, `searchUsersForGroup.variant.spec.ts`, `unassignClientFromGroup.feature.spec.ts`, `unassignMappingRuleFromGroup.feature.spec.ts`, `unassignUserFromGroup.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 14
 - **Form-step counts**: observe-present-search=14, mutate=3, delete=3, lifecycle=3, negative-update=6, negative-delete=6, negative-search=24
-- **Variants**: happy-path=13, observe-absence=3, data-driven=10, bad-request=36
+- **Variants**: happy-path=13, observe-absence=3, data-driven=10, bad-request=36, pagination-sort=8, filter=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-search | happy-path | `searchClientsForGroup.feature.spec.ts:12` | feature-1 - searchClientsForGroup - base (1) |
-| observe-present-search | data-driven | `searchClientsForGroup.variant.spec.ts:12` | variant-1 - searchClientsForGroup - path #1 |
-| observe-present-search | data-driven | `searchClientsForGroup.variant.spec.ts:86` | variant-2 - searchClientsForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClientsForGroup.variant.spec.ts:12` | variant-1 - searchClientsForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchClientsForGroup.variant.spec.ts:86` | variant-2 - searchClientsForGroup - path #1 |
 | observe-present-search | happy-path | `searchMappingRulesForGroup.feature.spec.ts:12` | feature-1 - searchMappingRulesForGroup - base (1) |
-| observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:12` | variant-1 - searchMappingRulesForGroup - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:84` | variant-2 - searchMappingRulesForGroup - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:159` | variant-3 - searchMappingRulesForGroup - path #1 |
+| observe-present-search | data-driven, filter | `searchMappingRulesForGroup.variant.spec.ts:12` | variant-1 - searchMappingRulesForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRulesForGroup.variant.spec.ts:84` | variant-2 - searchMappingRulesForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMappingRulesForGroup.variant.spec.ts:159` | variant-3 - searchMappingRulesForGroup - path #1 |
 | observe-present-search | happy-path | `searchRolesForGroup.feature.spec.ts:12` | feature-1 - searchRolesForGroup - base (1) |
-| observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:12` | variant-1 - searchRolesForGroup - path #1 |
-| observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:84` | variant-2 - searchRolesForGroup - path #1 |
-| observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:159` | variant-3 - searchRolesForGroup - path #1 |
+| observe-present-search | data-driven, filter | `searchRolesForGroup.variant.spec.ts:12` | variant-1 - searchRolesForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchRolesForGroup.variant.spec.ts:84` | variant-2 - searchRolesForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchRolesForGroup.variant.spec.ts:159` | variant-3 - searchRolesForGroup - path #1 |
 | observe-present-search | happy-path | `searchUsersForGroup.feature.spec.ts:12` | feature-1 - searchUsersForGroup - base (1) |
-| observe-present-search | data-driven | `searchUsersForGroup.variant.spec.ts:12` | variant-1 - searchUsersForGroup - path #1 |
-| observe-present-search | data-driven | `searchUsersForGroup.variant.spec.ts:86` | variant-2 - searchUsersForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsersForGroup.variant.spec.ts:12` | variant-1 - searchUsersForGroup - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUsersForGroup.variant.spec.ts:86` | variant-2 - searchUsersForGroup - path #1 |
 | mutate | happy-path | `assignClientToGroup.feature.spec.ts:8` | feature-1 - assignClientToGroup - base (1) |
 | mutate | happy-path | `assignMappingRuleToGroup.feature.spec.ts:8` | feature-1 - assignMappingRuleToGroup - base (1) |
 | mutate | happy-path | `assignUserToGroup.feature.spec.ts:8` | feature-1 - assignUserToGroup - base (1) |
@@ -746,36 +746,36 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getProcessDefinition.feature.spec.ts`, `getProcessDefinitionInstanceStatistics.feature.spec.ts`, `getProcessDefinitionInstanceVersionStatistics.feature.spec.ts`, `getProcessDefinitionInstanceVersionStatistics.variant.spec.ts`, `getProcessDefinitionMessageSubscriptionStatistics.feature.spec.ts`, `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts`, `getProcessDefinitionStatistics.feature.spec.ts`, `getProcessDefinitionStatistics.variant.spec.ts`, `getProcessDefinitionXML.feature.spec.ts`, `getStartProcessForm.feature.spec.ts`, `request-validation/processdefinitions-validation-api-tests.spec.ts`, `searchProcessDefinitions.feature.spec.ts`, `searchProcessDefinitions.variant.spec.ts`
 - **Observation channel**: GET = 21, Search = 5
 - **Form-step counts**: observe-present-get=21, observe-present-search=5, observe-absence=1, negative-get=38, negative-search=5
-- **Variants**: happy-path=8, observe-absence=1, data-driven=18, bad-request=43
+- **Variants**: happy-path=8, observe-absence=1, data-driven=18, bad-request=43, pagination-sort=3, filter=16
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getProcessDefinition.feature.spec.ts:13` | feature-1 - getProcessDefinition - base (1) |
 | observe-present-get | happy-path | `getProcessDefinitionInstanceStatistics.feature.spec.ts:11` | feature-1 - getProcessDefinitionInstanceStatistics - base (1) |
-| observe-present-get | happy-path | `getProcessDefinitionInstanceVersionStatistics.feature.spec.ts:12` | feature-1 - getProcessDefinitionInstanceVersionStatistics - base (1) |
-| observe-present-get | data-driven | `getProcessDefinitionInstanceVersionStatistics.variant.spec.ts:12` | variant-1 - getProcessDefinitionInstanceVersionStatistics - bpmn #1 |
+| observe-present-get | happy-path, filter | `getProcessDefinitionInstanceVersionStatistics.feature.spec.ts:12` | feature-1 - getProcessDefinitionInstanceVersionStatistics - base (1) |
+| observe-present-get | data-driven, filter | `getProcessDefinitionInstanceVersionStatistics.variant.spec.ts:12` | variant-1 - getProcessDefinitionInstanceVersionStatistics - bpmn #1 |
 | observe-present-get | happy-path | `getProcessDefinitionMessageSubscriptionStatistics.feature.spec.ts:11` | feature-1 - getProcessDefinitionMessageSubscriptionStatistics - base (1) |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:13` | variant-1 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:72` | variant-2 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:133` | variant-3 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:190` | variant-4 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:268` | variant-5 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
+| observe-present-get | data-driven, pagination-sort | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:13` | variant-1 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:72` | variant-2 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:133` | variant-3 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:190` | variant-4 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:268` | variant-5 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
 | observe-present-get | happy-path | `getProcessDefinitionStatistics.feature.spec.ts:12` | feature-1 - getProcessDefinitionStatistics - base (1) |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:12` | variant-1 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:86` | variant-2 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:160` | variant-3 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:214` | variant-4 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:268` | variant-5 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:346` | variant-6 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:424` | variant-7 - getProcessDefinitionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:482` | variant-8 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:12` | variant-1 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:86` | variant-2 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:160` | variant-3 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:214` | variant-4 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:268` | variant-5 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:346` | variant-6 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:424` | variant-7 - getProcessDefinitionStatistics - bpmn #1 |
+| observe-present-get | data-driven, filter | `getProcessDefinitionStatistics.variant.spec.ts:482` | variant-8 - getProcessDefinitionStatistics - bpmn #1 |
 | observe-present-get | happy-path | `getProcessDefinitionXML.feature.spec.ts:10` | feature-1 - getProcessDefinitionXML - base (1) |
 | observe-present-get | happy-path | `getStartProcessForm.feature.spec.ts:13` | feature-1 - getStartProcessForm - base (1) |
 | observe-present-search | happy-path | `searchProcessDefinitions.feature.spec.ts:13` | feature-1 - searchProcessDefinitions - base (1) |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:13` | variant-1 - searchProcessDefinitions - path #1 |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:86` | variant-2 - searchProcessDefinitions - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:138` | variant-3 - searchProcessDefinitions - path #1 |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:214` | variant-4 - searchProcessDefinitions - path #1 |
+| observe-present-search | data-driven, filter | `searchProcessDefinitions.variant.spec.ts:13` | variant-1 - searchProcessDefinitions - path #1 |
+| observe-present-search | data-driven, filter | `searchProcessDefinitions.variant.spec.ts:86` | variant-2 - searchProcessDefinitions - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchProcessDefinitions.variant.spec.ts:138` | variant-3 - searchProcessDefinitions - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchProcessDefinitions.variant.spec.ts:214` | variant-4 - searchProcessDefinitions - path #1 |
 | observe-absence | observe-absence | `searchProcessDefinitions.feature.spec.ts:60` | feature-2 - searchProcessDefinitions - negative empty (2) |
 | negative-get | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:18` | getProcessDefinition - Path param processDefinitionKey pattern violation |
 | negative-get | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:34` | getProcessDefinitionInstanceStatistics - Additional prop __extraField |
@@ -827,7 +827,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createDeployment.feature.spec.ts`, `createDeployment.variant.spec.ts`, `deleteResource.feature.spec.ts`, `getResource.feature.spec.ts`, `getResourceContent.feature.spec.ts`, `getResourceContentBinary.feature.spec.ts`, `request-validation/deployments-validation-api-tests.spec.ts`, `request-validation/resources-validation-api-tests.spec.ts`, `searchResources.feature.spec.ts`, `searchResources.variant.spec.ts`
 - **Observation channel**: GET = 3, Search = 6
 - **Form-step counts**: create=5, observe-present-get=3, observe-present-search=6, delete=1, observe-absence=1, negative-create=8, negative-delete=7, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=10, bad-request=20
+- **Variants**: happy-path=5, observe-absence=1, data-driven=10, bad-request=20, pagination-sort=2, filter=3
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -840,11 +840,11 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getResourceContent.feature.spec.ts:9` | feature-1 - getResourceContent - base (1) |
 | observe-present-get | happy-path | `getResourceContentBinary.feature.spec.ts:9` | feature-1 - getResourceContentBinary - base (1) |
 | observe-present-search | happy-path | `searchResources.feature.spec.ts:12` | feature-1 - searchResources - base (1) |
-| observe-present-search | data-driven | `searchResources.variant.spec.ts:13` | variant-1 - searchResources - bpmn #1 |
-| observe-present-search | data-driven | `searchResources.variant.spec.ts:62` | variant-2 - searchResources - path #1 |
-| observe-present-search | data-driven | `searchResources.variant.spec.ts:130` | variant-3 - searchResources - path #1 |
-| observe-present-search | data-driven | `searchResources.variant.spec.ts:180` | variant-4 - searchResources - path #1 |
-| observe-present-search | data-driven | `searchResources.variant.spec.ts:232` | variant-5 - searchResources - path #1 |
+| observe-present-search | data-driven, filter | `searchResources.variant.spec.ts:13` | variant-1 - searchResources - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchResources.variant.spec.ts:62` | variant-2 - searchResources - path #1 |
+| observe-present-search | data-driven, filter | `searchResources.variant.spec.ts:130` | variant-3 - searchResources - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchResources.variant.spec.ts:180` | variant-4 - searchResources - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchResources.variant.spec.ts:232` | variant-5 - searchResources - path #1 |
 | delete | happy-path | `deleteResource.feature.spec.ts:11` | feature-1 - deleteResource - base (1) |
 | observe-absence | observe-absence | `searchResources.feature.spec.ts:35` | feature-2 - searchResources - negative empty (2) |
 | negative-create | bad-request | `request-validation/deployments-validation-api-tests.spec.ts:18` | createDeployment - Additional prop __unexpectedField |
@@ -874,7 +874,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `evaluateDecision.feature.spec.ts`, `evaluateDecision.variant.spec.ts`, `getDecisionDefinition.feature.spec.ts`, `getDecisionDefinitionXML.feature.spec.ts`, `request-validation/decisiondefinitions-validation-api-tests.spec.ts`, `searchDecisionDefinitions.feature.spec.ts`, `searchDecisionDefinitions.variant.spec.ts`
 - **Observation channel**: GET = 2, Search = 7
 - **Form-step counts**: create=4, observe-present-get=2, observe-present-search=7, observe-absence=1, negative-create=7, negative-get=2, negative-search=5
-- **Variants**: happy-path=4, observe-absence=1, data-driven=9, bad-request=14
+- **Variants**: happy-path=4, observe-absence=1, data-driven=9, bad-request=14, pagination-sort=2, filter=4
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -885,12 +885,12 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getDecisionDefinition.feature.spec.ts:13` | feature-1 - getDecisionDefinition - base (1) |
 | observe-present-get | happy-path | `getDecisionDefinitionXML.feature.spec.ts:10` | feature-1 - getDecisionDefinitionXML - base (1) |
 | observe-present-search | happy-path | `searchDecisionDefinitions.feature.spec.ts:12` | feature-1 - searchDecisionDefinitions - base (1) |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:13` | variant-1 - searchDecisionDefinitions - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:64` | variant-2 - searchDecisionDefinitions - path #1 |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:117` | variant-3 - searchDecisionDefinitions - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:168` | variant-4 - searchDecisionDefinitions - drd #1 |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:219` | variant-5 - searchDecisionDefinitions - path #1 |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:273` | variant-6 - searchDecisionDefinitions - path #1 |
+| observe-present-search | data-driven, filter | `searchDecisionDefinitions.variant.spec.ts:13` | variant-1 - searchDecisionDefinitions - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionDefinitions.variant.spec.ts:64` | variant-2 - searchDecisionDefinitions - path #1 |
+| observe-present-search | data-driven, filter | `searchDecisionDefinitions.variant.spec.ts:117` | variant-3 - searchDecisionDefinitions - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionDefinitions.variant.spec.ts:168` | variant-4 - searchDecisionDefinitions - drd #1 |
+| observe-present-search | data-driven, pagination-sort | `searchDecisionDefinitions.variant.spec.ts:219` | variant-5 - searchDecisionDefinitions - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchDecisionDefinitions.variant.spec.ts:273` | variant-6 - searchDecisionDefinitions - path #1 |
 | observe-absence | observe-absence | `searchDecisionDefinitions.feature.spec.ts:37` | feature-2 - searchDecisionDefinitions - negative empty (2) |
 | negative-create | bad-request | `request-validation/decisiondefinitions-validation-api-tests.spec.ts:18` | evaluateDecision - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/decisiondefinitions-validation-api-tests.spec.ts:35` | evaluateDecision - Body wrong top-level type |
@@ -913,17 +913,17 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getDecisionRequirements.feature.spec.ts`, `getDecisionRequirementsXML.feature.spec.ts`, `request-validation/decisionrequirements-validation-api-tests.spec.ts`, `searchDecisionRequirements.feature.spec.ts`, `searchDecisionRequirements.variant.spec.ts`
 - **Observation channel**: GET = 2, Search = 5
 - **Form-step counts**: observe-present-get=2, observe-present-search=5, observe-absence=1, negative-get=2, negative-search=5
-- **Variants**: happy-path=3, observe-absence=1, data-driven=4, bad-request=7
+- **Variants**: happy-path=3, observe-absence=1, data-driven=4, bad-request=7, pagination-sort=2, filter=2
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getDecisionRequirements.feature.spec.ts:13` | feature-1 - getDecisionRequirements - base (1) |
 | observe-present-get | happy-path | `getDecisionRequirementsXML.feature.spec.ts:10` | feature-1 - getDecisionRequirementsXML - base (1) |
 | observe-present-search | happy-path | `searchDecisionRequirements.feature.spec.ts:12` | feature-1 - searchDecisionRequirements - base (1) |
-| observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:13` | variant-1 - searchDecisionRequirements - drd #1 |
-| observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:64` | variant-2 - searchDecisionRequirements - path #1 |
-| observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:116` | variant-3 - searchDecisionRequirements - path #1 |
-| observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:170` | variant-4 - searchDecisionRequirements - path #1 |
+| observe-present-search | data-driven, filter | `searchDecisionRequirements.variant.spec.ts:13` | variant-1 - searchDecisionRequirements - drd #1 |
+| observe-present-search | data-driven, filter | `searchDecisionRequirements.variant.spec.ts:64` | variant-2 - searchDecisionRequirements - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchDecisionRequirements.variant.spec.ts:116` | variant-3 - searchDecisionRequirements - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchDecisionRequirements.variant.spec.ts:170` | variant-4 - searchDecisionRequirements - path #1 |
 | observe-absence | observe-absence | `searchDecisionRequirements.feature.spec.ts:37` | feature-2 - searchDecisionRequirements - negative empty (2) |
 | negative-get | bad-request | `request-validation/decisionrequirements-validation-api-tests.spec.ts:18` | getDecisionRequirements - Path param decisionRequirementsKey pattern violation |
 | negative-get | bad-request | `request-validation/decisionrequirements-validation-api-tests.spec.ts:34` | getDecisionRequirementsXML - Path param decisionRequirementsKey pattern violation |
@@ -945,7 +945,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `cancelProcessInstance.feature.spec.ts`, `cancelProcessInstancesBatchOperation.feature.spec.ts`, `cancelProcessInstancesBatchOperation.variant.spec.ts`, `createProcessInstance.feature.spec.ts`, `createProcessInstance.variant.spec.ts`, `deleteProcessInstance.feature.spec.ts`, `deleteProcessInstancesBatchOperation.feature.spec.ts`, `deleteProcessInstancesBatchOperation.variant.spec.ts`, `getProcessInstance.feature.spec.ts`, `getProcessInstanceCallHierarchy.feature.spec.ts`, `getProcessInstanceSequenceFlows.feature.spec.ts`, `getProcessInstanceStatistics.feature.spec.ts`, `migrateProcessInstance.feature.spec.ts`, `migrateProcessInstance.variant.spec.ts`, `migrateProcessInstancesBatchOperation.feature.spec.ts`, `migrateProcessInstancesBatchOperation.variant.spec.ts`, `modifyProcessInstance.feature.spec.ts`, `modifyProcessInstance.variant.spec.ts`, `modifyProcessInstancesBatchOperation.feature.spec.ts`, `modifyProcessInstancesBatchOperation.variant.spec.ts`, `request-validation/processinstances-validation-api-tests.spec.ts`, `resolveIncidentsBatchOperation.feature.spec.ts`, `resolveIncidentsBatchOperation.variant.spec.ts`, `resolveProcessInstanceIncidents.feature.spec.ts`, `searchProcessInstanceIncidents.feature.spec.ts`, `searchProcessInstanceIncidents.variant.spec.ts`, `searchProcessInstances.feature.spec.ts`, `searchProcessInstances.variant.spec.ts`
 - **Observation channel**: GET = 4, Search = 20
 - **Form-step counts**: create=8, observe-present-get=4, observe-present-search=20, mutate=50, delete=24, observe-absence=1, negative-create=6, negative-get=4, negative-update=98, negative-delete=50, negative-search=17
-- **Variants**: happy-path=17, observe-absence=1, data-driven=89, bad-request=175
+- **Variants**: happy-path=17, observe-absence=1, data-driven=89, bad-request=175, pagination-sort=4, filter=73
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -962,41 +962,41 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getProcessInstanceSequenceFlows.feature.spec.ts:13` | feature-1 - getProcessInstanceSequenceFlows - base (1) |
 | observe-present-get | happy-path | `getProcessInstanceStatistics.feature.spec.ts:13` | feature-1 - getProcessInstanceStatistics - base (1) |
 | observe-present-search | happy-path | `searchProcessInstanceIncidents.feature.spec.ts:13` | feature-1 - searchProcessInstanceIncidents - base (1) |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:13` | variant-1 - searchProcessInstanceIncidents - cycle/bpmn+bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:109` | variant-2 - searchProcessInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:187` | variant-3 - searchProcessInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:297` | variant-4 - searchProcessInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:407` | variant-5 - searchProcessInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:512` | variant-6 - searchProcessInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstanceIncidents.variant.spec.ts:13` | variant-1 - searchProcessInstanceIncidents - cycle/bpmn+bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstanceIncidents.variant.spec.ts:109` | variant-2 - searchProcessInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstanceIncidents.variant.spec.ts:187` | variant-3 - searchProcessInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstanceIncidents.variant.spec.ts:297` | variant-4 - searchProcessInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchProcessInstanceIncidents.variant.spec.ts:407` | variant-5 - searchProcessInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchProcessInstanceIncidents.variant.spec.ts:512` | variant-6 - searchProcessInstanceIncidents - bpmn #1 |
 | observe-present-search | happy-path | `searchProcessInstances.feature.spec.ts:13` | feature-1 - searchProcessInstances - base (1) |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:13` | variant-1 - searchProcessInstances - path #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:87` | variant-2 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:161` | variant-3 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:235` | variant-4 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:337` | variant-5 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:440` | variant-6 - searchProcessInstances - path #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:518` | variant-7 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:596` | variant-8 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:674` | variant-9 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:780` | variant-10 - searchProcessInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:887` | variant-11 - searchProcessInstances - path #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:983` | variant-12 - searchProcessInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:13` | variant-1 - searchProcessInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:87` | variant-2 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:161` | variant-3 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:235` | variant-4 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:337` | variant-5 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:440` | variant-6 - searchProcessInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:518` | variant-7 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:596` | variant-8 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:674` | variant-9 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchProcessInstances.variant.spec.ts:780` | variant-10 - searchProcessInstances - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchProcessInstances.variant.spec.ts:887` | variant-11 - searchProcessInstances - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchProcessInstances.variant.spec.ts:983` | variant-12 - searchProcessInstances - path #1 |
 | mutate | happy-path | `migrateProcessInstance.feature.spec.ts:9` | feature-1 - migrateProcessInstance - base (1) |
 | mutate | data-driven | `migrateProcessInstance.variant.spec.ts:9` | variant-1 - migrateProcessInstance - cycle/bpmn+bpmn #1 |
 | mutate | data-driven | `migrateProcessInstance.variant.spec.ts:121` | variant-2 - migrateProcessInstance - cycle/bpmn+bpmn #1 |
-| mutate | happy-path | `migrateProcessInstancesBatchOperation.feature.spec.ts:12` | feature-1 - migrateProcessInstancesBatchOperation - base (1) |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:66` | variant-2 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:141` | variant-3 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:216` | variant-4 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:271` | variant-5 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:326` | variant-6 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:384` | variant-7 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:463` | variant-8 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:542` | variant-9 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:601` | variant-10 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:660` | variant-11 - migrateProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `migrateProcessInstancesBatchOperation.variant.spec.ts:720` | variant-12 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | happy-path, filter | `migrateProcessInstancesBatchOperation.feature.spec.ts:12` | feature-1 - migrateProcessInstancesBatchOperation - base (1) |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:66` | variant-2 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:141` | variant-3 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:216` | variant-4 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:271` | variant-5 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:326` | variant-6 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:384` | variant-7 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:463` | variant-8 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:542` | variant-9 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:601` | variant-10 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:660` | variant-11 - migrateProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `migrateProcessInstancesBatchOperation.variant.spec.ts:720` | variant-12 - migrateProcessInstancesBatchOperation - bpmn #1 |
 | mutate | happy-path | `modifyProcessInstance.feature.spec.ts:9` | feature-1 - modifyProcessInstance - base (1) |
 | mutate | data-driven | `modifyProcessInstance.variant.spec.ts:9` | variant-1 - modifyProcessInstance - bpmn #1 |
 | mutate | data-driven | `modifyProcessInstance.variant.spec.ts:102` | variant-2 - modifyProcessInstance - bpmn #1 |
@@ -1006,55 +1006,55 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | data-driven | `modifyProcessInstance.variant.spec.ts:478` | variant-6 - modifyProcessInstance - bpmn #1 |
 | mutate | data-driven | `modifyProcessInstance.variant.spec.ts:573` | variant-7 - modifyProcessInstance - bpmn #1 |
 | mutate | data-driven | `modifyProcessInstance.variant.spec.ts:666` | variant-8 - modifyProcessInstance - bpmn #1 |
-| mutate | happy-path | `modifyProcessInstancesBatchOperation.feature.spec.ts:11` | feature-1 - modifyProcessInstancesBatchOperation - base (1) |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:65` | variant-2 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:139` | variant-3 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:213` | variant-4 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:315` | variant-5 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:417` | variant-6 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:474` | variant-7 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:552` | variant-8 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:630` | variant-9 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:736` | variant-10 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:842` | variant-11 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | data-driven | `modifyProcessInstancesBatchOperation.variant.spec.ts:946` | variant-12 - modifyProcessInstancesBatchOperation - bpmn #1 |
-| mutate | happy-path | `resolveIncidentsBatchOperation.feature.spec.ts:11` | feature-1 - resolveIncidentsBatchOperation - base (1) |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:12` | variant-1 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:64` | variant-2 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:137` | variant-3 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:210` | variant-4 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:311` | variant-5 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:412` | variant-6 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:468` | variant-7 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:545` | variant-8 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:622` | variant-9 - resolveIncidentsBatchOperation - bpmn #1 |
-| mutate | data-driven | `resolveIncidentsBatchOperation.variant.spec.ts:727` | variant-10 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | happy-path, filter | `modifyProcessInstancesBatchOperation.feature.spec.ts:11` | feature-1 - modifyProcessInstancesBatchOperation - base (1) |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:65` | variant-2 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:139` | variant-3 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:213` | variant-4 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:315` | variant-5 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:417` | variant-6 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:474` | variant-7 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:552` | variant-8 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:630` | variant-9 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:736` | variant-10 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:842` | variant-11 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `modifyProcessInstancesBatchOperation.variant.spec.ts:946` | variant-12 - modifyProcessInstancesBatchOperation - bpmn #1 |
+| mutate | happy-path, filter | `resolveIncidentsBatchOperation.feature.spec.ts:11` | feature-1 - resolveIncidentsBatchOperation - base (1) |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:12` | variant-1 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:64` | variant-2 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:137` | variant-3 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:210` | variant-4 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:311` | variant-5 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:412` | variant-6 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:468` | variant-7 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:545` | variant-8 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:622` | variant-9 - resolveIncidentsBatchOperation - bpmn #1 |
+| mutate | data-driven, filter | `resolveIncidentsBatchOperation.variant.spec.ts:727` | variant-10 - resolveIncidentsBatchOperation - bpmn #1 |
 | mutate | happy-path | `resolveProcessInstanceIncidents.feature.spec.ts:12` | feature-1 - resolveProcessInstanceIncidents - base (1) |
 | delete | happy-path | `cancelProcessInstance.feature.spec.ts:9` | feature-1 - cancelProcessInstance - base (1) |
-| delete | happy-path | `cancelProcessInstancesBatchOperation.feature.spec.ts:11` | feature-1 - cancelProcessInstancesBatchOperation - base (1) |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:64` | variant-2 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:137` | variant-3 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:210` | variant-4 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:311` | variant-5 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:412` | variant-6 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:468` | variant-7 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:545` | variant-8 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:622` | variant-9 - cancelProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `cancelProcessInstancesBatchOperation.variant.spec.ts:727` | variant-10 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | happy-path, filter | `cancelProcessInstancesBatchOperation.feature.spec.ts:11` | feature-1 - cancelProcessInstancesBatchOperation - base (1) |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:64` | variant-2 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:137` | variant-3 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:210` | variant-4 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:311` | variant-5 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:412` | variant-6 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:468` | variant-7 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:545` | variant-8 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:622` | variant-9 - cancelProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `cancelProcessInstancesBatchOperation.variant.spec.ts:727` | variant-10 - cancelProcessInstancesBatchOperation - bpmn #1 |
 | delete | happy-path | `deleteProcessInstance.feature.spec.ts:10` | feature-1 - deleteProcessInstance - base (1) |
-| delete | happy-path | `deleteProcessInstancesBatchOperation.feature.spec.ts:11` | feature-1 - deleteProcessInstancesBatchOperation - base (1) |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:64` | variant-2 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:137` | variant-3 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:210` | variant-4 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:311` | variant-5 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:412` | variant-6 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:468` | variant-7 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:545` | variant-8 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:622` | variant-9 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:727` | variant-10 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | happy-path, filter | `deleteProcessInstancesBatchOperation.feature.spec.ts:11` | feature-1 - deleteProcessInstancesBatchOperation - base (1) |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:12` | variant-1 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:64` | variant-2 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:137` | variant-3 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:210` | variant-4 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:311` | variant-5 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:412` | variant-6 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:468` | variant-7 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:545` | variant-8 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:622` | variant-9 - deleteProcessInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteProcessInstancesBatchOperation.variant.spec.ts:727` | variant-10 - deleteProcessInstancesBatchOperation - bpmn #1 |
 | observe-absence | observe-absence | `searchProcessInstances.feature.spec.ts:80` | feature-2 - searchProcessInstances - negative empty (2) |
 | negative-create | bad-request | `request-validation/processinstances-validation-api-tests.spec.ts:556` | createProcessInstance - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/processinstances-validation-api-tests.spec.ts:571` | createProcessInstance - Missing body |
@@ -1244,17 +1244,17 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `cancelBatchOperation.feature.spec.ts`, `getBatchOperation.feature.spec.ts`, `request-validation/batchoperations-validation-api-tests.spec.ts`, `resumeBatchOperation.feature.spec.ts`, `searchBatchOperations.feature.spec.ts`, `searchBatchOperations.variant.spec.ts`, `suspendBatchOperation.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
 - **Form-step counts**: observe-present-get=1, observe-present-search=3, mutate=2, delete=1, observe-absence=1, negative-search=6
-- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=6
+- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=6, pagination-sort=2, filter=4
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
-| observe-present-get | happy-path | `getBatchOperation.feature.spec.ts:12` | feature-1 - getBatchOperation - base (1) |
+| observe-present-get | happy-path, filter | `getBatchOperation.feature.spec.ts:12` | feature-1 - getBatchOperation - base (1) |
 | observe-present-search | happy-path | `searchBatchOperations.feature.spec.ts:12` | feature-1 - searchBatchOperations - base (1) |
-| observe-present-search | data-driven | `searchBatchOperations.variant.spec.ts:12` | variant-1 - searchBatchOperations - path #1 |
-| observe-present-search | data-driven | `searchBatchOperations.variant.spec.ts:66` | variant-2 - searchBatchOperations - path #1 |
-| mutate | happy-path | `resumeBatchOperation.feature.spec.ts:8` | feature-1 - resumeBatchOperation - base (1) |
-| mutate | happy-path | `suspendBatchOperation.feature.spec.ts:8` | feature-1 - suspendBatchOperation - base (1) |
-| delete | happy-path | `cancelBatchOperation.feature.spec.ts:8` | feature-1 - cancelBatchOperation - base (1) |
+| observe-present-search | data-driven, pagination-sort | `searchBatchOperations.variant.spec.ts:12` | variant-1 - searchBatchOperations - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchBatchOperations.variant.spec.ts:66` | variant-2 - searchBatchOperations - path #1 |
+| mutate | happy-path, filter | `resumeBatchOperation.feature.spec.ts:8` | feature-1 - resumeBatchOperation - base (1) |
+| mutate | happy-path, filter | `suspendBatchOperation.feature.spec.ts:8` | feature-1 - suspendBatchOperation - base (1) |
+| delete | happy-path, filter | `cancelBatchOperation.feature.spec.ts:8` | feature-1 - cancelBatchOperation - base (1) |
 | observe-absence | observe-absence | `searchBatchOperations.feature.spec.ts:37` | feature-2 - searchBatchOperations - negative empty (2) |
 | negative-search | bad-request | `request-validation/batchoperations-validation-api-tests.spec.ts:18` | searchBatchOperations - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/batchoperations-validation-api-tests.spec.ts:37` | searchBatchOperations - Body wrong top-level type |
@@ -1269,14 +1269,14 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `request-validation/batchoperationitems-validation-api-tests.spec.ts`, `searchBatchOperationItems.feature.spec.ts`, `searchBatchOperationItems.variant.spec.ts`
 - **Observation channel**: GET = 0, Search = 4
 - **Form-step counts**: observe-present-search=4, observe-absence=1, negative-search=5
-- **Variants**: happy-path=1, observe-absence=1, data-driven=3, bad-request=5
+- **Variants**: happy-path=1, observe-absence=1, data-driven=3, bad-request=5, pagination-sort=2, filter=1
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-search | happy-path | `searchBatchOperationItems.feature.spec.ts:12` | feature-1 - searchBatchOperationItems - base (1) |
-| observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:13` | variant-1 - searchBatchOperationItems - bpmn #1 |
-| observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:84` | variant-2 - searchBatchOperationItems - path #1 |
-| observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:138` | variant-3 - searchBatchOperationItems - path #1 |
+| observe-present-search | data-driven, filter | `searchBatchOperationItems.variant.spec.ts:13` | variant-1 - searchBatchOperationItems - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchBatchOperationItems.variant.spec.ts:84` | variant-2 - searchBatchOperationItems - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchBatchOperationItems.variant.spec.ts:138` | variant-3 - searchBatchOperationItems - path #1 |
 | observe-absence | observe-absence | `searchBatchOperationItems.feature.spec.ts:37` | feature-2 - searchBatchOperationItems - negative empty (2) |
 | negative-search | bad-request | `request-validation/batchoperationitems-validation-api-tests.spec.ts:18` | searchBatchOperationItems - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/batchoperationitems-validation-api-tests.spec.ts:37` | searchBatchOperationItems - Body wrong top-level type |
@@ -1296,7 +1296,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignUserTask.feature.spec.ts`, `completeUserTask.feature.spec.ts`, `getFormByKey.feature.spec.ts`, `getUserTask.feature.spec.ts`, `getUserTaskForm.feature.spec.ts`, `request-validation/forms-validation-api-tests.spec.ts`, `request-validation/usertasks-validation-api-tests.spec.ts`, `searchUserTaskAuditLogs.feature.spec.ts`, `searchUserTaskEffectiveVariables.feature.spec.ts`, `searchUserTaskVariables.feature.spec.ts`, `searchUserTasks.feature.spec.ts`, `searchUserTasks.variant.spec.ts`, `unassignUserTask.feature.spec.ts`, `updateUserTask.feature.spec.ts`
 - **Observation channel**: GET = 3, Search = 13
 - **Form-step counts**: observe-present-get=3, observe-present-search=13, mutate=3, delete=1, observe-absence=1, negative-get=3, negative-update=10, negative-delete=1, negative-search=30
-- **Variants**: happy-path=11, observe-absence=1, data-driven=9, bad-request=44
+- **Variants**: happy-path=11, observe-absence=1, data-driven=9, bad-request=44, pagination-sort=2, filter=7
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -1307,15 +1307,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | happy-path | `searchUserTaskEffectiveVariables.feature.spec.ts:12` | feature-1 - searchUserTaskEffectiveVariables - base (1) |
 | observe-present-search | happy-path | `searchUserTaskVariables.feature.spec.ts:12` | feature-1 - searchUserTaskVariables - base (1) |
 | observe-present-search | happy-path | `searchUserTasks.feature.spec.ts:12` | feature-1 - searchUserTasks - base (1) |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:13` | variant-1 - searchUserTasks - bpmn #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:114` | variant-2 - searchUserTasks - bpmn #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:164` | variant-3 - searchUserTasks - path #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:232` | variant-4 - searchUserTasks - bpmn #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:282` | variant-5 - searchUserTasks - bpmn #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:353` | variant-6 - searchUserTasks - bpmn #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:454` | variant-7 - searchUserTasks - bpmn #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:552` | variant-8 - searchUserTasks - path #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:604` | variant-9 - searchUserTasks - path #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:13` | variant-1 - searchUserTasks - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:114` | variant-2 - searchUserTasks - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:164` | variant-3 - searchUserTasks - path #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:232` | variant-4 - searchUserTasks - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:282` | variant-5 - searchUserTasks - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:353` | variant-6 - searchUserTasks - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchUserTasks.variant.spec.ts:454` | variant-7 - searchUserTasks - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUserTasks.variant.spec.ts:552` | variant-8 - searchUserTasks - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchUserTasks.variant.spec.ts:604` | variant-9 - searchUserTasks - path #1 |
 | mutate | happy-path | `assignUserTask.feature.spec.ts:8` | feature-1 - assignUserTask - base (1) |
 | mutate | happy-path | `completeUserTask.feature.spec.ts:8` | feature-1 - completeUserTask - base (1) |
 | mutate | happy-path | `updateUserTask.feature.spec.ts:8` | feature-1 - updateUserTask - base (1) |
@@ -1378,7 +1378,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `activateJobs.feature.spec.ts`, `activateJobs.variant.spec.ts`, `completeJob.feature.spec.ts`, `completeJob.variant.spec.ts`, `failJob.feature.spec.ts`, `getGlobalJobStatistics.feature.spec.ts`, `getJobErrorStatistics.feature.spec.ts`, `getJobErrorStatistics.variant.spec.ts`, `getJobTimeSeriesStatistics.feature.spec.ts`, `getJobTimeSeriesStatistics.variant.spec.ts`, `getJobTypeStatistics.feature.spec.ts`, `getJobTypeStatistics.variant.spec.ts`, `getJobWorkerStatistics.feature.spec.ts`, `getJobWorkerStatistics.variant.spec.ts`, `request-validation/jobs-validation-api-tests.spec.ts`, `searchJobs.feature.spec.ts`, `searchJobs.variant.spec.ts`, `throwJobError.feature.spec.ts`, `updateJob.feature.spec.ts`
 - **Observation channel**: GET = 9, Search = 7
 - **Form-step counts**: create=3, observe-present-get=9, observe-present-search=7, mutate=6, observe-absence=2, negative-create=28, negative-get=58, negative-update=24, negative-search=5
-- **Variants**: happy-path=11, observe-absence=2, data-driven=14, bad-request=115
+- **Variants**: happy-path=11, observe-absence=2, data-driven=14, bad-request=115, pagination-sort=6, filter=10
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -1386,21 +1386,21 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | create | data-driven | `activateJobs.variant.spec.ts:12` | variant-1 - activateJobs - path #1 |
 | create | happy-path | `throwJobError.feature.spec.ts:9` | feature-1 - throwJobError - base (1) |
 | observe-present-get | happy-path | `getGlobalJobStatistics.feature.spec.ts:12` | feature-1 - getGlobalJobStatistics - base (1) |
-| observe-present-get | happy-path | `getJobErrorStatistics.feature.spec.ts:11` | feature-1 - getJobErrorStatistics - base (1) |
-| observe-present-get | data-driven | `getJobErrorStatistics.variant.spec.ts:12` | variant-1 - getJobErrorStatistics - path #1 |
-| observe-present-get | happy-path | `getJobTimeSeriesStatistics.feature.spec.ts:11` | feature-1 - getJobTimeSeriesStatistics - base (1) |
-| observe-present-get | data-driven | `getJobTimeSeriesStatistics.variant.spec.ts:12` | variant-1 - getJobTimeSeriesStatistics - path #1 |
+| observe-present-get | happy-path, filter | `getJobErrorStatistics.feature.spec.ts:11` | feature-1 - getJobErrorStatistics - base (1) |
+| observe-present-get | data-driven, pagination-sort, filter | `getJobErrorStatistics.variant.spec.ts:12` | variant-1 - getJobErrorStatistics - path #1 |
+| observe-present-get | happy-path, filter | `getJobTimeSeriesStatistics.feature.spec.ts:11` | feature-1 - getJobTimeSeriesStatistics - base (1) |
+| observe-present-get | data-driven, pagination-sort, filter | `getJobTimeSeriesStatistics.variant.spec.ts:12` | variant-1 - getJobTimeSeriesStatistics - path #1 |
 | observe-present-get | happy-path | `getJobTypeStatistics.feature.spec.ts:11` | feature-1 - getJobTypeStatistics - base (1) |
-| observe-present-get | data-driven | `getJobTypeStatistics.variant.spec.ts:12` | variant-1 - getJobTypeStatistics - path #1 |
-| observe-present-get | happy-path | `getJobWorkerStatistics.feature.spec.ts:11` | feature-1 - getJobWorkerStatistics - base (1) |
-| observe-present-get | data-driven | `getJobWorkerStatistics.variant.spec.ts:12` | variant-1 - getJobWorkerStatistics - path #1 |
+| observe-present-get | data-driven, pagination-sort | `getJobTypeStatistics.variant.spec.ts:12` | variant-1 - getJobTypeStatistics - path #1 |
+| observe-present-get | happy-path, filter | `getJobWorkerStatistics.feature.spec.ts:11` | feature-1 - getJobWorkerStatistics - base (1) |
+| observe-present-get | data-driven, pagination-sort, filter | `getJobWorkerStatistics.variant.spec.ts:12` | variant-1 - getJobWorkerStatistics - path #1 |
 | observe-present-search | happy-path | `searchJobs.feature.spec.ts:13` | feature-1 - searchJobs - base (1) |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:13` | variant-1 - searchJobs - bpmn #1 |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:116` | variant-2 - searchJobs - bpmn #1 |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:219` | variant-3 - searchJobs - path #1 |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:293` | variant-4 - searchJobs - bpmn #1 |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:366` | variant-5 - searchJobs - path #1 |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:462` | variant-6 - searchJobs - path #1 |
+| observe-present-search | data-driven, filter | `searchJobs.variant.spec.ts:13` | variant-1 - searchJobs - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchJobs.variant.spec.ts:116` | variant-2 - searchJobs - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchJobs.variant.spec.ts:219` | variant-3 - searchJobs - path #1 |
+| observe-present-search | data-driven, filter | `searchJobs.variant.spec.ts:293` | variant-4 - searchJobs - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchJobs.variant.spec.ts:366` | variant-5 - searchJobs - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchJobs.variant.spec.ts:462` | variant-6 - searchJobs - path #1 |
 | mutate | happy-path | `completeJob.feature.spec.ts:9` | feature-1 - completeJob - base (1) |
 | mutate | data-driven | `completeJob.feature.spec.ts:93` | feature-2 - completeJob - oneOf result variant1 (2) |
 | mutate | data-driven | `completeJob.feature.spec.ts:178` | feature-3 - completeJob - oneOf result variant2 (3) |
@@ -1537,20 +1537,20 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getIncident.feature.spec.ts`, `getProcessInstanceStatisticsByDefinition.feature.spec.ts`, `getProcessInstanceStatisticsByError.feature.spec.ts`, `request-validation/incidents-validation-api-tests.spec.ts`, `resolveIncident.feature.spec.ts`, `searchIncidents.feature.spec.ts`, `searchIncidents.variant.spec.ts`
 - **Observation channel**: GET = 3, Search = 7
 - **Form-step counts**: observe-present-get=3, observe-present-search=7, mutate=1, observe-absence=1, negative-get=16, negative-update=8, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=6, bad-request=29
+- **Variants**: happy-path=5, observe-absence=1, data-driven=6, bad-request=29, pagination-sort=2, filter=5
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getIncident.feature.spec.ts:12` | feature-1 - getIncident - base (1) |
-| observe-present-get | happy-path | `getProcessInstanceStatisticsByDefinition.feature.spec.ts:11` | feature-1 - getProcessInstanceStatisticsByDefinition - base (1) |
+| observe-present-get | happy-path, filter | `getProcessInstanceStatisticsByDefinition.feature.spec.ts:11` | feature-1 - getProcessInstanceStatisticsByDefinition - base (1) |
 | observe-present-get | happy-path | `getProcessInstanceStatisticsByError.feature.spec.ts:11` | feature-1 - getProcessInstanceStatisticsByError - base (1) |
 | observe-present-search | happy-path | `searchIncidents.feature.spec.ts:12` | feature-1 - searchIncidents - base (1) |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:13` | variant-1 - searchIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:63` | variant-2 - searchIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:134` | variant-3 - searchIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:236` | variant-4 - searchIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:338` | variant-5 - searchIncidents - path #1 |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:390` | variant-6 - searchIncidents - path #1 |
+| observe-present-search | data-driven, filter | `searchIncidents.variant.spec.ts:13` | variant-1 - searchIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchIncidents.variant.spec.ts:63` | variant-2 - searchIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchIncidents.variant.spec.ts:134` | variant-3 - searchIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchIncidents.variant.spec.ts:236` | variant-4 - searchIncidents - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchIncidents.variant.spec.ts:338` | variant-5 - searchIncidents - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchIncidents.variant.spec.ts:390` | variant-6 - searchIncidents - path #1 |
 | mutate | happy-path | `resolveIncident.feature.spec.ts:8` | feature-1 - resolveIncident - base (1) |
 | observe-absence | observe-absence | `searchIncidents.feature.spec.ts:35` | feature-2 - searchIncidents - negative empty (2) |
 | negative-get | bad-request | `request-validation/incidents-validation-api-tests.spec.ts:18` | getIncident - Path param incidentKey pattern violation |
@@ -1595,36 +1595,36 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `deleteDecisionInstance.feature.spec.ts`, `deleteDecisionInstancesBatchOperation.feature.spec.ts`, `deleteDecisionInstancesBatchOperation.variant.spec.ts`, `getDecisionInstance.feature.spec.ts`, `request-validation/decisioninstances-validation-api-tests.spec.ts`, `searchDecisionInstances.feature.spec.ts`, `searchDecisionInstances.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 13
 - **Form-step counts**: observe-present-get=1, observe-present-search=13, delete=12, observe-absence=1, negative-get=1, negative-delete=38, negative-search=6
-- **Variants**: happy-path=4, observe-absence=1, data-driven=22, bad-request=45
+- **Variants**: happy-path=4, observe-absence=1, data-driven=22, bad-request=45, pagination-sort=2, filter=21
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getDecisionInstance.feature.spec.ts:13` | feature-1 - getDecisionInstance - base (1) |
 | observe-present-search | happy-path | `searchDecisionInstances.feature.spec.ts:12` | feature-1 - searchDecisionInstances - base (1) |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:13` | variant-1 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:92` | variant-2 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:143` | variant-3 - searchDecisionInstances - path #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:195` | variant-4 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:274` | variant-5 - searchDecisionInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:326` | variant-6 - searchDecisionInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:399` | variant-7 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:450` | variant-8 - searchDecisionInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:552` | variant-9 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:603` | variant-10 - searchDecisionInstances - drd #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:654` | variant-11 - searchDecisionInstances - path #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:708` | variant-12 - searchDecisionInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:13` | variant-1 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:92` | variant-2 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:143` | variant-3 - searchDecisionInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:195` | variant-4 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:274` | variant-5 - searchDecisionInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:326` | variant-6 - searchDecisionInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:399` | variant-7 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:450` | variant-8 - searchDecisionInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:552` | variant-9 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven, filter | `searchDecisionInstances.variant.spec.ts:603` | variant-10 - searchDecisionInstances - drd #1 |
+| observe-present-search | data-driven, pagination-sort | `searchDecisionInstances.variant.spec.ts:654` | variant-11 - searchDecisionInstances - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchDecisionInstances.variant.spec.ts:708` | variant-12 - searchDecisionInstances - path #1 |
 | delete | happy-path | `deleteDecisionInstance.feature.spec.ts:9` | feature-1 - deleteDecisionInstance - base (1) |
-| delete | happy-path | `deleteDecisionInstancesBatchOperation.feature.spec.ts:11` | feature-1 - deleteDecisionInstancesBatchOperation - base (1) |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:12` | variant-1 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:90` | variant-2 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:140` | variant-3 - deleteDecisionInstancesBatchOperation - path #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:191` | variant-4 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:269` | variant-5 - deleteDecisionInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:321` | variant-6 - deleteDecisionInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:393` | variant-7 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:443` | variant-8 - deleteDecisionInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:544` | variant-9 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:594` | variant-10 - deleteDecisionInstancesBatchOperation - drd #1 |
+| delete | happy-path, filter | `deleteDecisionInstancesBatchOperation.feature.spec.ts:11` | feature-1 - deleteDecisionInstancesBatchOperation - base (1) |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:12` | variant-1 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:90` | variant-2 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:140` | variant-3 - deleteDecisionInstancesBatchOperation - path #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:191` | variant-4 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:269` | variant-5 - deleteDecisionInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:321` | variant-6 - deleteDecisionInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:393` | variant-7 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:443` | variant-8 - deleteDecisionInstancesBatchOperation - bpmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:544` | variant-9 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven, filter | `deleteDecisionInstancesBatchOperation.variant.spec.ts:594` | variant-10 - deleteDecisionInstancesBatchOperation - drd #1 |
 | observe-absence | observe-absence | `searchDecisionInstances.feature.spec.ts:37` | feature-2 - searchDecisionInstances - negative empty (2) |
 | negative-get | bad-request | `request-validation/decisioninstances-validation-api-tests.spec.ts:979` | getDecisionInstance - Path param decisionEvaluationInstanceKey pattern violation |
 | negative-delete | bad-request | `request-validation/decisioninstances-validation-api-tests.spec.ts:18` | deleteDecisionInstance - Additional prop __unexpectedField |
@@ -1684,7 +1684,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `activateAdHocSubProcessActivities.feature.spec.ts`, `activateAdHocSubProcessActivities.variant.spec.ts`, `createElementInstanceVariables.feature.spec.ts`, `getElementInstance.feature.spec.ts`, `request-validation/elementinstances-validation-api-tests.spec.ts`, `searchElementInstanceIncidents.feature.spec.ts`, `searchElementInstanceIncidents.variant.spec.ts`, `searchElementInstances.feature.spec.ts`, `searchElementInstances.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 20
 - **Form-step counts**: create=3, observe-present-get=1, observe-present-search=20, observe-absence=1, negative-create=16, negative-get=1, negative-search=13
-- **Variants**: happy-path=5, observe-absence=1, data-driven=19, bad-request=30
+- **Variants**: happy-path=5, observe-absence=1, data-driven=19, bad-request=30, pagination-sort=4, filter=12
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -1693,25 +1693,25 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | create | happy-path | `createElementInstanceVariables.feature.spec.ts:9` | feature-1 - createElementInstanceVariables - base (1) |
 | observe-present-get | happy-path | `getElementInstance.feature.spec.ts:13` | feature-1 - getElementInstance - base (1) |
 | observe-present-search | happy-path | `searchElementInstanceIncidents.feature.spec.ts:13` | feature-1 - searchElementInstanceIncidents - base (1) |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:13` | variant-1 - searchElementInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:122` | variant-2 - searchElementInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:231` | variant-3 - searchElementInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:340` | variant-4 - searchElementInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:449` | variant-5 - searchElementInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:584` | variant-6 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstanceIncidents.variant.spec.ts:13` | variant-1 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstanceIncidents.variant.spec.ts:122` | variant-2 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstanceIncidents.variant.spec.ts:231` | variant-3 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstanceIncidents.variant.spec.ts:340` | variant-4 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchElementInstanceIncidents.variant.spec.ts:449` | variant-5 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchElementInstanceIncidents.variant.spec.ts:584` | variant-6 - searchElementInstanceIncidents - bpmn #1 |
 | observe-present-search | happy-path | `searchElementInstances.feature.spec.ts:12` | feature-1 - searchElementInstances - base (1) |
 | observe-present-search | data-driven | `searchElementInstances.feature.spec.ts:63` | feature-3 - searchElementInstances - oneOf filter.elementInstanceScopeKey variant1 (3) |
 | observe-present-search | data-driven | `searchElementInstances.feature.spec.ts:91` | feature-4 - searchElementInstances - oneOf filter.elementInstanceScopeKey variant2 (4) |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:13` | variant-1 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:63` | variant-2 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:162` | variant-3 - searchElementInstances - path #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:213` | variant-4 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:312` | variant-5 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:382` | variant-6 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:432` | variant-7 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:594` | variant-8 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:693` | variant-9 - searchElementInstances - path #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:747` | variant-10 - searchElementInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:13` | variant-1 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:63` | variant-2 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:162` | variant-3 - searchElementInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:213` | variant-4 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:312` | variant-5 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:382` | variant-6 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:432` | variant-7 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchElementInstances.variant.spec.ts:594` | variant-8 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchElementInstances.variant.spec.ts:693` | variant-9 - searchElementInstances - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchElementInstances.variant.spec.ts:747` | variant-10 - searchElementInstances - path #1 |
 | observe-absence | observe-absence | `searchElementInstances.feature.spec.ts:37` | feature-2 - searchElementInstances - negative empty (2) |
 | negative-create | bad-request | `request-validation/elementinstances-validation-api-tests.spec.ts:18` | activateAdHocSubProcessActivities - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/elementinstances-validation-api-tests.spec.ts:45` | activateAdHocSubProcessActivities - Body wrong top-level type |
@@ -1750,27 +1750,27 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getAuditLog.feature.spec.ts`, `request-validation/auditlogs-validation-api-tests.spec.ts`, `searchAuditLogs.feature.spec.ts`, `searchAuditLogs.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 16
 - **Form-step counts**: observe-present-get=1, observe-present-search=16, observe-absence=1, negative-get=1, negative-search=5
-- **Variants**: happy-path=2, observe-absence=1, data-driven=11, unlabeled=4, bad-request=6
+- **Variants**: happy-path=2, observe-absence=1, data-driven=11, bad-request=6, pagination-sort=2, filter=13
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getAuditLog.feature.spec.ts:12` | feature-1 - getAuditLog - base (1) |
 | observe-present-search | happy-path | `searchAuditLogs.feature.spec.ts:12` | feature-1 - searchAuditLogs - base (1) |
-| observe-present-search | unlabeled | `searchAuditLogs.variant.spec.ts:13` | variant-1 - scenario |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:42` | variant-2 - searchAuditLogs - bpmn #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:92` | variant-3 - searchAuditLogs - bpmn #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:163` | variant-4 - searchAuditLogs - bpmn #1 |
-| observe-present-search | unlabeled | `searchAuditLogs.variant.spec.ts:265` | variant-5 - scenario |
-| observe-present-search | unlabeled | `searchAuditLogs.variant.spec.ts:293` | variant-6 - scenario |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:322` | variant-7 - searchAuditLogs - form #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:371` | variant-8 - searchAuditLogs - bpmn #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:421` | variant-9 - searchAuditLogs - bpmn #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:523` | variant-10 - searchAuditLogs - drd #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:572` | variant-11 - searchAuditLogs - dmn #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:621` | variant-12 - searchAuditLogs - dmn #1 |
-| observe-present-search | unlabeled | `searchAuditLogs.variant.spec.ts:697` | variant-13 - scenario |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:725` | variant-14 - searchAuditLogs - path #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:777` | variant-15 - searchAuditLogs - path #1 |
+| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:13` | variant-1 - scenario |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:42` | variant-2 - searchAuditLogs - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:92` | variant-3 - searchAuditLogs - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:163` | variant-4 - searchAuditLogs - bpmn #1 |
+| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:265` | variant-5 - scenario |
+| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:293` | variant-6 - scenario |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:322` | variant-7 - searchAuditLogs - form #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:371` | variant-8 - searchAuditLogs - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:421` | variant-9 - searchAuditLogs - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:523` | variant-10 - searchAuditLogs - drd #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:572` | variant-11 - searchAuditLogs - dmn #1 |
+| observe-present-search | data-driven, filter | `searchAuditLogs.variant.spec.ts:621` | variant-12 - searchAuditLogs - dmn #1 |
+| observe-present-search | filter | `searchAuditLogs.variant.spec.ts:697` | variant-13 - scenario |
+| observe-present-search | data-driven, pagination-sort | `searchAuditLogs.variant.spec.ts:725` | variant-14 - searchAuditLogs - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchAuditLogs.variant.spec.ts:777` | variant-15 - searchAuditLogs - path #1 |
 | observe-absence | observe-absence | `searchAuditLogs.feature.spec.ts:35` | feature-2 - searchAuditLogs - negative empty (2) |
 | negative-get | bad-request | `request-validation/auditlogs-validation-api-tests.spec.ts:18` | getAuditLog - Path param auditLogKey pattern violation |
 | negative-search | bad-request | `request-validation/auditlogs-validation-api-tests.spec.ts:30` | searchAuditLogs - Additional prop __unexpectedField |
@@ -1785,18 +1785,18 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `getVariable.feature.spec.ts`, `request-validation/variables-validation-api-tests.spec.ts`, `searchVariables.feature.spec.ts`, `searchVariables.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 7
 - **Form-step counts**: observe-present-get=1, observe-present-search=7, observe-absence=1, negative-get=1, negative-search=6
-- **Variants**: happy-path=2, observe-absence=1, data-driven=4, unlabeled=2, bad-request=7
+- **Variants**: happy-path=2, observe-absence=1, data-driven=4, bad-request=7, pagination-sort=2, filter=4
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getVariable.feature.spec.ts:12` | feature-1 - getVariable - base (1) |
 | observe-present-search | happy-path | `searchVariables.feature.spec.ts:12` | feature-1 - searchVariables - base (1) |
-| observe-present-search | data-driven | `searchVariables.variant.spec.ts:13` | variant-1 - searchVariables - path #1 |
-| observe-present-search | unlabeled | `searchVariables.variant.spec.ts:64` | variant-2 - scenario |
-| observe-present-search | unlabeled | `searchVariables.variant.spec.ts:93` | variant-3 - scenario |
-| observe-present-search | data-driven | `searchVariables.variant.spec.ts:122` | variant-4 - searchVariables - bpmn #1 |
-| observe-present-search | data-driven | `searchVariables.variant.spec.ts:191` | variant-5 - searchVariables - path #1 |
-| observe-present-search | data-driven | `searchVariables.variant.spec.ts:243` | variant-6 - searchVariables - path #1 |
+| observe-present-search | data-driven, filter | `searchVariables.variant.spec.ts:13` | variant-1 - searchVariables - path #1 |
+| observe-present-search | filter | `searchVariables.variant.spec.ts:64` | variant-2 - scenario |
+| observe-present-search | filter | `searchVariables.variant.spec.ts:93` | variant-3 - scenario |
+| observe-present-search | data-driven, filter | `searchVariables.variant.spec.ts:122` | variant-4 - searchVariables - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchVariables.variant.spec.ts:191` | variant-5 - searchVariables - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchVariables.variant.spec.ts:243` | variant-6 - searchVariables - path #1 |
 | observe-absence | observe-absence | `searchVariables.feature.spec.ts:35` | feature-2 - searchVariables - negative empty (2) |
 | negative-get | bad-request | `request-validation/variables-validation-api-tests.spec.ts:18` | getVariable - Path param variableKey pattern violation |
 | negative-search | bad-request | `request-validation/variables-validation-api-tests.spec.ts:30` | searchVariables - Additional prop __unexpectedField |
@@ -1884,17 +1884,17 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `request-validation/correlatedmessagesubscriptions-validation-api-tests.spec.ts`, `searchCorrelatedMessageSubscriptions.feature.spec.ts`, `searchCorrelatedMessageSubscriptions.variant.spec.ts`
 - **Observation channel**: GET = 0, Search = 7
 - **Form-step counts**: observe-present-search=7, observe-absence=1, negative-search=5
-- **Variants**: happy-path=1, observe-absence=1, data-driven=6, bad-request=5
+- **Variants**: happy-path=1, observe-absence=1, data-driven=6, bad-request=5, pagination-sort=2, filter=4
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-search | happy-path | `searchCorrelatedMessageSubscriptions.feature.spec.ts:12` | feature-1 - searchCorrelatedMessageSubscriptions - base (1) |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:13` | variant-1 - searchCorrelatedMessageSubscriptions - bpmn #1 |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:117` | variant-2 - searchCorrelatedMessageSubscriptions - bpmn #1 |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:170` | variant-3 - searchCorrelatedMessageSubscriptions - bpmn #1 |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:244` | variant-4 - searchCorrelatedMessageSubscriptions - path #1 |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:305` | variant-5 - searchCorrelatedMessageSubscriptions - path #1 |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:360` | variant-6 - searchCorrelatedMessageSubscriptions - path #1 |
+| observe-present-search | data-driven, filter | `searchCorrelatedMessageSubscriptions.variant.spec.ts:13` | variant-1 - searchCorrelatedMessageSubscriptions - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchCorrelatedMessageSubscriptions.variant.spec.ts:117` | variant-2 - searchCorrelatedMessageSubscriptions - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchCorrelatedMessageSubscriptions.variant.spec.ts:170` | variant-3 - searchCorrelatedMessageSubscriptions - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchCorrelatedMessageSubscriptions.variant.spec.ts:244` | variant-4 - searchCorrelatedMessageSubscriptions - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchCorrelatedMessageSubscriptions.variant.spec.ts:305` | variant-5 - searchCorrelatedMessageSubscriptions - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchCorrelatedMessageSubscriptions.variant.spec.ts:360` | variant-6 - searchCorrelatedMessageSubscriptions - path #1 |
 | observe-absence | observe-absence | `searchCorrelatedMessageSubscriptions.feature.spec.ts:38` | feature-2 - searchCorrelatedMessageSubscriptions - negative empty (2) |
 | negative-search | bad-request | `request-validation/correlatedmessagesubscriptions-validation-api-tests.spec.ts:18` | searchCorrelatedMessageSubscriptions - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/correlatedmessagesubscriptions-validation-api-tests.spec.ts:37` | searchCorrelatedMessageSubscriptions - Body wrong top-level type |
@@ -1908,17 +1908,17 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `request-validation/messagesubscriptions-validation-api-tests.spec.ts`, `searchMessageSubscriptions.feature.spec.ts`, `searchMessageSubscriptions.variant.spec.ts`
 - **Observation channel**: GET = 0, Search = 7
 - **Form-step counts**: observe-present-search=7, observe-absence=1, negative-search=5
-- **Variants**: happy-path=1, observe-absence=1, data-driven=6, bad-request=5
+- **Variants**: happy-path=1, observe-absence=1, data-driven=6, bad-request=5, pagination-sort=2, filter=4
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-search | happy-path | `searchMessageSubscriptions.feature.spec.ts:12` | feature-1 - searchMessageSubscriptions - base (1) |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:13` | variant-1 - searchMessageSubscriptions - path #1 |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:69` | variant-2 - searchMessageSubscriptions - bpmn #1 |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:121` | variant-3 - searchMessageSubscriptions - bpmn #1 |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:195` | variant-4 - searchMessageSubscriptions - bpmn #1 |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:298` | variant-5 - searchMessageSubscriptions - path #1 |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:352` | variant-6 - searchMessageSubscriptions - path #1 |
+| observe-present-search | data-driven, filter | `searchMessageSubscriptions.variant.spec.ts:13` | variant-1 - searchMessageSubscriptions - path #1 |
+| observe-present-search | data-driven, filter | `searchMessageSubscriptions.variant.spec.ts:69` | variant-2 - searchMessageSubscriptions - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchMessageSubscriptions.variant.spec.ts:121` | variant-3 - searchMessageSubscriptions - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchMessageSubscriptions.variant.spec.ts:195` | variant-4 - searchMessageSubscriptions - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMessageSubscriptions.variant.spec.ts:298` | variant-5 - searchMessageSubscriptions - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchMessageSubscriptions.variant.spec.ts:352` | variant-6 - searchMessageSubscriptions - path #1 |
 | observe-absence | observe-absence | `searchMessageSubscriptions.feature.spec.ts:37` | feature-2 - searchMessageSubscriptions - negative empty (2) |
 | negative-search | bad-request | `request-validation/messagesubscriptions-validation-api-tests.spec.ts:18` | searchMessageSubscriptions - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/messagesubscriptions-validation-api-tests.spec.ts:37` | searchMessageSubscriptions - Body wrong top-level type |
@@ -2110,20 +2110,20 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `createAgentInstance.feature.spec.ts`, `getAgentInstance.feature.spec.ts`, `request-validation/agentinstances-validation-api-tests.spec.ts`, `searchAgentInstances.feature.spec.ts`, `searchAgentInstances.variant.spec.ts`, `updateAgentInstance.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 8
 - **Form-step counts**: create=1, observe-present-get=1, observe-present-search=8, mutate=1, observe-absence=1, negative-create=21, negative-get=1, negative-update=10, negative-search=5
-- **Variants**: happy-path=4, observe-absence=1, data-driven=7, bad-request=37
+- **Variants**: happy-path=4, observe-absence=1, data-driven=7, bad-request=37, pagination-sort=2, filter=5
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createAgentInstance.feature.spec.ts:12` | feature-1 - createAgentInstance - base (1) |
 | observe-present-get | happy-path | `getAgentInstance.feature.spec.ts:13` | feature-1 - getAgentInstance - base (1) |
 | observe-present-search | happy-path | `searchAgentInstances.feature.spec.ts:12` | feature-1 - searchAgentInstances - base (1) |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:13` | variant-1 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:155` | variant-2 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:256` | variant-3 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:329` | variant-4 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:381` | variant-5 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:482` | variant-6 - searchAgentInstances - path #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:546` | variant-7 - searchAgentInstances - path #1 |
+| observe-present-search | data-driven, filter | `searchAgentInstances.variant.spec.ts:13` | variant-1 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAgentInstances.variant.spec.ts:155` | variant-2 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAgentInstances.variant.spec.ts:256` | variant-3 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAgentInstances.variant.spec.ts:329` | variant-4 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven, filter | `searchAgentInstances.variant.spec.ts:381` | variant-5 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven, pagination-sort | `searchAgentInstances.variant.spec.ts:482` | variant-6 - searchAgentInstances - path #1 |
+| observe-present-search | data-driven, pagination-sort | `searchAgentInstances.variant.spec.ts:546` | variant-7 - searchAgentInstances - path #1 |
 | mutate | happy-path | `updateAgentInstance.feature.spec.ts:9` | feature-1 - updateAgentInstance - base (1) |
 | observe-absence | observe-absence | `searchAgentInstances.feature.spec.ts:37` | feature-2 - searchAgentInstances - negative empty (2) |
 | negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:18` | createAgentInstance - Additional prop __extraField |

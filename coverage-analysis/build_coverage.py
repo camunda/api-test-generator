@@ -327,13 +327,34 @@ def load_edge_index():
 
 EDGE_INDEX = load_edge_index()
 
+# Detect pagination/filter exercise in a test body. We match on the
+# field-assignment form ('page: {', 'filter: {') so response-access
+# expressions (e.g. `json?.page?.startCursor`) don't false-positive.
+PAGINATION_BODY_RE = re.compile(r'\bpage\s*:\s*\{|\bsort\s*:\s*\[')
+FILTER_BODY_RE = re.compile(r'\bfilter\s*:\s*\{')
+
 def read_tests(path):
+    """Yield (test_name, line_number, body_text) per test() block. body_text
+    is the source from the test() start to the next test() start (or EOF),
+    used for body-shape variant detection (pagination/filter)."""
     with open(path, encoding='utf-8') as fp:
         content = fp.read()
+    matches = list(TEST_RE.finditer(content))
     out = []
-    for tm in TEST_RE.finditer(content):
-        out.append((tm.group(1), content.count('\n', 0, tm.start()) + 1))
+    for i, tm in enumerate(matches):
+        line_no = content.count('\n', 0, tm.start()) + 1
+        body_end = matches[i+1].start() if i+1 < len(matches) else len(content)
+        body = content[tm.start():body_end]
+        out.append((tm.group(1), line_no, body))
     return out
+
+def body_extra_variants(body):
+    extras = []
+    if PAGINATION_BODY_RE.search(body):
+        extras.append('pagination-sort')
+    if FILTER_BODY_RE.search(body):
+        extras.append('filter')
+    return extras
 
 def resolve_op(op_id):
     """operationId -> (method, path, entity, operation). Falls back to 'unknown' if not in spec."""
@@ -356,8 +377,14 @@ for f in sorted(os.listdir(PLAYWRIGHT_DIR)):
     method, path, entity, operation = resolve_op(op_id)
     if entity == 'unknown':
         unresolved_ops.add(op_id)
-    for name, line_no in read_tests(os.path.join(PLAYWRIGHT_DIR, f)):
+    for name, line_no, body in read_tests(os.path.join(PLAYWRIGHT_DIR, f)):
         variants = variants_of(name)
+        # Augment with body-detected shape variants (pagination/filter) —
+        # these are observable from the request body, not the test name.
+        extras = body_extra_variants(body)
+        if extras:
+            base = [] if variants == 'unlabeled' else variants.split('|')
+            variants = '|'.join(base + [e for e in extras if e not in base])
         rows.append({
             'file': f, 'line': line_no, 'source': source,
             'entity': entity, 'operation': operation,
@@ -384,7 +411,7 @@ if os.path.isdir(EDGES_DIR):
             method, path, entity, operation = resolve_op(op_id)
         else:
             method, path, entity, operation = '', '', 'unknown', 'lifecycle'
-        for name, line_no in read_tests(os.path.join(EDGES_DIR, f)):
+        for name, line_no, _body in read_tests(os.path.join(EDGES_DIR, f)):
             rows.append({
                 'file': f'edges/{f}', 'line': line_no, 'source': 'lifecycle',
                 'entity': entity, 'operation': 'lifecycle',
@@ -408,7 +435,7 @@ if os.path.isdir(ENTITIES_DIR):
             continue
         ent_pascal = m.group('entity')
         entity = PASCAL_TO_SLUG.get(ent_pascal, ent_pascal.lower())
-        for name, line_no in read_tests(os.path.join(ENTITIES_DIR, f)):
+        for name, line_no, _body in read_tests(os.path.join(ENTITIES_DIR, f)):
             rows.append({
                 'file': f'entities/{f}', 'line': line_no, 'source': 'lifecycle',
                 'entity': entity, 'operation': 'lifecycle',
@@ -429,7 +456,7 @@ if os.path.isdir(REQVAL_DIR):
     for f in sorted(os.listdir(REQVAL_DIR)):
         if not f.endswith('.spec.ts'):
             continue
-        for name, line_no in read_tests(os.path.join(REQVAL_DIR, f)):
+        for name, line_no, _body in read_tests(os.path.join(REQVAL_DIR, f)):
             tm = REQVAL_TEST_NAME_RE.match(name)
             op_id = tm.group('op') if tm else ''
             desc = tm.group('desc').strip() if tm else ''

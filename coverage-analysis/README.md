@@ -87,37 +87,27 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 |---|---:|---:|
 | Unique tests | 1001 | **1617** |
 | Entities | 33 | 37 |
-| Happy-path (occurrences) | 173 | 201 |
+| Happy-path (occurrences) | 173 | 211 |
 | Bad-request (400, occurrences) | 195 | **1071** |
+| Pagination-sort (occurrences) | 53 | **85** |
+| Filter (occurrences) | 85 | **196** |
+| Observe-absence | 2 | 48 |
+| Data-driven / oneOf variants | 5 | 302 |
 | Unauthorized (401) | 165 | **0** |
 | Not-found (404) | 127 | **0** |
-| Filter | 85 | **0** |
-| Pagination-sort | 53 | **0** |
 | Conflict (409) | 31 | **0** |
 | Forbidden (403) | 29 | **0** |
-| Observe-absence | 2 | 38 |
-| Data-driven / oneOf variants | 5 | **302** |
 
-**The generator emits 616 more tests than upstream.** It massively exceeds
-upstream on 400 bad-request coverage (the `request-validation` emitter alone
-produces 1071 tests across 17 violation kinds: `additional-prop`,
-`constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`,
-`missing-required`, `missing-required-combo`, `oneof-ambiguous`,
-`oneof-cross-bleed`, `oneof-none-match`, `param-constraint-violation`,
-`param-missing`, `param-type-mismatch`, `type-mismatch`, `union`,
-`unique-items-violation`, and `additional-prop-general`).
+**The generator emits 616 more tests than upstream.** It dominates upstream on 400 bad-request coverage (the `request-validation` emitter alone produces 1071 tests across 17 violation kinds: `additional-prop`, `constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`, `missing-required`, `missing-required-combo`, `oneof-ambiguous`, `oneof-cross-bleed`, `oneof-none-match`, `param-constraint-violation`, `param-missing`, `param-type-mismatch`, `type-mismatch`, `union`, `unique-items-violation`, and `additional-prop-general`).
+
+**Pagination/filter counts need a caveat.** The generator's variant emitter sends `page: { after: cursor }` and `filter: { ... }` in request bodies on many search and batch-operation specs (detected by the classifier from the test body shape), so the variant column counts are non-zero. But these tests only assert `status === 200`; they do **not** assert pagination *correctness* (e.g. "page 2 yields the next N items, no overlap with page 1") or filter *correctness* (e.g. "filtering by `status=active` returns only active rows"). Upstream's 53 pagination and 85 filter tests are behaviour assertions, not request-shape assertions — so although the generator's pagination/filter counts now exceed upstream, the *semantic depth* is still much lower. The numeric comparison is a request-shape comparison, not a behaviour-coverage comparison.
 
 The buckets where the generator currently emits zero tests:
 
-- **401 unauthorized** (165 in upstream) — needs deployment-mode-aware auth
-  context, see `camunda/camunda#52511`.
-- **403 forbidden** (29 in upstream) — needs RBAC ABox + restricted-token
-  test infrastructure.
+- **401 unauthorized** (165 in upstream) — needs deployment-mode-aware auth context, see `camunda/camunda#52511`.
+- **403 forbidden** (29 in upstream) — needs RBAC ABox + restricted-token test infrastructure.
 - **404 not-found** (127 in upstream) — fake-ID variant on path params; computable.
-- **409 conflict** (31 in upstream) — needs `duplicatePolicy` ABox slice
-  (designed in 8.8, not yet landed; see #277).
-- **Pagination + sort** (53 in upstream) — computable from declared params.
-- **Filter** (85 in upstream) — computable from filter schemas on search ops.
+- **409 conflict** (31 in upstream) — needs `duplicatePolicy` ABox slice (designed in 8.8, not yet landed; see #277).
 
 See `gaps.md` for the categorised per-entity list.
 
@@ -127,9 +117,16 @@ See `gaps.md` for the categorised per-entity list.
   When emitters change names (or new ones are added) update `variants_of()` in
   `build_coverage.py`.
 - The generator emits substantial 400/bad-request coverage via the
-  `request-validation` emitter (1000+ tests across 17 violation kinds), but
-  emits zero tests for 401/403/404/409 and zero for pagination/sort and filter.
-  Those zero columns are a generator capability gap, not a classifier
-  limitation — see `gaps.md` for the per-entity breakdown.
+  `request-validation` emitter (1000+ tests across 17 violation kinds), and
+  the variant emitter exercises pagination (`page.after` cursor) and filter
+  request shapes on many search/batch-operation specs (detected by the
+  classifier from the test body, not the test name). The buckets where the
+  generator emits **zero** tests are: 401, 403, 404, 409. These are a
+  generator capability gap — see `gaps.md` for the per-entity breakdown.
+- The pagination-sort / filter counts in `coverage_matrix.csv` reflect
+  request-shape coverage (the test sends `page: { ... }` or
+  `filter: { ... }`), not behaviour coverage (the test asserts pagination
+  or filter *results* are correct). Upstream's hand-written tests assert
+  behaviour; the generator's only assert status code + response schema.
 - Dynamic test names (`variant-N - scenario`) are bucketed as `unlabeled` because
   reading the test body would be required to refine them.
