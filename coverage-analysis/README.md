@@ -106,10 +106,25 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 
 The buckets where the generator currently emits zero tests:
 
-- **401 unauthorized** (165 in upstream) — needs deployment-mode-aware auth context, see `camunda/camunda#52511`.
-- **403 forbidden** (29 in upstream) — needs RBAC ABox + restricted-token test infrastructure.
-- **404 not-found** (127 in upstream) — fake-ID variant on path params; computable.
-- **409 conflict** (31 in upstream) — needs `duplicatePolicy` ABox slice (designed in 8.8, not yet landed; see #277).
+- **401 unauthorized** (165 in upstream) — verified zero: no test asserts `status === 401` anywhere in the suite. Needs deployment-mode-aware auth context, see `camunda/camunda#52511`.
+- **403 forbidden** (29 in upstream) — verified zero. Needs RBAC ABox + restricted-token test infrastructure.
+- **404 not-found** (127 in upstream) — see note below; the matrix says zero, but the generator *does* assert 404 in 10 entity-lifecycle tests (final "observe absent" phase). The real gap is the fake-ID variant. Needs `ontology/` semantic-type-based fake-ID generation on path params.
+- **409 conflict** (31 in upstream) — verified zero. Needs `duplicatePolicy` ABox slice (designed in 8.8, not yet landed; see #277).
+
+### Note on the `not-found` count
+
+The matrix shows `not-found: 0` for the generator, but this is a semantic distinction inherited from upstream's taxonomy, not "the generator never asserts 404". Upstream splits 404 assertions into two buckets:
+
+- **`observe-absence`** — `GET` after `DELETE`, expect 404. Entity *was* created, now gone. Generator currently has **48 of these** (10 entity-lifecycle + 12 edge-lifecycle + 26 from feature/variant emitters that include `negative empty` semantics).
+- **`not-found`** — `GET` against a fake/never-existing ID, expect 404. Entity *was never* created. Generator currently has **0** of these.
+
+Concretely, every entity-lifecycle test ends with:
+
+```typescript
+expect(resp4.status()).toBe(404);  // observe absent (after the prior delete)
+```
+
+These are real 404 assertions — they just exercise the "after-delete" path, not the "fake-ID" path. The capability gap is specifically the fake-ID pattern (replace `{tenantId}` with a generated invalid ID, call `GET /tenants/{tenantId}`, expect 404). Upstream's 127 `not-found` tests are mostly that fake-ID pattern.
 
 See `gaps.md` for the categorised per-entity list.
 
