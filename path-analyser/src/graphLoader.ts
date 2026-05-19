@@ -559,7 +559,7 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   // we forgot to update the ABox" (the locality-loss replacement
   // signal). See #210 §4b for the full rationale.
   if (aboxExternals !== null) {
-    const drift = detectEntityKindsDrift(opsRoot?.kindRegistry, operations, repoRoot);
+    const drift = detectEntityKindsDrift(opsRoot?.kindRegistry, operations, entityKindsAbox);
     if (drift.length > 0) {
       const detail = drift.map((d) => `  - ${d}`).join('\n');
       const message = `entity-kinds ABox drift detected:\n${detail}`;
@@ -1066,10 +1066,9 @@ function detectEdgeAnnotationDrift(
 function detectEntityKindsDrift(
   rawRegistry: RawGraphRoot['kindRegistry'] | undefined,
   operations: Record<string, OperationNode>,
-  repoRoot: string,
+  abox: ReturnType<typeof loadEntityKindsAbox>,
 ): string[] {
   const drift: string[] = [];
-  const abox = loadEntityKindsAbox(repoRoot);
   if (abox === null) return drift;
 
   const aboxByName = new Map(abox.kinds.map((k) => [k.name, k]));

@@ -53,6 +53,12 @@ async function main() {
   const suffix = 'path-analyser';
   const baseDir = cwd.endsWith(suffix) ? cwd : path.resolve(cwd, suffix);
   const repoRoot = path.resolve(baseDir, '..');
+  // #288 Phase 2 (review feedback): load the entity-kinds ABox ONCE
+  // per pipeline run and thread the parsed object to every consumer
+  // (post-hint identifier filter below + template instantiation
+  // further down). Re-loading + re-validating the same JSON file
+  // multiple times in one run was wasted I/O.
+  const entityKindsAbox = loadEntityKindsAbox(repoRoot);
   // Per-config layout (#128 PR 2): scenario JSON + feature output land
   // under generated/<config>/, not inside the path-analyser workspace.
   const outputDir = getScenariosDir(repoRoot);
@@ -143,10 +149,9 @@ async function main() {
   // from `requires.required` again here, undoing the Phase 2 fix and
   // letting BFS plan a single-op scenario with no chain to mint the
   // foreign key.
-  const entityKindsAboxForFilter = loadEntityKindsAbox(path.resolve(baseDir, '..'));
   const kindIdentifiersByKind: Map<string, Set<string>> | null =
-    entityKindsAboxForFilter !== null
-      ? new Map(entityKindsAboxForFilter.kinds.map((k) => [k.name, new Set(k.identifiers)]))
+    entityKindsAbox !== null
+      ? new Map(entityKindsAbox.kinds.map((k) => [k.name, new Set(k.identifiers)]))
       : null;
   for (const [opId, op] of Object.entries(graph.operations)) {
     const hint = hints[opId];
@@ -549,7 +554,7 @@ async function main() {
   // step cannot perturb byte-stability of the per-endpoint suites.
   const templatesAbox = loadScenarioTemplatesAbox(repoRoot);
   const edgesAbox = loadEdgesAbox(repoRoot);
-  const entityKindsAboxForTemplates = loadEntityKindsAbox(repoRoot);
+  const entityKindsAboxForTemplates = entityKindsAbox;
   if (templatesAbox && edgesAbox) {
     const results = instantiateAllTemplates(
       graph,
