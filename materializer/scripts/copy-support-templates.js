@@ -3,8 +3,10 @@
 // Stages the runtime support templates that the Playwright emitter vendors
 // into every generated test suite.
 //
-// The canonical sources live in src/playwright/support/ (some are also
-// imported at generation time by analyser code — e.g. deterministicSuffix).
+// The canonical runtime support sources live in src/playwright/support/.
+// Some logic here is intentionally duplicated in analyser-owned code
+// (for example, the deterministicSuffix algorithm), but analyser code does
+// not import these materializer support sources across the workspace boundary.
 // This script copies them as-is into a templates directory under dist/ where
 // the emitter's materializeSupport() resolves them at codegen time.
 //
