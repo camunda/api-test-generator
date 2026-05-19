@@ -243,24 +243,30 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('seedBindings entry NOT in globalContextSeeds still emits the `=== undefined` guard (#157 — pin both directions of the filter)', async () => {
-    // Class-scoped guard for the new filter. The fix in #157 must only
-    // drop bindings covered by globalContextSeeds; bindings that the
-    // planner needs seeded pre-step-0 but which have no domain-semantics
-    // entry must still produce the `=== undefined` guard form, because
-    // the universal-seed prologue won't cover them.
+  test('seedBindings entry NOT in globalContextSeeds emits the terse `??` form (#286 — unified seed emission)', async () => {
+    // Class-scoped guard for the unified seed-emission shape from
+    // #286. Pre-#286 the seedBindings loop emitted the verbose
+    //   `if (ctx['x'] === undefined) { ctx['x'] = seedBinding('x'); }`
+    // form for bindings NOT covered by globalContextSeeds, while the
+    // universal-seed prologue used the terse `??` form. #286
+    // collapsed both paths through `emitCtxSeeding` so every seeded
+    // line — planner-driven OR config-driven — uses the same shape.
     //
-    // A binding NOT in globalContextSeeds and listed in seedBindings:
-    const widgetKeyGuard = `if (ctx['widgetKeyVar'] === undefined) { ctx['widgetKeyVar'] = seedBinding('widgetKeyVar'); }`;
+    // The filter direction this test pins is unchanged: a binding
+    // listed in `seedBindings` but NOT in `globalContextSeeds` is
+    // still seeded by the planner-driven loop (it must not be
+    // dropped), but the emitted line now matches the prologue form.
+    const widgetKeyTerse = `ctx['widgetKeyVar'] = ctx['widgetKeyVar'] ?? seedBinding('widgetKeyVar');`;
+    const legacyGuard = `if (ctx['widgetKeyVar'] === undefined)`;
     const content = await renderFirst(
       buildCollectionWithBindings(
         { widgetKeyVar: '__PENDING__' },
         { seedBindings: ['widgetKeyVar'] },
       ),
     );
-    expect(countOccurrences(content, widgetKeyGuard)).toBe(1);
-    // And it does NOT receive a `??` line (because it's not in globalContextSeeds).
-    expect(content).not.toContain(`ctx['widgetKeyVar'] = ctx['widgetKeyVar'] ?? seedBinding(`);
+    expect(countOccurrences(content, widgetKeyTerse)).toBe(1);
+    // And the pre-#286 verbose guard form is gone.
+    expect(content).not.toContain(legacyGuard);
   });
 
   test('literal tenantIdVar still seeds even when an extract targets the same binding (#136)', async () => {
