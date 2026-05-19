@@ -76,10 +76,10 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 
 |  | upstream | generator |
 |---|---:|---:|
-| Unique tests | 1001 | **1567** |
+| Unique tests | 1001 | **1607** |
 | Entities | 33 | 37 |
-| Happy-path (occurrences) | 173 | 197 |
-| Bad-request (400, occurrences) | 195 | **1037** |
+| Happy-path (occurrences) | 173 | 201 |
+| Bad-request (400, occurrences) | 195 | **1071** |
 | Unauthorized (401) | 165 | **0** |
 | Not-found (404) | 127 | **0** |
 | Filter | 85 | **0** |
@@ -87,11 +87,11 @@ unique-test count; variant columns are label-occurrences, so a test tagged
 | Conflict (409) | 31 | **0** |
 | Forbidden (403) | 29 | **0** |
 | Observe-absence | 2 | 38 |
-| Data-driven / oneOf variants | 5 | **295** |
+| Data-driven / oneOf variants | 5 | **302** |
 
-**The generator emits 566 more tests than upstream.** It massively exceeds
+**The generator emits 606 more tests than upstream.** It massively exceeds
 upstream on 400 bad-request coverage (the `request-validation` emitter alone
-produces 1037 tests across 17 violation kinds: `additional-prop`,
+produces 1071 tests across 17 violation kinds: `additional-prop`,
 `constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`,
 `missing-required`, `missing-required-combo`, `oneof-ambiguous`,
 `oneof-cross-bleed`, `oneof-none-match`, `param-constraint-violation`,

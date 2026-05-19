@@ -1,6 +1,6 @@
 # api-test-generator — Per-category breakdown
 
-Total test declarations: **1567** across **37** entities.
+Total test declarations: **1607** across **37** entities.
 
 This file answers, per category: **(1) Form** (the canonical sequence), **(2) Prerequisite to create**, **(3) Observation channel split** (GET vs Search), **(4) Variants with counts**, **(5) The actual tests in that category**.
 
@@ -10,18 +10,18 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 - [A. Entity Lifecycle (CRUD)](#a-entity-lifecycle-crud) — 351 tests
 - [B. Membership/Association](#b-membershipassociation) — 206 tests
-- [C. Deployment Lifecycle](#c-deployment-lifecycle) — 148 tests
+- [C. Deployment Lifecycle](#c-deployment-lifecycle) — 149 tests
 - [D. Process-Instance Lifecycle & Ops](#d-process-instance-lifecycle--ops) — 282 tests
 - [E. Batch-Operation Lifecycle](#e-batch-operation-lifecycle) — 24 tests
-- [F. User-Task Lifecycle](#f-user-task-lifecycle) — 63 tests
+- [F. User-Task Lifecycle](#f-user-task-lifecycle) — 65 tests
 - [G. Job Lifecycle & Stats](#g-job-lifecycle--stats) — 142 tests
 - [H. Incident Lifecycle](#h-incident-lifecycle) — 41 tests
 - [I. Decision-Instance Lifecycle](#i-decision-instance-lifecycle) — 72 tests
 - [J/K/L. Observation-only](#jkl-observation-only) — 95 tests
 - [M. Messaging/Signals](#m-messagingsignals) — 70 tests
-- [N. Engine Evaluation](#n-engine-evaluation) — 22 tests
+- [N. Engine Evaluation](#n-engine-evaluation) — 25 tests
 - [O. System/Admin](#o-systemadmin) — 36 tests
-- [P. Agent-Instance (new in v2)](#p-agent-instance-new-in-v2) — 15 tests
+- [P. Agent-Instance (new in v2)](#p-agent-instance-new-in-v2) — 49 tests
 
 ## A. Entity Lifecycle (CRUD)
 
@@ -45,7 +45,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getTenantClusterVariable.feature.spec.ts:12` | feature-1 - getTenantClusterVariable - base (1) |
 | observe-present-search | happy-path | `searchClusterVariables.feature.spec.ts:12` | feature-1 - searchClusterVariables - base (1) |
 | observe-present-search | data-driven | `searchClusterVariables.variant.spec.ts:12` | variant-1 - searchClusterVariables - path #1 |
-| observe-present-search | data-driven | `searchClusterVariables.variant.spec.ts:65` | variant-2 - searchClusterVariables - path #1 |
+| observe-present-search | data-driven | `searchClusterVariables.variant.spec.ts:66` | variant-2 - searchClusterVariables - path #1 |
 | mutate | happy-path | `updateGlobalClusterVariable.feature.spec.ts:11` | feature-1 - updateGlobalClusterVariable - base (1) |
 | mutate | happy-path | `updateTenantClusterVariable.feature.spec.ts:11` | feature-1 - updateTenantClusterVariable - base (1) |
 | delete | happy-path | `deleteGlobalClusterVariable.feature.spec.ts:8` | feature-1 - deleteGlobalClusterVariable - base (1) |
@@ -114,8 +114,8 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getMappingRule.feature.spec.ts:12` | feature-1 - getMappingRule - base (1) |
 | observe-present-search | happy-path | `searchMappingRule.feature.spec.ts:12` | feature-1 - searchMappingRule - base (1) |
 | observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:12` | variant-1 - searchMappingRule - path #1 |
-| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:106` | variant-2 - searchMappingRule - path #1 |
-| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:159` | variant-3 - searchMappingRule - path #1 |
+| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:107` | variant-2 - searchMappingRule - path #1 |
+| observe-present-search | data-driven | `searchMappingRule.variant.spec.ts:161` | variant-3 - searchMappingRule - path #1 |
 | mutate | happy-path | `updateMappingRule.feature.spec.ts:11` | feature-1 - updateMappingRule - base (1) |
 | delete | happy-path | `deleteMappingRule.feature.spec.ts:8` | feature-1 - deleteMappingRule - base (1) |
 | observe-absence | observe-absence | `searchMappingRule.feature.spec.ts:37` | feature-2 - searchMappingRule - negative empty (2) |
@@ -173,7 +173,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getGlobalTaskListener.feature.spec.ts:12` | feature-1 - getGlobalTaskListener - base (1) |
 | observe-present-search | happy-path | `searchGlobalTaskListeners.feature.spec.ts:12` | feature-1 - searchGlobalTaskListeners - base (1) |
 | observe-present-search | data-driven | `searchGlobalTaskListeners.variant.spec.ts:12` | variant-1 - searchGlobalTaskListeners - path #1 |
-| observe-present-search | data-driven | `searchGlobalTaskListeners.variant.spec.ts:65` | variant-2 - searchGlobalTaskListeners - path #1 |
+| observe-present-search | data-driven | `searchGlobalTaskListeners.variant.spec.ts:66` | variant-2 - searchGlobalTaskListeners - path #1 |
 | mutate | happy-path | `updateGlobalTaskListener.feature.spec.ts:11` | feature-1 - updateGlobalTaskListener - base (1) |
 | delete | happy-path | `deleteGlobalTaskListener.feature.spec.ts:8` | feature-1 - deleteGlobalTaskListener - base (1) |
 | observe-absence | observe-absence | `searchGlobalTaskListeners.feature.spec.ts:37` | feature-2 - searchGlobalTaskListeners - negative empty (2) |
@@ -232,7 +232,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | happy-path | `searchTenants.feature.spec.ts:12` | feature-1 - searchTenants - base (1) |
 | observe-present-search | data-driven | `searchTenants.variant.spec.ts:12` | variant-1 - searchTenants - path #1 |
 | observe-present-search | data-driven | `searchTenants.variant.spec.ts:63` | variant-2 - searchTenants - path #1 |
-| observe-present-search | data-driven | `searchTenants.variant.spec.ts:114` | variant-3 - searchTenants - path #1 |
+| observe-present-search | data-driven | `searchTenants.variant.spec.ts:115` | variant-3 - searchTenants - path #1 |
 | mutate | happy-path | `updateTenant.feature.spec.ts:11` | feature-1 - updateTenant - base (1) |
 | delete | happy-path | `deleteTenant.feature.spec.ts:8` | feature-1 - deleteTenant - base (1) |
 | observe-absence | observe-absence | `searchTenants.feature.spec.ts:35` | feature-2 - searchTenants - negative empty (2) |
@@ -281,7 +281,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getAuthorization.feature.spec.ts:12` | feature-1 - getAuthorization - base (1) |
 | observe-present-search | happy-path | `searchAuthorizations.feature.spec.ts:12` | feature-1 - searchAuthorizations - base (1) |
 | observe-present-search | data-driven | `searchAuthorizations.variant.spec.ts:12` | variant-1 - searchAuthorizations - path #1 |
-| observe-present-search | data-driven | `searchAuthorizations.variant.spec.ts:65` | variant-2 - searchAuthorizations - path #1 |
+| observe-present-search | data-driven | `searchAuthorizations.variant.spec.ts:66` | variant-2 - searchAuthorizations - path #1 |
 | mutate | happy-path | `updateAuthorization.feature.spec.ts:8` | feature-1 - updateAuthorization - base (1) |
 | mutate | data-driven | `updateAuthorization.feature.spec.ts:63` | feature-2 - updateAuthorization - oneOf group0 variant1 (2) |
 | mutate | data-driven | `updateAuthorization.feature.spec.ts:119` | feature-3 - updateAuthorization - oneOf group0 variant2 (3) |
@@ -326,8 +326,8 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getRole.feature.spec.ts:12` | feature-1 - getRole - base (1) |
 | observe-present-search | happy-path | `searchRoles.feature.spec.ts:12` | feature-1 - searchRoles - base (1) |
 | observe-present-search | data-driven | `searchRoles.variant.spec.ts:12` | variant-1 - searchRoles - path #1 |
-| observe-present-search | data-driven | `searchRoles.variant.spec.ts:104` | variant-2 - searchRoles - path #1 |
-| observe-present-search | data-driven | `searchRoles.variant.spec.ts:155` | variant-3 - searchRoles - path #1 |
+| observe-present-search | data-driven | `searchRoles.variant.spec.ts:105` | variant-2 - searchRoles - path #1 |
+| observe-present-search | data-driven | `searchRoles.variant.spec.ts:157` | variant-3 - searchRoles - path #1 |
 | mutate | happy-path | `updateRole.feature.spec.ts:11` | feature-1 - updateRole - base (1) |
 | delete | happy-path | `deleteRole.feature.spec.ts:8` | feature-1 - deleteRole - base (1) |
 | observe-absence | observe-absence | `searchRoles.feature.spec.ts:35` | feature-2 - searchRoles - negative empty (2) |
@@ -373,7 +373,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getGroup.feature.spec.ts:12` | feature-1 - getGroup - base (1) |
 | observe-present-search | happy-path | `searchGroups.feature.spec.ts:12` | feature-1 - searchGroups - base (1) |
 | observe-present-search | data-driven | `searchGroups.variant.spec.ts:12` | variant-1 - searchGroups - path #1 |
-| observe-present-search | data-driven | `searchGroups.variant.spec.ts:63` | variant-2 - searchGroups - path #1 |
+| observe-present-search | data-driven | `searchGroups.variant.spec.ts:64` | variant-2 - searchGroups - path #1 |
 | mutate | happy-path | `updateGroup.feature.spec.ts:11` | feature-1 - updateGroup - base (1) |
 | delete | happy-path | `deleteGroup.feature.spec.ts:8` | feature-1 - deleteGroup - base (1) |
 | observe-absence | observe-absence | `searchGroups.feature.spec.ts:35` | feature-2 - searchGroups - negative empty (2) |
@@ -418,7 +418,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getUser.feature.spec.ts:12` | feature-1 - getUser - base (1) |
 | observe-present-search | happy-path | `searchUsers.feature.spec.ts:12` | feature-1 - searchUsers - base (1) |
 | observe-present-search | data-driven | `searchUsers.variant.spec.ts:12` | variant-1 - searchUsers - path #1 |
-| observe-present-search | data-driven | `searchUsers.variant.spec.ts:63` | variant-2 - searchUsers - path #1 |
+| observe-present-search | data-driven | `searchUsers.variant.spec.ts:64` | variant-2 - searchUsers - path #1 |
 | mutate | happy-path | `updateUser.feature.spec.ts:11` | feature-1 - updateUser - base (1) |
 | delete | happy-path | `deleteUser.feature.spec.ts:8` | feature-1 - deleteUser - base (1) |
 | observe-absence | observe-absence | `searchUsers.feature.spec.ts:35` | feature-2 - searchUsers - negative empty (2) |
@@ -497,21 +497,21 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 |--|--|--|--|
 | observe-present-search | happy-path | `searchClientsForTenant.feature.spec.ts:12` | feature-1 - searchClientsForTenant - base (1) |
 | observe-present-search | data-driven | `searchClientsForTenant.variant.spec.ts:12` | variant-1 - searchClientsForTenant - path #1 |
-| observe-present-search | data-driven | `searchClientsForTenant.variant.spec.ts:87` | variant-2 - searchClientsForTenant - path #1 |
+| observe-present-search | data-driven | `searchClientsForTenant.variant.spec.ts:88` | variant-2 - searchClientsForTenant - path #1 |
 | observe-present-search | happy-path | `searchGroupIdsForTenant.feature.spec.ts:12` | feature-1 - searchGroupIdsForTenant - base (1) |
 | observe-present-search | data-driven | `searchGroupIdsForTenant.variant.spec.ts:12` | variant-1 - searchGroupIdsForTenant - path #1 |
-| observe-present-search | data-driven | `searchGroupIdsForTenant.variant.spec.ts:87` | variant-2 - searchGroupIdsForTenant - path #1 |
+| observe-present-search | data-driven | `searchGroupIdsForTenant.variant.spec.ts:88` | variant-2 - searchGroupIdsForTenant - path #1 |
 | observe-present-search | happy-path | `searchMappingRulesForTenant.feature.spec.ts:12` | feature-1 - searchMappingRulesForTenant - base (1) |
 | observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:12` | variant-1 - searchMappingRulesForTenant - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:125` | variant-2 - searchMappingRulesForTenant - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:201` | variant-3 - searchMappingRulesForTenant - path #1 |
+| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:126` | variant-2 - searchMappingRulesForTenant - path #1 |
+| observe-present-search | data-driven | `searchMappingRulesForTenant.variant.spec.ts:203` | variant-3 - searchMappingRulesForTenant - path #1 |
 | observe-present-search | happy-path | `searchRolesForTenant.feature.spec.ts:12` | feature-1 - searchRolesForTenant - base (1) |
 | observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:12` | variant-1 - searchRolesForTenant - path #1 |
-| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:125` | variant-2 - searchRolesForTenant - path #1 |
-| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:201` | variant-3 - searchRolesForTenant - path #1 |
+| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:126` | variant-2 - searchRolesForTenant - path #1 |
+| observe-present-search | data-driven | `searchRolesForTenant.variant.spec.ts:203` | variant-3 - searchRolesForTenant - path #1 |
 | observe-present-search | happy-path | `searchUsersForTenant.feature.spec.ts:12` | feature-1 - searchUsersForTenant - base (1) |
 | observe-present-search | data-driven | `searchUsersForTenant.variant.spec.ts:12` | variant-1 - searchUsersForTenant - path #1 |
-| observe-present-search | data-driven | `searchUsersForTenant.variant.spec.ts:87` | variant-2 - searchUsersForTenant - path #1 |
+| observe-present-search | data-driven | `searchUsersForTenant.variant.spec.ts:88` | variant-2 - searchUsersForTenant - path #1 |
 | mutate | happy-path | `assignClientToTenant.feature.spec.ts:8` | feature-1 - assignClientToTenant - base (1) |
 | mutate | happy-path | `assignGroupToTenant.feature.spec.ts:8` | feature-1 - assignGroupToTenant - base (1) |
 | mutate | happy-path | `assignMappingRuleToTenant.feature.spec.ts:8` | feature-1 - assignMappingRuleToTenant - base (1) |
@@ -590,17 +590,17 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 |--|--|--|--|
 | observe-present-search | happy-path | `searchClientsForRole.feature.spec.ts:12` | feature-1 - searchClientsForRole - base (1) |
 | observe-present-search | data-driven | `searchClientsForRole.variant.spec.ts:12` | variant-1 - searchClientsForRole - path #1 |
-| observe-present-search | data-driven | `searchClientsForRole.variant.spec.ts:85` | variant-2 - searchClientsForRole - path #1 |
+| observe-present-search | data-driven | `searchClientsForRole.variant.spec.ts:86` | variant-2 - searchClientsForRole - path #1 |
 | observe-present-search | happy-path | `searchGroupsForRole.feature.spec.ts:12` | feature-1 - searchGroupsForRole - base (1) |
 | observe-present-search | data-driven | `searchGroupsForRole.variant.spec.ts:12` | variant-1 - searchGroupsForRole - path #1 |
-| observe-present-search | data-driven | `searchGroupsForRole.variant.spec.ts:85` | variant-2 - searchGroupsForRole - path #1 |
+| observe-present-search | data-driven | `searchGroupsForRole.variant.spec.ts:86` | variant-2 - searchGroupsForRole - path #1 |
 | observe-present-search | happy-path | `searchMappingRulesForRole.feature.spec.ts:12` | feature-1 - searchMappingRulesForRole - base (1) |
 | observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:12` | variant-1 - searchMappingRulesForRole - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:123` | variant-2 - searchMappingRulesForRole - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:197` | variant-3 - searchMappingRulesForRole - path #1 |
+| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:124` | variant-2 - searchMappingRulesForRole - path #1 |
+| observe-present-search | data-driven | `searchMappingRulesForRole.variant.spec.ts:199` | variant-3 - searchMappingRulesForRole - path #1 |
 | observe-present-search | happy-path | `searchUsersForRole.feature.spec.ts:12` | feature-1 - searchUsersForRole - base (1) |
 | observe-present-search | data-driven | `searchUsersForRole.variant.spec.ts:12` | variant-1 - searchUsersForRole - path #1 |
-| observe-present-search | data-driven | `searchUsersForRole.variant.spec.ts:85` | variant-2 - searchUsersForRole - path #1 |
+| observe-present-search | data-driven | `searchUsersForRole.variant.spec.ts:86` | variant-2 - searchUsersForRole - path #1 |
 | mutate | happy-path | `assignRoleToClient.feature.spec.ts:8` | feature-1 - assignRoleToClient - base (1) |
 | mutate | happy-path | `assignRoleToGroup.feature.spec.ts:8` | feature-1 - assignRoleToGroup - base (1) |
 | mutate | happy-path | `assignRoleToMappingRule.feature.spec.ts:8` | feature-1 - assignRoleToMappingRule - base (1) |
@@ -666,18 +666,18 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 |--|--|--|--|
 | observe-present-search | happy-path | `searchClientsForGroup.feature.spec.ts:12` | feature-1 - searchClientsForGroup - base (1) |
 | observe-present-search | data-driven | `searchClientsForGroup.variant.spec.ts:12` | variant-1 - searchClientsForGroup - path #1 |
-| observe-present-search | data-driven | `searchClientsForGroup.variant.spec.ts:85` | variant-2 - searchClientsForGroup - path #1 |
+| observe-present-search | data-driven | `searchClientsForGroup.variant.spec.ts:86` | variant-2 - searchClientsForGroup - path #1 |
 | observe-present-search | happy-path | `searchMappingRulesForGroup.feature.spec.ts:12` | feature-1 - searchMappingRulesForGroup - base (1) |
 | observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:12` | variant-1 - searchMappingRulesForGroup - path #1 |
 | observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:84` | variant-2 - searchMappingRulesForGroup - path #1 |
-| observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:158` | variant-3 - searchMappingRulesForGroup - path #1 |
+| observe-present-search | data-driven | `searchMappingRulesForGroup.variant.spec.ts:159` | variant-3 - searchMappingRulesForGroup - path #1 |
 | observe-present-search | happy-path | `searchRolesForGroup.feature.spec.ts:12` | feature-1 - searchRolesForGroup - base (1) |
 | observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:12` | variant-1 - searchRolesForGroup - path #1 |
 | observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:84` | variant-2 - searchRolesForGroup - path #1 |
-| observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:158` | variant-3 - searchRolesForGroup - path #1 |
+| observe-present-search | data-driven | `searchRolesForGroup.variant.spec.ts:159` | variant-3 - searchRolesForGroup - path #1 |
 | observe-present-search | happy-path | `searchUsersForGroup.feature.spec.ts:12` | feature-1 - searchUsersForGroup - base (1) |
 | observe-present-search | data-driven | `searchUsersForGroup.variant.spec.ts:12` | variant-1 - searchUsersForGroup - path #1 |
-| observe-present-search | data-driven | `searchUsersForGroup.variant.spec.ts:85` | variant-2 - searchUsersForGroup - path #1 |
+| observe-present-search | data-driven | `searchUsersForGroup.variant.spec.ts:86` | variant-2 - searchUsersForGroup - path #1 |
 | mutate | happy-path | `assignClientToGroup.feature.spec.ts:8` | feature-1 - assignClientToGroup - base (1) |
 | mutate | happy-path | `assignMappingRuleToGroup.feature.spec.ts:8` | feature-1 - assignMappingRuleToGroup - base (1) |
 | mutate | happy-path | `assignUserToGroup.feature.spec.ts:8` | feature-1 - assignUserToGroup - base (1) |
@@ -728,7 +728,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 **Form**: Deploy resource → Get definition (XML/JSON) → Search definitions (Observe Present) → Delete resource → Get definition (Observe Absence)
 
-**Total tests**: 148
+**Total tests**: 149
 
 ### `process-definition` — 70 tests
 
@@ -743,13 +743,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getProcessDefinition.feature.spec.ts:13` | feature-1 - getProcessDefinition - base (1) |
 | observe-present-get | happy-path | `getProcessDefinitionInstanceStatistics.feature.spec.ts:11` | feature-1 - getProcessDefinitionInstanceStatistics - base (1) |
 | observe-present-get | happy-path | `getProcessDefinitionInstanceVersionStatistics.feature.spec.ts:12` | feature-1 - getProcessDefinitionInstanceVersionStatistics - base (1) |
-| observe-present-get | data-driven | `getProcessDefinitionInstanceVersionStatistics.variant.spec.ts:13` | variant-1 - getProcessDefinitionInstanceVersionStatistics - bpmn #1 |
+| observe-present-get | data-driven | `getProcessDefinitionInstanceVersionStatistics.variant.spec.ts:12` | variant-1 - getProcessDefinitionInstanceVersionStatistics - bpmn #1 |
 | observe-present-get | happy-path | `getProcessDefinitionMessageSubscriptionStatistics.feature.spec.ts:11` | feature-1 - getProcessDefinitionMessageSubscriptionStatistics - base (1) |
 | observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:13` | variant-1 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:71` | variant-2 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:132` | variant-3 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:189` | variant-4 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
-| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:267` | variant-5 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
+| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:72` | variant-2 - getProcessDefinitionMessageSubscriptionStatistics - path #1 |
+| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:133` | variant-3 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
+| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:190` | variant-4 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
+| observe-present-get | data-driven | `getProcessDefinitionMessageSubscriptionStatistics.variant.spec.ts:268` | variant-5 - getProcessDefinitionMessageSubscriptionStatistics - bpmn #1 |
 | observe-present-get | happy-path | `getProcessDefinitionStatistics.feature.spec.ts:12` | feature-1 - getProcessDefinitionStatistics - base (1) |
 | observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:12` | variant-1 - getProcessDefinitionStatistics - bpmn #1 |
 | observe-present-get | data-driven | `getProcessDefinitionStatistics.variant.spec.ts:86` | variant-2 - getProcessDefinitionStatistics - bpmn #1 |
@@ -763,10 +763,10 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getStartProcessForm.feature.spec.ts:13` | feature-1 - getStartProcessForm - base (1) |
 | observe-present-search | happy-path | `searchProcessDefinitions.feature.spec.ts:13` | feature-1 - searchProcessDefinitions - base (1) |
 | observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:13` | variant-1 - searchProcessDefinitions - path #1 |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:88` | variant-2 - searchProcessDefinitions - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:140` | variant-3 - searchProcessDefinitions - path #1 |
-| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:215` | variant-4 - searchProcessDefinitions - path #1 |
-| observe-absence | observe-absence | `searchProcessDefinitions.feature.spec.ts:59` | feature-2 - searchProcessDefinitions - negative empty (2) |
+| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:86` | variant-2 - searchProcessDefinitions - bpmn #1 |
+| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:138` | variant-3 - searchProcessDefinitions - path #1 |
+| observe-present-search | data-driven | `searchProcessDefinitions.variant.spec.ts:214` | variant-4 - searchProcessDefinitions - path #1 |
+| observe-absence | observe-absence | `searchProcessDefinitions.feature.spec.ts:60` | feature-2 - searchProcessDefinitions - negative empty (2) |
 | negative-get | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:18` | getProcessDefinition - Path param processDefinitionKey pattern violation |
 | negative-get | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:34` | getProcessDefinitionInstanceStatistics - Additional prop __extraField |
 | negative-get | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:53` | getProcessDefinitionInstanceStatistics - Body wrong top-level type |
@@ -811,28 +811,29 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:890` | searchProcessDefinitions - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/processdefinitions-validation-api-tests.spec.ts:911` | searchProcessDefinitions - Enum violation sort.0.order |
 
-### `resource` — 35 tests
+### `resource` — 36 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createDeployment.feature.spec.ts`, `createDeployment.variant.spec.ts`, `deleteResource.feature.spec.ts`, `getResource.feature.spec.ts`, `getResourceContent.feature.spec.ts`, `request-validation/deployments-validation-api-tests.spec.ts`, `request-validation/resources-validation-api-tests.spec.ts`, `searchResources.feature.spec.ts`, `searchResources.variant.spec.ts`
-- **Observation channel**: GET = 2, Search = 6
-- **Form-step counts**: create=5, observe-present-get=2, observe-present-search=6, delete=1, observe-absence=1, negative-create=8, negative-delete=7, negative-search=5
-- **Variants**: happy-path=4, observe-absence=1, data-driven=10, bad-request=20
+- **Files**: `createDeployment.feature.spec.ts`, `createDeployment.variant.spec.ts`, `deleteResource.feature.spec.ts`, `getResource.feature.spec.ts`, `getResourceContent.feature.spec.ts`, `getResourceContentBinary.feature.spec.ts`, `request-validation/deployments-validation-api-tests.spec.ts`, `request-validation/resources-validation-api-tests.spec.ts`, `searchResources.feature.spec.ts`, `searchResources.variant.spec.ts`
+- **Observation channel**: GET = 3, Search = 6
+- **Form-step counts**: create=5, observe-present-get=3, observe-present-search=6, delete=1, observe-absence=1, negative-create=8, negative-delete=7, negative-search=5
+- **Variants**: happy-path=5, observe-absence=1, data-driven=10, bad-request=20
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | data-driven | `createDeployment.feature.spec.ts:12` | feature-1 - createDeployment - bpmn (1) |
 | create | data-driven | `createDeployment.feature.spec.ts:41` | feature-2 - createDeployment - form (2) |
-| create | data-driven | `createDeployment.feature.spec.ts:69` | feature-3 - createDeployment - dmn (3) |
-| create | data-driven | `createDeployment.feature.spec.ts:97` | feature-4 - createDeployment - drd (4) |
-| create | data-driven | `createDeployment.variant.spec.ts:13` | variant-1 - createDeployment - bpmn #1 |
+| create | data-driven | `createDeployment.feature.spec.ts:70` | feature-3 - createDeployment - dmn (3) |
+| create | data-driven | `createDeployment.feature.spec.ts:99` | feature-4 - createDeployment - drd (4) |
+| create | data-driven | `createDeployment.variant.spec.ts:12` | variant-1 - createDeployment - path #1 |
 | observe-present-get | happy-path | `getResource.feature.spec.ts:12` | feature-1 - getResource - base (1) |
 | observe-present-get | happy-path | `getResourceContent.feature.spec.ts:9` | feature-1 - getResourceContent - base (1) |
+| observe-present-get | happy-path | `getResourceContentBinary.feature.spec.ts:9` | feature-1 - getResourceContentBinary - base (1) |
 | observe-present-search | happy-path | `searchResources.feature.spec.ts:12` | feature-1 - searchResources - base (1) |
 | observe-present-search | data-driven | `searchResources.variant.spec.ts:13` | variant-1 - searchResources - bpmn #1 |
 | observe-present-search | data-driven | `searchResources.variant.spec.ts:62` | variant-2 - searchResources - path #1 |
 | observe-present-search | data-driven | `searchResources.variant.spec.ts:130` | variant-3 - searchResources - path #1 |
-| observe-present-search | data-driven | `searchResources.variant.spec.ts:181` | variant-4 - searchResources - path #1 |
+| observe-present-search | data-driven | `searchResources.variant.spec.ts:180` | variant-4 - searchResources - path #1 |
 | observe-present-search | data-driven | `searchResources.variant.spec.ts:232` | variant-5 - searchResources - path #1 |
 | delete | happy-path | `deleteResource.feature.spec.ts:11` | feature-1 - deleteResource - base (1) |
 | observe-absence | observe-absence | `searchResources.feature.spec.ts:35` | feature-2 - searchResources - negative empty (2) |
@@ -868,9 +869,9 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `evaluateDecision.feature.spec.ts:12` | feature-1 - evaluateDecision - base (1) |
-| create | data-driven | `evaluateDecision.feature.spec.ts:60` | feature-2 - evaluateDecision - oneOf group0 Decision evaluation by ID (2) |
-| create | data-driven | `evaluateDecision.feature.spec.ts:111` | feature-3 - evaluateDecision - oneOf group0 Decision evaluation by key (3) |
-| create | data-driven | `evaluateDecision.variant.spec.ts:13` | variant-1 - evaluateDecision - dmn #1 |
+| create | data-driven | `evaluateDecision.feature.spec.ts:61` | feature-2 - evaluateDecision - oneOf group0 Decision evaluation by ID (2) |
+| create | data-driven | `evaluateDecision.feature.spec.ts:113` | feature-3 - evaluateDecision - oneOf group0 Decision evaluation by key (3) |
+| create | data-driven | `evaluateDecision.variant.spec.ts:12` | variant-1 - evaluateDecision - dmn #1 |
 | observe-present-get | happy-path | `getDecisionDefinition.feature.spec.ts:13` | feature-1 - getDecisionDefinition - base (1) |
 | observe-present-get | happy-path | `getDecisionDefinitionXML.feature.spec.ts:10` | feature-1 - getDecisionDefinitionXML - base (1) |
 | observe-present-search | happy-path | `searchDecisionDefinitions.feature.spec.ts:12` | feature-1 - searchDecisionDefinitions - base (1) |
@@ -879,7 +880,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:117` | variant-3 - searchDecisionDefinitions - dmn #1 |
 | observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:168` | variant-4 - searchDecisionDefinitions - drd #1 |
 | observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:219` | variant-5 - searchDecisionDefinitions - path #1 |
-| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:272` | variant-6 - searchDecisionDefinitions - path #1 |
+| observe-present-search | data-driven | `searchDecisionDefinitions.variant.spec.ts:273` | variant-6 - searchDecisionDefinitions - path #1 |
 | observe-absence | observe-absence | `searchDecisionDefinitions.feature.spec.ts:37` | feature-2 - searchDecisionDefinitions - negative empty (2) |
 | negative-create | bad-request | `request-validation/decisiondefinitions-validation-api-tests.spec.ts:18` | evaluateDecision - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/decisiondefinitions-validation-api-tests.spec.ts:35` | evaluateDecision - Body wrong top-level type |
@@ -911,7 +912,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | happy-path | `searchDecisionRequirements.feature.spec.ts:12` | feature-1 - searchDecisionRequirements - base (1) |
 | observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:13` | variant-1 - searchDecisionRequirements - drd #1 |
 | observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:64` | variant-2 - searchDecisionRequirements - path #1 |
-| observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:117` | variant-3 - searchDecisionRequirements - path #1 |
+| observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:116` | variant-3 - searchDecisionRequirements - path #1 |
 | observe-present-search | data-driven | `searchDecisionRequirements.variant.spec.ts:170` | variant-4 - searchDecisionRequirements - path #1 |
 | observe-absence | observe-absence | `searchDecisionRequirements.feature.spec.ts:37` | feature-2 - searchDecisionRequirements - negative empty (2) |
 | negative-get | bad-request | `request-validation/decisionrequirements-validation-api-tests.spec.ts:18` | getDecisionRequirements - Path param decisionRequirementsKey pattern violation |
@@ -939,13 +940,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `createProcessInstance.feature.spec.ts:12` | feature-1 - createProcessInstance - base (1) |
-| create | data-driven | `createProcessInstance.feature.spec.ts:56` | feature-2 - createProcessInstance - oneOf group0 Process creation by key (2) |
-| create | data-driven | `createProcessInstance.feature.spec.ts:103` | feature-3 - createProcessInstance - oneOf group0 Process creation by id (3) |
+| create | data-driven | `createProcessInstance.feature.spec.ts:57` | feature-2 - createProcessInstance - oneOf group0 Process creation by key (2) |
+| create | data-driven | `createProcessInstance.feature.spec.ts:105` | feature-3 - createProcessInstance - oneOf group0 Process creation by id (3) |
 | create | data-driven | `createProcessInstance.variant.spec.ts:13` | variant-1 - createProcessInstance - bpmn #1 |
-| create | data-driven | `createProcessInstance.variant.spec.ts:65` | variant-2 - createProcessInstance - bpmn #1 |
-| create | data-driven | `createProcessInstance.variant.spec.ts:117` | variant-3 - createProcessInstance - bpmn #1 |
-| create | data-driven | `createProcessInstance.variant.spec.ts:208` | variant-4 - createProcessInstance - bpmn #1 |
-| create | data-driven | `createProcessInstance.variant.spec.ts:302` | variant-5 - createProcessInstance - bpmn #1 |
+| create | data-driven | `createProcessInstance.variant.spec.ts:66` | variant-2 - createProcessInstance - bpmn #1 |
+| create | data-driven | `createProcessInstance.variant.spec.ts:119` | variant-3 - createProcessInstance - bpmn #1 |
+| create | data-driven | `createProcessInstance.variant.spec.ts:187` | variant-4 - createProcessInstance - bpmn #1 |
+| create | data-driven | `createProcessInstance.variant.spec.ts:283` | variant-5 - createProcessInstance - bpmn #1 |
 | observe-present-get | happy-path | `getProcessInstance.feature.spec.ts:13` | feature-1 - getProcessInstance - base (1) |
 | observe-present-get | happy-path | `getProcessInstanceCallHierarchy.feature.spec.ts:10` | feature-1 - getProcessInstanceCallHierarchy - base (1) |
 | observe-present-get | happy-path | `getProcessInstanceSequenceFlows.feature.spec.ts:13` | feature-1 - getProcessInstanceSequenceFlows - base (1) |
@@ -956,7 +957,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:187` | variant-3 - searchProcessInstanceIncidents - bpmn #1 |
 | observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:297` | variant-4 - searchProcessInstanceIncidents - bpmn #1 |
 | observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:407` | variant-5 - searchProcessInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:511` | variant-6 - searchProcessInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven | `searchProcessInstanceIncidents.variant.spec.ts:512` | variant-6 - searchProcessInstanceIncidents - bpmn #1 |
 | observe-present-search | happy-path | `searchProcessInstances.feature.spec.ts:13` | feature-1 - searchProcessInstances - base (1) |
 | observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:13` | variant-1 - searchProcessInstances - path #1 |
 | observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:87` | variant-2 - searchProcessInstances - bpmn #1 |
@@ -969,7 +970,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:674` | variant-9 - searchProcessInstances - bpmn #1 |
 | observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:780` | variant-10 - searchProcessInstances - bpmn #1 |
 | observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:887` | variant-11 - searchProcessInstances - path #1 |
-| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:982` | variant-12 - searchProcessInstances - path #1 |
+| observe-present-search | data-driven | `searchProcessInstances.variant.spec.ts:983` | variant-12 - searchProcessInstances - path #1 |
 | mutate | happy-path | `migrateProcessInstance.feature.spec.ts:9` | feature-1 - migrateProcessInstance - base (1) |
 | mutate | data-driven | `migrateProcessInstance.variant.spec.ts:9` | variant-1 - migrateProcessInstance - cycle/bpmn+bpmn #1 |
 | mutate | data-driven | `migrateProcessInstance.variant.spec.ts:121` | variant-2 - migrateProcessInstance - cycle/bpmn+bpmn #1 |
@@ -1044,7 +1045,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:545` | variant-8 - deleteProcessInstancesBatchOperation - bpmn #1 |
 | delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:622` | variant-9 - deleteProcessInstancesBatchOperation - bpmn #1 |
 | delete | data-driven | `deleteProcessInstancesBatchOperation.variant.spec.ts:727` | variant-10 - deleteProcessInstancesBatchOperation - bpmn #1 |
-| observe-absence | observe-absence | `searchProcessInstances.feature.spec.ts:79` | feature-2 - searchProcessInstances - negative empty (2) |
+| observe-absence | observe-absence | `searchProcessInstances.feature.spec.ts:80` | feature-2 - searchProcessInstances - negative empty (2) |
 | negative-create | bad-request | `request-validation/processinstances-validation-api-tests.spec.ts:556` | createProcessInstance - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/processinstances-validation-api-tests.spec.ts:571` | createProcessInstance - Missing body |
 | negative-create | bad-request | `request-validation/processinstances-validation-api-tests.spec.ts:583` | createProcessInstance - oneOf ambiguous |
@@ -1240,7 +1241,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-get | happy-path | `getBatchOperation.feature.spec.ts:12` | feature-1 - getBatchOperation - base (1) |
 | observe-present-search | happy-path | `searchBatchOperations.feature.spec.ts:12` | feature-1 - searchBatchOperations - base (1) |
 | observe-present-search | data-driven | `searchBatchOperations.variant.spec.ts:12` | variant-1 - searchBatchOperations - path #1 |
-| observe-present-search | data-driven | `searchBatchOperations.variant.spec.ts:65` | variant-2 - searchBatchOperations - path #1 |
+| observe-present-search | data-driven | `searchBatchOperations.variant.spec.ts:66` | variant-2 - searchBatchOperations - path #1 |
 | mutate | happy-path | `resumeBatchOperation.feature.spec.ts:8` | feature-1 - resumeBatchOperation - base (1) |
 | mutate | happy-path | `suspendBatchOperation.feature.spec.ts:8` | feature-1 - suspendBatchOperation - base (1) |
 | delete | happy-path | `cancelBatchOperation.feature.spec.ts:8` | feature-1 - cancelBatchOperation - base (1) |
@@ -1265,7 +1266,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | happy-path | `searchBatchOperationItems.feature.spec.ts:12` | feature-1 - searchBatchOperationItems - base (1) |
 | observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:13` | variant-1 - searchBatchOperationItems - bpmn #1 |
 | observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:84` | variant-2 - searchBatchOperationItems - path #1 |
-| observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:137` | variant-3 - searchBatchOperationItems - path #1 |
+| observe-present-search | data-driven | `searchBatchOperationItems.variant.spec.ts:138` | variant-3 - searchBatchOperationItems - path #1 |
 | observe-absence | observe-absence | `searchBatchOperationItems.feature.spec.ts:37` | feature-2 - searchBatchOperationItems - negative empty (2) |
 | negative-search | bad-request | `request-validation/batchoperationitems-validation-api-tests.spec.ts:18` | searchBatchOperationItems - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/batchoperationitems-validation-api-tests.spec.ts:37` | searchBatchOperationItems - Body wrong top-level type |
@@ -1277,18 +1278,19 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 **Form**: Deploy process w/ user task (prerequisite) → Create instance → Assign → Update → Search/Get → Get form → Search variables → Complete → Unassign
 
-**Total tests**: 63
+**Total tests**: 65
 
-### `user-task` — 63 tests
+### `user-task` — 65 tests
 
 - **Prerequisite to create**: running-process-instance-with-user-task
-- **Files**: `assignUserTask.feature.spec.ts`, `completeUserTask.feature.spec.ts`, `getUserTask.feature.spec.ts`, `getUserTaskForm.feature.spec.ts`, `request-validation/usertasks-validation-api-tests.spec.ts`, `searchUserTaskAuditLogs.feature.spec.ts`, `searchUserTaskEffectiveVariables.feature.spec.ts`, `searchUserTaskVariables.feature.spec.ts`, `searchUserTasks.feature.spec.ts`, `searchUserTasks.variant.spec.ts`, `unassignUserTask.feature.spec.ts`, `updateUserTask.feature.spec.ts`
-- **Observation channel**: GET = 2, Search = 13
-- **Form-step counts**: observe-present-get=2, observe-present-search=13, mutate=3, delete=1, observe-absence=1, negative-get=2, negative-update=10, negative-delete=1, negative-search=30
-- **Variants**: happy-path=10, observe-absence=1, data-driven=9, bad-request=43
+- **Files**: `assignUserTask.feature.spec.ts`, `completeUserTask.feature.spec.ts`, `getFormByKey.feature.spec.ts`, `getUserTask.feature.spec.ts`, `getUserTaskForm.feature.spec.ts`, `request-validation/forms-validation-api-tests.spec.ts`, `request-validation/usertasks-validation-api-tests.spec.ts`, `searchUserTaskAuditLogs.feature.spec.ts`, `searchUserTaskEffectiveVariables.feature.spec.ts`, `searchUserTaskVariables.feature.spec.ts`, `searchUserTasks.feature.spec.ts`, `searchUserTasks.variant.spec.ts`, `unassignUserTask.feature.spec.ts`, `updateUserTask.feature.spec.ts`
+- **Observation channel**: GET = 3, Search = 13
+- **Form-step counts**: observe-present-get=3, observe-present-search=13, mutate=3, delete=1, observe-absence=1, negative-get=3, negative-update=10, negative-delete=1, negative-search=30
+- **Variants**: happy-path=11, observe-absence=1, data-driven=9, bad-request=44
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
+| observe-present-get | happy-path | `getFormByKey.feature.spec.ts:13` | feature-1 - getFormByKey - base (1) |
 | observe-present-get | happy-path | `getUserTask.feature.spec.ts:12` | feature-1 - getUserTask - base (1) |
 | observe-present-get | happy-path | `getUserTaskForm.feature.spec.ts:12` | feature-1 - getUserTaskForm - base (1) |
 | observe-present-search | happy-path | `searchUserTaskAuditLogs.feature.spec.ts:12` | feature-1 - searchUserTaskAuditLogs - base (1) |
@@ -1303,12 +1305,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:353` | variant-6 - searchUserTasks - bpmn #1 |
 | observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:454` | variant-7 - searchUserTasks - bpmn #1 |
 | observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:552` | variant-8 - searchUserTasks - path #1 |
-| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:603` | variant-9 - searchUserTasks - path #1 |
+| observe-present-search | data-driven | `searchUserTasks.variant.spec.ts:604` | variant-9 - searchUserTasks - path #1 |
 | mutate | happy-path | `assignUserTask.feature.spec.ts:8` | feature-1 - assignUserTask - base (1) |
 | mutate | happy-path | `completeUserTask.feature.spec.ts:8` | feature-1 - completeUserTask - base (1) |
 | mutate | happy-path | `updateUserTask.feature.spec.ts:8` | feature-1 - updateUserTask - base (1) |
 | delete | happy-path | `unassignUserTask.feature.spec.ts:8` | feature-1 - unassignUserTask - base (1) |
 | observe-absence | observe-absence | `searchUserTasks.feature.spec.ts:35` | feature-2 - searchUserTasks - negative empty (2) |
+| negative-get | bad-request | `request-validation/forms-validation-api-tests.spec.ts:18` | getFormByKey - Path param formKey pattern violation |
 | negative-get | bad-request | `request-validation/usertasks-validation-api-tests.spec.ts:136` | getUserTask - Path param userTaskKey pattern violation |
 | negative-get | bad-request | `request-validation/usertasks-validation-api-tests.spec.ts:148` | getUserTaskForm - Path param userTaskKey pattern violation |
 | negative-update | bad-request | `request-validation/usertasks-validation-api-tests.spec.ts:18` | assignUserTask - Additional prop __unexpectedField |
@@ -1370,7 +1373,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `activateJobs.feature.spec.ts:12` | feature-1 - activateJobs - base (1) |
-| create | data-driven | `activateJobs.variant.spec.ts:13` | variant-1 - activateJobs - bpmn #1 |
+| create | data-driven | `activateJobs.variant.spec.ts:12` | variant-1 - activateJobs - path #1 |
 | create | happy-path | `throwJobError.feature.spec.ts:9` | feature-1 - throwJobError - base (1) |
 | observe-present-get | happy-path | `getGlobalJobStatistics.feature.spec.ts:12` | feature-1 - getGlobalJobStatistics - base (1) |
 | observe-present-get | happy-path | `getJobErrorStatistics.feature.spec.ts:11` | feature-1 - getJobErrorStatistics - base (1) |
@@ -1387,15 +1390,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchJobs.variant.spec.ts:219` | variant-3 - searchJobs - path #1 |
 | observe-present-search | data-driven | `searchJobs.variant.spec.ts:293` | variant-4 - searchJobs - bpmn #1 |
 | observe-present-search | data-driven | `searchJobs.variant.spec.ts:366` | variant-5 - searchJobs - path #1 |
-| observe-present-search | data-driven | `searchJobs.variant.spec.ts:461` | variant-6 - searchJobs - path #1 |
+| observe-present-search | data-driven | `searchJobs.variant.spec.ts:462` | variant-6 - searchJobs - path #1 |
 | mutate | happy-path | `completeJob.feature.spec.ts:9` | feature-1 - completeJob - base (1) |
 | mutate | data-driven | `completeJob.feature.spec.ts:93` | feature-2 - completeJob - oneOf result variant1 (2) |
 | mutate | data-driven | `completeJob.feature.spec.ts:178` | feature-3 - completeJob - oneOf result variant2 (3) |
 | mutate | data-driven | `completeJob.variant.spec.ts:9` | variant-1 - completeJob - bpmn #1 |
 | mutate | happy-path | `failJob.feature.spec.ts:9` | feature-1 - failJob - base (1) |
 | mutate | happy-path | `updateJob.feature.spec.ts:9` | feature-1 - updateJob - base (1) |
-| observe-absence | observe-absence | `activateJobs.feature.spec.ts:77` | feature-2 - activateJobs - negative empty (2) |
-| observe-absence | observe-absence | `searchJobs.feature.spec.ts:79` | feature-2 - searchJobs - negative empty (2) |
+| observe-absence | observe-absence | `activateJobs.feature.spec.ts:78` | feature-2 - activateJobs - negative empty (2) |
+| observe-absence | observe-absence | `searchJobs.feature.spec.ts:80` | feature-2 - searchJobs - negative empty (2) |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:18` | activateJobs - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:40` | activateJobs - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:55` | activateJobs - Param maxJobsToActivate wrong type (#1) |
@@ -1413,10 +1416,10 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:304` | activateJobs - Missing timeout |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:322` | activateJobs - Missing type |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:340` | activateJobs - Missing body |
-| negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:352` | activateJobs - Missing combo timeout,maxJobsToActivate |
+| negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:352` | activateJobs - Missing combo maxJobsToActivate,timeout |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:369` | activateJobs - Missing combo type,maxJobsToActivate |
-| negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:386` | activateJobs - Missing combo type,timeout |
-| negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:403` | activateJobs - Missing combo type,timeout,maxJobsToActivate |
+| negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:386` | activateJobs - Missing combo type,maxJobsToActivate,timeout |
+| negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:403` | activateJobs - Missing combo type,timeout |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:1810` | throwJobError - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:1828` | throwJobError - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/jobs-validation-api-tests.spec.ts:1843` | throwJobError - Param errorCode wrong type (#1) |
@@ -1537,7 +1540,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchIncidents.variant.spec.ts:134` | variant-3 - searchIncidents - bpmn #1 |
 | observe-present-search | data-driven | `searchIncidents.variant.spec.ts:236` | variant-4 - searchIncidents - bpmn #1 |
 | observe-present-search | data-driven | `searchIncidents.variant.spec.ts:338` | variant-5 - searchIncidents - path #1 |
-| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:389` | variant-6 - searchIncidents - path #1 |
+| observe-present-search | data-driven | `searchIncidents.variant.spec.ts:390` | variant-6 - searchIncidents - path #1 |
 | mutate | happy-path | `resolveIncident.feature.spec.ts:8` | feature-1 - resolveIncident - base (1) |
 | observe-absence | observe-absence | `searchIncidents.feature.spec.ts:35` | feature-2 - searchIncidents - negative empty (2) |
 | negative-get | bad-request | `request-validation/incidents-validation-api-tests.spec.ts:18` | getIncident - Path param incidentKey pattern violation |
@@ -1582,7 +1585,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `deleteDecisionInstance.feature.spec.ts`, `deleteDecisionInstancesBatchOperation.feature.spec.ts`, `deleteDecisionInstancesBatchOperation.variant.spec.ts`, `getDecisionInstance.feature.spec.ts`, `request-validation/decisioninstances-validation-api-tests.spec.ts`, `searchDecisionInstances.feature.spec.ts`, `searchDecisionInstances.variant.spec.ts`
 - **Observation channel**: GET = 1, Search = 13
 - **Form-step counts**: observe-present-get=1, observe-present-search=13, delete=12, observe-absence=1, negative-get=1, negative-delete=38, negative-search=6
-- **Variants**: happy-path=4, observe-absence=1, data-driven=21, unlabeled=1, bad-request=45
+- **Variants**: happy-path=4, observe-absence=1, data-driven=22, bad-request=45
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -1591,27 +1594,27 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:13` | variant-1 - searchDecisionInstances - dmn #1 |
 | observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:92` | variant-2 - searchDecisionInstances - dmn #1 |
 | observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:143` | variant-3 - searchDecisionInstances - path #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:196` | variant-4 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:275` | variant-5 - searchDecisionInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:327` | variant-6 - searchDecisionInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:400` | variant-7 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:451` | variant-8 - searchDecisionInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:553` | variant-9 - searchDecisionInstances - dmn #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:604` | variant-10 - searchDecisionInstances - drd #1 |
-| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:655` | variant-11 - searchDecisionInstances - path #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:195` | variant-4 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:274` | variant-5 - searchDecisionInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:326` | variant-6 - searchDecisionInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:399` | variant-7 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:450` | variant-8 - searchDecisionInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:552` | variant-9 - searchDecisionInstances - dmn #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:603` | variant-10 - searchDecisionInstances - drd #1 |
+| observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:654` | variant-11 - searchDecisionInstances - path #1 |
 | observe-present-search | data-driven | `searchDecisionInstances.variant.spec.ts:708` | variant-12 - searchDecisionInstances - path #1 |
 | delete | happy-path | `deleteDecisionInstance.feature.spec.ts:9` | feature-1 - deleteDecisionInstance - base (1) |
 | delete | happy-path | `deleteDecisionInstancesBatchOperation.feature.spec.ts:11` | feature-1 - deleteDecisionInstancesBatchOperation - base (1) |
 | delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:12` | variant-1 - deleteDecisionInstancesBatchOperation - dmn #1 |
 | delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:90` | variant-2 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | unlabeled | `deleteDecisionInstancesBatchOperation.variant.spec.ts:140` | variant-3 - scenario |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:170` | variant-4 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:248` | variant-5 - deleteDecisionInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:300` | variant-6 - deleteDecisionInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:372` | variant-7 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:422` | variant-8 - deleteDecisionInstancesBatchOperation - bpmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:523` | variant-9 - deleteDecisionInstancesBatchOperation - dmn #1 |
-| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:573` | variant-10 - deleteDecisionInstancesBatchOperation - drd #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:140` | variant-3 - deleteDecisionInstancesBatchOperation - path #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:191` | variant-4 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:269` | variant-5 - deleteDecisionInstancesBatchOperation - bpmn #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:321` | variant-6 - deleteDecisionInstancesBatchOperation - bpmn #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:393` | variant-7 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:443` | variant-8 - deleteDecisionInstancesBatchOperation - bpmn #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:544` | variant-9 - deleteDecisionInstancesBatchOperation - dmn #1 |
+| delete | data-driven | `deleteDecisionInstancesBatchOperation.variant.spec.ts:594` | variant-10 - deleteDecisionInstancesBatchOperation - drd #1 |
 | observe-absence | observe-absence | `searchDecisionInstances.feature.spec.ts:37` | feature-2 - searchDecisionInstances - negative empty (2) |
 | negative-get | bad-request | `request-validation/decisioninstances-validation-api-tests.spec.ts:979` | getDecisionInstance - Path param decisionEvaluationInstanceKey pattern violation |
 | negative-delete | bad-request | `request-validation/decisioninstances-validation-api-tests.spec.ts:18` | deleteDecisionInstance - Additional prop __unexpectedField |
@@ -1685,19 +1688,19 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:231` | variant-3 - searchElementInstanceIncidents - bpmn #1 |
 | observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:340` | variant-4 - searchElementInstanceIncidents - bpmn #1 |
 | observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:449` | variant-5 - searchElementInstanceIncidents - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:583` | variant-6 - searchElementInstanceIncidents - bpmn #1 |
+| observe-present-search | data-driven | `searchElementInstanceIncidents.variant.spec.ts:584` | variant-6 - searchElementInstanceIncidents - bpmn #1 |
 | observe-present-search | happy-path | `searchElementInstances.feature.spec.ts:12` | feature-1 - searchElementInstances - base (1) |
 | observe-present-search | data-driven | `searchElementInstances.feature.spec.ts:63` | feature-3 - searchElementInstances - oneOf filter.elementInstanceScopeKey variant1 (3) |
 | observe-present-search | data-driven | `searchElementInstances.feature.spec.ts:91` | feature-4 - searchElementInstances - oneOf filter.elementInstanceScopeKey variant2 (4) |
 | observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:13` | variant-1 - searchElementInstances - bpmn #1 |
 | observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:63` | variant-2 - searchElementInstances - bpmn #1 |
 | observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:162` | variant-3 - searchElementInstances - path #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:215` | variant-4 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:314` | variant-5 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:384` | variant-6 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:434` | variant-7 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:595` | variant-8 - searchElementInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:694` | variant-9 - searchElementInstances - path #1 |
+| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:213` | variant-4 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:312` | variant-5 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:382` | variant-6 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:432` | variant-7 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:594` | variant-8 - searchElementInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:693` | variant-9 - searchElementInstances - path #1 |
 | observe-present-search | data-driven | `searchElementInstances.variant.spec.ts:747` | variant-10 - searchElementInstances - path #1 |
 | observe-absence | observe-absence | `searchElementInstances.feature.spec.ts:37` | feature-2 - searchElementInstances - negative empty (2) |
 | negative-create | bad-request | `request-validation/elementinstances-validation-api-tests.spec.ts:18` | activateAdHocSubProcessActivities - Additional prop __extraField |
@@ -1757,7 +1760,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:621` | variant-12 - searchAuditLogs - dmn #1 |
 | observe-present-search | unlabeled | `searchAuditLogs.variant.spec.ts:697` | variant-13 - scenario |
 | observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:725` | variant-14 - searchAuditLogs - path #1 |
-| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:776` | variant-15 - searchAuditLogs - path #1 |
+| observe-present-search | data-driven | `searchAuditLogs.variant.spec.ts:777` | variant-15 - searchAuditLogs - path #1 |
 | observe-absence | observe-absence | `searchAuditLogs.feature.spec.ts:35` | feature-2 - searchAuditLogs - negative empty (2) |
 | negative-get | bad-request | `request-validation/auditlogs-validation-api-tests.spec.ts:18` | getAuditLog - Path param auditLogKey pattern violation |
 | negative-search | bad-request | `request-validation/auditlogs-validation-api-tests.spec.ts:30` | searchAuditLogs - Additional prop __unexpectedField |
@@ -1783,7 +1786,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | unlabeled | `searchVariables.variant.spec.ts:93` | variant-3 - scenario |
 | observe-present-search | data-driven | `searchVariables.variant.spec.ts:122` | variant-4 - searchVariables - bpmn #1 |
 | observe-present-search | data-driven | `searchVariables.variant.spec.ts:191` | variant-5 - searchVariables - path #1 |
-| observe-present-search | data-driven | `searchVariables.variant.spec.ts:242` | variant-6 - searchVariables - path #1 |
+| observe-present-search | data-driven | `searchVariables.variant.spec.ts:243` | variant-6 - searchVariables - path #1 |
 | observe-absence | observe-absence | `searchVariables.feature.spec.ts:35` | feature-2 - searchVariables - negative empty (2) |
 | negative-get | bad-request | `request-validation/variables-validation-api-tests.spec.ts:18` | getVariable - Path param variableKey pattern violation |
 | negative-search | bad-request | `request-validation/variables-validation-api-tests.spec.ts:30` | searchVariables - Additional prop __unexpectedField |
@@ -1805,14 +1808,14 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `correlateMessage.feature.spec.ts`, `correlateMessage.variant.spec.ts`, `publishMessage.feature.spec.ts`, `publishMessage.variant.spec.ts`, `request-validation/messages-validation-api-tests.spec.ts`
 - **Observation channel**: GET = 0, Search = 0
 - **Form-step counts**: create=4, negative-create=26
-- **Variants**: happy-path=2, unlabeled=2, bad-request=26
+- **Variants**: happy-path=2, data-driven=2, bad-request=26
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `correlateMessage.feature.spec.ts:11` | feature-1 - correlateMessage - base (1) |
-| create | unlabeled | `correlateMessage.variant.spec.ts:11` | variant-1 - scenario |
+| create | data-driven | `correlateMessage.variant.spec.ts:11` | variant-1 - correlateMessage - path #1 |
 | create | happy-path | `publishMessage.feature.spec.ts:11` | feature-1 - publishMessage - base (1) |
-| create | unlabeled | `publishMessage.variant.spec.ts:11` | variant-1 - scenario |
+| create | data-driven | `publishMessage.variant.spec.ts:11` | variant-1 - publishMessage - path #1 |
 | negative-create | bad-request | `request-validation/messages-validation-api-tests.spec.ts:18` | correlateMessage - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/messages-validation-api-tests.spec.ts:37` | correlateMessage - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/messages-validation-api-tests.spec.ts:52` | correlateMessage - Param name wrong type (#1) |
@@ -1846,12 +1849,12 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `broadcastSignal.feature.spec.ts`, `broadcastSignal.variant.spec.ts`, `request-validation/signals-validation-api-tests.spec.ts`
 - **Observation channel**: GET = 0, Search = 0
 - **Form-step counts**: create=2, negative-create=12
-- **Variants**: happy-path=1, unlabeled=1, bad-request=12
+- **Variants**: happy-path=1, data-driven=1, bad-request=12
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `broadcastSignal.feature.spec.ts:11` | feature-1 - broadcastSignal - base (1) |
-| create | unlabeled | `broadcastSignal.variant.spec.ts:11` | variant-1 - scenario |
+| create | data-driven | `broadcastSignal.variant.spec.ts:11` | variant-1 - broadcastSignal - path #1 |
 | negative-create | bad-request | `request-validation/signals-validation-api-tests.spec.ts:18` | broadcastSignal - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/signals-validation-api-tests.spec.ts:37` | broadcastSignal - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/signals-validation-api-tests.spec.ts:52` | broadcastSignal - Param signalName wrong type (#1) |
@@ -1881,7 +1884,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:170` | variant-3 - searchCorrelatedMessageSubscriptions - bpmn #1 |
 | observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:244` | variant-4 - searchCorrelatedMessageSubscriptions - path #1 |
 | observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:305` | variant-5 - searchCorrelatedMessageSubscriptions - path #1 |
-| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:359` | variant-6 - searchCorrelatedMessageSubscriptions - path #1 |
+| observe-present-search | data-driven | `searchCorrelatedMessageSubscriptions.variant.spec.ts:360` | variant-6 - searchCorrelatedMessageSubscriptions - path #1 |
 | observe-absence | observe-absence | `searchCorrelatedMessageSubscriptions.feature.spec.ts:38` | feature-2 - searchCorrelatedMessageSubscriptions - negative empty (2) |
 | negative-search | bad-request | `request-validation/correlatedmessagesubscriptions-validation-api-tests.spec.ts:18` | searchCorrelatedMessageSubscriptions - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/correlatedmessagesubscriptions-validation-api-tests.spec.ts:37` | searchCorrelatedMessageSubscriptions - Body wrong top-level type |
@@ -1905,7 +1908,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:121` | variant-3 - searchMessageSubscriptions - bpmn #1 |
 | observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:195` | variant-4 - searchMessageSubscriptions - bpmn #1 |
 | observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:298` | variant-5 - searchMessageSubscriptions - path #1 |
-| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:351` | variant-6 - searchMessageSubscriptions - path #1 |
+| observe-present-search | data-driven | `searchMessageSubscriptions.variant.spec.ts:352` | variant-6 - searchMessageSubscriptions - path #1 |
 | observe-absence | observe-absence | `searchMessageSubscriptions.feature.spec.ts:37` | feature-2 - searchMessageSubscriptions - negative empty (2) |
 | negative-search | bad-request | `request-validation/messagesubscriptions-validation-api-tests.spec.ts:18` | searchMessageSubscriptions - Additional prop __unexpectedField |
 | negative-search | bad-request | `request-validation/messagesubscriptions-validation-api-tests.spec.ts:37` | searchMessageSubscriptions - Body wrong top-level type |
@@ -1917,7 +1920,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 **Form**: Submit expression / conditional → Receive result (stateless, no entity persisted)
 
-**Total tests**: 22
+**Total tests**: 25
 
 ### `conditional` — 15 tests
 
@@ -1925,13 +1928,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `evaluateConditionals.feature.spec.ts`, `evaluateConditionals.variant.spec.ts`, `request-validation/conditionals-validation-api-tests.spec.ts`
 - **Observation channel**: GET = 0, Search = 0
 - **Form-step counts**: create=3, negative-create=12
-- **Variants**: happy-path=1, data-driven=1, unlabeled=1, bad-request=12
+- **Variants**: happy-path=1, data-driven=2, bad-request=12
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `evaluateConditionals.feature.spec.ts:11` | feature-1 - evaluateConditionals - base (1) |
-| create | unlabeled | `evaluateConditionals.variant.spec.ts:12` | variant-1 - scenario |
-| create | data-driven | `evaluateConditionals.variant.spec.ts:40` | variant-2 - evaluateConditionals - bpmn #1 |
+| create | data-driven | `evaluateConditionals.variant.spec.ts:12` | variant-1 - evaluateConditionals - path #1 |
+| create | data-driven | `evaluateConditionals.variant.spec.ts:62` | variant-2 - evaluateConditionals - bpmn #1 |
 | negative-create | bad-request | `request-validation/conditionals-validation-api-tests.spec.ts:18` | evaluateConditionals - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/conditionals-validation-api-tests.spec.ts:38` | evaluateConditionals - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/conditionals-validation-api-tests.spec.ts:53` | evaluateConditionals - Param processDefinitionKey wrong type (#1) |
@@ -1945,23 +1948,26 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-create | bad-request | `request-validation/conditionals-validation-api-tests.spec.ts:217` | evaluateConditionals - Missing variables |
 | negative-create | bad-request | `request-validation/conditionals-validation-api-tests.spec.ts:232` | evaluateConditionals - Missing body |
 
-### `expression` — 7 tests
+### `expression` — 10 tests
 
 - **Prerequisite to create**: none
-- **Files**: `evaluateExpression.feature.spec.ts`, `request-validation/expression-validation-api-tests.spec.ts`
+- **Files**: `evaluateExpression.feature.spec.ts`, `evaluateExpression.variant.spec.ts`, `request-validation/expression-validation-api-tests.spec.ts`
 - **Observation channel**: GET = 0, Search = 0
-- **Form-step counts**: create=1, negative-create=6
-- **Variants**: happy-path=1, bad-request=6
+- **Form-step counts**: create=2, negative-create=8
+- **Variants**: happy-path=1, unlabeled=1, bad-request=8
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | create | happy-path | `evaluateExpression.feature.spec.ts:11` | feature-1 - evaluateExpression - base (1) |
+| create | unlabeled | `evaluateExpression.variant.spec.ts:11` | variant-1 - scenario |
 | negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:18` | evaluateExpression - Additional prop __extraField |
-| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:36` | evaluateExpression - Body wrong top-level type |
-| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:51` | evaluateExpression - Param expression wrong type (#1) |
-| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:68` | evaluateExpression - Param expression wrong type (#2) |
-| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:85` | evaluateExpression - Missing expression |
-| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:100` | evaluateExpression - Missing body |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:37` | evaluateExpression - Body wrong top-level type |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:52` | evaluateExpression - Param expression wrong type (#1) |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:70` | evaluateExpression - Param expression wrong type (#2) |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:88` | evaluateExpression - Param scopeKey wrong type (#1) |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:106` | evaluateExpression - Param scopeKey wrong type (#2) |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:124` | evaluateExpression - Missing expression |
+| negative-create | bad-request | `request-validation/expression-validation-api-tests.spec.ts:139` | evaluateExpression - Missing body |
 
 ## O. System/Admin
 
@@ -2086,31 +2092,65 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 **Form**: New v2 endpoint family — get / search agent instances (lifecycle TBD)
 
-**Total tests**: 15
+**Total tests**: 49
 
-### `agent-instance` — 15 tests
+### `agent-instance` — 49 tests
 
 - **Prerequisite to create**: unknown
-- **Files**: `getAgentInstance.feature.spec.ts`, `request-validation/agentinstances-validation-api-tests.spec.ts`, `searchAgentInstances.feature.spec.ts`, `searchAgentInstances.variant.spec.ts`
-- **Observation channel**: GET = 1, Search = 7
-- **Form-step counts**: observe-present-get=1, observe-present-search=7, observe-absence=1, negative-get=1, negative-search=5
-- **Variants**: happy-path=2, observe-absence=1, data-driven=5, unlabeled=1, bad-request=6
+- **Files**: `createAgentInstance.feature.spec.ts`, `getAgentInstance.feature.spec.ts`, `request-validation/agentinstances-validation-api-tests.spec.ts`, `searchAgentInstances.feature.spec.ts`, `searchAgentInstances.variant.spec.ts`, `updateAgentInstance.feature.spec.ts`
+- **Observation channel**: GET = 1, Search = 8
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=8, mutate=1, observe-absence=1, negative-create=21, negative-get=1, negative-update=10, negative-search=5
+- **Variants**: happy-path=4, observe-absence=1, data-driven=7, bad-request=37
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
-| observe-present-get | happy-path | `getAgentInstance.feature.spec.ts:12` | feature-1 - getAgentInstance - base (1) |
+| create | happy-path | `createAgentInstance.feature.spec.ts:12` | feature-1 - createAgentInstance - base (1) |
+| observe-present-get | happy-path | `getAgentInstance.feature.spec.ts:13` | feature-1 - getAgentInstance - base (1) |
 | observe-present-search | happy-path | `searchAgentInstances.feature.spec.ts:12` | feature-1 - searchAgentInstances - base (1) |
-| observe-present-search | unlabeled | `searchAgentInstances.variant.spec.ts:13` | variant-1 - scenario |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:44` | variant-2 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:145` | variant-3 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:218` | variant-4 - searchAgentInstances - bpmn #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:270` | variant-5 - searchAgentInstances - path #1 |
-| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:334` | variant-6 - searchAgentInstances - path #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:13` | variant-1 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:155` | variant-2 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:256` | variant-3 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:329` | variant-4 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:381` | variant-5 - searchAgentInstances - bpmn #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:482` | variant-6 - searchAgentInstances - path #1 |
+| observe-present-search | data-driven | `searchAgentInstances.variant.spec.ts:546` | variant-7 - searchAgentInstances - path #1 |
+| mutate | happy-path | `updateAgentInstance.feature.spec.ts:9` | feature-1 - updateAgentInstance - base (1) |
 | observe-absence | observe-absence | `searchAgentInstances.feature.spec.ts:37` | feature-2 - searchAgentInstances - negative empty (2) |
-| negative-get | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:18` | getAgentInstance - Path param agentInstanceKey pattern violation |
-| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:34` | searchAgentInstances - Additional prop __unexpectedField |
-| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:53` | searchAgentInstances - Body wrong top-level type |
-| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:68` | searchAgentInstances - Missing sort.0.field |
-| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:85` | searchAgentInstances - Enum violation sort.0.field |
-| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:106` | searchAgentInstances - Enum violation sort.0.order |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:18` | createAgentInstance - Additional prop __extraField |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:41` | createAgentInstance - Body wrong top-level type |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:56` | createAgentInstance - Param definition.model wrong type (#1) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:80` | createAgentInstance - Param definition.model wrong type (#2) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:104` | createAgentInstance - Param definition.provider wrong type (#1) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:128` | createAgentInstance - Param definition.provider wrong type (#2) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:152` | createAgentInstance - Param definition.systemPrompt wrong type (#1) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:176` | createAgentInstance - Param definition.systemPrompt wrong type (#2) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:200` | createAgentInstance - Param elementInstanceKey wrong type (#1) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:224` | createAgentInstance - Param elementInstanceKey wrong type (#2) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:248` | createAgentInstance - Missing definition.model |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:269` | createAgentInstance - Missing definition.provider |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:290` | createAgentInstance - Missing definition.systemPrompt |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:311` | createAgentInstance - Missing elementInstanceKey (#1) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:332` | createAgentInstance - Missing limits.maxModelCalls |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:358` | createAgentInstance - Missing limits.maxTokens |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:384` | createAgentInstance - Missing limits.maxToolCalls |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:410` | createAgentInstance - Missing definition |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:427` | createAgentInstance - Missing elementInstanceKey (#2) |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:444` | createAgentInstance - Missing body |
+| negative-create | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:456` | createAgentInstance - Missing combo elementInstanceKey,definition |
+| negative-get | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:473` | getAgentInstance - Path param agentInstanceKey pattern violation |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:582` | updateAgentInstance - Additional prop __extraField |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:602` | updateAgentInstance - Body wrong top-level type |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:619` | updateAgentInstance - Param status wrong type (#1) |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:638` | updateAgentInstance - Param status wrong type (#2) |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:657` | updateAgentInstance - Missing tools.0.description |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:681` | updateAgentInstance - Missing tools.0.elementId |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:705` | updateAgentInstance - Missing tools.0.name |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:729` | updateAgentInstance - Enum violation status |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:748` | updateAgentInstance - Missing body |
+| negative-update | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:762` | updateAgentInstance - Path param agentInstanceKey pattern violation |
+| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:489` | searchAgentInstances - Additional prop __unexpectedField |
+| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:508` | searchAgentInstances - Body wrong top-level type |
+| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:523` | searchAgentInstances - Missing sort.0.field |
+| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:540` | searchAgentInstances - Enum violation sort.0.field |
+| negative-search | bad-request | `request-validation/agentinstances-validation-api-tests.spec.ts:561` | searchAgentInstances - Enum violation sort.0.order |
 

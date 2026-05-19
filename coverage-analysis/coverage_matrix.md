@@ -1,6 +1,6 @@
 # api-test-generator — Coverage matrix (entity × operation × variant)
 
-Total test declarations: **1567** across **37** entities.
+Total test declarations: **1607** across **37** entities.
 
 Variants are first-match labels derived from the generator's emitter suffix (`base`, `negative empty`, `bpmn|dmn|drd|form|path|cycle/...`, `oneOf ...`, `scenario`). See `build_coverage.py` for the rule table.
 
@@ -38,11 +38,11 @@ Legend: ✓ = at least 1, blank = 0.
 | group | search | 47 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | group | lifecycle | 6 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | decision-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
-| decision-instance | delete | 50 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |
+| decision-instance | delete | 50 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-instance | search | 20 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | process-definition | get | 59 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | process-definition | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
-| user-task | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| user-task | get | 6 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user-task | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user-task | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user-task | search | 44 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
@@ -54,6 +54,10 @@ Legend: ✓ = at least 1, blank = 0.
 | element-instance | create | 19 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | element-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | element-instance | search | 34 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| agent-instance | create | 22 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| agent-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| agent-instance | update | 11 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
+| agent-instance | search | 14 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | mapping-rule | create | 21 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | mapping-rule | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | mapping-rule | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
@@ -73,7 +77,7 @@ Legend: ✓ = at least 1, blank = 0.
 | authorization | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | authorization | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | resource | create | 13 |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
-| resource | get | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
+| resource | get | 3 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | resource | delete | 8 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | resource | search | 12 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | user | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
@@ -81,7 +85,7 @@ Legend: ✓ = at least 1, blank = 0.
 | user | update | 5 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user | search | 9 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
-| message | create | 30 | ✓ | ✓ |  |  |  |  |  |  |  |  | ✓ |
+| message | create | 30 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-definition | create | 11 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-definition | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | decision-definition | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
@@ -93,23 +97,21 @@ Legend: ✓ = at least 1, blank = 0.
 | variable | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | variable | search | 14 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |
 | setup | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
-| conditional | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ | ✓ |
-| agent-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
-| agent-instance | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |
+| conditional | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-requirements | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | decision-requirements | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
-| signal | create | 14 | ✓ | ✓ |  |  |  |  |  |  |  |  | ✓ |
+| signal | create | 14 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | batch-operation | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | update | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | correlated-message-subscription | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | message-subscriptions | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| expression | create | 10 | ✓ | ✓ |  |  |  |  |  |  |  |  | ✓ |
 | batch-operation-item | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
 | system | get | 9 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | clock | create | 7 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | clock | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
-| expression | create | 7 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | authentication | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | license | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | status | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
@@ -147,11 +149,11 @@ Legend: ✓ = at least 1, blank = 0.
 | group | search | 47 | 5 | 29 |  |  |  |  |  |  | 1 | 12 |  |
 | group | lifecycle | 6 | 3 |  |  |  |  |  |  |  | 3 |  |  |
 | decision-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
-| decision-instance | delete | 50 | 2 | 38 |  |  |  |  |  |  |  | 9 | 1 |
+| decision-instance | delete | 50 | 2 | 38 |  |  |  |  |  |  |  | 10 |  |
 | decision-instance | search | 20 | 1 | 6 |  |  |  |  |  |  | 1 | 12 |  |
 | process-definition | get | 59 | 7 | 38 |  |  |  |  |  |  |  | 14 |  |
 | process-definition | search | 11 | 1 | 5 |  |  |  |  |  |  | 1 | 4 |  |
-| user-task | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
+| user-task | get | 6 | 3 | 3 |  |  |  |  |  |  |  |  |  |
 | user-task | update | 13 | 3 | 10 |  |  |  |  |  |  |  |  |  |
 | user-task | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | user-task | search | 44 | 4 | 30 |  |  |  |  |  |  | 1 | 9 |  |
@@ -163,6 +165,10 @@ Legend: ✓ = at least 1, blank = 0.
 | element-instance | create | 19 | 2 | 16 |  |  |  |  |  |  |  | 1 |  |
 | element-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | element-instance | search | 34 | 2 | 13 |  |  |  |  |  |  | 1 | 18 |  |
+| agent-instance | create | 22 | 1 | 21 |  |  |  |  |  |  |  |  |  |
+| agent-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
+| agent-instance | update | 11 | 1 | 10 |  |  |  |  |  |  |  |  |  |
+| agent-instance | search | 14 | 1 | 5 |  |  |  |  |  |  | 1 | 7 |  |
 | mapping-rule | create | 21 | 1 | 20 |  |  |  |  |  |  |  |  |  |
 | mapping-rule | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | mapping-rule | update | 13 | 1 | 12 |  |  |  |  |  |  |  |  |  |
@@ -182,7 +188,7 @@ Legend: ✓ = at least 1, blank = 0.
 | authorization | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | authorization | search | 11 | 1 | 7 |  |  |  |  |  |  | 1 | 2 |  |
 | resource | create | 13 |  | 8 |  |  |  |  |  |  |  | 5 |  |
-| resource | get | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
+| resource | get | 3 | 3 |  |  |  |  |  |  |  |  |  |  |
 | resource | delete | 8 | 1 | 7 |  |  |  |  |  |  |  |  |  |
 | resource | search | 12 | 1 | 5 |  |  |  |  |  |  | 1 | 5 |  |
 | user | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |
@@ -190,7 +196,7 @@ Legend: ✓ = at least 1, blank = 0.
 | user | update | 5 | 1 | 4 |  |  |  |  |  |  |  |  |  |
 | user | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | user | search | 9 | 1 | 5 |  |  |  |  |  |  | 1 | 2 |  |
-| message | create | 30 | 2 | 26 |  |  |  |  |  |  |  |  | 2 |
+| message | create | 30 | 2 | 26 |  |  |  |  |  |  |  | 2 |  |
 | decision-definition | create | 11 | 1 | 7 |  |  |  |  |  |  |  | 3 |  |
 | decision-definition | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
 | decision-definition | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
@@ -202,23 +208,21 @@ Legend: ✓ = at least 1, blank = 0.
 | variable | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | variable | search | 14 | 1 | 6 |  |  |  |  |  |  | 1 | 4 | 2 |
 | setup | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |
-| conditional | create | 15 | 1 | 12 |  |  |  |  |  |  |  | 1 | 1 |
-| agent-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
-| agent-instance | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 5 | 1 |
+| conditional | create | 15 | 1 | 12 |  |  |  |  |  |  |  | 2 |  |
 | decision-requirements | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
 | decision-requirements | search | 11 | 1 | 5 |  |  |  |  |  |  | 1 | 4 |  |
-| signal | create | 14 | 1 | 12 |  |  |  |  |  |  |  |  | 1 |
+| signal | create | 14 | 1 | 12 |  |  |  |  |  |  |  | 1 |  |
 | batch-operation | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | update | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | batch-operation | search | 10 | 1 | 6 |  |  |  |  |  |  | 1 | 2 |  |
 | correlated-message-subscription | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
 | message-subscriptions | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
+| expression | create | 10 | 1 | 8 |  |  |  |  |  |  |  |  | 1 |
 | batch-operation-item | search | 10 | 1 | 5 |  |  |  |  |  |  | 1 | 3 |  |
 | system | get | 9 | 2 | 7 |  |  |  |  |  |  |  |  |  |
 | clock | create | 7 | 1 | 6 |  |  |  |  |  |  |  |  |  |
 | clock | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
-| expression | create | 7 | 1 | 6 |  |  |  |  |  |  |  |  |  |
 | authentication | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | license | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | status | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |

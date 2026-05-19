@@ -1,6 +1,6 @@
 # Coverage gaps (heuristic)
 
-Computed across **1567** generated test declarations in **37** entities.
+Computed across **1607** generated test declarations in **37** entities.
 
 ## Entities missing delete-then-observe-absence variant
 

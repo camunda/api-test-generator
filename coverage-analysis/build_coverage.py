@@ -69,6 +69,7 @@ SEGMENT_TO_ENTITY = {
     'documents': 'document',
     'element-instances': 'element-instance',
     'expression': 'expression',
+    'forms': 'user-task',  # forms are intrinsically tied to user tasks; folded into F. User-Task Lifecycle
     'global-task-listeners': 'global-task-listener',
     'groups': 'group',
     'incidents': 'incident',
