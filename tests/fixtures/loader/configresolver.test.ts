@@ -107,9 +107,11 @@ describe('configResolver: per-config planner caps (#292)', () => {
   // an optional `planner` block per config. Class-scoped guards below
   // pin: (1) absent block falls back to documented defaults; (2) a
   // present block overrides; (3) a partial block fills missing fields
-  // from defaults; (4) the loader rejects malformed values rather than
-  // silently coercing them — otherwise a stringified number in
-  // configs.json could disable the cap by failing comparisons.
+  // from defaults; (4) the loader rejects malformed values up front
+  // rather than letting them flow into BFS — a typo like
+  // `"maxChainAlternatives": "twnety"` would otherwise coerce to NaN
+  // inside the BFS comparison and silently emit zero scenarios per
+  // endpoint, masking the config error as a generator bug.
   function writeConfig(planner: unknown): void {
     writeFileSync(
       join(workdir, 'configs.json'),

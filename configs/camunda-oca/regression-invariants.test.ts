@@ -7270,18 +7270,38 @@ describeForThisConfig(
     it('camunda-oca resolves planner caps to {20, 20} (#292)', () => {
       // #292 lifted the two `20` hard-codes in
       // path-analyser/src/index.ts into the per-config `planner`
-      // block in configs.json. This invariant locks the resolved
-      // values for camunda-oca so an accidental config edit (e.g.
-      // dropping the cap to 2 while iterating, or deleting the
-      // block entirely and silently changing what's emitted) is
-      // caught here rather than via a 412-file generated/ diff.
+      // block in configs.json. Two narrow assertions here:
       //
-      // The defaults in `getActivePlannerConfig` are deliberately
-      // the same numbers — so this assertion holds whether the
-      // block is present (explicit config) or absent (falls back
-      // to defaults). To intentionally tune these for OCA, update
-      // both `configs.json` AND the constants below in the same
-      // commit so the regen and the guard move together.
+      //   1. The OCA config explicitly declares a `planner` block.
+      //      Without this check, `getActivePlannerConfig` would
+      //      silently fall back to defaults if someone deleted the
+      //      block — passing the resolved-value assertion below
+      //      while making the config no longer self-documenting.
+      //   2. The resolved values are pinned to {20, 20} so an
+      //      accidental edit (e.g. dropping the cap to 2 while
+      //      iterating) is caught here rather than via a 412-file
+      //      generated/ diff.
+      //
+      // To intentionally tune these for OCA, update both
+      // `configs.json` AND the constants below in the same commit
+      // so the regen and the guard move together.
+      const configsRaw = readFileSync(join(REPO_ROOT, 'configs.json'), 'utf8');
+      const configsParsed: unknown = JSON.parse(configsRaw);
+      function isRecord(v: unknown): v is Record<string, unknown> {
+        return typeof v === 'object' && v !== null && !Array.isArray(v);
+      }
+      function getOcaPlanner(parsed: unknown): unknown {
+        if (!isRecord(parsed) || !isRecord(parsed.configs)) return undefined;
+        const oca = parsed.configs['camunda-oca'];
+        if (!isRecord(oca)) return undefined;
+        return oca.planner;
+      }
+      const ocaPlanner = getOcaPlanner(configsParsed);
+      expect(
+        ocaPlanner,
+        'configs.json must explicitly declare a `planner` block for camunda-oca; deleting it would silently fall back to defaults and erase the self-documenting per-config caps.',
+      ).toBeDefined();
+
       const cfg = getActivePlannerConfig(REPO_ROOT);
       expect(cfg.maxChainAlternatives).toBe(20);
       expect(cfg.maxVariantsPerEndpoint).toBe(20);
