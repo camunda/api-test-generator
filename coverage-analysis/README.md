@@ -31,16 +31,25 @@ The generator emits tests into three locations; `build_coverage.py` scans all of
 | `generated/camunda-oca/playwright/<operationId>.feature.spec.ts` | feature emitter (happy path + basic shape) | `feature` |
 | `generated/camunda-oca/playwright/<operationId>.variant.spec.ts` | variant emitter (schema/input variations: `bpmn`, `oneOf …`, etc.) | `variant` |
 | `generated/camunda-oca/playwright/edges/<EdgeName>.lifecycle.spec.ts` | edge lifecycle template (`establish → observe present → revoke → observe absent`) | `lifecycle` |
+| `generated/camunda-oca/playwright/entities/<EntityName>.lifecycle.spec.ts` | entity lifecycle template (`create → present → update → present → delete → absent`) | `lifecycle` |
 | `generated/camunda-oca/request-validation/<entity>-validation-api-tests.spec.ts` | request-validation emitter (negative schema cases, all bad-request) | `request-validation` |
 
 ## Regenerate
 
+The analyser reads from `spec/camunda-oca/bundled/rest-api.bundle.json` and
+`generated/camunda-oca/`, both of which are gitignored. On a fresh checkout
+you need to populate them first:
+
 ```sh
+npm install                          # one-time, brings in tooling deps
+npm run pipeline                     # fetch spec + generate scenarios + emit feature/variant/lifecycle playwright tests
+npm run generate:request-validation  # emit request-validation tests
 python3 coverage-analysis/build_coverage.py
 ```
 
-No dependencies beyond the Python stdlib. Re-run after any change under
-`generated/camunda-oca/playwright/` or the bundled OpenAPI spec.
+If `spec/camunda-oca/bundled/` and `generated/camunda-oca/` are already
+populated locally, only the last command is required to refresh the
+analysis. The analyser itself has no dependencies beyond the Python stdlib.
 
 ## How tests are classified
 
@@ -117,8 +126,10 @@ See `gaps.md` for the categorised per-entity list.
 - Variant classification depends on the generator's emitter suffix vocabulary.
   When emitters change names (or new ones are added) update `variants_of()` in
   `build_coverage.py`.
-- The generator does not emit error-path tests (401/403/400/404/409) today, so
-  every row in those columns is 0 — this is a generator capability gap, not a
-  classifier limitation.
+- The generator emits substantial 400/bad-request coverage via the
+  `request-validation` emitter (1000+ tests across 17 violation kinds), but
+  emits zero tests for 401/403/404/409 and zero for pagination/sort and filter.
+  Those zero columns are a generator capability gap, not a classifier
+  limitation — see `gaps.md` for the per-entity breakdown.
 - Dynamic test names (`variant-N - scenario`) are bucketed as `unlabeled` because
   reading the test body would be required to refine them.

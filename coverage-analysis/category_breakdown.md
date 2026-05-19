@@ -1,6 +1,6 @@
 # api-test-generator — Per-category breakdown
 
-Total test declarations: **1607** across **37** entities.
+Total test declarations: **1617** across **37** entities.
 
 This file answers, per category: **(1) Form** (the canonical sequence), **(2) Prerequisite to create**, **(3) Observation channel split** (GET vs Search), **(4) Variants with counts**, **(5) The actual tests in that category**.
 
@@ -8,7 +8,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 ## Table of contents
 
-- [A. Entity Lifecycle (CRUD)](#a-entity-lifecycle-crud) — 351 tests
+- [A. Entity Lifecycle (CRUD)](#a-entity-lifecycle-crud) — 361 tests
 - [B. Membership/Association](#b-membershipassociation) — 206 tests
 - [C. Deployment Lifecycle](#c-deployment-lifecycle) — 149 tests
 - [D. Process-Instance Lifecycle & Ops](#d-process-instance-lifecycle--ops) — 282 tests
@@ -27,15 +27,15 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 
 **Form**: Create Entity → Get Entity (Observe Present) → Update Entity → Search Entity (Observe via list) → Delete Entity → Get Entity (Observe Absence)
 
-**Total tests**: 351
+**Total tests**: 361
 
-### `cluster-variables` — 60 tests
+### `cluster-variables` — 62 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createGlobalClusterVariable.feature.spec.ts`, `createTenantClusterVariable.feature.spec.ts`, `deleteGlobalClusterVariable.feature.spec.ts`, `deleteTenantClusterVariable.feature.spec.ts`, `getGlobalClusterVariable.feature.spec.ts`, `getTenantClusterVariable.feature.spec.ts`, `request-validation/clustervariables-validation-api-tests.spec.ts`, `searchClusterVariables.feature.spec.ts`, `searchClusterVariables.variant.spec.ts`, `updateGlobalClusterVariable.feature.spec.ts`, `updateTenantClusterVariable.feature.spec.ts`
+- **Files**: `createGlobalClusterVariable.feature.spec.ts`, `createTenantClusterVariable.feature.spec.ts`, `deleteGlobalClusterVariable.feature.spec.ts`, `deleteTenantClusterVariable.feature.spec.ts`, `entities/GlobalClusterVariable.lifecycle.spec.ts`, `entities/TenantClusterVariable.lifecycle.spec.ts`, `getGlobalClusterVariable.feature.spec.ts`, `getTenantClusterVariable.feature.spec.ts`, `request-validation/clustervariables-validation-api-tests.spec.ts`, `searchClusterVariables.feature.spec.ts`, `searchClusterVariables.variant.spec.ts`, `updateGlobalClusterVariable.feature.spec.ts`, `updateTenantClusterVariable.feature.spec.ts`
 - **Observation channel**: GET = 2, Search = 3
-- **Form-step counts**: create=2, observe-present-get=2, observe-present-search=3, mutate=2, delete=2, observe-absence=1, negative-create=25, negative-get=3, negative-update=11, negative-delete=3, negative-search=6
-- **Variants**: happy-path=9, observe-absence=1, data-driven=2, bad-request=48
+- **Form-step counts**: create=2, observe-present-get=2, observe-present-search=3, mutate=2, delete=2, observe-absence=1, lifecycle=2, negative-create=25, negative-get=3, negative-update=11, negative-delete=3, negative-search=6
+- **Variants**: happy-path=11, observe-absence=3, data-driven=2, bad-request=48
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -51,6 +51,8 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | delete | happy-path | `deleteGlobalClusterVariable.feature.spec.ts:8` | feature-1 - deleteGlobalClusterVariable - base (1) |
 | delete | happy-path | `deleteTenantClusterVariable.feature.spec.ts:8` | feature-1 - deleteTenantClusterVariable - base (1) |
 | observe-absence | observe-absence | `searchClusterVariables.feature.spec.ts:37` | feature-2 - searchClusterVariables - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/GlobalClusterVariable.lifecycle.spec.ts:9` | establish GlobalClusterVariable, observe present, revoke, observe absent |
+| lifecycle | happy-path|observe-absence | `entities/TenantClusterVariable.lifecycle.spec.ts:9` | establish TenantClusterVariable, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:18` | createGlobalClusterVariable - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:39` | createGlobalClusterVariable - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:54` | createGlobalClusterVariable - Param name wrong type (#1) |
@@ -100,13 +102,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:660` | searchClusterVariables - Enum violation sort.0.order |
 | negative-search | bad-request | `request-validation/clustervariables-validation-api-tests.spec.ts:681` | searchClusterVariables - Param query.truncateValues wrong type |
 
-### `mapping-rule` — 48 tests
+### `mapping-rule` — 49 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createMappingRule.feature.spec.ts`, `deleteMappingRule.feature.spec.ts`, `getMappingRule.feature.spec.ts`, `request-validation/mappingrules-validation-api-tests.spec.ts`, `searchMappingRule.feature.spec.ts`, `searchMappingRule.variant.spec.ts`, `updateMappingRule.feature.spec.ts`
+- **Files**: `createMappingRule.feature.spec.ts`, `deleteMappingRule.feature.spec.ts`, `entities/MappingRule.lifecycle.spec.ts`, `getMappingRule.feature.spec.ts`, `request-validation/mappingrules-validation-api-tests.spec.ts`, `searchMappingRule.feature.spec.ts`, `searchMappingRule.variant.spec.ts`, `updateMappingRule.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 4
-- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, negative-create=20, negative-get=1, negative-update=12, negative-delete=1, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=3, bad-request=39
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=20, negative-get=1, negative-update=12, negative-delete=1, negative-search=5
+- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=39
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -119,6 +121,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateMappingRule.feature.spec.ts:11` | feature-1 - updateMappingRule - base (1) |
 | delete | happy-path | `deleteMappingRule.feature.spec.ts:8` | feature-1 - deleteMappingRule - base (1) |
 | observe-absence | observe-absence | `searchMappingRule.feature.spec.ts:37` | feature-2 - searchMappingRule - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/MappingRule.lifecycle.spec.ts:9` | establish MappingRule, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:18` | createMappingRule - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:39` | createMappingRule - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:54` | createMappingRule - Param claimName wrong type (#1) |
@@ -159,13 +162,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:488` | searchMappingRule - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/mappingrules-validation-api-tests.spec.ts:509` | searchMappingRule - Enum violation sort.0.order |
 
-### `global-task-listener` — 47 tests
+### `global-task-listener` — 48 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createGlobalTaskListener.feature.spec.ts`, `deleteGlobalTaskListener.feature.spec.ts`, `getGlobalTaskListener.feature.spec.ts`, `request-validation/globaltasklisteners-validation-api-tests.spec.ts`, `searchGlobalTaskListeners.feature.spec.ts`, `searchGlobalTaskListeners.variant.spec.ts`, `updateGlobalTaskListener.feature.spec.ts`
+- **Files**: `createGlobalTaskListener.feature.spec.ts`, `deleteGlobalTaskListener.feature.spec.ts`, `entities/GlobalTaskListener.lifecycle.spec.ts`, `getGlobalTaskListener.feature.spec.ts`, `request-validation/globaltasklisteners-validation-api-tests.spec.ts`, `searchGlobalTaskListeners.feature.spec.ts`, `searchGlobalTaskListeners.variant.spec.ts`, `updateGlobalTaskListener.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
-- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, negative-create=21, negative-get=1, negative-update=11, negative-delete=1, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=39
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=21, negative-get=1, negative-update=11, negative-delete=1, negative-search=5
+- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=39
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -177,6 +180,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateGlobalTaskListener.feature.spec.ts:11` | feature-1 - updateGlobalTaskListener - base (1) |
 | delete | happy-path | `deleteGlobalTaskListener.feature.spec.ts:8` | feature-1 - deleteGlobalTaskListener - base (1) |
 | observe-absence | observe-absence | `searchGlobalTaskListeners.feature.spec.ts:37` | feature-2 - searchGlobalTaskListeners - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/GlobalTaskListener.lifecycle.spec.ts:9` | establish GlobalTaskListener, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:18` | createGlobalTaskListener - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:38` | createGlobalTaskListener - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:53` | createGlobalTaskListener - Param id wrong type (#1) |
@@ -217,13 +221,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:473` | searchGlobalTaskListeners - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/globaltasklisteners-validation-api-tests.spec.ts:494` | searchGlobalTaskListeners - Enum violation sort.0.order |
 
-### `tenant` — 37 tests
+### `tenant` — 38 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createTenant.feature.spec.ts`, `deleteTenant.feature.spec.ts`, `getTenant.feature.spec.ts`, `request-validation/tenants-validation-api-tests.spec.ts`, `searchTenants.feature.spec.ts`, `searchTenants.variant.spec.ts`, `updateTenant.feature.spec.ts`
+- **Files**: `createTenant.feature.spec.ts`, `deleteTenant.feature.spec.ts`, `entities/Tenant.lifecycle.spec.ts`, `getTenant.feature.spec.ts`, `request-validation/tenants-validation-api-tests.spec.ts`, `searchTenants.feature.spec.ts`, `searchTenants.variant.spec.ts`, `updateTenant.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 4
-- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, negative-create=14, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=3, bad-request=28
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=14, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
+- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=28
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -236,6 +240,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateTenant.feature.spec.ts:11` | feature-1 - updateTenant - base (1) |
 | delete | happy-path | `deleteTenant.feature.spec.ts:8` | feature-1 - deleteTenant - base (1) |
 | observe-absence | observe-absence | `searchTenants.feature.spec.ts:35` | feature-2 - searchTenants - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/Tenant.lifecycle.spec.ts:9` | establish Tenant, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:189` | createTenant - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:208` | createTenant - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:223` | createTenant - Param name wrong type (#1) |
@@ -265,13 +270,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:951` | searchTenants - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/tenants-validation-api-tests.spec.ts:972` | searchTenants - Enum violation sort.0.order |
 
-### `authorization` — 36 tests
+### `authorization` — 37 tests
 
 - **Prerequisite to create**: owner-entity-or-resource
-- **Files**: `createAuthorization.feature.spec.ts`, `deleteAuthorization.feature.spec.ts`, `getAuthorization.feature.spec.ts`, `request-validation/authorizations-validation-api-tests.spec.ts`, `searchAuthorizations.feature.spec.ts`, `searchAuthorizations.variant.spec.ts`, `updateAuthorization.feature.spec.ts`
+- **Files**: `createAuthorization.feature.spec.ts`, `deleteAuthorization.feature.spec.ts`, `entities/Authorization.lifecycle.spec.ts`, `getAuthorization.feature.spec.ts`, `request-validation/authorizations-validation-api-tests.spec.ts`, `searchAuthorizations.feature.spec.ts`, `searchAuthorizations.variant.spec.ts`, `updateAuthorization.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
-- **Form-step counts**: create=3, observe-present-get=1, observe-present-search=3, mutate=3, delete=1, observe-absence=1, negative-create=7, negative-get=1, negative-update=8, negative-delete=1, negative-search=7
-- **Variants**: happy-path=5, observe-absence=1, data-driven=6, bad-request=24
+- **Form-step counts**: create=3, observe-present-get=1, observe-present-search=3, mutate=3, delete=1, observe-absence=1, lifecycle=1, negative-create=7, negative-get=1, negative-update=8, negative-delete=1, negative-search=7
+- **Variants**: happy-path=6, observe-absence=2, data-driven=6, bad-request=24
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -287,6 +292,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | data-driven | `updateAuthorization.feature.spec.ts:119` | feature-3 - updateAuthorization - oneOf group0 variant2 (3) |
 | delete | happy-path | `deleteAuthorization.feature.spec.ts:8` | feature-1 - deleteAuthorization - base (1) |
 | observe-absence | observe-absence | `searchAuthorizations.feature.spec.ts:37` | feature-2 - searchAuthorizations - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/Authorization.lifecycle.spec.ts:9` | establish Authorization, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:18` | createAuthorization - Additional prop __extraField |
 | negative-create | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:35` | createAuthorization - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:50` | createAuthorization - Missing body |
@@ -312,13 +318,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:272` | searchAuthorizations - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/authorizations-validation-api-tests.spec.ts:293` | searchAuthorizations - Enum violation sort.0.order |
 
-### `role` — 36 tests
+### `role` — 37 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createRole.feature.spec.ts`, `deleteRole.feature.spec.ts`, `getRole.feature.spec.ts`, `request-validation/roles-validation-api-tests.spec.ts`, `searchRoles.feature.spec.ts`, `searchRoles.variant.spec.ts`, `updateRole.feature.spec.ts`
+- **Files**: `createRole.feature.spec.ts`, `deleteRole.feature.spec.ts`, `entities/Role.lifecycle.spec.ts`, `getRole.feature.spec.ts`, `request-validation/roles-validation-api-tests.spec.ts`, `searchRoles.feature.spec.ts`, `searchRoles.variant.spec.ts`, `updateRole.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 4
-- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, negative-create=13, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=3, bad-request=27
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=4, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=13, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
+- **Variants**: happy-path=6, observe-absence=2, data-driven=3, bad-request=27
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -331,6 +337,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateRole.feature.spec.ts:11` | feature-1 - updateRole - base (1) |
 | delete | happy-path | `deleteRole.feature.spec.ts:8` | feature-1 - deleteRole - base (1) |
 | observe-absence | observe-absence | `searchRoles.feature.spec.ts:35` | feature-2 - searchRoles - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/Role.lifecycle.spec.ts:9` | establish Role, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/roles-validation-api-tests.spec.ts:151` | createRole - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/roles-validation-api-tests.spec.ts:170` | createRole - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/roles-validation-api-tests.spec.ts:185` | createRole - Param name wrong type (#1) |
@@ -359,13 +366,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/roles-validation-api-tests.spec.ts:770` | searchRoles - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/roles-validation-api-tests.spec.ts:791` | searchRoles - Enum violation sort.0.order |
 
-### `group` — 34 tests
+### `group` — 35 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createGroup.feature.spec.ts`, `deleteGroup.feature.spec.ts`, `getGroup.feature.spec.ts`, `request-validation/groups-validation-api-tests.spec.ts`, `searchGroups.feature.spec.ts`, `searchGroups.variant.spec.ts`, `updateGroup.feature.spec.ts`
+- **Files**: `createGroup.feature.spec.ts`, `deleteGroup.feature.spec.ts`, `entities/Group.lifecycle.spec.ts`, `getGroup.feature.spec.ts`, `request-validation/groups-validation-api-tests.spec.ts`, `searchGroups.feature.spec.ts`, `searchGroups.variant.spec.ts`, `updateGroup.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
-- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, negative-create=12, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=26
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=12, negative-get=1, negative-update=7, negative-delete=1, negative-search=5
+- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=26
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -377,6 +384,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateGroup.feature.spec.ts:11` | feature-1 - updateGroup - base (1) |
 | delete | happy-path | `deleteGroup.feature.spec.ts:8` | feature-1 - deleteGroup - base (1) |
 | observe-absence | observe-absence | `searchGroups.feature.spec.ts:35` | feature-2 - searchGroups - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/Group.lifecycle.spec.ts:9` | establish Group, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/groups-validation-api-tests.spec.ts:123` | createGroup - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/groups-validation-api-tests.spec.ts:142` | createGroup - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/groups-validation-api-tests.spec.ts:157` | createGroup - Param groupId wrong type (#1) |
@@ -404,13 +412,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/groups-validation-api-tests.spec.ts:521` | searchGroups - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/groups-validation-api-tests.spec.ts:542` | searchGroups - Enum violation sort.0.order |
 
-### `user` — 33 tests
+### `user` — 34 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createUser.feature.spec.ts`, `deleteUser.feature.spec.ts`, `getUser.feature.spec.ts`, `request-validation/users-validation-api-tests.spec.ts`, `searchUsers.feature.spec.ts`, `searchUsers.variant.spec.ts`, `updateUser.feature.spec.ts`
+- **Files**: `createUser.feature.spec.ts`, `deleteUser.feature.spec.ts`, `entities/User.lifecycle.spec.ts`, `getUser.feature.spec.ts`, `request-validation/users-validation-api-tests.spec.ts`, `searchUsers.feature.spec.ts`, `searchUsers.variant.spec.ts`, `updateUser.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
-- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, negative-create=14, negative-get=1, negative-update=4, negative-delete=1, negative-search=5
-- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=25
+- **Form-step counts**: create=1, observe-present-get=1, observe-present-search=3, mutate=1, delete=1, observe-absence=1, lifecycle=1, negative-create=14, negative-get=1, negative-update=4, negative-delete=1, negative-search=5
+- **Variants**: happy-path=6, observe-absence=2, data-driven=2, bad-request=25
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -422,6 +430,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | mutate | happy-path | `updateUser.feature.spec.ts:11` | feature-1 - updateUser - base (1) |
 | delete | happy-path | `deleteUser.feature.spec.ts:8` | feature-1 - deleteUser - base (1) |
 | observe-absence | observe-absence | `searchUsers.feature.spec.ts:35` | feature-2 - searchUsers - negative empty (2) |
+| lifecycle | happy-path|observe-absence | `entities/User.lifecycle.spec.ts:9` | establish User, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/users-validation-api-tests.spec.ts:18` | createUser - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/users-validation-api-tests.spec.ts:37` | createUser - Body wrong top-level type |
 | negative-create | bad-request | `request-validation/users-validation-api-tests.spec.ts:52` | createUser - Param password wrong type (#1) |
@@ -448,13 +457,13 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | negative-search | bad-request | `request-validation/users-validation-api-tests.spec.ts:332` | searchUsers - Enum violation sort.0.field |
 | negative-search | bad-request | `request-validation/users-validation-api-tests.spec.ts:353` | searchUsers - Enum violation sort.0.order |
 
-### `document` — 20 tests
+### `document` — 21 tests
 
 - **Prerequisite to create**: none
-- **Files**: `createDocument.feature.spec.ts`, `createDocument.variant.spec.ts`, `createDocumentLink.feature.spec.ts`, `createDocuments.feature.spec.ts`, `createDocuments.variant.spec.ts`, `deleteDocument.feature.spec.ts`, `getDocument.feature.spec.ts`, `request-validation/documents-validation-api-tests.spec.ts`
+- **Files**: `createDocument.feature.spec.ts`, `createDocument.variant.spec.ts`, `createDocumentLink.feature.spec.ts`, `createDocuments.feature.spec.ts`, `createDocuments.variant.spec.ts`, `deleteDocument.feature.spec.ts`, `entities/Document.lifecycle.spec.ts`, `getDocument.feature.spec.ts`, `request-validation/documents-validation-api-tests.spec.ts`
 - **Observation channel**: GET = 1, Search = 0
-- **Form-step counts**: create=7, observe-present-get=1, delete=1, negative-create=11
-- **Variants**: happy-path=5, data-driven=4, bad-request=11
+- **Form-step counts**: create=7, observe-present-get=1, delete=1, lifecycle=1, negative-create=11
+- **Variants**: happy-path=6, observe-absence=1, data-driven=4, bad-request=11
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -467,6 +476,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | create | data-driven | `createDocuments.variant.spec.ts:74` | variant-2 - createDocuments - bpmn #1 |
 | observe-present-get | happy-path | `getDocument.feature.spec.ts:9` | feature-1 - getDocument - base (1) |
 | delete | happy-path | `deleteDocument.feature.spec.ts:9` | feature-1 - deleteDocument - base (1) |
+| lifecycle | happy-path|observe-absence | `entities/Document.lifecycle.spec.ts:9` | establish Document, observe present, revoke, observe absent |
 | negative-create | bad-request | `request-validation/documents-validation-api-tests.spec.ts:18` | createDocument - Additional prop __unexpectedField |
 | negative-create | bad-request | `request-validation/documents-validation-api-tests.spec.ts:38` | createDocument - Missing body |
 | negative-create | bad-request | `request-validation/documents-validation-api-tests.spec.ts:55` | createDocument - Missing file |
@@ -491,7 +501,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignClientToTenant.feature.spec.ts`, `assignGroupToTenant.feature.spec.ts`, `assignMappingRuleToTenant.feature.spec.ts`, `assignRoleToTenant.feature.spec.ts`, `assignUserToTenant.feature.spec.ts`, `edges/TenantClientMembership.lifecycle.spec.ts`, `edges/TenantGroupMembership.lifecycle.spec.ts`, `edges/TenantMappingRuleMembership.lifecycle.spec.ts`, `edges/TenantRoleMembership.lifecycle.spec.ts`, `edges/TenantUserMembership.lifecycle.spec.ts`, `request-validation/tenants-validation-api-tests.spec.ts`, `searchClientsForTenant.feature.spec.ts`, `searchClientsForTenant.variant.spec.ts`, `searchGroupIdsForTenant.feature.spec.ts`, `searchGroupIdsForTenant.variant.spec.ts`, `searchMappingRulesForTenant.feature.spec.ts`, `searchMappingRulesForTenant.variant.spec.ts`, `searchRolesForTenant.feature.spec.ts`, `searchRolesForTenant.variant.spec.ts`, `searchUsersForTenant.feature.spec.ts`, `searchUsersForTenant.variant.spec.ts`, `unassignClientFromTenant.feature.spec.ts`, `unassignGroupFromTenant.feature.spec.ts`, `unassignMappingRuleFromTenant.feature.spec.ts`, `unassignRoleFromTenant.feature.spec.ts`, `unassignUserFromTenant.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 17
 - **Form-step counts**: observe-present-search=17, mutate=5, delete=5, lifecycle=5, negative-update=10, negative-delete=10, negative-search=30
-- **Variants**: happy-path=15, data-driven=12, bad-request=50
+- **Variants**: happy-path=20, observe-absence=5, data-driven=12, bad-request=50
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -584,7 +594,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignRoleToClient.feature.spec.ts`, `assignRoleToGroup.feature.spec.ts`, `assignRoleToMappingRule.feature.spec.ts`, `assignRoleToUser.feature.spec.ts`, `edges/RoleClientMembership.lifecycle.spec.ts`, `edges/RoleGroupMembership.lifecycle.spec.ts`, `edges/RoleMappingRuleMembership.lifecycle.spec.ts`, `edges/RoleUserMembership.lifecycle.spec.ts`, `request-validation/roles-validation-api-tests.spec.ts`, `searchClientsForRole.feature.spec.ts`, `searchClientsForRole.variant.spec.ts`, `searchGroupsForRole.feature.spec.ts`, `searchGroupsForRole.variant.spec.ts`, `searchMappingRulesForRole.feature.spec.ts`, `searchMappingRulesForRole.variant.spec.ts`, `searchUsersForRole.feature.spec.ts`, `searchUsersForRole.variant.spec.ts`, `unassignRoleFromClient.feature.spec.ts`, `unassignRoleFromGroup.feature.spec.ts`, `unassignRoleFromMappingRule.feature.spec.ts`, `unassignRoleFromUser.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 13
 - **Form-step counts**: observe-present-search=13, mutate=4, delete=4, lifecycle=4, negative-update=8, negative-delete=8, negative-search=24
-- **Variants**: happy-path=12, data-driven=9, bad-request=40
+- **Variants**: happy-path=16, observe-absence=4, data-driven=9, bad-request=40
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
@@ -660,7 +670,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignClientToGroup.feature.spec.ts`, `assignMappingRuleToGroup.feature.spec.ts`, `assignUserToGroup.feature.spec.ts`, `edges/GroupClientMembership.lifecycle.spec.ts`, `edges/GroupMappingRuleMembership.lifecycle.spec.ts`, `edges/GroupUserMembership.lifecycle.spec.ts`, `request-validation/groups-validation-api-tests.spec.ts`, `searchClientsForGroup.feature.spec.ts`, `searchClientsForGroup.variant.spec.ts`, `searchMappingRulesForGroup.feature.spec.ts`, `searchMappingRulesForGroup.variant.spec.ts`, `searchRolesForGroup.feature.spec.ts`, `searchRolesForGroup.variant.spec.ts`, `searchUsersForGroup.feature.spec.ts`, `searchUsersForGroup.variant.spec.ts`, `unassignClientFromGroup.feature.spec.ts`, `unassignMappingRuleFromGroup.feature.spec.ts`, `unassignUserFromGroup.feature.spec.ts`
 - **Observation channel**: GET = 0, Search = 14
 - **Form-step counts**: observe-present-search=14, mutate=3, delete=3, lifecycle=3, negative-update=6, negative-delete=6, negative-search=24
-- **Variants**: happy-path=10, data-driven=10, bad-request=36
+- **Variants**: happy-path=13, observe-absence=3, data-driven=10, bad-request=36
 
 | form step | variants | file:line | test name |
 |--|--|--|--|

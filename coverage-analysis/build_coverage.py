@@ -26,6 +26,7 @@ from collections import defaultdict
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PLAYWRIGHT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'generated', 'camunda-oca', 'playwright'))
 EDGES_DIR = os.path.join(PLAYWRIGHT_DIR, 'edges')
+ENTITIES_DIR = os.path.join(PLAYWRIGHT_DIR, 'entities')
 REQVAL_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'generated', 'camunda-oca', 'request-validation'))
 EDGES_ABOX = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'configs', 'camunda-oca', 'ontology', 'edges.json'))
 SPEC_PATH = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'spec', 'camunda-oca', 'bundled', 'rest-api.bundle.json'))
@@ -287,6 +288,22 @@ TEST_RE = re.compile(
 SPEC_FILE_RE = re.compile(r'^(?P<op>[A-Za-z][A-Za-z0-9]*)\.(?P<src>feature|variant)\.spec\.ts$')
 # playwright/edges/<EdgeName>.lifecycle.spec.ts
 EDGE_FILE_RE = re.compile(r'^(?P<edge>[A-Za-z][A-Za-z0-9]*)\.lifecycle\.spec\.ts$')
+# playwright/entities/<EntityName>.lifecycle.spec.ts
+ENTITY_FILE_RE = re.compile(r'^(?P<entity>[A-Za-z][A-Za-z0-9]*)\.lifecycle\.spec\.ts$')
+
+# Map PascalCase entity name from filename to our entity slug.
+PASCAL_TO_SLUG = {
+    'Authorization': 'authorization',
+    'Document': 'document',
+    'GlobalClusterVariable': 'cluster-variables',   # global namespace of cluster-variables
+    'TenantClusterVariable': 'cluster-variables',   # tenant namespace of cluster-variables
+    'GlobalTaskListener': 'global-task-listener',
+    'Group': 'group',
+    'MappingRule': 'mapping-rule',
+    'Role': 'role',
+    'Tenant': 'tenant',
+    'User': 'user',
+}
 # request-validation/<entity-slug>-validation-api-tests.spec.ts  (test names start with operationId)
 REQVAL_TEST_NAME_RE = re.compile(r'^(?P<op>[A-Za-z][A-Za-z0-9]*)\s*-\s*(?P<desc>.*)$')
 
@@ -377,6 +394,30 @@ if os.path.isdir(EDGES_DIR):
                 'test_name': name,
             })
 
+# --- 5b'. playwright/entities/*.lifecycle.spec.ts ---
+# EntityLifecycle template: create -> observe present -> update -> observe ->
+# delete -> observe absent. Single test() per entity. Tag with multi-label
+# variants (happy-path|observe-absence) and form_step='lifecycle', category A
+# (or B for membership-style entities; we keep it on entity).
+if os.path.isdir(ENTITIES_DIR):
+    for f in sorted(os.listdir(ENTITIES_DIR)):
+        m = ENTITY_FILE_RE.match(f)
+        if not m:
+            continue
+        ent_pascal = m.group('entity')
+        entity = PASCAL_TO_SLUG.get(ent_pascal, ent_pascal.lower())
+        for name, line_no in read_tests(os.path.join(ENTITIES_DIR, f)):
+            rows.append({
+                'file': f'entities/{f}', 'line': line_no, 'source': 'lifecycle',
+                'entity': entity, 'operation': 'lifecycle',
+                'method': '', 'path': '', 'operationId': '',
+                'category': category_of('', entity),
+                'form_step': 'lifecycle',
+                'prerequisite': PREREQ_BY_ENTITY.get(entity, 'unknown'),
+                'variants': 'happy-path|observe-absence',
+                'test_name': name,
+            })
+
 # --- 5c. request-validation/*.spec.ts ---
 # Every test in this emitter is a bad-request negative. Test names start with
 # the operationId: '<operationId> - <kind description>'. Each kind (Missing
@@ -423,12 +464,19 @@ variant_cols = ['happy-path','bad-request','unauthorized','forbidden','not-found
                 'conflict','pagination-sort','filter','observe-absence','data-driven','unlabeled']
 op_order = ['create','get','update','delete','search','lifecycle','other','parameterized']
 
-matrix = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+# Matches upstream coverage_matrix.csv semantics from camunda/camunda#53387:
+# `total` is the unique-test count per (entity, operation) — one row per
+# `test()` declaration. The variant columns are label-occurrence counts, so
+# a multi-label test (e.g. lifecycle row tagged `happy-path|observe-absence`)
+# counts in both columns but only once toward `total`.
+matrix_variants = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+matrix_unique = defaultdict(lambda: defaultdict(int))
 entity_totals = defaultdict(int)
 for r in rows:
     entity_totals[r['entity']] += 1
+    matrix_unique[r['entity']][r['operation']] += 1
     for v in (r['variants'].split('|') if r['variants'] else ['unlabeled']):
-        matrix[r['entity']][r['operation']][v] += 1
+        matrix_variants[r['entity']][r['operation']][v] += 1
 
 mat_csv = os.path.join(OUT, 'coverage_matrix.csv')
 with open(mat_csv, 'w', newline='', encoding='utf-8') as fp:
@@ -436,10 +484,10 @@ with open(mat_csv, 'w', newline='', encoding='utf-8') as fp:
     w.writerow(['entity','operation','total'] + variant_cols)
     for ent in sorted(entity_totals, key=lambda x: -entity_totals[x]):
         for op in op_order:
-            cell = matrix[ent].get(op, {})
-            total = sum(cell.values())
+            total = matrix_unique[ent].get(op, 0)
             if total == 0:
                 continue
+            cell = matrix_variants[ent].get(op, {})
             w.writerow([ent, op, total] + [cell.get(v, 0) for v in variant_cols])
 print(f"wrote {mat_csv}")
 
@@ -460,8 +508,8 @@ with open(md_path, 'w', encoding='utf-8') as fp:
     fp.write('|--|--|--:|' + '|'.join(['--']*len(header_vars)) + '|\n')
     for ent in sorted(entity_totals, key=lambda x: -entity_totals[x]):
         for op in op_order:
-            cell = matrix[ent].get(op, {})
-            total = sum(cell.values())
+            cell = matrix_variants[ent].get(op, {})
+            total = matrix_unique[ent].get(op, 0)
             if total == 0:
                 continue
             marks = ['✓' if cell.get(v,0) > 0 else '' for v in var_keys]
@@ -472,8 +520,8 @@ with open(md_path, 'w', encoding='utf-8') as fp:
     fp.write('|--|--|--:|' + '|'.join(['--:']*len(header_vars)) + '|\n')
     for ent in sorted(entity_totals, key=lambda x: -entity_totals[x]):
         for op in op_order:
-            cell = matrix[ent].get(op, {})
-            total = sum(cell.values())
+            cell = matrix_variants[ent].get(op, {})
+            total = matrix_unique[ent].get(op, 0)
             if total == 0:
                 continue
             nums = [str(cell.get(v,0)) if cell.get(v,0)>0 else '' for v in var_keys]
@@ -492,9 +540,9 @@ with open(gaps_path, 'w', encoding='utf-8') as fp:
              '(no negative-after-delete check).\n\n')
     any_missing = False
     for ent in sorted(entity_totals):
-        cell = matrix[ent]
-        has_create = sum(cell.get('create', {}).values()) > 0
-        has_delete = sum(cell.get('delete', {}).values()) > 0
+        cell = matrix_variants[ent]
+        has_create = matrix_unique[ent].get('create', 0) > 0 or matrix_unique[ent].get('lifecycle', 0) > 0
+        has_delete = matrix_unique[ent].get('delete', 0) > 0 or matrix_unique[ent].get('lifecycle', 0) > 0
         absence_hits = sum(cell.get(op, {}).get('observe-absence', 0) for op in op_order)
         if has_create and has_delete and absence_hits == 0:
             fp.write(f'- **{ent}** — has create+delete but no `observe-absence` test\n')
@@ -504,33 +552,33 @@ with open(gaps_path, 'w', encoding='utf-8') as fp:
 
     fp.write('\n## Entities with no unauthorized (401) coverage\n\n')
     for ent in sorted(entity_totals):
-        if not any(c.get('unauthorized', 0) for c in matrix[ent].values()):
+        if not any(c.get('unauthorized', 0) for c in matrix_variants[ent].values()):
             fp.write(f'- {ent}\n')
 
     fp.write('\n## Entities with no forbidden (403) coverage\n\n')
     for ent in sorted(entity_totals):
-        if not any(c.get('forbidden', 0) for c in matrix[ent].values()):
+        if not any(c.get('forbidden', 0) for c in matrix_variants[ent].values()):
             fp.write(f'- {ent}\n')
 
     fp.write('\n## Entities with no bad-request (400) coverage\n\n')
     for ent in sorted(entity_totals):
-        if not any(c.get('bad-request', 0) for c in matrix[ent].values()):
+        if not any(c.get('bad-request', 0) for c in matrix_variants[ent].values()):
             fp.write(f'- {ent}\n')
 
     fp.write('\n## Entities with no not-found (404) coverage\n\n')
     for ent in sorted(entity_totals):
-        if not any(c.get('not-found', 0) for c in matrix[ent].values()):
+        if not any(c.get('not-found', 0) for c in matrix_variants[ent].values()):
             fp.write(f'- {ent}\n')
 
     fp.write('\n## Entities with no conflict (409) coverage\n\n')
     for ent in sorted(entity_totals):
-        if not any(c.get('conflict', 0) for c in matrix[ent].values()):
+        if not any(c.get('conflict', 0) for c in matrix_variants[ent].values()):
             fp.write(f'- {ent}\n')
 
     fp.write('\n## Search ops with no pagination/sort or filter coverage\n\n')
     fp.write('Search operations that have tests but none labeled `pagination-sort` or `filter`.\n\n')
     for ent in sorted(entity_totals):
-        cell = matrix[ent].get('search', {})
+        cell = matrix_variants[ent].get('search', {})
         if not cell:
             continue
         if cell.get('pagination-sort', 0) == 0 and cell.get('filter', 0) == 0:
@@ -654,9 +702,13 @@ for cat in cat_order:
         obs_get    = sum(1 for r in ent_rows if r['form_step'] == 'observe-present-get')
         obs_search = sum(1 for r in ent_rows if r['form_step'] == 'observe-present-search')
 
+        # Split multi-label variants ('happy-path|observe-absence') so each
+        # label is counted independently — keeps these counts reconcilable
+        # with the matrix column counts.
         var_counts = defaultdict(int)
         for r in ent_rows:
-            var_counts[r['variants']] += 1
+            for v in (r['variants'].split('|') if r['variants'] else ['unlabeled']):
+                var_counts[v] += 1
 
         files = sorted({r['file'] for r in ent_rows})
 

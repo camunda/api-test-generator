@@ -1,6 +1,6 @@
 # api-test-generator — Coverage matrix (entity × operation × variant)
 
-Total test declarations: **1607** across **37** entities.
+Total test declarations: **1617** across **37** entities.
 
 Variants are first-match labels derived from the generator's emitter suffix (`base`, `negative empty`, `bpmn|dmn|drd|form|path|cycle/...`, `oneOf ...`, `scenario`). See `build_coverage.py` for the rule table.
 
@@ -24,19 +24,19 @@ Legend: ✓ = at least 1, blank = 0.
 | tenant | update | 23 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | tenant | delete | 17 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | tenant | search | 57 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
-| tenant | lifecycle | 10 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
+| tenant | lifecycle | 6 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | role | create | 14 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | role | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | role | update | 20 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | role | delete | 14 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | role | search | 47 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
-| role | lifecycle | 8 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
+| role | lifecycle | 5 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | group | create | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | group | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | group | update | 17 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | group | delete | 11 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | group | search | 47 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
-| group | lifecycle | 6 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
+| group | lifecycle | 4 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | decision-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | decision-instance | delete | 50 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-instance | search | 20 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
@@ -51,6 +51,7 @@ Legend: ✓ = at least 1, blank = 0.
 | cluster-variables | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | cluster-variables | delete | 5 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | cluster-variables | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| cluster-variables | lifecycle | 2 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | element-instance | create | 19 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | element-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | element-instance | search | 34 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
@@ -63,11 +64,13 @@ Legend: ✓ = at least 1, blank = 0.
 | mapping-rule | update | 13 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | mapping-rule | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | mapping-rule | search | 10 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| mapping-rule | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | global-task-listener | create | 22 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | global-task-listener | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | global-task-listener | update | 12 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | global-task-listener | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | global-task-listener | search | 9 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| global-task-listener | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | incident | get | 19 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | incident | update | 9 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | incident | search | 13 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
@@ -76,6 +79,7 @@ Legend: ✓ = at least 1, blank = 0.
 | authorization | update | 11 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | authorization | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | authorization | search | 11 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| authorization | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | resource | create | 13 |  | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | resource | get | 3 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | resource | delete | 8 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
@@ -85,6 +89,7 @@ Legend: ✓ = at least 1, blank = 0.
 | user | update | 5 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user | search | 9 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ |  |
+| user | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | message | create | 30 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-definition | create | 11 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | decision-definition | get | 4 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
@@ -94,6 +99,7 @@ Legend: ✓ = at least 1, blank = 0.
 | document | create | 18 | ✓ | ✓ |  |  |  |  |  |  |  | ✓ |  |
 | document | get | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | document | delete | 1 | ✓ |  |  |  |  |  |  |  |  |  |  |
+| document | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | variable | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | variable | search | 14 | ✓ | ✓ |  |  |  |  |  |  | ✓ | ✓ | ✓ |
 | setup | create | 15 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
@@ -135,19 +141,19 @@ Legend: ✓ = at least 1, blank = 0.
 | tenant | update | 23 | 6 | 17 |  |  |  |  |  |  |  |  |  |
 | tenant | delete | 17 | 6 | 11 |  |  |  |  |  |  |  |  |  |
 | tenant | search | 57 | 6 | 35 |  |  |  |  |  |  | 1 | 15 |  |
-| tenant | lifecycle | 10 | 5 |  |  |  |  |  |  |  | 5 |  |  |
+| tenant | lifecycle | 6 | 6 |  |  |  |  |  |  |  | 6 |  |  |
 | role | create | 14 | 1 | 13 |  |  |  |  |  |  |  |  |  |
 | role | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | role | update | 20 | 5 | 15 |  |  |  |  |  |  |  |  |  |
 | role | delete | 14 | 5 | 9 |  |  |  |  |  |  |  |  |  |
 | role | search | 47 | 5 | 29 |  |  |  |  |  |  | 1 | 12 |  |
-| role | lifecycle | 8 | 4 |  |  |  |  |  |  |  | 4 |  |  |
+| role | lifecycle | 5 | 5 |  |  |  |  |  |  |  | 5 |  |  |
 | group | create | 13 | 1 | 12 |  |  |  |  |  |  |  |  |  |
 | group | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | group | update | 17 | 4 | 13 |  |  |  |  |  |  |  |  |  |
 | group | delete | 11 | 4 | 7 |  |  |  |  |  |  |  |  |  |
 | group | search | 47 | 5 | 29 |  |  |  |  |  |  | 1 | 12 |  |
-| group | lifecycle | 6 | 3 |  |  |  |  |  |  |  | 3 |  |  |
+| group | lifecycle | 4 | 4 |  |  |  |  |  |  |  | 4 |  |  |
 | decision-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | decision-instance | delete | 50 | 2 | 38 |  |  |  |  |  |  |  | 10 |  |
 | decision-instance | search | 20 | 1 | 6 |  |  |  |  |  |  | 1 | 12 |  |
@@ -162,6 +168,7 @@ Legend: ✓ = at least 1, blank = 0.
 | cluster-variables | update | 13 | 2 | 11 |  |  |  |  |  |  |  |  |  |
 | cluster-variables | delete | 5 | 2 | 3 |  |  |  |  |  |  |  |  |  |
 | cluster-variables | search | 10 | 1 | 6 |  |  |  |  |  |  | 1 | 2 |  |
+| cluster-variables | lifecycle | 2 | 2 |  |  |  |  |  |  |  | 2 |  |  |
 | element-instance | create | 19 | 2 | 16 |  |  |  |  |  |  |  | 1 |  |
 | element-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | element-instance | search | 34 | 2 | 13 |  |  |  |  |  |  | 1 | 18 |  |
@@ -174,11 +181,13 @@ Legend: ✓ = at least 1, blank = 0.
 | mapping-rule | update | 13 | 1 | 12 |  |  |  |  |  |  |  |  |  |
 | mapping-rule | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | mapping-rule | search | 10 | 1 | 5 |  |  |  |  |  |  | 1 | 3 |  |
+| mapping-rule | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | global-task-listener | create | 22 | 1 | 21 |  |  |  |  |  |  |  |  |  |
 | global-task-listener | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | global-task-listener | update | 12 | 1 | 11 |  |  |  |  |  |  |  |  |  |
 | global-task-listener | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | global-task-listener | search | 9 | 1 | 5 |  |  |  |  |  |  | 1 | 2 |  |
+| global-task-listener | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | incident | get | 19 | 3 | 16 |  |  |  |  |  |  |  |  |  |
 | incident | update | 9 | 1 | 8 |  |  |  |  |  |  |  |  |  |
 | incident | search | 13 | 1 | 5 |  |  |  |  |  |  | 1 | 6 |  |
@@ -187,6 +196,7 @@ Legend: ✓ = at least 1, blank = 0.
 | authorization | update | 11 | 1 | 8 |  |  |  |  |  |  |  | 2 |  |
 | authorization | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | authorization | search | 11 | 1 | 7 |  |  |  |  |  |  | 1 | 2 |  |
+| authorization | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | resource | create | 13 |  | 8 |  |  |  |  |  |  |  | 5 |  |
 | resource | get | 3 | 3 |  |  |  |  |  |  |  |  |  |  |
 | resource | delete | 8 | 1 | 7 |  |  |  |  |  |  |  |  |  |
@@ -196,6 +206,7 @@ Legend: ✓ = at least 1, blank = 0.
 | user | update | 5 | 1 | 4 |  |  |  |  |  |  |  |  |  |
 | user | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | user | search | 9 | 1 | 5 |  |  |  |  |  |  | 1 | 2 |  |
+| user | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | message | create | 30 | 2 | 26 |  |  |  |  |  |  |  | 2 |  |
 | decision-definition | create | 11 | 1 | 7 |  |  |  |  |  |  |  | 3 |  |
 | decision-definition | get | 4 | 2 | 2 |  |  |  |  |  |  |  |  |  |
@@ -205,6 +216,7 @@ Legend: ✓ = at least 1, blank = 0.
 | document | create | 18 | 3 | 11 |  |  |  |  |  |  |  | 4 |  |
 | document | get | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
 | document | delete | 1 | 1 |  |  |  |  |  |  |  |  |  |  |
+| document | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | variable | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | variable | search | 14 | 1 | 6 |  |  |  |  |  |  | 1 | 4 | 2 |
 | setup | create | 15 | 1 | 14 |  |  |  |  |  |  |  |  |  |

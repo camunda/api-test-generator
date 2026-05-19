@@ -1,13 +1,12 @@
 # Coverage gaps (heuristic)
 
-Computed across **1607** generated test declarations in **37** entities.
+Computed across **1617** generated test declarations in **37** entities.
 
 ## Entities missing delete-then-observe-absence variant
 
 Entities that have both `create` and `delete` tests but no test tagged `observe-absence` (no negative-after-delete check).
 
 - **clock** — has create+delete but no `observe-absence` test
-- **document** — has create+delete but no `observe-absence` test
 
 ## Entities with no unauthorized (401) coverage
 
