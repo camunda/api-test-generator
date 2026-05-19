@@ -102,10 +102,17 @@ Derived per Josh's #277 framing — flagging the spec-uncomputable surface so th
 - **No 405 (method-not-allowed) generation.** Could enumerate undeclared methods per path; not in spike.
 - **Cross-field range heuristic is naïve.** Only catches paired `*Before` / `*After` properties; cross-field rules between differently-named fields (e.g. `password ≠ username`) need explicit ABox.
 
-## Next steps (per #277)
+## Next steps
 
-1. Land this spike for review against #277.
-2. Pick the heaviest needs-ABox bucket and design the ABox slice (likely `duplicatePolicy` since Josh already sketched it in 8.8).
-3. Wire the analyzer to read the ABox once a slice lands, so `409-conflict` items move from "needs ABox" to "covered by ABox fact, computable".
-4. Cross-validate by running on the Camunda Hub spec — confirm the rule table generalises.
-5. Repurpose `coverage-analysis/` (which analyses generator *output*) as a verification check: "does the generator emit what the analyzer says it should?".
+In priority order, with dependencies:
+
+1. **Land `duplicatePolicy` as the first ABox slice.** Cheapest unblock — Josh has already designed it (8.8); needs to be expressed as a new file under `configs/camunda-oca/ontology/duplicatePolicy.json` with `{ operationId → policy }` entries for the ~59 create-style endpoints flagged. **Independent of this analyzer spike's review outcome — could start in parallel.** Owner: TBD.
+2. **Wire the analyzer to read the ABox.** After (1), update `build_plan.py` to consume `duplicatePolicy` and reclassify those 59 plan items from `needs-abox` to `computable`. Validates the analyzer ↔ ABox contract on the smallest slice before scaling.
+3. **Ship the 404 fake-ID emitter ([#279](https://github.com/camunda/api-test-generator/issues/279)).** First proof of the full loop: analyzer flags a plan item as computable → emitter generates the actual test → tests run. No dependency on any ABox slice; `ontology/semantics.json` already encodes the path-param identifier types. ~1 day's work, closes ~127 upstream-equivalent tests.
+4. **Run the analyzer against the Camunda Hub spec.** Validates the rule table generalises beyond OCA.
+5. **Repurpose `coverage-analysis/` ([PR #278](https://github.com/camunda/api-test-generator/pull/278))** as a verification check: "does the generator emit what the analyzer says it should?". Becomes a CI gate rather than a static snapshot.
+
+**Deferred** (do not start until step 2 has validated the analyzer ↔ ABox contract):
+- RBAC ABox slice (190 items — biggest unlock but biggest scoping effort).
+- Filter-semantics ABox slice (106 items).
+- Camunda Hub generalisation (wait for stable OCA-side loop).
