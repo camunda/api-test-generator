@@ -329,7 +329,7 @@ export interface TemplateInstantiationResult {
  *
  * Returns `null`-flavoured `{ error }` if any of the three referenced
  * operations (establishedBy, observableVia, revokedBy) is missing from
- * the canonical. The caller surfaces the error with the entity-kind name.
+ * the canonical map. The caller surfaces the error with the entity-kind name.
  */
 function compileEntityLifecycle(
   template: ScenarioTemplate,
