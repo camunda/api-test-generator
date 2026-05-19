@@ -477,6 +477,18 @@ error.
   outputs at once.
 - Adding a new emitter target (`path-analyser/src/codegen/emitter.ts`) —
   the contract is currently experimental.
+- **Adding a parallel implementation of an existing pipeline stage**
+  (a new scenario builder alongside `scenarioGenerator.ts`, a new
+  Playwright emitter alongside `materializer/src/playwright/emitter.ts`,
+  a new feature-coverage generator alongside `featureCoverageGenerator.ts`,
+  etc.). In the PR description, justify why a unification with the
+  existing canonical implementation is not possible. Parallel
+  implementations drift: every diverged code path silently grows
+  bug-fix asymmetries and feature gaps that don't surface until much
+  later (see issues #286 and #288 for two concurrent examples of this
+  failure mode). If the new requirement genuinely doesn't fit the
+  canonical implementation, prefer extending the canonical one — even
+  if the extension is larger than the parallel implementation would be.
 
 **Never:**
 - Reintroduce an end-to-end snapshot/manifest guard (it was retired
