@@ -301,6 +301,38 @@ async function main() {
       ) {
         s.operations = chainSource.operations.map((o) => ({ ...o }));
       }
+      // #288 Phase 1: inherit planner-computed bindings (external-mints
+      // for `acceptsExternal` edges + non-edge establisher self-mints
+      // for path/query/header identifiers) from the donor planner
+      // scenario. Without this, `buildScenarioFromVariant` starts with
+      // `bindings = {}` and only adds variant `optionals`, dropping
+      // required-prereq identifiers like `tenantIdVar` (self-establisher
+      // path param on updateTenantClusterVariable) and `clientIdVar`
+      // (external-entity placeholder), which then leak into emitted
+      // URLs as literal `${...Var}` at runtime. Variant bindings win on
+      // overlap so optional-variant overrides (e.g. `${var}Nonexistent`
+      // for the search-empty-negative variant) are preserved.
+      //
+      // Donor selection mirrors the chain-source pick above: prefer the
+      // authoritative multi-op chain, falling back to any other planner
+      // scenario for this endpoint. The donor's bindings always
+      // represent the canonical scenario for *this* endpoint, so the
+      // merge is meaningful even when no chain graft happened (donor
+      // scenario was single-op).
+      //
+      // Skip the inherit when `skipGraft` is true (search-empty-negative)
+      // for symmetry with the operations graft — the negative variant
+      // deliberately omits prerequisites so the search returns empty.
+      // In practice the donor's bindings are empty for search-like
+      // endpoints (which gate on `required.length === 0`), so the merge
+      // would be a no-op anyway; the explicit skip keeps the intent
+      // legible.
+      if (!skipGraft) {
+        const donor = chainSource || integrationCandidates[0];
+        if (donor?.bindings) {
+          s.bindings = { ...donor.bindings, ...(s.bindings ?? {}) };
+        }
+      }
       if (resp) {
         s.responseShapeSemantics = resp.producedSemantics || undefined;
         s.responseShapeFields = resp.fields.map((f) => ({
