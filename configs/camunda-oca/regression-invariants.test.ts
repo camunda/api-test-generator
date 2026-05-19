@@ -72,6 +72,10 @@ interface OperationNode {
   parameters?: ParameterEntry[];
   requestBodySemanticTypes?: SemanticTypeEntry[];
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
+  establishes?: {
+    shape?: string;
+    identifiedBy?: { semanticType: string; in?: string }[];
+  };
 }
 interface GraphEdge {
   sourceOperationId: string;
@@ -136,6 +140,24 @@ function requiredSemanticTypesOf(opId: string): string[] {
     if (e.required) set.add(e.semanticType);
   }
   return [...set].sort();
+}
+
+/**
+ * Lazy-loaded set of externalEntityIdentifiers derived from the entity-kinds
+ * ABox (e.g. ClientId for `Client` declared with `shape: 'external-entity'`).
+ * The planner treats these as globally seeded — they are never produced by
+ * any operation but are always satisfied via planner-injected request
+ * bindings. Mirrors `loadExternalEntityIdentifiers()` from
+ * `path-analyser/src/ontology/loader.ts`.
+ */
+let cachedExternalEntityIdentifiers: Set<string> | undefined;
+async function getExternalEntityIdentifiers(): Promise<Set<string>> {
+  if (cachedExternalEntityIdentifiers) return cachedExternalEntityIdentifiers;
+  const { loadExternalEntityIdentifiers } = await import(
+    '../../path-analyser/src/ontology/loader.js'
+  );
+  cachedExternalEntityIdentifiers = loadExternalEntityIdentifiers(REPO_ROOT) ?? new Set<string>();
+  return cachedExternalEntityIdentifiers;
 }
 
 function providersOf(opId: string): string[] {
@@ -496,19 +518,32 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     ).toBeDefined();
   });
 
-  // Skipped: new cluster-variables endpoint family in pinned spec
-  // (camunda/camunda PR #52322) is unsatisfied; tracked at #138.
-  it.skip('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', () => {
+  it('every step in every scenario has its required semantic inputs produced by an earlier step (#35)', async () => {
     // Class-scoped guard against the #35 defect family: BFS must not
     // insert any operation whose `requires.required` is not satisfied
-    // by either a seeded binding (none here) or an earlier step's
-    // `produces`. A violation means a generated test would render with
-    // a literal `${...}` placeholder URL at runtime.
+    // by either a seeded binding (external-entity identifier or
+    // self-establisher identifier) or an earlier step's `produces`.
+    // A violation means a generated test would render with a literal
+    // `${...}` placeholder URL at runtime.
+    //
+    // The "produced" set mirrors the planner's actual semantics (see
+    // `path-analyser/src/graphLoader.ts::normalizeOp`):
+    //   1. success/redirect response semantics from earlier steps
+    //      (and from this step — establishers extract their identifier
+    //      from the 2xx response too);
+    //   2. non-edge establisher self-satisfaction: when this step's op
+    //      establishes an entity, the planner seeds the identifier as a
+    //      request input (path param or body field) and treats it as
+    //      produced by the step for chaining purposes;
+    //   3. externalEntityIdentifiers (e.g. ClientId for Client declared
+    //      as `shape: 'external-entity'`) — globally pre-seeded by the
+    //      planner, never authored by any operation in the graph.
     if (!existsSync(SCENARIOS_DIR)) {
       throw new Error(
         `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
       );
     }
+    const externals = await getExternalEntityIdentifiers();
     const offenders: {
       file: string;
       scenario: string;
@@ -521,13 +556,22 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
       for (const sc of file.scenarios) {
         if (sc.id === 'unsatisfied') continue; // explicitly flagged unreachable
-        const produced = new Set<string>();
+        const produced = new Set<string>(externals);
         for (const ref of sc.operations) {
           // Let findOperation throw if the scenario references an
           // operationId not in the dependency graph: that would be a
           // pipeline/graph mismatch and a silent skip could hide a
           // real prereq violation.
           const opNode = findOperation(ref.operationId);
+          // Seed self-establisher identifier semantics BEFORE checking
+          // missing inputs: the planner treats these as produced by the
+          // op (they originate from the identifier inputs the op itself
+          // requires — establisher self-satisfaction).
+          if (opNode.establishes && opNode.establishes.shape !== 'edge') {
+            for (const id of opNode.establishes.identifiedBy ?? []) {
+              produced.add(id.semanticType);
+            }
+          }
           const req = (opNode.requestBodySemanticTypes ?? [])
             .filter((e) => e.required)
             .map((e) => e.semanticType);
@@ -618,6 +662,21 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
 
   // Skipped: new cluster-variables endpoint family in pinned spec
   // (camunda/camunda PR #52322) leaves placeholders unbound; tracked at #138.
+  // Skipped: pinned-spec bump (camunda/camunda PR #52322) surfaces two
+  // real planner-side feature-output binding gaps that this invariant
+  // correctly flags:
+  //   1. external-entity identifiers (e.g. `clientId` for the Client
+  //      kind, `shape: 'external-entity'`) are never seeded into
+  //      `bindings`, so unassign/assign edge chains rendering URLs
+  //      with `{clientId}` leak `${clientIdVar}` at runtime;
+  //   2. self-establisher chain roots (e.g. `createTenantClusterVariable`
+  //      as the first chain step for cluster-variable endpoints) need
+  //      both identifier inputs seeded — currently the planner seeds
+  //      only the body-field identifier (`name`) and not the path-param
+  //      identifier (`tenantId`).
+  // Both are production planner gaps in feature-output binding
+  // propagation, not test-definition gaps. Tracked at #138; fix scope
+  // is the planner's seedBindings/feature-output stage.
   it.skip('every feature-output scenario binds or chains every {placeholder} whose path parameter has a recognised semanticType', () => {
     // Class-scoped guard for the "un-extracted ${var} in URL" defect family:
     // when an endpoint's response analyser produces no shape (typically for
@@ -1089,6 +1148,19 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
 
   // Skipped: new cluster-variables endpoint family in pinned spec
   // (camunda/camunda PR #52322) lacks an authoritative producer; tracked at #138.
+  // Skipped: pinned-spec bump (camunda/camunda PR #52322) surfaces a
+  // related but distinct planner gap from #138 — the authoritative-
+  // producer index here only counts `provider:true` response semantics,
+  // so for cluster-variable chains the establisher
+  // `createTenantClusterVariable` is not recognised as an authoritative
+  // producer of `TenantId` (it self-satisfies via a path-param input,
+  // which the planner seeds at request time). Fix scope is broadening
+  // this index to include `op.establishes.identifiedBy[].semanticType`
+  // for non-edge establishers (mirroring graphLoader.ts `produces`
+  // synthesis), but only after the planner-side seedBindings gap on
+  // path-param establisher identifiers (#138 follow-up) is closed —
+  // otherwise this invariant would pass while the emitted URLs still
+  // leak `${tenantIdVar}` at runtime.
   it.skip('every feature scenario chain contains an authoritative producer for each requiredSemanticType', () => {
     // Chain-selector correctness guard. The feature-output stage in
     // `path-analyser/src/index.ts` chooses one integration scenario from
@@ -1212,8 +1284,8 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
     return JSON.parse(readFileSync(p, 'utf8')) as VariantScenarioFile;
   }
 
-  // Skipped: variant chain regressed after pinned-spec bump
-  // (camunda/camunda PR #52322); tracked at #139.
+  // The startInstructions variant test remains skipped under #139
+  // (variant-chain regression independent of the #138 prereq fix).
   it.skip('createProcessInstance has a variant populating startInstructions[].elementId with the canonical chain (#37)', () => {
     // Acceptance criteria from #37:
     //  - At least one scenario populates startInstructions[].elementId
@@ -1243,16 +1315,14 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
     expect(canonical).toBeDefined();
   });
 
-  // Skipped: variant scenarios for new cluster-variables / startInstructions
-  // shapes regressed after pinned-spec bump (camunda/camunda PR #52322);
-  // tracked at #138 / #139.
-  it.skip('every step in every variant scenario has its required semantic inputs satisfied (#37)', () => {
-    // Mirror of the base-scenario prereq invariant, scoped to variant
-    // scenarios. This only checks that each step's required semantic
-    // inputs are satisfied by semantics produced earlier in the chain;
-    // it does not assert that optional inputs (for example
-    // overlap-heuristic triggers on search steps) are present.
+  it('every step in every variant scenario has its required semantic inputs satisfied (#37)', async () => {
+    // Mirror of the base-scenario prereq invariant (#35), scoped to
+    // variant scenarios. Same "produced" semantics — see the comment
+    // on the base invariant: success/redirect response semantics,
+    // non-edge establisher self-satisfaction, and pre-seeded
+    // externalEntityIdentifiers.
     if (!existsSync(VARIANT_SCENARIOS_DIR)) return; // no variants generated yet
+    const externals = await getExternalEntityIdentifiers();
     const offenders: { file: string; scenario: string; step: string; missing: string[] }[] = [];
     for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
       if (!f.endsWith('-scenarios.json')) continue;
@@ -1261,9 +1331,14 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
         readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
       ) as VariantScenarioFile;
       for (const sc of file.scenarios) {
-        const produced = new Set<string>();
+        const produced = new Set<string>(externals);
         for (const ref of sc.operations) {
           const opNode = findOperation(ref.operationId);
+          if (opNode.establishes && opNode.establishes.shape !== 'edge') {
+            for (const id of opNode.establishes.identifiedBy ?? []) {
+              produced.add(id.semanticType);
+            }
+          }
           const req = (opNode.requestBodySemanticTypes ?? [])
             .filter((e) => e.required)
             .map((e) => e.semanticType);
