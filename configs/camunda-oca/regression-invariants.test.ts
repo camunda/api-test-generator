@@ -401,8 +401,25 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
         .filter((s): s is string => typeof s === 'string');
       const relevant = requiredPathSemantics.filter((s) => runtimeEmissionByName.has(s));
       if (relevant.length === 0) continue;
-      for (const s of file.scenarios ?? []) {
-        if (s.id === 'unsatisfied') continue;
+      // Also flag the empty-success case: a relevant endpoint that only
+      // plans `unsatisfied` scenarios passes the per-scenario checks
+      // below trivially (the loop body is skipped). A regression where
+      // the planner stops expanding the discovery chain and falls back
+      // to `unsatisfied` would otherwise go undetected. (PR #308
+      // review.)
+      const satisfiable = (file.scenarios ?? []).filter((s) => s.id !== 'unsatisfied');
+      if (satisfiable.length === 0) {
+        for (const sem of relevant) {
+          offenders.push({
+            file: f,
+            scenario: '(none — all scenarios unsatisfied)',
+            semantic: sem,
+            reason: `endpoint '${file.endpoint.operationId}' planned no satisfiable chain for required path-param semantic '${sem}'`,
+          });
+        }
+        continue;
+      }
+      for (const s of satisfiable) {
         const ops = s.operations.map((o) => o.operationId);
         for (const sem of relevant) {
           const discoveryOp = runtimeEmissionByName.get(sem);
