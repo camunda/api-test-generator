@@ -527,16 +527,24 @@ export interface SemanticTypeSpec {
    *     acceptable because the value is a fabricated placeholder for a
    *     key the client could not have known.
    *
-   *   - `runtimeEmission` (#305 Phase 1): a server-minted lifecycle key
-   *     that the planner *can* discover after a known producing
-   *     side-effect (e.g. `UserTaskKey` is emitted when a process
-   *     instance executes a user-task element, and is discoverable via
-   *     `searchUserTasks(processInstanceKey)`). Distinct from
-   *     `serverEmergent` precisely because the discovery path is
-   *     declarable. Requires both `emittedBy` and `discoveredVia` on the
-   *     same entry — without them the planner has nothing to act on and
-   *     the entry would degrade to a placeholder. The loader enforces
-   *     this coupling.
+   *   - `runtimeEmission` (#305 Phase 1, schema-only): a server-minted
+   *     lifecycle key that the planner *will be able to* discover after
+   *     a known producing side-effect (e.g. `UserTaskKey` is emitted
+   *     when a process instance executes a user-task element, and is
+   *     discoverable via `searchUserTasks(processInstanceKey)`).
+   *     Distinct from `serverEmergent` precisely because the discovery
+   *     path is declarable. Requires both `emittedBy` and
+   *     `discoveredVia` on the same entry — without them the planner
+   *     would have nothing to act on and the entry would degrade to a
+   *     placeholder. The loader enforces this coupling.
+   *
+   *     **Phase-1 scope note:** as of #305 Phase 1 (this commit) no
+   *     planner code reads `kind === 'runtimeEmission'`. The
+   *     classifier, BFS chain planner, and value-binder all behave as
+   *     if the entry were classified `serverEmergent` (falls through
+   *     to a placeholder `seedBinding`). The vocabulary is landed
+   *     first so Phase 3's ABox edits can validate cleanly against the
+   *     published TBox; planner support follows in Phase 3 of #305.
    *
    * Absent `kind` means the planner falls back to its existing
    * classification chain (producersByType / establishersByType /

@@ -155,13 +155,13 @@ export const semanticsSchema = {
               type: 'string',
               minLength: 1,
               description:
-                'Name of a runtime state (`runtimeStates`) that must hold before this key can be discovered. Resolution against `domain.runtimeStates` is checked at load time. Typically the post-condition of a `createXxx` operation that triggers the key emission (e.g. `ProcessInstanceExists` for `UserTaskKey`).',
+                'Name of a runtime state (`runtimeStates`) that must hold before this key can be discovered. Typically the post-condition of a `createXxx` operation that triggers the key emission (e.g. `ProcessInstanceExists` for `UserTaskKey`). Cross-ref against `domain.runtimeStates` is not yet enforced; the resolver lands with the planner support in Phase 2/3.',
             },
             guardedBy: {
               type: 'array',
               items: { type: 'string', minLength: 1 },
               description:
-                'Capability names whose presence is required for the predecessor to actually emit a key of this type — e.g. `ProcessInstanceExists` alone is not enough to emit a `UserTaskKey`; the deployed BPMN must contain a user-task element (`ModelHasUserTask`). Each entry must resolve against `domain.capabilities` (cross-sub-tree check enforced at load time). Empty/omitted = no capability guard.',
+                'Capability names whose presence is required for the predecessor to actually emit a key of this type — e.g. `ProcessInstanceExists` alone is not enough to emit a `UserTaskKey`; the deployed BPMN must contain a user-task element (`ModelHasUserTask`). Empty/omitted = no capability guard. Cross-ref against `domain.capabilities` is not yet enforced; the resolver lands with the planner support in Phase 2/3.',
             },
           },
         },
@@ -176,7 +176,7 @@ export const semanticsSchema = {
               type: 'string',
               minLength: 1,
               description:
-                'OperationId of the search/get endpoint that surfaces the emitted key (e.g. `searchUserTasks`). Must reference an op present in the bundled graph — checked as an L3 abox-vs-graph invariant.',
+                'OperationId of the search/get endpoint that surfaces the emitted key (e.g. `searchUserTasks`). Graph cross-ref (op must exist in the bundled spec) is not yet enforced; the L3 abox-vs-graph invariant lands with the planner support in Phase 3 alongside the first ABox entry that uses `runtimeEmission`.',
             },
             filterBy: {
               type: 'string',
