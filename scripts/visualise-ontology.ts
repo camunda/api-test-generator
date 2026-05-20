@@ -352,6 +352,70 @@ function renderSvg(dotSrc: string, svgPath: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// README transclusion
+//
+// `ontology/README.md` carries inline Mermaid snapshots for the smaller
+// (TBox + ABox) graphs so the rendered README on GitHub shows the
+// diagrams directly. Each block is wrapped with HTML-comment markers
+// of the form:
+//
+//   <!-- generated-from: ontology/diagrams/<file>.mmd -->
+//   ```mermaid
+//   ...current contents of <file>...
+//   ```
+//   <!-- /generated-from -->
+//
+// This function rewrites every marker-delimited block in the README so
+// the inline copy stays byte-identical with the committed `.mmd` file.
+// In `--check` mode it exits non-zero if the README would change. The
+// same auto-refresh workflow that keeps `ontology/diagrams/*.mmd` in
+// sync after merges also covers the README via this transclusion.
+// ---------------------------------------------------------------------------
+
+const README_BLOCK_RE =
+  /<!-- generated-from: (ontology\/diagrams\/[\w.-]+\.mmd) -->\n```mermaid\n[\s\S]*?\n```\n<!-- \/generated-from -->/g;
+
+function buildReadmeBlock(relPath: string, content: string): string {
+  // The committed .mmd files end with a trailing newline; strip it so
+  // the rebuilt block has exactly one newline before the closing fence.
+  const body = content.endsWith('\n') ? content.slice(0, -1) : content;
+  return `<!-- generated-from: ${relPath} -->\n\`\`\`mermaid\n${body}\n\`\`\`\n<!-- /generated-from -->`;
+}
+
+function syncReadme(check: boolean): void {
+  const readmePath = join(REPO_ROOT, 'ontology', 'README.md');
+  if (!existsSync(readmePath)) return;
+  const original = readFileSync(readmePath, 'utf8');
+
+  let missingSource = false;
+  const updated = original.replace(README_BLOCK_RE, (_match, relPath: string) => {
+    const absPath = join(REPO_ROOT, relPath);
+    if (!existsSync(absPath)) {
+      process.stderr.write(`README references missing diagram source: ${relPath}\n`);
+      missingSource = true;
+      return _match;
+    }
+    return buildReadmeBlock(relPath, readFileSync(absPath, 'utf8'));
+  });
+  if (missingSource) process.exit(1);
+
+  if (check) {
+    if (updated !== original) {
+      process.stderr.write(
+        'ontology/README.md transcluded Mermaid blocks are out of date. Run `npm run viz:ontology` to update them.\n',
+      );
+      process.exit(1);
+    }
+    process.stdout.write('ontology/README.md transcluded blocks are up to date.\n');
+    return;
+  }
+  if (updated !== original) {
+    writeFileSync(readmePath, updated, 'utf8');
+    process.stdout.write(`wrote ${readmePath} (transcluded diagram blocks)\n`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -434,6 +498,11 @@ async function main(): Promise<void> {
     process.stdout.write(`wrote ${aboxMmdCommittedPath}\n`);
     renderSvg(aboxDot, join(vizDir, 'abox.svg'));
   }
+
+  // ------------------------------------------------------------------
+  // README transclusion (uses the just-written committed .mmd files)
+  // ------------------------------------------------------------------
+  syncReadme(check);
 
   // ------------------------------------------------------------------
   // Operations graph (requires generated pipeline output)

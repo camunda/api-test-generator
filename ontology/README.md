@@ -41,15 +41,18 @@ emitted. Install Graphviz with `sudo apt-get install graphviz` (Debian/Ubuntu)
 or `brew install graphviz` (macOS).
 
 The committed Mermaid snapshots in [`diagrams/`](./diagrams/) are kept
-in sync by the same script. A Layer-3 drift-detector invariant fails if
-the committed files diverge from the current ABox:
+in sync by the same script, and the inline Mermaid blocks further down
+this README are transcluded from those committed files (look for the
+`<!-- generated-from: ontology/diagrams/*.mmd -->` markers). A
+`--check` flag verifies both surfaces:
 
 ```bash
-npm run viz:ontology -- --check   # verify committed .mmd files are up to date
+npm run viz:ontology -- --check   # verify committed .mmd files and README inline blocks are up to date
 ```
 
 ### TBox diagram
 
+<!-- generated-from: ontology/diagrams/tbox.mmd -->
 ```mermaid
 %% api-test-generator Ontology TBox (camunda-oca) — 7 JSON Schema slices
 graph LR
@@ -68,9 +71,11 @@ graph LR
   scenario_template -->|"appliesTo (edge)"| edge
   scenario_template -->|"appliesTo (entity)"| entity_kinds
 ```
+<!-- /generated-from -->
 
 ### ABox diagram (camunda-oca entity kinds + membership edges)
 
+<!-- generated-from: ontology/diagrams/abox.mmd -->
 ```mermaid
 %% api-test-generator ABox (camunda-oca) — entity kinds and membership edges
 graph LR
@@ -87,6 +92,7 @@ graph LR
   Client(Client)
   UserTask{UserTask}
   Incident{Incident}
+  ProcessInstance{ProcessInstance}
 
   Role -->|"RoleUserMembership"| User
   Tenant -->|"TenantUserMembership"| User
@@ -101,6 +107,7 @@ graph LR
   Tenant -->|"TenantGroupMembership"| Group
   Tenant -->|"TenantRoleMembership"| Role
 ```
+<!-- /generated-from -->
 
 For the full rendered SVGs (operations graph included), see
 `https://camunda.github.io/api-test-generator/ns/v1/viz/camunda-oca/`
