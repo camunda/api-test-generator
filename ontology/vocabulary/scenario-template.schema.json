@@ -166,7 +166,7 @@
             "absent",
             "fieldEquals"
           ],
-          "description": "High-level observation predicate. `present`/`absent` assert the subject instance is/is not visible to the observer (compiled to membership or status assertions per `appliesTo.kind`). `fieldEquals` (#305 Phase 4) asserts that every field present in the preceding mutator's emitted request body is reflected unchanged in the fetcher's 200 response; only valid for `appliesTo.kind: \"RuntimeEntity\"` templates that include an Observe-after-Invoke pattern. The concrete list of fields is derived at instantiation time by intersecting the mutator request body's semantic-typed leaves with the fetcher 200 response's semantic-typed leaves — no field selector lives in the template ABox."
+          "description": "High-level observation predicate. `present`/`absent` assert the subject instance is/is not visible to the observer (compiled to membership or status assertions per `appliesTo.kind`). `fieldEquals` (#305 Phase 4) asserts that every field present in the preceding mutator's emitted request body is reflected unchanged in the fetcher's 200 response; only valid for `appliesTo.kind: \"RuntimeEntity\"` templates that include an Observe-after-Invoke pattern. The concrete list of fields is derived at instantiation time by intersecting the mutator request body's leaves with the fetcher's `responseLeafPaths['200']`, bridged by **last-segment leaf name** (not `semanticType` — changeset fields typically lack `x-semantic-type` upstream). Mutator-body leaves with no matching fetcher leaf are skipped silently; the instantiator errors only if the intersection is empty. No field selector lives in the template ABox."
         }
       }
     }

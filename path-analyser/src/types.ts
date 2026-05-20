@@ -1001,13 +1001,17 @@ export interface ObserveStep {
          * preceding `InvokeStep` is the mutator; the observation
          * fetches the entity by id and asserts each field listed
          * below equals the value the mutator request body carried
-         * for the same semantic type. The field list is derived at
+         * for the same field. The field list is derived at
          * instantiation time by intersecting the mutator request-body
-         * leaves with the fetcher 200-response leaves, bridged on
-         * `semanticType`. Empty `fields[]` is rejected by the
-         * instantiator (and by the L3 invariant) — a fieldEquals
-         * step with nothing to assert is a planner bug, not a silent
-         * pass.
+         * leaves with the fetcher 200-response leaves from
+         * `OperationNode.responseLeafPaths`, bridged by **last-segment
+         * leaf name** (not `semanticType` — changeset fields typically
+         * lack `x-semantic-type` upstream). Mutator-body leaves that
+         * have no matching fetcher leaf are skipped silently; the
+         * instantiator only errors if the intersection is empty
+         * (a fieldEquals step with nothing to assert is a planner
+         * bug, not a silent pass). The same L3 invariant enforces
+         * non-empty `fields[]`.
          */
         kind: 'fieldEquals';
         fields: Array<{
