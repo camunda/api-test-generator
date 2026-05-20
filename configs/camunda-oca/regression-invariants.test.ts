@@ -1993,6 +1993,47 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     );
   });
 
+  it('getIncident.feature.spec.ts deploys bpmn/incident-script-task.bpmn and chains searchIncidents → getIncident (#305 Phase 5a)', () => {
+    // Phase 5a promoted IncidentKey serverEmergent → runtimeEmission, gated
+    // by the new ModelEmitsIncident capability. The selector must pick the
+    // new incident-script-task fixture (the only one declaring
+    // providesStates: ['ModelEmitsIncident']) for any chain that consumes
+    // IncidentKey in a required path-param. The chain must also include a
+    // searchIncidents discovery step, an extracted incidentKey binding, and
+    // a getIncident step that consumes the bound key — the same shape as
+    // the UserTaskKey pilot (#305 Phase 3) but for incidents.
+    //
+    // Without the ABox promotion + fixture, getIncident would dead-end on
+    // IncidentKey (synthetic seed only), the emitted spec would have a
+    // single getIncident step seeded with `seedBinding('incidentKeyVar')`,
+    // and the test would be a no-op against any real broker.
+    const spec = join(GENERATED_TESTS_DIR, 'getIncident.feature.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(src, 'getIncident must deploy the incident-emitting fixture').toContain(
+      '@@FILE:bpmn/incident-script-task.bpmn',
+    );
+    expect(src, 'getIncident must include searchIncidents discovery step').toContain(
+      "test.step('searchIncidents'",
+    );
+    expect(src, 'getIncident must include getIncident endpoint step').toContain(
+      "test.step('getIncident'",
+    );
+    expect(src, 'getIncident must extract incidentKey from searchIncidents response').toContain(
+      "extractInto(ctx, 'incidentKeyVar', json?.items?.[0]?.incidentKey)",
+    );
+    expect(src, 'getIncident must consume the runtime-discovered incidentKey').toContain(
+      '${ctx.incidentKeyVar',
+    );
+    // Negative: must NOT fall back to seeded-only resolution.
+    expect(
+      src,
+      'getIncident must NOT seed incidentKeyVar — the runtimeEmission chain supplies it',
+    ).not.toContain("seedBinding('incidentKeyVar')");
+  });
+
   it('createProcessInstance.feature.spec.ts deploys bpmn/simple.bpmn (chainCleanupRequires ProcessInstanceCompleted, #249)', () => {
     // #249: createProcessInstance declares
     // `chainCleanupRequires: ["ProcessInstanceCompleted"]` so the

@@ -8,7 +8,7 @@
       "name": "bpmnProcess",
       "identifierType": "ProcessDefinitionId",
       "producesStates": ["ProcessDefinitionDeployed"],
-      "producibleStates": ["ModelHasServiceTaskType", "ModelHasUserTask", "ProcessInstanceCompleted"],
+      "producibleStates": ["ModelHasServiceTaskType", "ModelHasUserTask", "ModelEmitsIncident", "ProcessInstanceCompleted"],
       "producesSemantics": ["ProcessDefinitionKey"],
       "deploymentSlices": ["processDefinition"],
       "modelKind": "bpmn",
