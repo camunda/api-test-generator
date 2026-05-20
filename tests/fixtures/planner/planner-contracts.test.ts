@@ -854,6 +854,7 @@ describe('planner contracts: discoveryIntent stamped on inserted runtimeEmission
     expect(discoveryRef).toBeDefined();
     expect(discoveryRef?.discoveryIntent).toEqual({
       filterBy: 'processInstanceKey',
+      fromSemantic: 'ProcessInstanceKey',
       fromBinding: 'processInstanceKeyVar',
       extractKey: 'userTaskKey',
       extractInto: 'userTaskKeyVar',

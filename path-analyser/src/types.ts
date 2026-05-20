@@ -52,9 +52,18 @@ export interface OperationRef {
  * `discoveredVia.extractKey` via the producer auto-derive at
  * `path-analyser/src/index.ts` ~714, so this field is currently
  * documentary — Phase A only consumes filterBy + fromBinding).
+ *
+ * `fromSemantic` records which upstream semantic the filter is bound
+ * to (e.g. `ProcessInstanceKey`). The planner stamps it eagerly during
+ * BFS expansion and uses it at scenario finalisation to resolve the
+ * actual `fromBinding` var name from the chain's allocated bindings —
+ * mirroring `semanticToVarName`'s suffixing convention so chains with
+ * multiple producers of the same semantic bind to the latest one
+ * rather than always assuming the un-suffixed base name.
  */
 export interface DiscoveryIntent {
   filterBy: string;
+  fromSemantic: string;
   fromBinding: string;
   extractKey: string;
   extractInto: string;

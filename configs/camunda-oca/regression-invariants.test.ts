@@ -481,8 +481,31 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
         `Feature-output scenarios directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
+    // Independently identify the runtimeEmission discovery ops from the
+    // ABox so this invariant can fail when a discovery op appears in a
+    // chain *without* the planner having stamped a DiscoveryIntent on
+    // it. Looking only at already-stamped intents would only validate
+    // the body shape — not catch the regression where the stamp itself
+    // is missing.
+    const semanticsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const semantics = JSON.parse(readFileSync(semanticsPath, 'utf8')) as {
+      semanticTypes?: Array<{
+        name: string;
+        kind?: string;
+        discoveredVia?: { operationId?: string };
+      }>;
+    };
+    const discoveryOpIds = new Set<string>();
+    for (const t of semantics.semanticTypes ?? []) {
+      if (t.kind === 'runtimeEmission' && t.discoveredVia?.operationId) {
+        discoveryOpIds.add(t.discoveredVia.operationId);
+      }
+    }
+    if (discoveryOpIds.size === 0) return; // no-op until an ABox declares one
     interface DiscoveryIntentLite {
       filterBy: string;
+      fromSemantic: string;
       fromBinding: string;
       extractKey: string;
       extractInto: string;
@@ -512,9 +535,26 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       if (!f.endsWith('-scenarios.json')) continue;
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
       const file = JSON.parse(readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8')) as FileLite;
+      const endpointOpId = file.endpoint.operationId;
       for (const s of file.scenarios) {
         for (const op of s.operations) {
-          if (!op.discoveryIntent) continue;
+          // Phase A only governs planner-inserted discovery steps —
+          // i.e. an ABox runtimeEmission op appearing as a prereq, not
+          // as the endpoint under test (which is the exploratory regime
+          // and uses the generic body builder).
+          const isInsertedDiscovery =
+            discoveryOpIds.has(op.operationId) && op.operationId !== endpointOpId;
+          if (!isInsertedDiscovery) continue;
+          if (!op.discoveryIntent) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason:
+                'planner-inserted runtimeEmission discovery op is missing discoveryIntent stamp — body would fall through to the generic builder (wrong regime)',
+            });
+            continue;
+          }
           intentCount++;
           const intent = op.discoveryIntent;
           // Find the matching requestPlan step (must exist; body builder
