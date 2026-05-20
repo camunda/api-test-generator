@@ -96,7 +96,7 @@ function collectBindingRefs(step: RequestStep): Set<string> {
 }
 
 const PATH_PLACEHOLDER_RE = /\{([A-Za-z_$][\w$]*)\}/g;
-const PLACEHOLDER_RE = /\$\{([A-Za-z_$][\w$]*)\}/g;
+const PLACEHOLDER_RE = /\\?\$\{([^}]+)\}/g;
 
 function collectPathTemplateRefs(pathTemplate: string | undefined, out: Set<string>): void {
   if (!pathTemplate) return;
