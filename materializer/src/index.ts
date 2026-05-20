@@ -557,6 +557,21 @@ async function run() {
         globalContextSeeds: seedsArg,
       });
       lifecycleCount += runtimeWritten.length;
+
+      // #305 Phase 5d / #189 — StateTransitionVisibleAfterAction
+      // (RuntimeEntity). Sibling subdir to runtime-entities/ so the
+      // two RuntimeEntity-scoped templates don't fight over file
+      // names (Incident.resolveIncident is a state-transition;
+      // future Incident.mutateIncident — if ever — would be a
+      // readback, separate file in runtime-entities/).
+      const stateTransitionOutDir = path.join(outDir, 'state-transitions');
+      await fs.rm(stateTransitionOutDir, { recursive: true, force: true });
+      const stateTransitionWritten = await emitTemplateSuites({
+        scenariosDir: getTemplateScenariosDir(repoRoot, 'StateTransitionVisibleAfterAction'),
+        outDir: stateTransitionOutDir,
+        globalContextSeeds: seedsArg,
+      });
+      lifecycleCount += stateTransitionWritten.length;
     }
     console.log(
       `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites) in ${outDir} (target: ${emitter.id})`,

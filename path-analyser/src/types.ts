@@ -1075,6 +1075,44 @@ export interface ObserveStep {
           /** Path into the fetcher's 200-response body where the actual value should appear. */
           responseBodyPath: string[];
         }>;
+      }
+    | {
+        /**
+         * #305 Phase 5d / #189 — state-transition read-back assertion.
+         * Emitted by the `StateTransitionVisibleAfterAction` template
+         * compiler for `shape: "runtime-entity"` subjects that declare
+         * `transitions[]` + `stateField`. The preceding `InvokeStep`
+         * is a state-transition op whose request body carries no per-
+         * field update (e.g. `resolveIncident` — the post-state is
+         * implicit in the op semantics). The observation fetches the
+         * entity by id and asserts a single equality on the named
+         * state field. Compiled to
+         * `expect(body.<stateField>).toBe(<expectedState>)`.
+         *
+         * `fromState` is carried purely for traceability (so the
+         * emitted suite's test name and the L3 invariant can mention
+         * the transition direction); the assertion itself does not
+         * re-witness the pre-state — the planner's chain guarantees
+         * the entity is in `fromState` at invoke time (e.g.
+         * `searchIncidents` only surfaces ACTIVE incidents on the
+         * OCA API).
+         */
+        kind: 'stateEquals';
+        /**
+         * Top-level (or dotted) response leaf carrying the entity's
+         * current state on the fetcher's 200 response. Almost always
+         * a single segment (`['state']`); recorded as a path for
+         * symmetry with `fieldEquals.responseBodyPath` so a future
+         * nested-state response can be modelled without an emitter
+         * change.
+         */
+        responseBodyPath: string[];
+        /** Expected state value after the transition (e.g. `'RESOLVED'`). */
+        expectedState: string;
+        /** State the entity is expected to be in before the transition (e.g. `'ACTIVE'`). Informational; not re-asserted. */
+        fromState: string;
+        /** OperationId of the transition op that drove the state change. Recorded for traceability. */
+        transitionOp: string;
       };
 }
 
