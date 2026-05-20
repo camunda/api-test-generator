@@ -6,7 +6,7 @@ import type {
   RequestStep,
   TemplateScenarioFile,
 } from 'path-analyser/types';
-import { emitCtxSeeding } from './ctxSeeding.js';
+import { computeUniqueBindings, emitCtxSeeding } from './ctxSeeding.js';
 import {
   buildUrlExpression,
   escapeQuotes,
@@ -294,6 +294,7 @@ function renderLifecycleSuite(
       bindings: prereq.bindings,
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(prereq.requestPlan),
     }),
   );
 
@@ -675,6 +676,7 @@ function renderReadBackSuite(
       bindings: prereq.bindings,
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(prereq.requestPlan),
     }),
   );
 
@@ -862,6 +864,7 @@ function renderStateTransitionSuite(
       bindings: prereq.bindings,
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(prereq.requestPlan),
     }),
   );
 

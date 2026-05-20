@@ -14,7 +14,7 @@ import type {
   RequestStep,
 } from 'path-analyser/types';
 import type { ImportsTemplateScope, PlaywrightRoleScope } from '../roles.js';
-import { emitCtxSeeding } from './ctxSeeding.js';
+import { computeUniqueBindings, emitCtxSeeding } from './ctxSeeding.js';
 import {
   loadProjectScaffoldingFiles,
   materializeFixtures,
@@ -457,6 +457,7 @@ function renderScenarioTest(
       bindings: s.bindings,
       seedBindings: s.seedBindings,
       globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(s.requestPlan),
     }),
   );
   // Multipart-sentinel locals (`__<fieldName>IsDefault`) are emitted

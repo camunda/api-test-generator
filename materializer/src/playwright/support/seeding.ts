@@ -1,13 +1,32 @@
 // Centralized seeding utilities for generated Playwright tests.
 // Provides pattern-based value generation with optional deterministic mode.
 // Deterministic mode: set TEST_SEED to a stable string (e.g. commit hash) to make outputs reproducible.
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 
 type LocalRequire = ((id: string) => unknown) | undefined;
 const localRequire: LocalRequire =
   typeof createRequire === 'function' ? createRequire(import.meta.url) : undefined;
 
-export type SeedOptions = Record<string, never>;
+/**
+ * Per-call options for {@link seedBinding}.
+ *
+ * - `unique: true` mixes a per-process `runNonce` into the seed for this
+ *   binding so the value differs across pipeline/run invocations. Use for
+ *   client-minted identifiers consumed by operations that declare an HTTP
+ *   409 (Conflict) response — re-running the suite against the same cluster
+ *   would otherwise collide on the previous run's identifiers (#304).
+ *
+ * - The nonce is sourced from env `TEST_RUN_NONCE` if set (lets CI replay
+ *   a specific failed run), otherwise from `crypto.randomUUID()` at first
+ *   use. Within a single process the nonce is stable, so retries and
+ *   parallel workers within the same Playwright run see the same value.
+ *
+ * - When `unique` is omitted/false the helper remains fully deterministic
+ *   (TEST_SEED + per-spec salt only), so request bodies stay snapshot-
+ *   comparable apart from the identifier slots.
+ */
+export type SeedOptions = { unique?: boolean };
 
 interface SeedRule {
   match: RegExp | ((name: string) => boolean);
@@ -76,6 +95,39 @@ function resolveSeed(): { seed: string; random: boolean } {
 // seedBinding() call in every worker returns the same value (#175).
 let _specSalt = '';
 let _globalEnv: SeedEnv | undefined;
+let _uniqueEnv: SeedEnv | undefined;
+let _runNonce: string | undefined;
+
+/**
+ * Resolve the per-process run nonce used by `seedBinding(name, { unique: true })`.
+ *
+ * Sourced from env `TEST_RUN_NONCE` if set (lets CI pin a specific replay),
+ * otherwise from `crypto.randomUUID()` at first use. Stable for the process
+ * lifetime so retries and parallel workers within the same Playwright run
+ * see the same identifier — only across separate invocations does it change.
+ *
+ * Exported only for the helper unit test; production code should not call
+ * it directly.
+ */
+export function _resolveRunNonce(): string {
+  if (_runNonce !== undefined) return _runNonce;
+  const env = process.env.TEST_RUN_NONCE;
+  _runNonce = env && env.length > 0 ? env : randomUUID();
+  return _runNonce;
+}
+
+/**
+ * Reset cached per-process state. Test-only helper — generated suites
+ * never call this. Used by the seeding unit test to simulate a fresh
+ * process invocation between two `seedBinding(..., { unique: true })`
+ * calls.
+ */
+export function _resetSeedingForTest(): void {
+  _specSalt = '';
+  _globalEnv = undefined;
+  _uniqueEnv = undefined;
+  _runNonce = undefined;
+}
 
 /**
  * Set the per-suite salt before the first seedBinding() call.
@@ -92,9 +144,10 @@ let _globalEnv: SeedEnv | undefined;
 export function initSpecSalt(salt: string): void {
   _specSalt = salt;
   _globalEnv = undefined; // reset so next seedBinding() picks up the new salt
+  _uniqueEnv = undefined;
 }
 
-function buildGlobalEnv(): SeedEnv {
+function buildEnv(opts: { mixRunNonce: boolean }): SeedEnv {
   const { seed: seedStr, random } = resolveSeed();
   let seedNum = 0;
   if (random) {
@@ -106,10 +159,23 @@ function buildGlobalEnv(): SeedEnv {
     // Mix in the per-spec-file salt so parallel workers draw different sequences.
     for (let i = 0; i < _specSalt.length; i++)
       seedNum = (Math.imul(31, seedNum) + _specSalt.charCodeAt(i)) | 0;
+    if (opts.mixRunNonce) {
+      // Mix in the per-process run nonce so identifier-shaped bindings
+      // diverge across separate pipeline/run invocations (#304). The PRNG
+      // sequence for unique bindings is therefore distinct from the
+      // deterministic sequence used for snapshot-stable bindings.
+      const nonce = _resolveRunNonce();
+      for (let i = 0; i < nonce.length; i++)
+        seedNum = (Math.imul(31, seedNum) + nonce.charCodeAt(i)) | 0;
+    }
   }
   const rand = random ? Math.random : mulberry32(seedNum >>> 0);
   const counters = new Map<string, number>();
-  const runId = random ? `rt-${Date.now().toString(36)}` : `det-${seedStr}`;
+  const runId = random
+    ? `rt-${Date.now().toString(36)}`
+    : opts.mixRunNonce
+      ? `det-${seedStr}-${_resolveRunNonce()}`
+      : `det-${seedStr}`;
   return {
     random: () => rand().toString(36).slice(2),
     counter: (bucket = 'default') => {
@@ -123,8 +189,13 @@ function buildGlobalEnv(): SeedEnv {
 }
 
 function getGlobalEnv(): SeedEnv {
-  if (!_globalEnv) _globalEnv = buildGlobalEnv();
+  if (!_globalEnv) _globalEnv = buildEnv({ mixRunNonce: false });
   return _globalEnv;
+}
+
+function getUniqueEnv(): SeedEnv {
+  if (!_uniqueEnv) _uniqueEnv = buildEnv({ mixRunNonce: true });
+  return _uniqueEnv;
 }
 
 /**
@@ -236,9 +307,9 @@ function expandTemplate(tpl: string, varName: string, env: SeedEnv): string {
   });
 }
 
-export function seedBinding(varName: string, _opts?: SeedOptions): string {
+export function seedBinding(varName: string, opts?: SeedOptions): string {
   loadRules();
-  const env = getGlobalEnv();
+  const env = opts?.unique ? getUniqueEnv() : getGlobalEnv();
   for (const r of rules) {
     const m = r.match instanceof RegExp ? r.match.test(varName) : r.match(varName);
     if (m) return r.gen(varName, env);
