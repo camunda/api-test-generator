@@ -1409,16 +1409,15 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     ).toEqual([]);
   });
 
-  it('generated package.json has no script that points at a file the codegen does not ship', () => {
+  it('generated package.json has no script that references `./openapi.json`', () => {
     // The pre-fix `responses:regenerate` script pointed at
     // `./openapi.json`, which the codegen never wrote next to the
     // suite's package.json. Running `npm run responses:regenerate`
     // out of the box failed with "Local spec file not found". This
     // invariant rejects any script in the generated package.json
-    // whose command-line references a literal `./openapi.json` (or
-    // any other file the codegen does not materialise alongside
-    // package.json). Class-scoped: any reintroduction of the same
-    // dead-on-arrival shape — under any script name — fails.
+    // whose command-line references the literal `./openapi.json`.
+    // Class-scoped: any reintroduction of that dead-on-arrival
+    // shape — under any script name — fails.
     const pkgPath = join(GENERATED_TESTS_DIR, 'package.json');
     if (!existsSync(pkgPath)) {
       throw new Error(
