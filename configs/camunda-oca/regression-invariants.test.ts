@@ -314,10 +314,17 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       'FormKey',
     ]);
     function consumesDeploymentDerived(opId: string): boolean {
-      const op = cachedOperationById?.get(opId);
-      if (!op) return false;
+      // Use findOperation so unknown opIds throw rather than silently
+      // making the invariant a no-op (which would mask drift between
+      // the scenarios and the graph).
+      const op = findOperation(opId);
       for (const e of op.requestBodySemanticTypes ?? []) {
         if (e.required && deploymentDerivedSemantics.has(e.semanticType)) return true;
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType && deploymentDerivedSemantics.has(p.semanticType)) {
+          return true;
+        }
       }
       return false;
     }
