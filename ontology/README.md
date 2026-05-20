@@ -198,7 +198,9 @@ signal. No further configuration is required.
 5. Wire the loader + cross-ref module per Lift 15 / #255.
 6. Add the slice's Layer-3 invariants in
    `configs/<config>/regression-invariants.test.ts`.
-7. Run `npm run viz:ontology` to refresh `ontology/diagrams/*.mmd` and
-   commit the updated snapshots.
+7. (Optional) Run `npm run viz:ontology` to preview the refreshed
+   `ontology/diagrams/*.mmd` snapshots locally. You do not need to
+   commit them — the `Refresh ontology diagrams` workflow opens an
+   auto-PR after your change merges to `main`.
 
 The next push to `main` touching `ontology/**` re-publishes the site.

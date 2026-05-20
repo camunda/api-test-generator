@@ -7399,9 +7399,14 @@ describeForThisConfig('bundled-spec invariants: ontology publishing surface (#27
 //
 // Guards that the TBox and ABox emitter functions (from
 // scripts/visualise-ontology.ts) produce non-empty DOT/Mermaid output
-// against the live committed ABox files, and that the committed
-// ontology/diagrams/tbox.mmd + abox.mmd snapshots are in sync with
-// what the emitter would generate from the current ABox.
+// against the live committed ABox files.
+//
+// Drift between the committed ontology/diagrams/*.mmd snapshots and
+// what the emitter would generate today is NOT enforced per-PR — it
+// would poison every concurrent PR whenever any ontology change merges.
+// The .github/workflows/refresh-ontology-diagrams.yml workflow opens
+// an auto-PR after every push to main (and nightly as a safety net)
+// to keep the committed snapshots fresh.
 //
 // These invariants are fast (no pipeline output required — they read
 // only the committed ABox JSON files) and run in every PR CI pass.
@@ -7441,32 +7446,6 @@ describeForThisConfig('bundled-spec invariants: ontology visualisation emitter',
     const mmd = emitAboxMmd(bundle);
     expect(mmd.trim().length, 'ABox Mermaid must not be empty').toBeGreaterThan(0);
     expect(mmd, 'ABox Mermaid must start with graph').toContain('graph LR');
-  });
-
-  it('committed ontology/diagrams/tbox.mmd matches current TBox emitter output (drift check)', async () => {
-    const { emitTboxMmd } = await import('../../scripts/visualise-ontology.ts');
-    const committedPath = join(REPO_ROOT, 'ontology', 'diagrams', 'tbox.mmd');
-    expect(existsSync(committedPath), `ontology/diagrams/tbox.mmd must exist`).toBe(true);
-    const committed = readFileSync(committedPath, 'utf8');
-    const generated = emitTboxMmd('camunda-oca');
-    expect(
-      committed,
-      "ontology/diagrams/tbox.mmd has drifted from the current TBox emitter output. Run 'npm run viz:ontology' to update it.",
-    ).toBe(generated);
-  });
-
-  it('committed ontology/diagrams/abox.mmd matches current ABox emitter output (drift check)', async () => {
-    const { emitAboxMmd } = await import('../../scripts/visualise-ontology.ts');
-    const { buildBundle } = await import('../../scripts/export-ontology.ts');
-    const committedPath = join(REPO_ROOT, 'ontology', 'diagrams', 'abox.mmd');
-    expect(existsSync(committedPath), `ontology/diagrams/abox.mmd must exist`).toBe(true);
-    const committed = readFileSync(committedPath, 'utf8');
-    const bundle = buildBundle();
-    const generated = emitAboxMmd(bundle);
-    expect(
-      committed,
-      "ontology/diagrams/abox.mmd has drifted from the current ABox emitter output. Run 'npm run viz:ontology' to update it.",
-    ).toBe(generated);
   });
 });
 
