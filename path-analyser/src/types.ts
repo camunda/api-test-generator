@@ -518,18 +518,46 @@ export interface SemanticTypeSpec {
    *     `attribute` is a structural shape, `clientMinted` says where the
    *     value originates. Examples: `Tag`, `BusinessId`.
    *
+   *   - `serverEmergent` (#162 PR 5): server-minted lifecycle identifiers
+   *     that no client API directly mints with a returned value (e.g.
+   *     `IncidentKey`, `AuditLogKey`, `MessageSubscriptionKey`) AND for
+   *     which the planner has no path to discover the emitted value
+   *     post-hoc. The planner binds a deterministic placeholder so
+   *     search-filter request shapes validate; an empty search result is
+   *     acceptable because the value is a fabricated placeholder for a
+   *     key the client could not have known.
+   *
+   *   - `runtimeEmission` (#305 Phase 1, schema-only): a server-minted
+   *     lifecycle key that the planner *will be able to* discover after
+   *     a known producing side-effect (e.g. `UserTaskKey` is emitted
+   *     when a process instance executes a user-task element, and is
+   *     discoverable via `searchUserTasks(processInstanceKey)`).
+   *     Distinct from `serverEmergent` precisely because the discovery
+   *     path is declarable. Requires both `emittedBy` and
+   *     `discoveredVia` on the same entry — without them the entry
+   *     would carry no actionable information for the future planner.
+   *     The loader enforces this coupling.
+   *
+   *     **Phase-1 scope note:** as of #305 Phase 1 (this commit) no
+   *     planner code reads `kind === 'runtimeEmission'`. The
+   *     `classifySemantic` dispatch in `bindSemanticInput.ts` only
+   *     special-cases `modelDerived` / `clientMintedAttribute` /
+   *     `serverEmergent`; a `runtimeEmission` declaration therefore
+   *     falls through to the producer/establisher/external-entity
+   *     chain and most commonly classifies as `unclassified` (the
+   *     keys we plan to migrate in Phase 3 — `UserTaskKey`,
+   *     `JobKey`, … — have no producer or establisher today, which
+   *     is exactly why they need `runtimeEmission` in the first
+   *     place). The vocabulary is landed first so Phase 3's ABox
+   *     edits can validate cleanly against the published TBox;
+   *     classifier + chain-planner support follows in Phase 3 of
+   *     #305.
+   *
    * Absent `kind` means the planner falls back to its existing
    * classification chain (producersByType / establishersByType /
    * external-entity / synthetic).
-   *
-   * `serverEmergent` (#162 PR 5): server-minted lifecycle identifiers
-   * that no client API directly mints with a returned value (e.g.
-   * `IncidentKey`, `AuditLogKey`, `MessageSubscriptionKey`). The planner
-   * binds a deterministic placeholder so search-filter request shapes
-   * validate; an empty search result is acceptable because the value is
-   * a fabricated placeholder for a key the client could not have known.
    */
-  kind?: 'modelDerived' | 'attribute' | 'serverEmergent';
+  kind?: 'modelDerived' | 'attribute' | 'serverEmergent' | 'runtimeEmission';
   /**
    * Whether values of this semantic are minted by the planner / client
    * rather than returned by a producer endpoint (#162 PR 2). Only
@@ -537,6 +565,29 @@ export interface SemanticTypeSpec {
    * client-minted semantics to identifier-shaped types as well.
    */
   clientMinted?: boolean;
+  /**
+   * Required when `kind === 'runtimeEmission'` (#305 Phase 1). Declares
+   * how a value of this type comes into existence at runtime — the
+   * producing predecessor that must run, plus any capability guards the
+   * predecessor's deployment artefact must satisfy. See
+   * `path-analyser/src/ontology/semanticsSchema.ts` for the field-level
+   * docs; this interface mirrors the ABox shape for the planner views.
+   */
+  emittedBy?: {
+    predecessor: string;
+    guardedBy?: string[];
+  };
+  /**
+   * Required when `kind === 'runtimeEmission'` (#305 Phase 1). Declares
+   * how the planner reads the emitted value back from the system after
+   * the predecessor has run.
+   */
+  discoveredVia?: {
+    operationId: string;
+    filterBy?: string;
+    extractKey: string;
+    consistency?: 'eventual' | 'strong';
+  };
 }
 
 export interface IdentifierSpec {

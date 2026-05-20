@@ -679,6 +679,25 @@ export function loadSemanticsAbox(repoRoot: string): SemanticsAbox | null {
         `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'attribute' but clientMinted is not true — attribute-shaped semantic types must declare clientMinted: true so the planner mints values rather than waiting for a producer`,
       );
     }
+    // Cross-property invariant: `kind: 'runtimeEmission'` ⇒ both
+    // `emittedBy` and `discoveredVia` present (#305 Phase 1). The whole
+    // point of `runtimeEmission` is to carry the planning information
+    // that distinguishes it from plain `serverEmergent`; without both
+    // sub-objects the planner has nothing to act on and the entry would
+    // silently behave like `serverEmergent` (a placeholder seedBinding),
+    // which is the bug #305 fixes.
+    if (t.kind === 'runtimeEmission') {
+      if (t.emittedBy === undefined) {
+        throw new Error(
+          `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'runtimeEmission' but no emittedBy — runtimeEmission types must declare the producing predecessor (and any capability guards) so the planner can plan the produce → discover → bind chain`,
+        );
+      }
+      if (t.discoveredVia === undefined) {
+        throw new Error(
+          `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'runtimeEmission' but no discoveredVia — runtimeEmission types must declare the discovery operation (operationId, optional filterBy, extractKey, optional consistency) so the planner knows how to read the emitted key back from the system`,
+        );
+      }
+    }
   }
   return parsed;
 }
@@ -693,8 +712,18 @@ export interface SemanticsViews {
     string,
     {
       witnesses?: string;
-      kind?: 'modelDerived' | 'attribute' | 'serverEmergent';
+      kind?: 'modelDerived' | 'attribute' | 'serverEmergent' | 'runtimeEmission';
       clientMinted?: boolean;
+      emittedBy?: {
+        predecessor: string;
+        guardedBy?: string[];
+      };
+      discoveredVia?: {
+        operationId: string;
+        filterBy?: string;
+        extractKey: string;
+        consistency?: 'eventual' | 'strong';
+      };
     }
   >;
   capabilities: Record<
@@ -727,6 +756,28 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
     if (t.witnesses !== undefined) entry.witnesses = t.witnesses;
     if (t.kind !== undefined) entry.kind = t.kind;
     if (t.clientMinted !== undefined) entry.clientMinted = t.clientMinted;
+    if (t.emittedBy !== undefined) {
+      const eb: NonNullable<SemanticsViews['semanticTypes'][string]['emittedBy']> = {
+        predecessor: t.emittedBy.predecessor,
+      };
+      if (t.emittedBy.guardedBy !== undefined) eb.guardedBy = [...t.emittedBy.guardedBy];
+      entry.emittedBy = eb;
+    }
+    if (t.discoveredVia !== undefined) {
+      const dv: NonNullable<SemanticsViews['semanticTypes'][string]['discoveredVia']> = {
+        operationId: t.discoveredVia.operationId,
+        extractKey: t.discoveredVia.extractKey,
+        // Normalize the documented default here so every downstream
+        // consumer can rely on a concrete value rather than each
+        // re-implementing the fallback. Defaults to 'strong' — most
+        // Camunda read-after-write surfaces are strongly consistent;
+        // 'eventual' is the explicit exception that opts in to the
+        // poll-with-await helper (#305 Phase 1 review).
+        consistency: t.discoveredVia.consistency ?? 'strong',
+      };
+      if (t.discoveredVia.filterBy !== undefined) dv.filterBy = t.discoveredVia.filterBy;
+      entry.discoveredVia = dv;
+    }
     semanticTypes[t.name] = entry;
   }
   const capabilities: SemanticsViews['capabilities'] = {};
