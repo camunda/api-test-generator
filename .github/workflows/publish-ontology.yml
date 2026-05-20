@@ -5,6 +5,11 @@ name: Publish ontology to GitHub Pages
 #
 #   https://camunda.github.io/api-test-generator/ns/v1/<slice>.schema.json
 #
+# Also publishes:
+#   ns/v1/context.jsonld              — shared ABox JSON-LD context
+#   ns/v1/ontology-bundle.ttl         — Turtle bundle for external RDF tooling
+#   ns/v1/viz/camunda-oca/{tbox,abox,operations}.svg  — rendered diagrams
+#
 # This makes good on the contract documented in every
 # `path-analyser/src/ontology/*Schema.ts` header: the JSON Schema
 # artefacts exist specifically so external SPARQL/SHACL/OWL/IDE
@@ -23,6 +28,9 @@ on:
       - 'ontology/**'
       - 'path-analyser/src/ontology/**Schema.ts'
       - 'scripts/build-ontology.ts'
+      - 'scripts/export-ontology.ts'
+      - 'scripts/visualise-ontology.ts'
+      - 'configs/camunda-oca/ontology/**'
       - '.github/workflows/publish-ontology.yml'
   workflow_dispatch:
 
@@ -41,7 +49,7 @@ jobs:
   build:
     name: Build publishable site
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -57,12 +65,33 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Install Graphviz
+        run: sudo apt-get install -y graphviz
+
       - name: Regenerate ontology artefacts from TS source
         # Defence-in-depth against a drifted commit: regenerate the
         # JSON before publishing rather than trusting whatever is on
         # disk. A regression invariant already gates this in PR CI,
         # but publishing is the contract surface so we double-check.
         run: npm run build:ontology
+
+      - name: Read pinned spec ref
+        id: pin
+        run: |
+          SPEC_REF=$(node -e "const p=require('./configs/camunda-oca/spec-pin.json'); process.stdout.write(p.specRef)")
+          echo "specRef=${SPEC_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned OpenAPI spec
+        run: SPEC_REF=${{ steps.pin.outputs.specRef }} npm run fetch-spec:ref
+
+      - name: Extract operation-dependency graph
+        run: npm run extract-graph
+
+      - name: Export ontology bundle (JSON + Turtle + N-Quads)
+        run: npm run export:ontology -- --rdf
+
+      - name: Emit visualisation diagrams (DOT + SVG)
+        run: npm run viz:ontology
 
       - name: Assemble publish directory
         # The TBox `$id` URLs are of the form
@@ -72,12 +101,25 @@ jobs:
         # mirroring the URL is `public/ns/v1/<slice>.schema.json`.
         run: |
           set -euo pipefail
-          mkdir -p public/ns/v1
+          mkdir -p public/ns/v1/viz/camunda-oca
+
+          # TBox JSON Schemas
           cp ontology/vocabulary/*.schema.json public/ns/v1/
+
+          # Shared ABox context
+          cp ontology/context.jsonld public/ns/v1/
+
+          # Turtle / N-Quads bundle
+          cp generated/camunda-oca/ontology-bundle.ttl public/ns/v1/ 2>/dev/null || true
+          cp generated/camunda-oca/ontology-bundle.nq  public/ns/v1/ 2>/dev/null || true
+
+          # Rendered SVGs (populated by viz:ontology when dot is available)
+          cp generated/camunda-oca/viz/*.svg public/ns/v1/viz/camunda-oca/ 2>/dev/null || true
+
+          # README → landing page index
           cp ontology/README.md public/index.md 2>/dev/null || true
+
           # Minimal landing page so visiting the root URL is not a 404.
-          # Listing is generated from the publish directory so it stays
-          # in sync with whatever was just copied.
           {
             echo '<!doctype html><meta charset="utf-8"><title>api-test-generator ontology</title>'
             echo '<h1>api-test-generator ontology vocabulary</h1>'
@@ -88,6 +130,17 @@ jobs:
             for f in public/ns/v1/*.schema.json; do
               name="$(basename "$f")"
               echo "<li><a href=\"ns/v1/${name}\"><code>ns/v1/${name}</code></a></li>"
+            done
+            echo '</ul>'
+            echo '<h2>RDF bundle</h2><ul>'
+            echo '<li><a href="ns/v1/ontology-bundle.ttl"><code>ns/v1/ontology-bundle.ttl</code></a> (Turtle)</li>'
+            echo '<li><a href="ns/v1/ontology-bundle.nq"><code>ns/v1/ontology-bundle.nq</code></a> (N-Quads)</li>'
+            echo '</ul>'
+            echo '<h2>Visualisations</h2><ul>'
+            for f in public/ns/v1/viz/camunda-oca/*.svg; do
+              [ -f "$f" ] || continue
+              name="$(basename "$f")"
+              echo "<li><a href=\"ns/v1/viz/camunda-oca/${name}\"><code>ns/v1/viz/camunda-oca/${name}</code></a></li>"
             done
             echo '</ul>'
           } > public/index.html

@@ -7348,6 +7348,125 @@ describeForThisConfig('bundled-spec invariants: ontology publishing surface (#27
       },
       60_000,
     );
+
+    it.skipIf(!shouldRun)(
+      'every published SVG URL HEADs 200',
+      async () => {
+        const SVG_BASE = 'https://camunda.github.io/api-test-generator/ns/v1/viz/camunda-oca/';
+        const svgFiles = ['tbox.svg', 'abox.svg', 'operations.svg'];
+        const offenders: string[] = [];
+        for (const file of svgFiles) {
+          const url = `${SVG_BASE}${file}`;
+          try {
+            const res = await fetch(url, { method: 'HEAD' });
+            if (res.status !== 200) {
+              offenders.push(`${url}: HTTP ${res.status}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            offenders.push(`${url}: fetch failed — ${msg}`);
+          }
+        }
+        expect(
+          offenders,
+          'Every viz SVG URL must resolve to HTTP 200. Check publish-ontology.yml run history if this fails.',
+        ).toEqual([]);
+      },
+      60_000,
+    );
+
+    it.skipIf(!shouldRun)(
+      'ontology-bundle.ttl HEADs 200',
+      async () => {
+        const url = 'https://camunda.github.io/api-test-generator/ns/v1/ontology-bundle.ttl';
+        let status: number | null = null;
+        try {
+          const res = await fetch(url, { method: 'HEAD' });
+          status = res.status;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`${url}: fetch failed — ${msg}`);
+        }
+        expect(status, `${url} must resolve to HTTP 200`).toBe(200);
+      },
+      60_000,
+    );
+  });
+});
+
+// ===========================================================================
+// Ontology visualisation emitter (Step 1 of viz issue).
+//
+// Guards that the TBox and ABox emitter functions (from
+// scripts/visualise-ontology.ts) produce non-empty DOT/Mermaid output
+// against the live committed ABox files, and that the committed
+// ontology/diagrams/tbox.mmd + abox.mmd snapshots are in sync with
+// what the emitter would generate from the current ABox.
+//
+// These invariants are fast (no pipeline output required — they read
+// only the committed ABox JSON files) and run in every PR CI pass.
+// ===========================================================================
+describeForThisConfig('bundled-spec invariants: ontology visualisation emitter', () => {
+  it('emitTboxDot produces non-empty DOT output', async () => {
+    const { emitTboxDot } = await import('../../scripts/visualise-ontology.ts');
+    const dot = emitTboxDot('camunda-oca');
+    expect(dot.trim().length, 'TBox DOT must not be empty').toBeGreaterThan(0);
+    expect(dot, 'TBox DOT must start with digraph').toMatch(/^digraph TBox/);
+    expect(dot, 'TBox DOT must declare at least one node').toContain('edge');
+    expect(dot, 'TBox DOT must declare at least one edge relation').toContain('->');
+  });
+
+  it('emitTboxMmd produces non-empty Mermaid output', async () => {
+    const { emitTboxMmd } = await import('../../scripts/visualise-ontology.ts');
+    const mmd = emitTboxMmd('camunda-oca');
+    expect(mmd.trim().length, 'TBox Mermaid must not be empty').toBeGreaterThan(0);
+    expect(mmd, 'TBox Mermaid must start with graph').toContain('graph LR');
+  });
+
+  it('emitAboxDot produces non-empty DOT output for the camunda-oca ABox', async () => {
+    const { emitAboxDot } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const bundle = buildBundle();
+    const dot = emitAboxDot(bundle);
+    expect(dot.trim().length, 'ABox DOT must not be empty').toBeGreaterThan(0);
+    expect(dot, 'ABox DOT must start with digraph ABox').toMatch(/^digraph ABox/);
+    expect(dot, 'ABox DOT must declare at least one entity-kind node').toContain('Role');
+    expect(dot, 'ABox DOT must declare at least one membership edge').toContain('->');
+  });
+
+  it('emitAboxMmd produces non-empty Mermaid output for the camunda-oca ABox', async () => {
+    const { emitAboxMmd } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const bundle = buildBundle();
+    const mmd = emitAboxMmd(bundle);
+    expect(mmd.trim().length, 'ABox Mermaid must not be empty').toBeGreaterThan(0);
+    expect(mmd, 'ABox Mermaid must start with graph').toContain('graph LR');
+  });
+
+  it('committed ontology/diagrams/tbox.mmd matches current TBox emitter output (drift check)', async () => {
+    const { emitTboxMmd } = await import('../../scripts/visualise-ontology.ts');
+    const committedPath = join(REPO_ROOT, 'ontology', 'diagrams', 'tbox.mmd');
+    expect(existsSync(committedPath), `ontology/diagrams/tbox.mmd must exist`).toBe(true);
+    const committed = readFileSync(committedPath, 'utf8');
+    const generated = emitTboxMmd('camunda-oca');
+    expect(
+      committed,
+      "ontology/diagrams/tbox.mmd has drifted from the current TBox emitter output. Run 'npm run viz:ontology' to update it.",
+    ).toBe(generated);
+  });
+
+  it('committed ontology/diagrams/abox.mmd matches current ABox emitter output (drift check)', async () => {
+    const { emitAboxMmd } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const committedPath = join(REPO_ROOT, 'ontology', 'diagrams', 'abox.mmd');
+    expect(existsSync(committedPath), `ontology/diagrams/abox.mmd must exist`).toBe(true);
+    const committed = readFileSync(committedPath, 'utf8');
+    const bundle = buildBundle();
+    const generated = emitAboxMmd(bundle);
+    expect(
+      committed,
+      "ontology/diagrams/abox.mmd has drifted from the current ABox emitter output. Run 'npm run viz:ontology' to update it.",
+    ).toBe(generated);
   });
 });
 

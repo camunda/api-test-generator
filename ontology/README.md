@@ -18,6 +18,135 @@ A Layer-3 regression invariant in
 fails if any committed JSON drifts from its TS source of truth, so the
 generated artefacts cannot silently fall out of sync.
 
+## Visualising the ontology
+
+Run the visualiser to emit DOT diagrams and Mermaid snapshots:
+
+```bash
+npm run viz:ontology
+```
+
+This writes to `generated/<config>/viz/`:
+
+| File | Description |
+|------|-------------|
+| `tbox.dot` | TBox class diagram (7 JSON Schema slices) |
+| `abox.dot` | ABox instance graph (entity kinds + membership edges) |
+| `operations.dot` | Full operation-dependency graph, clustered by OpenAPI tag |
+| `tbox.mmd` | Mermaid TBox snapshot |
+| `abox.mmd` | Mermaid ABox snapshot |
+
+If `dot` (Graphviz) is on your PATH, matching `.svg` files are also
+emitted. Install Graphviz with `sudo apt-get install graphviz` (Debian/Ubuntu)
+or `brew install graphviz` (macOS).
+
+The committed Mermaid snapshots in [`diagrams/`](./diagrams/) are kept
+in sync by the same script. A Layer-3 drift-detector invariant fails if
+the committed files diverge from the current ABox:
+
+```bash
+npm run viz:ontology -- --check   # verify committed .mmd files are up to date
+```
+
+### TBox diagram
+
+```mermaid
+%% api-test-generator Ontology TBox (camunda-oca) — 7 JSON Schema slices
+graph LR
+  edge["**Edge**<br/>edge.schema.json"]
+  entity_kinds["**EntityKind**<br/>entity-kinds.schema.json"]
+  artifact_kinds["**ArtifactKind**<br/>artifact-kinds.schema.json"]
+  runtime_states["**RuntimeState**<br/>runtime-states.schema.json"]
+  semantics["**SemanticType**<br/>semantics.schema.json"]
+  global_context_seeds["**GlobalContextSeed**<br/>global-context-seeds.schema.json"]
+  scenario_template["**ScenarioTemplate**<br/>scenario-template.schema.json"]
+
+  edge -->|"endpoints.from/to"| entity_kinds
+  edge -->|"identifiedBy"| semantics
+  artifact_kinds -->|"producesSemantics"| semantics
+  runtime_states -->|"operationRequirements"| entity_kinds
+  scenario_template -->|"appliesTo (edge)"| edge
+  scenario_template -->|"appliesTo (entity)"| entity_kinds
+```
+
+### ABox diagram (camunda-oca entity kinds + membership edges)
+
+```mermaid
+%% api-test-generator ABox (camunda-oca) — entity kinds and membership edges
+graph LR
+  Role(Role)
+  User(User)
+  Tenant(Tenant)
+  Group(Group)
+  MappingRule(MappingRule)
+  GlobalTaskListener(GlobalTaskListener)
+  GlobalClusterVariable(GlobalClusterVariable)
+  TenantClusterVariable(TenantClusterVariable)
+  Authorization(Authorization)
+  Document(Document)
+  Client(Client)
+  UserTask{UserTask}
+  Incident{Incident}
+
+  Role -->|"RoleUserMembership"| User
+  Tenant -->|"TenantUserMembership"| User
+  Group -->|"GroupUserMembership"| User
+  Role -->|"RoleMappingRuleMembership"| MappingRule
+  Group -->|"GroupMappingRuleMembership"| MappingRule
+  Tenant -->|"TenantMappingRuleMembership"| MappingRule
+  Role -->|"RoleGroupMembership"| Group
+  Role -->|"RoleClientMembership"| Client
+  Group -->|"GroupClientMembership"| Client
+  Tenant -->|"TenantClientMembership"| Client
+  Tenant -->|"TenantGroupMembership"| Group
+  Tenant -->|"TenantRoleMembership"| Role
+```
+
+For the full rendered SVGs (operations graph included), see
+`https://camunda.github.io/api-test-generator/ns/v1/viz/camunda-oca/`
+after a push to `main`.
+
+## Exporting the ontology bundle
+
+```bash
+npm run export:ontology           # JSON bundle only
+npm run export:ontology -- --rdf  # + Turtle (ontology-bundle.ttl) and N-Quads (ontology-bundle.nq)
+```
+
+Output goes to `generated/<config>/`:
+
+| File | Description |
+|------|-------------|
+| `ontology-bundle.json` | Unified bundle of all TBox + ABox slices |
+| `ontology-bundle.ttl` | Turtle serialisation of the ABox JSON-LD (`--rdf`) |
+| `ontology-bundle.nq` | N-Quads serialisation of the ABox JSON-LD (`--rdf`) |
+
+## Loading the ontology into WebVOWL / Protégé / GraphDB
+
+Once published (after a push to `main`), the Turtle bundle is available at:
+
+```
+https://camunda.github.io/api-test-generator/ns/v1/ontology-bundle.ttl
+```
+
+### WebVOWL
+
+1. Open [WebVOWL](https://service.tib.eu/webvowl/)
+2. Click **Ontology → Load from URL**
+3. Paste the URL above and click **Load**
+
+### Protégé
+
+1. **File → Open from URL…**
+2. Paste the URL above
+
+### GraphDB / SPARQL endpoint
+
+```sparql
+LOAD <https://camunda.github.io/api-test-generator/ns/v1/ontology-bundle.ttl>
+  INTO GRAPH <https://camunda.github.io/api-test-generator/ns/v1/>
+```
+
 ## Publishing
 
 The JSON Schemas under `vocabulary/` are published to GitHub Pages by
@@ -34,6 +163,12 @@ https://camunda.github.io/api-test-generator/ns/v1/<slice>.schema.json
 uses the matching URL as its `$schema`. A structural Layer-3
 invariant pins that convention so ad-hoc relative `$schema` paths
 cannot creep back in.
+
+The same workflow also publishes:
+
+- `ns/v1/viz/camunda-oca/tbox.svg`, `abox.svg`, `operations.svg` —
+  rendered operation/ontology graphs (requires Graphviz in CI).
+- `ns/v1/ontology-bundle.ttl` — Turtle bundle for external RDF tooling.
 
 A separate scheduled workflow
 [`ontology-url-check.yml`](../.github/workflows/ontology-url-check.yml)
@@ -63,5 +198,7 @@ signal. No further configuration is required.
 5. Wire the loader + cross-ref module per Lift 15 / #255.
 6. Add the slice's Layer-3 invariants in
    `configs/<config>/regression-invariants.test.ts`.
+7. Run `npm run viz:ontology` to refresh `ontology/diagrams/*.mmd` and
+   commit the updated snapshots.
 
 The next push to `main` touching `ontology/**` re-publishes the site.

@@ -1,0 +1,5 @@
+{
+  "@context": {
+    "@vocab": "https://camunda.github.io/api-test-generator/ns/v1/"
+  }
+}
