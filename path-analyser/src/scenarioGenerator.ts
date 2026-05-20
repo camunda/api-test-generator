@@ -531,8 +531,23 @@ export function generateScenariosForEndpoint(
       targetDecl.discoveredVia &&
       targetDecl.emittedBy
     ) {
-      expandRuntimeEmission(graph, targetSemantic, targetDecl, state, seen, queue, endpointOpId);
-      continue;
+      const expanded = expandRuntimeEmission(
+        graph,
+        targetSemantic,
+        targetDecl,
+        state,
+        seen,
+        queue,
+        endpointOpId,
+      );
+      if (expanded) continue;
+      // Fall through to the regular producer loop when the discovery
+      // chain could not be applied (missing/self-referential discovery
+      // op, discovery op's required inputs not yet satisfied, cycle, or
+      // already-seen successor signature). Without the fall-through the
+      // BFS would `continue` here, drain the queue without enqueuing
+      // anything for `targetSemantic`, and return `unsatisfied` — which
+      // hides a legitimate producer path. (PR #308 review.)
     }
 
     // Shallow-copy the producer list before any local augmentation —

@@ -387,8 +387,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     }
     if (runtimeEmissionByName.size === 0) return; // no-op until Phase 3 lands UserTaskKey
 
-    const op = loadGraph();
-    void op;
+    loadGraph();
     const offenders: { file: string; scenario: string; semantic: string; reason: string }[] = [];
     for (const f of readdirSync(SCENARIOS_DIR)) {
       if (!f.endsWith('-scenarios.json')) continue;
@@ -409,7 +408,12 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
           const discoveryOp = runtimeEmissionByName.get(sem);
           if (!discoveryOp) continue;
           const discIdx = ops.indexOf(discoveryOp);
-          const endIdx = ops.indexOf(file.endpoint.operationId);
+          // Use lastIndexOf for the consuming-endpoint op: variant
+          // scenarios can legitimately invoke the endpoint more than
+          // once (e.g. warm-up + final). The discovery op must precede
+          // the FINAL consumer invocation, not the warm-up one. (PR
+          // #308 review.)
+          const endIdx = ops.lastIndexOf(file.endpoint.operationId);
           if (discIdx < 0) {
             offenders.push({
               file: f,
