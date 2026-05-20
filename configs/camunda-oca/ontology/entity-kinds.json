@@ -151,7 +151,7 @@
           "to": "COMPLETED"
         }
       ],
-      "description": "#305 Phase 4 + Phase 5d-2 — a runtime-emitted user task, identified by its server-minted userTaskKey. UserTasks are not created via a client-facing endpoint; they are emitted as a side-effect of process-instance progression (when a user-task service-task activates). Discovered at planning time via the UserTaskKey runtimeEmission entry (discoveredVia searchUserTasks, post-#308). Mutated in place by updateUserTask (and, in future phases, assignUserTask/unassignUserTask) and read back via getUserTask. State transition: completeUserTask flips state CREATED → COMPLETED (Phase 5d-2 / #189). Consumed by both UpdatedFieldVisibleOnReadBack (mutators) and StateTransitionVisibleAfterAction (transitions)."
+      "description": "#305 Phase 4 + Phase 5d-2 — a runtime-emitted user task, identified by its server-minted userTaskKey. UserTasks are not created via a client-facing endpoint; they are emitted as a side-effect of process-instance progression (when a BPMN user-task element is activated). Discovered at planning time via the UserTaskKey runtimeEmission entry (discoveredVia searchUserTasks, post-#308). Mutated in place by updateUserTask (and, in future phases, assignUserTask/unassignUserTask) and read back via getUserTask. State transition: completeUserTask flips state CREATED → COMPLETED (Phase 5d-2 / #189). Consumed by both UpdatedFieldVisibleOnReadBack (mutators) and StateTransitionVisibleAfterAction (transitions)."
     },
     {
       "@type": "EntityKind",
