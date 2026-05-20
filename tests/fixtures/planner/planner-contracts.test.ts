@@ -874,3 +874,103 @@ describe('planner contracts: discoveryIntent stamped on inserted runtimeEmission
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fixture: IncidentKey runtimeEmission produces deploy → instance → search
+// → getIncident chain (#305 Phase 5a)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the UserTaskKey pilot fixture but for IncidentKey, gated by the
+// new ModelEmitsIncident capability and discovered via searchIncidents.
+// The L2 guards that the planner machinery applies generically to any
+// runtimeEmission key (not just UserTaskKey) and that #309 Phase A's
+// discoveryIntent stamping carries through with the IncidentKey extract
+// shape.
+const fixtureRuntimeEmissionIncidentKey: OperationGraph = (() => {
+  const graph = makeGraph([
+    makeOp('createDeployment', {
+      produces: ['ProcessDefinitionKey'],
+      providerMap: { ProcessDefinitionKey: true },
+      domainProduces: ['ProcessDefinitionDeployed', 'ModelEmitsIncident'],
+    }),
+    makeOp('createProcessInstance', {
+      required: ['ProcessDefinitionKey'],
+      produces: ['ProcessInstanceKey'],
+      providerMap: { ProcessInstanceKey: true },
+      domainRequiresAll: ['ProcessDefinitionDeployed'],
+      domainProduces: ['ProcessInstanceExists'],
+    }),
+    makeOp('searchIncidents', {
+      required: [],
+      produces: [],
+      requestBodySemantics: [
+        { semantic: 'ProcessInstanceKey', fieldPath: 'filter.processInstanceKey', required: false },
+      ],
+    }),
+    makeOp('getIncident', {
+      required: ['IncidentKey'],
+    }),
+  ]);
+  graph.domain = {
+    version: 1,
+    semanticTypes: {
+      IncidentKey: {
+        kind: 'runtimeEmission',
+        emittedBy: {
+          predecessor: 'ProcessInstanceExists',
+          guardedBy: ['ModelEmitsIncident'],
+        },
+        discoveredVia: {
+          operationId: 'searchIncidents',
+          filterBy: 'processInstanceKey',
+          extractKey: 'incidentKey',
+          consistency: 'eventual',
+        },
+      },
+    },
+    runtimeStates: {
+      ProcessDefinitionDeployed: { kind: 'state', producedBy: ['createDeployment'] },
+      ProcessInstanceExists: { kind: 'state', producedBy: ['createProcessInstance'] },
+    },
+    capabilities: {
+      ModelEmitsIncident: {
+        kind: 'capability',
+        parameter: 'incidentEmittingElementId',
+        producedBy: ['createDeployment'],
+        dependsOn: ['ProcessDefinitionDeployed'],
+      },
+    },
+    identifiers: {},
+  };
+  return graph;
+})();
+
+describe('planner contracts: IncidentKey runtimeEmission discover-and-bind chain (#305 Phase 5a)', () => {
+  it('plans deploy → createProcessInstance → searchIncidents → getIncident for an endpoint that consumes IncidentKey', () => {
+    const collection = plan(fixtureRuntimeEmissionIncidentKey, 'getIncident');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const ops = opIdsOf(collection.scenarios[0]);
+    expect(ops).toEqual([
+      'createDeployment',
+      'createProcessInstance',
+      'searchIncidents',
+      'getIncident',
+    ]);
+  });
+
+  it('stamps discoveryIntent on the searchIncidents OperationRef with IncidentKey extract shape', () => {
+    const collection = plan(fixtureRuntimeEmissionIncidentKey, 'getIncident');
+    const scenario = collection.scenarios[0];
+    const discoveryRef = scenario.operations.find((o) => o.operationId === 'searchIncidents');
+    expect(discoveryRef).toBeDefined();
+    expect(discoveryRef?.discoveryIntent).toEqual({
+      filterBy: 'processInstanceKey',
+      fromSemantic: 'ProcessInstanceKey',
+      fromBinding: 'processInstanceKeyVar',
+      extractKey: 'incidentKey',
+      extractInto: 'incidentKeyVar',
+      consistency: 'eventual',
+    });
+  });
+});

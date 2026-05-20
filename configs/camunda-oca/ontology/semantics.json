@@ -76,15 +76,29 @@
     },
     {
       "name": "IncidentKey",
-      "kind": "serverEmergent",
-      "$comment": "Server-minted lifecycle key for an incident. Incidents emerge from runtime failures during process execution \u2014 no direct create API. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
+      "kind": "runtimeEmission",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": [
+          "ModelEmitsIncident"
+        ]
+      },
+      "discoveredVia": {
+        "operationId": "searchIncidents",
+        "filterBy": "processInstanceKey",
+        "extractKey": "incidentKey",
+        "consistency": "eventual"
+      },
+      "$comment": "Server-minted lifecycle key for an incident. Emitted after a deployment whose BPMN deterministically fails at runtime (ModelEmitsIncident) reaches the failing element during a process instance run. Discovered via searchIncidents filtered by processInstanceKey; eventually consistent (await-eventually). See #305 Phase 5a (promoted from serverEmergent)."
     },
     {
       "name": "UserTaskKey",
       "kind": "runtimeEmission",
       "emittedBy": {
         "predecessor": "ProcessInstanceExists",
-        "guardedBy": ["ModelHasUserTask"]
+        "guardedBy": [
+          "ModelHasUserTask"
+        ]
       },
       "discoveredVia": {
         "operationId": "searchUserTasks",
@@ -119,6 +133,16 @@
     {
       "name": "ModelHasUserTask",
       "parameter": "userTaskElementId",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ModelEmitsIncident",
+      "parameter": "incidentEmittingElementId",
       "producedBy": [
         "createDeployment"
       ],

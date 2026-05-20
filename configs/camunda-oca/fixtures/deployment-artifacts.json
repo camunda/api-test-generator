@@ -30,6 +30,15 @@
       }
     },
     {
+      "kind": "bpmnProcess",
+      "path": "bpmn/incident-script-task.bpmn",
+      "description": "BPMN process with a script task whose FEEL expression `assert(missingVariable, missingVariable != null)` fails on every instance, emitting a single incident deterministically (no timing dependency). Selected for chains whose consumer ops require ModelEmitsIncident (e.g. getIncident discovered via searchIncidents). See #305 Phase 5a.",
+      "providesStates": ["ModelEmitsIncident"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "ScriptTask_1", "EndEvent_1"]
+      }
+    },
+    {
       "kind": "form",
       "path": "forms/simple.form",
       "description": "Minimal Camunda form JSON"
