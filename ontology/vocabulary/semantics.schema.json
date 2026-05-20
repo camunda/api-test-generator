@@ -133,7 +133,7 @@
                 "eventual",
                 "strong"
               ],
-              "description": "Whether the discovery op returns the emitted key strongly-consistently (`strong` — read after producer returns succeeds first time) or only eventually (`eventual` — the planner must poll until the item appears, via the existing `await-eventually` helper). Mirrors the `runtimeStates.eventual` flag's intent. Defaults to `eventual` if omitted, matching Camunda's general consistency model for emitted entities."
+              "description": "Whether the discovery op returns the emitted key strongly-consistently (`strong` — read after producer returns succeeds first time) or only eventually (`eventual` — the planner must poll until the item appears, via the existing `await-eventually` helper). Mirrors the `runtimeStates.eventual` flag's intent. Defaults to `strong` if omitted — most Camunda read-after-write surfaces are strongly consistent; `eventual` is the explicit opt-in for emitters that need polling."
             }
           }
         },

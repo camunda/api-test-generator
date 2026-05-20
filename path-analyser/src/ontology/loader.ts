@@ -769,9 +769,11 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
         extractKey: t.discoveredVia.extractKey,
         // Normalize the documented default here so every downstream
         // consumer can rely on a concrete value rather than each
-        // re-implementing the fallback. Mirrors the `defaults to
-        // 'eventual'` claim in the TBox docs (#305 Phase 1 review).
-        consistency: t.discoveredVia.consistency ?? 'eventual',
+        // re-implementing the fallback. Defaults to 'strong' — most
+        // Camunda read-after-write surfaces are strongly consistent;
+        // 'eventual' is the explicit exception that opts in to the
+        // poll-with-await helper (#305 Phase 1 review).
+        consistency: t.discoveredVia.consistency ?? 'strong',
       };
       if (t.discoveredVia.filterBy !== undefined) dv.filterBy = t.discoveredVia.filterBy;
       entry.discoveredVia = dv;

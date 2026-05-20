@@ -313,11 +313,14 @@ describe('deriveSemanticsViews: record-shaped views', () => {
     });
   });
 
-  it("normalizes omitted `discoveredVia.consistency` to 'eventual' in derived views (#305 Phase 1)", () => {
-    // The TBox documents `consistency` as defaulting to `'eventual'`
-    // when omitted. Normalize in deriveSemanticsViews so downstream
-    // consumers (Phase 3+ planner code) can rely on a concrete value
-    // rather than each re-implementing the fallback.
+  it("normalizes omitted `discoveredVia.consistency` to 'strong' in derived views (#305 Phase 1)", () => {
+    // The TBox documents `consistency` as defaulting to `'strong'`
+    // when omitted (most Camunda read-after-write surfaces are
+    // strongly consistent; `'eventual'` is the explicit opt-in for
+    // emitters that need the poll-with-await helper). Normalize in
+    // deriveSemanticsViews so downstream consumers (Phase 3+ planner
+    // code) can rely on a concrete value rather than each
+    // re-implementing the fallback.
     writeAbox(
       minimalAbox({
         semanticTypes: [
@@ -333,7 +336,7 @@ describe('deriveSemanticsViews: record-shaped views', () => {
       }),
     );
     const views = deriveSemanticsViews(workdir);
-    expect(views?.semanticTypes.EmittedKey?.discoveredVia?.consistency).toBe('eventual');
+    expect(views?.semanticTypes.EmittedKey?.discoveredVia?.consistency).toBe('strong');
   });
 
   it('deep-clones array fields so callers cannot mutate the cached parse', () => {
