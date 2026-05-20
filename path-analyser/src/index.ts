@@ -1350,10 +1350,16 @@ function buildRequestBodyFromCanonical(
       // characteristics on the fixture falls through to the most generic
       // candidate.
       const requiredStates = computeDeploymentRequiredStates(scenario, graph.domain);
+      const hardRequiredStates = computeDeploymentHardRequiredStates(scenario, graph.domain);
       const kindLevelProvides = new Set<string>(
         kind ? (graph.domain?.artifactKinds?.[kind]?.producesStates ?? []) : [],
       );
-      const regHit = chooseFixtureFromRegistry(kind, requiredStates, kindLevelProvides);
+      const regHit = chooseFixtureFromRegistry(
+        kind,
+        requiredStates,
+        kindLevelProvides,
+        hardRequiredStates,
+      );
       if (!regHit) {
         // Lift 17 / #257 retired the hard-coded `defaultFixtures` map
         // and the `'@@FILE:bpmn/simple.bpmn'` second-fallback that
@@ -1636,19 +1642,35 @@ function chooseFixtureFromRegistry(
   kind: string | undefined,
   requiredStates: ReadonlySet<string>,
   kindLevelProvides: ReadonlySet<string>,
+  hardRequiredStates?: ReadonlySet<string>,
 ): { ref: string; providesValues?: Record<string, string[]> } | undefined {
   if (!kind) return undefined;
   const candidates = getArtifactsRegistry().filter((e) => e.kind === kind);
   if (candidates.length === 0) return undefined;
 
-  const covers = candidates.filter((e) => {
+  const effectiveProvides = (e: { providesStates?: string[] }) => {
     const provides = new Set<string>(kindLevelProvides);
     for (const s of e.providesStates ?? []) provides.add(s);
-    for (const r of requiredStates) {
-      if (!provides.has(r)) return false;
-    }
+    return provides;
+  };
+  const isSuperset = (provides: Set<string>, required: ReadonlySet<string>) => {
+    for (const r of required) if (!provides.has(r)) return false;
     return true;
-  });
+  };
+
+  // Two-tier selection (#305 Phase 3): try the full requirement set first
+  // (hard + soft). If nothing covers, drop the soft `chainCleanupRequires`
+  // bias and retry with hardRequiredStates alone — hard states (semantic
+  // op.requires, runtimeEmission `emittedBy.guardedBy` guards) are
+  // necessary for the chain to function at runtime; soft states are
+  // hygiene preferences that may legitimately conflict with a hard
+  // requirement (e.g. a self-completing BPMN can't also contain a
+  // user-task element). Only when no fixture covers the hard set
+  // either do we fall through to the first registered candidate.
+  let covers = candidates.filter((e) => isSuperset(effectiveProvides(e), requiredStates));
+  if (covers.length === 0 && hardRequiredStates && hardRequiredStates.size > 0) {
+    covers = candidates.filter((e) => isSuperset(effectiveProvides(e), hardRequiredStates));
+  }
 
   // Fall back to the first registered candidate when the requirement is
   // unsatisfiable — the caller still gets a runnable suite, and the
@@ -1701,7 +1723,9 @@ function chooseFixtureFromRegistry(
  * fixture of the right kind is acceptable.
  */
 function computeDeploymentRequiredStates(
-  scenario: { operations?: ReadonlyArray<{ operationId: string }> } | undefined,
+  scenario:
+    | { operations?: ReadonlyArray<{ operationId: string }>; producedSemanticTypes?: string[] }
+    | undefined,
   domain: DomainSemantics | undefined,
 ): Set<string> {
   const result = new Set<string>();
@@ -1713,6 +1737,7 @@ function computeDeploymentRequiredStates(
     for (const s of req.requires ?? []) result.add(s);
     for (const s of req.chainCleanupRequires ?? []) result.add(s);
   }
+  for (const g of collectRuntimeEmissionGuards(scenario, domain)) result.add(g);
   // States produced by non-deployment-gateway ops earlier in the chain are
   // satisfied by their own producer step; the deployment gateway doesn't
   // need to provide them. The deployment-gateway op is identified via the
@@ -1725,4 +1750,94 @@ function computeDeploymentRequiredStates(
     for (const s of req.implicitAdds ?? []) result.delete(s);
   }
   return result;
+}
+
+/**
+ * #305 Phase 3 — the **hard** subset of deployment-required states: those
+ * whose absence would break the chain at runtime (semantic op.requires +
+ * runtimeEmission `emittedBy.guardedBy` guards), excluding the soft
+ * hygiene preferences from `chainCleanupRequires`. Used by the fixture
+ * selector as a fallback predicate when no candidate covers the full
+ * (hard ∪ soft) requirement set — a self-completing BPMN can't
+ * simultaneously contain a user-task element, so the selector must
+ * privilege correctness over hygiene.
+ */
+function computeDeploymentHardRequiredStates(
+  scenario:
+    | { operations?: ReadonlyArray<{ operationId: string }>; producedSemanticTypes?: string[] }
+    | undefined,
+  domain: DomainSemantics | undefined,
+): Set<string> {
+  const result = new Set<string>();
+  if (!scenario?.operations || !domain?.operationRequirements) return result;
+  const opReqs = domain.operationRequirements;
+  for (const opRef of scenario.operations) {
+    const req = opReqs[opRef.operationId];
+    if (!req) continue;
+    for (const s of req.requires ?? []) result.add(s);
+  }
+  for (const g of collectRuntimeEmissionGuards(scenario, domain)) result.add(g);
+  for (const opRef of scenario.operations) {
+    if (isDeploymentGatewayOp(domain, opRef.operationId)) continue;
+    const req = opReqs[opRef.operationId];
+    if (!req) continue;
+    for (const s of req.produces ?? []) result.delete(s);
+    for (const s of req.implicitAdds ?? []) result.delete(s);
+  }
+  return result;
+}
+
+/**
+ * Walk the scenario's `producedSemanticTypes` and yield every
+ * `emittedBy.guardedBy` capability declared by a `runtimeEmission`
+ * semantic type in the ABox. Shared by `computeDeploymentRequiredStates`
+ * and `computeDeploymentHardRequiredStates`.
+ */
+function collectRuntimeEmissionGuards(
+  scenario:
+    | { producedSemanticTypes?: string[]; operations?: ReadonlyArray<{ operationId: string }> }
+    | undefined,
+  domain: DomainSemantics | undefined,
+): string[] {
+  const out: string[] = [];
+  const semantics = domain?.semanticTypes;
+  if (!semantics || !scenario) return out;
+  const seen = new Set<string>();
+  for (const s of scenario.producedSemanticTypes ?? []) {
+    const decl = semantics[s];
+    if (decl?.kind === 'runtimeEmission' && decl.emittedBy?.guardedBy) {
+      for (const g of decl.emittedBy.guardedBy) {
+        if (!seen.has(g)) {
+          seen.add(g);
+          out.push(g);
+        }
+      }
+    }
+  }
+  // Feature/variant scenarios are cloned from the canonical scenario with
+  // `producedSemanticTypes` stripped (overlay rebuild). Re-derive the
+  // guards by scanning operations for any `runtimeEmission` semantic whose
+  // `discoveredVia.operationId` appears in the chain — that's the
+  // structural signal that the planner expanded a runtimeEmission for
+  // this scenario, independent of whether `producedSemanticTypes` was
+  // re-hydrated.
+  const opIds = new Set((scenario.operations ?? []).map((o) => o.operationId));
+  if (opIds.size > 0) {
+    for (const decl of Object.values(semantics)) {
+      if (
+        decl?.kind === 'runtimeEmission' &&
+        decl.discoveredVia?.operationId &&
+        opIds.has(decl.discoveredVia.operationId) &&
+        decl.emittedBy?.guardedBy
+      ) {
+        for (const g of decl.emittedBy.guardedBy) {
+          if (!seen.has(g)) {
+            seen.add(g);
+            out.push(g);
+          }
+        }
+      }
+    }
+  }
+  return out;
 }
