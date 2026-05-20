@@ -1617,26 +1617,37 @@ function resolveProvider(opId: string, field: string, scenario: EndpointScenario
  * Pick the fixture registry entry whose effective providesStates (per-entry ∪
  * kind-level `artifactKinds.<kind>.producesStates`) covers `requiredStates`.
  *
- * Selection algorithm (#159, PR A):
+ * Selection algorithm:
  *   1. Filter to entries whose `kind` matches.
- *   2. Of those, keep entries whose effective providesStates is a superset of
- *      `requiredStates`. An empty `requiredStates` matches every entry — so
- *      chains that don't impose runtime characteristics on the fixture fall
- *      through to step 3 with all candidates.
- *   3. Tie-break: smallest |entry.providesStates| wins (most specific match;
- *      fewer extra states the chain didn't ask for). Ties at that point
- *      break by array order in the registry.
+ *   2. Two-tier match (#305 Phase 3):
+ *        a. Keep entries whose effective providesStates is a superset of
+ *           `requiredStates` (hard + soft). An empty `requiredStates`
+ *           matches every entry — chains that don't impose runtime
+ *           characteristics on the fixture fall through to the tie-break.
+ *        b. If no entry covers (a) AND `hardRequiredStates` is non-empty,
+ *           retry the superset check against `hardRequiredStates` alone.
+ *           Hard states (semantic `op.requires`, `runtimeEmission.emittedBy.
+ *           guardedBy` guards) are necessary for the chain to function at
+ *           runtime; soft states (`chainCleanupRequires`) are hygiene
+ *           preferences that may legitimately conflict with a hard
+ *           requirement — e.g. a self-completing BPMN cannot simultaneously
+ *           contain a user-task element. Correctness wins over hygiene.
+ *   3. Tie-break across surviving candidates: smallest |entry.providesStates|
+ *      wins (most specific match; fewer extra states the chain didn't ask
+ *      for). Ties break by array order in the registry.
  *
  * Returns the chosen entry's `@@FILE:<path>` ref plus its `providesValues`
  * (the per-fixture modelDerived value source — #162 PR 1), or `undefined`
- * when no entry of the right kind exists at all (the caller then falls
- * back to a hard-coded default).
+ * when no entry of the right kind exists at all.
  *
- * When no entry of the right kind covers `requiredStates` (a real
+ * When neither (a) nor (b) finds a covering candidate (a real
  * misconfiguration — the chain asked for a state nothing provides), the
  * function still returns the first entry of that kind so the caller can
  * emit a runnable suite; the diagnostic should be caught earlier by the
  * fixture-registry validator or the bundled-spec invariants.
+ *
+ * `hardRequiredStates` is optional — callers that don't compute a hard/
+ * soft split pass `undefined` and get single-tier (a)-only selection.
  */
 function chooseFixtureFromRegistry(
   kind: string | undefined,
