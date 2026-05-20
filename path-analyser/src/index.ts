@@ -662,21 +662,40 @@ function buildRequestPlan(
     // identifier echoes for downstream filters.)
     // Canonical request body synthesis for POST/PUT/PATCH using requestByMediaType
     if (['POST', 'PUT', 'PATCH'].includes(opRef.method)) {
-      const plan = buildRequestBodyFromCanonical(
-        opRef.operationId,
-        scenario,
-        graph,
-        canonical,
-        requestGroupsIndex,
-        isFinal,
-      );
-      if (plan?.kind === 'json') {
-        step.bodyTemplate = plan.template;
+      // #309 Phase A — intentional discovery body wrapping. When the
+      // planner stamped a `discoveryIntent` on this opRef (it's the
+      // inserted runtimeEmission discovery step, e.g. searchUserTasks
+      // for UserTaskKey), emit ONLY the structurally-correct filter
+      // wrapper `{ filter: { [filterBy]: '${fromBinding}' } }` and
+      // skip the generic semantics synthesis pass. The intent guarantees
+      // the upstream producer's binding name (`fromBinding`) was already
+      // bound by an earlier step's extract; this step must therefore
+      // query for *that exact* runtime-emitted entity, not throw a flat
+      // bag of placeholder filters at the server.
+      if (opRef.discoveryIntent) {
+        const intent = opRef.discoveryIntent;
+        step.bodyTemplate = {
+          filter: { [intent.filterBy]: `\${${intent.fromBinding}}` },
+        };
         step.bodyKind = 'json';
-      } else if (plan?.kind === 'multipart') {
-        step.multipartTemplate = plan.template;
-        step.bodyKind = 'multipart';
-        step.expectedDeploymentSlices = plan.expectedSlices;
+        step.discoveryIntent = intent;
+      } else {
+        const plan = buildRequestBodyFromCanonical(
+          opRef.operationId,
+          scenario,
+          graph,
+          canonical,
+          requestGroupsIndex,
+          isFinal,
+        );
+        if (plan?.kind === 'json') {
+          step.bodyTemplate = plan.template;
+          step.bodyKind = 'json';
+        } else if (plan?.kind === 'multipart') {
+          step.multipartTemplate = plan.template;
+          step.bodyKind = 'multipart';
+          step.expectedDeploymentSlices = plan.expectedSlices;
+        }
       }
     }
     if (isFinal && resp?.fields?.length) {

@@ -9,6 +9,7 @@ import {
 } from './ontology/operationRoles.js';
 import type {
   ArtifactRule,
+  DiscoveryIntent,
   EndpointScenario,
   EndpointScenarioCollection,
   ExtendedGenerationOpts,
@@ -78,6 +79,14 @@ interface State {
   establisherAliasSemantics?: Record<string, string>;
   providerList?: Record<string, string[]>; // semantic -> all providers
   artifactsApplied?: string[]; // artifact rule ids used so far
+  /**
+   * #309 Phase A — opId → DiscoveryIntent stamped by
+   * `expandRuntimeEmission` on the apply branch. Propagated through
+   * every `queue.push` site so the intent survives to scenario
+   * finalisation, where it is attached to the matching `OperationRef`
+   * for downstream body-builder consumption.
+   */
+  discoveryIntents?: Record<string, DiscoveryIntent>;
 }
 
 /*
@@ -329,6 +338,30 @@ export function generateScenariosForEndpoint(
         ...state.ops.map((id) => toRef(graph.operations[id])),
         toRef(endpoint),
       ];
+      // #309 Phase A — resolve `fromBinding` from the chain's final
+      // bindings (mirroring `semanticToVarName`'s suffixing convention),
+      // and attach the resolved intent to the matching OperationRef so
+      // downstream materialisation can recognise the intentional-
+      // discovery shape. When multiple producers of the same semantic
+      // are bound in the chain, this picks the latest (`Var2`, `Var3`,
+      // …) rather than the un-suffixed base — matching the var name
+      // the producer auto-derive at `path-analyser/src/index.ts` will
+      // actually allocate for that producer. When the producer is
+      // enqueued via a defer path (which doesn't run the identifier-
+      // heuristic, so bindingsDraft has no entry yet), fall back to
+      // the un-suffixed base — the producer auto-derive will allocate
+      // exactly that name at code-emission time.
+      if (state.discoveryIntents) {
+        const finalBindings = state.bindingsDraft ?? {};
+        for (const ref of opRefs) {
+          const intent = state.discoveryIntents[ref.operationId];
+          if (!intent) continue;
+          const resolved =
+            findLatestBindingForSemantic(intent.fromSemantic, finalBindings) ??
+            `${camelLower(intent.fromSemantic)}Var`;
+          ref.discoveryIntent = { ...intent, fromBinding: resolved };
+        }
+      }
       const producedSemanticTypes = new Set<string>([...state.produced]);
       endpoint.produces.forEach((s) => {
         producedSemanticTypes.add(s);
@@ -506,6 +539,7 @@ export function generateScenariosForEndpoint(
           productionMap: newProductionMap,
           modelsDraft: state.modelsDraft,
           bindingsDraft: state.bindingsDraft,
+          discoveryIntents: state.discoveryIntents,
         });
       }
       continue;
@@ -953,6 +987,7 @@ export function generateScenariosForEndpoint(
           newProduced,
         ),
         artifactsApplied: workingState.artifactsApplied,
+        discoveryIntents: state.discoveryIntents,
       });
     }
   }
@@ -1286,6 +1321,7 @@ function deferForMissingDomainPrereqs(
         newProduced,
       ),
       artifactsApplied: workingState.artifactsApplied,
+      discoveryIntents: state.discoveryIntents,
     });
     enqueued = true;
   }
@@ -1464,6 +1500,7 @@ function expandRuntimeEmission(
           newProduced,
         ),
         artifactsApplied: workingState.artifactsApplied,
+        discoveryIntents: state.discoveryIntents,
       });
       enqueued = true;
     }
@@ -1515,6 +1552,37 @@ function expandRuntimeEmission(
   const varName = semanticToVarName(targetSemantic, bindingsDraft);
   if (!bindingsDraft[varName]) bindingsDraft[varName] = PENDING_BINDING;
 
+  // #309 Phase A — stamp DiscoveryIntent so the body builder emits
+  // `{ filter: { [filterBy]: '${fromBinding}' } }` for this inserted
+  // discovery step instead of the generic top-level scalar shape.
+  // Stamping is *eager* here (without resolving `fromBinding`) because
+  // the upstream producer may not have populated bindingsDraft yet at
+  // this BFS frontier. `fromBinding` is resolved later, at scenario
+  // finalisation, using `findLatestBindingForSemantic` against the
+  // final chain's bindings — that mirrors `semanticToVarName`'s
+  // suffixing convention (`Var`, `Var2`, …) so chains with multiple
+  // producers of the same semantic bind to the latest producer rather
+  // than the first.
+  let newDiscoveryIntents = state.discoveryIntents;
+  if (decl.discoveredVia.filterBy) {
+    const filterBy = decl.discoveredVia.filterBy;
+    const filterPaths = [`filter.${filterBy}`, filterBy];
+    const filterEntry = (discoveryNode.requestBodySemantics ?? []).find((rb) =>
+      filterPaths.includes(rb.fieldPath),
+    );
+    if (filterEntry) {
+      const intent: DiscoveryIntent = {
+        filterBy,
+        fromSemantic: filterEntry.semantic,
+        fromBinding: '', // resolved at finalisation (see attachDiscoveryIntents)
+        extractKey: decl.discoveredVia.extractKey,
+        extractInto: varName,
+        consistency: decl.discoveredVia.consistency ?? 'strong',
+      };
+      newDiscoveryIntents = { ...(state.discoveryIntents ?? {}), [discoveryOpId]: intent };
+    }
+  }
+
   const sig = signature(newOps, newProduced, newNeeded, nextCycle);
   if (seen.has(sig)) return false;
   seen.add(sig);
@@ -1534,6 +1602,7 @@ function expandRuntimeEmission(
       newProduced,
     ),
     artifactsApplied: state.artifactsApplied,
+    discoveryIntents: newDiscoveryIntents,
   });
   return true;
 }
@@ -1809,6 +1878,26 @@ function semanticToVarName(semantic: string, existing: Record<string, string>): 
   let i = 2;
   while (existing[base + i]) i++;
   return base + i;
+}
+
+// Mirror of `semanticToVarName` for the *consumer* side: given a semantic
+// for which a binding has already been allocated upstream in the chain,
+// return the latest-allocated var name (`Var`, `Var2`, `Var3`, …) so the
+// discovery step's filter binds to the most recent producer rather than
+// the first. Returns undefined if no binding exists for the semantic.
+function findLatestBindingForSemantic(
+  semantic: string,
+  bindings: Record<string, string>,
+): string | undefined {
+  const base = `${camelLower(semantic)}Var`;
+  if (!(base in bindings)) return undefined;
+  let latest = base;
+  let i = 2;
+  while (base + i in bindings) {
+    latest = base + i;
+    i++;
+  }
+  return latest;
 }
 
 function camelLower(s: string): string {
