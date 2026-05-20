@@ -144,6 +144,24 @@
       ],
       "fetcher": "getUserTask",
       "description": "#305 Phase 4 — a runtime-emitted user task, identified by its server-minted userTaskKey. UserTasks are not created via a client-facing endpoint; they are emitted as a side-effect of process-instance progression (when a user-task service-task activates). Discovered at planning time via the UserTaskKey runtimeEmission entry (discoveredVia searchUserTasks, post-#308). Mutated in place by updateUserTask (and, in future phases, assignUserTask/unassignUserTask/completeUserTask) and read back via getUserTask. Consumed by the UpdatedFieldVisibleOnReadBack scenario template (#305 Phase 4)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Incident",
+      "shape": "runtime-entity",
+      "identifiers": [
+        "IncidentKey"
+      ],
+      "fetcher": "getIncident",
+      "stateField": "state",
+      "transitions": [
+        {
+          "op": "resolveIncident",
+          "from": "ACTIVE",
+          "to": "RESOLVED"
+        }
+      ],
+      "description": "#305 Phase 5d / #189 — a runtime-emitted incident, identified by its server-minted incidentKey. Incidents are not created via a client-facing endpoint; they are emitted as a side-effect of a process instance whose BPMN deterministically fails at runtime (e.g. incident-script-task.bpmn). Discovered at planning time via the IncidentKey runtimeEmission entry (discoveredVia searchIncidents, #305 Phase 5a). The only client-facing state transition on the OCA API is resolveIncident (ACTIVE → RESOLVED); read back via getIncident. Consumed by the StateTransitionVisibleAfterAction scenario template (#305 Phase 5d / #189). No mutators[] today — Incidents do not expose per-field mutators on the public API."
     }
   ]
 }

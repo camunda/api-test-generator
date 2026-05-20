@@ -146,7 +146,31 @@ function renderLifecycleSuite(
   // a syntactically valid spec that secretly elides a step.
   const subjectKind = file.subjectKind;
   if (subjectKind === 'RuntimeEntity') {
-    return renderReadBackSuite(file, globalContextSeeds);
+    // RuntimeEntity templates share the 3-step shape but differ on the
+    // observe step's assertion kind: `fieldEquals` (#305 Phase 4,
+    // UpdatedFieldVisibleOnReadBack) vs `stateEquals` (#305 Phase 5d /
+    // #189, StateTransitionVisibleAfterAction). Dispatch on the third
+    // step's assertion kind so each render path is self-contained.
+    if (steps.length !== 3) {
+      throw new Error(
+        `RuntimeEntity template ${file.subjectName} must have exactly 3 steps; got ${steps.length}.`,
+      );
+    }
+    const observe = steps[2];
+    if (observe.kind !== 'observe') {
+      throw new Error(
+        `RuntimeEntity template ${file.subjectName} step 2 must be an observe step (got '${observe.kind}').`,
+      );
+    }
+    if (observe.assertion.kind === 'fieldEquals') {
+      return renderReadBackSuite(file, globalContextSeeds);
+    }
+    if (observe.assertion.kind === 'stateEquals') {
+      return renderStateTransitionSuite(file, globalContextSeeds);
+    }
+    throw new Error(
+      `RuntimeEntity template ${file.subjectName} observe.assertion.kind must be 'fieldEquals' or 'stateEquals' (got '${observe.assertion.kind}').`,
+    );
   }
   if (subjectKind !== 'Edge' && subjectKind !== 'Entity') {
     throw new Error(
@@ -169,6 +193,7 @@ function renderLifecycleSuite(
   if (
     observePresent.kind !== 'observe' ||
     observePresent.assertion.kind === 'fieldEquals' ||
+    observePresent.assertion.kind === 'stateEquals' ||
     observePresent.assertion.expect !== 'present'
   ) {
     throw new Error(`Step 2 of ${file.subjectName} must be a present-observe step.`);
@@ -179,6 +204,7 @@ function renderLifecycleSuite(
   if (
     observeAbsent.kind !== 'observe' ||
     observeAbsent.assertion.kind === 'fieldEquals' ||
+    observeAbsent.assertion.kind === 'stateEquals' ||
     observeAbsent.assertion.expect !== 'absent'
   ) {
     throw new Error(`Step 4 of ${file.subjectName} must be an absent-observe step.`);
@@ -753,6 +779,182 @@ function appendObserveFieldEqualsStep(
   }
 }
 
+// ---------------------------------------------------------------------------
+// #305 Phase 5d / #189 — StateTransitionVisibleAfterAction render path
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a 3-step `StateTransitionVisibleAfterAction` template
+ * scenario (per Incident.resolveIncident, etc.):
+ *   1. prereqChain inline (establish the runtime entity + bind its id,
+ *      typically deploy → createProcessInstance → searchIncidents)
+ *   2. invoke (transition op, e.g. resolveIncident)
+ *   3. observe (fetcher; assert body.<stateField> === expectedState)
+ *
+ * Parallel to {@link renderReadBackSuite}; differs only in the
+ * observe step's assertion shape — `stateEquals` reads the expected
+ * value from the assertion itself rather than the mutator body.
+ */
+function renderStateTransitionSuite(
+  file: TemplateScenarioFile,
+  globalContextSeeds: readonly TemplateGlobalContextSeed[],
+): string {
+  const scenario = file.scenario;
+  const steps = scenario.steps;
+  if (steps.length !== 3) {
+    throw new Error(
+      `StateTransitionVisibleAfterAction template ${file.subjectName} must have exactly 3 steps; got ${steps.length}.`,
+    );
+  }
+  const [prereq, transition, observe] = steps;
+  if (prereq.kind !== 'prereqChain') {
+    throw new Error(`Step 0 of ${file.subjectName} must be a prereqChain step.`);
+  }
+  if (transition.kind !== 'invoke') {
+    throw new Error(`Step 1 of ${file.subjectName} must be an invoke step.`);
+  }
+  if (observe.kind !== 'observe' || observe.assertion.kind !== 'stateEquals') {
+    throw new Error(
+      `Step 2 of ${file.subjectName} must be an observe step with assertion.kind='stateEquals'.`,
+    );
+  }
+  const allRequestSteps: RequestStep[] = [
+    ...prereq.requestPlan,
+    transition.requestPlan,
+    observe.requestPlan,
+  ];
+  const ecOps = new Set<string>(scenario.eventuallyConsistentOps ?? []);
+  const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
+  const needsAwaitEventually =
+    allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps)) ||
+    ecOps.has(observe.operationId);
+  const needsResolveFixture = allRequestSteps.some(
+    (rp) => rp.bodyKind === 'multipart' && !!rp.multipartTemplate,
+  );
+
+  const lines: string[] = [];
+  lines.push("import { expect, test } from '@playwright/test';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  const seedingImports = ['initSpecSalt', 'seedBinding'];
+  if (needsExtractInto) seedingImports.push('extractInto');
+  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from '../support/await-eventually';");
+  }
+  if (needsResolveFixture) {
+    lines.push("import { resolveFixture } from '../support/fixtures';");
+  }
+  lines.push('');
+  lines.push(`initSpecSalt('${file.subjectName}.state-transition');`);
+  lines.push('');
+  const fromTo = `${observe.assertion.fromState} → ${observe.assertion.expectedState}`;
+  lines.push(`test.describe('${file.subjectName} state transition (${fromTo})', () => {`);
+  lines.push(
+    `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }) => {`,
+  );
+  lines.push('    const baseUrl = buildBaseUrl();');
+  lines.push('    const ctx: Record<string, unknown> = {};');
+
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+    }),
+  );
+
+  let stepIdx = 0;
+  for (const rp of prereq.requestPlan) {
+    lines.push('');
+    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    stepIdx++;
+  }
+
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    transition.requestPlan,
+    stepIdx,
+    `invoke (transition): ${transition.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+
+  lines.push('');
+  appendObserveStateEqualsStep(
+    lines,
+    observe,
+    stepIdx,
+    `observe (read-back): ${observe.operationId}`,
+    ecOps,
+  );
+
+  lines.push('  });');
+  lines.push('});');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * Render an observe step whose assertion is `stateEquals`. Reads the
+ * fetcher's 200 response and asserts a single equality on the named
+ * state field against the literal `expectedState` from the assertion.
+ */
+function appendObserveStateEqualsStep(
+  lines: string[],
+  step: ObserveStep,
+  idx: number,
+  label: string,
+  ecOps: ReadonlySet<string>,
+): void {
+  if (step.assertion.kind !== 'stateEquals') {
+    throw new Error(
+      `appendObserveStateEqualsStep called with assertion.kind='${step.assertion.kind}'`,
+    );
+  }
+  const respVar = `resp${idx + 1}`;
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const method = step.requestPlan.method.toLowerCase();
+  const isEC = ecOps.has(step.operationId);
+  lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
+  if (isEC) {
+    lines.push(`      const url = baseUrl + ${urlExpr};`);
+    lines.push(`      const ${respVar} = await awaitEventually(`);
+    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        {`);
+    lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
+    lines.push(`          operationId: '${step.operationId}',`);
+    lines.push(`        },`);
+    lines.push(`      );`);
+  } else {
+    const inline = renderInlineStepLines({
+      step: step.requestPlan,
+      idx,
+      varName: respVar,
+      urlExpr,
+      method,
+      shouldAwaitEventually: false,
+    });
+    for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  }
+  lines.push(`      if (${respVar}.status() !== 200) {`);
+  lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
+  lines.push('      }');
+  lines.push(`      expect(${respVar}.status()).toBe(200);`);
+  lines.push(`      const __body = await ${respVar}.json();`);
+  const accessExpr = buildOptionalAccessChain(
+    '__body',
+    stripArrayMarkers(step.assertion.responseBodyPath),
+  );
+  const literal = JSON.stringify(step.assertion.expectedState);
+  lines.push(`      expect(${accessExpr}).toEqual(${literal});`);
+  lines.push('    });');
+  for (const wait of step.requestPlan.eventualWaitsAfter ?? []) {
+    appendEventualWait(lines, wait, idx);
+  }
+}
 /**
  * Walk `body` along `path` (object property names) and return the
  * primitive/array value at that leaf, or `undefined` if any segment

@@ -4804,7 +4804,7 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     // (e.g. server-minted resources whose existence is only implied by
     // path-param conventions). These are deliberate ABox-only entries
     // and must not trip the spec-vs-abox drift check.
-    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document', 'UserTask']);
+    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document', 'UserTask', 'Incident']);
     const unaccounted = aboxOnly.filter((n) => !ABOX_AUTHORITATIVE_KINDS.has(n));
     expect(
       unaccounted,
@@ -7057,8 +7057,11 @@ describeForThisConfig(
       // against the runtime-entity ABox fields `mutators[]` (plural,
       // referenced symbolically as `mutator` from steps) and
       // `fetcher`. The compiler fans `mutator` out to one scenario
-      // per entry at instantiation time.
-      const RUNTIME_ENTITY_ROLES = new Set(['mutator', 'fetcher']);
+      // per entry at instantiation time. #305 Phase 5d / #189 adds
+      // `transition` for the StateTransitionVisibleAfterAction
+      // template, which fans `transition` out to one scenario per
+      // `transitions[]` entry.
+      const RUNTIME_ENTITY_ROLES = new Set(['mutator', 'fetcher', 'transition']);
       const offenders: string[] = [];
       for (const tpl of templates.templates) {
         const validRoles =
@@ -7084,7 +7087,7 @@ describeForThisConfig(
         `Every template step's role reference must resolve to a known field on its appliesTo subject ABox. ` +
           `For 'Edge' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
           `For 'Entity' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
-          `For 'RuntimeEntity' subjects, valid roles are: mutator, fetcher.`,
+          `For 'RuntimeEntity' subjects, valid roles are: mutator, fetcher, transition.`,
       ).toEqual([]);
     });
 
@@ -8034,6 +8037,162 @@ describeForThisConfig(
         }
       }
       expect(offenders).toEqual([]);
+    });
+  },
+);
+
+// ===========================================================================
+// #305 Phase 5d / #189 — StateTransitionVisibleAfterAction RuntimeEntity
+// scenarios.
+//
+// Same shape as the Phase 4 readback invariants above: skip when the
+// template emitted nothing for this config (no runtime-entity ABox row
+// with transitions[]), otherwise assert structural well-formedness of
+// the compiled scenarios AND the emitted Playwright spec for the
+// `resolveIncident` first-slice. Future transitions (completeJob,
+// completeUserTask, cancelProcessInstance, …) drop into the same
+// guard as soon as their ABox rows land.
+// ===========================================================================
+describeForThisConfig(
+  'bundled-spec invariants: StateTransitionVisibleAfterAction scenarios (#305 Phase 5d / #189)',
+  () => {
+    const STATE_TRANSITION_DIR = join(
+      SCENARIOS_DIR,
+      'templates',
+      'StateTransitionVisibleAfterAction',
+    );
+
+    interface StateTransitionFile {
+      templateName: string;
+      subjectName: string;
+      subjectKind: string;
+      scenario: {
+        steps: Array<{
+          kind: string;
+          operationId?: string;
+          assertion?: {
+            kind: string;
+            responseBodyPath?: string[];
+            expectedState?: string;
+            fromState?: string;
+            transitionOp?: string;
+          };
+        }>;
+      };
+    }
+
+    function loadAll(): { file: string; data: StateTransitionFile }[] {
+      if (!existsSync(STATE_TRANSITION_DIR)) return [];
+      const out: { file: string; data: StateTransitionFile }[] = [];
+      for (const f of readdirSync(STATE_TRANSITION_DIR)) {
+        if (!f.endsWith('.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+        const data = JSON.parse(
+          readFileSync(join(STATE_TRANSITION_DIR, f), 'utf8'),
+        ) as StateTransitionFile;
+        out.push({ file: f, data });
+      }
+      return out;
+    }
+
+    it('every emitted scenario has the canonical 3-step shape (prereqChain → invoke → observe.stateEquals)', () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const kinds = data.scenario.steps.map((s) => s.kind);
+        if (
+          kinds.length !== 3 ||
+          kinds[0] !== 'prereqChain' ||
+          kinds[1] !== 'invoke' ||
+          kinds[2] !== 'observe'
+        ) {
+          offenders.push(
+            `${file}: expected [prereqChain, invoke, observe], got ${JSON.stringify(kinds)}`,
+          );
+          continue;
+        }
+        const observe = data.scenario.steps[2];
+        if (observe.assertion?.kind !== 'stateEquals') {
+          offenders.push(
+            `${file}: observe.assertion.kind expected 'stateEquals', got '${observe.assertion?.kind}'`,
+          );
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it("every stateEquals assertion's responseBodyPath is a live 200-response leaf of the fetcher", () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operationsById?: Record<string, { responseLeafPaths?: Record<string, string[]> }>;
+      };
+      const opsById = graph.operationsById ?? {};
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const observe = data.scenario.steps[2];
+        const fetcherOpId = observe.operationId;
+        if (typeof fetcherOpId !== 'string') {
+          offenders.push(`${file}: observe.operationId missing`);
+          continue;
+        }
+        const liveLeaves = new Set(opsById[fetcherOpId]?.responseLeafPaths?.['200'] ?? []);
+        if (liveLeaves.size === 0) {
+          offenders.push(
+            `${file}: fetcher='${fetcherOpId}' has no 2xx responseLeafPaths in the graph`,
+          );
+          continue;
+        }
+        const path = observe.assertion?.responseBodyPath;
+        if (!Array.isArray(path) || path.length === 0) {
+          offenders.push(`${file}: stateEquals.responseBodyPath must be non-empty`);
+          continue;
+        }
+        const dotted = path.join('.');
+        if (!liveLeaves.has(dotted)) {
+          offenders.push(
+            `${file}: stateEquals.responseBodyPath '${dotted}' is not a live 200-response leaf of '${fetcherOpId}'`,
+          );
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('every stateEquals assertion carries non-empty fromState, expectedState, and transitionOp', () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const a = data.scenario.steps[2].assertion;
+        if (a?.kind !== 'stateEquals') continue;
+        if (!a.fromState) offenders.push(`${file}: stateEquals.fromState missing`);
+        if (!a.expectedState) offenders.push(`${file}: stateEquals.expectedState missing`);
+        if (!a.transitionOp) offenders.push(`${file}: stateEquals.transitionOp missing`);
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('Incident.resolveIncident slice: emitted Playwright spec asserts state === RESOLVED via getIncident read-back', () => {
+      const specPath = join(
+        GENERATED_TESTS_DIR,
+        'state-transitions',
+        'Incident.resolveIncident.lifecycle.spec.ts',
+      );
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const required = [
+        "operationId: 'getIncident'",
+        "operationId: 'searchIncidents'",
+        '/resolution',
+        ".state).toEqual('RESOLVED')",
+        'incident-script-task.bpmn',
+      ];
+      const missing = required.filter((needle) => !src.includes(needle));
+      expect(missing).toEqual([]);
     });
   },
 );
