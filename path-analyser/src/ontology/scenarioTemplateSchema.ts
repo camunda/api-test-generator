@@ -109,14 +109,14 @@ export const scenarioTemplateSchema = {
     },
     AppliesTo: {
       description:
-        'Discriminator naming the subject ABox the template is instantiated against. `Edge` instantiates against the edges ABox (#269 Phase 1). `Entity` (#280) instantiates against the entity-kinds ABox, restricted to `shape: "entity"` rows (those carry the required `establishedBy`/`observableVia`/`revokedBy` triple). Extending the union is how future subject ABoxes (resources, state-transitions, …) opt in to template-driven scenario emission.',
+        'Discriminator naming the subject ABox the template is instantiated against. `Edge` instantiates against the edges ABox (#269 Phase 1). `Entity` (#280) instantiates against the entity-kinds ABox, restricted to `shape: "entity"` rows (those carry the required `establishedBy`/`observableVia`/`revokedBy` triple). `RuntimeEntity` (#305 Phase 4) also instantiates against the entity-kinds ABox, but restricted to `shape: "runtime-entity"` rows (which carry `mutators[]` + `fetcher` instead of the CRUD triple). Extending the union is how future subject ABoxes (resources, state-transitions, …) opt in to template-driven scenario emission.',
       type: 'object',
       additionalProperties: false,
       required: ['kind'],
       properties: {
         kind: {
           type: 'string',
-          enum: ['Edge', 'Entity'],
+          enum: ['Edge', 'Entity', 'RuntimeEntity'],
         },
       },
     },
@@ -167,13 +167,13 @@ export const scenarioTemplateSchema = {
           type: 'string',
           minLength: 1,
           description:
-            "Subject-role name (e.g. `observableVia`). At instantiation time the planner resolves this to the subject's observation operationId, invokes it, and asserts on the response per `expect`. The concrete assertion shape is chosen by `appliesTo.kind`: for `Edge` it is a projection-search membership check (`toContain` / `not.toContain` on the configured array path); for `Entity` (#280) it is a get-by-id status check (`expect: 'present'` → status 200; `expect: 'absent'` → status 404).",
+            "Subject-role name (e.g. `observableVia`, `fetcher`). At instantiation time the planner resolves this to the subject's observation operationId, invokes it, and asserts on the response per `expect`. The concrete assertion shape is chosen by `appliesTo.kind` × `expect`: for `Edge` + `present|absent` it is a projection-search membership check (`toContain` / `not.toContain` on the configured array path); for `Entity` (#280) + `present|absent` it is a get-by-id status check (`expect: 'present'` → status 200; `expect: 'absent'` → status 404); for `RuntimeEntity` (#305 Phase 4) + `fieldEquals` it is a per-field equality check on the fetcher 200 response against the values emitted by the preceding mutator request body.",
         },
         expect: {
           type: 'string',
-          enum: ['present', 'absent'],
+          enum: ['present', 'absent', 'fieldEquals'],
           description:
-            "High-level membership predicate. `present` asserts the subject instance is visible to the observer; `absent` asserts it is not. The emitter compiles this to a concrete assertion at instantiation time based on the template's `appliesTo.kind` (see ObserveStep.op above).",
+            "High-level observation predicate. `present`/`absent` assert the subject instance is/is not visible to the observer (compiled to membership or status assertions per `appliesTo.kind`). `fieldEquals` (#305 Phase 4) asserts that every field present in the preceding mutator's emitted request body is reflected unchanged in the fetcher's 200 response; only valid for `appliesTo.kind: \"RuntimeEntity\"` templates that include an Observe-after-Invoke pattern. The concrete list of fields is derived at instantiation time by intersecting the mutator request body's leaves with the fetcher's `responseLeafPaths['200']`, bridged by **last-segment leaf name** (not `semanticType` — changeset fields typically lack `x-semantic-type` upstream). Mutator-body leaves with no matching fetcher leaf are skipped silently; the instantiator errors only if the intersection is empty. No field selector lives in the template ABox.",
         },
       },
     },

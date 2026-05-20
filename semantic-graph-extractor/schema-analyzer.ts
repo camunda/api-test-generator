@@ -163,6 +163,13 @@ export class SchemaAnalyzer {
     // Extract response semantic types
     const responseSemanticTypes = this.extractResponseSemanticTypes(operation.responses, spec);
 
+    // #305 Phase 4: collect every primitive response leaf path per
+    // status code (regardless of `x-semantic-type`). Powers the
+    // UpdatedFieldVisibleOnReadBack instantiator's name-based bridge
+    // from a mutator's emitted request body to the fetcher's
+    // observable response.
+    const responseLeafPaths = this.extractResponseLeafPaths(operation.responses, spec);
+
     // Classify operation type
     const operationType = this.classifyOperation(operation, path, method);
 
@@ -310,6 +317,7 @@ export class SchemaAnalyzer {
       operationMetadata,
       conditionalIdempotency,
       establishes,
+      responseLeafPaths,
     };
   }
 
@@ -453,6 +461,93 @@ export class SchemaAnalyzer {
     }
 
     return result;
+  }
+
+  /**
+   * #305 Phase 4: collect ALL primitive leaf paths from a response
+   * schema, regardless of semantic-type annotation. Used by the
+   * UpdatedFieldVisibleOnReadBack instantiator to name-match a
+   * mutator's emitted body fields against the fetcher's observable
+   * response shape. Arrays appear as `prefix[].leaf`. Cycles in `$ref`
+   * chains are broken with a per-walk seen-set.
+   */
+  private extractResponseLeafPaths(
+    responses: ResponsesObject,
+    spec: OpenAPISpec,
+  ): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+    for (const [statusCode, response] of Object.entries(responses)) {
+      let resolved: ResponseObject | null;
+      if (response && typeof response === 'object' && '$ref' in response) {
+        resolved = this.resolveReference<ResponseObject>(response.$ref, spec);
+        if (!resolved) continue;
+      } else {
+        resolved = response;
+      }
+      const leaves: string[] = [];
+      if (resolved.content) {
+        for (const mediaType of Object.values(resolved.content)) {
+          if (mediaType.schema) {
+            this.collectLeafPaths(mediaType.schema, '', leaves, spec, new Set());
+          }
+        }
+      }
+      result[statusCode] = Array.from(new Set(leaves));
+    }
+    return result;
+  }
+
+  private collectLeafPaths(
+    schema: Schema | ReferenceObject,
+    fieldPath: string,
+    leaves: string[],
+    spec: OpenAPISpec,
+    seenRefs: Set<string>,
+  ): void {
+    const actual: Schema | ReferenceObject = schema;
+    if ('$ref' in schema && schema.$ref) {
+      if (seenRefs.has(schema.$ref)) return;
+      const nextSeen = new Set(seenRefs);
+      nextSeen.add(schema.$ref);
+      const resolved = this.resolveReference<Schema>(schema.$ref, spec);
+      if (!resolved) return;
+      this.collectLeafPaths(resolved, fieldPath, leaves, spec, nextSeen);
+      return;
+    }
+    // biome-ignore lint/plugin: After the $ref branch, value is structurally a Schema.
+    const s = actual as Schema;
+    const hasProps = s.properties && Object.keys(s.properties).length > 0;
+    const hasItems = !!s.items;
+    const hasComposite = !!(s.allOf || s.oneOf || s.anyOf);
+    if (!hasProps && !hasItems && !hasComposite) {
+      if (fieldPath) leaves.push(fieldPath);
+      return;
+    }
+    if (s.properties) {
+      for (const [name, sub] of Object.entries(s.properties)) {
+        const next = fieldPath ? `${fieldPath}.${name}` : name;
+        this.collectLeafPaths(sub, next, leaves, spec, seenRefs);
+      }
+    }
+    if (s.items) {
+      const next = fieldPath ? `${fieldPath}[]` : '[]';
+      this.collectLeafPaths(s.items, next, leaves, spec, seenRefs);
+    }
+    if (s.allOf) {
+      s.allOf.forEach((sub) => {
+        this.collectLeafPaths(sub, fieldPath, leaves, spec, seenRefs);
+      });
+    }
+    if (s.oneOf) {
+      s.oneOf.forEach((sub) => {
+        this.collectLeafPaths(sub, fieldPath, leaves, spec, seenRefs);
+      });
+    }
+    if (s.anyOf) {
+      s.anyOf.forEach((sub) => {
+        this.collectLeafPaths(sub, fieldPath, leaves, spec, seenRefs);
+      });
+    }
   }
 
   /**

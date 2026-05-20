@@ -43,6 +43,23 @@
 // minted outside the API and have no in-API lifecycle. The Draft-07
 // `if/then/else` on `shape` below encodes both rules.
 //
+// #305 Phase 4 — `shape: "runtime-entity"` is the third shape. It
+// covers entities that are emitted by the runtime as a side-effect of
+// some other operation (e.g. a UserTask emitted when a user-task
+// service-task activates inside a process instance) rather than being
+// directly created by a client-facing endpoint. Runtime entities have
+// no `establishedBy`/`observableVia`/`revokedBy` triple; instead they
+// carry `mutators[]` (one-or-more opIds that mutate the entity in
+// place — e.g. `updateUserTask`, `assignUserTask`, `completeUserTask`)
+// and a `fetcher` (single opId, conventionally a GET-by-id). The pair
+// is consumed by the `UpdatedFieldVisibleOnReadBack` scenario template,
+// which emits one "mutate → re-fetch and assert the mutated field
+// equals the request value" scenario per mutator. Discovery of the
+// pre-existing entity (e.g. `searchUserTasks` to find an active
+// user-task key) is the planner's job via the runtimeEmission
+// machinery shipped in Phase 3 (#308) — the ABox itself only declares
+// the mutator/fetcher catalogue.
+//
 // JSON-LD (`@context`, `@type`) is accepted and preserved verbatim but
 // not interpreted by the loader — same convention as `edgeSchema.ts`.
 
@@ -51,7 +68,7 @@ export const entityKindsSchema = {
   $id: 'https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json',
   title: 'Entity-kinds ABox (api-test-generator ontology, v1)',
   description:
-    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of two shapes (`entity` for in-API-managed, `external-entity` for identifiers minted outside the API); and (for both shapes) a list of semantic identifier-type names that identify it. `shape: "entity"` kinds additionally carry an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/`revokedBy`) consumed by the EntityLifecycle scenario template (#280) — asymmetric subsets surface as ABox-load validation errors (the resource-leak / write-only smells are product anti-patterns the generator refuses to silently paper over). `shape: "external-entity"` kinds (e.g. Client) must NOT carry any of the three. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, CRUD op methods being POST/GET/DELETE, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
+    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of three shapes (`entity` for in-API-managed with full CRUD, `external-entity` for identifiers minted outside the API, `runtime-entity` for entities emitted by the runtime as a side-effect of other operations); and a list of semantic identifier-type names that identify it. `shape: "entity"` kinds carry an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/`revokedBy`) consumed by the EntityLifecycle scenario template (#280) — asymmetric subsets surface as ABox-load validation errors. `shape: "external-entity"` kinds (e.g. Client) must NOT carry the CRUD triple. `shape: "runtime-entity"` kinds (#305 Phase 4, e.g. UserTask) carry `mutators[]` plus a single `fetcher` consumed by the `UpdatedFieldVisibleOnReadBack` template; the if/then/else below enforces that runtime-entity kinds carry mutators+fetcher and that entity/external-entity kinds do NOT. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, CRUD op methods being POST/GET/DELETE, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
   type: 'object',
   additionalProperties: false,
   required: ['version', 'kinds'],
@@ -91,9 +108,9 @@ export const entityKindsSchema = {
         },
         shape: {
           type: 'string',
-          enum: ['entity', 'external-entity'],
+          enum: ['entity', 'external-entity', 'runtime-entity'],
           description:
-            '`entity`: in-API-managed (producer + consumer ops both inside the API). `external-entity`: identifier minted outside the API; planner treats `identifiers[]` as `externalBoundary` (client-mintable, no upstream producer required).',
+            '`entity`: in-API-managed (producer + consumer ops both inside the API). `external-entity`: identifier minted outside the API; planner treats `identifiers[]` as `externalBoundary` (client-mintable, no upstream producer required). `runtime-entity` (#305 Phase 4): entity emitted by the runtime as a side-effect of another operation (e.g. UserTask from a process instance); discovered via runtimeEmission, mutated in place, and re-read via `mutators[]` + `fetcher` consumed by the `UpdatedFieldVisibleOnReadBack` template.',
         },
         identifiers: {
           type: 'array',
@@ -121,16 +138,34 @@ export const entityKindsSchema = {
           type: 'string',
           minLength: 1,
           description:
-            '#280 — operationId of the canonical delete operation for this entity kind (e.g. `deleteUser` for `User`). Conventionally a `DELETE` returning 204. Required on `shape: "entity"`; forbidden on `shape: "external-entity"`. ProcessInstance (cancel/delete divergence) is intentionally excluded here — see follow-up #281.',
+            '#280 — operationId of the canonical delete operation for this entity kind (e.g. `deleteUser` for `User`). Conventionally a `DELETE` returning 204. Required on `shape: "entity"`; forbidden on `shape: "external-entity"` and `shape: "runtime-entity"`. ProcessInstance (cancel/delete divergence) is intentionally excluded here — see follow-up #281.',
+        },
+        mutators: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'string',
+            minLength: 1,
+          },
+          description:
+            '#305 Phase 4 — operationIds of operations that mutate the runtime entity in place (e.g. `updateUserTask`, `assignUserTask`, `completeUserTask` for `UserTask`). Conventionally a `PATCH`/`POST`/`DELETE` on a sub-resource of the entity\'s identifier (`/{id}/...`). Required on `shape: "runtime-entity"`; forbidden on `shape: "entity"` and `shape: "external-entity"`. The `UpdatedFieldVisibleOnReadBack` template emits one scenario per mutator.',
+        },
+        fetcher: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#305 Phase 4 — operationId of the canonical read-back operation for this runtime entity (e.g. `getUserTask` for `UserTask`). Conventionally a `GET` returning 200, accepting the entity\'s identifier(s) as path parameters. Required on `shape: "runtime-entity"`; forbidden on `shape: "entity"` and `shape: "external-entity"`.',
         },
         description: {
           type: 'string',
           minLength: 1,
         },
       },
-      // All-or-nothing CRUD triple gated by shape (#280).
-      //   - shape=entity: all three of establishedBy/observableVia/revokedBy are required.
-      //   - shape=external-entity: none of the three may be present.
+      // All-or-nothing CRUD triple / runtime-entity pair gated by shape.
+      //   - shape=entity (#280):           all three of establishedBy/observableVia/revokedBy required;
+      //                                    mutators/fetcher forbidden.
+      //   - shape=external-entity (#280):  none of the CRUD triple, no mutators/fetcher.
+      //   - shape=runtime-entity (#305-4): mutators+fetcher required; CRUD triple forbidden.
       // Draft-07 if/then/else: the `if` clause matches by `shape` only
       // (no extra `required`), then branches set the all-or-nothing
       // constraint on the same instance.
@@ -138,12 +173,33 @@ export const entityKindsSchema = {
         {
           if: { properties: { shape: { const: 'entity' } } },
           // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
-          then: { required: ['establishedBy', 'observableVia', 'revokedBy'] },
+          then: {
+            required: ['establishedBy', 'observableVia', 'revokedBy'],
+            not: {
+              anyOf: [{ required: ['mutators'] }, { required: ['fetcher'] }],
+            },
+          },
         },
         {
           if: { properties: { shape: { const: 'external-entity' } } },
           // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
           then: {
+            not: {
+              anyOf: [
+                { required: ['establishedBy'] },
+                { required: ['observableVia'] },
+                { required: ['revokedBy'] },
+                { required: ['mutators'] },
+                { required: ['fetcher'] },
+              ],
+            },
+          },
+        },
+        {
+          if: { properties: { shape: { const: 'runtime-entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: {
+            required: ['mutators', 'fetcher'],
             not: {
               anyOf: [
                 { required: ['establishedBy'] },

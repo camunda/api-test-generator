@@ -18,6 +18,16 @@
         "type": "__NON_EXISTENT_JOB_TYPE__",
         "requestTimeout": 250
       }
+    },
+    "updateUserTask": {
+      "changeset": {
+        "dueDate": "2099-12-31T23:59:59Z",
+        "followUpDate": "2099-06-15T10:00:00Z",
+        "candidateUsers": ["user1", "user2"],
+        "candidateGroups": ["group1", "group2"],
+        "priority": 80
+      },
+      "action": "customUpdate"
     }
   }
 }

@@ -145,6 +145,9 @@ function renderLifecycleSuite(
   // (materializer CLI, future per-suite invocations) and must not produce
   // a syntactically valid spec that secretly elides a step.
   const subjectKind = file.subjectKind;
+  if (subjectKind === 'RuntimeEntity') {
+    return renderReadBackSuite(file, globalContextSeeds);
+  }
   if (subjectKind !== 'Edge' && subjectKind !== 'Entity') {
     throw new Error(
       `Unknown subjectKind '${String(subjectKind)}' on template scenario for ${file.subjectName}.`,
@@ -163,13 +166,21 @@ function renderLifecycleSuite(
   if (establish.kind !== 'invoke') {
     throw new Error(`Step 1 of ${file.subjectName} must be an invoke step.`);
   }
-  if (observePresent.kind !== 'observe' || observePresent.assertion.expect !== 'present') {
+  if (
+    observePresent.kind !== 'observe' ||
+    observePresent.assertion.kind === 'fieldEquals' ||
+    observePresent.assertion.expect !== 'present'
+  ) {
     throw new Error(`Step 2 of ${file.subjectName} must be a present-observe step.`);
   }
   if (revoke.kind !== 'invoke') {
     throw new Error(`Step 3 of ${file.subjectName} must be an invoke step.`);
   }
-  if (observeAbsent.kind !== 'observe' || observeAbsent.assertion.expect !== 'absent') {
+  if (
+    observeAbsent.kind !== 'observe' ||
+    observeAbsent.assertion.kind === 'fieldEquals' ||
+    observeAbsent.assertion.expect !== 'absent'
+  ) {
     throw new Error(`Step 4 of ${file.subjectName} must be an absent-observe step.`);
   }
   // Per-subject assertion-kind consistency check. The instantiator
@@ -556,6 +567,215 @@ function buildOptionalAccessChain(rootExpr: string, segments: readonly string[])
     acc = `(${acc} as Record<string, unknown> | null | undefined)?.['${seg}']`;
   }
   return acc;
+}
+
+// ---------------------------------------------------------------------------
+// #305 Phase 4 — UpdatedFieldVisibleOnReadBack render path
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a 3-step `UpdatedFieldVisibleOnReadBack` template scenario:
+ *   1. prereqChain inline (establish the runtime entity + bind its id)
+ *   2. invoke (mutator)
+ *   3. observe (fetcher; assert each `fieldEquals` tuple)
+ *
+ * Parallel to {@link renderLifecycleSuite}'s 5-step shape but no
+ * revoke / absent-observe pair (runtime-emitted entities don't have a
+ * client-facing teardown).
+ */
+function renderReadBackSuite(
+  file: TemplateScenarioFile,
+  globalContextSeeds: readonly TemplateGlobalContextSeed[],
+): string {
+  const scenario = file.scenario;
+  const steps = scenario.steps;
+  if (steps.length !== 3) {
+    throw new Error(
+      `UpdatedFieldVisibleOnReadBack template ${file.subjectName} must have exactly 3 steps; got ${steps.length}.`,
+    );
+  }
+  const [prereq, mutate, observe] = steps;
+  if (prereq.kind !== 'prereqChain') {
+    throw new Error(`Step 0 of ${file.subjectName} must be a prereqChain step.`);
+  }
+  if (mutate.kind !== 'invoke') {
+    throw new Error(`Step 1 of ${file.subjectName} must be an invoke step.`);
+  }
+  if (observe.kind !== 'observe' || observe.assertion.kind !== 'fieldEquals') {
+    throw new Error(
+      `Step 2 of ${file.subjectName} must be an observe step with assertion.kind='fieldEquals'.`,
+    );
+  }
+  const allRequestSteps: RequestStep[] = [
+    ...prereq.requestPlan,
+    mutate.requestPlan,
+    observe.requestPlan,
+  ];
+  const ecOps = new Set<string>(scenario.eventuallyConsistentOps ?? []);
+  const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
+  const needsAwaitEventually =
+    allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps)) ||
+    ecOps.has(observe.operationId);
+  const needsResolveFixture = allRequestSteps.some(
+    (rp) => rp.bodyKind === 'multipart' && !!rp.multipartTemplate,
+  );
+
+  const lines: string[] = [];
+  lines.push("import { expect, test } from '@playwright/test';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  const seedingImports = ['initSpecSalt', 'seedBinding'];
+  if (needsExtractInto) seedingImports.push('extractInto');
+  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from '../support/await-eventually';");
+  }
+  if (needsResolveFixture) {
+    lines.push("import { resolveFixture } from '../support/fixtures';");
+  }
+  lines.push('');
+  lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
+  lines.push('');
+  lines.push(`test.describe('${file.subjectName} read-back', () => {`);
+  lines.push(
+    `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }) => {`,
+  );
+  lines.push('    const baseUrl = buildBaseUrl();');
+  lines.push('    const ctx: Record<string, unknown> = {};');
+
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+    }),
+  );
+
+  let stepIdx = 0;
+  for (const rp of prereq.requestPlan) {
+    lines.push('');
+    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    stepIdx++;
+  }
+
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    mutate.requestPlan,
+    stepIdx,
+    `invoke (mutate): ${mutate.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+
+  lines.push('');
+  appendObserveFieldEqualsStep(
+    lines,
+    observe,
+    mutate.requestPlan,
+    stepIdx,
+    `observe (read-back): ${observe.operationId}`,
+    ecOps,
+  );
+
+  lines.push('  });');
+  lines.push('});');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * Render an observe step whose assertion is `fieldEquals`. The
+ * expected value for each tuple is sourced directly from the mutator
+ * request body literal at `requestBodyPath` (because the planner emits
+ * concrete values at body materialisation time, not symbolic
+ * placeholders). The actual value is read from the fetcher 2xx
+ * response body at `responseBodyPath`.
+ */
+function appendObserveFieldEqualsStep(
+  lines: string[],
+  step: ObserveStep,
+  mutatorStep: RequestStep,
+  idx: number,
+  label: string,
+  ecOps: ReadonlySet<string>,
+): void {
+  if (step.assertion.kind !== 'fieldEquals') {
+    throw new Error(
+      `appendObserveFieldEqualsStep called with assertion.kind='${step.assertion.kind}'`,
+    );
+  }
+  const respVar = `resp${idx + 1}`;
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const method = step.requestPlan.method.toLowerCase();
+  const isEC = ecOps.has(step.operationId);
+  lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
+  if (isEC) {
+    lines.push(`      const url = baseUrl + ${urlExpr};`);
+    lines.push(`      const ${respVar} = await awaitEventually(`);
+    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        {`);
+    lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
+    lines.push(`          operationId: '${step.operationId}',`);
+    lines.push(`        },`);
+    lines.push(`      );`);
+  } else {
+    const inline = renderInlineStepLines({
+      step: step.requestPlan,
+      idx,
+      varName: respVar,
+      urlExpr,
+      method,
+      shouldAwaitEventually: false,
+    });
+    for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  }
+  lines.push(`      if (${respVar}.status() !== 200) {`);
+  lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
+  lines.push('      }');
+  lines.push(`      expect(${respVar}.status()).toBe(200);`);
+  lines.push(`      const __body = await ${respVar}.json();`);
+  for (const f of step.assertion.fields) {
+    const expectedValue = pluckByPath(mutatorStep.bodyTemplate, f.requestBodyPath);
+    if (expectedValue === undefined) {
+      throw new Error(
+        `fieldEquals: mutator body has no value at path ${JSON.stringify(f.requestBodyPath)} for observe operationId=${step.operationId}.`,
+      );
+    }
+    const accessExpr = buildOptionalAccessChain('__body', stripArrayMarkers(f.responseBodyPath));
+    const literal = JSON.stringify(expectedValue);
+    lines.push(`      expect(${accessExpr}).toEqual(${literal});`);
+  }
+  lines.push('    });');
+  for (const wait of step.requestPlan.eventualWaitsAfter ?? []) {
+    appendEventualWait(lines, wait, idx);
+  }
+}
+
+/**
+ * Walk `body` along `path` (object property names) and return the
+ * primitive/array value at that leaf, or `undefined` if any segment
+ * misses. Used to extract the literal value the planner emitted for a
+ * given request-body leaf so the read-back assertion can match exactly.
+ */
+function pluckByPath(body: unknown, path: readonly string[]): unknown {
+  let node: unknown = body;
+  for (const seg of path) {
+    if (node === null || typeof node !== 'object') return undefined;
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON body template
+    node = (node as Record<string, unknown>)[seg];
+  }
+  return node;
+}
+
+/**
+ * Strip array `[]` markers from response-leaf path segments — the
+ * planner records `candidateGroups[]` to indicate an array property,
+ * but the runtime read accesses the array via the bare property name.
+ */
+function stripArrayMarkers(path: readonly string[]): string[] {
+  return path.map((s) => s.replace(/\[\]$/, ''));
 }
 
 function resolveBindingNameForSemantic(

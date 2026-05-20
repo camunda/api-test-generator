@@ -55,6 +55,7 @@ interface RawOp {
   producesSemanticTypes?: unknown;
   outputsSemanticTypes?: unknown;
   responseSemanticTypes?: Record<string, unknown>;
+  responseLeafPaths?: Record<string, unknown>;
   requires?: unknown;
   requiresSemanticTypes?: unknown;
   parameters?: Array<{
@@ -791,6 +792,20 @@ function normalizeOp(
     }
   }
 
+  // #305 Phase 4: pass through responseLeafPaths (flat list of all
+  // primitive leaf paths per status code). Used by the
+  // UpdatedFieldVisibleOnReadBack template instantiator.
+  let normalizedResponseLeafPaths: Record<string, string[]> | undefined;
+  if (op.responseLeafPaths && typeof op.responseLeafPaths === 'object') {
+    const tmp: Record<string, string[]> = {};
+    for (const [status, arr] of Object.entries(op.responseLeafPaths)) {
+      if (!Array.isArray(arr)) continue;
+      const paths = arr.filter((p): p is string => typeof p === 'string');
+      if (paths.length) tmp[status] = paths;
+    }
+    if (Object.keys(tmp).length) normalizedResponseLeafPaths = tmp;
+  }
+
   // Issue #104: x-semantic-establishes contributes synthetic produced
   // semantic types so BFS can schedule the establisher as a satisfier
   // for any consumer that needs the same identifier. Establishers are
@@ -852,6 +867,7 @@ function normalizeOp(
     responseSemanticTypes: Object.keys(normalizedResponseSemanticTypes).length
       ? normalizedResponseSemanticTypes
       : undefined,
+    responseLeafPaths: normalizedResponseLeafPaths,
     pathParameters: extractPathParameters(op),
     optionalSubShapes: optionalSubShapes.length ? optionalSubShapes : undefined,
     responseSemanticLeaves: responseLeaves.length ? responseLeaves : undefined,
