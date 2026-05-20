@@ -767,9 +767,13 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
       const dv: NonNullable<SemanticsViews['semanticTypes'][string]['discoveredVia']> = {
         operationId: t.discoveredVia.operationId,
         extractKey: t.discoveredVia.extractKey,
+        // Normalize the documented default here so every downstream
+        // consumer can rely on a concrete value rather than each
+        // re-implementing the fallback. Mirrors the `defaults to
+        // 'eventual'` claim in the TBox docs (#305 Phase 1 review).
+        consistency: t.discoveredVia.consistency ?? 'eventual',
       };
       if (t.discoveredVia.filterBy !== undefined) dv.filterBy = t.discoveredVia.filterBy;
-      if (t.discoveredVia.consistency !== undefined) dv.consistency = t.discoveredVia.consistency;
       entry.discoveredVia = dv;
     }
     semanticTypes[t.name] = entry;

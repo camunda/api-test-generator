@@ -313,6 +313,29 @@ describe('deriveSemanticsViews: record-shaped views', () => {
     });
   });
 
+  it("normalizes omitted `discoveredVia.consistency` to 'eventual' in derived views (#305 Phase 1)", () => {
+    // The TBox documents `consistency` as defaulting to `'eventual'`
+    // when omitted. Normalize in deriveSemanticsViews so downstream
+    // consumers (Phase 3+ planner code) can rely on a concrete value
+    // rather than each re-implementing the fallback.
+    writeAbox(
+      minimalAbox({
+        semanticTypes: [
+          { name: 'S', witnesses: 'Some' },
+          {
+            name: 'EmittedKey',
+            kind: 'runtimeEmission',
+            emittedBy: { predecessor: 'PS' },
+            // Intentionally omit `consistency`.
+            discoveredVia: { operationId: 'searchOp', extractKey: 'emittedKey' },
+          },
+        ],
+      }),
+    );
+    const views = deriveSemanticsViews(workdir);
+    expect(views?.semanticTypes.EmittedKey?.discoveredVia?.consistency).toBe('eventual');
+  });
+
   it('deep-clones array fields so callers cannot mutate the cached parse', () => {
     writeAbox(
       minimalAbox({
