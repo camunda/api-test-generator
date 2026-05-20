@@ -1,10 +1,10 @@
 name: Ontology URL resolution check
 
-# Periodic and on-demand HEAD-check of every published TBox `$id` URL
-# and every per-config ABox `$schema` URL. This catches a regression
-# in the Pages publish path (deploy stuck, branch protections changed,
-# Pages disabled, paths-filter mis-tuned) before external consumers
-# notice the 404.
+# Periodic and on-demand HEAD-check of every published TBox `$id` URL,
+# every per-config ABox `$schema` URL, the published SVG diagrams, and
+# the Turtle bundle. This catches a regression in the Pages publish path
+# (deploy stuck, branch protections changed, Pages disabled,
+# paths-filter mis-tuned) before external consumers notice the 404.
 #
 # Runs separately from PR CI because (a) it depends on network egress
 # from GitHub Actions to `camunda.github.io`, and (b) a brand-new
