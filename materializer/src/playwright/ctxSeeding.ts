@@ -89,12 +89,19 @@ export function computeUniqueBindings(
 function collectBindingRefs(step: RequestStep): Set<string> {
   const refs = new Set<string>();
   for (const p of step.pathParams ?? []) refs.add(p.var);
+  collectPathTemplateRefs(step.pathTemplate, refs);
   walkForPlaceholders(step.bodyTemplate, refs);
   walkForPlaceholders(step.multipartTemplate, refs);
   return refs;
 }
 
+const PATH_PLACEHOLDER_RE = /\{([A-Za-z_$][\w$]*)\}/g;
 const PLACEHOLDER_RE = /\$\{([A-Za-z_$][\w$]*)\}/g;
+
+function collectPathTemplateRefs(pathTemplate: string | undefined, out: Set<string>): void {
+  if (!pathTemplate) return;
+  for (const m of pathTemplate.matchAll(PATH_PLACEHOLDER_RE)) out.add(m[1]);
+}
 
 function walkForPlaceholders(node: unknown, out: Set<string>): void {
   if (node === null || node === undefined) return;
