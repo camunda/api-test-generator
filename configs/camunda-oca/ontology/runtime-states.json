@@ -98,6 +98,9 @@
     },
     {
       "operationId": "cancelProcessInstance",
+      "requires": [
+        "ModelHasCancellationBlocker"
+      ],
       "produces": [
         "ProcessInstanceCompleted"
       ]

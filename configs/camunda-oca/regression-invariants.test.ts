@@ -4804,7 +4804,13 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     // (e.g. server-minted resources whose existence is only implied by
     // path-param conventions). These are deliberate ABox-only entries
     // and must not trip the spec-vs-abox drift check.
-    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document', 'UserTask', 'Incident']);
+    const ABOX_AUTHORITATIVE_KINDS = new Set([
+      'Authorization',
+      'Document',
+      'UserTask',
+      'Incident',
+      'ProcessInstance',
+    ]);
     const unaccounted = aboxOnly.filter((n) => !ABOX_AUTHORITATIVE_KINDS.has(n));
     expect(
       unaccounted,
@@ -8211,6 +8217,27 @@ describeForThisConfig(
         '/completion',
         ".state).toEqual('COMPLETED')",
         'user-task.bpmn',
+      ];
+      const missing = required.filter((needle) => !src.includes(needle));
+      expect(missing).toEqual([]);
+    });
+
+    it('ProcessInstance.cancelProcessInstance slice (#305 Phase 5d-4): emitted Playwright spec asserts state === CANCELED via getProcessInstance read-back, using cancellable-blocked.bpmn fixture', () => {
+      const specPath = join(
+        GENERATED_TESTS_DIR,
+        'state-transitions',
+        'ProcessInstance.cancelProcessInstance.lifecycle.spec.ts',
+      );
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const required = [
+        "operationId: 'getProcessInstance'",
+        'invoke (transition): cancelProcessInstance',
+        '/cancellation',
+        ".state).toEqual('CANCELED')",
+        'cancellable-blocked.bpmn',
       ];
       const missing = required.filter((needle) => !src.includes(needle));
       expect(missing).toEqual([]);

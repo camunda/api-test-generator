@@ -170,6 +170,24 @@
         }
       ],
       "description": "#305 Phase 5d / #189 — a runtime-emitted incident, identified by its server-minted incidentKey. Incidents are not created via a client-facing endpoint; they are emitted as a side-effect of a process instance whose BPMN deterministically fails at runtime (e.g. incident-script-task.bpmn). Discovered at planning time via the IncidentKey runtimeEmission entry (discoveredVia searchIncidents, #305 Phase 5a). The only client-facing state transition on the OCA API is resolveIncident (ACTIVE → RESOLVED); read back via getIncident. Consumed by the StateTransitionVisibleAfterAction scenario template (#305 Phase 5d / #189). No mutators[] today — Incidents do not expose per-field mutators on the public API."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "ProcessInstance",
+      "shape": "runtime-entity",
+      "identifiers": [
+        "ProcessInstanceKey"
+      ],
+      "fetcher": "getProcessInstance",
+      "stateField": "state",
+      "transitions": [
+        {
+          "op": "cancelProcessInstance",
+          "from": "ACTIVE",
+          "to": "CANCELED"
+        }
+      ],
+      "description": "#305 Phase 5d-4 / #189 — a process instance, identified by its server-minted processInstanceKey. NOTE on shape: ProcessInstance is the direct response of createProcessInstance, not strictly a side-effect 'runtime-emitted' entity in the strict #305 sense; we classify it as a runtime-entity here purely so it can participate in the StateTransitionVisibleAfterAction template (which requires fetcher+stateField+transitions). The cancelProcessInstance transition (ACTIVE → CANCELED) is verified by read-back through getProcessInstance. Selection of the deployment fixture is driven by `requires: [ModelHasCancellationBlocker]` on the cancelProcessInstance op, which forces the planner to choose bpmn/cancellable-blocked.bpmn (a service task wired to a unique job type that no other test activates) so the instance stays ACTIVE until the test cancels it explicitly. No mutators[]. See #281 for the orthogonal EntityLifecycle two-revoker design that may later relocate ProcessInstance into a richer shape; this row scopes ProcessInstance to the state-transition concern only."
     }
   ]
 }
