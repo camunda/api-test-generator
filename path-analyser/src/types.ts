@@ -534,17 +534,24 @@ export interface SemanticTypeSpec {
    *     discoverable via `searchUserTasks(processInstanceKey)`).
    *     Distinct from `serverEmergent` precisely because the discovery
    *     path is declarable. Requires both `emittedBy` and
-   *     `discoveredVia` on the same entry — without them the planner
-   *     would have nothing to act on and the entry would degrade to a
-   *     placeholder. The loader enforces this coupling.
+   *     `discoveredVia` on the same entry — without them the entry
+   *     would carry no actionable information for the future planner.
+   *     The loader enforces this coupling.
    *
    *     **Phase-1 scope note:** as of #305 Phase 1 (this commit) no
    *     planner code reads `kind === 'runtimeEmission'`. The
-   *     classifier, BFS chain planner, and value-binder all behave as
-   *     if the entry were classified `serverEmergent` (falls through
-   *     to a placeholder `seedBinding`). The vocabulary is landed
-   *     first so Phase 3's ABox edits can validate cleanly against the
-   *     published TBox; planner support follows in Phase 3 of #305.
+   *     `classifySemantic` dispatch in `bindSemanticInput.ts` only
+   *     special-cases `modelDerived` / `clientMintedAttribute` /
+   *     `serverEmergent`; a `runtimeEmission` declaration therefore
+   *     falls through to the producer/establisher/external-entity
+   *     chain and most commonly classifies as `unclassified` (the
+   *     keys we plan to migrate in Phase 3 — `UserTaskKey`,
+   *     `JobKey`, … — have no producer or establisher today, which
+   *     is exactly why they need `runtimeEmission` in the first
+   *     place). The vocabulary is landed first so Phase 3's ABox
+   *     edits can validate cleanly against the published TBox;
+   *     classifier + chain-planner support follows in Phase 3 of
+   *     #305.
    *
    * Absent `kind` means the planner falls back to its existing
    * classification chain (producersByType / establishersByType /

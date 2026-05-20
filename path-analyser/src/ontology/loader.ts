@@ -757,14 +757,14 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
     if (t.kind !== undefined) entry.kind = t.kind;
     if (t.clientMinted !== undefined) entry.clientMinted = t.clientMinted;
     if (t.emittedBy !== undefined) {
-      const eb: SemanticsViews['semanticTypes'][string]['emittedBy'] = {
+      const eb: NonNullable<SemanticsViews['semanticTypes'][string]['emittedBy']> = {
         predecessor: t.emittedBy.predecessor,
       };
       if (t.emittedBy.guardedBy !== undefined) eb.guardedBy = [...t.emittedBy.guardedBy];
       entry.emittedBy = eb;
     }
     if (t.discoveredVia !== undefined) {
-      const dv: SemanticsViews['semanticTypes'][string]['discoveredVia'] = {
+      const dv: NonNullable<SemanticsViews['semanticTypes'][string]['discoveredVia']> = {
         operationId: t.discoveredVia.operationId,
         extractKey: t.discoveredVia.extractKey,
       };

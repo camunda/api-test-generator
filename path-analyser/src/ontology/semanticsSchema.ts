@@ -137,7 +137,7 @@ export const semanticsSchema = {
         kind: {
           enum: ['modelDerived', 'attribute', 'serverEmergent', 'runtimeEmission'],
           description:
-            'How the planner obtains a value for this semantic type. `modelDerived` (#162) reads from a deployment artifact in the same chain. `attribute` (#162) is a free-form label minted by the planner; requires `clientMinted: true`. `serverEmergent` (#162) is a server-minted lifecycle key the client cannot pre-mint and has no discovery surface — the planner falls through to a placeholder. `runtimeEmission` (#305) is a server-minted key that *is* discoverable via a search endpoint after a known producing side-effect; requires both `emittedBy` (producing predecessor + capability guards) and `discoveredVia` (search-op + extraction + consistency model) so the planner can plan the `produce → discover → bind` chain. Absent `kind` falls back to the existing planner classification chain.',
+            'How the planner obtains a value for this semantic type. `modelDerived` (#162) reads from a deployment artifact in the same chain. `attribute` (#162) is a free-form label minted by the planner; requires `clientMinted: true`. `serverEmergent` (#162) is a server-minted lifecycle key the client cannot pre-mint and has no discovery surface — the planner falls through to a placeholder. `runtimeEmission` (#305) is a server-minted key that *is* discoverable via a search endpoint after a known producing side-effect; the entry declares both `emittedBy` (producing predecessor + capability guards) and `discoveredVia` (search-op + extraction + consistency model). As of #305 Phase 1 the planner does not yet consume these fields — the produce → discover → bind chain is planned in Phase 3. Absent `kind` falls back to the existing planner classification chain.',
         },
         clientMinted: {
           type: 'boolean',
@@ -155,13 +155,13 @@ export const semanticsSchema = {
               type: 'string',
               minLength: 1,
               description:
-                'Name of a runtime state (`runtimeStates`) that must hold before this key can be discovered. Typically the post-condition of a `createXxx` operation that triggers the key emission (e.g. `ProcessInstanceExists` for `UserTaskKey`). Cross-ref against `domain.runtimeStates` is not yet enforced; the resolver lands with the planner support in Phase 2/3.',
+                'Name of a runtime state (`runtimeStates`) that must hold before this key can be discovered. Typically the post-condition of a `createXxx` operation that triggers the key emission (e.g. `ProcessInstanceExists` for `UserTaskKey`). No cross-ABox validation is performed at load time as of #305 Phase 1; the resolver is intended to land alongside the planner support in Phase 3.',
             },
             guardedBy: {
               type: 'array',
               items: { type: 'string', minLength: 1 },
               description:
-                'Capability names whose presence is required for the predecessor to actually emit a key of this type — e.g. `ProcessInstanceExists` alone is not enough to emit a `UserTaskKey`; the deployed BPMN must contain a user-task element (`ModelHasUserTask`). Empty/omitted = no capability guard. Cross-ref against `domain.capabilities` is not yet enforced; the resolver lands with the planner support in Phase 2/3.',
+                'Capability names whose presence is required for the predecessor to actually emit a key of this type — e.g. `ProcessInstanceExists` alone is not enough to emit a `UserTaskKey`; the deployed BPMN must contain a user-task element (`ModelHasUserTask`). Empty/omitted = no capability guard. No cross-ABox validation is performed at load time as of #305 Phase 1; the resolver is intended to land alongside the planner support in Phase 3.',
             },
           },
         },
@@ -176,7 +176,7 @@ export const semanticsSchema = {
               type: 'string',
               minLength: 1,
               description:
-                'OperationId of the search/get endpoint that surfaces the emitted key (e.g. `searchUserTasks`). Graph cross-ref (op must exist in the bundled spec) is not yet enforced; the L3 abox-vs-graph invariant lands with the planner support in Phase 3 alongside the first ABox entry that uses `runtimeEmission`.',
+                'OperationId of the search/get endpoint that surfaces the emitted key (e.g. `searchUserTasks`). No graph cross-ref (that the op exists in the bundled spec) is performed at load time as of #305 Phase 1; an L3 abox-vs-graph invariant is intended to land alongside the first ABox entry that uses `runtimeEmission` in Phase 3.',
             },
             filterBy: {
               type: 'string',
