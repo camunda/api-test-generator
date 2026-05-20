@@ -9,7 +9,8 @@
  *   4. Schema-invalid content → throws with a "failed TBox validation" diagnostic.
  *   5. Duplicate name in any sub-tree → throws.
  *   6. `kind: 'attribute'` without `clientMinted: true` → throws (cross-property invariant, #162 PR 2).
- *   7. Happy path → returns the parsed ABox.
+ *   7. `kind: 'runtimeEmission'` without `emittedBy` or without `discoveredVia` → throws (cross-property invariant, #305 Phase 1).
+ *   8. Happy path → returns the parsed ABox.
  *
  * Plus the `deriveSemanticsViews` accessor returns record-shaped views
  * that match what `graph.domain.{semanticTypes,capabilities,identifiers}`
@@ -136,6 +137,67 @@ describe('loadSemanticsAbox: documented branches', () => {
     expect(abox?.semanticTypes[0]?.clientMinted).toBe(true);
   });
 
+  it("throws when `kind: 'runtimeEmission'` is set without `emittedBy` (#305 Phase 1 coupling)", () => {
+    writeAbox(
+      minimalAbox({
+        semanticTypes: [
+          {
+            name: 'UserTaskKey',
+            kind: 'runtimeEmission',
+            discoveredVia: {
+              operationId: 'searchUserTasks',
+              filterBy: 'processInstanceKey',
+              extractKey: 'userTaskKey',
+              consistency: 'eventual',
+            },
+          },
+        ],
+      }),
+    );
+    expect(() => loadSemanticsAbox(workdir)).toThrow(
+      /UserTaskKey.*kind: 'runtimeEmission' but no emittedBy/,
+    );
+  });
+
+  it("throws when `kind: 'runtimeEmission'` is set without `discoveredVia` (#305 Phase 1 coupling)", () => {
+    writeAbox(
+      minimalAbox({
+        semanticTypes: [
+          {
+            name: 'UserTaskKey',
+            kind: 'runtimeEmission',
+            emittedBy: { predecessor: 'ProcessInstanceExists', guardedBy: ['ModelHasUserTask'] },
+          },
+        ],
+      }),
+    );
+    expect(() => loadSemanticsAbox(workdir)).toThrow(
+      /UserTaskKey.*kind: 'runtimeEmission' but no discoveredVia/,
+    );
+  });
+
+  it("accepts `kind: 'runtimeEmission'` with both `emittedBy` and `discoveredVia` (#305 Phase 1)", () => {
+    writeAbox(
+      minimalAbox({
+        semanticTypes: [
+          {
+            name: 'UserTaskKey',
+            kind: 'runtimeEmission',
+            emittedBy: { predecessor: 'ProcessInstanceExists', guardedBy: ['ModelHasUserTask'] },
+            discoveredVia: {
+              operationId: 'searchUserTasks',
+              filterBy: 'processInstanceKey',
+              extractKey: 'userTaskKey',
+              consistency: 'eventual',
+            },
+          },
+        ],
+      }),
+    );
+    const abox = loadSemanticsAbox(workdir);
+    expect(abox?.semanticTypes[0]?.kind).toBe('runtimeEmission');
+  });
+
   it('returns the parsed ABox on the happy path', () => {
     writeAbox(
       minimalAbox({
@@ -189,6 +251,17 @@ describe('deriveSemanticsViews: record-shaped views', () => {
           { name: 'ProcessDefinitionKey', witnesses: 'ProcessDefinitionDeployed' },
           { name: 'Tag', kind: 'attribute', clientMinted: true },
           { name: 'IncidentKey', kind: 'serverEmergent' },
+          {
+            name: 'UserTaskKey',
+            kind: 'runtimeEmission',
+            emittedBy: { predecessor: 'ProcessInstanceExists', guardedBy: ['ModelHasUserTask'] },
+            discoveredVia: {
+              operationId: 'searchUserTasks',
+              filterBy: 'processInstanceKey',
+              extractKey: 'userTaskKey',
+              consistency: 'eventual',
+            },
+          },
         ],
         capabilities: [
           {
@@ -213,9 +286,20 @@ describe('deriveSemanticsViews: record-shaped views', () => {
       'IncidentKey',
       'ProcessDefinitionKey',
       'Tag',
+      'UserTaskKey',
     ]);
     expect(views.semanticTypes.Tag).toEqual({ kind: 'attribute', clientMinted: true });
     expect(views.semanticTypes.IncidentKey).toEqual({ kind: 'serverEmergent' });
+    expect(views.semanticTypes.UserTaskKey).toEqual({
+      kind: 'runtimeEmission',
+      emittedBy: { predecessor: 'ProcessInstanceExists', guardedBy: ['ModelHasUserTask'] },
+      discoveredVia: {
+        operationId: 'searchUserTasks',
+        filterBy: 'processInstanceKey',
+        extractKey: 'userTaskKey',
+        consistency: 'eventual',
+      },
+    });
     expect(views.capabilities.ModelHasServiceTaskType).toEqual({
       kind: 'capability',
       parameter: 'jobType',
@@ -232,7 +316,15 @@ describe('deriveSemanticsViews: record-shaped views', () => {
   it('deep-clones array fields so callers cannot mutate the cached parse', () => {
     writeAbox(
       minimalAbox({
-        semanticTypes: [{ name: 'T', witnesses: 'S' }],
+        semanticTypes: [
+          { name: 'T', witnesses: 'S' },
+          {
+            name: 'EmittedKey',
+            kind: 'runtimeEmission',
+            emittedBy: { predecessor: 'PS', guardedBy: ['Cap'] },
+            discoveredVia: { operationId: 'searchOp', extractKey: 'emittedKey' },
+          },
+        ],
         capabilities: [
           {
             name: 'Cap',
@@ -257,11 +349,13 @@ describe('deriveSemanticsViews: record-shaped views', () => {
     v1.capabilities.Cap?.dependsOn?.push('mutated');
     v1.identifiers.Id?.boundBy?.push('mutated');
     v1.identifiers.Id?.fieldPaths?.push('mutated');
+    v1.semanticTypes.EmittedKey?.emittedBy?.guardedBy?.push('mutated');
     const v2 = deriveSemanticsViews(workdir);
     expect(v2?.capabilities.Cap?.producedBy).toEqual(['op1']);
     expect(v2?.capabilities.Cap?.dependsOn).toEqual(['S']);
     expect(v2?.identifiers.Id?.boundBy).toEqual(['op1']);
     expect(v2?.identifiers.Id?.fieldPaths).toEqual(['a.b']);
+    expect(v2?.semanticTypes.EmittedKey?.emittedBy?.guardedBy).toEqual(['Cap']);
   });
 
   it("propagates the loader's validation failure (does not silently swallow malformed ABox)", () => {
