@@ -191,4 +191,77 @@ describe('StateTransitionVisibleAfterAction compiler — Layer 2 contract', () =
       instantiateAllTemplates(graph, templates, edges, badCanonical, entityKinds),
     ).toThrow(/no canonical scenario for transition op/);
   });
+
+  it('splits a dotted stateField into responseBodyPath segments (so the emitter walks the object, not a bracket access)', () => {
+    const dottedGraph: OperationGraph = {
+      operations: {
+        resolveThing: graph.operations.resolveThing,
+        getThing: makeOp('getThing', {
+          method: 'GET',
+          path: '/things/{thingKey}',
+          requires: { required: ['ThingKey'], optional: [] },
+          responseLeafPaths: {
+            '200': ['thingKey', 'metadata.state'],
+          },
+        }),
+      },
+      producersByType: {},
+      establishersByType: {},
+    };
+    const dottedKinds = {
+      version: 1,
+      kinds: [
+        {
+          '@type': 'EntityKind' as const,
+          name: 'Thing',
+          shape: 'runtime-entity' as const,
+          identifiers: ['ThingKey'],
+          fetcher: 'getThing',
+          stateField: 'metadata.state',
+          transitions: [{ op: 'resolveThing', from: 'ACTIVE', to: 'RESOLVED' }],
+          description: 'test',
+        },
+      ],
+    };
+    const out = instantiateAllTemplates(dottedGraph, templates, edges, canonical, dottedKinds);
+    const observe = out[0].scenario.steps[2];
+    if (observe.kind !== 'observe' || observe.assertion.kind !== 'stateEquals') {
+      throw new Error('expected observe.stateEquals');
+    }
+    expect(observe.assertion.responseBodyPath).toEqual(['metadata', 'state']);
+  });
+
+  it('throws (loud failure) when stateField has empty path segments (leading/trailing/double dot)', () => {
+    const emptySegmentGraph: OperationGraph = {
+      operations: {
+        resolveThing: graph.operations.resolveThing,
+        getThing: makeOp('getThing', {
+          method: 'GET',
+          path: '/things/{thingKey}',
+          requires: { required: ['ThingKey'], optional: [] },
+          responseLeafPaths: { '200': ['thingKey', '.state'] },
+        }),
+      },
+      producersByType: {},
+      establishersByType: {},
+    };
+    const emptySegmentKinds = {
+      version: 1,
+      kinds: [
+        {
+          '@type': 'EntityKind' as const,
+          name: 'Thing',
+          shape: 'runtime-entity' as const,
+          identifiers: ['ThingKey'],
+          fetcher: 'getThing',
+          stateField: '.state',
+          transitions: [{ op: 'resolveThing', from: 'ACTIVE', to: 'RESOLVED' }],
+          description: 'test',
+        },
+      ],
+    };
+    expect(() =>
+      instantiateAllTemplates(emptySegmentGraph, templates, edges, canonical, emptySegmentKinds),
+    ).toThrow(/empty path segments/);
+  });
 });

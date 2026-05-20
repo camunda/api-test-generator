@@ -812,6 +812,22 @@ function compileStateTransitionVisibleAfterAction(
     return { scenarios, errors };
   }
 
+  // Split the (possibly dotted) stateField into segments for the
+  // emitter's array-based `pluckByPath`. responseLeafPaths stores
+  // dotted leaves (`metadata.state`, `process.status`, …), so a
+  // single-element wrapper would coerce the emitter into reading
+  // `body['metadata.state']` instead of `body.metadata.state`.
+  // Empty segments (leading dot, double dot, trailing dot) are
+  // never valid leaves — reject so the ABox author sees a clear
+  // error rather than a malformed assertion.
+  const stateFieldSegments = stateField.split('.');
+  if (stateFieldSegments.some((seg) => seg.length === 0)) {
+    errors.push(
+      `${template.name} × ${kind.name}: stateField='${stateField}' has empty path segments (leading, trailing, or double dot)`,
+    );
+    return { scenarios, errors };
+  }
+
   const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
 
   for (const transition of transitions) {
@@ -906,7 +922,7 @@ function compileStateTransitionVisibleAfterAction(
         requestPlan: lastOf(fetcherPlan),
         assertion: {
           kind: 'stateEquals',
-          responseBodyPath: [stateField],
+          responseBodyPath: stateFieldSegments,
           expectedState: transition.to,
           fromState: transition.from,
           transitionOp: transitionOpId,
