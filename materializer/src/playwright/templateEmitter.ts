@@ -294,7 +294,7 @@ function renderLifecycleSuite(
       bindings: prereq.bindings,
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
-      uniqueBindings: computeUniqueBindings(prereq.requestPlan),
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
     }),
   );
 
@@ -676,7 +676,7 @@ function renderReadBackSuite(
       bindings: prereq.bindings,
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
-      uniqueBindings: computeUniqueBindings(prereq.requestPlan),
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
     }),
   );
 
@@ -864,7 +864,7 @@ function renderStateTransitionSuite(
       bindings: prereq.bindings,
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
-      uniqueBindings: computeUniqueBindings(prereq.requestPlan),
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
     }),
   );
 

@@ -138,8 +138,11 @@ export function _resetSeedingForTest(): void {
  * (operationId), which is stable across regenerations.
  *
  * Calling this function resets the PRNG state so the new salt takes effect
- * from the next seedBinding() call onward. It must not be called after
- * seedBinding() has already been called in the same process.
+ * from the next seedBinding() call onward. Re-calling it after
+ * seedBinding() has already been called in the same process is
+ * supported: any cached PRNG envs are discarded and rebuilt with the
+ * new salt on the next seed call. Test helpers rely on this to reset
+ * deterministic state between cases.
  */
 export function initSpecSalt(salt: string): void {
   _specSalt = salt;

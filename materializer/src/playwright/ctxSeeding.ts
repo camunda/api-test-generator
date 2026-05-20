@@ -137,9 +137,16 @@ export interface EmitCtxSeedingOptions {
    * diverge across separate run invocations. Populated by the emitter
    * for client-minted identifiers consumed by operations that declare an
    * HTTP 409 (Conflict) response — re-runs would otherwise collide on
-   * the previous run's identifiers (#304). Names match against both
-   * `seedBindings[i]` and `globalContextSeeds[i].binding` (the seed
-   * rule's second arg is the same name in both code paths).
+   * the previous run's identifiers (#304).
+   *
+   * **Keyed by binding name** (the ctx key being seeded), NOT by seed
+   * rule. For the `seedNames` loop the two coincide; for the
+   * `globalContextSeeds` loop the emitted `seedBinding(seedRule, ...)`
+   * call uses `seedRule` as the name argument while uniqueness is
+   * decided by membership of the ctx `binding` in this set. The
+   * resulting `seedBinding('seedRule', { unique: true })` is still
+   * correct: `seedBinding`'s name arg drives the per-binding counter
+   * seed, while the `unique` flag toggles which PRNG env is used.
    */
   uniqueBindings?: ReadonlySet<string>;
 }
