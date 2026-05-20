@@ -7447,6 +7447,30 @@ describeForThisConfig('bundled-spec invariants: ontology visualisation emitter',
     expect(mmd.trim().length, 'ABox Mermaid must not be empty').toBeGreaterThan(0);
     expect(mmd, 'ABox Mermaid must start with graph').toContain('graph LR');
   });
+
+  // Regression for the "literal \n in SVG" bug: DOT labels must contain the
+  // 2-char newline escape (backslash + n) — not the 3-char over-escaped
+  // sequence (backslash + backslash + n), which Graphviz unescapes to a
+  // literal '\n' string in the rendered SVG. Class-scoped: applies to every
+  // label in every DOT emitter that doesn't require pipeline output.
+  it('DOT emitters must not over-escape newlines in labels', async () => {
+    const { emitTboxDot, emitAboxDot } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const bundle = buildBundle();
+    const outputs: Record<string, string> = {
+      tbox: emitTboxDot('camunda-oca'),
+      abox: emitAboxDot(bundle),
+    };
+    for (const [name, dot] of Object.entries(outputs)) {
+      const labelMatches = dot.match(/label="[^"]*"/g) ?? [];
+      for (const match of labelMatches) {
+        expect(
+          match.includes('\\\\n'),
+          `${name} DOT label over-escapes newline (renders as literal \\n in SVG): ${match}`,
+        ).toBe(false);
+      }
+    }
+  });
 });
 
 // ===========================================================================

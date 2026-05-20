@@ -234,8 +234,11 @@ export function emitAboxDot(bundle: ReturnType<typeof buildBundle>): string {
   for (const e of edges) {
     const fromId = dotId(e.endpoints.from);
     const toId = dotId(e.endpoints.to);
+    // Join with a real newline; dotLabel() converts \n → the DOT \n escape.
+    // Joining with the literal '\n' two-char sequence would be double-escaped
+    // by dotLabel() into '\\n' and rendered verbatim in the SVG.
     const lbl = [e.name, `+${e.establishedBy}`, `−${e.revokedBy}`, `obs: ${e.observableVia}`].join(
-      '\\n',
+      '\n',
     );
     lines.push(`  ${fromId} -> ${toId} [label="${dotLabel(lbl)}"];`);
   }
