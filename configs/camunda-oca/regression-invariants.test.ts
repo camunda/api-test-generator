@@ -114,6 +114,9 @@ interface VariantScenarioFile {
 
 let cachedGraph: DependencyGraph | undefined;
 let cachedOperationById: Map<string, OperationNode> | undefined;
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
 function loadGraph(): DependencyGraph {
   if (cachedGraph) return cachedGraph;
   if (!existsSync(GRAPH_PATH)) {
@@ -538,7 +541,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
             continue;
           }
           const body = step.bodyTemplate;
-          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          if (!isPlainRecord(body)) {
             offenders.push({
               file: f,
               scenario: s.id,
@@ -547,7 +550,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
             });
             continue;
           }
-          const bodyObj: Record<string, unknown> = body;
+          const bodyObj = body;
           const topKeys = Object.keys(bodyObj);
           if (topKeys.length !== 1 || topKeys[0] !== 'filter') {
             offenders.push({
@@ -559,7 +562,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
             continue;
           }
           const filterRaw = bodyObj.filter;
-          if (!filterRaw || typeof filterRaw !== 'object' || Array.isArray(filterRaw)) {
+          if (!isPlainRecord(filterRaw)) {
             offenders.push({
               file: f,
               scenario: s.id,
@@ -568,7 +571,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
             });
             continue;
           }
-          const filter: Record<string, unknown> = filterRaw;
+          const filter = filterRaw;
           const filterKeys = Object.keys(filter);
           if (filterKeys.length !== 1 || filterKeys[0] !== intent.filterBy) {
             offenders.push({
