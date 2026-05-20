@@ -39,6 +39,16 @@
       }
     },
     {
+      "kind": "bpmnProcess",
+      "path": "bpmn/cancellable-blocked.bpmn",
+      "description": "BPMN process with a single service task wired to a unique job type `cancelProcessInstanceTestBlock` that is never activated anywhere else in the generated suite. The instance therefore stays ACTIVE indefinitely (no auto-completion, no race with parallel `activateJobs` runs that target other job types) until the test cancels it explicitly. Selected for chains whose consumer ops require `ModelHasCancellationBlocker` (e.g. cancelProcessInstance — see #305 Phase 5d-4 / #189). The unique job type is the whole point: do NOT consolidate with bpmn/service-task.bpmn (sampleJobType), or a parallel run that activates sampleJobType jobs could complete this PI before the cancel step fires.",
+      "providesStates": ["ModelHasCancellationBlocker"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "ServiceTask_1", "EndEvent_1"],
+        "JobType": ["cancelProcessInstanceTestBlock"]
+      }
+    },
+    {
       "kind": "form",
       "path": "forms/simple.form",
       "description": "Minimal Camunda form JSON"

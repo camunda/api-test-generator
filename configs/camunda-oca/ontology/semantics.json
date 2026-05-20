@@ -149,6 +149,16 @@
       "dependsOn": [
         "ProcessDefinitionDeployed"
       ]
+    },
+    {
+      "name": "ModelHasCancellationBlocker",
+      "parameter": "cancellationBlockerJobType",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
     }
   ],
   "identifiers": [
