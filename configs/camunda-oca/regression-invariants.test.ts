@@ -8194,5 +8194,26 @@ describeForThisConfig(
       const missing = required.filter((needle) => !src.includes(needle));
       expect(missing).toEqual([]);
     });
+
+    it('UserTask.completeUserTask slice (#305 Phase 5d-2): emitted Playwright spec asserts state === COMPLETED via getUserTask read-back', () => {
+      const specPath = join(
+        GENERATED_TESTS_DIR,
+        'state-transitions',
+        'UserTask.completeUserTask.lifecycle.spec.ts',
+      );
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const required = [
+        "operationId: 'getUserTask'",
+        "operationId: 'searchUserTasks'",
+        '/completion',
+        ".state).toEqual('COMPLETED')",
+        'user-task.bpmn',
+      ];
+      const missing = required.filter((needle) => !src.includes(needle));
+      expect(missing).toEqual([]);
+    });
   },
 );
