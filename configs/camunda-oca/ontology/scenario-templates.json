@@ -53,6 +53,17 @@
         { "kind": "Invoke", "op": "revokedBy" },
         { "kind": "Observe", "op": "observableVia", "expect": "absent" }
       ]
+    },
+    {
+      "@type": "ScenarioTemplate",
+      "name": "UpdatedFieldVisibleOnReadBack",
+      "appliesTo": { "kind": "RuntimeEntity" },
+      "description": "#305 Phase 4 — for every runtime-emitted entity that exposes one or more mutators and a fetcher (shape: 'runtime-entity'), emit one scenario per mutator that: (1) establishes the prerequisite chain for the mutator (which includes discovering the runtime entity via its runtimeEmission, e.g. UserTaskKey via searchUserTasks), (2) invokes the mutator with values drawn from the binding context, (3) re-reads the entity via the fetcher (GET-by-id) and asserts every semantic-typed field present in the mutator's emitted request body is reflected unchanged in the fetcher's 200 response. The field list is auto-derived at instantiation time by intersecting mutator request-body leaves carrying a `semanticType` with fetcher 200-response leaves carrying the same `semanticType`; the template ABox carries no per-field selector. Closes the read-after-write gap for entities whose lifecycle the API does not own (in-API CRUD is covered by EntityLifecycle, #280).",
+      "steps": [
+        { "kind": "PrereqChain", "for": "mutator" },
+        { "kind": "Invoke", "op": "mutator" },
+        { "kind": "Observe", "op": "fetcher", "expect": "fieldEquals" }
+      ]
     }
   ]
 }

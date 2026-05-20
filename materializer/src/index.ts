@@ -544,6 +544,19 @@ async function run() {
         globalContextSeeds: seedsArg,
       });
       lifecycleCount += entitiesWritten.length;
+
+      // #305 Phase 4 — UpdatedFieldVisibleOnReadBack (RuntimeEntity).
+      // Sibling subdir to edges/ and entities/ for symmetry. Suites
+      // here are 3-step (prereq → mutate → observe field equality)
+      // and rendered via `renderReadBackSuite` inside emitTemplateSuites.
+      const runtimeOutDir = path.join(outDir, 'runtime-entities');
+      await fs.rm(runtimeOutDir, { recursive: true, force: true });
+      const runtimeWritten = await emitTemplateSuites({
+        scenariosDir: getTemplateScenariosDir(repoRoot, 'UpdatedFieldVisibleOnReadBack'),
+        outDir: runtimeOutDir,
+        globalContextSeeds: seedsArg,
+      });
+      lifecycleCount += runtimeWritten.length;
     }
     console.log(
       `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites) in ${outDir} (target: ${emitter.id})`,

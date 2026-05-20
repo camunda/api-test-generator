@@ -68,6 +68,15 @@ export interface OperationNode extends OperationRef {
     string,
     { semanticType: string; fieldPath: string; required?: boolean }[]
   >;
+  /**
+   * #305 Phase 4: flat list of every primitive (or array-of-primitive)
+   * leaf path in the response schema, per status code, irrespective of
+   * `x-semantic-type` annotation. Powers the
+   * UpdatedFieldVisibleOnReadBack template instantiator's name-based
+   * bridge from a mutator's emitted request body to a fetcher's
+   * observable response shape. Arrays appear as `prefix[].leaf`.
+   */
+  responseLeafPaths?: Record<string, string[]>;
   // Path parameters with their declared `x-semantic-type`. Used by
   // `buildRequestPlan` to alias producer extracts under the
   // placeholder-derived var name when an OpenAPI path-param's name differs
@@ -983,6 +992,38 @@ export interface ObserveStep {
          * The emitter emits `expect(resp.status()).toBe(<expectedStatus>)`.
          */
         expectedStatus: 200 | 404;
+      }
+    | {
+        /**
+         * #305 Phase 4 — read-back-after-mutate equality assertion.
+         * Emitted by the `UpdatedFieldVisibleOnReadBack` template
+         * compiler for `shape: "runtime-entity"` subjects. The
+         * preceding `InvokeStep` is the mutator; the observation
+         * fetches the entity by id and asserts each field listed
+         * below equals the value the mutator request body carried
+         * for the same semantic type. The field list is derived at
+         * instantiation time by intersecting the mutator request-body
+         * leaves with the fetcher 200-response leaves, bridged on
+         * `semanticType`. Empty `fields[]` is rejected by the
+         * instantiator (and by the L3 invariant) — a fieldEquals
+         * step with nothing to assert is a planner bug, not a silent
+         * pass.
+         */
+        kind: 'fieldEquals';
+        fields: Array<{
+          /**
+           * The leaf-name segment used to bridge the mutator body to
+           * the fetcher response. For name-based bridging this is the
+           * final segment of `requestBodyPath` (which must equal the
+           * final segment of `responseBodyPath`). Carried explicitly so
+           * the emitter and L3 invariant don't have to re-derive it.
+           */
+          leafName: string;
+          /** Path into the mutator's emitted request body where the expected value lives. */
+          requestBodyPath: string[];
+          /** Path into the fetcher's 200-response body where the actual value should appear. */
+          responseBodyPath: string[];
+        }>;
       };
 }
 
@@ -1000,7 +1041,7 @@ export interface TemplateScenario {
   templateName: string;
   /** Identifier of the subject the template was instantiated against. */
   subjectName: string;
-  subjectKind: 'Edge' | 'Entity';
+  subjectKind: 'Edge' | 'Entity' | 'RuntimeEntity';
   steps: TemplateStep[];
   /**
    * Aggregated semantic-type → binding-name map across all steps. The
@@ -1041,6 +1082,6 @@ export interface TemplateScenario {
 export interface TemplateScenarioFile {
   templateName: string;
   subjectName: string;
-  subjectKind: 'Edge' | 'Entity';
+  subjectKind: 'Edge' | 'Entity' | 'RuntimeEntity';
   scenario: TemplateScenario;
 }

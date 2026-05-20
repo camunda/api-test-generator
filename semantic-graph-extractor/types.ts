@@ -290,6 +290,16 @@ export interface Operation {
   parameters: OperationParameter[];
   requestBodySemanticTypes: SemanticTypeReference[];
   responseSemanticTypes: Record<string, SemanticTypeReference[]>; // keyed by status code
+  /**
+   * Flat list of all primitive (and array-of-primitive) leaf paths per
+   * response status code, irrespective of whether the leaf carries an
+   * `x-semantic-type` annotation. Used by the scenario-template
+   * instantiator (#305 Phase 4) to bridge a mutator's emitted request
+   * body to a fetcher's observable response by leaf-name. Cycles in
+   * `$ref` chains are broken with seen-set tracking; arrays appear as
+   * `prefix[].leafName`.
+   */
+  responseLeafPaths: Record<string, string[]>;
   eventuallyConsistent?: boolean;
   // NEW: Enhanced analysis
   operationType: OperationType;

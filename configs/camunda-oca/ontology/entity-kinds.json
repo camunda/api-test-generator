@@ -131,6 +131,19 @@
         "ClientId"
       ],
       "description": "An OAuth client. Minted outside the Camunda REST API: by Console in SaaS, by the configured external IdP (EntraID, Keycloak, Okta, …) in Self-Managed with OIDC. Not modelled at all under Self-Managed Basic auth, where m2m apps are users instead. Referenced by the client-membership edges only — never established or fetched via this API."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "UserTask",
+      "shape": "runtime-entity",
+      "identifiers": [
+        "UserTaskKey"
+      ],
+      "mutators": [
+        "updateUserTask"
+      ],
+      "fetcher": "getUserTask",
+      "description": "#305 Phase 4 — a runtime-emitted user task, identified by its server-minted userTaskKey. UserTasks are not created via a client-facing endpoint; they are emitted as a side-effect of process-instance progression (when a user-task service-task activates). Discovered at planning time via the UserTaskKey runtimeEmission entry (discoveredVia searchUserTasks, post-#308). Mutated in place by updateUserTask (and, in future phases, assignUserTask/unassignUserTask/completeUserTask) and read back via getUserTask. Consumed by the UpdatedFieldVisibleOnReadBack scenario template (#305 Phase 4)."
     }
   ]
 }

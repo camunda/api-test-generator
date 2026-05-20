@@ -4569,7 +4569,7 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     // (e.g. server-minted resources whose existence is only implied by
     // path-param conventions). These are deliberate ABox-only entries
     // and must not trip the spec-vs-abox drift check.
-    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document']);
+    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document', 'UserTask']);
     const unaccounted = aboxOnly.filter((n) => !ABOX_AUTHORITATIVE_KINDS.has(n));
     expect(
       unaccounted,
@@ -6818,6 +6818,12 @@ describeForThisConfig(
       // EntityLifecycle). Extending this map is mandatory whenever a
       // new subject-shape's ABox grows a new role field.
       const ENTITY_ROLES = new Set(['establishedBy', 'revokedBy', 'observableVia']);
+      // RuntimeEntity-subject templates (#305 Phase 4) resolve roles
+      // against the runtime-entity ABox fields `mutators[]` (plural,
+      // referenced symbolically as `mutator` from steps) and
+      // `fetcher`. The compiler fans `mutator` out to one scenario
+      // per entry at instantiation time.
+      const RUNTIME_ENTITY_ROLES = new Set(['mutator', 'fetcher']);
       const offenders: string[] = [];
       for (const tpl of templates.templates) {
         const validRoles =
@@ -6825,7 +6831,9 @@ describeForThisConfig(
             ? EDGE_ROLES
             : tpl.appliesTo.kind === 'Entity'
               ? ENTITY_ROLES
-              : new Set<string>();
+              : tpl.appliesTo.kind === 'RuntimeEntity'
+                ? RUNTIME_ENTITY_ROLES
+                : new Set<string>();
         for (let i = 0; i < tpl.steps.length; i++) {
           const step = tpl.steps[i];
           const ref = step.kind === 'PrereqChain' ? step.for : step.op;
@@ -6840,7 +6848,8 @@ describeForThisConfig(
         offenders,
         `Every template step's role reference must resolve to a known field on its appliesTo subject ABox. ` +
           `For 'Edge' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
-          `For 'Entity' subjects, valid roles are: establishedBy, revokedBy, observableVia.`,
+          `For 'Entity' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
+          `For 'RuntimeEntity' subjects, valid roles are: mutator, fetcher.`,
       ).toEqual([]);
     });
 
@@ -7648,6 +7657,148 @@ describeForThisConfig(
         offenders,
         'search-empty-negative variant (variantKey=neg, no duplicateTest, expectedResult=empty) must only be emitted for search-like endpoints (POST + /search$ OR opId matches /search/i OR jobActivator role). A non-search endpoint shipping it means the gating rule in featureCoverageGenerator.ts has widened.',
       ).toEqual([]);
+    });
+  },
+);
+
+// ===========================================================================
+// #305 Phase 4 — UpdatedFieldVisibleOnReadBack RuntimeEntity scenarios.
+//
+// Conditional invariants (skip when the template emitted no scenarios for
+// this config, e.g. configs without runtime-entity ABox rows). When
+// scenarios DO exist, assert structural well-formedness so a future
+// regression in the compiler or extractor surfaces here rather than at
+// test-runtime against a live broker.
+// ===========================================================================
+describeForThisConfig(
+  'bundled-spec invariants: UpdatedFieldVisibleOnReadBack scenarios (#305 Phase 4)',
+  () => {
+    const READBACK_DIR = join(SCENARIOS_DIR, 'templates', 'UpdatedFieldVisibleOnReadBack');
+
+    interface ReadBackField {
+      leafName: string;
+      requestBodyPath: string[];
+      responseBodyPath: string[];
+    }
+    interface ReadBackFile {
+      templateName: string;
+      subjectName: string;
+      subjectKind: string;
+      scenario: {
+        steps: Array<{
+          kind: string;
+          operationId?: string;
+          assertion?: { kind: string; fields?: ReadBackField[] };
+          requestPlan?: { bodyTemplate?: unknown };
+        }>;
+      };
+    }
+
+    function loadAll(): { file: string; data: ReadBackFile }[] {
+      if (!existsSync(READBACK_DIR)) return [];
+      const out: { file: string; data: ReadBackFile }[] = [];
+      for (const f of readdirSync(READBACK_DIR)) {
+        if (!f.endsWith('.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+        const data = JSON.parse(readFileSync(join(READBACK_DIR, f), 'utf8')) as ReadBackFile;
+        out.push({ file: f, data });
+      }
+      return out;
+    }
+
+    it('every emitted scenario has the canonical 3-step shape (prereqChain → invoke → observe.fieldEquals)', () => {
+      const all = loadAll();
+      if (all.length === 0) return; // no runtime-entity ABox rows for this config
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const kinds = data.scenario.steps.map((s) => s.kind);
+        if (
+          kinds.length !== 3 ||
+          kinds[0] !== 'prereqChain' ||
+          kinds[1] !== 'invoke' ||
+          kinds[2] !== 'observe'
+        ) {
+          offenders.push(
+            `${file}: expected [prereqChain, invoke, observe], got ${JSON.stringify(kinds)}`,
+          );
+          continue;
+        }
+        const observe = data.scenario.steps[2];
+        if (observe.assertion?.kind !== 'fieldEquals') {
+          offenders.push(
+            `${file}: observe.assertion.kind expected 'fieldEquals', got '${observe.assertion?.kind}'`,
+          );
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it("every fieldEquals assertion has a non-empty fields[] and each field's responseBodyPath is a live response leaf of the fetcher", () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operationsById?: Record<string, { responseLeafPaths?: Record<string, string[]> }>;
+      };
+      const opsById = graph.operationsById ?? {};
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const observe = data.scenario.steps[2];
+        const fields = observe.assertion?.fields;
+        if (!Array.isArray(fields) || fields.length === 0) {
+          offenders.push(`${file}: fieldEquals.fields[] must be non-empty`);
+          continue;
+        }
+        const fetcherOpId = observe.operationId;
+        if (typeof fetcherOpId !== 'string') {
+          offenders.push(`${file}: observe.operationId missing`);
+          continue;
+        }
+        const liveLeaves = new Set(opsById[fetcherOpId]?.responseLeafPaths?.['200'] ?? []);
+        if (liveLeaves.size === 0) {
+          offenders.push(
+            `${file}: fetcher='${fetcherOpId}' has no 2xx responseLeafPaths in the graph`,
+          );
+          continue;
+        }
+        for (const f of fields) {
+          const dotted = f.responseBodyPath.join('.');
+          if (!liveLeaves.has(dotted)) {
+            offenders.push(
+              `${file}: responseBodyPath '${dotted}' is not a live 200-response leaf of '${fetcherOpId}'`,
+            );
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it("every fieldEquals assertion's expected value can be plucked from the mutator's emitted bodyTemplate at requestBodyPath", () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const invoke = data.scenario.steps[1];
+        const observe = data.scenario.steps[2];
+        const body = invoke.requestPlan?.bodyTemplate;
+        for (const f of observe.assertion?.fields ?? []) {
+          let node: unknown = body;
+          for (const seg of f.requestBodyPath) {
+            if (node === null || typeof node !== 'object') {
+              node = undefined;
+              break;
+            }
+            // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+            node = (node as Record<string, unknown>)[seg];
+          }
+          if (node === undefined) {
+            offenders.push(
+              `${file}: mutator body missing value at ${JSON.stringify(f.requestBodyPath)}`,
+            );
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
     });
   },
 );
