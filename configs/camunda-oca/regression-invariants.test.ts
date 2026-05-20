@@ -455,6 +455,157 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     ).toEqual([]);
   });
 
+  it('every planner-inserted runtimeEmission discovery step has a discoveryIntent and a body shaped exactly { filter: { [filterBy]: <bound> } } (#309 Phase A)', () => {
+    // Class-scoped guard for #309 Phase A. The pre-Phase-A planner
+    // emitted a flat top-level body for the inserted discovery step
+    // (every filter field as a placeholder), so the chain ran but
+    // queried for the wrong entity and the test passed for the wrong
+    // reason. Phase A stamps `discoveryIntent` on the OperationRef
+    // and the body builder emits ONLY the forward-bound filter wrapper.
+    //
+    // What this guards (per the issue #309 design table):
+    //   - The intentional-discovery regime must NEVER share the
+    //     exploratory-search regime's body shape — `{ filter: {
+    //       processInstanceKey: '${processInstanceKeyVar}' } }`, not
+    //     `{ processInstanceKey: '${processInstanceKeyVar}', state: ... }`.
+    //   - `filterBy` MUST resolve to the upstream producer's binding
+    //     (forward-bind), not a synthetic placeholder.
+    //   - User-authored search tests (no discoveryIntent stamped) are
+    //     untouched — they keep whatever shape the generic body builder
+    //     produces (today `{}` for a base-feature scenario).
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output scenarios directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    interface DiscoveryIntentLite {
+      filterBy: string;
+      fromBinding: string;
+      extractKey: string;
+      extractInto: string;
+      consistency: 'eventual' | 'strong';
+    }
+    interface OpRefLite {
+      operationId: string;
+      discoveryIntent?: DiscoveryIntentLite;
+    }
+    interface RequestStepLite {
+      operationId: string;
+      bodyTemplate?: unknown;
+      discoveryIntent?: DiscoveryIntentLite;
+    }
+    interface ScenarioLite {
+      id: string;
+      operations: OpRefLite[];
+      requestPlan?: RequestStepLite[];
+    }
+    interface FileLite {
+      endpoint: { operationId: string };
+      scenarios: ScenarioLite[];
+    }
+    const offenders: { file: string; scenario: string; op: string; reason: string }[] = [];
+    let intentCount = 0;
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8')) as FileLite;
+      for (const s of file.scenarios) {
+        for (const op of s.operations) {
+          if (!op.discoveryIntent) continue;
+          intentCount++;
+          const intent = op.discoveryIntent;
+          // Find the matching requestPlan step (must exist; body builder
+          // skips ops without a plan only for GET/DELETE — discovery
+          // ops are POST searches).
+          const step = (s.requestPlan ?? []).find((st) => st.operationId === op.operationId);
+          if (!step) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: 'discoveryIntent stamped but no matching requestPlan step found',
+            });
+            continue;
+          }
+          if (!step.discoveryIntent) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason:
+                'requestPlan step missing discoveryIntent — body builder bypassed the Phase A branch',
+            });
+            continue;
+          }
+          const body = step.bodyTemplate;
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate must be a plain object, got ${typeof body}`,
+            });
+            continue;
+          }
+          const bodyObj: Record<string, unknown> = body;
+          const topKeys = Object.keys(bodyObj);
+          if (topKeys.length !== 1 || topKeys[0] !== 'filter') {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate must have exactly one top-level key 'filter', got [${topKeys.join(', ')}]`,
+            });
+            continue;
+          }
+          const filterRaw = bodyObj.filter;
+          if (!filterRaw || typeof filterRaw !== 'object' || Array.isArray(filterRaw)) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate.filter must be a plain object, got ${typeof filterRaw}`,
+            });
+            continue;
+          }
+          const filter: Record<string, unknown> = filterRaw;
+          const filterKeys = Object.keys(filter);
+          if (filterKeys.length !== 1 || filterKeys[0] !== intent.filterBy) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate.filter must have exactly one key '${intent.filterBy}', got [${filterKeys.join(', ')}]`,
+            });
+            continue;
+          }
+          const value = filter[intent.filterBy];
+          const expected = `\${${intent.fromBinding}}`;
+          if (value !== expected) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate.filter.${intent.filterBy} must equal '${expected}', got ${JSON.stringify(value)}`,
+            });
+          }
+        }
+      }
+    }
+    // Sanity: this invariant is a no-op without runtimeEmission ABox
+    // entries; with the camunda-oca config there must be at least one
+    // (UserTaskKey × searchUserTasks). A zero here means either the
+    // ABox regressed or the planner stopped stamping the intent.
+    expect(
+      intentCount,
+      'expected at least one stamped discoveryIntent (UserTaskKey via searchUserTasks)',
+    ).toBeGreaterThan(0);
+    expect(
+      offenders,
+      "Every planner-inserted runtimeEmission discovery step must carry a discoveryIntent and a body shaped exactly { filter: { [filterBy]: '${fromBinding}' } }. Per the #309 design table, this is the intentional-discovery regime — it MUST NOT share the exploratory-search regime's flat top-level body shape, and it MUST forward-bind to the upstream producer's binding.",
+    ).toEqual([]);
+  });
+
   it('every endpoint whose only required semantic has a self-sufficient authoritative producer plans at least one chain (#95)', () => {
     // Class-scoped guard against the #95 defect family: the witness
     // implication in graphLoader must not turn an authoritative producer

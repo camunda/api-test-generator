@@ -32,6 +32,7 @@ interface NodeOpts {
   optionalSubShapes?: OperationNode['optionalSubShapes'];
   responseSemanticLeaves?: OperationNode['responseSemanticLeaves'];
   eventuallyConsistent?: boolean;
+  requestBodySemantics?: OperationNode['requestBodySemantics'];
 }
 
 function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
@@ -50,6 +51,7 @@ function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
     optionalSubShapes: opts.optionalSubShapes,
     responseSemanticLeaves: opts.responseSemanticLeaves,
     eventuallyConsistent: opts.eventuallyConsistent,
+    requestBodySemantics: opts.requestBodySemantics,
   };
 }
 
@@ -772,6 +774,13 @@ const fixtureRuntimeEmissionUserTaskKey: OperationGraph = (() => {
       // the graph index rather than the ABox declaration.
       required: [],
       produces: [],
+      // #309 Phase A — the body builder resolves `fromBinding` by
+      // looking up which semantic the `filterBy` field carries; the
+      // BFS needs that index on the discovery node to stamp a
+      // discoveryIntent on the inserted step.
+      requestBodySemantics: [
+        { semantic: 'ProcessInstanceKey', fieldPath: 'filter.processInstanceKey', required: false },
+      ],
     }),
     makeOp('updateUserTask', {
       required: ['UserTaskKey'],
@@ -823,5 +832,44 @@ describe('planner contracts: runtimeEmission semantic produces discover-and-bind
       'searchUserTasks',
       'updateUserTask',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture extension: discoveryIntent stamped on the inserted discovery step
+// (#309 Phase A — intentional discovery body wrapping)
+// ---------------------------------------------------------------------------
+//
+// Once Phase 3 puts the discovery op in the chain, Phase A must stamp a
+// `discoveryIntent` on the OperationRef for that step. The body builder
+// reads the intent to emit `{ filter: { [filterBy]: '${fromBinding}' } }`
+// instead of the generic top-level scalar shape — without this the
+// chain runs but the discovery filter is wrong and the test passes for
+// the wrong reason (see #309 issue context).
+describe('planner contracts: discoveryIntent stamped on inserted runtimeEmission discovery step (#309 Phase A)', () => {
+  it('stamps discoveryIntent on the searchUserTasks OperationRef with filterBy + fromBinding + extractKey + consistency', () => {
+    const collection = plan(fixtureRuntimeEmissionUserTaskKey, 'updateUserTask');
+    const scenario = collection.scenarios[0];
+    const discoveryRef = scenario.operations.find((o) => o.operationId === 'searchUserTasks');
+    expect(discoveryRef).toBeDefined();
+    expect(discoveryRef?.discoveryIntent).toEqual({
+      filterBy: 'processInstanceKey',
+      fromBinding: 'processInstanceKeyVar',
+      extractKey: 'userTaskKey',
+      extractInto: 'userTaskKeyVar',
+      consistency: 'eventual',
+    });
+  });
+
+  it('does NOT stamp discoveryIntent on the upstream producer or the endpoint-under-test', () => {
+    const collection = plan(fixtureRuntimeEmissionUserTaskKey, 'updateUserTask');
+    const scenario = collection.scenarios[0];
+    for (const op of scenario.operations) {
+      if (op.operationId === 'searchUserTasks') continue;
+      expect(
+        op.discoveryIntent,
+        `${op.operationId} must not carry discoveryIntent`,
+      ).toBeUndefined();
+    }
   });
 });

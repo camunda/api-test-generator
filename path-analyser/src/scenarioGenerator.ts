@@ -9,6 +9,7 @@ import {
 } from './ontology/operationRoles.js';
 import type {
   ArtifactRule,
+  DiscoveryIntent,
   EndpointScenario,
   EndpointScenarioCollection,
   ExtendedGenerationOpts,
@@ -78,6 +79,14 @@ interface State {
   establisherAliasSemantics?: Record<string, string>;
   providerList?: Record<string, string[]>; // semantic -> all providers
   artifactsApplied?: string[]; // artifact rule ids used so far
+  /**
+   * #309 Phase A — opId → DiscoveryIntent stamped by
+   * `expandRuntimeEmission` on the apply branch. Propagated through
+   * every `queue.push` site so the intent survives to scenario
+   * finalisation, where it is attached to the matching `OperationRef`
+   * for downstream body-builder consumption.
+   */
+  discoveryIntents?: Record<string, DiscoveryIntent>;
 }
 
 /*
@@ -329,6 +338,15 @@ export function generateScenariosForEndpoint(
         ...state.ops.map((id) => toRef(graph.operations[id])),
         toRef(endpoint),
       ];
+      // #309 Phase A — attach stamped discovery intents to matching
+      // OperationRefs so downstream materialisation can recognise the
+      // intentional-discovery shape.
+      if (state.discoveryIntents) {
+        for (const ref of opRefs) {
+          const intent = state.discoveryIntents[ref.operationId];
+          if (intent) ref.discoveryIntent = intent;
+        }
+      }
       const producedSemanticTypes = new Set<string>([...state.produced]);
       endpoint.produces.forEach((s) => {
         producedSemanticTypes.add(s);
@@ -506,6 +524,7 @@ export function generateScenariosForEndpoint(
           productionMap: newProductionMap,
           modelsDraft: state.modelsDraft,
           bindingsDraft: state.bindingsDraft,
+          discoveryIntents: state.discoveryIntents,
         });
       }
       continue;
@@ -953,6 +972,7 @@ export function generateScenariosForEndpoint(
           newProduced,
         ),
         artifactsApplied: workingState.artifactsApplied,
+        discoveryIntents: state.discoveryIntents,
       });
     }
   }
@@ -1286,6 +1306,7 @@ function deferForMissingDomainPrereqs(
         newProduced,
       ),
       artifactsApplied: workingState.artifactsApplied,
+      discoveryIntents: state.discoveryIntents,
     });
     enqueued = true;
   }
@@ -1464,6 +1485,7 @@ function expandRuntimeEmission(
           newProduced,
         ),
         artifactsApplied: workingState.artifactsApplied,
+        discoveryIntents: state.discoveryIntents,
       });
       enqueued = true;
     }
@@ -1515,6 +1537,35 @@ function expandRuntimeEmission(
   const varName = semanticToVarName(targetSemantic, bindingsDraft);
   if (!bindingsDraft[varName]) bindingsDraft[varName] = PENDING_BINDING;
 
+  // #309 Phase A — stamp DiscoveryIntent so the body builder emits
+  // `{ filter: { [filterBy]: '${fromBinding}' } }` for this inserted
+  // discovery step instead of the generic top-level scalar shape.
+  // `fromBinding` is resolved by finding the filterBy field's
+  // `requestBodySemantics` entry and converting its semantic to the
+  // standard `<camelLower(sem)>Var` binding name (the same convention
+  // every producer extract / URL-placeholder rewrite uses). Absent
+  // `filterBy` (allowed by the schema) → no intent; falls back to the
+  // generic body builder (rare; Phase A's invariant skips those).
+  let newDiscoveryIntents = state.discoveryIntents;
+  if (decl.discoveredVia.filterBy) {
+    const filterBy = decl.discoveredVia.filterBy;
+    const filterPaths = [`filter.${filterBy}`, filterBy];
+    const filterEntry = (discoveryNode.requestBodySemantics ?? []).find((rb) =>
+      filterPaths.includes(rb.fieldPath),
+    );
+    if (filterEntry) {
+      const fromBinding = `${camelLower(filterEntry.semantic)}Var`;
+      const intent: DiscoveryIntent = {
+        filterBy,
+        fromBinding,
+        extractKey: decl.discoveredVia.extractKey,
+        extractInto: varName,
+        consistency: decl.discoveredVia.consistency ?? 'strong',
+      };
+      newDiscoveryIntents = { ...(state.discoveryIntents ?? {}), [discoveryOpId]: intent };
+    }
+  }
+
   const sig = signature(newOps, newProduced, newNeeded, nextCycle);
   if (seen.has(sig)) return false;
   seen.add(sig);
@@ -1534,6 +1585,7 @@ function expandRuntimeEmission(
       newProduced,
     ),
     artifactsApplied: state.artifactsApplied,
+    discoveryIntents: newDiscoveryIntents,
   });
   return true;
 }

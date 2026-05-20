@@ -30,6 +30,35 @@ export interface OperationRef {
   method: string;
   path: string;
   eventuallyConsistent?: boolean;
+  /**
+   * #309 Phase A — stamped by `expandRuntimeEmission` on the inserted
+   * runtimeEmission discovery step (e.g. `searchUserTasks` when the
+   * chain is discovering `UserTaskKey`). Carries everything the body
+   * builder needs to emit the structurally-correct filter wrapper —
+   * `{ filter: { [filterBy]: '${fromBinding}' } }` — bound forward
+   * from the upstream producer's binding name. Absent on every other
+   * step (the generic body builder handles those).
+   */
+  discoveryIntent?: DiscoveryIntent;
+}
+
+/**
+ * #309 Phase A — describes a planner-inserted runtimeEmission
+ * discovery step: the upstream producer-binding the filter must
+ * forward-bind to, and the response field that surfaces the
+ * runtime-emitted key. The body builder reads `filterBy` + `fromBinding`
+ * to emit `{ filter: { [filterBy]: '${fromBinding}' } }`; the emitter
+ * reads `extractKey` + `extractInto` (today already derived from
+ * `discoveredVia.extractKey` via the producer auto-derive at
+ * `path-analyser/src/index.ts` ~714, so this field is currently
+ * documentary — Phase A only consumes filterBy + fromBinding).
+ */
+export interface DiscoveryIntent {
+  filterBy: string;
+  fromBinding: string;
+  extractKey: string;
+  extractInto: string;
+  consistency: 'eventual' | 'strong';
 }
 
 export interface OperationNode extends OperationRef {
@@ -420,6 +449,15 @@ export interface RequestStep {
    * graph or the domain sidecar.
    */
   eventualWaitsAfter?: EventualWaitSpec[];
+  /**
+   * #309 Phase A — present on planner-inserted runtimeEmission
+   * discovery steps. When set, `bodyTemplate` was synthesised by the
+   * forward-bind branch (`{ filter: { [filterBy]: '${fromBinding}' } }`),
+   * NOT by `buildRequestBodyFromCanonical`. Carried explicitly so L3
+   * invariants and downstream tooling can recognise the intentional-
+   * discovery shape without re-deriving it.
+   */
+  discoveryIntent?: DiscoveryIntent;
 }
 
 /**
