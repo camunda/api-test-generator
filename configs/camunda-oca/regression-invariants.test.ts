@@ -279,6 +279,76 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('every scenario whose chain consumes a createDeployment-authoritative semantic includes createDeployment as a producer step (#305 Phase 2 — deployment-as-planner-producer guard)', () => {
+    // Class-scoped pin of the property #305's Phase 3 must preserve:
+    // the `deploymentGateway` codegen role is a per-test call-site
+    // helper, NOT a semantic substitute for the planner step. If a
+    // chain references an operation that requires a semantic
+    // createDeployment authoritatively produces (e.g.
+    // ProcessDefinitionKey on createProcessInstance, FormKey on
+    // updateUserTaskForm, etc.), then createDeployment must appear in
+    // the same chain as a real producer step. The scenario JSON is
+    // the planner's output contract; this invariant fails if a future
+    // refactor lets the role hook short-circuit deployment planning.
+    //
+    // Defect class: any chain in which a deployment-derived key is
+    // sourced from a placeholder seedBinding or from an unrelated
+    // ancestor instead of an in-chain createDeployment.
+    //
+    // The "authoritative" set comes from the #34/#137 invariant above
+    // and matches createDeployment's response provider:true semantics:
+    // ProcessDefinitionKey/Id, DecisionDefinitionKey/Id,
+    // DecisionRequirementsKey, FormKey.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    loadGraph();
+    const deploymentDerivedSemantics = new Set([
+      'ProcessDefinitionKey',
+      'ProcessDefinitionId',
+      'DecisionDefinitionKey',
+      'DecisionDefinitionId',
+      'DecisionRequirementsKey',
+      'FormKey',
+    ]);
+    function consumesDeploymentDerived(opId: string): boolean {
+      const op = cachedOperationById?.get(opId);
+      if (!op) return false;
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required && deploymentDerivedSemantics.has(e.semanticType)) return true;
+      }
+      return false;
+    }
+    const offenders: { file: string; scenario: string; ops: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      for (const s of file.scenarios ?? []) {
+        if (s.id === 'unsatisfied') continue;
+        const ops = s.operations.map((o) => o.operationId);
+        if (ops.length <= 1) continue;
+        // Exclude createDeployment itself from the chain when checking
+        // who consumes deployment-derived semantics — we want the
+        // *downstream* consumers' transitive need to be satisfied by
+        // an in-chain createDeployment.
+        const downstreamConsumers = ops.filter(
+          (o) => o !== 'createDeployment' && consumesDeploymentDerived(o),
+        );
+        if (downstreamConsumers.length === 0) continue;
+        if (!ops.includes('createDeployment')) {
+          offenders.push({ file: f, scenario: s.id, ops });
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Every chain that consumes a deployment-derived semantic (ProcessDefinitionKey/Id, DecisionDefinitionKey/Id, DecisionRequirementsKey, FormKey) must include createDeployment as a producer step. The deploymentGateway codegen role is an emitter call-site helper, not a planner substitute (#305 corrected acceptance criterion #3).',
+    ).toEqual([]);
+  });
+
   it('every endpoint whose only required semantic has a self-sufficient authoritative producer plans at least one chain (#95)', () => {
     // Class-scoped guard against the #95 defect family: the witness
     // implication in graphLoader must not turn an authoritative producer
