@@ -21,6 +21,15 @@
       }
     },
     {
+      "kind": "bpmnProcess",
+      "path": "bpmn/user-task.bpmn",
+      "description": "BPMN process with a single Zeebe user task between start and end. Selected for chains whose consumer ops require ModelHasUserTask (e.g. updateUserTask, completeUserTask, assignUserTask discovered via searchUserTasks). See #305 Phase 3.",
+      "providesStates": ["ModelHasUserTask"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "UserTask_1", "EndEvent_1"]
+      }
+    },
+    {
       "kind": "form",
       "path": "forms/simple.form",
       "description": "Minimal Camunda form JSON"

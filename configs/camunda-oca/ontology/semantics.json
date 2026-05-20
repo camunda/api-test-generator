@@ -81,8 +81,18 @@
     },
     {
       "name": "UserTaskKey",
-      "kind": "serverEmergent",
-      "$comment": "Server-minted lifecycle key for a user task instance. User tasks emerge when a deployed process reaches a user-task element \u2014 no direct create API. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
+      "kind": "runtimeEmission",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": ["ModelHasUserTask"]
+      },
+      "discoveredVia": {
+        "operationId": "searchUserTasks",
+        "filterBy": "processInstanceKey",
+        "extractKey": "userTaskKey",
+        "consistency": "eventual"
+      },
+      "$comment": "Server-minted lifecycle key for a user task instance. Emitted after a deployment whose BPMN contains a user-task element (`ModelHasUserTask`) reaches that element during a process instance run. Discovered via searchUserTasks filtered by processInstanceKey; eventually consistent (await-eventually). See #305 Phase 3 (promoted from serverEmergent)."
     },
     {
       "name": "VariableKey",
@@ -99,6 +109,16 @@
     {
       "name": "ModelHasServiceTaskType",
       "parameter": "jobType",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ModelHasUserTask",
+      "parameter": "userTaskElementId",
       "producedBy": [
         "createDeployment"
       ],

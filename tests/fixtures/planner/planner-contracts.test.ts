@@ -727,3 +727,101 @@ describe('planner contracts: variant planner non-overlap producer fallback (#37)
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fixture: runtimeEmission semantic triggers produce→discover→bind sub-chain
+// (#305 Phase 3 — UserTaskKey pilot)
+// ---------------------------------------------------------------------------
+//
+// A semantic declared `kind: 'runtimeEmission'` must NOT dead-end on the
+// missing-producers check. The planner must:
+//   1. Satisfy the `emittedBy.predecessor` runtime state via the BFS
+//      domain-prereq chain (here: createProcessInstance for
+//      ProcessInstanceExists).
+//   2. Inject the `discoveredVia.operationId` (here: searchUserTasks)
+//      into the chain after the predecessor.
+//   3. Treat the discovery op's response field (`extractKey`) as the
+//      authoritative binding for the runtimeEmission semantic, so the
+//      endpoint-under-test consumes it as a producer-bound var.
+//
+// Before Phase 3 lands the planner classifies `runtimeEmission`-kinded
+// types as `unclassified` (because they have no producers / establishers
+// / external-entity entry) and emits `{ id: 'unsatisfied' }` —
+// reproducing exactly the `updateUserTask` scenario shape today.
+
+const fixtureRuntimeEmissionUserTaskKey: OperationGraph = (() => {
+  const graph = makeGraph([
+    makeOp('createDeployment', {
+      produces: ['ProcessDefinitionKey'],
+      providerMap: { ProcessDefinitionKey: true },
+      domainProduces: ['ProcessDefinitionDeployed', 'ModelHasUserTask'],
+    }),
+    makeOp('createProcessInstance', {
+      required: ['ProcessDefinitionKey'],
+      produces: ['ProcessInstanceKey'],
+      providerMap: { ProcessInstanceKey: true },
+      domainRequiresAll: ['ProcessDefinitionDeployed'],
+      domainProduces: ['ProcessInstanceExists'],
+    }),
+    makeOp('searchUserTasks', {
+      // The runtimeEmission ABox declares this as the discovery op;
+      // the planner injects it from the domain declaration, NOT from
+      // producersByType. So we deliberately leave UserTaskKey OUT of
+      // searchUserTasks.produces — the test will fail differently
+      // (false-positive via producersByType) if the planner relies on
+      // the graph index rather than the ABox declaration.
+      required: [],
+      produces: [],
+    }),
+    makeOp('updateUserTask', {
+      required: ['UserTaskKey'],
+    }),
+  ]);
+  graph.domain = {
+    version: 1,
+    semanticTypes: {
+      UserTaskKey: {
+        kind: 'runtimeEmission',
+        emittedBy: {
+          predecessor: 'ProcessInstanceExists',
+          guardedBy: ['ModelHasUserTask'],
+        },
+        discoveredVia: {
+          operationId: 'searchUserTasks',
+          filterBy: 'processInstanceKey',
+          extractKey: 'userTaskKey',
+          consistency: 'eventual',
+        },
+      },
+    },
+    runtimeStates: {
+      ProcessDefinitionDeployed: { kind: 'state', producedBy: ['createDeployment'] },
+      ProcessInstanceExists: { kind: 'state', producedBy: ['createProcessInstance'] },
+    },
+    capabilities: {
+      ModelHasUserTask: {
+        kind: 'capability',
+        parameter: 'userTaskElementId',
+        producedBy: ['createDeployment'],
+        dependsOn: ['ProcessDefinitionDeployed'],
+      },
+    },
+    identifiers: {},
+  };
+  return graph;
+})();
+
+describe('planner contracts: runtimeEmission semantic produces discover-and-bind chain (#305 Phase 3)', () => {
+  it('plans deploy → createProcessInstance → searchUserTasks → updateUserTask for an endpoint that consumes a runtimeEmission semantic', () => {
+    const collection = plan(fixtureRuntimeEmissionUserTaskKey, 'updateUserTask');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const ops = opIdsOf(collection.scenarios[0]);
+    expect(ops).toEqual([
+      'createDeployment',
+      'createProcessInstance',
+      'searchUserTasks',
+      'updateUserTask',
+    ]);
+  });
+});

@@ -356,6 +356,105 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
     ).toEqual([]);
   });
 
+  it('every endpoint that consumes a runtimeEmission-classified semantic in a required path-param plans a real discovery chain — no synthetic-only resolution (#305 Phase 3)', () => {
+    // Class-scoped guard for the runtimeEmission promotion (#305):
+    // when a semantic type is reclassified from `serverEmergent` to
+    // `runtimeEmission`, every endpoint that consumes it in a required
+    // path-param must plan a chain that (a) is not `unsatisfied` and
+    // (b) includes the declared `discoveredVia.operationId` ahead of
+    // the consuming op. Regression would mean the planner silently
+    // falls back to a synthetic `seedBinding(...)` placeholder, which
+    // makes the integration test a no-op.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const semanticsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const semantics = JSON.parse(readFileSync(semanticsPath, 'utf8')) as {
+      semanticTypes?: Array<{
+        name: string;
+        kind?: string;
+        discoveredVia?: { operationId?: string };
+      }>;
+    };
+    const runtimeEmissionByName = new Map<string, string>();
+    for (const t of semantics.semanticTypes ?? []) {
+      if (t.kind === 'runtimeEmission' && t.discoveredVia?.operationId) {
+        runtimeEmissionByName.set(t.name, t.discoveredVia.operationId);
+      }
+    }
+    if (runtimeEmissionByName.size === 0) return; // no-op until Phase 3 lands UserTaskKey
+
+    loadGraph();
+    const offenders: { file: string; scenario: string; semantic: string; reason: string }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      const endpointOp = findOperation(file.endpoint.operationId);
+      // Required path-param semantics on the endpoint under test.
+      const requiredPathSemantics = (endpointOp.parameters ?? [])
+        .filter((p) => p.location === 'path' && p.required && p.semanticType)
+        .map((p) => p.semanticType)
+        .filter((s): s is string => typeof s === 'string');
+      const relevant = requiredPathSemantics.filter((s) => runtimeEmissionByName.has(s));
+      if (relevant.length === 0) continue;
+      // Also flag the empty-success case: a relevant endpoint that only
+      // plans `unsatisfied` scenarios passes the per-scenario checks
+      // below trivially (the loop body is skipped). A regression where
+      // the planner stops expanding the discovery chain and falls back
+      // to `unsatisfied` would otherwise go undetected. (PR #308
+      // review.)
+      const satisfiable = (file.scenarios ?? []).filter((s) => s.id !== 'unsatisfied');
+      if (satisfiable.length === 0) {
+        for (const sem of relevant) {
+          offenders.push({
+            file: f,
+            scenario: '(none — all scenarios unsatisfied)',
+            semantic: sem,
+            reason: `endpoint '${file.endpoint.operationId}' planned no satisfiable chain for required path-param semantic '${sem}'`,
+          });
+        }
+        continue;
+      }
+      for (const s of satisfiable) {
+        const ops = s.operations.map((o) => o.operationId);
+        for (const sem of relevant) {
+          const discoveryOp = runtimeEmissionByName.get(sem);
+          if (!discoveryOp) continue;
+          const discIdx = ops.indexOf(discoveryOp);
+          // Use lastIndexOf for the consuming-endpoint op: variant
+          // scenarios can legitimately invoke the endpoint more than
+          // once (e.g. warm-up + final). The discovery op must precede
+          // the FINAL consumer invocation, not the warm-up one. (PR
+          // #308 review.)
+          const endIdx = ops.lastIndexOf(file.endpoint.operationId);
+          if (discIdx < 0) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              semantic: sem,
+              reason: `discovery op '${discoveryOp}' missing from chain ${JSON.stringify(ops)}`,
+            });
+          } else if (endIdx >= 0 && discIdx > endIdx) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              semantic: sem,
+              reason: `discovery op '${discoveryOp}' appears after the consuming op '${file.endpoint.operationId}'`,
+            });
+          }
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Every endpoint that consumes a runtimeEmission semantic in a required path-param must plan a chain whose discoveredVia.operationId precedes the consuming op (#305 Phase 3). A failure here usually means the planner silently fell back to `seedBinding(...)` for the target semantic instead of expanding the discovery chain.',
+    ).toEqual([]);
+  });
+
   it('every endpoint whose only required semantic has a self-sufficient authoritative producer plans at least one chain (#95)', () => {
     // Class-scoped guard against the #95 defect family: the witness
     // implication in graphLoader must not turn an authoritative producer
