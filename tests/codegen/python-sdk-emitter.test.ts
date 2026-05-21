@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { PythonSdkEmitter } from '../../path-analyser/src/codegen/python-sdk/emitter.js';
+import { PythonSdkEmitter } from '../../materializer/src/python-sdk/emitter.js';
 import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.js';
 
 /**

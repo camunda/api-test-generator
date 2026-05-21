@@ -1,11 +1,11 @@
-import { assertSafeGlobalContextSeeds } from '../../domainSemanticsValidator.js';
+import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
+import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
   GlobalContextSeed,
   RequestStep,
-} from '../../types.js';
-import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
+} from 'path-analyser/types';
 import { FallbackMappingSource, type SdkMappingSource } from './sdk-mapping.js';
 
 /**
@@ -41,11 +41,12 @@ export function renderJsSdkSuite(
  * When no source is supplied, `FallbackMappingSource` is used, which returns
  * the operationId unchanged (already camelCase in the Camunda REST API).
  */
-export function createJsSdkEmitter(mapping?: SdkMappingSource): Emitter {
+export function createJsSdkEmitter(mapping?: SdkMappingSource): EmitterStrategy {
   const source = mapping ?? new FallbackMappingSource();
   return {
     id: 'js-sdk',
     name: 'JavaScript SDK (@camunda8/orchestration-cluster-api)',
+    supportedConfigs: ['*'],
     async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderJsSdkSuite(collection, source, {
         suiteName: ctx.suiteName,

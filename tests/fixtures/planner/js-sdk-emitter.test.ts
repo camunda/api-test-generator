@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  jsSdkSuiteFileName,
-  renderJsSdkSuite,
-} from '../../../path-analyser/src/codegen/js-sdk/emitter.ts';
-import { FallbackMappingSource } from '../../../path-analyser/src/codegen/js-sdk/sdk-mapping.ts';
+import { jsSdkSuiteFileName, renderJsSdkSuite } from '../../../materializer/src/js-sdk/emitter.ts';
+import { FallbackMappingSource } from '../../../materializer/src/js-sdk/sdk-mapping.ts';
 import type { EndpointScenarioCollection } from '../../../path-analyser/src/types.ts';
 
 /**

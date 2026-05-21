@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCsharpEmitter } from '../../../path-analyser/src/codegen/csharp-sdk/emitter.ts';
+import { createCsharpEmitter } from '../../../materializer/src/csharp-sdk/emitter.ts';
 import type { EndpointScenarioCollection } from '../../../path-analyser/src/types.ts';
 
 /**

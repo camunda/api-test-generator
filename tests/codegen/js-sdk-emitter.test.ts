@@ -3,11 +3,11 @@ import {
   createJsSdkEmitter,
   jsSdkSuiteFileName,
   renderJsSdkSuite,
-} from '../../path-analyser/src/codegen/js-sdk/emitter.ts';
+} from '../../materializer/src/js-sdk/emitter.ts';
 import {
   FallbackMappingSource,
   OperationMapJsonSource,
-} from '../../path-analyser/src/codegen/js-sdk/sdk-mapping.ts';
+} from '../../materializer/src/js-sdk/sdk-mapping.ts';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
 
 /**

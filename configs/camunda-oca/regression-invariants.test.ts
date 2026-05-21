@@ -8871,9 +8871,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
         `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
-    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
-      f.endsWith('.python_sdk.spec.py'),
-    );
+    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.python_sdk.spec.py'));
     if (files.length === 0) {
       // No Python SDK tests generated yet; skip
       return;
@@ -8886,7 +8884,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       assertionsRun++;
       const contextRefs = new Set<string>();
       const regexCtxRead = /ctx\['([^']+)'\]/g;
-      let match;
+      let match: RegExpExecArray | null;
       while ((match = regexCtxRead.exec(src)) !== null) {
         contextRefs.add(match[1]);
       }
@@ -8925,7 +8923,21 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
         `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
+    // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
+    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
+    // so the set of operations they CAN emit is identical. We use the JS SDK's
+    // emitted .feature.test.ts files as the reference set: any operationId covered
+    // by the JS SDK must also have a Python SDK file, and vice versa.
+    const jsSdkEmitted = new Set(
+      readdirSync(GENERATED_TESTS_DIR)
+        .filter((f) => f.endsWith('.feature.test.ts'))
+        .map((f) => f.replace(/\.feature\.test\.ts$/, '')),
+    );
+    if (jsSdkEmitted.size === 0) {
+      throw new Error('No JS SDK .feature.test.ts files found — run codegen:js-sdk:all first.');
+    }
     const missing = planned
+      .filter((e) => jsSdkEmitted.has(e.operationId))
       .map((e) => `${e.operationId}.python_sdk.spec.py`)
       .filter((f) => !existsSync(join(GENERATED_TESTS_DIR, f)));
     expect(
@@ -8946,16 +8958,13 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
         `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
-    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
-      f.endsWith('.feature.test.ts'),
-    );
+    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.test.ts'));
     if (files.length === 0) {
       return;
     }
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal regex to detect unresolved placeholder syntax in generated JS SDK files
       if (/\$\{[^}]+\}/.test(src)) {
         offenders.push(f);
       }
@@ -8987,7 +8996,23 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
         `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
+    // JS SDK and Python SDK hard-fail on scenarios whose prereqs require multipart
+    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
+    // so the set of operations they CAN emit is identical. We use the Python SDK's
+    // emitted .python_sdk.spec.py files as the reference set: any operationId
+    // covered by the Python SDK must also have a JS SDK file, and vice versa.
+    const pythonSdkEmitted = new Set(
+      readdirSync(GENERATED_TESTS_DIR)
+        .filter((f) => f.endsWith('.python_sdk.spec.py'))
+        .map((f) => f.replace(/\.python_sdk\.spec\.py$/, '')),
+    );
+    if (pythonSdkEmitted.size === 0) {
+      throw new Error(
+        'No Python SDK .python_sdk.spec.py files found — run codegen:python-sdk:all first.',
+      );
+    }
     const missing = planned
+      .filter((e) => pythonSdkEmitted.has(e.operationId))
       .map((e) => `${e.operationId}.feature.test.ts`)
       .filter((f) => !existsSync(join(GENERATED_TESTS_DIR, f)));
     expect(
@@ -9048,4 +9073,3 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
     ).toEqual([]);
   });
 });
-

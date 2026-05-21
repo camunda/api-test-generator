@@ -12,8 +12,8 @@
  *   - Hard-fail on multipart (unsupported in Python SDK integration)
  */
 
-import type { EndpointScenario, EndpointScenarioCollection } from '../../types.js';
-import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
+import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
+import type { EndpointScenario, EndpointScenarioCollection } from 'path-analyser/types';
 import {
   camelToSnake,
   createDefaultOperationMapSource,
@@ -57,7 +57,7 @@ function toPythonLiteral(value: unknown): string {
     }
 
     // Otherwise use single quotes with escaping
-    const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'" );
+    const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `'${escaped}'`;
   }
 
@@ -66,7 +66,7 @@ function toPythonLiteral(value: unknown): string {
 
   // Handle arrays
   if (Array.isArray(value)) {
-    const items = value.map(v => toPythonLiteral(v)).join(', ');
+    const items = value.map((v) => toPythonLiteral(v)).join(', ');
     return `[${items}]`;
   }
 
@@ -328,11 +328,14 @@ function renderPythonTestSuite(
 /**
  * Factory: create a Python SDK emitter backed by the given operation map.
  */
-export function createPythonSdkEmitter(operationMapSource?: OperationMapJsonSource): Emitter {
+export function createPythonSdkEmitter(
+  operationMapSource?: OperationMapJsonSource,
+): EmitterStrategy {
   const source = operationMapSource ?? createDefaultOperationMapSource();
   return {
     id: 'python-sdk',
     name: 'Python SDK (Async)',
+    supportedConfigs: ['*'],
     async emit(collection: EndpointScenarioCollection, _ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderPythonTestSuite(collection, source);
       return [
@@ -346,7 +349,7 @@ export function createPythonSdkEmitter(operationMapSource?: OperationMapJsonSour
 }
 
 /**
- * {@link Emitter} implementation for Python SDK tests.
+ * {@link EmitterStrategy} implementation for Python SDK tests.
  *
  * Pure: returns in-memory {@link EmittedFile} list, no filesystem access.
  * Uses default operation map (fallback camelToSnake).
@@ -354,4 +357,4 @@ export function createPythonSdkEmitter(operationMapSource?: OperationMapJsonSour
  * For production use, consider using createPythonSdkEmitter() with a loaded
  * operation-map.json source for more accurate method name resolution.
  */
-export const PythonSdkEmitter: Emitter = createPythonSdkEmitter();
+export const PythonSdkEmitter: EmitterStrategy = createPythonSdkEmitter();

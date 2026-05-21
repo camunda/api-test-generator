@@ -90,10 +90,7 @@ try {
   writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
   console.log(`[fetch-python-sdk-map] Written metadata to ${metadataPath}`);
 } catch (err) {
-  console.error(
-    '[fetch-python-sdk-map] Failed:',
-    err instanceof Error ? err.message : String(err),
-  );
+  console.error('[fetch-python-sdk-map] Failed:', err instanceof Error ? err.message : String(err));
   process.exit(1);
 } finally {
   try {

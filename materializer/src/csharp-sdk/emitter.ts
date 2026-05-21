@@ -1,5 +1,5 @@
-import type { EndpointScenarioCollection } from '../../types.js';
-import type { EmitContext, EmittedFile, Emitter } from '../emitter.js';
+import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
+import type { EndpointScenarioCollection } from 'path-analyser/types';
 
 export interface CsharpOperationMapEntry {
   file?: string;
@@ -9,10 +9,11 @@ export interface CsharpOperationMapEntry {
 
 export type CsharpOperationMap = Record<string, CsharpOperationMapEntry[]>;
 
-export function createCsharpEmitter(map: CsharpOperationMap): Emitter {
+export function createCsharpEmitter(map: CsharpOperationMap): EmitterStrategy {
   return {
     id: 'csharp-sdk',
     name: 'C# SDK',
+    supportedConfigs: ['*'],
     async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
       const relativePath = `csharp/${collection.endpoint.operationId}.${ctx.mode}.cs`;
       const content = renderCsharpSuite(collection, ctx, map);

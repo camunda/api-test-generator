@@ -30,6 +30,8 @@ import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRole
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult } from './coverage.js';
+import { createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -40,6 +42,7 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
+import { createPythonSdkEmitter } from './python-sdk/emitter.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -50,6 +53,9 @@ import { emitTemplateSuites } from './playwright/templateEmitter.js';
 // pulled OCA-specific knowledge into a package that is supposed to be
 // config-agnostic.
 registerEmitter(PlaywrightEmitter);
+registerEmitter(createJsSdkEmitter());
+registerEmitter(createPythonSdkEmitter());
+registerEmitter(createCsharpEmitter({}));
 
 /**
  * Walk the active config's role bundles and register any role-hook
@@ -346,7 +352,12 @@ async function run() {
   // version cannot survive into the current run. Without this, local
   // pre-push validation can diverge from CI (which always sees a fresh tree).
   // The support/ tree, README.md, and responses.json are re-materialised below.
-  await fs.rm(outDir, { recursive: true, force: true });
+  // SDK emitters (js-sdk, python-sdk, csharp-sdk) share the outDir with
+  // playwright and must NOT wipe it — they add complementary file types
+  // (.test.ts, .spec.py, .cs) alongside the existing .spec.ts files.
+  if (emitter.id === 'playwright') {
+    await fs.rm(outDir, { recursive: true, force: true });
+  }
   await fs.mkdir(outDir, { recursive: true });
   // Lift 12 / #231: per-role template bundles for the active config's
   // Playwright emitter. Loaded from configs/<config>/codegen/playwright/roles/
@@ -604,28 +615,31 @@ async function run() {
     }
     // #331: persist the coverage artefact alongside the suites so it
     // is diffable in PRs and consumable by the L3 invariant in
-    // configs/<config>/regression-invariants.test.ts. Written for
-    // every emitter so the artefact's presence is independent of
-    // whether the current target shipped template suites this run.
-    await fs.writeFile(
-      path.join(outDir, 'coverage.json'),
-      `${JSON.stringify(
-        {
-          version: 1,
-          suppressedOpIds: [...coverage.suppressedOpIds].sort(),
-          entries: [...coverage.entries].sort((a, b) =>
-            a.operationId === b.operationId
-              ? a.template === b.template
-                ? a.aboxRow.localeCompare(b.aboxRow) || a.stepKind.localeCompare(b.stepKind)
-                : a.template.localeCompare(b.template)
-              : a.operationId.localeCompare(b.operationId),
-          ),
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
-    );
+    // configs/<config>/regression-invariants.test.ts. Only written by
+    // the Playwright emitter — SDK emitters (js-sdk, python-sdk, csharp-sdk)
+    // do not suppress via scenario-template coverage and must not overwrite
+    // the playwright-written artefact with an empty suppressedOpIds list.
+    if (emitter.id === PlaywrightEmitter.id) {
+      await fs.writeFile(
+        path.join(outDir, 'coverage.json'),
+        `${JSON.stringify(
+          {
+            version: 1,
+            suppressedOpIds: [...coverage.suppressedOpIds].sort(),
+            entries: [...coverage.entries].sort((a, b) =>
+              a.operationId === b.operationId
+                ? a.template === b.template
+                  ? a.aboxRow.localeCompare(b.aboxRow) || a.stepKind.localeCompare(b.stepKind)
+                  : a.template.localeCompare(b.template)
+                : a.operationId.localeCompare(b.operationId),
+            ),
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      );
+    }
     console.log(
       `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites, -${suppressedCount} suppressed by scenario-template coverage) in ${outDir} (target: ${emitter.id})`,
     );
