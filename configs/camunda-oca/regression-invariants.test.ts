@@ -54,6 +54,29 @@ const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 
+// #331: opIds whose per-endpoint feature spec is intentionally omitted
+// because a scenario-template instantiation already encodes the
+// canonical functional test for that operation. Materializer writes
+// the coverage artefact alongside the suite. Loaded lazily — feature-
+// presence invariants subtract this set; the lifecycle specs under
+// `edges/`, `entities/`, `runtime-entities/`, and `state-transitions/`
+// are the regression guard for the suppressed operations.
+let _suppressedOpIdsCache: Set<string> | undefined;
+function loadSuppressedOpIds(): Set<string> {
+  if (_suppressedOpIdsCache) return _suppressedOpIdsCache;
+  const coveragePath = join(GENERATED_TESTS_DIR, 'coverage.json');
+  if (!existsSync(coveragePath)) {
+    _suppressedOpIdsCache = new Set();
+    return _suppressedOpIdsCache;
+  }
+  // biome-ignore lint/plugin: runtime contract boundary — materializer-emitted coverage artefact; only `suppressedOpIds: string[]` is read.
+  const parsed = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+    suppressedOpIds?: string[];
+  };
+  _suppressedOpIdsCache = new Set(parsed.suppressedOpIds ?? []);
+  return _suppressedOpIdsCache;
+}
+
 // ---------------------------------------------------------------------------
 // Bundled-spec helpers (shared between #326 and #247 invariants).
 //
@@ -2037,6 +2060,10 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     let totalExpected = 0;
     let totalActual = 0;
     let suitesWithEc = 0;
+    // #331: suppressed opIds have no feature spec to wrap — the
+    // equivalent eventually-consistent reads inside their lifecycle
+    // spec are guarded by the template emitter's own wrap logic.
+    const suppressed = loadSuppressedOpIds();
 
     for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
       if (!f.endsWith('-scenarios.json')) continue;
@@ -2044,6 +2071,7 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
       // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary; shape locally typed as CollectionLite
       const coll = JSON.parse(raw) as CollectionLite;
       if (!coll || typeof coll !== 'object') continue;
+      if (suppressed.has(coll.endpoint?.operationId)) continue;
       const expected = expectedWraps(coll);
       if (expected === 0) continue;
       suitesWithEc++;
@@ -2277,7 +2305,7 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     );
   });
 
-  it('getIncident.feature.spec.ts deploys bpmn/incident-script-task.bpmn and chains searchIncidents → getIncident (#305 Phase 5a)', () => {
+  it('Incident.resolveIncident lifecycle spec deploys bpmn/incident-script-task.bpmn and chains searchIncidents → getIncident (#305 Phase 5a)', () => {
     // Phase 5a promoted IncidentKey serverEmergent → runtimeEmission, gated
     // by the new ModelEmitsIncident capability. The selector must pick the
     // new incident-script-task fixture (the only one declaring
@@ -2291,30 +2319,42 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     // IncidentKey (synthetic seed only), the emitted spec would have a
     // single getIncident step seeded with `seedBinding('incidentKeyVar')`,
     // and the test would be a no-op against any real broker.
-    const spec = join(GENERATED_TESTS_DIR, 'getIncident.feature.spec.ts');
+    //
+    // #331: getIncident's per-endpoint feature spec is now suppressed
+    // because `Incident.resolveIncident` (StateTransitionVisibleAfterAction
+    // template) is the canonical runtime-discovery test. The same chain
+    // assertions hold against the lifecycle spec — the production behaviour
+    // is unchanged, only the spec file moved.
+    const spec = join(
+      GENERATED_TESTS_DIR,
+      'state-transitions',
+      'Incident.resolveIncident.lifecycle.spec.ts',
+    );
     if (!existsSync(spec)) {
       throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
     }
     const src = readFileSync(spec, 'utf8');
-    expect(src, 'getIncident must deploy the incident-emitting fixture').toContain(
+    expect(src, 'Incident.resolveIncident must deploy the incident-emitting fixture').toContain(
       '@@FILE:bpmn/incident-script-task.bpmn',
     );
-    expect(src, 'getIncident must include searchIncidents discovery step').toContain(
-      "test.step('searchIncidents'",
+    expect(src, 'Incident.resolveIncident must include searchIncidents discovery step').toContain(
+      "test.step('prereq: searchIncidents'",
     );
-    expect(src, 'getIncident must include getIncident endpoint step').toContain(
-      "test.step('getIncident'",
+    expect(src, 'Incident.resolveIncident must include getIncident endpoint step').toContain(
+      "test.step('observe (read-back): getIncident'",
     );
-    expect(src, 'getIncident must extract incidentKey from searchIncidents response').toContain(
-      "extractInto(ctx, 'incidentKeyVar', json?.items?.[0]?.incidentKey)",
-    );
-    expect(src, 'getIncident must consume the runtime-discovered incidentKey').toContain(
-      '${ctx.incidentKeyVar',
-    );
+    expect(
+      src,
+      'Incident.resolveIncident must extract incidentKey from searchIncidents response',
+    ).toMatch(/extractInto\(ctx, 'incidentKeyVar', json\d*\?\.items\?\.\[0\]\?\.incidentKey\)/);
+    expect(
+      src,
+      'Incident.resolveIncident must consume the runtime-discovered incidentKey',
+    ).toContain('${ctx.incidentKeyVar');
     // Negative: must NOT fall back to seeded-only resolution.
     expect(
       src,
-      'getIncident must NOT seed incidentKeyVar — the runtimeEmission chain supplies it',
+      'Incident.resolveIncident must NOT seed incidentKeyVar — the runtimeEmission chain supplies it',
     ).not.toContain("seedBinding('incidentKeyVar')");
   });
 
@@ -4167,11 +4207,23 @@ describeForThisConfig('bundled-spec invariants: suite-partition cut (#162 PR 4)'
     // without a corresponding `.feature.spec.ts` means the emitter
     // dropped the suite silently — exactly the failure mode the
     // partition cut is supposed to prevent.
+    //
+    // #331: operations covered by a scenario-template instantiation
+    // (EdgeLifecycle / EntityLifecycle / UpdatedFieldVisibleOnReadBack /
+    // StateTransitionVisibleAfterAction) are intentionally suppressed
+    // — the lifecycle spec under edges/, entities/, runtime-entities/,
+    // or state-transitions/ is the canonical functional test. Read
+    // the suppression set from the coverage artefact and exclude
+    // those opIds from this guard. A separate invariant below pins
+    // the inverse (every suppressed opId is backed by an emitted
+    // lifecycle spec).
+    const suppressed = loadSuppressedOpIds();
     const offenders: { jsonFile: string; expectedSpec: string }[] = [];
     for (const { file, parsed } of loadAllFeatureFiles()) {
       if (!parsed.scenarios?.length) continue;
       const opId = parsed.endpoint?.operationId;
       if (!opId) continue;
+      if (suppressed.has(opId)) continue;
       const expectedSpec = `${opId}.feature.spec.ts`;
       const specPath = join(GENERATED_TESTS_DIR, expectedSpec);
       if (!existsSync(specPath)) {
@@ -4182,6 +4234,54 @@ describeForThisConfig('bundled-spec invariants: suite-partition cut (#162 PR 4)'
       offenders,
       'Feature scenario JSON without a matching .feature.spec.ts in the playwright suite directory.',
     ).toEqual([]);
+  });
+
+  it('every scenario-template-suppressed opId is backed by an emitted lifecycle spec (#331)', () => {
+    // The inverse of the partition-cut guard above. The coverage
+    // artefact declares which opIds the materializer suppressed
+    // because a scenario-template instantiation already covers them;
+    // for every such opId there must be a `coverage.entries[]` row
+    // pointing at an emitted lifecycle spec that actually exists on
+    // disk. Without this guard a generator regression that emitted
+    // an empty coverage map (or one pointing at non-existent specs)
+    // would silently delete the feature spec for an operation that
+    // now has no test at all.
+    const coveragePath = join(GENERATED_TESTS_DIR, 'coverage.json');
+    if (!existsSync(coveragePath)) {
+      throw new Error(
+        `coverage artefact not found at ${coveragePath} — run 'npm run testsuite:generate'`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary — materializer-emitted coverage artefact.
+    const cov = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+      suppressedOpIds?: string[];
+      entries?: Array<{ operationId: string; emittedSpec: string }>;
+    };
+    const entries = cov.entries ?? [];
+    const opToSpecs = new Map<string, string[]>();
+    for (const e of entries) {
+      const arr = opToSpecs.get(e.operationId) ?? [];
+      arr.push(e.emittedSpec);
+      opToSpecs.set(e.operationId, arr);
+    }
+    const offenders: { opId: string; reason: string }[] = [];
+    for (const opId of cov.suppressedOpIds ?? []) {
+      const specs = opToSpecs.get(opId);
+      if (!specs || specs.length === 0) {
+        offenders.push({ opId, reason: 'no coverage entry' });
+        continue;
+      }
+      const missing = specs.filter((rel) => !existsSync(join(GENERATED_TESTS_DIR, rel)));
+      if (missing.length > 0) {
+        offenders.push({ opId, reason: `missing emitted spec(s): ${missing.join(', ')}` });
+      }
+    }
+    expect(
+      offenders,
+      'Operations whose feature spec was suppressed must be covered by an emitted lifecycle spec.',
+    ).toEqual([]);
+    // Sanity: the bundled spec exercises this pattern non-trivially.
+    expect((cov.suppressedOpIds ?? []).length).toBeGreaterThan(0);
   });
 
   it('variant suite covers every flat top-level optional present in the feature suite pre-cut (#162 PR 4)', () => {

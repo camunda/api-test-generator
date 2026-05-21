@@ -18,6 +18,7 @@ import {
   getFeatureOutputDir,
   getPlaywrightSuiteDir,
   getTemplateScenariosDir,
+  getTemplateScenariosRootDir,
   getVariantOutputDir,
 } from 'path-analyser/configResolver';
 import {
@@ -28,6 +29,7 @@ import {
 import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRoles';
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
+import { buildCoverage, type CoverageResult } from './coverage.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -466,12 +468,39 @@ async function run() {
   await writeScaffolded(emitter, buildCtx('', 'feature'));
 
   if (positional === '--all') {
+    // #331: scenario-template coverage. Build the suppression set
+    // from on-disk template scenario JSONs before the feature loop so
+    // operations covered by a well-formed EdgeLifecycle /
+    // EntityLifecycle / UpdatedFieldVisibleOnReadBack /
+    // StateTransitionVisibleAfterAction spec (or any future scenario
+    // template wired into `templateOutputDirs`) do not also emit a
+    // structurally weaker feature spec. Suppression only applies to
+    // emitters that ship the corresponding template suites; for now
+    // that is Playwright. See materializer/src/coverage.ts and #331.
+    let coverage: CoverageResult = { suppressedOpIds: new Set(), entries: [] };
+    if (emitter.id === PlaywrightEmitter.id) {
+      coverage = await buildCoverage({
+        templateScenariosRootDir: getTemplateScenariosRootDir(repoRoot),
+        templatesAboxPath: path.join(configDir, 'ontology', 'scenario-templates.json'),
+        templateOutputDirs: {
+          EdgeLifecycle: 'edges',
+          EntityLifecycle: 'entities',
+          UpdatedFieldVisibleOnReadBack: 'runtime-entities',
+          StateTransitionVisibleAfterAction: 'state-transitions',
+        },
+      });
+    }
     let count = 0;
+    let suppressedCount = 0;
     for (const f of files) {
       try {
         const content = await fs.readFile(path.join(featureDir, f), 'utf8');
         const parsed = parseScenarioCollection(content);
         if (!parsed.endpoint?.operationId) continue;
+        if (coverage.suppressedOpIds.has(parsed.endpoint.operationId)) {
+          suppressedCount++;
+          continue;
+        }
         await writeEmitted(emitter, parsed, buildCtx(parsed.endpoint.operationId, 'feature'));
         count++;
       } catch (e) {
@@ -573,8 +602,32 @@ async function run() {
       });
       lifecycleCount += stateTransitionWritten.length;
     }
+    // #331: persist the coverage artefact alongside the suites so it
+    // is diffable in PRs and consumable by the L3 invariant in
+    // configs/<config>/regression-invariants.test.ts. Written for
+    // every emitter so the artefact's presence is independent of
+    // whether the current target shipped template suites this run.
+    await fs.writeFile(
+      path.join(outDir, 'coverage.json'),
+      `${JSON.stringify(
+        {
+          version: 1,
+          suppressedOpIds: [...coverage.suppressedOpIds].sort(),
+          entries: [...coverage.entries].sort((a, b) =>
+            a.operationId === b.operationId
+              ? a.template === b.template
+                ? a.aboxRow.localeCompare(b.aboxRow) || a.stepKind.localeCompare(b.stepKind)
+                : a.template.localeCompare(b.template)
+              : a.operationId.localeCompare(b.operationId),
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
     console.log(
-      `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites) in ${outDir} (target: ${emitter.id})`,
+      `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites, -${suppressedCount} suppressed by scenario-template coverage) in ${outDir} (target: ${emitter.id})`,
     );
     return;
   }

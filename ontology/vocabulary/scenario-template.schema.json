@@ -68,6 +68,10 @@
           "type": "string",
           "minLength": 1,
           "description": "Maintainer-facing prose explaining what behaviour this template asserts and why it is encoded as a template (vs. baked into the planner)."
+        },
+        "suppressesFeatureTest": {
+          "type": "boolean",
+          "description": "#331: whether this template suppresses per-endpoint feature-spec emission for the operationIds bound to its `Invoke` / `Observe` steps. Defaults to `true` — every well-formed scenario template is the canonical functional test for the operations it exercises, and a parallel feature spec would be either strictly weaker (EntityLifecycle case) or structurally malformed (EdgeLifecycle case: no key-only prereq chain can encode the establish-before-revoke precondition). Set to `false` only for future non-functional templates (smoke / chaos / load) that emit a spec without claiming functional coverage of the operations they touch. The materializer reads this flag from `configs/<config>/ontology/scenario-templates.json` to build the suppression set in `materializer/src/coverage.ts`."
         }
       }
     },
