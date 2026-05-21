@@ -2029,15 +2029,15 @@ export function generateOptionalSubShapeVariants(
       if (collectionScenarios.length >= maxVariants) break outer;
 
       // Skip duplicates BEFORE any planning work: `requestBodySemanticTypes`
-      // can repeat a (rootPath, fieldPath, semantic) triple for true
-      // siblings, and the producer-chain BFS below is the most expensive
-      // step in this function — never run it for a key we've already
-      // emitted. The dedup key includes `leaf.semantic` so polymorphic
-      // semantic-type annotations on the SAME field (e.g.
-      // `evaluateExpression.scopeKey` annotated as both `ScopeKey` and
-      // `ProcessInstanceKey` and `ElementInstanceKey`) each get their own
-      // variant — one per semantic binding — rather than collapsing into
-      // the first semantic seen (#324).
+      // can repeat the exact same (rootPath, fieldPath, semantic) triple
+      // for true duplicates, and the producer-chain BFS below is the most
+      // expensive step in this function — never run it for a key we've
+      // already emitted. The dedup key includes `leaf.semantic`, so
+      // polymorphic semantic-type annotations on the SAME field (e.g.
+      // `evaluateExpression.scopeKey` annotated as `ScopeKey`,
+      // `ProcessInstanceKey`, and `ElementInstanceKey`) are intentionally
+      // kept as separate variants — one per semantic binding — rather than
+      // collapsing into the first semantic seen (#324).
       const variantKey = `${subShape.rootPath}::${leaf.fieldPath}::${leaf.semantic}`;
       if (seenVariantKeys.has(variantKey)) continue;
 
