@@ -12,6 +12,7 @@ import {
   getGraphDir,
   getPlaywrightSuiteDir,
   getScenariosDir,
+  getSdkOutDir,
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
@@ -52,6 +53,9 @@ const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
 const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
+const JS_SDK_DIR = getSdkOutDir(REPO_ROOT, 'js-sdk');
+const PYTHON_SDK_DIR = getSdkOutDir(REPO_ROOT, 'python-sdk');
+const CSHARP_SDK_DIR = getSdkOutDir(REPO_ROOT, 'csharp-sdk');
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 
 // #331: opIds whose per-endpoint feature spec is intentionally omitted
@@ -8866,12 +8870,12 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     // Mirrors the Playwright invariant: all ctx reads must resolve to bound
     // values at test time. Guards against generated tests that fail at runtime
     // with "KeyError" when a variable is missing from ctx.
-    if (!existsSync(GENERATED_TESTS_DIR)) {
+    if (!existsSync(PYTHON_SDK_DIR)) {
       throw new Error(
-        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.python_sdk.spec.py'));
+    const files = readdirSync(PYTHON_SDK_DIR).filter((f) => f.endsWith('.python_sdk.spec.py'));
     if (files.length === 0) {
       // No Python SDK tests generated yet; skip
       return;
@@ -8880,7 +8884,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     const offenders: Array<{ file: string; placeholder: string; reason: string }> = [];
     let assertionsRun = 0;
     for (const file of files) {
-      const src = readFileSync(join(GENERATED_TESTS_DIR, file), 'utf8');
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       assertionsRun++;
       const contextRefs = new Set<string>();
       const regexCtxRead = /ctx\['([^']+)'\]/g;
@@ -8918,9 +8922,9 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     if (planned.length === 0) {
       return;
     }
-    if (!existsSync(GENERATED_TESTS_DIR)) {
+    if (!existsSync(PYTHON_SDK_DIR)) {
       throw new Error(
-        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
@@ -8929,7 +8933,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     // emitted .feature.test.ts files as the reference set: any operationId covered
     // by the JS SDK must also have a Python SDK file, and vice versa.
     const jsSdkEmitted = new Set(
-      readdirSync(GENERATED_TESTS_DIR)
+      readdirSync(JS_SDK_DIR)
         .filter((f) => f.endsWith('.feature.test.ts'))
         .map((f) => f.replace(/\.feature\.test\.ts$/, '')),
     );
@@ -8939,7 +8943,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     const missing = planned
       .filter((e) => jsSdkEmitted.has(e.operationId))
       .map((e) => `${e.operationId}.python_sdk.spec.py`)
-      .filter((f) => !existsSync(join(GENERATED_TESTS_DIR, f)));
+      .filter((f) => !existsSync(join(PYTHON_SDK_DIR, f)));
     expect(
       missing,
       'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
@@ -8953,18 +8957,18 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     // ctx["var"] at code-generation time. Any remaining ${...} literal in
     // the emitted .test.ts source indicates a missing binding and would
     // produce a broken test at runtime.
-    if (!existsSync(GENERATED_TESTS_DIR)) {
+    if (!existsSync(JS_SDK_DIR)) {
       throw new Error(
-        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.test.ts'));
+    const files = readdirSync(JS_SDK_DIR).filter((f) => f.endsWith('.feature.test.ts'));
     if (files.length === 0) {
       return;
     }
     const offenders: string[] = [];
     for (const f of files) {
-      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      const src = readFileSync(join(JS_SDK_DIR, f), 'utf8');
       if (/\$\{[^}]+\}/.test(src)) {
         offenders.push(f);
       }
@@ -8991,9 +8995,9 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     if (planned.length === 0) {
       return;
     }
-    if (!existsSync(GENERATED_TESTS_DIR)) {
+    if (!existsSync(JS_SDK_DIR)) {
       throw new Error(
-        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     // JS SDK and Python SDK hard-fail on scenarios whose prereqs require multipart
@@ -9002,7 +9006,7 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     // emitted .python_sdk.spec.py files as the reference set: any operationId
     // covered by the Python SDK must also have a JS SDK file, and vice versa.
     const pythonSdkEmitted = new Set(
-      readdirSync(GENERATED_TESTS_DIR)
+      readdirSync(PYTHON_SDK_DIR)
         .filter((f) => f.endsWith('.python_sdk.spec.py'))
         .map((f) => f.replace(/\.python_sdk\.spec\.py$/, '')),
     );
@@ -9014,7 +9018,7 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     const missing = planned
       .filter((e) => pythonSdkEmitted.has(e.operationId))
       .map((e) => `${e.operationId}.feature.test.ts`)
-      .filter((f) => !existsSync(join(GENERATED_TESTS_DIR, f)));
+      .filter((f) => !existsSync(join(JS_SDK_DIR, f)));
     expect(
       missing,
       'Planned scenarios exist but no JS SDK test file was materialized for these operationIds',
@@ -9024,12 +9028,12 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
 
 describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', () => {
   it('every emitted C# file is placed under the csharp/ subdirectory (#132)', () => {
-    if (!existsSync(GENERATED_TESTS_DIR)) {
+    if (!existsSync(CSHARP_SDK_DIR)) {
       throw new Error(
-        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const CSHARP_DIR = join(GENERATED_TESTS_DIR, 'csharp');
+    const CSHARP_DIR = join(CSHARP_SDK_DIR, 'csharp');
     if (!existsSync(CSHARP_DIR)) {
       return;
     }
@@ -9047,12 +9051,12 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
   });
 
   it('every emitted C# file uses the Camunda.Orchestration.RestSdk.Generated namespace (#132)', () => {
-    if (!existsSync(GENERATED_TESTS_DIR)) {
+    if (!existsSync(CSHARP_SDK_DIR)) {
       throw new Error(
-        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const CSHARP_DIR = join(GENERATED_TESTS_DIR, 'csharp');
+    const CSHARP_DIR = join(CSHARP_SDK_DIR, 'csharp');
     if (!existsSync(CSHARP_DIR)) {
       return;
     }

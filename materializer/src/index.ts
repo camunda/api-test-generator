@@ -17,6 +17,7 @@ import {
   getActiveConfigName,
   getFeatureOutputDir,
   getPlaywrightSuiteDir,
+  getSdkOutDir,
   getTemplateScenariosDir,
   getTemplateScenariosRootDir,
   getVariantOutputDir,
@@ -31,7 +32,9 @@ import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyse
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult } from './coverage.js';
 import { createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
+import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -43,6 +46,7 @@ import {
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
+import { materializePythonSupport } from './python-sdk/materialize-support.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -305,7 +309,6 @@ async function run() {
   // emitted Playwright suite all live under generated/<config>/.
   const featureDir = getFeatureOutputDir(repoRoot);
   const variantDir = getVariantOutputDir(repoRoot);
-  const outDir = getPlaywrightSuiteDir(repoRoot);
 
   if (help || !positional) {
     printUsage();
@@ -348,16 +351,20 @@ async function run() {
   const emitterConfig = loadEmitterConfig(configDir, emitter);
   const resolveConfigPath = (relative: string): string => path.resolve(configDir, relative);
 
-  // Wipe before write so emitted spec files left over from a previous spec
-  // version cannot survive into the current run. Without this, local
-  // pre-push validation can diverge from CI (which always sees a fresh tree).
-  // The support/ tree, README.md, and responses.json are re-materialised below.
-  // SDK emitters (js-sdk, python-sdk, csharp-sdk) share the outDir with
-  // playwright and must NOT wipe it — they add complementary file types
-  // (.test.ts, .spec.py, .cs) alongside the existing .spec.ts files.
-  if (emitter.id === 'playwright') {
-    await fs.rm(outDir, { recursive: true, force: true });
-  }
+  // Each emitter owns its own output directory so every `codegen:<target>` run
+  // produces a self-contained, runnable artifact. Playwright writes to
+  // generated/<config>/playwright/; SDK emitters write to
+  // generated/<config>/<emitter-id>/ and materialise their own scaffolding
+  // so the output is runnable without a prior playwright run.
+  const outDir =
+    emitter.id === 'playwright'
+      ? getPlaywrightSuiteDir(repoRoot)
+      : getSdkOutDir(repoRoot, emitter.id);
+
+  // Wipe before write so stale files from a previous spec version cannot
+  // survive into the current run. Each emitter owns its own directory so
+  // the wipe is always safe regardless of target.
+  await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(outDir, { recursive: true });
   // Lift 12 / #231: per-role template bundles for the active config's
   // Playwright emitter. Loaded from configs/<config>/codegen/playwright/roles/
@@ -395,6 +402,15 @@ async function run() {
     // here (rather than a separate npm script) so every codegen run produces
     // a runnable suite as a single artifact.
     await materializeResponseSchemas(outDir);
+  }
+  if (emitter.id === 'js-sdk') {
+    await materializeSdkSupport(outDir);
+  }
+  if (emitter.id === 'python-sdk') {
+    await materializePythonSupport(outDir);
+  }
+  if (emitter.id === 'csharp-sdk') {
+    await materializeCsharpSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));

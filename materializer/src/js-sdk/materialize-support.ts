@@ -46,8 +46,9 @@ function defaultSupportTemplatesDir(): string {
   if (here.includes(`${path.sep}dist${path.sep}`)) {
     return path.join(here, 'support-templates');
   }
-  // Source mode: walk up from src/codegen/js-sdk/ to src/codegen/support/.
-  return path.resolve(here, '..', 'support');
+  // Source mode: support templates live in the Playwright emitter's support/
+  // directory, which is co-located at materializer/src/playwright/support/.
+  return path.resolve(here, '..', 'playwright', 'support');
 }
 
 function defaultProjectTemplatesDir(): string {
