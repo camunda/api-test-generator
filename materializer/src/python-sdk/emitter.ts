@@ -40,6 +40,22 @@ import {
  *   toPythonLiteral({ type: '${workerType}', active: true })
  *   → {"type": ctx['workerType'], "active": True}
  */
+
+/**
+ * Escape special characters in a Python string literal body.
+ * Handles backslashes, newlines, carriage returns, tabs, and the chosen
+ * quote character. Called by `toPythonLiteral` for both single- and
+ * double-quoted strings so escaping logic stays in one place.
+ */
+function escapePythonStringContent(value: string, quote: "'" | '"'): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t')
+    .replace(quote === "'" ? /'/g : /"/g, `\\${quote}`);
+}
+
 function toPythonLiteral(value: unknown): string {
   // Handle null
   if (value === null) return 'None';
@@ -61,12 +77,11 @@ function toPythonLiteral(value: unknown): string {
     // Regular string: choose quotes intelligently
     if (value.includes("'") && !value.includes('"')) {
       // Has single quotes but not double → use double quotes
-      return `"${value}"`;
+      return `"${escapePythonStringContent(value, '"')}"`;
     }
 
     // Otherwise use single quotes with escaping
-    const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    return `'${escaped}'`;
+    return `'${escapePythonStringContent(value, "'")}'`;
   }
 
   // Handle numbers

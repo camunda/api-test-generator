@@ -103,3 +103,18 @@ export function createDefaultOperationMapSource(): OperationMapJsonSource {
     },
   };
 }
+
+/**
+ * Create an `OperationMapJsonSource` by parsing a raw JSON string from
+ * `spec/python-sdk/operation-map.json`. Isolates the JSON-parse boundary
+ * so callers (e.g. the materializer orchestrator) don't need access to the
+ * unexported `OperationMapEntry` type.
+ *
+ * Throws `SyntaxError` on malformed JSON — callers should handle this
+ * and fall back to `createDefaultOperationMapSource()`.
+ */
+export function createOperationMapSourceFromJson(json: string): OperationMapJsonSource {
+  // biome-ignore lint/plugin: runtime contract boundary — JSON from fetched SDK operation-map file
+  const mapData = JSON.parse(json) as Record<string, OperationMapEntry[]>;
+  return createOperationMapSource(mapData);
+}
