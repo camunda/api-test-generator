@@ -40,6 +40,7 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
+import { TEMPLATE_REGISTRY } from './templateRegistry.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -470,24 +471,18 @@ async function run() {
   if (positional === '--all') {
     // #331: scenario-template coverage. Build the suppression set
     // from on-disk template scenario JSONs before the feature loop so
-    // operations covered by a well-formed EdgeLifecycle /
-    // EntityLifecycle / UpdatedFieldVisibleOnReadBack /
-    // StateTransitionVisibleAfterAction spec (or any future scenario
-    // template wired into `templateOutputDirs`) do not also emit a
-    // structurally weaker feature spec. Suppression only applies to
-    // emitters that ship the corresponding template suites; for now
-    // that is Playwright. See materializer/src/coverage.ts and #331.
+    // operations covered by a well-formed scenario-template spec do
+    // not also emit a structurally weaker per-endpoint feature spec.
+    // Suppression only applies to emitters that ship the
+    // corresponding template suites; for now that is Playwright. The
+    // canonical list of templates lives in `TEMPLATE_REGISTRY`
+    // (#333) — see `materializer/src/templateRegistry.ts` and #331.
     let coverage: CoverageResult = { suppressedOpIds: new Set(), entries: [] };
     if (emitter.id === PlaywrightEmitter.id) {
       coverage = await buildCoverage({
         templateScenariosRootDir: getTemplateScenariosRootDir(repoRoot),
         templatesAboxPath: path.join(configDir, 'ontology', 'scenario-templates.json'),
-        templateOutputDirs: {
-          EdgeLifecycle: 'edges',
-          EntityLifecycle: 'entities',
-          UpdatedFieldVisibleOnReadBack: 'runtime-entities',
-          StateTransitionVisibleAfterAction: 'state-transitions',
-        },
+        templates: TEMPLATE_REGISTRY,
       });
     }
     let count = 0;
@@ -538,69 +533,35 @@ async function run() {
       }
     }
     // Template-derived suites (Lift 22 / #270; extended in #280 with
-    // EntityLifecycle). One Playwright suite per subject under
-    // `<playwrightSuiteDir>/edges/` (Edge templates) or
-    // `<playwrightSuiteDir>/entities/` (Entity templates). Only the
-    // Playwright emitter wires this — other emitters opt in by
-    // implementing their own template-aware renderer. The scenarios
+    // EntityLifecycle, #305 with UpdatedFieldVisibleOnReadBack +
+    // StateTransitionVisibleAfterAction). One Playwright suite per
+    // subject under `<playwrightSuiteDir>/<template.outputDir>/`.
+    // Only the Playwright emitter wires this — other emitters opt in
+    // by implementing their own template-aware renderer. The scenarios
     // are produced by the planner (`scenarioTemplateInstantiator.ts`);
     // if a directory is missing (older planner runs, configs that
     // don't ship the corresponding template), `emitTemplateSuites`
-    // no-ops.
+    // no-ops. Adding a new template is one entry in `TEMPLATE_REGISTRY`
+    // (#333).
     let lifecycleCount = 0;
     if (emitter.id === PlaywrightEmitter.id) {
       const seedsArg = globalContextSeeds.map((s) => ({
         binding: s.binding,
         seedRule: s.seedRule,
       }));
-      const edgesOutDir = path.join(outDir, 'edges');
-      // Wipe the per-template subdir for the same reason the parent
-      // `outDir` is wiped above: stale specs from a previous spec version
-      // must not survive into the current run.
-      await fs.rm(edgesOutDir, { recursive: true, force: true });
-      const edgesWritten = await emitTemplateSuites({
-        scenariosDir: getTemplateScenariosDir(repoRoot, 'EdgeLifecycle'),
-        outDir: edgesOutDir,
-        globalContextSeeds: seedsArg,
-      });
-      lifecycleCount += edgesWritten.length;
-
-      const entitiesOutDir = path.join(outDir, 'entities');
-      await fs.rm(entitiesOutDir, { recursive: true, force: true });
-      const entitiesWritten = await emitTemplateSuites({
-        scenariosDir: getTemplateScenariosDir(repoRoot, 'EntityLifecycle'),
-        outDir: entitiesOutDir,
-        globalContextSeeds: seedsArg,
-      });
-      lifecycleCount += entitiesWritten.length;
-
-      // #305 Phase 4 — UpdatedFieldVisibleOnReadBack (RuntimeEntity).
-      // Sibling subdir to edges/ and entities/ for symmetry. Suites
-      // here are 3-step (prereq → mutate → observe field equality)
-      // and rendered via `renderReadBackSuite` inside emitTemplateSuites.
-      const runtimeOutDir = path.join(outDir, 'runtime-entities');
-      await fs.rm(runtimeOutDir, { recursive: true, force: true });
-      const runtimeWritten = await emitTemplateSuites({
-        scenariosDir: getTemplateScenariosDir(repoRoot, 'UpdatedFieldVisibleOnReadBack'),
-        outDir: runtimeOutDir,
-        globalContextSeeds: seedsArg,
-      });
-      lifecycleCount += runtimeWritten.length;
-
-      // #305 Phase 5d / #189 — StateTransitionVisibleAfterAction
-      // (RuntimeEntity). Sibling subdir to runtime-entities/ so the
-      // two RuntimeEntity-scoped templates don't fight over file
-      // names (Incident.resolveIncident is a state-transition;
-      // future Incident.mutateIncident — if ever — would be a
-      // readback, separate file in runtime-entities/).
-      const stateTransitionOutDir = path.join(outDir, 'state-transitions');
-      await fs.rm(stateTransitionOutDir, { recursive: true, force: true });
-      const stateTransitionWritten = await emitTemplateSuites({
-        scenariosDir: getTemplateScenariosDir(repoRoot, 'StateTransitionVisibleAfterAction'),
-        outDir: stateTransitionOutDir,
-        globalContextSeeds: seedsArg,
-      });
-      lifecycleCount += stateTransitionWritten.length;
+      for (const template of TEMPLATE_REGISTRY) {
+        const templateOutDir = path.join(outDir, template.outputDir);
+        // Wipe the per-template subdir for the same reason the parent
+        // `outDir` is wiped above: stale specs from a previous spec
+        // version must not survive into the current run.
+        await fs.rm(templateOutDir, { recursive: true, force: true });
+        const written = await emitTemplateSuites({
+          scenariosDir: getTemplateScenariosDir(repoRoot, template.name),
+          outDir: templateOutDir,
+          globalContextSeeds: seedsArg,
+        });
+        lifecycleCount += written.length;
+      }
     }
     // #331: persist the coverage artefact alongside the suites so it
     // is diffable in PRs and consumable by the L3 invariant in

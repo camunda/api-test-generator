@@ -12,8 +12,10 @@
 // The collector is deliberately template-agnostic: a new
 // ScenarioTemplate added to `configs/<config>/ontology/scenario-templates.json`
 // (and emitted by the planner under a new subdirectory of
-// `scenarios/templates/`) extends suppression automatically as soon as
-// it is wired into `templateOutputDirs`.
+// `scenarios/templates/`) extends suppression automatically as soon
+// as it is included in the `templates` option passed to `buildCoverage`
+// (in production, that's `TEMPLATE_REGISTRY` — see
+// `materializer/src/templateRegistry.ts`).
 //
 // `PrereqChain` steps are intentionally *excluded* from coverage —
 // they are scaffolding, not units-under-test. The Invoke/Observe vs
@@ -22,6 +24,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { TemplateBinding } from './templateRegistry.js';
 
 export interface CoverageEntry {
   operationId: string;
@@ -44,15 +47,16 @@ export interface BuildCoverageOptions {
    *  to treat every template as suppressing (the default). */
   templatesAboxPath: string | undefined;
   /**
-   * Maps `templateName → emitted output directory relative to the
-   * playwright suite root`. For each scenario file under
-   * `<templateScenariosRootDir>/<templateName>/<subjectName>.json` the
+   * The materializer's scenario-template registry — the single source
+   * of truth for which templates emit a spec and where. For each
+   * scenario file under
+   * `<templateScenariosRootDir>/<binding.name>/<subjectName>.json` the
    * recorded `emittedSpec` becomes
-   * `<emittedDir>/<subjectName>.lifecycle.spec.ts`. Templates not
-   * present in this map are skipped (no spec is emitted, so coverage
-   * cannot legitimately claim the op).
+   * `<binding.outputDir>/<subjectName>.lifecycle.spec.ts`. Templates
+   * not present in this registry are skipped (no spec is emitted on
+   * disk, so coverage cannot legitimately claim the op).
    */
-  templateOutputDirs: Record<string, string>;
+  templates: readonly TemplateBinding[];
 }
 
 interface ScenarioStep {
@@ -91,16 +95,17 @@ export async function buildCoverage(opts: BuildCoverageOptions): Promise<Coverag
   }
   templateDirs.sort();
 
+  // Build a name → outputDir lookup from the registry. Templates the
+  // registry doesn't know about are skipped (no spec is emitted on disk,
+  // so coverage cannot legitimately claim the op).
+  const outputDirByName = new Map(opts.templates.map((t) => [t.name, t.outputDir]));
+
   for (const templateName of templateDirs) {
     const templateDir = path.join(opts.templateScenariosRootDir, templateName);
     const stat = await fs.stat(templateDir);
     if (!stat.isDirectory()) continue;
 
-    // Templates not wired to an emitted output dir don't actually
-    // produce a spec on disk; suppressing the feature spec on the
-    // strength of a scenario JSON nobody renders would create an
-    // untested gap. Skip.
-    const emittedDir = opts.templateOutputDirs[templateName];
+    const emittedDir = outputDirByName.get(templateName);
     if (!emittedDir) continue;
 
     // Default: every well-formed scenario template suppresses. The
