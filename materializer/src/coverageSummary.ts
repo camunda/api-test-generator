@@ -77,16 +77,22 @@ export async function loadSpecOperationIds(specBundleDir: string): Promise<strin
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`coverage summary: failed to parse ${bundledSpecPath}: ${msg}`);
   }
-  const ids: string[] = [];
+  // Dedupe via Set: OpenAPI does not technically forbid duplicate
+  // operationIds, and treating them as a multiset would inflate
+  // totalSpecOperations and the unmapped count (cf. PR #337 review).
+  // Other consumers of spec opIds in this repo (e.g.
+  // configs/camunda-oca/regression-invariants.test.ts) also treat them
+  // as a Set, so the reconciliation math stays consistent.
+  const ids = new Set<string>();
   for (const pathItem of Object.values(spec.paths ?? {})) {
     if (!pathItem || typeof pathItem !== 'object') continue;
     for (const op of Object.values(pathItem)) {
       if (!op || typeof op !== 'object') continue;
       const opId = Reflect.get(op, 'operationId');
-      if (typeof opId === 'string' && opId.length > 0) ids.push(opId);
+      if (typeof opId === 'string' && opId.length > 0) ids.add(opId);
     }
   }
-  return ids.sort();
+  return [...ids].sort();
 }
 
 export function buildCoverageSummary(input: BuildCoverageSummaryInput): CoverageSummary {

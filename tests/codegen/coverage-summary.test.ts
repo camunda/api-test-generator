@@ -14,8 +14,14 @@
 // has an emitted lifecycle spec) are sufficient — no fixture under
 // `generated/<config>/` is required for renderer correctness.
 
-import { describe, expect, test } from 'vitest';
-import { buildCoverageSummary } from '../../materializer/src/coverageSummary.ts';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import {
+  buildCoverageSummary,
+  loadSpecOperationIds,
+} from '../../materializer/src/coverageSummary.ts';
 import { renderMarkdown } from '../../scripts/render-coverage-report.ts';
 
 describe('buildCoverageSummary (#335)', () => {
@@ -111,6 +117,47 @@ describe('buildCoverageSummary (#335)', () => {
       lifecycleSpecs: 0,
     });
     expect(summary.unmappedOperations).toEqual(['alpha', 'mango', 'zebra']);
+  });
+});
+
+describe('loadSpecOperationIds (#337)', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'coverage-summary-test-'));
+  });
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('returns sorted unique operationIds (dedupes duplicates across paths/methods)', async () => {
+    // OpenAPI does not technically forbid duplicate operationIds. Treat them as a set
+    // so totalSpecOperations + unmapped reconciliation don't inflate (PR #337 review).
+    const spec = {
+      paths: {
+        '/groups': {
+          get: { operationId: 'listGroups' },
+          post: { operationId: 'createGroup' },
+        },
+        '/groups/{id}': {
+          // Same operationId appearing again under a different path — must
+          // contribute one entry, not two.
+          get: { operationId: 'listGroups' },
+          delete: { operationId: 'deleteGroup' },
+        },
+      },
+    };
+    writeFileSync(join(tmpDir, 'rest-api.bundle.json'), JSON.stringify(spec), 'utf8');
+
+    const ids = await loadSpecOperationIds(tmpDir);
+
+    expect(ids).toEqual(['createGroup', 'deleteGroup', 'listGroups']);
+    // Defect-class guard: total length === unique-set size, for any spec.
+    expect(ids.length).toBe(new Set(ids).size);
+  });
+
+  test('returns [] when the bundled spec file is missing', async () => {
+    const ids = await loadSpecOperationIds(tmpDir);
+    expect(ids).toEqual([]);
   });
 });
 

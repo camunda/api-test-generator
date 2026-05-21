@@ -21,6 +21,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getActiveConfigName, getPlaywrightSuiteDir } from '../path-analyser/src/configResolver.ts';
 
+// Derive REPO_ROOT from the script's own location rather than walking
+// up from process.cwd() looking for a package.json — this is a
+// monorepo with nested package.json files (materializer/, path-analyser/, …)
+// so a cwd-based search would happily stop at a workspace package.json
+// and then break configs.json lookups (cf. PR #337 review). The script
+// lives at <repo>/scripts/render-coverage-report.ts, so the repo root
+// is one directory up. This matches the convention used by sibling
+// scripts (export-ontology.ts, build-ontology.ts, run-pw-request-validation.ts).
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
 interface PerTemplateSummary {
   name: string;
   specs: number;
@@ -93,18 +103,6 @@ function printUsage(): void {
       'Playwright suite (`generated/<config>/playwright/coverage.json`).',
     ].join('\n'),
   );
-}
-
-function findRepoRoot(startDir: string): string {
-  let current = startDir;
-  while (true) {
-    if (existsSync(path.join(current, 'package.json'))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) {
-      throw new Error('Could not locate repository root (no package.json found)');
-    }
-    current = parent;
-  }
 }
 
 export function renderMarkdown(artefact: CoverageArtefact): string {
@@ -190,10 +188,9 @@ export function renderMarkdown(artefact: CoverageArtefact): string {
 
 function main(argv: readonly string[]): void {
   const args = parseArgs(argv);
-  const repoRoot = findRepoRoot(process.cwd());
-  const inputPath = args.inputPath ?? path.join(getPlaywrightSuiteDir(repoRoot), 'coverage.json');
+  const inputPath = args.inputPath ?? path.join(getPlaywrightSuiteDir(REPO_ROOT), 'coverage.json');
   if (!existsSync(inputPath)) {
-    const activeConfig = getActiveConfigName(repoRoot);
+    const activeConfig = getActiveConfigName(REPO_ROOT);
     throw new Error(
       `coverage artefact not found at ${inputPath} ` +
         `(active config: ${activeConfig}). Run \`npm run codegen:playwright:all\` to produce it.`,
