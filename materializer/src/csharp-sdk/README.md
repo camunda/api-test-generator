@@ -23,15 +23,18 @@ C# SDK and emits self-contained **.NET 8** test classes.
 cd <outDir>
 cp .env.example .env   # fill in connection details
 dotnet restore
-dotnet run
+dotnet build
 ```
+
+> **Note:** The generated project is a class library — there is no entry point, so `dotnet run` will fail.
+> To execute the tests, reference this project from an xUnit or NUnit test project and run `dotnet test` from there.
 
 ## Prerequisites
 
 The C# operation-map file must be present before generation. The map is
-bundled with the `csharp-sdk/` workspace under `operation-map.ts`. Unlike
-the JS/Python SDK emitters, the C# map is a static JSON document committed
-to the repository — no separate fetch step is required.
+a static JSON document committed to `csharp-sdk/examples/operation-map.json`.
+Unlike the JS/Python SDK emitters, no separate fetch step is required;
+`csharp-sdk/src/operation-map.ts` is a loader that reads that file at runtime.
 
 ## Environment variables
 
