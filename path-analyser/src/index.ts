@@ -1071,19 +1071,25 @@ type RequestBodyPlan =
  * carries no items, so validation messages like "No elements provided"
  * surface at runtime. The class-scoped fix is to ensure such fields
  * always emit at least one element whose shape honours the item
- * schema's own `required` set (recursive for nested arrays/objects).
+ * schema's own `required` set, recursively across nested objects and
+ * arrays.
  *
- * Strategy:
- *   - Direct children of `<basePath>[]` (i.e. nodes whose path equals
- *     `${basePath}[].${key}` with no further `.` or `[]` in the tail)
- *     describe the item-object's properties.
- *   - For each `required` direct child, emit a value:
- *       - object   → `{}` (matches existing top-level object handling)
- *       - array    → recurse to build a one-element array
- *       - other    → 'placeholder' (string seed; richer binding-aware
- *                    seeding lives in the variant suite)
- *   - If there are no direct children (array of primitives/enums),
- *     emit a string placeholder.
+ * Canonical-node layout reminder (see `walkSchema` in
+ * canonicalSchemas.ts):
+ *   - object property `foo`     → node path `foo`     (type matches schema)
+ *   - nested object `foo.bar`   → node path `foo.bar` (type 'object')
+ *   - array property `xs`       → node path `xs[]`    (type 'array')
+ *   - array item object's prop  → node path `xs[].k`  (type per schema)
+ *   - nested array under item   → node path `xs[].ys[]` (type 'array')
+ *
+ * The helper walks "direct children" of a given prefix (no further `.`
+ * in the tail), and:
+ *   - if the child tail ends with `[]` (a nested array property) it
+ *     recurses to build a one-element array;
+ *   - if the child is type `object` it recurses into the nested
+ *     object's required properties (avoids emitting `{}` for objects
+ *     that themselves declare required content);
+ *   - otherwise it seeds a string `'placeholder'`.
  *
  * Item-schema enums could in principle be sourced from the bundled
  * spec for stricter validity, but the canonical nodes don't carry
@@ -1091,35 +1097,51 @@ type RequestBodyPlan =
  * the emitted value is not literally `[]`, and the broader live-cluster
  * acceptance is tracked separately.
  */
-function synthesizeArrayElement(
-  basePath: string,
-  nodes: { path: string; type: string; required: boolean }[],
-): unknown {
-  const prefix = `${basePath}[].`;
-  const directChildren = nodes.filter((n) => {
-    if (!n.path.startsWith(prefix)) return false;
+type CanonicalNode = { path: string; type: string; required: boolean };
+
+function synthesizeObjectFromPrefix(
+  prefix: string,
+  nodes: CanonicalNode[],
+): Record<string, unknown> {
+  const obj: Record<string, unknown> = {};
+  for (const n of nodes) {
+    if (!n.path.startsWith(prefix)) continue;
     const tail = n.path.slice(prefix.length);
-    return tail.length > 0 && !tail.includes('.') && !tail.includes('[]');
-  });
-  if (directChildren.length === 0) {
+    if (tail.length === 0) continue;
+    // Direct children only: tail is either `<key>` or `<key>[]` (no
+    // intermediate `.`). Deeper descendants are handled by recursion.
+    const isArrayChild = tail.endsWith('[]');
+    const inner = isArrayChild ? tail.slice(0, -2) : tail;
+    if (inner.length === 0 || inner.includes('.') || inner.includes('[]')) continue;
+    if (!n.required) continue;
+    if (Object.hasOwn(obj, inner)) continue;
+    if (isArrayChild) {
+      obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
+    } else if (n.type === 'object') {
+      obj[inner] = synthesizeObjectFromPrefix(`${prefix}${inner}.`, nodes);
+    } else if (n.type === 'array') {
+      // Defensive: walkSchema records arrays with a `[]` suffix on
+      // path, but if a future change ever records type:'array' on a
+      // bare-key node, treat it the same way to keep the synth
+      // schema-honest.
+      obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
+    } else {
+      obj[inner] = 'placeholder';
+    }
+  }
+  return obj;
+}
+
+function synthesizeArrayElement(basePath: string, nodes: CanonicalNode[]): unknown {
+  const prefix = `${basePath}[].`;
+  const hasItemProperties = nodes.some((n) => n.path.startsWith(prefix));
+  if (!hasItemProperties) {
     // Array of primitives/enums; the canonical node walker doesn't
     // record sub-paths for primitive item types beyond the array node
     // itself. A bare string placeholder is the safest seed.
     return 'placeholder';
   }
-  const element: Record<string, unknown> = {};
-  for (const child of directChildren) {
-    if (!child.required) continue;
-    const key = child.path.slice(prefix.length);
-    if (child.type === 'object') {
-      element[key] = {};
-    } else if (child.type === 'array') {
-      element[key] = [synthesizeArrayElement(`${basePath}[].${key}`, nodes)];
-    } else {
-      element[key] = 'placeholder';
-    }
-  }
-  return element;
+  return synthesizeObjectFromPrefix(prefix, nodes);
 }
 
 function buildRequestBodyFromCanonical(
