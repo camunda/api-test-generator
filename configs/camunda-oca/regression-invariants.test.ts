@@ -207,18 +207,23 @@ describeForThisConfig('bundled-spec invariants: extractor classification', () =>
     expect(node?.required).toBe(false);
   });
 
-  it('createDeployment provides the full {DecisionDefinitionId, DecisionDefinitionKey, DecisionRequirementsKey, FormKey, ProcessDefinitionId, ProcessDefinitionKey} provider set (#34 / #137)', () => {
+  it('createDeployment provides the full {DecisionDefinitionId, DecisionDefinitionKey, DecisionRequirementsKey, DeploymentKey, FormKey, ProcessDefinitionId, ProcessDefinitionKey} provider set (#34 / #137)', () => {
     // Locks in `x-semantic-provider` array-form recognition: the response
     // payload uses array-form `x-semantic-provider` on `deployments[].*`,
     // and #34 made the inheritedProvider flag thread through the nested
     // object subtrees so every listed key is flagged provider:true. The
     // pinned spec bump (#134, camunda/camunda PR #52322, merge SHA
     // b9d355d) added DecisionDefinitionId to the authoritative set —
-    // see #137 for the rationale and the migration trail.
+    // see #137 for the rationale and the migration trail. The subsequent
+    // bump to camunda/camunda main HEAD (d29d644) added DeploymentKey
+    // as a top-level `x-semantic-provider` on the `DeploymentResult`
+    // response envelope itself (alongside the existing nested
+    // `deployments[].*` providers).
     expect(providersOf('createDeployment')).toEqual([
       'DecisionDefinitionId',
       'DecisionDefinitionKey',
       'DecisionRequirementsKey',
+      'DeploymentKey',
       'FormKey',
       'ProcessDefinitionId',
       'ProcessDefinitionKey',
