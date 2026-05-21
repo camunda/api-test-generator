@@ -17,6 +17,7 @@ import {
   getActiveConfigName,
   getFeatureOutputDir,
   getPlaywrightSuiteDir,
+  getSpecBundleDir,
   getTemplateScenariosDir,
   getTemplateScenariosRootDir,
   getVariantOutputDir,
@@ -31,6 +32,7 @@ import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRole
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult, templateOutputDir } from './coverage.js';
+import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -496,6 +498,12 @@ async function run() {
     }
     let count = 0;
     let suppressedCount = 0;
+    // #335: track which opIds were emitted as feature specs so the
+    // coverage summary can compute the unmapped set (ops in the spec
+    // that are neither emitted as a feature spec nor suppressed by a
+    // scenario-template lifecycle suite). Should be empty on a healthy
+    // spec; a non-empty set surfaces planner / coverage drift.
+    const emittedFeatureOpIds = new Set<string>();
     for (const f of files) {
       try {
         const content = await fs.readFile(path.join(featureDir, f), 'utf8');
@@ -506,6 +514,7 @@ async function run() {
           continue;
         }
         await writeEmitted(emitter, parsed, buildCtx(parsed.endpoint.operationId, 'feature'));
+        emittedFeatureOpIds.add(parsed.endpoint.operationId);
         count++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -572,6 +581,23 @@ async function run() {
         lifecycleCount += written.length;
       }
     }
+    // #335: build a deterministic coverage summary alongside the raw
+    // suppression set / entries. The summary block answers "how many
+    // operations in the spec are covered, by what kind of suite, and
+    // by which template" without requiring readers to re-walk the
+    // feature-output / template-scenarios directories. The summary is
+    // emitted for every emitter so PR diffs and the
+    // `npm run coverage:report` script see the same shape regardless
+    // of which target the materializer was invoked for.
+    const allSpecOpIds = await loadSpecOperationIds(getSpecBundleDir(repoRoot));
+    const summary = buildCoverageSummary({
+      allSpecOpIds,
+      emittedFeatureOpIds,
+      suppressedOpIds: coverage.suppressedOpIds,
+      entries: coverage.entries,
+      variantSpecs: variantCount,
+      lifecycleSpecs: lifecycleCount,
+    });
     // #331: persist the coverage artefact alongside the suites so it
     // is diffable in PRs and consumable by the L3 invariant in
     // configs/<config>/regression-invariants.test.ts. Written for
@@ -581,7 +607,10 @@ async function run() {
       path.join(outDir, 'coverage.json'),
       `${JSON.stringify(
         {
-          version: 1,
+          version: 2,
+          config: configName,
+          emitter: emitter.id,
+          summary,
           suppressedOpIds: [...coverage.suppressedOpIds].sort(),
           entries: [...coverage.entries].sort((a, b) =>
             a.operationId === b.operationId
