@@ -3,7 +3,7 @@ import path from 'node:path';
 
 /**
  * Resolves the directory holding the active generator configuration's
- * sidecar files (domain-semantics.json, filter-providers.json,
+ * per-config generator files (ontology ABoxes, filter-providers.json,
  * request-defaults.json, spec-pin.json).
  *
  * The active config name comes from `process.env.CONFIG`. If unset,
@@ -51,10 +51,9 @@ function loadConfigsIndex(repoRoot: string): ConfigsIndex {
  * Resolve the active config name against an already-loaded {@link ConfigsIndex}.
  *
  * Split out from {@link getActiveConfigName} so callers that also need other
- * fields from the index (e.g. {@link getPlaywrightCodegenOptions}) can load
- * `configs.json` exactly once per invocation. A second read could see a
- * different on-disk snapshot (TOCTOU), validate against one and look up the
- * config entry from another.
+ * fields from the index can load `configs.json` exactly once per invocation.
+ * A second read could see a different on-disk snapshot (TOCTOU), validate
+ * against one and look up the config entry from another.
  */
 function resolveActiveConfigName(index: ConfigsIndex): string {
   const fromEnv = process.env.CONFIG?.trim();
@@ -93,77 +92,6 @@ export function getActiveConfigDir(repoRoot: string): string {
 }
 
 /**
- * Options that control the Playwright emitter, sourced from
- * `configs.json#configs.<active>.codegen.playwright`.
- *
- * Every field is optional in the on-disk schema and has an explicit
- * default documented on the field. Missing `codegen` / `codegen.playwright`
- * blocks yield an all-defaults result without throwing.
- */
-export interface PlaywrightCodegenOptions {
-  /**
-   * When true, every emitted scenario step appends a `recordResponse({...})`
-   * call (and the suite imports `recordResponse`/`sanitizeBody` from
-   * `./support/recorder`). When false, neither the call nor the import is
-   * emitted, and `recorder.ts` is not vendored into the suite's `support/`
-   * directory.
-   *
-   * Default: false. The recorder is opt-in tooling for downstream
-   * response-shape diffing; suites that don't consume
-   * `dist/runtime-observations/responses.jsonl` get cleaner output and
-   * skip the per-step `fs.appendFile`.
-   */
-  recordResponses: boolean;
-}
-
-/**
- * Resolve the Playwright codegen options for the active config. Strict
- * shape-checking on the `codegen.playwright` block — a non-object, or a
- * non-boolean `recordResponses`, throws. Missing keys default.
- */
-export function getPlaywrightCodegenOptions(repoRoot: string): PlaywrightCodegenOptions {
-  // Single-pass: load configs.json exactly once and resolve the active
-  // config name against that same snapshot. Calling getActiveConfigName()
-  // here would re-read the file and could observe a different on-disk
-  // state from the one we then index into below.
-  const index = loadConfigsIndex(repoRoot);
-  const name = resolveActiveConfigName(index);
-  const entry = index.configs[name];
-  if (!isRecord(entry)) {
-    return { recordResponses: false };
-  }
-  if (!('codegen' in entry)) {
-    return { recordResponses: false };
-  }
-  const codegen = entry.codegen;
-  if (!isRecord(codegen)) {
-    throw new Error(
-      `Malformed configs.json: configs.${name}.codegen must be an object, got ${typeof codegen}.`,
-    );
-  }
-  if (!('playwright' in codegen)) {
-    return { recordResponses: false };
-  }
-  const playwright = codegen.playwright;
-  if (!isRecord(playwright)) {
-    throw new Error(
-      `Malformed configs.json: configs.${name}.codegen.playwright must be an object, got ${typeof playwright}.`,
-    );
-  }
-  let recordResponses = false;
-  if ('recordResponses' in playwright) {
-    const v = playwright.recordResponses;
-    if (typeof v !== 'boolean') {
-      throw new Error(
-        `Malformed configs.json: configs.${name}.codegen.playwright.recordResponses must be a boolean, got ${typeof v}.`,
-      );
-    }
-    recordResponses = v;
-  }
-  return { recordResponses };
-}
-
-/**
  * Per-config layout helpers (#128 PR 2 — output partitioning).
  *
  * Convention:
@@ -196,6 +124,27 @@ export function getScenariosDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'scenarios');
 }
 
+/**
+ * Root of the per-config template-scenarios partition (#270). The
+ * orchestrator wipes this entire tree before writing per-template
+ * subdirectories so an ABox template that's been removed (or whose
+ * `appliesTo` no longer matches any subject) can't leave a stale
+ * directory behind. Deriving the wipe set from current `results`
+ * would miss exactly those cases.
+ */
+export function getTemplateScenariosRootDir(repoRoot: string): string {
+  return path.join(getScenariosDir(repoRoot), 'templates');
+}
+
+/**
+ * Per-template subdirectory under the scenarios partition (#270).
+ * Layout: `generated/<config>/scenarios/templates/<TemplateName>/`.
+ * One JSON file per (template × subject) pair lands underneath.
+ */
+export function getTemplateScenariosDir(repoRoot: string, templateName: string): string {
+  return path.join(getTemplateScenariosRootDir(repoRoot), templateName);
+}
+
 export function getFeatureOutputDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'feature-output');
 }
@@ -210,4 +159,69 @@ export function getPlaywrightSuiteDir(repoRoot: string): string {
 
 export function getRequestValidationSuiteDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'request-validation');
+}
+
+/**
+ * Per-config planner caps (#292).
+ *
+ * Field names mirror the internal option keys consumed by
+ * `generateScenariosForEndpoint` (`maxChainAlternatives`) and
+ * `generateOptionalSubShapeVariants` (`maxVariantsPerEndpoint`) so the
+ * config key is the option key — no translation layer.
+ *
+ * Defaults preserve the pre-#292 hard-codes so a config without a
+ * `planner` block (or with a partial one) keeps the same emission
+ * shape it had before the lift.
+ *
+ * NOT exposed here: the two inner `maxChainAlternatives: 1` caps inside
+ * variant planning in `scenarioGenerator.ts`. Those are load-bearing
+ * strategy constants (one producer chain per variant leaf is the whole
+ * point of the variant emitter), not a budget — lifting them into
+ * config would invite a user to break the strategy by raising them.
+ */
+export interface PlannerConfig {
+  maxChainAlternatives: number;
+  maxVariantsPerEndpoint: number;
+}
+
+const PLANNER_DEFAULTS: PlannerConfig = {
+  maxChainAlternatives: 20,
+  maxVariantsPerEndpoint: 20,
+};
+
+function readPositiveInt(
+  raw: Record<string, unknown>,
+  key: keyof PlannerConfig,
+  configName: string,
+): number | undefined {
+  if (!Object.hasOwn(raw, key)) return undefined;
+  const v = raw[key];
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) {
+    throw new Error(
+      `Malformed configs.json: configs.${configName}.planner.${key} must be a positive integer; got ${JSON.stringify(v)}.`,
+    );
+  }
+  return v;
+}
+
+export function getActivePlannerConfig(repoRoot: string): PlannerConfig {
+  const index = loadConfigsIndex(repoRoot);
+  const name = resolveActiveConfigName(index);
+  const entry = index.configs[name];
+  if (!isRecord(entry)) return { ...PLANNER_DEFAULTS };
+  const planner = entry.planner;
+  if (planner === undefined) return { ...PLANNER_DEFAULTS };
+  if (!isRecord(planner)) {
+    throw new Error(
+      `Malformed configs.json: configs.${name}.planner must be an object when present.`,
+    );
+  }
+  return {
+    maxChainAlternatives:
+      readPositiveInt(planner, 'maxChainAlternatives', name) ??
+      PLANNER_DEFAULTS.maxChainAlternatives,
+    maxVariantsPerEndpoint:
+      readPositiveInt(planner, 'maxVariantsPerEndpoint', name) ??
+      PLANNER_DEFAULTS.maxVariantsPerEndpoint,
+  };
 }

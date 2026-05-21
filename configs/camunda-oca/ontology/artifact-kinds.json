@@ -1,0 +1,85 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/artifact-kinds.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "kinds": [
+    {
+      "@type": "ArtifactKind",
+      "name": "bpmnProcess",
+      "identifierType": "ProcessDefinitionId",
+      "producesStates": ["ProcessDefinitionDeployed"],
+      "producibleStates": ["ModelHasServiceTaskType", "ModelHasUserTask", "ModelEmitsIncident", "ModelHasCancellationBlocker", "ProcessInstanceCompleted"],
+      "producesSemantics": ["ProcessDefinitionKey"],
+      "deploymentSlices": ["processDefinition"],
+      "modelKind": "bpmn",
+      "description": "A BPMN process model. Kind-level producesStates lists what EVERY bpmnProcess fixture deploys; producibleStates lists what SOME fixture of this kind can deliver (planner uses producesStates ∪ producibleStates for chain-feasibility BFS; the selector matches per-fixture providesStates in configs/<config>/fixtures/deployment-artifacts.json at emission time, see #159)."
+    },
+    {
+      "@type": "ArtifactKind",
+      "name": "dmnDecision",
+      "identifierType": "DecisionDefinitionId",
+      "producesStates": ["DecisionDefinitionDeployed"],
+      "producesSemantics": ["DecisionDefinitionKey"],
+      "deploymentSlices": ["decisionDefinition"],
+      "description": "A standalone DMN decision (no DRD wrapper)."
+    },
+    {
+      "@type": "ArtifactKind",
+      "name": "dmnDrd",
+      "identifierType": "DecisionRequirementsId",
+      "producesStates": ["DecisionRequirementsDeployed"],
+      "producesSemantics": ["DecisionRequirementsKey"],
+      "deploymentSlices": ["decisionRequirements"],
+      "description": "A DMN decision-requirements diagram (DRD), grouping one or more decisions."
+    },
+    {
+      "@type": "ArtifactKind",
+      "name": "form",
+      "identifierType": "FormId",
+      "producesStates": ["FormDeployed"],
+      "producesSemantics": ["FormKey"],
+      "deploymentSlices": ["form"],
+      "modelKind": "form",
+      "description": "A Camunda Forms JSON form definition."
+    }
+  ],
+  "semanticTypeMap": [
+    { "@type": "SemanticTypeMapping", "semanticType": "ProcessDefinitionKey", "artifactKind": "bpmnProcess" },
+    { "@type": "SemanticTypeMapping", "semanticType": "DecisionDefinitionKey", "artifactKind": "dmnDecision" },
+    { "@type": "SemanticTypeMapping", "semanticType": "DecisionRequirementsKey", "artifactKind": "dmnDrd" },
+    { "@type": "SemanticTypeMapping", "semanticType": "FormKey", "artifactKind": "form" }
+  ],
+  "operationRules": [
+    {
+      "@type": "OperationArtifactRule",
+      "operationId": "createDeployment",
+      "role": "deploymentGateway",
+      "composable": true,
+      "rules": [
+        { "id": "bpmn", "artifactKind": "bpmnProcess" },
+        { "id": "form", "artifactKind": "form" },
+        { "id": "dmn", "artifactKind": "dmnDecision" },
+        { "id": "drd", "artifactKind": "dmnDrd" }
+      ]
+    },
+    {
+      "@type": "OperationArtifactRule",
+      "operationId": "activateJobs",
+      "role": "jobActivator",
+      "plannerOnly": true
+    }
+  ],
+  "fileExtensionMap": [
+    { "@type": "FileExtensionMapping", "extension": ".bpmn", "artifactKinds": ["bpmnProcess"] },
+    { "@type": "FileExtensionMapping", "extension": ".dmn", "artifactKinds": ["dmnDecision", "dmnDrd"] },
+    { "@type": "FileExtensionMapping", "extension": ".form", "artifactKinds": ["form"] },
+    { "@type": "FileExtensionMapping", "extension": ".json", "artifactKinds": ["form"] }
+  ],
+  "nonArtifactWrapperKeys": [
+    {
+      "@type": "NonArtifactWrapperKey",
+      "key": "resource",
+      "rationale": "Generic legacy envelope (DeploymentResourceResult). DeploymentMetadataResult ships this property alongside the four typed slices (processDefinition, decisionDefinition, decisionRequirements, form); every typed slice carries the same semantically-meaningful fields in a typed shape, and `resource.resourceKey` is the oneOf union of the four typed keys. The test-generator extracts semantics from the typed slices and intentionally ignores `resource` — modelling it as an artifact-kind would duplicate the typed coverage without adding a distinct deployment shape. Acknowledged here so the Lift 16 / #256 bidirectional drift check stays green; if the upstream spec ever drops `resource`, remove this entry to keep the allowlist honest."
+    }
+  ]
+}

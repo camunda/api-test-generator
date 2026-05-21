@@ -1,0 +1,293 @@
+// Source of truth for the entity-kinds ABox TBox (api-test-generator
+// ontology, v1).
+//
+// Mirrors the pattern established by `edgeSchema.ts` (Lift 3 / #208):
+// this TypeScript module is the authoritative declaration; the matching
+// `ontology/vocabulary/entity-kinds.schema.json` file is generated from
+// it by `scripts/build-ontology.ts` and committed solely so external
+// SPARQL/SHACL/OWL consumers can fetch a plain JSON Schema by URL. A
+// regression invariant in `configs/<config>/regression-invariants.test.ts`
+// asserts the two are in sync.
+//
+// What this ABox encodes (Lift 4 / #210): the inventory of entity kinds
+// for an API. Each kind is one of two shapes:
+//
+//   - `entity`            — a server-minted (or client-minted) singleton
+//                           identified by one or more semantic identifier
+//                           types. Lifecycle is fully observable via the
+//                           same API (create/get/delete operations).
+//
+//   - `external-entity`   — an identifier minted *outside* the API
+//                           (e.g. an OAuth ClientId minted by Console or
+//                           an external IdP). Treated by the planner as
+//                           "client-mintable, no upstream producer
+//                           required" (graph.externalEntityIdentifiers).
+//
+// `identifiers[]` lists the semantic identifier-type names that identify
+// the entity. For `external-entity` kinds, these are the types the
+// planner short-circuits as `externalBoundary`. For `entity` kinds the
+// list is currently inert at runtime (catalogue only) but is migrated
+// for completeness so `x-semantic-kind` can eventually be retired
+// upstream and so the coverage gates have a complete inventory.
+//
+// #280 — EntityLifecycle template inputs. `shape: "entity"` kinds carry
+// an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/
+// `revokedBy`) consumed by the EntityLifecycle scenario template to
+// emit create→observe present→delete→observe absent lifecycle suites
+// (see `configs/<config>/ontology/scenario-templates.json`). The
+// all-or-nothing rule is structural lint: an entity that can be created
+// but not deleted, or mutated but not observed, is a product
+// anti-pattern that should surface at ABox-load time rather than
+// silently producing a partial test suite. `shape: "external-entity"`
+// kinds (e.g. Client) must NOT carry any of the three — they are
+// minted outside the API and have no in-API lifecycle. The Draft-07
+// `if/then/else` on `shape` below encodes both rules.
+//
+// #305 Phase 4 — `shape: "runtime-entity"` is the third shape. It
+// covers entities that are emitted by the runtime as a side-effect of
+// some other operation (e.g. a UserTask emitted when a user-task
+// service-task activates inside a process instance) rather than being
+// directly created by a client-facing endpoint. Runtime entities have
+// no `establishedBy`/`observableVia`/`revokedBy` triple; instead they
+// carry a `fetcher` (single opId, conventionally a GET-by-id) plus
+// **at least one** of:
+//
+//   - `mutators[]`   — opIds that mutate the entity in place
+//                       (e.g. `updateUserTask`, `assignUserTask`).
+//                       Consumed by the `UpdatedFieldVisibleOnReadBack`
+//                       scenario template (one scenario per mutator).
+//   - `transitions[]` — server-driven state transitions invoked by a
+//                       transition op whose request body carries no
+//                       new field value (e.g. `resolveIncident` flips
+//                       Incident.state from ACTIVE → RESOLVED). #305
+//                       Phase 5d / #189. Consumed by the
+//                       `StateTransitionVisibleAfterAction` scenario
+//                       template (one scenario per transition). When
+//                       `transitions[]` is present, `stateField` is
+//                       required: it names the leaf in the fetcher's
+//                       200 response that carries the entity's current
+//                       state (almost always `"state"`).
+//
+// Discovery of the pre-existing entity (e.g. `searchUserTasks` to find
+// an active user-task key, `searchIncidents` to find an active
+// incident) is the planner's job via the runtimeEmission machinery
+// shipped in Phase 3 (#308) — the ABox itself only declares the
+// mutator/transition/fetcher catalogue.
+//
+// JSON-LD (`@context`, `@type`) is accepted and preserved verbatim but
+// not interpreted by the loader — same convention as `edgeSchema.ts`.
+
+export const entityKindsSchema = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  $id: 'https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json',
+  title: 'Entity-kinds ABox (api-test-generator ontology, v1)',
+  description:
+    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of three shapes (`entity` for in-API-managed with full CRUD, `external-entity` for identifiers minted outside the API, `runtime-entity` for entities emitted by the runtime as a side-effect of other operations); and a list of semantic identifier-type names that identify it. `shape: "entity"` kinds carry an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/`revokedBy`) consumed by the EntityLifecycle scenario template (#280) — asymmetric subsets surface as ABox-load validation errors. `shape: "external-entity"` kinds (e.g. Client) must NOT carry the CRUD triple. `shape: "runtime-entity"` kinds (#305 Phase 4 / Phase 5d, e.g. UserTask, Incident) carry a `fetcher` plus at least one of `mutators[]` (consumed by `UpdatedFieldVisibleOnReadBack`) or `transitions[]` + `stateField` (consumed by `StateTransitionVisibleAfterAction`, #189); the if/then/else below enforces that runtime-entity kinds carry the required combination and that entity/external-entity kinds carry none of these. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, CRUD op methods being POST/GET/DELETE, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
+  type: 'object',
+  additionalProperties: false,
+  required: ['version', 'kinds'],
+  properties: {
+    $schema: { type: 'string' },
+    '@context': {
+      description:
+        'Optional JSON-LD context. Ignored by the loader; preserved verbatim so external RDF tooling can resolve term IRIs without modification.',
+      type: ['object', 'string', 'array'],
+    },
+    version: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'Schema version of this ABox file. Bumped only when the TBox shape changes incompatibly.',
+    },
+    kinds: {
+      type: 'array',
+      minItems: 1,
+      items: { $ref: '#/definitions/EntityKind' },
+    },
+  },
+  definitions: {
+    EntityKind: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'shape', 'identifiers', 'description'],
+      properties: {
+        '@type': {
+          description: 'Optional JSON-LD type IRI. Ignored by the loader.',
+          type: 'string',
+        },
+        name: {
+          type: 'string',
+          pattern: '^[A-Z][A-Za-z0-9]+$',
+          description: 'PascalCase singular noun naming the entity kind (e.g. `Role`, `Client`).',
+        },
+        shape: {
+          type: 'string',
+          enum: ['entity', 'external-entity', 'runtime-entity'],
+          description:
+            '`entity`: in-API-managed (producer + consumer ops both inside the API). `external-entity`: identifier minted outside the API; planner treats `identifiers[]` as `externalBoundary` (client-mintable, no upstream producer required). `runtime-entity` (#305 Phase 4 / Phase 5d): entity emitted by the runtime as a side-effect of another operation (e.g. UserTask from a process instance, Incident from a failing process instance); discovered via runtimeEmission and re-read via `fetcher`. Carries `mutators[]` (consumed by `UpdatedFieldVisibleOnReadBack`) and/or `transitions[]`+`stateField` (consumed by `StateTransitionVisibleAfterAction`, #189).',
+        },
+        identifiers: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'string',
+            minLength: 1,
+            description:
+              'Semantic identifier-type name (matching the `semanticType` values used in `x-semantic-establishes.identifiedBy` upstream).',
+          },
+        },
+        establishedBy: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#280 — operationId of the canonical create operation for this entity kind (e.g. `createUser` for `User`). Conventionally a `POST` returning 201. Required on `shape: "entity"`; forbidden on `shape: "external-entity"` (the all-or-nothing rule is enforced by the if/then/else below).',
+        },
+        observableVia: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#280 — operationId of the canonical get-by-id operation for this entity kind (e.g. `getUser` for `User`). Conventionally a `GET` returning 200, accepting the entity\'s identifier(s) as path parameters. Required on `shape: "entity"`; forbidden on `shape: "external-entity"`.',
+        },
+        revokedBy: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#280 — operationId of the canonical delete operation for this entity kind (e.g. `deleteUser` for `User`). Conventionally a `DELETE` returning 204. Required on `shape: "entity"`; forbidden on `shape: "external-entity"` and `shape: "runtime-entity"`. ProcessInstance (cancel/delete divergence) is intentionally excluded here — see follow-up #281.',
+        },
+        mutators: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'string',
+            minLength: 1,
+          },
+          description:
+            '#305 Phase 4 — operationIds of operations that mutate the runtime entity in place (e.g. `updateUserTask`, `assignUserTask`, `completeUserTask` for `UserTask`). Conventionally a `PATCH`/`POST`/`DELETE` on a sub-resource of the entity\'s identifier (`/{id}/...`). Optional on `shape: "runtime-entity"` (the row must carry `mutators[]` or `transitions[]` or both — see the runtime-entity branch of the allOf below); forbidden on `shape: "entity"` and `shape: "external-entity"`. The `UpdatedFieldVisibleOnReadBack` template emits one scenario per mutator.',
+        },
+        transitions: {
+          type: 'array',
+          minItems: 1,
+          items: { $ref: '#/definitions/StateTransition' },
+          description:
+            '#305 Phase 5d / #189 — server-driven state transitions for this runtime entity. Each entry names the operationId of a transition op (e.g. `resolveIncident`), the state the entity is expected to be in *before* the transition is invoked (e.g. `ACTIVE`), and the state it is expected to be in *after* (e.g. `RESOLVED`). Transition ops are distinguished from mutators by carrying no per-field update in the request body — the post-state is implicit in the operation semantics. Consumed by the `StateTransitionVisibleAfterAction` scenario template (one scenario per transition: prereqChain → invoke transition → re-fetch via `fetcher` → assert `<stateField>` equals `to`). Optional on `shape: "runtime-entity"` (the row must carry `mutators[]` or `transitions[]` or both); when present, `stateField` is required so the template knows which response leaf to read.',
+        },
+        stateField: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#305 Phase 5d / #189 — name of the leaf in the `fetcher`\'s 200 response that carries this entity\'s current state (almost always `"state"`). Required when `transitions[]` is present (the `StateTransitionVisibleAfterAction` template asserts `body.<stateField> === transition.to`). Forbidden when `transitions[]` is absent (would have no consumer). The L3 invariant verifies the named leaf actually appears in the fetcher\'s `responseLeafPaths["200"]`.',
+        },
+        fetcher: {
+          type: 'string',
+          minLength: 1,
+          description:
+            '#305 Phase 4 — operationId of the canonical read-back operation for this runtime entity (e.g. `getUserTask` for `UserTask`, `getIncident` for `Incident`). Conventionally a `GET` returning 200, accepting the entity\'s identifier(s) as path parameters. Required on `shape: "runtime-entity"`; forbidden on `shape: "entity"` and `shape: "external-entity"`.',
+        },
+        description: {
+          type: 'string',
+          minLength: 1,
+        },
+      },
+      // All-or-nothing CRUD triple / runtime-entity pair gated by shape.
+      //   - shape=entity (#280):           all three of establishedBy/observableVia/revokedBy required;
+      //                                    mutators/transitions/stateField/fetcher forbidden.
+      //   - shape=external-entity (#280):  none of the CRUD triple, no mutators/transitions/stateField/fetcher.
+      //   - shape=runtime-entity (#305-4 / Phase 5d):
+      //                                    fetcher required; at least one of mutators[] or transitions[]
+      //                                    must be present (a runtime-entity row with neither is dead
+      //                                    weight — nothing instantiates against it); if transitions[]
+      //                                    is present, stateField is required; CRUD triple forbidden.
+      // Draft-07 if/then/else: the `if` clause matches by `shape` only
+      // (no extra `required`), then branches set the all-or-nothing
+      // constraint on the same instance.
+      allOf: [
+        {
+          if: { properties: { shape: { const: 'entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: {
+            required: ['establishedBy', 'observableVia', 'revokedBy'],
+            not: {
+              anyOf: [
+                { required: ['mutators'] },
+                { required: ['transitions'] },
+                { required: ['stateField'] },
+                { required: ['fetcher'] },
+              ],
+            },
+          },
+        },
+        {
+          if: { properties: { shape: { const: 'external-entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: {
+            not: {
+              anyOf: [
+                { required: ['establishedBy'] },
+                { required: ['observableVia'] },
+                { required: ['revokedBy'] },
+                { required: ['mutators'] },
+                { required: ['transitions'] },
+                { required: ['stateField'] },
+                { required: ['fetcher'] },
+              ],
+            },
+          },
+        },
+        {
+          if: { properties: { shape: { const: 'runtime-entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: {
+            required: ['fetcher'],
+            anyOf: [{ required: ['mutators'] }, { required: ['transitions'] }],
+            not: {
+              anyOf: [
+                { required: ['establishedBy'] },
+                { required: ['observableVia'] },
+                { required: ['revokedBy'] },
+              ],
+            },
+          },
+        },
+        {
+          // Cross-field: `stateField` exists iff `transitions` exists.
+          // Split into two if/then arms because Draft-07 if/then doesn't
+          // gracefully express "X required iff Y present" in a single
+          // branch.
+          if: { required: ['transitions'] },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: { required: ['stateField'] },
+        },
+        {
+          if: { required: ['stateField'] },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: { required: ['transitions'] },
+        },
+      ],
+    },
+    StateTransition: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['op', 'from', 'to'],
+      properties: {
+        op: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'OperationId of the transition op (e.g. `resolveIncident`). Conventionally a `POST` on a sub-resource of the entity (`/{id}/resolution`) whose request body carries no new field value — the post-state is implicit in the operation semantics. At instantiation time the planner resolves this to its canonical scenario and uses the final RequestStep as the invoke step.',
+        },
+        from: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Entity state expected *before* the transition is invoked (e.g. `ACTIVE`). Currently informational — the template trusts the chain to deliver the entity in this state (e.g. `searchIncidents` only ever surfaces ACTIVE incidents on the OCA API). Recorded explicitly so future tightening (an explicit pre-state witness step) is a template change, not an ABox migration.',
+        },
+        to: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Entity state expected *after* the transition is invoked (e.g. `RESOLVED`). Compiled into the `stateEquals` assertion on the read-back step: `expect(body.<stateField>).toBe(<to>)`.',
+        },
+      },
+    },
+  },
+} as const;

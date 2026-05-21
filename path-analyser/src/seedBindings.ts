@@ -24,7 +24,9 @@
  *
  * The returned list is ordered by first-read for stable output.
  */
+
 import type { EndpointScenario, RequestStep } from './types.js';
+import { PENDING_BINDING } from './types.js';
 
 const PLACEHOLDER_RE = /\$\{([^}]+)\}/g;
 const PATH_PLACEHOLDER_RE = /\{([^}]+)\}/g;
@@ -96,7 +98,7 @@ export function computeSeedBindings(scenario: EndpointScenario): string[] {
     // else is a literal value the emitter writes as
     // `ctx['k'] = "<literal>";`, so it is already satisfied at scenario
     // start without a seedBinding() call.
-    if (v !== '__PENDING__') literalBindings.add(k);
+    if (v !== PENDING_BINDING) literalBindings.add(k);
   }
 
   const need = new Set<string>();

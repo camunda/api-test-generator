@@ -26,11 +26,16 @@ malformed-request scenario kinds.
 │   graph.json             │               │ → generated/<config>/    │
 └────────────┬─────────────┘               │   request-validation/    │
              │                             │   *.spec.ts              │
-             │                             └──────────────────────────┘
+             ▼                             └──────────────────────────┘
+┌──────────────────────────┐
+│     path-analyser        │  Reads graph + spec, plans positive scenarios
+│                          │  per endpoint
+│                          │  → generated/<config>/feature-output/*.json
+└────────────┬─────────────┘
              ▼
 ┌──────────────────────────┐
-│     path-analyser        │  Reads graph + spec, generates positive scenarios
-│                          │  per endpoint, emits Playwright test suites
+│      materializer        │  Reads planned scenarios, emits self-contained
+│                          │  Playwright suites (other targets pluggable)
 │                          │  → generated/<config>/playwright/*.spec.ts
 └──────────────────────────┘
 ```
@@ -103,24 +108,25 @@ npm run test:pw:request-validation    # negative request-validation only
 
 ## Project Structure
 
-This is an **npm workspaces** monorepo with four packages:
+This is an **npm workspaces** monorepo with five packages:
 
 ```
 api-test-generator/
 ├── package.json              ← root workspace orchestrator
 ├── spec/                     ← (gitignored) bundled OpenAPI spec output
-│   └── bundled/
+│   └── <config>/bundled/
 │       ├── rest-api.bundle.json
 │       └── spec-metadata.json
 ├── semantic-graph-extractor/ ← workspace: graph extraction from OpenAPI
-├── path-analyser/            ← workspace: positive scenario generation & Playwright codegen
+├── path-analyser/            ← workspace: positive scenario planner (writes JSON only)
+├── materializer/             ← workspace: emits runnable Playwright suites from planned scenarios
 ├── request-validation/       ← workspace: negative request-validation test generator (HTTP 400)
 └── optional-responses/       ← workspace: optional response field analyser
 ```
 
 ## npm Workspaces
 
-All four sub-packages are registered as [npm workspaces](https://docs.npmjs.com/cli/v10/using-npm/workspaces).
+All five sub-packages are registered as [npm workspaces](https://docs.npmjs.com/cli/v10/using-npm/workspaces).
 A single `npm install` at the root installs dependencies for every package.
 
 ### Managing Dependencies
@@ -175,6 +181,7 @@ npm run build --workspaces --if-present
 | `npm run lint:fix` | Lint and apply safe Biome fixes |
 | `npm run format` | Format all workspaces with Biome |
 | `npm test` | Run the regression test suite (extractor + planner fixtures, bundled-spec invariants) |
+| `npm run build:ontology` | Regenerate `ontology/vocabulary/*.schema.json` from their TypeScript source of truth. Run whenever you edit a schema const under `path-analyser/src/ontology/` (e.g. `edgeSchema.ts`). A drift-detector invariant fails if the committed JSON is stale. |
 
 ## Code Quality Tooling
 
@@ -224,7 +231,7 @@ invariant if the property is observable at the chain or graph level. See
 ### Determinism
 
 Generator output is byte-reproducible **by default**. The seeding module
-(`path-analyser/src/codegen/support/seeding.ts`) uses `TEST_SEED` to seed all
+(`materializer/src/playwright/support/seeding.ts`) uses `TEST_SEED` to seed all
 `deterministicSuffix(...)` calls; if unset, it falls back to the constant
 `'snapshot-baseline'`, so `npm run pipeline` produces identical output across
 runs and machines without needing `TEST_SEED` to be set explicitly.
@@ -275,7 +282,7 @@ npm run generate:request-validation
 
 1. `npm run lint` — Biome
 2. `tsc --noEmit` against each workspace tsconfig
-3. Builds (`build:analyser`, `build:request-validation`)
+3. Builds for downstream consumers (`build:analyser`, `build -w @camunda8/emitter-sdk`) — needed so the materializer typecheck can resolve `.d.ts` for the subpath `exports`
 4. `npm run fetch-spec:ref` at the pinned `specRef`
 5. Full pipeline regeneration with `TEST_SEED=snapshot-baseline`
 6. `npm test` — spec-pin guard, layered regression, and unit tests
@@ -323,42 +330,71 @@ consume which semantic types, enabling dependency-aware test ordering.
 npm run build -w semantic-graph-extractor
 npm run extract-graph              # build + extract
 npm run analyze-graph -w semantic-graph-extractor   # human-readable analysis report
-npm run validate-graph -w semantic-graph-extractor  # validate graph integrity
 ```
 
 ### path-analyser
 
-Reads the dependency graph and the OpenAPI spec to generate **positive** test
-scenarios for every endpoint — happy paths, oneOf variant selection, dependency
-chaining, response-shape assertions and artifact deployment coverage. Then
-emits executable Playwright test files. Negative-request scenarios (missing
+Reads the dependency graph and the OpenAPI spec to **plan positive
+scenarios** for every endpoint — happy paths, oneOf variant selection,
+dependency chaining, response-shape assertions, and artifact deployment
+coverage. Writes scenario JSON to `generated/<config>/feature-output/`.
+Emission of runnable suites is handled downstream by
+[`materializer`](#materializer). Negative-request scenarios (missing
 required fields, wrong types, etc.) are owned exclusively by
 [`request-validation`](#request-validation).
 
 ```bash
 npm run build -w path-analyser
-npm run generate:scenarios         # build + generate scenario JSON
-npm run codegen:playwright:all     # build + emit all Playwright tests
+npm run generate:scenarios         # build + plan scenarios into JSON
+```
+
+See [path-analyser/README.md](path-analyser/README.md) for the public
+subpath-exports surface consumed by the materializer.
+
+### materializer
+
+Reads planned scenarios from `generated/<config>/feature-output/` and
+emits a self-contained, runnable Playwright project under
+`generated/<config>/playwright/` — `*.feature.spec.ts` files plus
+`package.json`, `playwright.config.ts`, `tsconfig.json`, vendored
+runtime helpers (`support/`), fixtures, and a README.
+
+Template-derived suites (`#268` Phase 2 / `#270`) land under
+`generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts` —
+one per ABox-declared edge. Each suite runs the full lifecycle
+(establish → present-observe → revoke → absent-observe) and is sourced
+from `generated/<config>/scenarios/templates/EdgeLifecycle/<EdgeName>.json`,
+which the planner instantiates from the EdgeLifecycle TBox template
+(see `ontology/README.md`).
+
+```bash
+npm run codegen:playwright -- <operationId>
+npm run codegen:playwright:all
 npm run test:pw                    # run the generated tests
 npm run observe:aggregate          # aggregate runtime observations
 ```
 
 #### Pluggable test emitters
 
-Suite generation is layered behind a small `Emitter` strategy interface
-(`path-analyser/src/codegen/emitter.ts`). The CLI selects an emitter via
-`--target=<id>` and falls back to `playwright` when omitted:
+Suite generation is layered behind a small `Emitter` strategy
+interface (`materializer/src/emitter.ts`). The CLI selects an emitter
+via `--target=<id>` and falls back to `playwright` when omitted:
 
 ```bash
-node path-analyser/dist/src/codegen/index.js --target=playwright createWidget
-node path-analyser/dist/src/codegen/index.js --target=playwright --all
+tsx materializer/src/index.ts --target=playwright createWidget
+tsx materializer/src/index.ts --target=playwright --all
 ```
+
+The codegen scripts (`npm run codegen:playwright`, `npm run codegen:playwright:all`) invoke the materializer via `tsx` so config-side role hooks (`configs/<config>/codegen/playwright/roles/<role>/hook.ts`, Lift 19 / #261) load transparently alongside the materializer source.
 
 The current built-in is `playwright`. Additional targets (e.g. SDK-based
 suites — see [#8](https://github.com/camunda/api-test-generator/issues/8))
 register themselves through `registerEmitter()` and are listed in
-`--help`. The emitter contract is **experimental** and may change while
-the SDK strategies land.
+`--help`. The emitter contract is **experimental** and is being formalised
+in [#233](https://github.com/camunda/api-test-generator/issues/233).
+
+See [materializer/README.md](materializer/README.md) for the workspace
+boundary, role-bundle layout, and emitter contract details.
 
 ### request-validation
 
@@ -398,14 +434,17 @@ optional fields — useful for understanding which response fields may be absent
 npm run optional-responses
 ```
 
-## Configuration Files (path-analyser)
+## Configuration Files (per active config)
+
+These live under `configs/<active-config>/`:
 
 | File | Purpose |
 |------|---------|
 | `domain-semantics.json` | Domain-level semantic requirements, runtime states, and value bindings |
 | `filter-providers.json` | Maps fields to value providers (`ctx`, `const`, `enumFirst`, etc.) |
 | `request-defaults.json` | Default values for request body fields per operation |
-| `fixtures/` | BPMN, DMN, and form files used by deployment tests |
+| `fixtures/` | BPMN, DMN, and form files used by deployment tests, plus `deployment-artifacts.json` registry |
+| `codegen/playwright/roles/<role>/` | Per-role bundles consumed by the materializer (`call-site.tmpl`, optional `imports.tmpl`, `support.<ext>` or `support.<ext>.tmpl`, `match.json`) |
 
 ## Environment Variables
 

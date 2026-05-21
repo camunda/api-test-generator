@@ -290,6 +290,16 @@ export interface Operation {
   parameters: OperationParameter[];
   requestBodySemanticTypes: SemanticTypeReference[];
   responseSemanticTypes: Record<string, SemanticTypeReference[]>; // keyed by status code
+  /**
+   * Flat list of all primitive (and array-of-primitive) leaf paths per
+   * response status code, irrespective of whether the leaf carries an
+   * `x-semantic-type` annotation. Used by the scenario-template
+   * instantiator (#305 Phase 4) to bridge a mutator's emitted request
+   * body to a fetcher's observable response by leaf-name. Cycles in
+   * `$ref` chains are broken with seen-set tracking; arrays appear as
+   * `prefix[].leafName`.
+   */
+  responseLeafPaths: Record<string, string[]>;
   eventuallyConsistent?: boolean;
   // NEW: Enhanced analysis
   operationType: OperationType;
@@ -401,41 +411,6 @@ export interface OperationDependencyGraph {
   operations: Map<string, Operation>;
   semanticTypes: Map<string, SemanticType>;
   edges: DependencyEdge[];
-  // NEW: Enhanced analysis results
-  semanticTypeLibrary?: SemanticTypeLibrary;
-  rootDependencyAnalysis?: RootOperationAnalysis;
-  crossContaminationMap?: CrossContaminationMap;
-}
-
-// NEW: Semantic Type Library interfaces
-export interface SemanticTypeLibrary {
-  semanticTypes: Map<string, SemanticTypeDefinition>;
-}
-
-export interface SemanticTypeDefinition {
-  name: string;
-  description?: string;
-  baseType: string;
-  format?: string;
-  pattern?: string;
-  minLength?: number;
-  maxLength?: number;
-  // NEW: Value libraries for test generation
-  validExamples: unknown[];
-  invalidExamples: InvalidExample[];
-  crossContaminationSources: string[]; // Other semantic types with same base type
-  generationRules: ValueGenerationRule[];
-}
-
-export interface InvalidExample {
-  value: unknown;
-  invalidationType: 'wrong_type' | 'wrong_format' | 'out_of_bounds' | 'wrong_semantic_type';
-  description: string;
-}
-
-export interface ValueGenerationRule {
-  type: 'random' | 'boundary' | 'pattern' | 'enum';
-  rule: string;
 }
 
 // Operation metadata vendor extension representation
@@ -454,26 +429,6 @@ export interface ConditionalIdempotencySpec {
   window: { field: string; unit: string };
   duplicatePolicy: string; // currently 'ignore'
   appliesWhen: string; // 'key-present'
-}
-
-// NEW: Root Dependency Analysis interfaces
-export interface RootOperationAnalysis {
-  deploymentOperations: string[]; // Operations that create foundational resources
-  setupOperations: string[]; // Operations that must run before others
-  entryPointOperations: string[]; // Operations with no dependencies
-  bootstrapSequences: BootstrapSequence[];
-}
-
-export interface BootstrapSequence {
-  name: string;
-  description: string;
-  operations: string[]; // Ordered sequence of operations
-  produces: string[]; // Semantic types produced by this sequence
-}
-
-// NEW: Cross-contamination mapping
-export interface CrossContaminationMap {
-  [semanticType: string]: string[]; // Maps semantic type to potential contaminants
 }
 
 // Analysis result types

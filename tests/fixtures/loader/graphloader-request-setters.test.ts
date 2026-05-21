@@ -9,11 +9,12 @@
  * semantic in its body, dedup'd, with no entries when no operation
  * declares a body semantic.
  *
- * These properties are what the planner's `bindClientMintedAttribute`
- * helper and the future setter-chain reuse pass consume; if either
- * regresses, attribute-classification scenarios silently revert to the
- * pre-PR-2 synthetic placeholder. The fixture is the smallest spec
- * that exercises each shape independently.
+ * These properties are what the variant suite's
+ * `generateOptionalSubShapeVariants` consumes via the `bindSemanticInput`
+ * chokepoint (and what the future setter-chain reuse pass will
+ * consume); if either regresses, attribute-classification variant
+ * scenarios silently revert to a synthetic placeholder. The fixture is
+ * the smallest spec that exercises each shape independently.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,14 +47,36 @@ afterEach(() => {
 
 interface Layout {
   graph: Record<string, unknown>;
-  domain?: Record<string, unknown>;
+  semanticsAbox?: Record<string, unknown>;
 }
+
+// Default classifications for the synthetic semantics these fixtures
+// reference in their `requestBodySemanticTypes` blocks. Without this,
+// #162 PR 5's load-time fail-fast diagnostic rejects every fixture
+// that names a semantic with no corresponding producer/establisher in
+// the synthetic graph (which is most of them — these fixtures are
+// scoped to the request-setter index, not to the classification chain).
+//
+// Any test exercising the unclassified-detection path itself must
+// override `semanticsAbox` explicitly.
+const DEFAULT_SEMANTICS_ABOX = {
+  version: 1,
+  semanticTypes: [
+    { name: 'Tag', kind: 'attribute', clientMinted: true },
+    { name: 'BusinessId', kind: 'attribute', clientMinted: true },
+    { name: 'NoPath', kind: 'attribute', clientMinted: true },
+    { name: 'ProcessInstanceKey', kind: 'serverEmergent' },
+    { name: 'ProcessDefinitionId', kind: 'serverEmergent' },
+  ],
+};
 
 function writeLayout(layout: Layout): void {
   writeFileSync(join(graphDir, 'operation-dependency-graph.json'), JSON.stringify(layout.graph));
+  const aboxDir = join(configDir, 'ontology');
+  mkdirSync(aboxDir, { recursive: true });
   writeFileSync(
-    join(configDir, 'domain-semantics.json'),
-    JSON.stringify(layout.domain ?? { operationRequirements: {} }),
+    join(aboxDir, 'semantics.json'),
+    JSON.stringify(layout.semanticsAbox ?? DEFAULT_SEMANTICS_ABOX),
   );
 }
 

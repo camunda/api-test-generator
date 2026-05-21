@@ -1,0 +1,153 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/runtime-states.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "states": [
+    {
+      "name": "ProcessDefinitionDeployed",
+      "parameter": "processDefinitionId",
+      "producedBy": [
+        "createDeployment"
+      ]
+    },
+    {
+      "name": "ProcessInstanceExists",
+      "parameter": "processDefinitionId",
+      "producedBy": [
+        "createProcessInstance"
+      ],
+      "requires": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ProcessInstanceCompleted",
+      "parameter": "processInstanceKey",
+      "producedBy": [
+        "createProcessInstance"
+      ],
+      "requires": [
+        "ProcessDefinitionDeployed"
+      ],
+      "eventual": true,
+      "witness": {
+        "operationId": "getProcessInstance",
+        "predicate": {
+          "path": "state",
+          "equals": "COMPLETED"
+        }
+      }
+    },
+    {
+      "name": "JobAvailableForActivation",
+      "parameters": [
+        "jobType",
+        "processDefinitionId"
+      ],
+      "producedBy": [
+        "activateJobs"
+      ],
+      "requires": [
+        "ProcessInstanceExists",
+        "ModelHasServiceTaskType"
+      ]
+    },
+    {
+      "name": "FormDeployed",
+      "parameter": "formKey",
+      "producedBy": [
+        "createDeployment"
+      ]
+    },
+    {
+      "name": "DecisionDefinitionDeployed",
+      "parameter": "decisionDefinitionId",
+      "producedBy": [
+        "createDeployment"
+      ]
+    },
+    {
+      "name": "DecisionRequirementsDeployed",
+      "parameter": "decisionRequirementsId",
+      "producedBy": [
+        "createDeployment"
+      ]
+    }
+  ],
+  "operationRequirements": [
+    {
+      "operationId": "createProcessInstance",
+      "requires": [
+        "ProcessDefinitionDeployed"
+      ],
+      "implicitAdds": [
+        "ProcessInstanceExists"
+      ],
+      "chainCleanupRequires": [
+        "ProcessInstanceCompleted"
+      ],
+      "valueBindings": {
+        "request.processDefinitionId": "ProcessDefinitionDeployed.processDefinitionId"
+      }
+    },
+    {
+      "operationId": "completeJob",
+      "produces": [
+        "ProcessInstanceCompleted"
+      ]
+    },
+    {
+      "operationId": "cancelProcessInstance",
+      "requires": [
+        "ModelHasCancellationBlocker"
+      ],
+      "produces": [
+        "ProcessInstanceCompleted"
+      ]
+    },
+    {
+      "operationId": "activateJobs",
+      "requires": [
+        "ProcessInstanceExists",
+        "ModelHasServiceTaskType"
+      ],
+      "produces": [
+        "JobAvailableForActivation"
+      ],
+      "valueBindings": {
+        "request.jobType": "ModelHasServiceTaskType.jobType"
+      }
+    },
+    {
+      "operationId": "searchJobs",
+      "requires": [
+        "ProcessInstanceExists",
+        "ModelHasServiceTaskType"
+      ]
+    },
+    {
+      "operationId": "getUserTask",
+      "requires": [
+        "ProcessInstanceExists"
+      ]
+    },
+    {
+      "operationId": "searchProcessInstances",
+      "requires": [
+        "ProcessInstanceExists"
+      ]
+    },
+    {
+      "operationId": "deleteProcessInstance",
+      "requires": [
+        "ProcessInstanceCompleted"
+      ]
+    },
+    {
+      "operationId": "searchProcessDefinitions",
+      "requires": [
+        "ProcessDefinitionDeployed"
+      ]
+    }
+  ]
+}

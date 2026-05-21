@@ -1,0 +1,183 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/semantics.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "semanticTypes": [
+    {
+      "name": "ProcessDefinitionKey",
+      "witnesses": "ProcessDefinitionDeployed"
+    },
+    {
+      "name": "ProcessInstanceKey",
+      "witnesses": "ProcessInstanceExists"
+    },
+    {
+      "name": "DecisionDefinitionKey",
+      "witnesses": "DecisionDefinitionDeployed"
+    },
+    {
+      "name": "DecisionRequirementsKey",
+      "witnesses": "DecisionRequirementsDeployed"
+    },
+    {
+      "name": "FormKey",
+      "witnesses": "FormDeployed"
+    },
+    {
+      "name": "JobKey",
+      "witnesses": "JobAvailableForActivation"
+    },
+    {
+      "name": "ElementId",
+      "kind": "modelDerived",
+      "$comment": "Element IDs are defined inside the deployed BPMN model. The planner reads them out-of-band from the chosen fixture's providesValues at plan time \u2014 no Camunda API round-trip required. See #162 PR 1."
+    },
+    {
+      "name": "JobType",
+      "kind": "modelDerived",
+      "$comment": "zeebe:taskDefinition type is encoded in the BPMN model on each service-task element. Read out-of-band from the chosen fixture's providesValues. Subsumes the pre-#162 ad-hoc `parameters.jobType` handling in the registry."
+    },
+    {
+      "name": "Tag",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Free-form label attached to an entity (createProcessInstance.tags[], searchProcessInstances.filter.tags[], etc.). No producer endpoint and no first-order entity retrievable by tag \u2014 the planner mints a deterministic value at setter sites (createProcessInstance.tags[]). Filter-consumer reuse \u2014 threading the same minted value into searchProcessInstances.filter.tags[] and similar \u2014 is deferred (see #168). See #162 PR 2."
+    },
+    {
+      "name": "BusinessId",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Free-form correlation identifier attached to a process instance (createProcessInstance.businessId, searchProcessInstances.filter.businessId, etc.). Like Tag: client-minted, no producer endpoint, no first-order entity retrievable by it. The planner mints a deterministic value at the setter site; filter-consumer reuse is deferred (see #168)."
+    },
+    {
+      "name": "AgentInstanceKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted lifecycle key for AI agent instances. No client API directly creates an AgentInstance with a returned key \u2014 instances emerge from agent runtime activity and are discoverable only via search/get. Used as a search-filter input; the planner mints a deterministic placeholder so the request validates and an empty result set is acceptable. See #162 PR 5."
+    },
+    {
+      "name": "AuditLogKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted lifecycle key for audit-log entries. Audit logs are produced as a side-effect of audited writes \u2014 no direct create API. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
+    },
+    {
+      "name": "AuditLogEntityKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted reference to the entity an audit-log entry was emitted for. Same lifecycle as AuditLogKey \u2014 emerges from audited writes, never directly minted via a client API. See #162 PR 5."
+    },
+    {
+      "name": "DeploymentKey",
+      "kind": "serverEmergent",
+      "$comment": "Temporary classification pending upstream spec fix camunda/camunda#52926. createDeployment returns deploymentKey in its 200 response but the response field is currently flagged provider:false in the bundled spec, so the planner cannot bind it as a producerBound semantic. Once upstream marks deploymentKey as provider:true, this entry should be removed and DeploymentKey will classify as producerBound automatically. See #162 PR 5."
+    },
+    {
+      "name": "MessageSubscriptionKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted lifecycle key for a message subscription. Subscriptions emerge when a deployed process reaches a message catch event \u2014 no direct create API. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
+    },
+    {
+      "name": "IncidentKey",
+      "kind": "runtimeEmission",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": [
+          "ModelEmitsIncident"
+        ]
+      },
+      "discoveredVia": {
+        "operationId": "searchIncidents",
+        "filterBy": "processInstanceKey",
+        "extractKey": "incidentKey",
+        "consistency": "eventual"
+      },
+      "$comment": "Server-minted lifecycle key for an incident. Emitted after a deployment whose BPMN deterministically fails at runtime (ModelEmitsIncident) reaches the failing element during a process instance run. Discovered via searchIncidents filtered by processInstanceKey; eventually consistent (await-eventually). See #305 Phase 5a (promoted from serverEmergent)."
+    },
+    {
+      "name": "UserTaskKey",
+      "kind": "runtimeEmission",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": [
+          "ModelHasUserTask"
+        ]
+      },
+      "discoveredVia": {
+        "operationId": "searchUserTasks",
+        "filterBy": "processInstanceKey",
+        "extractKey": "userTaskKey",
+        "consistency": "eventual"
+      },
+      "$comment": "Server-minted lifecycle key for a user task instance. Emitted after a deployment whose BPMN contains a user-task element (`ModelHasUserTask`) reaches that element during a process instance run. Discovered via searchUserTasks filtered by processInstanceKey; eventually consistent (await-eventually). See #305 Phase 3 (promoted from serverEmergent)."
+    },
+    {
+      "name": "VariableKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted key for a variable row. Variables are managed by process execution and via setVariables, but no client API mints a variable atomically with a returned key. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
+    },
+    {
+      "name": "ScopeKey",
+      "kind": "serverEmergent",
+      "$comment": "Server-minted key identifying the scope (process instance / element instance) a variable lives in. Same lifecycle as VariableKey \u2014 managed by process execution, never directly minted via a client API. Search-filter input only. See #162 PR 5."
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "ModelHasServiceTaskType",
+      "parameter": "jobType",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ModelHasUserTask",
+      "parameter": "userTaskElementId",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ModelEmitsIncident",
+      "parameter": "incidentEmittingElementId",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ModelHasCancellationBlocker",
+      "parameter": "cancellationBlockerJobType",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    }
+  ],
+  "identifiers": [
+    {
+      "name": "ProcessDefinitionId",
+      "validityState": "ProcessDefinitionDeployed",
+      "boundBy": [
+        "createDeployment"
+      ],
+      "fieldPaths": [
+        "deployments[].processDefinition.processDefinitionId"
+      ]
+    },
+    {
+      "name": "JobTypeValue",
+      "boundBy": [
+        "createDeployment"
+      ],
+      "derivedVia": "ModelHasServiceTaskType"
+    }
+  ]
+}

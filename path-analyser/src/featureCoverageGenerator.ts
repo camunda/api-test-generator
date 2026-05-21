@@ -1,4 +1,5 @@
-import { deterministicSuffix } from './codegen/support/seeding.js';
+import { deterministicSuffix } from './deterministicSuffix.js';
+import { isJobActivatorOp } from './ontology/operationRoles.js';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
@@ -15,14 +16,23 @@ interface FeatureCoverageOptions {
   generateNegative: boolean;
   requestVariants?: RequestOneOfGroupSummary[]; // injected extracted request variant groups
   // Cap total scenarios per endpoint for feature coverage
-  maxScenariosPerEndpoint?: number;
+  maxVariantOverlays?: number;
+  // #288 Phase 3b — the planner's authoritative scenario for this
+  // endpoint, used as the source of `operations` and `bindings` for
+  // every variant that inherits the chain (i.e. everything except
+  // search-empty-negative). When omitted (legacy callers, tests),
+  // variants fall back to the pre-3b blank-slate construction —
+  // single-op chain, no prereq bindings — which keeps the function
+  // usable in isolation but is not how the production pipeline calls
+  // it.
+  canonical?: EndpointScenario;
 }
 
 const DEFAULT_OPTS: FeatureCoverageOptions = {
   maxOptionalPairs: 20,
   includeAllOptionalsThreshold: 5,
   generateNegative: true,
-  maxScenariosPerEndpoint: 35,
+  maxVariantOverlays: 35,
 };
 
 export function generateFeatureCoverageForEndpoint(
@@ -64,34 +74,19 @@ export function generateFeatureCoverageForEndpoint(
     });
   }
 
-  // Single optional variants
-  for (const o of optional) {
-    variants.push({
-      endpointId: endpointOpId,
-      optionals: [o],
-      disjunctionChoices: [],
-      artifactSemantics: [o],
-      expectedResult: 'nonEmpty',
-    });
-  }
+  // #162 PR 4 (suite-partition cut): optional-population scenarios
+  // (single `opt=<sem>` and the `all optionals` combo) used to be
+  // emitted here. They now live exclusively in the variant suite
+  // (`generateOptionalSubShapeVariants`) so each suite has one
+  // convention. The feature suite shrinks to: base, oneOf-minimal,
+  // negative-empty, and duplicate-test carve-outs.
 
-  // All optionals variant if under threshold
-  if (optional.length > 1 && optional.length <= options.includeAllOptionalsThreshold) {
-    variants.push({
-      endpointId: endpointOpId,
-      optionals: [...optional],
-      disjunctionChoices: [],
-      artifactSemantics: [...optional],
-      expectedResult: 'nonEmpty',
-    });
-  }
-
-  // Negative empty-result variant: only for search-like endpoints (query style or activateJobs) with no required semantics
+  // Negative empty-result variant: only for search-like endpoints (query style or jobActivator) with no required semantics
   const isSearchLike =
     endpoint.method.toUpperCase() === 'POST' &&
     (/\/search$/.test(endpoint.path) ||
       /search/i.test(endpoint.operationId) ||
-      endpoint.operationId === 'activateJobs');
+      isJobActivatorOp(graph.domain, endpoint.operationId));
   if (options.generateNegative && required.length === 0 && isSearchLike) {
     variants.push({
       endpointId: endpointOpId,
@@ -100,6 +95,11 @@ export function generateFeatureCoverageForEndpoint(
       artifactSemantics: [],
       expectedResult: 'empty',
       negative: true,
+      // #288 Phase 3b — the search-empty-negative variant deliberately
+      // omits chain prerequisites so the search returns empty at
+      // runtime. This is the single case across the codebase where
+      // canonical-chain inheritance is wrong.
+      inheritChainPrereqs: false,
     });
   }
 
@@ -148,19 +148,11 @@ export function generateFeatureCoverageForEndpoint(
           requestVariantName: v.variantName,
           requestVariantRichness: 'minimal',
         });
-        // rich variant (required + optional) if there are optional fields
-        if (v.optional.length) {
-          variants.push({
-            endpointId: endpointOpId,
-            optionals: [],
-            disjunctionChoices: [],
-            artifactSemantics: [],
-            expectedResult: 'nonEmpty',
-            requestVariantGroup: group.groupId,
-            requestVariantName: `${v.variantName}:rich`,
-            requestVariantRichness: 'rich',
-          });
-        }
+        // #162 PR 4 (suite-partition cut): the `<variant>:rich` shape
+        // (oneOf variant with all optional fields populated) used to be
+        // emitted here as well. It is now owned by the variant suite
+        // alongside other populated-optional scenarios; the feature
+        // suite keeps only the minimal-required oneOf variant per group.
       }
       // oneOf union-all/pairwise negatives are owned by the request-validation suite
       // (see issue #27); intentionally not emitted here.
@@ -168,10 +160,10 @@ export function generateFeatureCoverageForEndpoint(
   }
 
   let scenarios: EndpointScenario[] = variants.map((v, i) =>
-    buildScenarioFromVariant(graph, endpointOpId, v, i + 1),
+    buildScenarioFromVariant(graph, endpointOpId, v, i + 1, options.canonical),
   );
   // Enforce global cap per endpoint
-  const cap = options.maxScenariosPerEndpoint ?? 35;
+  const cap = options.maxVariantOverlays ?? 35;
   if (scenarios.length > cap) scenarios = scenarios.slice(0, cap);
 
   return {
@@ -188,17 +180,45 @@ function buildScenarioFromVariant(
   endpointId: string,
   variant: FeatureVariantSpec,
   index: number,
+  canonical: EndpointScenario | undefined,
 ): EndpointScenario {
   const endpoint = graph.operations[endpointId];
-  const opRefs: OperationRef[] = [toRef(endpoint)];
+  // #288 Phase 3b — inherit the planner's canonical chain (operations
+  // + bindings) unless the variant explicitly opts out
+  // (`inheritChainPrereqs: false`, currently only the
+  // search-empty-negative case). This replaces the post-hoc
+  // chain-graft + donor-binding-merge blocks that used to live in
+  // `path-analyser/src/index.ts` immediately after this call.
+  const inheritChain = variant.inheritChainPrereqs !== false;
+  const opRefs: OperationRef[] =
+    inheritChain && canonical && canonical.operations.length > 1
+      ? canonical.operations.map((o) => ({ ...o }))
+      : [toRef(endpoint)];
+  const inheritedBindings: Record<string, string> =
+    inheritChain && canonical?.bindings ? { ...canonical.bindings } : {};
+
   const produced = new Set<string>();
-  const bindings: Record<string, string> = {};
+  // Variant bindings overlay onto inherited bindings — variant wins
+  // on overlap, so negative-variant overrides like `${var}Nonexistent`
+  // are preserved. Without the merge, the variant would lose the
+  // planner's prereq mints (e.g. external-entity `clientIdVar`, the
+  // foreign-key `tenantIdVar` for createTenantClusterVariable's path
+  // param) and the emitter would render literal `${...Var}` at runtime.
+  const bindings: Record<string, string> = { ...inheritedBindings };
+  // Track synthetic bindings explicitly so the post-3b inherit doesn't
+  // accidentally classify inherited canonical bindings (e.g. `tenantIdVar`)
+  // as synthetic — `syntheticBindings` is specifically the negative-
+  // variant `${var}Nonexistent` overrides, used downstream to drive
+  // the emitter's "intentionally invalid lookup value" rendering.
+  const syntheticKeys: string[] = [];
   // Synthetic bindings for negative variant
   if (variant.negative) {
     for (const o of variant.optionals) {
       const varName = `${camelLower(o)}Var`;
-      bindings[`${varName}Nonexistent`] =
+      const key = `${varName}Nonexistent`;
+      bindings[key] =
         `${camelLower(o)}_nonexistent_${deterministicSuffix(`fc:neg:${endpoint.operationId}:${o}`)}`;
+      syntheticKeys.push(key);
     }
   } else {
     for (const o of variant.optionals) {
@@ -220,7 +240,7 @@ function buildScenarioFromVariant(
     expectedResult: { kind: variant.expectedResult },
     coverageTags: buildCoverageTags(variant),
     filtersUsed: variant.optionals,
-    syntheticBindings: variant.negative ? Object.keys(bindings) : undefined,
+    syntheticBindings: variant.negative ? syntheticKeys : undefined,
     bindings,
   };
   if (variant.duplicateTest) {

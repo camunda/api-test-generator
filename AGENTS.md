@@ -23,10 +23,13 @@ REST API by analysing the upstream OpenAPI spec. Two suites are emitted:
 - **Negative** request-validation tests (HTTP 400 expectations across ~24
   malformed-request kinds) via `request-validation`.
 
-Inputs flow through three workspaces in order:
-`semantic-graph-extractor` → `path-analyser` (+ `request-validation`)
-→ generated `*.spec.ts` files. The bundled OpenAPI spec is fetched by
-`camunda-schema-bundler` (a dev dependency).
+Inputs flow through the processing pipeline `semantic-graph-extractor`
+→ `path-analyser` → `materializer` (with `request-validation` as a
+parallel pipeline). The new `@camunda8/emitter-sdk` workspace is a
+contract dependency consumed by `materializer/` (and by external
+emitter packages) — it sits beside the pipeline, not inside it. The
+bundled OpenAPI spec is fetched by `camunda-schema-bundler` (a dev
+dependency).
 
 ## Project layout
 
@@ -35,8 +38,10 @@ npm workspaces monorepo. Node `>=22`.
 | Path | Purpose |
 |---|---|
 | `semantic-graph-extractor/` | Parses bundled spec, emits `operation-dependency-graph.json` |
-| `path-analyser/` | BFS scenario planner + Playwright codegen (positive suite) |
+| `path-analyser/` | BFS scenario planner — emits scenario JSON |
 | `path-analyser/src/scenarioGenerator.ts` | Core BFS planner — `generateScenariosForEndpoint()` |
+| `materializer/` | Test-suite materialization — reads scenarios JSON + ABox views and emits Playwright suites (positive). Owns the Playwright emitter, role-templating renderer, and vendored support helpers. Depends on path-analyser only via published `exports` (loaders + types). |
+| `emitter-sdk/` | `@camunda8/emitter-sdk` — public contract package for SDK emitter contributors (JS/C#/Python OCA emitters). Defines `EmitterStrategy`, `EmitContext`, `EmittedFile`, `LoadedRoleBundle`, `RoleMatchSpec`, `JSONSchema`, `RoleHookProvider`, and the singleton registries. Consumed by `materializer/` and by external emitter packages. |
 | `request-validation/` | Negative-test generator (HTTP 400 suite) |
 | `optional-responses/` | Optional response field analyser |
 | `tests/fixtures/extractor/` | Layer-1 hand-curated OpenAPI snippets |
@@ -45,6 +50,7 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/` | Per-target generator configs (one directory per named config) |
 | `configs/camunda-oca/spec-pin.json` | Pinned upstream `specRef` + `expectedSpecHash` for the camunda-oca config |
 | `configs/camunda-oca/{domain-semantics,filter-providers,request-defaults}.json` | Domain rules, value providers, and request-body defaults for camunda-oca |
+| `configs/camunda-oca/fixtures/` | Deployment-artifact fixture registry + BPMN/DMN/Form files for camunda-oca (#221 / Lift 11) |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
@@ -81,6 +87,9 @@ npm run lint                         # Biome (lint + plugin)
 npm run lint:fix                     # apply safe fixes
 npm test                             # vitest (regression + unit)
 npx tsc --noEmit -p <workspace>/tsconfig.json   # per-workspace typecheck
+
+# Ontology artefacts
+npm run build:ontology               # regenerate ontology/vocabulary/*.schema.json from TS source
 ```
 
 `spec/`, `dist/`, and `**/generated/` are gitignored. CI regenerates them
@@ -150,14 +159,42 @@ Biome 2.4.12 owns both linting and formatting. Config: [biome.json](biome.json).
 
 Run `npm run lint` (or `npx biome check <files>`) before commit.
 
+### Zero tolerance for warnings
+
+`npm run lint` must report **zero warnings and zero infos** — not just
+zero errors. Warnings are latent bugs or stale code (unused imports,
+redundant suppressions, dead biome-ignore comments, style nudges); they
+accumulate silently and erode the signal of the lint gate. Treat every
+warning as a hard failure and clear it before you commit.
+
+Fix warnings **at the root**, not by suppressing them:
+
+- An unused import means dead code — delete the import (and any other
+  artefacts left behind by the same refactor).
+- A redundant `// biome-ignore …` comment means the rule no longer
+  fires on that site — delete the comment.
+- A `useTemplate` warning means a string concat should be a template
+  literal — rewrite the expression.
+- A `noExplicitAny`/`noImplicitAnyLet`/`noEvolvingTypes` warning means
+  the type is wrong — narrow it.
+
+Add a `// biome-ignore lint/<rule>: <reason>` suppression only when the
+rule is genuinely wrong for the call site (e.g. a runtime contract
+boundary parsing `unknown` JSON), and always include a concrete
+justification. Reviewers will reject suppressions added to silence a
+warning that has a real fix.
+
 ## TypeScript
 
-- Three workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
-  `path-analyser/tsconfig.json`, `request-validation/tsconfig.json`. CI
-  typechecks each in turn.
-- Tests under `tests/**` import workspace sources directly (e.g.
-  `../../../path-analyser/src/scenarioGenerator.ts`) and run via vitest with
-  on-the-fly transformation — no separate test tsconfig.
+- Five workspace tsconfigs: `semantic-graph-extractor/tsconfig.json`,
+  `path-analyser/tsconfig.json`, `emitter-sdk/tsconfig.json`,
+  `materializer/tsconfig.json`, `request-validation/tsconfig.json`. CI
+  typechecks each in turn (and builds path-analyser + emitter-sdk before
+  the materializer typecheck so `.d.ts` files exist for the
+  subpath-exports resolution). A separate `tests/tsconfig.json` covers
+  the test sources (which import workspace sources directly via `.ts`
+  extensions; see `allowImportingTsExtensions` in that file); CI runs
+  `npx tsc --noEmit -p tests/tsconfig.json` as its own gate.
 - **No `any`.** Narrow `unknown` with type guards.
 - **No unsafe type assertions.** `as T` is banned by the
   `plugins/no-unsafe-type-assertion.grit` Biome plugin in both `src/` and
@@ -361,11 +398,24 @@ Local equivalent of the CI gate. Run before every push:
 npm run lint
 npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
 npx tsc --noEmit -p path-analyser/tsconfig.json
+npm run build:analyser   # emits .d.ts that emitter-sdk + materializer typechecks depend on
+npx tsc --noEmit -p emitter-sdk/tsconfig.json
+npm run build:emitter-sdk   # emits .d.ts that materializer's typecheck depends on
+npx tsc --noEmit -p materializer/tsconfig.json
 npx tsc --noEmit -p request-validation/tsconfig.json
 TEST_SEED=snapshot-baseline npm run testsuite:generate
 npm run generate:request-validation
 npm test
 ```
+
+> **The `build:analyser` and `build:emitter-sdk` steps are mandatory
+> before the materializer typecheck.** Materializer imports
+> `from 'path-analyser/configResolver'` and
+> `from '@camunda8/emitter-sdk'`, both resolved via subpath `exports`
+> maps to `dist/**/*.d.ts`. Those declarations only exist after `tsc`
+> has emitted them. CI builds both in the typecheck job for the same
+> reason; if you skip the builds locally you'll miss CI failures that
+> a fresh clone would surface.
 
 > **`npm test` alone is not sufficient.** The Layer-3 invariants in
 > `configs/<config>/regression-invariants.test.ts` read regenerated
@@ -377,7 +427,8 @@ npm test
 > `scenarioGenerator.ts`).
 >
 > Any change under `semantic-graph-extractor/`, `path-analyser/`,
-> `request-validation/`, or any file under `configs/<name>/` (notably
+> `materializer/`, `request-validation/`, or any file under
+> `configs/<name>/` (notably
 > `domain-semantics.json`, `filter-providers.json`, `request-defaults.json`)
 > requires the regen. When in doubt, regen.
 >
@@ -390,6 +441,15 @@ npm test
 For Layer-3 invariant changes you must run the regen step or the test
 file aborts with a "graph not found" / "scenarios directory not found"
 error.
+
+> **`npm run build:ontology` is a separate step.** Run it whenever you
+> edit any TypeScript file under `path-analyser/src/ontology/` (e.g.
+> `edgeSchema.ts`). It regenerates the committed JSON Schema artefacts
+> under `ontology/vocabulary/` that external SPARQL/SHACL/OWL tooling
+> reads. A Layer-3 drift-detector invariant in
+> `configs/<config>/regression-invariants.test.ts` fails if the
+> committed JSON drifts from the TS source of truth, so a stale file
+> will surface as a test failure rather than shipping silently.
 
 ## Terminal commands (agent tooling)
 
@@ -417,6 +477,18 @@ error.
   outputs at once.
 - Adding a new emitter target (`path-analyser/src/codegen/emitter.ts`) —
   the contract is currently experimental.
+- **Adding a parallel implementation of an existing pipeline stage**
+  (a new scenario builder alongside `scenarioGenerator.ts`, a new
+  Playwright emitter alongside `materializer/src/playwright/emitter.ts`,
+  a new feature-coverage generator alongside `featureCoverageGenerator.ts`,
+  etc.). In the PR description, justify why a unification with the
+  existing canonical implementation is not possible. Parallel
+  implementations drift: every diverged code path silently grows
+  bug-fix asymmetries and feature gaps that don't surface until much
+  later (see issues #286 and #288 for two concurrent examples of this
+  failure mode). If the new requirement genuinely doesn't fit the
+  canonical implementation, prefer extending the canonical one — even
+  if the extension is larger than the parallel implementation would be.
 
 **Never:**
 - Reintroduce an end-to-end snapshot/manifest guard (it was retired

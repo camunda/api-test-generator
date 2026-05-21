@@ -3,29 +3,49 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "exports": {
+    "./configResolver": {
+      "types": "./dist/src/configResolver.d.ts",
+      "import": "./dist/src/configResolver.js"
+    },
+    "./graphLoader": {
+      "types": "./dist/src/graphLoader.d.ts",
+      "import": "./dist/src/graphLoader.js"
+    },
+    "./ontology/loader": {
+      "types": "./dist/src/ontology/loader.d.ts",
+      "import": "./dist/src/ontology/loader.js"
+    },
+    "./ontology/operationRoles": {
+      "types": "./dist/src/ontology/operationRoles.d.ts",
+      "import": "./dist/src/ontology/operationRoles.js"
+    },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./dist/src/types.js"
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
+    "build": "tsc -p tsconfig.json",
     "generate:scenarios": "node ./dist/src/index.js",
     "start": "npm run build && npm run generate:scenarios",
-    "codegen:playwright": "npm run build && node dist/src/codegen/index.js",
-    "codegen:playwright:all": "npm run build && node dist/src/codegen/index.js --all",
     "test:pw": "npx playwright test",
     "test:pw:file": "npx playwright test --",
     "test:pw:grep": "npx playwright test --grep",
-    "gen-and-test": "npm run codegen:playwright:all && npm run test:pw",
     "observe:aggregate": "npm run build && node dist/src/scripts/aggregate-observations.js",
-    "observe:run": "npm run codegen:playwright:all && npm run test:pw && npm run observe:aggregate",
     "validate:providers": "npm run build && node dist/scripts/validate-providers.js",
     "debug:canonical": "npm run build && node dist/src/scripts/debug-canonical.js",
     "clean": "rimraf dist || rm -rf dist",
-    "regenerate": "npm run clean && npm run build && npm run generate:scenarios && npm run codegen:playwright:all"
+    "regenerate": "npm run clean && npm run build && npm run generate:scenarios"
   },
   "dependencies": {
     "@playwright/test": "^1.54.2",
+    "ajv": "^8.20.0",
     "yaml": "^2.5.0",
     "zod": "^4.3.6"
   },
   "engines": {
     "node": ">=22.0.0"
-  }
+  },
+  "devDependencies": {}
 }

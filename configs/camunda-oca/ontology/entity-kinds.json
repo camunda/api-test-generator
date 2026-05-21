@@ -1,0 +1,193 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "kinds": [
+    {
+      "@type": "EntityKind",
+      "name": "Role",
+      "shape": "entity",
+      "identifiers": [
+        "RoleId"
+      ],
+      "establishedBy": "createRole",
+      "observableVia": "getRole",
+      "revokedBy": "deleteRole",
+      "description": "A role entity, identified by its client-minted roleId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "User",
+      "shape": "entity",
+      "identifiers": [
+        "Username"
+      ],
+      "establishedBy": "createUser",
+      "observableVia": "getUser",
+      "revokedBy": "deleteUser",
+      "description": "A user entity, identified by its client-minted username."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Tenant",
+      "shape": "entity",
+      "identifiers": [
+        "TenantId"
+      ],
+      "establishedBy": "createTenant",
+      "observableVia": "getTenant",
+      "revokedBy": "deleteTenant",
+      "description": "A tenant entity, identified by its client-minted tenantId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Group",
+      "shape": "entity",
+      "identifiers": [
+        "GroupId"
+      ],
+      "establishedBy": "createGroup",
+      "observableVia": "getGroup",
+      "revokedBy": "deleteGroup",
+      "description": "A group entity, identified by its client-minted groupId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "MappingRule",
+      "shape": "entity",
+      "identifiers": [
+        "MappingRuleId"
+      ],
+      "establishedBy": "createMappingRule",
+      "observableVia": "getMappingRule",
+      "revokedBy": "deleteMappingRule",
+      "description": "A mapping rule entity, identified by its client-minted mappingRuleId."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "GlobalTaskListener",
+      "shape": "entity",
+      "identifiers": [
+        "GlobalListenerId"
+      ],
+      "establishedBy": "createGlobalTaskListener",
+      "observableVia": "getGlobalTaskListener",
+      "revokedBy": "deleteGlobalTaskListener",
+      "description": "A global user task listener entity, identified by its client-minted id (a GlobalListenerId)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "GlobalClusterVariable",
+      "shape": "entity",
+      "identifiers": [
+        "ClusterVariableName"
+      ],
+      "establishedBy": "createGlobalClusterVariable",
+      "observableVia": "getGlobalClusterVariable",
+      "revokedBy": "deleteGlobalClusterVariable",
+      "description": "A global-scoped cluster variable, identified by its client-minted name (a ClusterVariableName). Established by createGlobalClusterVariable."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "TenantClusterVariable",
+      "shape": "entity",
+      "identifiers": [
+        "ClusterVariableName"
+      ],
+      "establishedBy": "createTenantClusterVariable",
+      "observableVia": "getTenantClusterVariable",
+      "revokedBy": "deleteTenantClusterVariable",
+      "description": "A tenant-scoped cluster variable, identified by the (tenantId, name) tuple. Established by createTenantClusterVariable. Only ClusterVariableName is listed in 'identifiers' here because TenantId is owned by the Tenant entity and must remain single-owner for the edge-derivation rule; the Tenant requirement of tenant-scoped operations is expressed via the tenantId path parameter."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Authorization",
+      "shape": "entity",
+      "identifiers": [
+        "AuthorizationKey"
+      ],
+      "establishedBy": "createAuthorization",
+      "observableVia": "getAuthorization",
+      "revokedBy": "deleteAuthorization",
+      "description": "An authorization entity, identified by its server-minted authorizationKey. Granted by createAuthorization (server mints the key)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Document",
+      "shape": "entity",
+      "identifiers": [
+        "DocumentId"
+      ],
+      "establishedBy": "createDocument",
+      "observableVia": "getDocument",
+      "revokedBy": "deleteDocument",
+      "description": "A document entity, identified by its server-minted documentId. Established by uploading via createDocument (POST /documents)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Client",
+      "shape": "external-entity",
+      "identifiers": [
+        "ClientId"
+      ],
+      "description": "An OAuth client. Minted outside the Camunda REST API: by Console in SaaS, by the configured external IdP (EntraID, Keycloak, Okta, …) in Self-Managed with OIDC. Not modelled at all under Self-Managed Basic auth, where m2m apps are users instead. Referenced by the client-membership edges only — never established or fetched via this API."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "UserTask",
+      "shape": "runtime-entity",
+      "identifiers": [
+        "UserTaskKey"
+      ],
+      "mutators": [
+        "updateUserTask"
+      ],
+      "fetcher": "getUserTask",
+      "stateField": "state",
+      "transitions": [
+        {
+          "op": "completeUserTask",
+          "from": "CREATED",
+          "to": "COMPLETED"
+        }
+      ],
+      "description": "#305 Phase 4 + Phase 5d-2 — a runtime-emitted user task, identified by its server-minted userTaskKey. UserTasks are not created via a client-facing endpoint; they are emitted as a side-effect of process-instance progression (when a BPMN user-task element is activated). Discovered at planning time via the UserTaskKey runtimeEmission entry (discoveredVia searchUserTasks, post-#308). Mutated in place by updateUserTask (and, in future phases, assignUserTask/unassignUserTask) and read back via getUserTask. State transition: completeUserTask flips state CREATED → COMPLETED (Phase 5d-2 / #189). Consumed by both UpdatedFieldVisibleOnReadBack (mutators) and StateTransitionVisibleAfterAction (transitions)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Incident",
+      "shape": "runtime-entity",
+      "identifiers": [
+        "IncidentKey"
+      ],
+      "fetcher": "getIncident",
+      "stateField": "state",
+      "transitions": [
+        {
+          "op": "resolveIncident",
+          "from": "ACTIVE",
+          "to": "RESOLVED"
+        }
+      ],
+      "description": "#305 Phase 5d / #189 — a runtime-emitted incident, identified by its server-minted incidentKey. Incidents are not created via a client-facing endpoint; they are emitted as a side-effect of a process instance whose BPMN deterministically fails at runtime (e.g. incident-script-task.bpmn). Discovered at planning time via the IncidentKey runtimeEmission entry (discoveredVia searchIncidents, #305 Phase 5a). The only client-facing state transition on the OCA API is resolveIncident (ACTIVE → RESOLVED); read back via getIncident. Consumed by the StateTransitionVisibleAfterAction scenario template (#305 Phase 5d / #189). No mutators[] today — Incidents do not expose per-field mutators on the public API."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "ProcessInstance",
+      "shape": "runtime-entity",
+      "identifiers": [
+        "ProcessInstanceKey"
+      ],
+      "fetcher": "getProcessInstance",
+      "stateField": "state",
+      "transitions": [
+        {
+          "op": "cancelProcessInstance",
+          "from": "ACTIVE",
+          "to": "CANCELED"
+        }
+      ],
+      "description": "#305 Phase 5d-4 / #189 — a process instance, identified by its server-minted processInstanceKey. NOTE on shape: ProcessInstance is the direct response of createProcessInstance, not strictly a side-effect 'runtime-emitted' entity in the strict #305 sense; we classify it as a runtime-entity here purely so it can participate in the StateTransitionVisibleAfterAction template (which requires fetcher+stateField+transitions). The cancelProcessInstance transition (ACTIVE → CANCELED) is verified by read-back through getProcessInstance. Selection of the deployment fixture is driven by `requires: [ModelHasCancellationBlocker]` on the cancelProcessInstance op, which forces the planner to choose bpmn/cancellable-blocked.bpmn (a service task wired to a unique job type that no other test activates) so the instance stays ACTIVE until the test cancels it explicitly. No mutators[]. See #281 for the orthogonal EntityLifecycle two-revoker design that may later relocate ProcessInstance into a richer shape; this row scopes ProcessInstance to the state-transition concern only."
+    }
+  ]
+}

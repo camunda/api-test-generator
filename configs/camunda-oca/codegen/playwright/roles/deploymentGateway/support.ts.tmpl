@@ -1,0 +1,182 @@
+// Runtime helper for the `deploymentGateway` role (Lift 12 / #231).
+//
+// Vendored into every emitted Playwright suite at
+// <outDir>/support/deploymentGateway.ts by the role-overlay materializer
+// (see materializer/src/playwright/materialize-support.ts). This source
+// file ships as `support.ts.tmpl` and is rendered as a Mustache template
+// at codegen time so the spec-derived `EXTRACTS` constant is baked into
+// the vendored helper instead of being threaded through every call-site
+// literal (#243).
+//
+// Encapsulates the full deployment lifecycle in a single call:
+//   - resolve @@FILE: paths via resolveFixture()
+//   - build the multipart body, stripping fields per the strip rules
+//     supplied by the emitter (from globalContextSeeds)
+//   - POST <baseUrl> + the role-bound op's path with auth headers
+//   - throw a descriptive Error on any non-200 response
+//   - walk the spec-derived `EXTRACTS` constant and populate ctx via
+//     extractInto() — the helper has no hard-coded knowledge of which
+//     response fields are extracted; the list is generated at codegen
+//     time from the extractor's responseSemanticLeaves and templated
+//     into this file's `EXTRACTS` literal below.
+//
+// Keep this file free of npm package imports — only the co-vendored
+// ./env, ./fixtures, and ./seeding helpers (built-in support, sibling
+// in the emitted suite) are permitted.
+
+import { authHeaders } from './env.js';
+import { resolveFixture } from './fixtures.js';
+import { extractInto } from './seeding.js';
+
+/**
+ * Structural mirror of Playwright's APIResponse — avoids a Playwright import while
+ * remaining assignable to assert-json-body's PlaywrightAPIResponse parameter.
+ */
+interface ApiResponseLike {
+  body(): Promise<Buffer>;
+  dispose(): Promise<void>;
+  headers(): Record<string, string>;
+  headersArray(): Array<{ name: string; value: string }>;
+  // biome-ignore lint/suspicious/noExplicitAny: mirrors Playwright's actual json() return type
+  json(): Promise<any>;
+  ok(): boolean;
+  status(): number;
+  statusText(): string;
+  text(): Promise<string>;
+  url(): string;
+  // Required for structural compatibility with Playwright's APIResponse (which includes
+  // [Symbol.asyncDispose] as a required member). Both path-analyser/tsconfig.json and
+  // the generated suite's tsconfig must include ESNext.Disposable in their lib array
+  // for this to compile.
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+/** Structural subset of Playwright's APIRequestContext — avoids a Playwright import. */
+interface ApiRequestContextLike {
+  post(
+    url: string,
+    options?: {
+      headers?: Record<string, string>;
+      multipart?: Record<string, string | { name: string; mimeType: string; buffer: Buffer }>;
+    },
+  ): Promise<ApiResponseLike>;
+}
+
+/** Multipart body template accepted by deploy(). */
+export interface DeployBody {
+  fields?: Record<string, unknown>;
+  files?: Record<string, string>;
+}
+
+/**
+ * A strip rule: skip `fieldName` from the multipart body when the field's
+ * resolved value equals `sentinel`. Passed by the emitter via the `strips`
+ * parameter so deploy() has no hard-coded domain knowledge about tenant sentinels
+ * or any other config-specific defaults.
+ */
+export interface DeployStripRule {
+  fieldName: string;
+  sentinel: string;
+}
+
+/**
+ * A response-field extraction directive: navigate `segments` on the response
+ * JSON and bind the value to `ctx[varName]` via `extractInto`.
+ *
+ * `segments` mixes string property keys with number array indices. A `null`
+ * or `undefined` encountered partway short-circuits the walk and the
+ * variable is left untouched (extractInto skips undefined values).
+ */
+interface DeployExtract {
+  varName: string;
+  segments: (string | number)[];
+}
+
+/**
+ * Spec-derived response-extracts list. Baked into this file at codegen time
+ * from the role-bound operation's `responseSemanticLeaves` via the
+ * `DeploymentRoleHookProvider` (`materializer/src/playwright/hooks/deployment.ts`)
+ * and the templated-support-file rendering path in `materializeRoleSupportFiles`
+ * (`materializer/src/playwright/materialize-support.ts`).
+ *
+ * Keeping the list inside the helper (rather than at every `deploy(...)`
+ * call site in the emitted suite) is the encapsulation the helper was
+ * introduced for — see #243.
+ */
+const EXTRACTS: DeployExtract[] = {{{extracts}}};
+
+/**
+ * Perform a multipart deploy call against `path` and walk `EXTRACTS` against
+ * the response JSON.
+ *
+ * - Resolves `@@FILE:<path>` entries in `body.files` via resolveFixture().
+ * - Strips fields whose resolved value equals the corresponding sentinel in
+ *   `strips` (e.g. `{ fieldName: 'tenantId', sentinel: '<default>' }` for
+ *   single-tenant deployments). Strips are derived by the emitter from
+ *   `globalContextSeeds` so no domain-specific knowledge is hard-coded here.
+ * - Throws a descriptive Error on any non-200 response (includes the response
+ *   body for diagnosis).
+ * - Walks `EXTRACTS` against the parsed JSON and assigns each resolved value
+ *   to `ctx[ex.varName]` via `extractInto`. The walker short-circuits to
+ *   `undefined` on a null/missing segment; `extractInto` skips undefined
+ *   values so pre-seeded ctx bindings are preserved.
+ * - Returns the APIResponse so callers can optionally call validateResponse().
+ */
+export async function deploy(
+  ctx: Record<string, unknown>,
+  request: ApiRequestContextLike,
+  body: DeployBody,
+  url: string,
+  strips: DeployStripRule[],
+): Promise<ApiResponseLike> {
+  const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};
+
+  for (const [k, v] of Object.entries(body.fields ?? {})) {
+    if (strips.some((s) => s.fieldName === k && String(v) === s.sentinel)) continue;
+    if (v !== undefined && v !== null) multipart[k] = String(v);
+  }
+
+  for (const [k, v] of Object.entries(body.files ?? {})) {
+    if (typeof v === 'string' && v.startsWith('@@FILE:')) {
+      const p = v.slice('@@FILE:'.length);
+      const buf = await resolveFixture(p);
+      const name = p.split('/').pop() ?? 'file';
+      multipart[k] = { name, mimeType: 'application/octet-stream', buffer: buf };
+    } else {
+      multipart[k] = String(v);
+    }
+  }
+
+  const resp = await request.post(url, {
+    headers: await authHeaders(),
+    multipart,
+  });
+
+  if (resp.status() !== 200) {
+    const text = await resp.text().catch(() => '(unreadable)');
+    throw new Error(`[deploy ${url}] expected HTTP 200, got ${resp.status()}: ${text}`);
+  }
+
+  const json = await resp.json();
+
+  for (const ex of EXTRACTS) {
+    let v: unknown = json;
+    for (const seg of ex.segments) {
+      if (v === null || v === undefined) {
+        v = undefined;
+        break;
+      }
+      if (typeof seg === 'number') {
+        v = Array.isArray(v) ? v[seg] : undefined;
+      } else if (typeof v === 'object') {
+        v = (v as Record<string, unknown>)[seg];
+      } else {
+        v = undefined;
+        break;
+      }
+    }
+    extractInto(ctx, ex.varName, v);
+  }
+
+  return resp;
+}

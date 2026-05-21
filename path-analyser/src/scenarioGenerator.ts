@@ -1,6 +1,15 @@
-import { deterministicSuffix } from './codegen/support/seeding.js';
+import { bindSemanticInput } from './bindSemanticInput.js';
+import { deterministicSuffix } from './deterministicSuffix.js';
+import { buildBpmnModelSpec, buildModelSpec, findModelSpec } from './modelSpecBuilders.js';
+import { getModelKindForSemantic } from './ontology/artifactModelKinds.js';
+import {
+  findDeploymentGatewayOpId,
+  findJobActivatorOpId,
+  isDeploymentGatewayOp,
+} from './ontology/operationRoles.js';
 import type {
   ArtifactRule,
+  DiscoveryIntent,
   EndpointScenario,
   EndpointScenarioCollection,
   ExtendedGenerationOpts,
@@ -8,11 +17,13 @@ import type {
   OperationGraph,
   OperationNode,
   OperationRef,
+  VariantGenerationOpts,
 } from './types.js';
+import { PENDING_BINDING } from './types.js';
 
 // Back-compat generation options
 interface GenerationOpts {
-  maxScenarios: number;
+  maxChainAlternatives: number;
   longChains?: { enabled: boolean; maxPreOps: number };
   // Issue #37: when planning an optional sub-shape variant, the endpoint
   // itself is allowed to appear as a producer in the BFS (i.e. the
@@ -37,8 +48,6 @@ interface State {
   ops: string[]; // operations before endpoint
   cycle: boolean;
   productionMap: Map<string, string>; // semanticType -> opId
-  bootstrapSequencesUsed: string[]; // contributing bootstrap sequences
-  bootstrapFull?: boolean; // this state derives from a single bootstrap that covers all required
   modelsDraft?: GeneratedModelSpec[]; // synthesized models (mutable during BFS)
   bindingsDraft?: Record<string, string>; // variable bindings
   // Issue #104: side index recording which semanticType each
@@ -70,6 +79,14 @@ interface State {
   establisherAliasSemantics?: Record<string, string>;
   providerList?: Record<string, string[]>; // semantic -> all providers
   artifactsApplied?: string[]; // artifact rule ids used so far
+  /**
+   * #309 Phase A — opId → DiscoveryIntent stamped by
+   * `expandRuntimeEmission` on the apply branch. Propagated through
+   * every `queue.push` site so the intent survives to scenario
+   * finalisation, where it is attached to the matching `OperationRef`
+   * for downstream body-builder consumption.
+   */
+  discoveryIntents?: Record<string, DiscoveryIntent>;
 }
 
 /*
@@ -81,7 +98,7 @@ Maintain a state with:
  - cycle flag
 Expand BFS for breadth ordering (naturally tends toward shorter chains first).
 Cycle handling: allow one repeat of any operation already in path (sets cycle flag), then block further repeats of that same op.
-Stop when maxScenarios collected or queue empty.
+Stop when maxChainAlternatives collected or queue empty.
 */
 export function generateScenariosForEndpoint(
   graph: OperationGraph,
@@ -138,7 +155,17 @@ export function generateScenariosForEndpoint(
   for (const st of initialNeeded) {
     const hasProducer = graph.producersByType[st]?.length;
     const hasEstablisher = graph.establishersByType?.[st]?.length;
-    if (!hasProducer && !hasEstablisher) {
+    // #305 Phase 3: `runtimeEmission` semantics have no graph-indexed
+    // producer (their discovery op is declared in the ABox via
+    // `discoveredVia`, not via response provider annotations). They
+    // are satisfied at BFS expansion time by the runtimeEmission
+    // injection branch below — exempt them from the static-missing
+    // gate here so the unsatisfied branch doesn't fire prematurely.
+    const isRuntimeEmission =
+      graph.domain?.semanticTypes?.[st]?.kind === 'runtimeEmission' &&
+      graph.domain.semanticTypes[st].discoveredVia !== undefined &&
+      graph.domain.semanticTypes[st].emittedBy !== undefined;
+    if (!hasProducer && !hasEstablisher && !isRuntimeEmission) {
       if (!endpoint.produces.includes(st)) missing.push(st);
     }
   }
@@ -222,7 +249,7 @@ export function generateScenariosForEndpoint(
       : new Set([...initialNeeded].filter((s) => !externalEntitySites.includes(s)));
 
   const scenarios: EndpointScenario[] = [];
-  const max = opts.maxScenarios;
+  const max = opts.maxChainAlternatives;
 
   if (missing.length > 0) {
     scenarios.push({
@@ -258,7 +285,6 @@ export function generateScenariosForEndpoint(
     ops: [],
     cycle: false,
     productionMap: new Map(),
-    bootstrapSequencesUsed: [],
     providerList: {},
     artifactsApplied: [],
     // Issue #134: pre-seed bindingsDraft with the client-minted IDs
@@ -270,102 +296,29 @@ export function generateScenariosForEndpoint(
   };
 
   const queue: State[] = [initial];
-  const bootstrapScenarios: EndpointScenario[] = [];
 
-  // Seed states from bootstrap sequences (if any) whose produced set contributes to endpoint requirements.
-  if (graph.bootstrapSequences?.length) {
-    for (const seq of graph.bootstrapSequences) {
-      const seqOpsValid = seq.operations.every((opId) => graph.operations[opId]);
-      if (!seqOpsValid) continue;
-      const produced = new Set<string>(externalEntitySites);
-      for (const opId of seq.operations) {
-        graph.operations[opId].produces.forEach((s) => {
-          produced.add(s);
-        });
-      }
-      // Include declared produces on sequence definition (acts as union / override)
-      seq.produces.forEach((s) => {
-        produced.add(s);
-      });
-      // Only enqueue if it helps satisfy at least one needed semantic type (or endpoint has none -> still useful as canonical setup)
-      const helps = [...planningNeeded].some((s) => produced.has(s));
-      if (helps || planningNeeded.size === 0) {
-        const productionMap = new Map<string, string>();
-        for (const opId of seq.operations) {
-          graph.operations[opId].produces.forEach((s) => {
-            if (!productionMap.has(s)) productionMap.set(s, opId);
-          });
-        }
-        // Sequence state before endpoint
-        const bootstrapFull = [...required].every((r) => produced.has(r));
-        queue.push({
-          produced,
-          needed: new Set(planningNeeded),
-          domainStates: new Set(),
-          ops: [...seq.operations],
-          cycle: false,
-          productionMap,
-          bootstrapSequencesUsed: [seq.name],
-          bootstrapFull,
-          // Issue #134: carry the external-mint bindings into
-          // bootstrap-seeded states so scenarios that start from a
-          // bootstrap sequence still emit bound path/body variables
-          // for the external-mintable semantics that
-          // `planningNeeded` already removed from `needed`.
-          bindingsDraft: initial.bindingsDraft ? { ...initial.bindingsDraft } : undefined,
-        });
-        // Emit explicit bootstrap scenario if it alone satisfies all required semantic types
-        if (bootstrapFull) {
-          const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => {
-            producedSemanticTypes.add(s);
-          });
-          const opRefs = [
-            ...seq.operations.map((id) => toRef(graph.operations[id])),
-            toRef(endpoint),
-          ];
-          const evCount = opRefs.filter((o) => o.eventuallyConsistent).length;
-          bootstrapScenarios.push({
-            id: `bootstrap:${seq.name}`,
-            operations: opRefs,
-            producedSemanticTypes: [...producedSemanticTypes],
-            satisfiedSemanticTypes: [...initialNeeded],
-            productionMap: Object.fromEntries(productionMap.entries()),
-            bootstrapSequencesUsed: [seq.name],
-            bootstrapFull: true,
-            hasEventuallyConsistent: evCount > 0 || undefined,
-            eventuallyConsistentCount: evCount || undefined,
-          });
-        } else if (planningNeeded.size === 0) {
-          // For endpoints with no requirements we still include a bootstrap variant for reference
-          const producedSemanticTypes = new Set<string>(produced);
-          endpoint.produces.forEach((s) => {
-            producedSemanticTypes.add(s);
-          });
-          const opRefs = [
-            ...seq.operations.map((id) => toRef(graph.operations[id])),
-            toRef(endpoint),
-          ];
-          const evCount = opRefs.filter((o) => o.eventuallyConsistent).length;
-          bootstrapScenarios.push({
-            id: `bootstrap:${seq.name}`,
-            operations: opRefs,
-            producedSemanticTypes: [...producedSemanticTypes],
-            satisfiedSemanticTypes: [],
-            productionMap: Object.fromEntries(productionMap.entries()),
-            bootstrapSequencesUsed: [seq.name],
-            hasEventuallyConsistent: evCount > 0 || undefined,
-            eventuallyConsistentCount: evCount || undefined,
-          });
-        }
-      }
-    }
-  }
   const seen = new Set<string>(); // simple dedupe by produced+ops signature
   const completed: Map<string, EndpointScenario> = new Map();
 
   const longChainsEnabled = !!opts.longChains?.enabled;
   const maxPreOps = opts.longChains?.maxPreOps ?? 25;
+  // Lift 9 / #225: the deployment-gateway operationId for the active config
+  // (per `artifact-kinds.json#operationRules[].role === "deploymentGateway"`).
+  // `undefined` when the ABox is absent or no rule declares the role —
+  // every special-case below then collapses to "no op is the deployment
+  // gateway". This is a behaviour change relative to the pre-Lift-9 code,
+  // which always special-cased the literal `'createDeployment'` opId. Unit
+  // tests that build minimal graphs and rely on the deployment special-
+  // casing must declare the role on their fixture domain (see
+  // `tests/fixtures/planner/classification-dispatch.test.ts`).
+  const deploymentGatewayOpId = findDeploymentGatewayOpId(graph.domain);
+  // Lift 14 / #254: the job-activator operationId for the active config
+  // (per `artifact-kinds.json#operationRules[].role === "jobActivator"`).
+  // When the role is declared on an op present in the BFS state, the
+  // fallback model-spec draft must include a service task whose `type`
+  // is bound to the activator's request `type` filter so the deployed
+  // BPMN actually surfaces a job for the activation to pick up.
+  const jobActivatorOpId = findJobActivatorOpId(graph.domain);
   while (queue.length && scenarios.length < max) {
     // biome-ignore lint/style/noNonNullAssertion: queue.length is checked in the loop predicate
     const state = queue.shift()!;
@@ -385,6 +338,30 @@ export function generateScenariosForEndpoint(
         ...state.ops.map((id) => toRef(graph.operations[id])),
         toRef(endpoint),
       ];
+      // #309 Phase A — resolve `fromBinding` from the chain's final
+      // bindings (mirroring `semanticToVarName`'s suffixing convention),
+      // and attach the resolved intent to the matching OperationRef so
+      // downstream materialisation can recognise the intentional-
+      // discovery shape. When multiple producers of the same semantic
+      // are bound in the chain, this picks the latest (`Var2`, `Var3`,
+      // …) rather than the un-suffixed base — matching the var name
+      // the producer auto-derive at `path-analyser/src/index.ts` will
+      // actually allocate for that producer. When the producer is
+      // enqueued via a defer path (which doesn't run the identifier-
+      // heuristic, so bindingsDraft has no entry yet), fall back to
+      // the un-suffixed base — the producer auto-derive will allocate
+      // exactly that name at code-emission time.
+      if (state.discoveryIntents) {
+        const finalBindings = state.bindingsDraft ?? {};
+        for (const ref of opRefs) {
+          const intent = state.discoveryIntents[ref.operationId];
+          if (!intent) continue;
+          const resolved =
+            findLatestBindingForSemantic(intent.fromSemantic, finalBindings) ??
+            `${camelLower(intent.fromSemantic)}Var`;
+          ref.discoveryIntent = { ...intent, fromBinding: resolved };
+        }
+      }
       const producedSemanticTypes = new Set<string>([...state.produced]);
       endpoint.produces.forEach((s) => {
         producedSemanticTypes.add(s);
@@ -395,20 +372,18 @@ export function generateScenariosForEndpoint(
         let models = state.modelsDraft;
         let bindings = state.bindingsDraft;
         // Fallback simple heuristic if drafts absent
-        if (!models && state.ops.includes('createDeployment')) {
+        if (!models && deploymentGatewayOpId && state.ops.includes(deploymentGatewayOpId)) {
           // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
           bindings = { processDefinitionIdVar1: 'proc_${RANDOM}' };
-          if (state.ops.includes('activateJobs'))
+          const includesJobActivator = !!(jobActivatorOpId && state.ops.includes(jobActivatorOpId));
+          if (includesJobActivator)
             // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
             bindings.jobTypeVar1 = 'jobType_${RANDOM}';
           models = [
-            {
-              kind: 'bpmn',
-              processDefinitionIdVar: 'processDefinitionIdVar1',
-              serviceTasks: state.ops.includes('activateJobs')
-                ? [{ id: 'task1', typeVar: 'jobTypeVar1' }]
-                : undefined,
-            },
+            buildBpmnModelSpec(
+              'processDefinitionIdVar1',
+              includesJobActivator ? [{ id: 'task1', typeVar: 'jobTypeVar1' }] : undefined,
+            ),
           ];
         }
         const scenario: EndpointScenario = {
@@ -434,10 +409,6 @@ export function generateScenariosForEndpoint(
           providerList: Object.keys(state.providerList || {}).length
             ? state.providerList
             : undefined,
-          bootstrapSequencesUsed: state.bootstrapSequencesUsed.length
-            ? [...state.bootstrapSequencesUsed]
-            : undefined,
-          bootstrapFull: state.bootstrapFull || undefined,
           hasEventuallyConsistent: eventuallyConsistentOps > 0 || undefined,
           eventuallyConsistentCount: eventuallyConsistentOps || undefined,
           domainStatesRequired: domainRequiredStates.length ? domainRequiredStates : undefined,
@@ -566,10 +537,9 @@ export function generateScenariosForEndpoint(
           ops: newOps,
           cycle: nextCycle,
           productionMap: newProductionMap,
-          bootstrapSequencesUsed: state.bootstrapSequencesUsed,
-          bootstrapFull: state.bootstrapFull,
           modelsDraft: state.modelsDraft,
           bindingsDraft: state.bindingsDraft,
+          discoveryIntents: state.discoveryIntents,
         });
       }
       continue;
@@ -577,6 +547,43 @@ export function generateScenariosForEndpoint(
 
     // Choose a semantic type to target next
     const targetSemantic = remaining[0];
+
+    // #305 Phase 3 — `runtimeEmission` semantics declare a discovery
+    // operation (ABox `discoveredVia.operationId`) that surfaces the
+    // key at runtime, gated by a predecessor runtime state + optional
+    // capability guards (`emittedBy.predecessor`, `emittedBy.guardedBy`).
+    // They're deliberately NOT in `producersByType[target]` — the
+    // authoritative-producer index only carries statically-annotated
+    // providers. Synthesise the producer chain here; if the helper
+    // dispatches a state into the queue (apply branch or defer branch),
+    // skip the regular producer loop for this iteration. Otherwise
+    // fall through and the BFS will drain the queue → `unsatisfied`.
+    const targetDecl = targetSemantic ? graph.domain?.semanticTypes?.[targetSemantic] : undefined;
+    if (
+      targetSemantic &&
+      targetDecl?.kind === 'runtimeEmission' &&
+      targetDecl.discoveredVia &&
+      targetDecl.emittedBy
+    ) {
+      const expanded = expandRuntimeEmission(
+        graph,
+        targetSemantic,
+        targetDecl,
+        state,
+        seen,
+        queue,
+        endpointOpId,
+      );
+      if (expanded) continue;
+      // Fall through to the regular producer loop when the discovery
+      // chain could not be applied (missing/self-referential discovery
+      // op, discovery op's required inputs not yet satisfied, cycle, or
+      // already-seen successor signature). Without the fall-through the
+      // BFS would `continue` here, drain the queue without enqueuing
+      // anything for `targetSemantic`, and return `unsatisfied` — which
+      // hides a legitimate producer path. (PR #308 review.)
+    }
+
     // Shallow-copy the producer list before any local augmentation —
     // `graph.producersByType[targetSemantic]` is the shared
     // authoritative-producer index and must remain immutable across
@@ -700,7 +707,7 @@ export function generateScenariosForEndpoint(
       // heuristic below writes to it for every producer.
       const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
       let workingState: State;
-      if (producerOpId === 'createDeployment') {
+      if (isDeploymentGatewayOp(graph.domain, producerOpId)) {
         const workingArtifactsApplied = state.artifactsApplied
           ? [...state.artifactsApplied]
           : undefined;
@@ -781,19 +788,25 @@ export function generateScenariosForEndpoint(
       // child without leaking into sibling candidates.
       let modelsDraft = workingState.modelsDraft;
       const bindingsDraft = workingState.bindingsDraft ?? {};
-      if (producerOpId === 'createDeployment' && !modelsDraft) {
+      if (isDeploymentGatewayOp(graph.domain, producerOpId) && !modelsDraft) {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
         bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
-        modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
+        modelsDraft = [buildBpmnModelSpec('processDefinitionIdVar1')];
       }
-      // Identifier heuristic: assign vars for newly added semantics ending with 'Key'
+      // Identifier heuristic: assign vars for newly added semantics ending with 'Key'.
+      // Only applies to semantics that have no authoritative producer — producerBound
+      // semantics (those with a producer in graph.producersByType) receive __PENDING__
+      // because their value is server-established at runtime via the response.
       const newlyAddedSemantics = [...newProduced].filter((s) => !state.produced.has(s));
       for (const s of newlyAddedSemantics) {
         if (/Key$/.test(s)) {
           const varName = semanticToVarName(s, bindingsDraft);
-          if (!bindingsDraft[varName])
-            bindingsDraft[varName] =
-              `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
+          if (!bindingsDraft[varName]) {
+            const isProducerBound = (graph.producersByType[s]?.length ?? 0) > 0;
+            bindingsDraft[varName] = isProducerBound
+              ? PENDING_BINDING
+              : `${camelLower(s)}_${deterministicSuffix(`sg:key:${s}:${varName}`)}`;
+          }
         }
       }
       // Issue #104: when the producer is an establisher, mint a fresh
@@ -963,8 +976,6 @@ export function generateScenariosForEndpoint(
         ops: newOps,
         cycle: nextCycle,
         productionMap: newProductionMap,
-        bootstrapSequencesUsed: state.bootstrapSequencesUsed,
-        bootstrapFull: state.bootstrapFull,
         modelsDraft,
         bindingsDraft,
         establisherBindingSemantics,
@@ -976,19 +987,12 @@ export function generateScenariosForEndpoint(
           newProduced,
         ),
         artifactsApplied: workingState.artifactsApplied,
+        discoveryIntents: state.discoveryIntents,
       });
     }
   }
 
-  scenarios.push(...bootstrapScenarios.filter((bs) => !scenarios.find((s) => s.id === bs.id)));
-  // Sort: full bootstrap first, then any bootstrap-used, then by length.
   scenarios.sort((a, b) => {
-    const aFull = a.bootstrapFull ? 1 : 0;
-    const bFull = b.bootstrapFull ? 1 : 0;
-    if (aFull !== bFull) return bFull - aFull; // full first
-    const aBoot = a.bootstrapSequencesUsed ? 1 : 0;
-    const bBoot = b.bootstrapSequencesUsed ? 1 : 0;
-    if (aBoot !== bBoot) return bBoot - aBoot; // any bootstrap before none
     return a.operations.length - b.operations.length;
   });
 
@@ -1198,7 +1202,7 @@ function deferForMissingDomainPrereqs(
     // clone the draft collections only on that path so non-deployment
     // candidates avoid the extra allocations on every BFS iteration.
     let workingState: State;
-    if (candidateOpId === 'createDeployment') {
+    if (isDeploymentGatewayOp(graph.domain, candidateOpId)) {
       const workingArtifactsApplied = state.artifactsApplied
         ? [...state.artifactsApplied]
         : undefined;
@@ -1287,10 +1291,10 @@ function deferForMissingDomainPrereqs(
     // models/bindings/artifactsApplied for the enqueued child state.
     let modelsDraft = workingState.modelsDraft;
     const bindingsDraft = workingState.bindingsDraft ?? {};
-    if (candidateOpId === 'createDeployment' && !modelsDraft) {
+    if (isDeploymentGatewayOp(graph.domain, candidateOpId) && !modelsDraft) {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
       bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
-      modelsDraft = [{ kind: 'bpmn', processDefinitionIdVar: 'processDefinitionIdVar1' }];
+      modelsDraft = [buildBpmnModelSpec('processDefinitionIdVar1')];
     }
     const sig = signature(newOps, newProduced, newNeeded, nextCycle);
     if (seen.has(sig)) continue;
@@ -1302,8 +1306,6 @@ function deferForMissingDomainPrereqs(
       ops: newOps,
       cycle: nextCycle,
       productionMap: newProductionMap,
-      bootstrapSequencesUsed: state.bootstrapSequencesUsed,
-      bootstrapFull: state.bootstrapFull,
       modelsDraft,
       bindingsDraft,
       // Propagate scenario-metadata bookkeeping from `state` and update
@@ -1319,13 +1321,296 @@ function deferForMissingDomainPrereqs(
         newProduced,
       ),
       artifactsApplied: workingState.artifactsApplied,
+      discoveryIntents: state.discoveryIntents,
     });
     enqueued = true;
   }
   return enqueued;
 }
 
-// Select minimal artifact rules for createDeployment based on unmet semantic needs.
+/**
+ * #305 Phase 3 — expand a `runtimeEmission` semantic type into a
+ * discover-and-bind sub-chain.
+ *
+ * `runtimeEmission` semantic types declare a discovery operation
+ * (ABox `discoveredVia.operationId`) that surfaces the key at runtime,
+ * gated by `emittedBy.predecessor` (a runtime state) and optional
+ * `emittedBy.guardedBy` capabilities. The discovery op is NOT in
+ * `producersByType[target]` — the authoritative-producer index only
+ * carries statically-annotated providers — so the producer loop would
+ * otherwise dead-end on this semantic.
+ *
+ * Two branches:
+ *
+ *   - **Defer**: if any required domain state is missing, enqueue
+ *     producers for the missing state(s) (mirrors the body of
+ *     `deferForMissingDomainPrereqs`, sans the
+ *     `providerMap[target]===true` precondition that doesn't apply to
+ *     synthesised producers). The runtimeEmission semantic stays in
+ *     `state.needed`; a later BFS iteration retries once the gates
+ *     surface.
+ *
+ *   - **Apply**: gates satisfied — append the discovery op, add the
+ *     runtimeEmission semantic to `produced`, and mint a `PENDING_BINDING`
+ *     under its canonical var name (the server-extracted value is
+ *     threaded through by the request builder / emitter).
+ *
+ * Returns true when a child state was enqueued (caller skips the
+ * regular producer loop).
+ */
+function expandRuntimeEmission(
+  graph: OperationGraph,
+  targetSemantic: string,
+  decl: NonNullable<NonNullable<OperationGraph['domain']>['semanticTypes']>[string],
+  state: State,
+  seen: Set<string>,
+  queue: State[],
+  endpointOpId: string,
+): boolean {
+  if (!decl.discoveredVia || !decl.emittedBy) return false;
+  const discoveryOpId = decl.discoveredVia.operationId;
+  if (discoveryOpId === endpointOpId) return false;
+  const discoveryNode = graph.operations[discoveryOpId];
+  if (!discoveryNode) return false;
+
+  const requiredDomain = [decl.emittedBy.predecessor, ...(decl.emittedBy.guardedBy ?? [])];
+  const directMissing = requiredDomain.filter((d) => !state.domainStates.has(d));
+
+  // ── Defer branch ──────────────────────────────────────────────────────
+  if (directMissing.length) {
+    const missingAll = gatherDomainPrerequisites(graph, directMissing, state.domainStates);
+    const candidates = new Set<string>();
+    for (const ds of missingAll) {
+      for (const opId of graph.producersByState?.[ds] ?? []) candidates.add(opId);
+    }
+    let enqueued = false;
+    for (const candidateOpId of candidates) {
+      if (candidateOpId === endpointOpId) continue;
+      const candidateNode = graph.operations[candidateOpId];
+      if (!candidateNode) continue;
+      const indexInPath = state.ops.indexOf(candidateOpId);
+      let nextCycle = state.cycle;
+      if (indexInPath !== -1) {
+        if (state.cycle) continue;
+        nextCycle = true;
+      }
+      if (candidateNode.domainRequiresAll?.length) {
+        const m = candidateNode.domainRequiresAll.filter((d) => !state.domainStates.has(d));
+        if (m.length) continue;
+      }
+      if (!hasSatisfiedRequiredInputs(candidateNode, state.produced)) continue;
+
+      const newProduced = new Set(state.produced);
+      const newDomainStates = new Set(state.domainStates);
+      let workingState: State;
+      if (isDeploymentGatewayOp(graph.domain, candidateOpId)) {
+        const workingArtifactsApplied = state.artifactsApplied
+          ? [...state.artifactsApplied]
+          : undefined;
+        const workingBindingsDraft = { ...(state.bindingsDraft || {}) };
+        const workingModelsDraft = state.modelsDraft ? [...state.modelsDraft] : undefined;
+        workingState = {
+          ...state,
+          artifactsApplied: workingArtifactsApplied,
+          bindingsDraft: workingBindingsDraft,
+          modelsDraft: workingModelsDraft,
+        };
+        applyArtifactRuleSelection(
+          graph,
+          candidateNode,
+          workingState,
+          newProduced,
+          newDomainStates,
+        );
+      } else {
+        workingState = state;
+        candidateNode.produces.forEach((s) => {
+          newProduced.add(s);
+        });
+        candidateNode.domainProduces?.forEach((d) => {
+          newDomainStates.add(d);
+        });
+        candidateNode.domainImplicitAdds?.forEach((d) => {
+          newDomainStates.add(d);
+        });
+      }
+
+      const domainAddedNow = [...newDomainStates].filter((d) => !state.domainStates.has(d));
+      if (domainAddedNow.length === 0) continue;
+
+      let prereqFailed = false;
+      for (const d of domainAddedNow) {
+        const rs = graph.domain?.runtimeStates?.[d];
+        if (rs?.requires) {
+          for (const req of rs.requires) {
+            if (!newDomainStates.has(req)) {
+              prereqFailed = true;
+              break;
+            }
+          }
+          if (prereqFailed) break;
+        }
+        const cap = graph.domain?.capabilities?.[d];
+        if (cap?.dependsOn) {
+          for (const dep of cap.dependsOn) {
+            if (!newDomainStates.has(dep)) {
+              prereqFailed = true;
+              break;
+            }
+          }
+          if (prereqFailed) break;
+        }
+      }
+      if (prereqFailed) continue;
+
+      const newNeeded = new Set(state.needed);
+      candidateNode.requires.required.forEach((s) => {
+        newNeeded.add(s);
+      });
+      const newOps = [...state.ops, candidateOpId];
+      const newProductionMap = new Map(state.productionMap);
+      candidateNode.produces.forEach((s) => {
+        if (newProduced.has(s) && !newProductionMap.has(s)) {
+          newProductionMap.set(s, candidateOpId);
+        }
+      });
+      let modelsDraft = workingState.modelsDraft;
+      const bindingsDraft = workingState.bindingsDraft ?? {};
+      if (isDeploymentGatewayOp(graph.domain, candidateOpId) && !modelsDraft) {
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder consumed by the test runtime
+        bindingsDraft.processDefinitionIdVar1 = 'proc_${RANDOM}';
+        modelsDraft = [buildBpmnModelSpec('processDefinitionIdVar1')];
+      }
+      const sig = signature(newOps, newProduced, newNeeded, nextCycle);
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      queue.push({
+        produced: newProduced,
+        needed: newNeeded,
+        domainStates: newDomainStates,
+        ops: newOps,
+        cycle: nextCycle,
+        productionMap: newProductionMap,
+        modelsDraft,
+        bindingsDraft,
+        providerList: updateProviderList(
+          state.providerList || {},
+          candidateNode,
+          newProductionMap,
+          newProduced,
+        ),
+        artifactsApplied: workingState.artifactsApplied,
+        discoveryIntents: state.discoveryIntents,
+      });
+      enqueued = true;
+    }
+    return enqueued;
+  }
+
+  // ── Apply branch ──────────────────────────────────────────────────────
+  const indexInPath = state.ops.indexOf(discoveryOpId);
+  let nextCycle = state.cycle;
+  if (indexInPath !== -1) {
+    if (state.cycle) return false;
+    nextCycle = true;
+  }
+  // The discovery op's own required semantic inputs (e.g. a search
+  // filter that's actually `required` in the spec) must be available;
+  // otherwise we'd build a chain whose discovery step has a missing
+  // input. Optional filter-by inputs are not enforced here — the
+  // request builder writes a placeholder if absent, and BFS would
+  // otherwise spuriously plan a producer for an opportunistic filter.
+  if (!hasSatisfiedRequiredInputs(discoveryNode, state.produced)) return false;
+
+  const newProduced = new Set(state.produced);
+  discoveryNode.produces.forEach((s) => {
+    newProduced.add(s);
+  });
+  newProduced.add(targetSemantic);
+  const newDomainStates = new Set(state.domainStates);
+  discoveryNode.domainProduces?.forEach((d) => {
+    newDomainStates.add(d);
+  });
+  discoveryNode.domainImplicitAdds?.forEach((d) => {
+    newDomainStates.add(d);
+  });
+  const newNeeded = new Set(state.needed);
+  discoveryNode.requires.required.forEach((s) => {
+    newNeeded.add(s);
+  });
+  const newOps = [...state.ops, discoveryOpId];
+  const newProductionMap = new Map(state.productionMap);
+  if (!newProductionMap.has(targetSemantic)) {
+    newProductionMap.set(targetSemantic, discoveryOpId);
+  }
+  discoveryNode.produces.forEach((s) => {
+    if (newProduced.has(s) && !newProductionMap.has(s)) {
+      newProductionMap.set(s, discoveryOpId);
+    }
+  });
+  const bindingsDraft = { ...(state.bindingsDraft || {}) };
+  const varName = semanticToVarName(targetSemantic, bindingsDraft);
+  if (!bindingsDraft[varName]) bindingsDraft[varName] = PENDING_BINDING;
+
+  // #309 Phase A — stamp DiscoveryIntent so the body builder emits
+  // `{ filter: { [filterBy]: '${fromBinding}' } }` for this inserted
+  // discovery step instead of the generic top-level scalar shape.
+  // Stamping is *eager* here (without resolving `fromBinding`) because
+  // the upstream producer may not have populated bindingsDraft yet at
+  // this BFS frontier. `fromBinding` is resolved later, at scenario
+  // finalisation, using `findLatestBindingForSemantic` against the
+  // final chain's bindings — that mirrors `semanticToVarName`'s
+  // suffixing convention (`Var`, `Var2`, …) so chains with multiple
+  // producers of the same semantic bind to the latest producer rather
+  // than the first.
+  let newDiscoveryIntents = state.discoveryIntents;
+  if (decl.discoveredVia.filterBy) {
+    const filterBy = decl.discoveredVia.filterBy;
+    const filterPaths = [`filter.${filterBy}`, filterBy];
+    const filterEntry = (discoveryNode.requestBodySemantics ?? []).find((rb) =>
+      filterPaths.includes(rb.fieldPath),
+    );
+    if (filterEntry) {
+      const intent: DiscoveryIntent = {
+        filterBy,
+        fromSemantic: filterEntry.semantic,
+        fromBinding: '', // resolved at finalisation (see attachDiscoveryIntents)
+        extractKey: decl.discoveredVia.extractKey,
+        extractInto: varName,
+        consistency: decl.discoveredVia.consistency ?? 'strong',
+      };
+      newDiscoveryIntents = { ...(state.discoveryIntents ?? {}), [discoveryOpId]: intent };
+    }
+  }
+
+  const sig = signature(newOps, newProduced, newNeeded, nextCycle);
+  if (seen.has(sig)) return false;
+  seen.add(sig);
+  queue.push({
+    produced: newProduced,
+    needed: newNeeded,
+    domainStates: newDomainStates,
+    ops: newOps,
+    cycle: nextCycle,
+    productionMap: newProductionMap,
+    modelsDraft: state.modelsDraft,
+    bindingsDraft,
+    providerList: updateProviderList(
+      state.providerList || {},
+      discoveryNode,
+      newProductionMap,
+      newProduced,
+    ),
+    artifactsApplied: state.artifactsApplied,
+    discoveryIntents: newDiscoveryIntents,
+  });
+  return true;
+}
+
+// Select minimal artifact rules for the deployment-gateway producer based
+// on unmet semantic needs. Callers gate on `isDeploymentGatewayOp` so the
+// producerNode passed here is always the deployment-gateway op for the
+// active config (Lift 9 / #225).
 function applyArtifactRuleSelection(
   graph: OperationGraph,
   producerNode: OperationNode,
@@ -1340,7 +1625,7 @@ function applyArtifactRuleSelection(
     });
     return;
   }
-  const ruleSpec = domain.operationArtifactRules.createDeployment;
+  const ruleSpec = domain.operationArtifactRules[producerNode.operationId];
   if (!ruleSpec) {
     producerNode.produces.forEach((s: string) => {
       newProduced.add(s);
@@ -1553,7 +1838,7 @@ function coverageCount(rule: ArtifactRule, remaining: Set<string>, graph: Operat
 
 function ensureArtifactBindings(
   _rule: ArtifactRule,
-  _graph: OperationGraph,
+  graph: OperationGraph,
   state: State,
   semantics: string[],
   _states: string[],
@@ -1563,18 +1848,26 @@ function ensureArtifactBindings(
   // Semantic-driven bindings naming
   for (const s of semantics) {
     const varName = semanticToVarName(s, state.bindingsDraft);
-    if (!state.bindingsDraft[varName])
-      state.bindingsDraft[varName] =
-        `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
-    // If BPMN process definition -> ensure BPMN model spec exists
-    if (s === 'ProcessDefinitionKey' && !state.modelsDraft.find((m) => m.kind === 'bpmn')) {
-      state.modelsDraft.push({ kind: 'bpmn', processDefinitionIdVar: varName });
+    if (!state.bindingsDraft[varName]) {
+      // producerBound semantics (those with an authoritative producer) get
+      // __PENDING__ — their value is server-established at runtime via the
+      // producer's response. All other artifact semantics (model-derived,
+      // client-minted) get a deterministic literal for pre-seeding.
+      const isProducerBound = (graph.producersByType[s]?.length ?? 0) > 0;
+      state.bindingsDraft[varName] = isProducerBound
+        ? PENDING_BINDING
+        : `${camelLower(s)}_${deterministicSuffix(`sg:sem:${s}:${varName}`)}`;
     }
-    if (
-      s === 'FormKey' &&
-      !state.modelsDraft.find((m) => m.kind === 'form' && m.formKeyVar === varName)
-    ) {
-      state.modelsDraft.push({ kind: 'form', formKeyVar: varName });
+    // Resolve the GeneratedModelSpec variant for this semantic via the ABox
+    // (Lift 10 / #227): semantic → artifactKind → modelKind. Lift 13 / #253:
+    // the per-kind arms collapsed into a single generic builder, so any
+    // ABox-declared `modelKind` value (not just `bpmn` / `form`) produces a
+    // model-spec entry. Per-kind primary-binding-role names live in
+    // `modelSpecBuilders.ts`; new kinds register there without editing this
+    // call site.
+    const modelKind = getModelKindForSemantic(graph.domain, s);
+    if (modelKind && !findModelSpec(state.modelsDraft, modelKind, varName)) {
+      state.modelsDraft.push(buildModelSpec(modelKind, varName));
     }
   }
 }
@@ -1585,6 +1878,26 @@ function semanticToVarName(semantic: string, existing: Record<string, string>): 
   let i = 2;
   while (existing[base + i]) i++;
   return base + i;
+}
+
+// Mirror of `semanticToVarName` for the *consumer* side: given a semantic
+// for which a binding has already been allocated upstream in the chain,
+// return the latest-allocated var name (`Var`, `Var2`, `Var3`, …) so the
+// discovery step's filter binds to the most recent producer rather than
+// the first. Returns undefined if no binding exists for the semantic.
+function findLatestBindingForSemantic(
+  semantic: string,
+  bindings: Record<string, string>,
+): string | undefined {
+  const base = `${camelLower(semantic)}Var`;
+  if (!(base in bindings)) return undefined;
+  let latest = base;
+  let i = 2;
+  while (base + i in bindings) {
+    latest = base + i;
+    i++;
+  }
+  return latest;
 }
 
 function camelLower(s: string): string {
@@ -1599,7 +1912,6 @@ function buildIntegrationScenarioName(
   _totalRequired: number,
 ): string {
   const parts: string[] = [];
-  if (state.bootstrapFull) parts.push('bootstrap');
   if (state.cycle) parts.push('cycle');
   if (state.artifactsApplied?.length) parts.push(state.artifactsApplied.join('+'));
   const tag = parts.length ? parts.join('/') : 'path';
@@ -1622,10 +1934,6 @@ function buildIntegrationScenarioDescription(
     segs.push(
       `${preOpCount} prerequisite operation(s) executed to satisfy ${totalRequired} required semantic type(s).`,
     );
-  if (state.bootstrapFull)
-    segs.push('Uses bootstrap sequence providing full coverage of required semantics.');
-  else if (state.bootstrapSequencesUsed?.length)
-    segs.push(`Bootstrap assistance: ${state.bootstrapSequencesUsed.join(', ')}.`);
   if (state.cycle) segs.push('Includes one allowed cycle repetition for semantic closure.');
   if (state.artifactsApplied?.length)
     segs.push(`Artifact bundle applied: ${state.artifactsApplied.join(', ')}.`);
@@ -1692,7 +2000,7 @@ function gatherDomainPrerequisites(
 export function generateOptionalSubShapeVariants(
   graph: OperationGraph,
   endpointOpId: string,
-  opts: GenerationOpts,
+  opts: VariantGenerationOpts,
 ): EndpointScenarioCollection {
   const endpoint = graph.operations[endpointOpId];
   if (!endpoint) {
@@ -1707,122 +2015,118 @@ export function generateOptionalSubShapeVariants(
   const subShapes = endpoint.optionalSubShapes ?? [];
   const collectionScenarios: EndpointScenario[] = [];
   const seenVariantKeys = new Set<string>();
-  // Cap total variants emitted per endpoint at `opts.maxScenarios`. The
-  // inner `generateScenariosForEndpoint` call below intentionally pins
-  // its own `maxScenarios: 1` (one chain per variant), so the outer
-  // cap is what bounds variant count for endpoints with many
+  // Cap total variants emitted per endpoint at `opts.maxVariantsPerEndpoint`.
+  // The inner `generateScenariosForEndpoint` calls below intentionally pin
+  // their own `maxChainAlternatives: 1` (one chain per variant), so this
+  // outer cap is what bounds variant count for endpoints with many
   // semantic-typed optional leaves. Without this cap, a future spec
   // change could blow up `dist/variant-output/` with one file per
   // (subShape × leaf) pair.
-  const maxVariants = Math.max(0, opts.maxScenarios | 0);
+  const maxVariants = Math.max(0, opts.maxVariantsPerEndpoint | 0);
 
   outer: for (const subShape of subShapes) {
     for (const leaf of subShape.leaves) {
       if (collectionScenarios.length >= maxVariants) break outer;
-      // Resolve producer candidates: prefer authoritative (provider:true)
-      // producers from `producersByType`, but fall back to the
-      // inclusive index that includes provider:false response leaves
-      // (e.g. searchElementInstances → ElementId via items[].elementId).
+
+      // Skip duplicates BEFORE any planning work: `requestBodySemanticTypes`
+      // can repeat the exact same (rootPath, fieldPath, semantic) triple
+      // for true duplicates, and the producer-chain BFS below is the most
+      // expensive step in this function — never run it for a key we've
+      // already emitted. The dedup key includes `leaf.semantic`, so
+      // polymorphic semantic-type annotations on the SAME field (e.g.
+      // `evaluateExpression.scopeKey` annotated as `ScopeKey`,
+      // `ProcessInstanceKey`, and `ElementInstanceKey`) are intentionally
+      // kept as separate variants — one per semantic binding — rather than
+      // collapsing into the first semantic seen (#324).
+      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}::${leaf.semantic}`;
+      if (seenVariantKeys.has(variantKey)) continue;
+
+      // Resolve producer candidates. When authoritative (provider:true)
+      // producers exist, use them exclusively — `tryProducerChainVariant`'s
+      // Pass 1 overlap heuristic would otherwise select an incidental
+      // responder (e.g. searchAgentInstances, which exposes
+      // ProcessDefinitionKey in its response but doesn't own it) over the
+      // true authoritative producer (createDeployment). Restricting to
+      // authoritative-only when available ensures the canonical source is
+      // always tried. When authoritative is empty, fall back to the
+      // inclusive index (provider:false response leaves, e.g.
+      // searchElementInstances → ElementId).
       const authoritative = graph.producersByType[leaf.semantic] ?? [];
       const inclusive = graph.responseProducersByType?.[leaf.semantic] ?? [];
-      // Prefer inclusive (search-style) producers first: search/list ops
-      // typically take optional filters that overlap endpoint outputs,
-      // making them the natural "look up the entity we just created" step
-      // in a variant chain. Authoritative producers (provider:true) are
-      // tried only as fallback. Note many ops appear in both lists; unique
-      // preserves first occurrence, so inclusive order wins.
-      const producerCandidates = unique([...inclusive, ...authoritative]).filter(
-        (id) => id !== endpointOpId,
-      );
-      if (!producerCandidates.length) continue;
-      // Try each candidate producer; pick the first that yields a valid
-      // variant. Two passes:
-      //   1. Prefer producers whose required + opportunistic-optional inputs
-      //      overlap the endpoint's outputs. This forces a warm-up call to
-      //      the endpoint (e.g. createProcessInstance → searchElementInstances
-      //      → createProcessInstance) — the canonical "look up the entity
-      //      we just created" chain.
-      //   2. Fall back to non-overlap producers (independent producers that
-      //      need nothing from the endpoint). The variant chain is then a
-      //      simple `producer → endpoint` shape with no warm-up.
-      // Without the fallback, optional sub-shapes whose leaf semantics are
-      // produced by independent ops (e.g. a standalone `mintFoo` for an
-      // optional `foo` field) would receive zero variant coverage.
-      const buildAdditional = (candidate: OperationNode): Set<string> => {
-        const additional = new Set<string>();
-        for (const opt of candidate.requires.optional) {
-          if (endpoint.produces.includes(opt)) additional.add(opt);
+      const producerCandidates = unique(
+        authoritative.length > 0 ? authoritative : inclusive,
+      ).filter((id) => id !== endpointOpId);
+
+      // #162 PR 4 (suite-partition cut): Try to build a producer-chain
+      // variant first (the canonical "warm-up + search + final" pattern
+      // for nested object leaves like `startInstructions[].elementId`).
+      // If that fails — either because no producer exists at all
+      // (clientMintedAttribute leaves like Tag/BusinessId) or because
+      // BFS could not satisfy the augmented chain (some flat top-level
+      // optionals on isolated message/signal endpoints) — fall back to
+      // a bare endpoint scenario plus the populatesSubShape annotation
+      // so the materializer still fills the body and the variant suite
+      // covers the leaf.
+      const producerChain = producerCandidates.length
+        ? tryProducerChainVariant({
+            graph,
+            endpoint,
+            endpointOpId,
+            opts,
+            leaf,
+            producerCandidates,
+          })
+        : undefined;
+
+      let scenario: EndpointScenario | undefined;
+      if (producerChain) {
+        scenario = producerChain;
+      } else {
+        // Bare-endpoint fallback: generate the basic chain and bind the
+        // leaf semantic via the unified `bindSemanticInput` chokepoint.
+        // For producerBound leaves where the chain failed, mint a
+        // synthetic placeholder so the body still has a non-empty value
+        // — matches the pre-PR-4 featureCoverageGenerator synthetic
+        // (`<sem>_<suffix>`).
+        const planned = generateScenariosForEndpoint(graph, endpointOpId, {
+          ...opts,
+          // #292: NOT a budget — this is a load-bearing strategy
+          // constant. The variant emitter's contract is "one producer
+          // chain per variant leaf"; raising it would emit multiple
+          // chains for the same variant, which is the wrong shape.
+          // Deliberately not surfaced via per-config planner caps.
+          maxChainAlternatives: 1,
+        });
+        const baseScenario = planned.scenarios[0];
+        if (!baseScenario || planned.unsatisfied) continue;
+        const bound = bindSemanticInput({
+          semantic: leaf.semantic,
+          operationId: endpointOpId,
+          graph,
+        });
+        const value = resolveFallbackValue(bound, leaf.semantic, endpointOpId);
+        if (value === undefined) continue;
+        // Prefer the canonical `bound.varName` (the same
+        // `<camelCase(sem)>Var` convention every other binder uses) so
+        // bindings stay consistent across planner paths. For
+        // `unclassified` semantics (no entry in domain-semantics; no
+        // varName on the bound result) derive the same name shape
+        // locally so synthesised L2-fixture semantics like `ProductId`
+        // still bind correctly.
+        const varName =
+          bound.classification === 'unclassified'
+            ? `${camelLower(leaf.semantic)}Var`
+            : bound.varName;
+        baseScenario.bindings ||= {};
+        // Only set the slot when empty so we never overwrite a binding
+        // the basic-chain planner produced earlier in this pass.
+        if (baseScenario.bindings[varName] === undefined) {
+          baseScenario.bindings[varName] = value;
         }
-        for (const req of candidate.requires.required) additional.add(req);
-        additional.add(leaf.semantic);
-        return additional;
-      };
-      let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
-      // Pass 1: overlap-based (warm-up forced).
-      for (const candidateOpId of producerCandidates) {
-        const candidate = graph.operations[candidateOpId];
-        if (!candidate) continue;
-        const additional = buildAdditional(candidate);
-        const overlapsEndpoint = [...additional].some((s) => endpoint.produces.includes(s));
-        if (!overlapsEndpoint) continue;
-        chosenProducer = { node: candidate, additional };
-        break;
+        scenario = baseScenario;
       }
-      // Pass 2: non-overlap fallback (no warm-up).
-      if (!chosenProducer) {
-        for (const candidateOpId of producerCandidates) {
-          const candidate = graph.operations[candidateOpId];
-          if (!candidate) continue;
-          chosenProducer = { node: candidate, additional: buildAdditional(candidate) };
-          break;
-        }
-      }
-      if (!chosenProducer) continue;
-      const { additional } = chosenProducer;
 
-      // Build a per-variant graph view: pin the chosen producer as the
-      // SOLE producer of the leaf semantic AND mark it as authoritative
-      // (`providerMap[leaf.semantic] = true`, semantic added to `produces`).
-      // Without that, BFS would insert the chosen producer but its
-      // `produces` list (built from `provider:true` annotations only)
-      // wouldn't include the leaf semantic — leaving ElementId unsatisfied
-      // in `remaining` and looping forever. The endpoint itself is NOT
-      // mutated — augmented needs are passed via `additionalNeeded` so
-      // they don't bleed into the endpoint's prereq set when it appears
-      // as a warm-up step.
-      const chosenId = chosenProducer.node.operationId;
-      const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
-      variantProducersByType[leaf.semantic] = [chosenId];
-      const variantOperations: Record<string, OperationNode> = { ...graph.operations };
-      variantOperations[chosenId] = {
-        ...chosenProducer.node,
-        produces: chosenProducer.node.produces.includes(leaf.semantic)
-          ? chosenProducer.node.produces
-          : [...chosenProducer.node.produces, leaf.semantic],
-        providerMap: {
-          ...(chosenProducer.node.providerMap ?? {}),
-          [leaf.semantic]: true,
-        },
-      };
-      const variantGraph: OperationGraph = {
-        ...graph,
-        operations: variantOperations,
-        producersByType: variantProducersByType,
-      };
-
-      const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
-        ...opts,
-        allowEndpointAsProducer: true,
-        additionalNeeded: [...additional],
-        maxScenarios: 1,
-      });
-      const scenario = planned.scenarios[0];
-      if (!scenario || planned.unsatisfied) continue;
-
-      const variantKey = `${subShape.rootPath}::${leaf.fieldPath}`;
-      if (seenVariantKeys.has(variantKey)) continue;
       seenVariantKeys.add(variantKey);
-
       scenario.id = `variant-${collectionScenarios.length + 1}`;
       scenario.strategy = 'optionalSubShapeVariant';
       scenario.variantKey = variantKey;
@@ -1846,4 +2150,117 @@ export function generateOptionalSubShapeVariants(
 
 function unique<T>(arr: T[]): T[] {
   return [...new Set(arr)];
+}
+
+/**
+ * #162 PR 4: producer-chain variant builder, extracted from
+ * `generateOptionalSubShapeVariants` so the suite-partition-cut
+ * fallback path can be invoked when no producer chain is viable.
+ *
+ * Returns the planned scenario on success, or `undefined` if no
+ * producer candidate yields a satisfied chain (caller falls through
+ * to the bare-endpoint variant).
+ */
+function tryProducerChainVariant(args: {
+  graph: OperationGraph;
+  endpoint: OperationNode;
+  endpointOpId: string;
+  opts: VariantGenerationOpts;
+  leaf: { fieldPath: string; semantic: string };
+  producerCandidates: string[];
+}): EndpointScenario | undefined {
+  const { graph, endpoint, endpointOpId, opts, leaf, producerCandidates } = args;
+  const buildAdditional = (candidate: OperationNode): Set<string> => {
+    const additional = new Set<string>();
+    for (const opt of candidate.requires.optional) {
+      if (endpoint.produces.includes(opt)) additional.add(opt);
+    }
+    for (const req of candidate.requires.required) additional.add(req);
+    additional.add(leaf.semantic);
+    return additional;
+  };
+  let chosenProducer: { node: OperationNode; additional: Set<string> } | undefined;
+  // Pass 1: overlap-based (warm-up forced).
+  for (const candidateOpId of producerCandidates) {
+    const candidate = graph.operations[candidateOpId];
+    if (!candidate) continue;
+    const additional = buildAdditional(candidate);
+    const overlapsEndpoint = [...additional].some((s) => endpoint.produces.includes(s));
+    if (!overlapsEndpoint) continue;
+    chosenProducer = { node: candidate, additional };
+    break;
+  }
+  // Pass 2: non-overlap fallback (no warm-up).
+  if (!chosenProducer) {
+    for (const candidateOpId of producerCandidates) {
+      const candidate = graph.operations[candidateOpId];
+      if (!candidate) continue;
+      chosenProducer = { node: candidate, additional: buildAdditional(candidate) };
+      break;
+    }
+  }
+  if (!chosenProducer) return undefined;
+  const { additional } = chosenProducer;
+
+  const chosenId = chosenProducer.node.operationId;
+  const variantProducersByType: Record<string, string[]> = { ...graph.producersByType };
+  variantProducersByType[leaf.semantic] = [chosenId];
+  const variantOperations: Record<string, OperationNode> = { ...graph.operations };
+  variantOperations[chosenId] = {
+    ...chosenProducer.node,
+    produces: chosenProducer.node.produces.includes(leaf.semantic)
+      ? chosenProducer.node.produces
+      : [...chosenProducer.node.produces, leaf.semantic],
+    providerMap: {
+      ...(chosenProducer.node.providerMap ?? {}),
+      [leaf.semantic]: true,
+    },
+  };
+  const variantGraph: OperationGraph = {
+    ...graph,
+    operations: variantOperations,
+    producersByType: variantProducersByType,
+  };
+
+  const planned = generateScenariosForEndpoint(variantGraph, endpointOpId, {
+    ...opts,
+    allowEndpointAsProducer: true,
+    additionalNeeded: [...additional],
+    // #292: NOT a budget — see the matching note at the bare-endpoint
+    // fallback above. One producer chain per variant leaf is the
+    // strategy, not a tunable cap.
+    maxChainAlternatives: 1,
+  });
+  const scenario = planned.scenarios[0];
+  if (!scenario || planned.unsatisfied) return undefined;
+  return scenario;
+}
+
+/**
+ * #162 PR 4: pick a value for the bare-endpoint fallback path.
+ *
+ * - `clientMintedAttribute` and `serverEmergent` (PR 5): deterministic
+ *   minted token from `bindSemanticInput`. Both classifications carry
+ *   their own value because the planner is the authoritative source
+ *   for what to put in the request body (no producer chain to extract
+ *   from); reusing `bound.value` keeps the byte-stable mint formula
+ *   centralised in `bindSemanticInput.ts`.
+ * - `modelDerived` and `producerBound` (and other classifications):
+ *   synthesise the same `<semantic>_<suffix>` placeholder shape
+ *   `featureCoverageGenerator` used pre-PR-4 for `opt=<sem>` scenarios.
+ *   For `modelDerived`, the proper deploy-fixture value is unreachable
+ *   from this stage (no chain context); the placeholder is a stand-in
+ *   so the variant exists and the body is well-formed. For
+ *   `producerBound`, chain-extracted values would be preferable but
+ *   are not reachable for endpoints whose producer-chain BFS could not
+ *   satisfy.
+ */
+function resolveFallbackValue(
+  bound: ReturnType<typeof bindSemanticInput>,
+  semantic: string,
+  endpointOpId: string,
+): string | undefined {
+  if (bound.classification === 'clientMintedAttribute') return bound.value;
+  if (bound.classification === 'serverEmergent') return bound.value;
+  return `${camelLower(semantic)}_${deterministicSuffix(`vc:opt:${endpointOpId}:${semantic}`)}`;
 }

@@ -1,0 +1,221 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/edge.schema.json",
+  "@context": {
+    "@vocab": "https://camunda.github.io/api-test-generator/ns/v1/",
+    "edges": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/edges",
+      "@container": "@set"
+    },
+    "endpoints": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/endpoints"
+    },
+    "identifiedBy": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/identifiedBy",
+      "@container": "@list"
+    },
+    "establishedBy": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/establishedBy"
+    },
+    "observableVia": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/observableVia"
+    },
+    "revokedBy": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/revokedBy"
+    }
+  },
+  "version": 1,
+  "edges": [
+    {
+      "@type": "Edge",
+      "name": "RoleUserMembership",
+      "endpoints": {
+        "from": "Role",
+        "to": "User"
+      },
+      "identifiedBy": [
+        "RoleId",
+        "Username"
+      ],
+      "establishedBy": "assignRoleToUser",
+      "revokedBy": "unassignRoleFromUser",
+      "observableVia": "searchUsersForRole",
+      "description": "Edge between a Role and a User, identified by the (roleId, username) tuple. Established by assignRoleToUser, observable only via searchUsersForRole."
+    },
+    {
+      "@type": "Edge",
+      "name": "TenantUserMembership",
+      "endpoints": {
+        "from": "Tenant",
+        "to": "User"
+      },
+      "identifiedBy": [
+        "TenantId",
+        "Username"
+      ],
+      "establishedBy": "assignUserToTenant",
+      "revokedBy": "unassignUserFromTenant",
+      "observableVia": "searchUsersForTenant",
+      "description": "Edge between a Tenant and a User, identified by the (tenantId, username) tuple. Established by assignUserToTenant, observable only via searchUsersForTenant."
+    },
+    {
+      "@type": "Edge",
+      "name": "GroupUserMembership",
+      "endpoints": {
+        "from": "Group",
+        "to": "User"
+      },
+      "identifiedBy": [
+        "GroupId",
+        "Username"
+      ],
+      "establishedBy": "assignUserToGroup",
+      "revokedBy": "unassignUserFromGroup",
+      "observableVia": "searchUsersForGroup",
+      "description": "Edge between a Group and a User, identified by the (groupId, username) tuple. Established by assignUserToGroup, observable only via searchUsersForGroup."
+    },
+    {
+      "@type": "Edge",
+      "name": "RoleMappingRuleMembership",
+      "endpoints": {
+        "from": "Role",
+        "to": "MappingRule"
+      },
+      "identifiedBy": [
+        "RoleId",
+        "MappingRuleId"
+      ],
+      "establishedBy": "assignRoleToMappingRule",
+      "revokedBy": "unassignRoleFromMappingRule",
+      "observableVia": "searchMappingRulesForRole",
+      "description": "Edge between a Role and a MappingRule, identified by the (roleId, mappingRuleId) tuple. Established by assignRoleToMappingRule, observable only via searchMappingRulesForRole."
+    },
+    {
+      "@type": "Edge",
+      "name": "GroupMappingRuleMembership",
+      "endpoints": {
+        "from": "Group",
+        "to": "MappingRule"
+      },
+      "identifiedBy": [
+        "GroupId",
+        "MappingRuleId"
+      ],
+      "establishedBy": "assignMappingRuleToGroup",
+      "revokedBy": "unassignMappingRuleFromGroup",
+      "observableVia": "searchMappingRulesForGroup",
+      "description": "Edge between a Group and a MappingRule, identified by the (groupId, mappingRuleId) tuple. Established by assignMappingRuleToGroup, observable only via searchMappingRulesForGroup."
+    },
+    {
+      "@type": "Edge",
+      "name": "TenantMappingRuleMembership",
+      "endpoints": {
+        "from": "Tenant",
+        "to": "MappingRule"
+      },
+      "identifiedBy": [
+        "TenantId",
+        "MappingRuleId"
+      ],
+      "establishedBy": "assignMappingRuleToTenant",
+      "revokedBy": "unassignMappingRuleFromTenant",
+      "observableVia": "searchMappingRulesForTenant",
+      "description": "Edge between a Tenant and a MappingRule, identified by the (tenantId, mappingRuleId) tuple. Established by assignMappingRuleToTenant, observable only via searchMappingRulesForTenant."
+    },
+    {
+      "@type": "Edge",
+      "name": "RoleGroupMembership",
+      "endpoints": {
+        "from": "Role",
+        "to": "Group"
+      },
+      "identifiedBy": [
+        "RoleId",
+        "GroupId"
+      ],
+      "establishedBy": "assignRoleToGroup",
+      "revokedBy": "unassignRoleFromGroup",
+      "observableVia": "searchGroupsForRole",
+      "description": "Edge between a Role and a Group, identified by the (roleId, groupId) tuple. Established by assignRoleToGroup, observable only via searchGroupsForRole."
+    },
+    {
+      "@type": "Edge",
+      "name": "RoleClientMembership",
+      "endpoints": {
+        "from": "Role",
+        "to": "Client"
+      },
+      "identifiedBy": [
+        "RoleId",
+        "ClientId"
+      ],
+      "establishedBy": "assignRoleToClient",
+      "revokedBy": "unassignRoleFromClient",
+      "observableVia": "searchClientsForRole",
+      "description": "Edge between a Role and a Client, identified by the (roleId, clientId) tuple. Established by assignRoleToClient, observable only via searchClientsForRole. Client is an external-entity kind (identifier minted outside the Camunda REST API)."
+    },
+    {
+      "@type": "Edge",
+      "name": "GroupClientMembership",
+      "endpoints": {
+        "from": "Group",
+        "to": "Client"
+      },
+      "identifiedBy": [
+        "GroupId",
+        "ClientId"
+      ],
+      "establishedBy": "assignClientToGroup",
+      "revokedBy": "unassignClientFromGroup",
+      "observableVia": "searchClientsForGroup",
+      "description": "Edge between a Group and a Client, identified by the (groupId, clientId) tuple. Established by assignClientToGroup, observable only via searchClientsForGroup. Client is an external-entity kind."
+    },
+    {
+      "@type": "Edge",
+      "name": "TenantClientMembership",
+      "endpoints": {
+        "from": "Tenant",
+        "to": "Client"
+      },
+      "identifiedBy": [
+        "TenantId",
+        "ClientId"
+      ],
+      "establishedBy": "assignClientToTenant",
+      "revokedBy": "unassignClientFromTenant",
+      "observableVia": "searchClientsForTenant",
+      "description": "Edge between a Tenant and a Client, identified by the (tenantId, clientId) tuple. Established by assignClientToTenant, observable only via searchClientsForTenant. Client is an external-entity kind."
+    },
+    {
+      "@type": "Edge",
+      "name": "TenantGroupMembership",
+      "endpoints": {
+        "from": "Tenant",
+        "to": "Group"
+      },
+      "identifiedBy": [
+        "TenantId",
+        "GroupId"
+      ],
+      "establishedBy": "assignGroupToTenant",
+      "revokedBy": "unassignGroupFromTenant",
+      "observableVia": "searchGroupIdsForTenant",
+      "description": "Edge between a Tenant and a Group, identified by the (tenantId, groupId) tuple. Established by assignGroupToTenant, observable only via searchGroupIdsForTenant."
+    },
+    {
+      "@type": "Edge",
+      "name": "TenantRoleMembership",
+      "endpoints": {
+        "from": "Tenant",
+        "to": "Role"
+      },
+      "identifiedBy": [
+        "TenantId",
+        "RoleId"
+      ],
+      "establishedBy": "assignRoleToTenant",
+      "revokedBy": "unassignRoleFromTenant",
+      "observableVia": "searchRolesForTenant",
+      "description": "Edge between a Tenant and a Role, identified by the (tenantId, roleId) tuple. Established by assignRoleToTenant, observable only via searchRolesForTenant."
+    }
+  ]
+}

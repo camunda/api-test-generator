@@ -1,8 +1,73 @@
+/**
+ * Sentinel value the planner writes into `EndpointScenario.bindings[v]`
+ * when a binding is declared but not yet produced — a placeholder
+ * meaning "a later step's response extraction, a seed-rule literal, or
+ * a runtime-seeded value will fill this in before any step that reads
+ * it is emitted".
+ *
+ * The sentinel IS contractual in scenario JSON: the materializer reads
+ * `scenario.bindings[v] === PENDING_BINDING` to skip emitting a literal
+ * `ctx.set(v, '__PENDING__')` line, and `computeSeedBindings`
+ * (`path-analyser/src/seedBindings.ts`) returns exactly the still-PENDING
+ * bindings as the per-scenario runtime seed list (#136). Stripping the
+ * sentinel from scenario output would break both contracts.
+ *
+ * What MUST stay free of the sentinel is the *emitted* output (a
+ * generated Playwright `.spec.ts` containing `'__PENDING__'` means the
+ * materializer's skip guard or the seedBindings filter regressed and
+ * the string will flow into a live API call). Lift 18 / #258 added an
+ * L3 invariant that scans `generated/<config>/playwright/` for the
+ * literal — see "PENDING_BINDING sentinel hygiene" in
+ * `configs/<config>/regression-invariants.test.ts`.
+ *
+ * Imported by the materializer via the `path-analyser/types` subpath
+ * export so the two workspaces share one source of truth.
+ */
+export const PENDING_BINDING = '__PENDING__';
+
 export interface OperationRef {
   operationId: string;
   method: string;
   path: string;
   eventuallyConsistent?: boolean;
+  /**
+   * #309 Phase A — stamped by `expandRuntimeEmission` on the inserted
+   * runtimeEmission discovery step (e.g. `searchUserTasks` when the
+   * chain is discovering `UserTaskKey`). Carries everything the body
+   * builder needs to emit the structurally-correct filter wrapper —
+   * `{ filter: { [filterBy]: '${fromBinding}' } }` — bound forward
+   * from the upstream producer's binding name. Absent on every other
+   * step (the generic body builder handles those).
+   */
+  discoveryIntent?: DiscoveryIntent;
+}
+
+/**
+ * #309 Phase A — describes a planner-inserted runtimeEmission
+ * discovery step: the upstream producer-binding the filter must
+ * forward-bind to, and the response field that surfaces the
+ * runtime-emitted key. The body builder reads `filterBy` + `fromBinding`
+ * to emit `{ filter: { [filterBy]: '${fromBinding}' } }`; the emitter
+ * reads `extractKey` + `extractInto` (today already derived from
+ * `discoveredVia.extractKey` via the producer auto-derive at
+ * `path-analyser/src/index.ts` ~714, so this field is currently
+ * documentary — Phase A only consumes filterBy + fromBinding).
+ *
+ * `fromSemantic` records which upstream semantic the filter is bound
+ * to (e.g. `ProcessInstanceKey`). The planner stamps it eagerly during
+ * BFS expansion and uses it at scenario finalisation to resolve the
+ * actual `fromBinding` var name from the chain's allocated bindings —
+ * mirroring `semanticToVarName`'s suffixing convention so chains with
+ * multiple producers of the same semantic bind to the latest one
+ * rather than always assuming the un-suffixed base name.
+ */
+export interface DiscoveryIntent {
+  filterBy: string;
+  fromSemantic: string;
+  fromBinding: string;
+  extractKey: string;
+  extractInto: string;
+  consistency: 'eventual' | 'strong';
 }
 
 export interface OperationNode extends OperationRef {
@@ -41,6 +106,15 @@ export interface OperationNode extends OperationRef {
     string,
     { semanticType: string; fieldPath: string; required?: boolean }[]
   >;
+  /**
+   * #305 Phase 4: flat list of every primitive (or array-of-primitive)
+   * leaf path in the response schema, per status code, irrespective of
+   * `x-semantic-type` annotation. Powers the
+   * UpdatedFieldVisibleOnReadBack template instantiator's name-based
+   * bridge from a mutator's emitted request body to a fetcher's
+   * observable response shape. Arrays appear as `prefix[].leaf`.
+   */
+  responseLeafPaths?: Record<string, string[]>;
   // Path parameters with their declared `x-semantic-type`. Used by
   // `buildRequestPlan` to alias producer extracts under the
   // placeholder-derived var name when an OpenAPI path-param's name differs
@@ -123,7 +197,6 @@ export interface OperationGraph {
   // affecting base-scenario planning, which still consults
   // `producersByType` (authoritative outputs only after #98).
   responseProducersByType?: Record<string, string[]>;
-  bootstrapSequences?: BootstrapSequence[];
   domain?: DomainSemantics; // loaded sidecar
   producersByState?: Record<string, string[]>; // domain state -> operations
   // Issue #104: parallel index of operations that *establish* a semantic
@@ -169,13 +242,6 @@ export interface OperationGraph {
   requestSettersByType?: Record<string, string[]>;
 }
 
-export interface BootstrapSequence {
-  name: string;
-  description?: string;
-  operations: string[]; // ordered operationIds
-  produces: string[]; // declared semantic types produced by the full sequence
-}
-
 export interface EndpointScenario {
   id: string;
   name?: string; // human-friendly short name
@@ -187,8 +253,6 @@ export interface EndpointScenario {
   cycleInvolved?: boolean;
   productionMap?: Record<string, string>; // semanticType -> operationId
   providerList?: Record<string, string[]>; // semanticType -> all producing opIds encountered
-  bootstrapSequencesUsed?: string[]; // names of bootstrap sequences contributing
-  bootstrapFull?: boolean; // true if a single bootstrap sequence satisfied all required semantic types
   hasEventuallyConsistent?: boolean; // true if any operation in chain is eventually consistent
   eventuallyConsistentCount?: number; // count of operations in chain that are eventually consistent
   // Domain scenario augmentation
@@ -306,6 +370,13 @@ export interface FeatureVariantSpec {
     policy: string;
     secondStatus?: number;
   };
+  // #288 Phase 3b — opt out of the canonical chain inheritance.
+  // Defaults to true (omitted ⇒ inherit). The only current consumer
+  // is the search-empty-negative variant, which deliberately omits
+  // prerequisites so the search returns empty at runtime. Replaces
+  // the ad-hoc `isSearchLikeOp && isEmptyNeg` regex previously
+  // applied to every variant in `index.ts`.
+  inheritChainPrereqs?: boolean;
 }
 
 export interface GenerationSummary {
@@ -348,6 +419,8 @@ export interface RequestOneOfVariant {
   variantName: string;
   required: string[];
   optional: string[];
+  /** Effective JSON Schema type for each field in this variant ('object', 'array', 'string', …). */
+  fieldTypes: Record<string, string>;
   discriminator?: { field: string; value: string };
 }
 
@@ -385,6 +458,24 @@ export interface RequestStep {
    * graph or the domain sidecar.
    */
   eventualWaitsAfter?: EventualWaitSpec[];
+  /**
+   * #309 Phase A — present on planner-inserted runtimeEmission
+   * discovery steps. When set, `bodyTemplate` was synthesised by the
+   * forward-bind branch (`{ filter: { [filterBy]: '${fromBinding}' } }`),
+   * NOT by `buildRequestBodyFromCanonical`. Carried explicitly so L3
+   * invariants and downstream tooling can recognise the intentional-
+   * discovery shape without re-deriving it.
+   */
+  discoveryIntent?: DiscoveryIntent;
+  /**
+   * Per-step copy of `Operation.responseLeafPaths['409']` presence — true
+   * when this step's operation declares an HTTP 409 (Conflict) response
+   * in the OpenAPI spec. Stamped by `buildRequestPlan` so the emitter can
+   * decide (together with "binding is client-minted") which seedBinding
+   * calls to mark `{ unique: true }` for cross-run identifier uniqueness
+   * (#304). Absent / false ⇒ no 409 declared.
+   */
+  declares409?: boolean;
 }
 
 /**
@@ -492,11 +583,46 @@ export interface SemanticTypeSpec {
    *     `attribute` is a structural shape, `clientMinted` says where the
    *     value originates. Examples: `Tag`, `BusinessId`.
    *
+   *   - `serverEmergent` (#162 PR 5): server-minted lifecycle identifiers
+   *     that no client API directly mints with a returned value (e.g.
+   *     `IncidentKey`, `AuditLogKey`, `MessageSubscriptionKey`) AND for
+   *     which the planner has no path to discover the emitted value
+   *     post-hoc. The planner binds a deterministic placeholder so
+   *     search-filter request shapes validate; an empty search result is
+   *     acceptable because the value is a fabricated placeholder for a
+   *     key the client could not have known.
+   *
+   *   - `runtimeEmission` (#305 Phase 1, schema-only): a server-minted
+   *     lifecycle key that the planner *will be able to* discover after
+   *     a known producing side-effect (e.g. `UserTaskKey` is emitted
+   *     when a process instance executes a user-task element, and is
+   *     discoverable via `searchUserTasks(processInstanceKey)`).
+   *     Distinct from `serverEmergent` precisely because the discovery
+   *     path is declarable. Requires both `emittedBy` and
+   *     `discoveredVia` on the same entry — without them the entry
+   *     would carry no actionable information for the future planner.
+   *     The loader enforces this coupling.
+   *
+   *     **Phase-1 scope note:** as of #305 Phase 1 (this commit) no
+   *     planner code reads `kind === 'runtimeEmission'`. The
+   *     `classifySemantic` dispatch in `bindSemanticInput.ts` only
+   *     special-cases `modelDerived` / `clientMintedAttribute` /
+   *     `serverEmergent`; a `runtimeEmission` declaration therefore
+   *     falls through to the producer/establisher/external-entity
+   *     chain and most commonly classifies as `unclassified` (the
+   *     keys we plan to migrate in Phase 3 — `UserTaskKey`,
+   *     `JobKey`, … — have no producer or establisher today, which
+   *     is exactly why they need `runtimeEmission` in the first
+   *     place). The vocabulary is landed first so Phase 3's ABox
+   *     edits can validate cleanly against the published TBox;
+   *     classifier + chain-planner support follows in Phase 3 of
+   *     #305.
+   *
    * Absent `kind` means the planner falls back to its existing
    * classification chain (producersByType / establishersByType /
    * external-entity / synthetic).
    */
-  kind?: 'modelDerived' | 'attribute';
+  kind?: 'modelDerived' | 'attribute' | 'serverEmergent' | 'runtimeEmission';
   /**
    * Whether values of this semantic are minted by the planner / client
    * rather than returned by a producer endpoint (#162 PR 2). Only
@@ -504,6 +630,29 @@ export interface SemanticTypeSpec {
    * client-minted semantics to identifier-shaped types as well.
    */
   clientMinted?: boolean;
+  /**
+   * Required when `kind === 'runtimeEmission'` (#305 Phase 1). Declares
+   * how a value of this type comes into existence at runtime — the
+   * producing predecessor that must run, plus any capability guards the
+   * predecessor's deployment artefact must satisfy. See
+   * `path-analyser/src/ontology/semanticsSchema.ts` for the field-level
+   * docs; this interface mirrors the ABox shape for the planner views.
+   */
+  emittedBy?: {
+    predecessor: string;
+    guardedBy?: string[];
+  };
+  /**
+   * Required when `kind === 'runtimeEmission'` (#305 Phase 1). Declares
+   * how the planner reads the emitted value back from the system after
+   * the predecessor has run.
+   */
+  discoveredVia?: {
+    operationId: string;
+    filterBy?: string;
+    extractKey: string;
+    consistency?: 'eventual' | 'strong';
+  };
 }
 
 export interface IdentifierSpec {
@@ -580,6 +729,24 @@ export interface OperationDomainRequirements {
   disjunctions?: string[][]; // sets where one of each required
   implicitAdds?: string[]; // states produced implicitly on success
   produces?: string[]; // produced states (override)
+  /**
+   * Post-condition hygiene states the chain SHOULD leave in place after
+   * this op runs, but which are NOT preconditions to the op (#249). Unlike
+   * `requires`, this field is invisible to the BFS scenario planner — it
+   * never gates feasibility, never schedules producer ops, and never
+   * filters the op out. Its sole consumer is the fixture selector
+   * (`computeDeploymentRequiredStates`), which unions these states into
+   * the deployment-gateway requirement set so a fixture that provides them
+   * is preferred. Subsequent ops in the chain whose `produces` /
+   * `implicitAdds` include the state discharge the hygiene requirement.
+   *
+   * Used to encode "this op creates a resource that should be driven to a
+   * terminal state by the end of the test" — e.g. `createProcessInstance`
+   * declares `chainCleanupRequires: ["ProcessInstanceCompleted"]` so the
+   * base scenario deploys a self-completing fixture instead of leaving an
+   * orphan running instance.
+   */
+  chainCleanupRequires?: string[];
   valueBindings?: Record<string, string>; // request field -> state.parameter mapping
 }
 
@@ -597,7 +764,7 @@ export interface ArtifactKindSpec {
    * chain-feasibility BFS — a chain is satisfiable if requires can be
    * covered by `producesStates ∪ producibleStates`. The selector then
    * matches the chain's required states against per-entry `providesStates`
-   * in `path-analyser/fixtures/deployment-artifacts.json` to choose the
+   * in `configs/<config>/fixtures/deployment-artifacts.json` to choose the
    * fitting file. Example: bpmnProcess can produce `ModelHasServiceTaskType`
    * (via `service-task.bpmn`) or `ProcessInstanceCompleted` (via
    * `simple.bpmn`), but neither is unconditional.
@@ -606,11 +773,87 @@ export interface ArtifactKindSpec {
   producesSemantics?: string[];
   identifierType?: string;
   deploymentSlices?: string[]; // e.g., ["processDefinition"] or ["decisionDefinition","decisionRequirements"]
+  /**
+   * Optional discriminator selecting the `GeneratedModelSpec` variant the
+   * planner should construct when this artifact kind is bound to a chain
+   * (Lift 10 / #227). Conventional values: `'bpmn'`, `'form'`. Sourced
+   * from the artifact-kinds ABox so the planner does not need to encode
+   * a semantic→kind table that already exists in `semanticTypeMap`.
+   */
+  modelKind?: string;
+}
+
+/**
+ * Single entry in the deployment artifact registry
+ * (`configs/<config>/fixtures/deployment-artifacts.json`). One entry per
+ * checked-in BPMN/DMN/Form file the planner can deploy via
+ * `createDeployment`. Loaded lazily and cached at module scope by
+ * `getArtifactsRegistry()` in `path-analyser/src/index.ts`.
+ *
+ * Exported from `types.ts` (rather than kept private to `index.ts`) so
+ * the unified classification dispatch in `bindSemanticInput.ts` can
+ * accept a fixture parameter without having to import from `index.ts`
+ * (which would create a circular dependency once `index.ts` re-imports
+ * the chokepoint helper).
+ */
+export interface ArtifactRegistryEntry {
+  kind: string;
+  path: string;
+  description?: string;
+  /**
+   * Runtime characteristics this specific fixture provides BEYOND what
+   * `artifactKinds.<kind>.producesStates` declares for the kind. The
+   * selector picks the entry whose effective providesStates (entry ∪
+   * kind) covers the chain's required states (#159).
+   */
+  providesStates?: string[];
+  /**
+   * Concrete values this fixture supplies for semantic types whose
+   * `semanticTypes.<X>.kind === 'modelDerived'` (#162 PR 1). The planner
+   * reads these out-of-band at plan time — no Camunda API round-trip is
+   * needed to learn the values, because the BPMN/DMN/Form file already
+   * encodes them (element IDs, job types, form IDs, …).
+   *
+   * Per-semantic the value is an array so a future per-consumer-site
+   * preference vocabulary can pick a specific entry; PR 1's planner
+   * takes index 0 unconditionally.
+   *
+   * After #164: this is the SOLE source of fixture-derived values. The
+   * pre-#162 ad-hoc `parameters: { jobType: ... }` field was the
+   * embryonic form of this idea and has been retired; any new
+   * fixture-derived value must be declared here.
+   */
+  providesValues?: Record<string, string[]>;
 }
 
 export interface OperationArtifactRuleSpec {
   rules?: ArtifactRule[]; // optional when composable
   composable?: boolean; // if true, generator composes artifacts via set cover
+  /**
+   * Optional ontological role this operation plays in the API surface
+   * (Lift 9 / #225, extended by Lift 14 / #254). The planner and
+   * Playwright emitter consult this field via `findOpIdByRole` /
+   * `isDeploymentGatewayOp` / `isJobActivatorOp` to discriminate
+   * special-case behaviour against the ABox instead of a hard-coded
+   * operationId. Conventional values: `deploymentGateway` (the
+   * multipart deploy operation whose response surfaces deployed
+   * artifact identifiers); `jobActivator` (the operation that
+   * activates jobs produced by service tasks in a deployed BPMN
+   * process — search-like, requires service-task wiring in the BPMN
+   * model draft, has a non-existent-job-type override for empty
+   * negatives).
+   */
+  role?: string;
+  /**
+   * Optional flag indicating that the declared `role` is consumed
+   * only by the planner and not by the per-step Playwright emitter
+   * dispatch (Lift 14 / #254). When `true`, the materializer treats
+   * the role as informational and does not require a
+   * `configs/<config>/codegen/playwright/roles/<role>/` bundle. When
+   * `false` or omitted, the role is emitter-dispatched and the
+   * bundle must exist (Lift 12 / #231 contract).
+   */
+  plannerOnly?: boolean;
 }
 
 export interface ArtifactRule {
@@ -634,22 +877,309 @@ export interface LongChainConfig {
 }
 
 export interface ExtendedGenerationOpts {
-  maxScenarios: number;
+  maxChainAlternatives: number;
   longChains?: LongChainConfig;
   // Issue #37: see scenarioGenerator GenerationOpts for semantics.
   allowEndpointAsProducer?: boolean;
   additionalNeeded?: string[];
 }
 
-export type GeneratedModelSpec = BpmnModelSpec | FormModelSpec;
-
-export interface BpmnModelSpec {
-  kind: 'bpmn';
-  processDefinitionIdVar: string;
-  serviceTasks?: { id: string; typeVar: string }[];
+/**
+ * Options consumed by `generateOptionalSubShapeVariants` (the variant
+ * suite emitter). Distinct from `ExtendedGenerationOpts` because the
+ * outer cap here bounds *variant scenarios per endpoint* (one per
+ * subShape × leaf pair), not chain alternatives — those are pinned to
+ * `maxChainAlternatives: 1` for every inner planner call. Splitting
+ * the option types (#288 Phase 3c review) keeps the two semantically
+ * distinct caps from sharing a misleading name.
+ */
+export interface VariantGenerationOpts {
+  maxVariantsPerEndpoint: number;
+  longChains?: LongChainConfig;
+  allowEndpointAsProducer?: boolean;
+  additionalNeeded?: string[];
 }
 
-export interface FormModelSpec {
-  kind: 'form';
-  formKeyVar: string;
+/**
+ * A model-spec entry describing one synthesized model the planner needs to
+ * deploy as part of a scenario.
+ *
+ * The shape is intentionally **open** over `kind` so any ABox-declared
+ * `modelKind` value produces a structured entry, not just the hard-coded
+ * `bpmn` / `form` discriminants the planner originally hand-rolled. Per-kind
+ * extensions (e.g. BPMN's service-task metadata) live in `metadata`;
+ * consumers that care about a specific kind narrow via the `kind` tag and
+ * reach into `metadata` with their own decoder.
+ *
+ * Lift 13 / #253: the previous closed union `BpmnModelSpec | FormModelSpec`
+ * caused the planner to silently drop any ABox `modelKind` value outside
+ * those two literals (the caveat originally noted on `modelKind` in
+ * `artifactKindsSchema.ts`). Removing the union closes that gap and lets a
+ * new `modelKind` declared in the ABox flow end-to-end without editing
+ * `scenarioGenerator.ts`.
+ */
+export interface GeneratedModelSpec {
+  /** ABox-declared kind discriminator (e.g. `'bpmn'`, `'form'`). */
+  kind: string;
+  /**
+   * Map of binding-role → binding variable name. Role names are
+   * planner-internal conventions per kind (see
+   * `path-analyser/src/modelSpecBuilders.ts`): `bpmn` uses
+   * `processDefinitionId`; `form` uses `formKey`. Consumers that round-trip
+   * scenario JSON should treat unknown roles as opaque pass-through data.
+   */
+  bindings: Record<string, string>;
+  /**
+   * Optional per-kind structured extension. Currently used only by the
+   * `bpmn` kind to carry `serviceTasks` (id → job-type-binding pairs the
+   * runtime worker needs to honour). Consumers narrow via `kind`.
+   */
+  metadata?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// #270 — Scenario template instantiation (Phase 2 of #268).
+//
+// Template-derived scenarios are emitted alongside (not in place of) the
+// BFS-derived `EndpointScenario`s. They are written to
+// `generated/<config>/scenarios/templates/<TemplateName>/<EdgeName>.json`
+// and consumed by the Playwright emitter to produce
+// `generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts`.
+// The two output trees are independent — no field on `EndpointScenario`
+// is touched here.
+// ---------------------------------------------------------------------------
+
+/**
+ * A `PrereqChain` template step: a planned dependency chain that
+ * establishes everything a subsequent `InvokeStep` requires before it
+ * runs. Derived by delegating to `generateScenariosForEndpoint` against
+ * the target operationId and dropping the target itself (which is
+ * invoked by the following `InvokeStep`, not by the prereq chain).
+ *
+ * The `bindings`, `seedBindings` and `requestPlan` fields mirror the
+ * same-named fields on `EndpointScenario` so the emitter can reuse the
+ * existing per-step renderer.
+ */
+export interface PrereqChainStep {
+  kind: 'prereqChain';
+  /** OperationId the chain is intended to enable. Diagnostic only. */
+  targetOperationId: string;
+  /** Ordered list of prerequisite operations (target op excluded). */
+  operations: OperationRef[];
+  /** Same shape as `EndpointScenario.bindings`. */
+  bindings: Record<string, string>;
+  /** Same shape as `EndpointScenario.seedBindings`. */
+  seedBindings: string[];
+  /** Per-operation request plan, parallel to `operations`. */
+  requestPlan: RequestStep[];
+}
+
+/**
+ * A single-operation invocation. Carries the request plan for that one
+ * operation and a description of which scenario bindings flow into it
+ * (`inputs`) and which the response contributes back (`produces`).
+ */
+export interface InvokeStep {
+  kind: 'invoke';
+  operationId: string;
+  /** semanticType → binding name consumed by this invocation. */
+  inputs: Record<string, string>;
+  /** semanticType → binding name produced by this invocation. */
+  produces: Record<string, string>;
+  /** Request plan for THIS invocation only (one step). */
+  requestPlan: RequestStep;
+}
+
+/**
+ * A membership assertion against an observation operation's 2xx
+ * response. The assertion compiles to
+ * `expect(items.map(r => r.<elementField>)).[not.]toContain(<value>)`
+ * at emit time. `value` is sourced from the scenario binding table
+ * keyed by `membershipSemanticType`.
+ *
+ * #280 — `statusOnly` covers EntityLifecycle observation: the entity is
+ * looked up by id (GET-by-id), so visibility is asserted on the HTTP
+ * status alone (`present` → 200, `absent` → 404). No body inspection,
+ * no array walk. `expectedStatus` is materialised eagerly so the
+ * emitter doesn't have to re-derive it from `expect`.
+ */
+export interface ObserveStep {
+  kind: 'observe';
+  operationId: string;
+  /**
+   * semanticType → binding name consumed by the observation call's
+   * inputs (path params / body). The scoping/membership split:
+   * `identifiedBy ∩ inputs` go here; the remaining identifiedBy
+   * member is the membership identifier asserted on the response
+   * (for `membership` assertions). For `statusOnly` assertions all
+   * required inputs (typically a single identifier path param) appear
+   * here; the assertion targets status only and consults no binding.
+   */
+  inputs: Record<string, string>;
+  requestPlan: RequestStep;
+  assertion:
+    | {
+        kind: 'membership';
+        expect: 'present' | 'absent';
+        /**
+         * Path into the 2xx response body to the array carrying the
+         * membership rows. Each segment is a property name; the last
+         * segment names the array property itself (e.g. `['items']`).
+         */
+        arrayPath: string[];
+        /**
+         * Property name on each array element that carries the membership
+         * identifier value (e.g. `'username'` for RoleUserMembership).
+         */
+        elementField: string;
+        /**
+         * Semantic type of the membership identifier. The emitter
+         * resolves this against the scenario binding table to find the
+         * value being asserted.
+         */
+        membershipSemanticType: string;
+      }
+    | {
+        kind: 'statusOnly';
+        expect: 'present' | 'absent';
+        /**
+         * HTTP status code the observation is expected to return.
+         * `present` → 200 (entity visible). `absent` → 404 (entity gone).
+         * The emitter emits `expect(resp.status()).toBe(<expectedStatus>)`.
+         */
+        expectedStatus: 200 | 404;
+      }
+    | {
+        /**
+         * #305 Phase 4 — read-back-after-mutate equality assertion.
+         * Emitted by the `UpdatedFieldVisibleOnReadBack` template
+         * compiler for `shape: "runtime-entity"` subjects. The
+         * preceding `InvokeStep` is the mutator; the observation
+         * fetches the entity by id and asserts each field listed
+         * below equals the value the mutator request body carried
+         * for the same field. The field list is derived at
+         * instantiation time by intersecting the mutator request-body
+         * leaves with the fetcher 200-response leaves from
+         * `OperationNode.responseLeafPaths`, bridged by **last-segment
+         * leaf name** (not `semanticType` — changeset fields typically
+         * lack `x-semantic-type` upstream). Mutator-body leaves that
+         * have no matching fetcher leaf are skipped silently; the
+         * instantiator only errors if the intersection is empty
+         * (a fieldEquals step with nothing to assert is a planner
+         * bug, not a silent pass). The same L3 invariant enforces
+         * non-empty `fields[]`.
+         */
+        kind: 'fieldEquals';
+        fields: Array<{
+          /**
+           * The leaf-name segment used to bridge the mutator body to
+           * the fetcher response. For name-based bridging this is the
+           * final segment of `requestBodyPath` (which must equal the
+           * final segment of `responseBodyPath`). Carried explicitly so
+           * the emitter and L3 invariant don't have to re-derive it.
+           */
+          leafName: string;
+          /** Path into the mutator's emitted request body where the expected value lives. */
+          requestBodyPath: string[];
+          /** Path into the fetcher's 200-response body where the actual value should appear. */
+          responseBodyPath: string[];
+        }>;
+      }
+    | {
+        /**
+         * #305 Phase 5d / #189 — state-transition read-back assertion.
+         * Emitted by the `StateTransitionVisibleAfterAction` template
+         * compiler for `shape: "runtime-entity"` subjects that declare
+         * `transitions[]` + `stateField`. The preceding `InvokeStep`
+         * is a state-transition op whose request body carries no per-
+         * field update (e.g. `resolveIncident` — the post-state is
+         * implicit in the op semantics). The observation fetches the
+         * entity by id and asserts a single equality on the named
+         * state field. Compiled to
+         * `expect(body.<stateField>).toBe(<expectedState>)`.
+         *
+         * `fromState` is carried purely for traceability (so the
+         * emitted suite's test name and the L3 invariant can mention
+         * the transition direction); the assertion itself does not
+         * re-witness the pre-state — the planner's chain guarantees
+         * the entity is in `fromState` at invoke time (e.g.
+         * `searchIncidents` only surfaces ACTIVE incidents on the
+         * OCA API).
+         */
+        kind: 'stateEquals';
+        /**
+         * Top-level (or dotted) response leaf carrying the entity's
+         * current state on the fetcher's 200 response. Almost always
+         * a single segment (`['state']`); recorded as a path for
+         * symmetry with `fieldEquals.responseBodyPath` so a future
+         * nested-state response can be modelled without an emitter
+         * change.
+         */
+        responseBodyPath: string[];
+        /** Expected state value after the transition (e.g. `'RESOLVED'`). */
+        expectedState: string;
+        /** State the entity is expected to be in before the transition (e.g. `'ACTIVE'`). Informational; not re-asserted. */
+        fromState: string;
+        /** OperationId of the transition op that drove the state change. Recorded for traceability. */
+        transitionOp: string;
+      };
+}
+
+export type TemplateStep = PrereqChainStep | InvokeStep | ObserveStep;
+
+/**
+ * A scenario produced by instantiating a `ScenarioTemplate` against a
+ * concrete subject (currently only `Edge`). The step list is a
+ * discriminated union; the binding table is the union of all bindings
+ * declared anywhere in the steps so consumers don't need to walk the
+ * step list to learn which symbolic names exist.
+ */
+export interface TemplateScenario {
+  /** Identifier of the template (e.g. `'EdgeLifecycle'`). */
+  templateName: string;
+  /** Identifier of the subject the template was instantiated against. */
+  subjectName: string;
+  subjectKind: 'Edge' | 'Entity' | 'RuntimeEntity';
+  steps: TemplateStep[];
+  /**
+   * Aggregated semantic-type → binding-name map across all steps. The
+   * keys are semantic-type identifiers (e.g. `'Username'`, `'RoleId'`)
+   * and the values are the planner-minted binding names the runtime
+   * `ctx` is keyed by (e.g. `'usernameVar'`, `'roleIdVar'`). This
+   * intentionally diverges from `EndpointScenario.bindings` (whose
+   * keys ARE binding names and whose values are concrete placeholders
+   * like `'__PENDING__'` or literal values): the membership assertion
+   * on an `ObserveStep` is expressed in semantic-type terms
+   * (`assertion.membershipSemanticType`), and the emitter looks the
+   * binding name up directly in this map rather than re-deriving it
+   * from the semantic-type identifier — so a future change to the
+   * planner's naming convention requires no emitter change. The
+   * per-step `PrereqChainStep.bindings` map remains binding-name-keyed
+   * (mirrors `EndpointScenario.bindings`) so the existing per-endpoint
+   * emitter code paths apply unchanged.
+   */
+  bindings: Record<string, string>;
+  /**
+   * Aggregated set of `operationId`s in this template scenario whose
+   * source `OperationSpec.eventuallyConsistent` flag is `true` (i.e.
+   * the spec carries the `x-eventually-consistent` vendor extension).
+   * Threaded through so the template emitter can wrap read-shape steps
+   * in `awaitEventually(...)` exactly like the per-endpoint emitter
+   * does — without re-consulting the dependency graph at emission
+   * time. Empty list is permitted (and is the common case for OCA
+   * edges); the field is required to make the contract explicit.
+   */
+  eventuallyConsistentOps: string[];
+}
+
+/**
+ * Per-template, per-subject scenario file shape. One file per
+ * (template × subject) pair under
+ * `generated/<config>/scenarios/templates/<TemplateName>/<SubjectName>.json`.
+ */
+export interface TemplateScenarioFile {
+  templateName: string;
+  subjectName: string;
+  subjectKind: 'Edge' | 'Entity' | 'RuntimeEntity';
+  scenario: TemplateScenario;
 }

@@ -32,6 +32,7 @@ interface NodeOpts {
   optionalSubShapes?: OperationNode['optionalSubShapes'];
   responseSemanticLeaves?: OperationNode['responseSemanticLeaves'];
   eventuallyConsistent?: boolean;
+  requestBodySemantics?: OperationNode['requestBodySemantics'];
 }
 
 function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
@@ -50,6 +51,7 @@ function makeOp(operationId: string, opts: NodeOpts = {}): OperationNode {
     optionalSubShapes: opts.optionalSubShapes,
     responseSemanticLeaves: opts.responseSemanticLeaves,
     eventuallyConsistent: opts.eventuallyConsistent,
+    requestBodySemantics: opts.requestBodySemantics,
   };
 }
 
@@ -84,7 +86,7 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
 }
 
 function plan(graph: OperationGraph, endpointOpId: string): EndpointScenarioCollection {
-  return generateScenariosForEndpoint(graph, endpointOpId, { maxScenarios: 10 });
+  return generateScenariosForEndpoint(graph, endpointOpId, { maxChainAlternatives: 10 });
 }
 
 function opIdsOf(scenario: { operations: { operationId: string }[] }): string[] {
@@ -421,7 +423,7 @@ const fixtureSubShapeVariant: OperationGraph = makeGraph([
 describe('planner contracts: optional sub-shape variants (#37)', () => {
   it('emits a variant scenario per sub-shape leaf with warm-up + producer + final', () => {
     const variants = generateOptionalSubShapeVariants(fixtureSubShapeVariant, 'createOrder', {
-      maxScenarios: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios.length).toBeGreaterThan(0);
     const variant = variants.scenarios[0];
@@ -494,26 +496,37 @@ describe('planner contracts: variant planner respects success-status producer fi
     expect(fixtureErrorOnlyProducer.responseProducersByType?.ProductId).toBeUndefined();
   });
 
-  it('emits zero variants when the only candidate producer surfaces the leaf in a 4xx response', () => {
+  it('falls back to a bare-endpoint variant when the only candidate producer surfaces the leaf in a 4xx response (#162 PR 4)', () => {
+    // Pre-#162-PR-4 this case emitted ZERO variants. The PR-4 cut moves
+    // ALL populated-optional coverage into the variant suite, so when
+    // the producer-chain path cannot satisfy the leaf the planner falls
+    // back to a bare-endpoint scenario with a synthetic placeholder
+    // (see `resolveFallbackValue` in scenarioGenerator.ts). The
+    // 4xx-only producer must NOT appear in the chain — the variant has
+    // exactly one operation (the endpoint itself).
     const variants = generateOptionalSubShapeVariants(fixtureErrorOnlyProducer, 'placeOrder', {
-      maxScenarios: 10,
+      maxVariantsPerEndpoint: 10,
     });
-    expect(variants.scenarios).toEqual([]);
+    expect(variants.scenarios).toHaveLength(1);
+    const [scenario] = variants.scenarios;
+    expect(scenario.strategy).toBe('optionalSubShapeVariant');
+    expect(scenario.variantKey).toBe('addons[]::addons[].productId::ProductId');
+    expect(scenario.operations.map((o) => o.operationId)).toEqual(['placeOrder']);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Fixture J: variant planner caps emission at opts.maxScenarios (#37)
+// Fixture J: variant planner caps emission at opts.maxVariantsPerEndpoint (#37)
 // ---------------------------------------------------------------------------
 //
 // Endpoint `bulkCreate` has THREE semantic-typed optional leaves under
 // the same sub-shape. Without the cap, the planner emits one variant
-// per leaf (3 variants). With `maxScenarios: 2`, only the first 2 are
-// emitted.
+// per leaf (3 variants). With `maxVariantsPerEndpoint: 2`, only the first 2
+// are emitted.
 //
 // Class-scoped guarantee: a future endpoint with N semantic-typed
-// optional leaves cannot produce more than `opts.maxScenarios` variant
-// scenario files.
+// optional leaves cannot produce more than `opts.maxVariantsPerEndpoint`
+// variant scenario files.
 const fixtureMaxVariantsCap: OperationGraph = makeGraph([
   makeOp('mintFoo', {
     produces: ['Foo'],
@@ -551,24 +564,24 @@ const fixtureMaxVariantsCap: OperationGraph = makeGraph([
   }),
 ]);
 
-describe('planner contracts: variant emission respects maxScenarios cap (#37)', () => {
-  it('uncapped (maxScenarios = 10) emits one variant per semantic leaf', () => {
+describe('planner contracts: variant emission respects maxVariantsPerEndpoint cap (#37)', () => {
+  it('uncapped (maxVariantsPerEndpoint = 10) emits one variant per semantic leaf', () => {
     const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
-      maxScenarios: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios.length).toBe(3);
   });
 
-  it('caps emission at maxScenarios = 2', () => {
+  it('caps emission at maxVariantsPerEndpoint = 2', () => {
     const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
-      maxScenarios: 2,
+      maxVariantsPerEndpoint: 2,
     });
     expect(variants.scenarios.length).toBe(2);
   });
 
-  it('caps emission at maxScenarios = 0 (emit nothing)', () => {
+  it('caps emission at maxVariantsPerEndpoint = 0 (emit nothing)', () => {
     const variants = generateOptionalSubShapeVariants(fixtureMaxVariantsCap, 'bulkCreate', {
-      maxScenarios: 0,
+      maxVariantsPerEndpoint: 0,
     });
     expect(variants.scenarios).toEqual([]);
   });
@@ -616,10 +629,82 @@ const fixtureNonOverlapVariant: OperationGraph = makeGraph([
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Fixture L: producerBound semantics must not receive synthetic literals
+// ---------------------------------------------------------------------------
+//
+// When `createDeployment` is selected as an authoritative producer for
+// `ProcessDefinitionKey`, the planner used to assign a synthetic literal
+// (`processDefinitionKey_<suffix>`) to `bindingsDraft.processDefinitionKeyVar`
+// via the Key heuristic and `ensureArtifactBindings`. This caused the emitter
+// to emit `ctx.processDefinitionKeyVar = 'processDefinitionKey_dadq'` on the
+// line *before* the deployment call that actually establishes the value —
+// the synthetic pre-seed was immediately overwritten at runtime.
+//
+// Class-scoped rule: any semantic that has an authoritative producer in
+// `graph.producersByType` is `producerBound` — its value is server-established
+// at runtime via the producer's response. Its binding must be `'__PENDING__'`
+// in the planned scenario, never a synthetic literal. `__PENDING__` causes
+// the emitter to skip the literal assignment; `deploy()` / `extractInto()`
+// then populate the binding at runtime with the real server-assigned value.
+const fixtureProducerBoundBinding: OperationGraph = makeGraph([
+  makeOp('createDeployment', {
+    produces: ['ProcessDefinitionKey'],
+    providerMap: { ProcessDefinitionKey: true },
+  }),
+  makeOp('searchAuditLogs', {
+    required: ['ProcessDefinitionKey'],
+  }),
+]);
+
+describe('planner contracts: producerBound semantics must be __PENDING__ in bindings', () => {
+  it('ProcessDefinitionKey binding is __PENDING__ when createDeployment is the authoritative producer', () => {
+    // Reproducer: prior to the fix the planner emitted
+    // `processDefinitionKeyVar: 'processDefinitionKey_<suffix>'`.
+    // The emitter then output a redundant literal assignment that was
+    // overwritten by the deployment helper at runtime.
+    const collection = plan(fixtureProducerBoundBinding, 'searchAuditLogs');
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const scenario = collection.scenarios[0];
+    expect(scenario.bindings?.processDefinitionKeyVar).toBe('__PENDING__');
+  });
+
+  it('class-scoped: no scenario for any endpoint has a synthetic literal for a producerBound Key semantic', () => {
+    // Any semantic ending in 'Key' that has an authoritative producer must
+    // have ALL its vars (including suffixed allocations like processDefinitionKeyVar2)
+    // set to __PENDING__, not a synthetic `<sem>_<suffix>`.
+    // The pattern ^<base>Var\d*$ catches the primary slot and any overflow
+    // slots that semanticToVarName allocates when the primary is already taken.
+    const graph = fixtureProducerBoundBinding;
+    const authoritative = Object.keys(graph.producersByType).filter(
+      (s) => s.endsWith('Key') && (graph.producersByType[s]?.length ?? 0) > 0,
+    );
+    const collection = plan(graph, 'searchAuditLogs');
+    for (const scenario of collection.scenarios) {
+      for (const sem of authoritative) {
+        const baseVarName = `${sem.charAt(0).toLowerCase()}${sem.slice(1)}Var`;
+        const pattern = new RegExp(`^${baseVarName}\\d*$`);
+        const bindings = scenario.bindings ?? {};
+        const matchingKeys = Object.keys(bindings).filter((k) => pattern.test(k));
+        // The primary var must exist (the planner must allocate a slot for it)
+        expect(
+          matchingKeys.length,
+          `expected at least one binding matching ${pattern} for producerBound semantic ${sem}`,
+        ).toBeGreaterThan(0);
+        for (const key of matchingKeys) {
+          expect(bindings[key], `${key} should be __PENDING__, not a synthetic literal`).toBe(
+            '__PENDING__',
+          );
+        }
+      }
+    }
+  });
+});
+
 describe('planner contracts: variant planner non-overlap producer fallback (#37)', () => {
   it('emits a producer→endpoint variant with no warm-up when the producer needs nothing from the endpoint', () => {
     const variants = generateOptionalSubShapeVariants(fixtureNonOverlapVariant, 'createOrder', {
-      maxScenarios: 10,
+      maxVariantsPerEndpoint: 10,
     });
     expect(variants.scenarios.length).toBeGreaterThan(0);
     const variant = variants.scenarios[0];
@@ -642,5 +727,350 @@ describe('planner contracts: variant planner non-overlap producer fallback (#37)
       // mintTag is opportunistic — base planning must not pull it in.
       expect(opIdsOf(s)).not.toContain('mintTag');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: runtimeEmission semantic triggers produce→discover→bind sub-chain
+// (#305 Phase 3 — UserTaskKey pilot)
+// ---------------------------------------------------------------------------
+//
+// A semantic declared `kind: 'runtimeEmission'` must NOT dead-end on the
+// missing-producers check. The planner must:
+//   1. Satisfy the `emittedBy.predecessor` runtime state via the BFS
+//      domain-prereq chain (here: createProcessInstance for
+//      ProcessInstanceExists).
+//   2. Inject the `discoveredVia.operationId` (here: searchUserTasks)
+//      into the chain after the predecessor.
+//   3. Treat the discovery op's response field (`extractKey`) as the
+//      authoritative binding for the runtimeEmission semantic, so the
+//      endpoint-under-test consumes it as a producer-bound var.
+//
+// Before Phase 3 lands the planner classifies `runtimeEmission`-kinded
+// types as `unclassified` (because they have no producers / establishers
+// / external-entity entry) and emits `{ id: 'unsatisfied' }` —
+// reproducing exactly the `updateUserTask` scenario shape today.
+
+const fixtureRuntimeEmissionUserTaskKey: OperationGraph = (() => {
+  const graph = makeGraph([
+    makeOp('createDeployment', {
+      produces: ['ProcessDefinitionKey'],
+      providerMap: { ProcessDefinitionKey: true },
+      domainProduces: ['ProcessDefinitionDeployed', 'ModelHasUserTask'],
+    }),
+    makeOp('createProcessInstance', {
+      required: ['ProcessDefinitionKey'],
+      produces: ['ProcessInstanceKey'],
+      providerMap: { ProcessInstanceKey: true },
+      domainRequiresAll: ['ProcessDefinitionDeployed'],
+      domainProduces: ['ProcessInstanceExists'],
+    }),
+    makeOp('searchUserTasks', {
+      // The runtimeEmission ABox declares this as the discovery op;
+      // the planner injects it from the domain declaration, NOT from
+      // producersByType. So we deliberately leave UserTaskKey OUT of
+      // searchUserTasks.produces — the test will fail differently
+      // (false-positive via producersByType) if the planner relies on
+      // the graph index rather than the ABox declaration.
+      required: [],
+      produces: [],
+      // #309 Phase A — the body builder resolves `fromBinding` by
+      // looking up which semantic the `filterBy` field carries; the
+      // BFS needs that index on the discovery node to stamp a
+      // discoveryIntent on the inserted step.
+      requestBodySemantics: [
+        { semantic: 'ProcessInstanceKey', fieldPath: 'filter.processInstanceKey', required: false },
+      ],
+    }),
+    makeOp('updateUserTask', {
+      required: ['UserTaskKey'],
+    }),
+  ]);
+  graph.domain = {
+    version: 1,
+    semanticTypes: {
+      UserTaskKey: {
+        kind: 'runtimeEmission',
+        emittedBy: {
+          predecessor: 'ProcessInstanceExists',
+          guardedBy: ['ModelHasUserTask'],
+        },
+        discoveredVia: {
+          operationId: 'searchUserTasks',
+          filterBy: 'processInstanceKey',
+          extractKey: 'userTaskKey',
+          consistency: 'eventual',
+        },
+      },
+    },
+    runtimeStates: {
+      ProcessDefinitionDeployed: { kind: 'state', producedBy: ['createDeployment'] },
+      ProcessInstanceExists: { kind: 'state', producedBy: ['createProcessInstance'] },
+    },
+    capabilities: {
+      ModelHasUserTask: {
+        kind: 'capability',
+        parameter: 'userTaskElementId',
+        producedBy: ['createDeployment'],
+        dependsOn: ['ProcessDefinitionDeployed'],
+      },
+    },
+    identifiers: {},
+  };
+  return graph;
+})();
+
+describe('planner contracts: runtimeEmission semantic produces discover-and-bind chain (#305 Phase 3)', () => {
+  it('plans deploy → createProcessInstance → searchUserTasks → updateUserTask for an endpoint that consumes a runtimeEmission semantic', () => {
+    const collection = plan(fixtureRuntimeEmissionUserTaskKey, 'updateUserTask');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const ops = opIdsOf(collection.scenarios[0]);
+    expect(ops).toEqual([
+      'createDeployment',
+      'createProcessInstance',
+      'searchUserTasks',
+      'updateUserTask',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture extension: discoveryIntent stamped on the inserted discovery step
+// (#309 Phase A — intentional discovery body wrapping)
+// ---------------------------------------------------------------------------
+//
+// Once Phase 3 puts the discovery op in the chain, Phase A must stamp a
+// `discoveryIntent` on the OperationRef for that step. The body builder
+// reads the intent to emit `{ filter: { [filterBy]: '${fromBinding}' } }`
+// instead of the generic top-level scalar shape — without this the
+// chain runs but the discovery filter is wrong and the test passes for
+// the wrong reason (see #309 issue context).
+describe('planner contracts: discoveryIntent stamped on inserted runtimeEmission discovery step (#309 Phase A)', () => {
+  it('stamps discoveryIntent on the searchUserTasks OperationRef with filterBy + fromBinding + extractKey + consistency', () => {
+    const collection = plan(fixtureRuntimeEmissionUserTaskKey, 'updateUserTask');
+    const scenario = collection.scenarios[0];
+    const discoveryRef = scenario.operations.find((o) => o.operationId === 'searchUserTasks');
+    expect(discoveryRef).toBeDefined();
+    expect(discoveryRef?.discoveryIntent).toEqual({
+      filterBy: 'processInstanceKey',
+      fromSemantic: 'ProcessInstanceKey',
+      fromBinding: 'processInstanceKeyVar',
+      extractKey: 'userTaskKey',
+      extractInto: 'userTaskKeyVar',
+      consistency: 'eventual',
+    });
+  });
+
+  it('does NOT stamp discoveryIntent on the upstream producer or the endpoint-under-test', () => {
+    const collection = plan(fixtureRuntimeEmissionUserTaskKey, 'updateUserTask');
+    const scenario = collection.scenarios[0];
+    for (const op of scenario.operations) {
+      if (op.operationId === 'searchUserTasks') continue;
+      expect(
+        op.discoveryIntent,
+        `${op.operationId} must not carry discoveryIntent`,
+      ).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture: IncidentKey runtimeEmission produces deploy → instance → search
+// → getIncident chain (#305 Phase 5a)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the UserTaskKey pilot fixture but for IncidentKey, gated by the
+// new ModelEmitsIncident capability and discovered via searchIncidents.
+// The L2 guards that the planner machinery applies generically to any
+// runtimeEmission key (not just UserTaskKey) and that #309 Phase A's
+// discoveryIntent stamping carries through with the IncidentKey extract
+// shape.
+const fixtureRuntimeEmissionIncidentKey: OperationGraph = (() => {
+  const graph = makeGraph([
+    makeOp('createDeployment', {
+      produces: ['ProcessDefinitionKey'],
+      providerMap: { ProcessDefinitionKey: true },
+      domainProduces: ['ProcessDefinitionDeployed', 'ModelEmitsIncident'],
+    }),
+    makeOp('createProcessInstance', {
+      required: ['ProcessDefinitionKey'],
+      produces: ['ProcessInstanceKey'],
+      providerMap: { ProcessInstanceKey: true },
+      domainRequiresAll: ['ProcessDefinitionDeployed'],
+      domainProduces: ['ProcessInstanceExists'],
+    }),
+    makeOp('searchIncidents', {
+      required: [],
+      produces: [],
+      requestBodySemantics: [
+        { semantic: 'ProcessInstanceKey', fieldPath: 'filter.processInstanceKey', required: false },
+      ],
+    }),
+    makeOp('getIncident', {
+      required: ['IncidentKey'],
+    }),
+  ]);
+  graph.domain = {
+    version: 1,
+    semanticTypes: {
+      IncidentKey: {
+        kind: 'runtimeEmission',
+        emittedBy: {
+          predecessor: 'ProcessInstanceExists',
+          guardedBy: ['ModelEmitsIncident'],
+        },
+        discoveredVia: {
+          operationId: 'searchIncidents',
+          filterBy: 'processInstanceKey',
+          extractKey: 'incidentKey',
+          consistency: 'eventual',
+        },
+      },
+    },
+    runtimeStates: {
+      ProcessDefinitionDeployed: { kind: 'state', producedBy: ['createDeployment'] },
+      ProcessInstanceExists: { kind: 'state', producedBy: ['createProcessInstance'] },
+    },
+    capabilities: {
+      ModelEmitsIncident: {
+        kind: 'capability',
+        parameter: 'incidentEmittingElementId',
+        producedBy: ['createDeployment'],
+        dependsOn: ['ProcessDefinitionDeployed'],
+      },
+    },
+    identifiers: {},
+  };
+  return graph;
+})();
+
+describe('planner contracts: IncidentKey runtimeEmission discover-and-bind chain (#305 Phase 5a)', () => {
+  it('plans deploy → createProcessInstance → searchIncidents → getIncident for an endpoint that consumes IncidentKey', () => {
+    const collection = plan(fixtureRuntimeEmissionIncidentKey, 'getIncident');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const ops = opIdsOf(collection.scenarios[0]);
+    expect(ops).toEqual([
+      'createDeployment',
+      'createProcessInstance',
+      'searchIncidents',
+      'getIncident',
+    ]);
+  });
+
+  it('stamps discoveryIntent on the searchIncidents OperationRef with IncidentKey extract shape', () => {
+    const collection = plan(fixtureRuntimeEmissionIncidentKey, 'getIncident');
+    const scenario = collection.scenarios[0];
+    const discoveryRef = scenario.operations.find((o) => o.operationId === 'searchIncidents');
+    expect(discoveryRef).toBeDefined();
+    expect(discoveryRef?.discoveryIntent).toEqual({
+      filterBy: 'processInstanceKey',
+      fromSemantic: 'ProcessInstanceKey',
+      fromBinding: 'processInstanceKeyVar',
+      extractKey: 'incidentKey',
+      extractInto: 'incidentKeyVar',
+      consistency: 'eventual',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture P: variant planner enumerates polymorphic semantic-type siblings on
+// the same field (#324)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the `evaluateExpression.scopeKey` shape exposed by the spec
+// bump in #322: a single optional flat top-level field that carries
+// MULTIPLE semantic-type annotations (e.g. `ScopeKey`,
+// `ProcessInstanceKey`, `ElementInstanceKey`). Pre-fix the planner's
+// variant dedup key was `${rootPath}::${fieldPath}` which collapsed all
+// polymorphic siblings into the first semantic — emitting one variant
+// instead of N.
+//
+// Class-scoped guarantee: for any optional field with N distinct
+// semantic-type annotations, the variant planner emits N variants —
+// one per `(rootPath, fieldPath, semantic)` triple — each carrying its
+// own `populatesSubShape.leafSemantics` value.
+const fixturePolymorphicSemanticSiblings: OperationGraph = makeGraph([
+  makeOp('mintScopeKey', {
+    produces: ['ScopeKey'],
+    providerMap: { ScopeKey: true },
+  }),
+  makeOp('mintProcessInstanceKey', {
+    produces: ['ProcessInstanceKey'],
+    providerMap: { ProcessInstanceKey: true },
+  }),
+  makeOp('mintElementInstanceKey', {
+    produces: ['ElementInstanceKey'],
+    providerMap: { ElementInstanceKey: true },
+  }),
+  makeOp('evaluateExpression', {
+    optionalSubShapes: [
+      {
+        rootPath: '',
+        leaves: [
+          { fieldPath: 'scopeKey', semantic: 'ScopeKey' },
+          { fieldPath: 'scopeKey', semantic: 'ProcessInstanceKey' },
+          { fieldPath: 'scopeKey', semantic: 'ElementInstanceKey' },
+        ],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: variant planner enumerates polymorphic semantic-type siblings (#324)', () => {
+  it('emits one variant per (fieldPath, semantic) for a flat optional with three semantic-type annotations', () => {
+    const variants = generateOptionalSubShapeVariants(
+      fixturePolymorphicSemanticSiblings,
+      'evaluateExpression',
+      { maxVariantsPerEndpoint: 10 },
+    );
+    // Class-scoped: three distinct semantic-type annotations on the
+    // same field => three variant scenarios. Pre-#324 only the first
+    // (ScopeKey) was emitted because the dedup key ignored semantic.
+    const triples = variants.scenarios
+      .map((s) => ({
+        variantKey: s.variantKey ?? '',
+        leafSemantics: s.populatesSubShape?.leafSemantics,
+      }))
+      .sort((a, b) => a.variantKey.localeCompare(b.variantKey));
+    expect(triples).toEqual(
+      [
+        { variantKey: '::scopeKey::ScopeKey', leafSemantics: ['ScopeKey'] },
+        { variantKey: '::scopeKey::ProcessInstanceKey', leafSemantics: ['ProcessInstanceKey'] },
+        { variantKey: '::scopeKey::ElementInstanceKey', leafSemantics: ['ElementInstanceKey'] },
+      ].sort((a, b) => a.variantKey.localeCompare(b.variantKey)),
+    );
+  });
+
+  it('still dedupes true duplicates: the same (fieldPath, semantic) pair appearing twice emits one variant', () => {
+    // Construct a fixture where the extractor emitted the same
+    // (fieldPath, semantic) pair twice in `requestBodySemanticTypes`
+    // (a legitimate occurrence — e.g. a field referenced from two
+    // oneOf branches that both annotate the same semantic). Pre- and
+    // post-#324 must both dedupe these.
+    const fixtureDuplicate: OperationGraph = makeGraph([
+      makeOp('mintScopeKey', {
+        produces: ['ScopeKey'],
+        providerMap: { ScopeKey: true },
+      }),
+      makeOp('evaluateExpression', {
+        optionalSubShapes: [
+          {
+            rootPath: '',
+            leaves: [
+              { fieldPath: 'scopeKey', semantic: 'ScopeKey' },
+              { fieldPath: 'scopeKey', semantic: 'ScopeKey' },
+            ],
+          },
+        ],
+      }),
+    ]);
+    const variants = generateOptionalSubShapeVariants(fixtureDuplicate, 'evaluateExpression', {
+      maxVariantsPerEndpoint: 10,
+    });
+    expect(variants.scenarios.length).toBe(1);
+    expect(variants.scenarios[0].variantKey).toBe('::scopeKey::ScopeKey');
   });
 });

@@ -1,12 +1,25 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { getActiveConfigDir, getGraphDir, getSpecBundleDir } from './configResolver.js';
+import { getGraphDir, getSpecBundleDir } from './configResolver.js';
 import {
   validateDomainSemantics,
+  validateRequestBodySemanticsClassified,
   validateRuntimeStateWitnessGraphRefs,
-} from './domainSemanticsValidator.js';
-import type { BootstrapSequence, DomainSemantics, OperationGraph, OperationNode } from './types.js';
+} from './ontology/crossRefValidator.js';
+import {
+  deriveArtifactKindsViews,
+  deriveGlobalContextSeedsViews,
+  deriveRuntimeStatesViews,
+  deriveSemanticsViews,
+  loadArtifactKindsAbox,
+  loadEdgeEstablishers,
+  loadEntityKindsAbox,
+  loadExternalEntityIdentifiers,
+  loadRuntimeStatesAbox,
+  loadSemanticsAbox,
+} from './ontology/loader.js';
+import type { DomainSemantics, OperationGraph, OperationNode } from './types.js';
 
 class DomainSemanticsValidationFailure extends Error {
   constructor(message: string) {
@@ -42,6 +55,7 @@ interface RawOp {
   producesSemanticTypes?: unknown;
   outputsSemanticTypes?: unknown;
   responseSemanticTypes?: Record<string, unknown>;
+  responseLeafPaths?: Record<string, unknown>;
   requires?: unknown;
   requiresSemanticTypes?: unknown;
   parameters?: Array<{
@@ -75,9 +89,6 @@ interface RawGraphRoot {
   operationNodes?: Record<string, RawOp> | RawOp[];
   graph?: RawGraphRoot;
   data?: RawGraphRoot;
-  bootstrapSequences?: RawBootstrapSeq[];
-  bootstrap_sequences?: RawBootstrapSeq[];
-  sequences?: RawBootstrapSeq[];
   // Issue #134 / camunda/camunda#52320: upstream `semantic-kinds.json`
   // payload, attached by the extractor. Lets the planner identify
   // semantic types owned by an `external-entity` kind without
@@ -85,15 +96,6 @@ interface RawGraphRoot {
   kindRegistry?: {
     kinds?: Array<{ name?: string; shape?: string; identifiers?: string[] }>;
   };
-}
-
-interface RawBootstrapSeq {
-  name?: string;
-  id?: string;
-  description?: string;
-  desc?: string;
-  operations?: unknown[];
-  produces?: string[];
 }
 
 interface RawSchema {
@@ -132,6 +134,33 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`Failed to parse graph JSON at ${graphPath}: ${msg}`);
   }
+
+  // Lift 3 / #208: load the per-config edges ABox up front. The set of
+  // edge-establisher opIds is the authoritative source for
+  // `op.establishes.shape === 'edge'` going forward; the spec
+  // annotation's `shape` field is consulted only for cross-validation
+  // (drift warning). When the active config has not shipped an edges
+  // ABox, `edgeEstablishers` is `null` and `normalizeEstablishes` falls
+  // back to the legacy spec-annotation behaviour for backward compat.
+  const edgeEstablishers = loadEdgeEstablishers(repoRoot);
+
+  // #288 Phase 2: load the entity-kinds ABox up front so `normalizeOp`
+  // can distinguish "owned identifier" from "scoping foreign-key" in
+  // `establishes.identifiedBy[]`. Example: `createTenantClusterVariable`
+  // declares `identifiedBy = [{TenantId, path}, {ClusterVariableName,
+  // body}]`. Only `ClusterVariableName` is genuinely client-minted by
+  // this op — `tenantId` is a foreign-key reference to an existing
+  // Tenant that must exist first. The ABox is the authoritative source
+  // for which semantic types are TRUE identifiers of a given kind
+  // (`TenantClusterVariable.identifiers = ['ClusterVariableName']`).
+  // When the ABox is absent (legacy configs, tmpDir tests),
+  // `kindIdentifiersByKind` is `null` and `normalizeOp` falls back to
+  // the legacy "all identifiedBy are self-minted" behaviour.
+  const entityKindsAbox = loadEntityKindsAbox(repoRoot);
+  const kindIdentifiersByKind: Map<string, Set<string>> | null =
+    entityKindsAbox !== null
+      ? new Map(entityKindsAbox.kinds.map((k) => [k.name, new Set(k.identifiers)]))
+      : null;
 
   const operations: Record<string, OperationNode> = {};
 
@@ -175,11 +204,32 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         console.warn('[graphLoader] Skipping node without operationId/id/name:', Object.keys(op));
         continue;
       }
-      operations[opId] = normalizeOp(opId, op);
+      operations[opId] = normalizeOp(opId, op, edgeEstablishers, kindIdentifiersByKind);
     }
   } else {
     for (const [opId, op] of Object.entries(candidateOps)) {
-      operations[opId] = normalizeOp(opId, op);
+      operations[opId] = normalizeOp(opId, op, edgeEstablishers, kindIdentifiersByKind);
+    }
+  }
+
+  // Lift 3 / #208: cross-validate the edges ABox against the spec
+  // annotations now that every op has been normalised. The ABox is
+  // authoritative for `shape: 'edge'` at runtime, but a disagreement
+  // with the spec annotation almost always signals a config error
+  // (typo in `establishedBy`, ABox missing a recently-added op,
+  // upstream rename) — surface it loudly so it doesn't rot.
+  //
+  // Strict mode (STRICT_EDGES_ABOX=1) escalates drift to a hard error;
+  // default is a warning so a partially-migrated config still loads.
+  if (edgeEstablishers !== null) {
+    const drift = detectEdgeAnnotationDrift(candidateOps, edgeEstablishers, operations);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `edges ABox / spec-annotation drift detected:\n${detail}`;
+      if (process.env.STRICT_EDGES_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(`WARNING: ${message}\n  (set STRICT_EDGES_ABOX=1 to fail-fast on drift.)`);
     }
   }
 
@@ -208,18 +258,47 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // clean while preserving per-op satisfaction tracking.
     const synthesisedFromEstablishes = new Set<string>();
     if (op.establishes && op.establishes.shape !== 'edge') {
+      const kindIdentifiers = kindIdentifiersByKind?.get(op.establishes.kind);
       for (const id of op.establishes.identifiedBy) {
+        // #288 Phase 2: only treat components that are TRUE identifiers
+        // of the kind as synthesised — mirroring the filter applied in
+        // `normalizeOp`. Without this, the foreign-key components have
+        // already been removed from `op.produces` upstream but the
+        // synthesised-set check below could still spuriously suppress
+        // them from `producersByType` had they snuck in.
+        if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
         synthesisedFromEstablishes.add(id.semanticType);
       }
     }
     for (const st of op.produces) {
-      if (synthesisedFromEstablishes.has(st)) continue;
+      // #288 Phase 2: an op that establishes type T AND authoritatively
+      // returns T in a 2xx response (provider:true) is legitimately a
+      // producer — its server-echoed value is the canonical source for
+      // downstream chains. `createTenant` is the motivating example:
+      // it establishes Tenant via body.tenantId (client-minted) AND
+      // its 201 response carries `tenantId` with provider:true. The
+      // earlier blanket skip of every synthesised entry kept
+      // createTenant out of `producersByType.TenantId`, which made
+      // `isAuthoritativeChain` exempt `TenantId` from gating and let
+      // the chain selector pick `createTenantClusterVariable` (a
+      // non-authoritative establisher) instead of `createTenant`.
+      if (synthesisedFromEstablishes.has(st) && !(op.providerMap?.[st] === true)) continue;
       const list = producersByType[st] ?? [];
       list.push(op.operationId);
       producersByType[st] = list;
     }
     if (op.establishes && op.establishes.shape !== 'edge') {
+      const kindIdentifiers = kindIdentifiersByKind?.get(op.establishes.kind);
       for (const id of op.establishes.identifiedBy) {
+        // #288 Phase 2: a foreign-key component (e.g. `tenantId` on
+        // createTenantClusterVariable) is NOT an entry this op
+        // establishes — it's a value the op consumes. Skip the
+        // foreign-key entries when building `establishersByType` so
+        // that index keeps its "registers a client-minted value"
+        // contract: querying `establishersByType.TenantId` returns only
+        // ops that genuinely mint a Tenant identifier (`createTenant`),
+        // not ops that scope under one.
+        if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
         const list = establishersByType[id.semanticType] ?? [];
         if (!list.includes(op.operationId)) list.push(op.operationId);
         establishersByType[id.semanticType] = list;
@@ -258,70 +337,63 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // debug: normalization summary
   }
 
-  // Bootstrap sequences (optional)
-  const bootstrapSequences: BootstrapSequence[] = [];
-  const rawSequences: RawBootstrapSeq[] = !Array.isArray(parsed)
-    ? parsed.bootstrapSequences || parsed.bootstrap_sequences || parsed.sequences || []
-    : [];
-  if (Array.isArray(rawSequences)) {
-    for (const seq of rawSequences) {
-      if (!seq) continue;
-      const name = seq.name || seq.id;
-      if (!name || !Array.isArray(seq.operations)) continue;
-      bootstrapSequences.push({
-        name,
-        description: seq.description || seq.desc,
-        operations: seq.operations.filter((o): o is string => typeof o === 'string'),
-        produces: Array.isArray(seq.produces) ? unique(seq.produces) : [],
-      });
+  // Per-config ontology ABoxes (optional). Each file contributes one
+  // slice of `graph.domain`; absent ABoxes simply leave that slice
+  // unset.
+  let domain: DomainSemantics | undefined;
+  let producersByState: Record<string, string[]> | undefined;
+  const artifactViews = deriveArtifactKindsViews(repoRoot);
+  const runtimeStatesViews = deriveRuntimeStatesViews(repoRoot);
+  const semanticsViews = deriveSemanticsViews(repoRoot);
+  const globalContextSeedsViews = deriveGlobalContextSeedsViews(repoRoot);
+  const postOverlayReValidationNeeded =
+    artifactViews !== null ||
+    runtimeStatesViews !== null ||
+    semanticsViews !== null ||
+    globalContextSeedsViews !== null;
+
+  if (postOverlayReValidationNeeded) {
+    domain = { version: 1 };
+    if (artifactViews !== null) {
+      domain = {
+        ...domain,
+        artifactKinds: artifactViews.artifactKinds,
+        semanticTypeToArtifactKind: artifactViews.semanticTypeToArtifactKind,
+        operationArtifactRules: artifactViews.operationArtifactRules,
+        artifactFileKinds: artifactViews.artifactFileKinds,
+      };
     }
-    if (bootstrapSequences.length) {
-      // debug: number of bootstrap sequences loaded
+    if (runtimeStatesViews !== null) {
+      domain = {
+        ...domain,
+        runtimeStates: runtimeStatesViews.runtimeStates,
+        operationRequirements: runtimeStatesViews.operationRequirements,
+      };
+    }
+    if (semanticsViews !== null) {
+      domain = {
+        ...domain,
+        semanticTypes: semanticsViews.semanticTypes,
+        capabilities: semanticsViews.capabilities,
+        identifiers: semanticsViews.identifiers,
+      };
+    }
+    if (globalContextSeedsViews !== null) {
+      domain = { ...domain, globalContextSeeds: globalContextSeedsViews.globalContextSeeds };
     }
   }
 
-  // Domain sidecar load (optional). The file lives under the active
-  // config directory at the repo root (see #128). `baseDir` is the
-  // path-analyser workspace, so the repo root is its parent.
-  let domain: DomainSemantics | undefined;
-  let producersByState: Record<string, string[]> | undefined;
-  try {
-    const repoRoot = path.resolve(baseDir, '..');
-    const domainPath = path.resolve(getActiveConfigDir(repoRoot), 'domain-semantics.json');
-    const domainRaw = await readFile(domainPath, 'utf8');
-    // biome-ignore lint/plugin: JSON.parse returns `any`; domain-semantics.json is the runtime contract.
-    const parsedDomain = JSON.parse(domainRaw) as DomainSemantics;
-    const issues = validateDomainSemantics(parsedDomain);
-    if (issues.length > 0) {
-      const detail = issues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
-      throw new DomainSemanticsValidationFailure(
-        `domain-semantics.json failed validation:\n${detail}`,
-      );
+  if (runtimeStatesViews !== null) {
+    for (const [opId, req] of Object.entries(runtimeStatesViews.operationRequirements)) {
+      const node = operations[opId];
+      if (!node) continue;
+      if (req.requires) node.domainRequiresAll = req.requires;
+      if (req.disjunctions) node.domainDisjunctions = req.disjunctions;
+      if (req.produces) node.domainProduces = req.produces;
+      if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
     }
-    domain = parsedDomain;
-    // debug: domain semantics sidecar loaded
-    if (domain?.operationRequirements) {
-      for (const [opId, req] of Object.entries(domain.operationRequirements)) {
-        const node = operations[opId];
-        if (!node) continue;
-        if (req.requires) node.domainRequiresAll = req.requires;
-        if (req.disjunctions) node.domainDisjunctions = req.disjunctions;
-        if (req.produces) node.domainProduces = req.produces;
-        if (req.implicitAdds) node.domainImplicitAdds = req.implicitAdds;
-      }
-    }
-    // Build producersByState
     const producers: Record<string, string[]> = {};
     producersByState = producers;
-    // Dedup at the writer: every callsite (runtimeStates.producedBy,
-    // capabilities.producedBy, identifiers.boundBy, operationRequirements.
-    // produces / implicitAdds, the #70 witness implication) funnels through
-    // here, so guarding once prevents duplicate (state, opId) pairs from any
-    // current or future caller. Without this, an opId that satisfies a state
-    // through more than one channel (e.g. createDeployment producing
-    // ProcessDefinitionDeployed both directly and via the
-    // ProcessDefinitionKey → ProcessDefinitionDeployed witness edge) would
-    // appear multiple times in producersByState[state].
     const addProducer = (state: string, opId: string) => {
       const list = producers[state] ?? [];
       if (!list.includes(opId)) list.push(opId);
@@ -332,57 +404,64 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
       }
     };
-    if (domain?.runtimeStates) {
-      for (const [stateName, spec] of Object.entries(domain.runtimeStates)) {
-        for (const opId of spec.producedBy ?? []) {
-          if (operations[opId]) addProducer(stateName, opId);
-        }
+    for (const [stateName, spec] of Object.entries(runtimeStatesViews.runtimeStates)) {
+      for (const opId of spec.producedBy ?? []) {
+        if (operations[opId]) addProducer(stateName, opId);
       }
     }
-    if (domain?.capabilities) {
-      for (const [capName, spec] of Object.entries(domain.capabilities)) {
-        for (const opId of spec.producedBy ?? []) {
-          if (operations[opId]) addProducer(capName, opId);
-        }
-      }
+    for (const [opId, spec] of Object.entries(runtimeStatesViews.operationRequirements)) {
+      if (!operations[opId]) continue;
+      for (const st of spec.produces ?? []) addProducer(st, opId);
+      for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
     }
-    if (domain?.identifiers) {
-      for (const [, spec] of Object.entries(domain.identifiers)) {
-        const state = spec.validityState;
-        // Skip identifiers whose validityState is not declared in the sidecar.
-        // Empty strings are invalid data and would surface as a malformed
-        // producersByState key — the regression test in
-        // tests/regression/graph-loader-undefined-state-key.test.ts asserts
-        // no such key is ever written. We use `state == null` per #65 review:
-        // an empty string is not the same as "absent" and should not be
-        // silently treated as such.
-        if (state == null) continue;
-        for (const opId of spec.boundBy ?? []) {
-          if (operations[opId]) addProducer(state, opId);
-        }
-      }
-    }
-    if (domain?.operationRequirements) {
-      for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
-        if (!operations[opId]) continue;
-        for (const st of spec.produces ?? []) addProducer(st, opId);
-        for (const st of spec.implicitAdds ?? []) addProducer(st, opId);
-      }
-    }
-    // #56: surface sidecar-declared `produces` into the semantic-BFS-visible
+    // #56: surface ABox-declared `produces` into the semantic-BFS-visible
     // structures (op.produces and producersByType). Without this step the
-    // sidecar entry only updates `domainProduces` / `producersByState`, which
-    // are used by the runtime-state planner but invisible to semantic BFS.
-    if (domain?.operationRequirements) {
-      for (const [opId, spec] of Object.entries(domain.operationRequirements)) {
-        const node = operations[opId];
-        if (!node) continue;
-        for (const st of spec.produces ?? []) {
-          if (!node.produces.includes(st)) node.produces.push(st);
-          const list = producersByType[st] ?? [];
-          if (!list.includes(opId)) list.push(opId);
-          producersByType[st] = list;
-        }
+    // entry only updates `domainProduces` / `producersByState`, which are
+    // used by the runtime-state planner but invisible to semantic BFS.
+    for (const [opId, spec] of Object.entries(runtimeStatesViews.operationRequirements)) {
+      const node = operations[opId];
+      if (!node) continue;
+      for (const st of spec.produces ?? []) {
+        if (!node.produces.includes(st)) node.produces.push(st);
+        const list = producersByType[st] ?? [];
+        if (!list.includes(opId)) list.push(opId);
+        producersByType[st] = list;
+      }
+    }
+  }
+
+  if (semanticsViews !== null) {
+    // Preserve any runtime-state-derived producers when the semantics
+    // ABox is also present; otherwise start a fresh map.
+    const producers: Record<string, string[]> = producersByState ?? {};
+    producersByState = producers;
+    const addProducer = (state: string, opId: string) => {
+      const list = producers[state] ?? [];
+      if (!list.includes(opId)) list.push(opId);
+      producers[state] = list;
+      const node = operations[opId];
+      if (node) {
+        if (!node.domainProduces) node.domainProduces = [state];
+        else if (!node.domainProduces.includes(state)) node.domainProduces.push(state);
+      }
+    };
+    for (const [capName, spec] of Object.entries(semanticsViews.capabilities)) {
+      for (const opId of spec.producedBy ?? []) {
+        if (operations[opId]) addProducer(capName, opId);
+      }
+    }
+    for (const [, spec] of Object.entries(semanticsViews.identifiers)) {
+      const state = spec.validityState;
+      // Skip identifiers whose validityState is absent. Empty strings are
+      // invalid data and would surface as a malformed producersByState key —
+      // the regression test in
+      // tests/regression/graph-loader-undefined-state-key.test.ts asserts
+      // no such key is ever written. We use `state == null` per #65 review:
+      // an empty string is not the same as "absent" and should not be
+      // silently treated as such.
+      if (state == null) continue;
+      for (const opId of spec.boundBy ?? []) {
+        if (operations[opId]) addProducer(state, opId);
       }
     }
     // #70: witness implication. Producing a value of semantic type T
@@ -403,44 +482,61 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     // createDocument symptom in #95). Authoritative producers
     // (`provider: true`) are still surfaced; that is the relation #70
     // intended to capture.
-    if (domain?.semanticTypes) {
-      for (const [semanticType, spec] of Object.entries(domain.semanticTypes)) {
-        const witnessed = spec.witnesses;
-        if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
-        const producers = producersByType[semanticType] ?? [];
-        for (const opId of producers) {
-          const op = operations[opId];
-          if (!op) continue;
-          if (op.providerMap?.[semanticType] !== true) continue;
-          addProducer(witnessed, opId);
-        }
+    for (const [semanticType, spec] of Object.entries(semanticsViews.semanticTypes)) {
+      const witnessed = spec.witnesses;
+      if (typeof witnessed !== 'string' || witnessed.length === 0) continue;
+      const producersForSemantic = producersByType[semanticType] ?? [];
+      for (const opId of producersForSemantic) {
+        const op = operations[opId];
+        if (!op) continue;
+        if (op.providerMap?.[semanticType] !== true) continue;
+        addProducer(witnessed, opId);
       }
     }
-  } catch (err) {
-    if (err instanceof DomainSemanticsValidationFailure) throw err;
-    if (err instanceof SyntaxError) {
-      throw new DomainSemanticsValidationFailure(
-        `domain-semantics.json is not valid JSON: ${err.message}`,
-      );
-    }
-    if (err instanceof Error && 'code' in err && err.code !== 'ENOENT') {
-      throw new DomainSemanticsValidationFailure(
-        `Failed to load domain-semantics.json: ${err.message}`,
-      );
-    }
-    // ENOENT or non-Error throw: sidecar absent — domain analysis disabled
   }
 
-  // Issue #134 / camunda/camunda#52320: build the external-entity
-  // identifier set from the kindRegistry payload (if any). Each kind
-  // with `shape: "external-entity"` contributes its `identifiers`
-  // (e.g. Client → ClientId) — the planner treats these as
-  // automatically client-mintable. Source the registry from the same
-  // root that yielded `candidateOps` so nested-graph layouts
-  // (`parsed.graph` / `parsed.data`) are handled consistently with
-  // the top-level layout.
+  // Re-run the cross-reference invariants from `validateDomainSemantics`
+  // against the synthesized ontology-derived `graph.domain`. The per-ABox drift
+  // detectors (detectArtifactKindsDrift / detectRuntimeStatesDrift /
+  // detectSemanticsDrift) only check abox-vs-graph opId references;
+  // they do NOT check cross-ABox references like
+  // `semanticTypes.witnesses → runtimeStates|capabilities`,
+  // `capabilities.dependsOn → runtimeStates`,
+  // `identifiers.validityState → runtimeStates`, or
+  // `identifiers.derivedVia → capabilities`. Without this re-validation
+  // pass an ABox-only config could ship a `semantics.json` whose
+  // `witnesses` points at a now-removed runtime state and `loadGraph`
+  // would still return an invalid `graph.domain`. The validator is
+  // structural (zod `safeParse`) and tolerant of any subset of
+  // sub-trees being absent, so it is safe to invoke on the synthesized
+  // domain. Reuses the same validator and the same
+  // DomainSemanticsValidationFailure error type so the diagnostic
+  // surfaces with one well-known shape regardless of which ABox
+  // tripped it.
+  if (postOverlayReValidationNeeded && domain !== undefined) {
+    const overlayIssues = validateDomainSemantics(domain);
+    if (overlayIssues.length > 0) {
+      const detail = overlayIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+      throw new DomainSemanticsValidationFailure(
+        `ontology ABox introduced cross-reference violation(s):\n${detail}`,
+      );
+    }
+  }
+
+  // Lift 4 / #210: the entity-kinds ABox is the authoritative runtime
+  // source for the external-entity identifier set. Falls back to the
+  // spec-emitted `kindRegistry` (Issue #134 / camunda/camunda#52320)
+  // when no ABox is shipped — the legacy path stays alive so
+  // unmigrated configs and tests using isolated tmpDirs still work.
+  // Mirrors the Lift 3 (#208) edges-ABox pattern.
   let externalEntityIdentifiers: Set<string> | undefined;
-  if (opsRoot) {
+  const aboxExternals = loadExternalEntityIdentifiers(repoRoot);
+  if (aboxExternals !== null) {
+    if (aboxExternals.size > 0) externalEntityIdentifiers = aboxExternals;
+  } else if (opsRoot) {
+    // Source the registry from the same root that yielded `candidateOps`
+    // so nested-graph layouts (`parsed.graph` / `parsed.data`) are
+    // handled consistently with the top-level layout.
     const registry = opsRoot.kindRegistry;
     if (registry && Array.isArray(registry.kinds)) {
       const set = new Set<string>();
@@ -455,11 +551,99 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
   }
 
+  // Lift 4 / #210: cross-validate the entity-kinds ABox against both
+  // the spec-emitted kindRegistry (transitional, sense 1) and the
+  // bundled-graph use-sites (durable, sense 2). The two senses have
+  // different lifetimes — sense 1 is migration scaffolding that
+  // retires when upstream drops `x-semantic-kind`; sense 2 is the
+  // permanent gate that catches "upstream added a new endpoint and
+  // we forgot to update the ABox" (the locality-loss replacement
+  // signal). See #210 §4b for the full rationale.
+  if (aboxExternals !== null) {
+    const drift = detectEntityKindsDrift(opsRoot?.kindRegistry, operations, entityKindsAbox);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `entity-kinds ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_ENTITY_KINDS_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(
+        `WARNING: ${message}\n  (set STRICT_ENTITY_KINDS_ABOX=1 to fail-fast on drift.)`,
+      );
+    }
+  }
+
+  // Lift 5 / #212: cross-validate the artifact-kinds ABox against the
+  // bundled graph (durable, sense 2 only — there is no spec source for
+  // these facts to disagree with). Catches: rules naming nonexistent
+  // operations / artifact kinds; semantic-types mapped to nonexistent
+  // kinds; file-extension entries pointing at nonexistent kinds; kinds
+  // not referenced by any rule, semanticTypeMap entry, or
+  // fileExtensionMap entry (dead weight). Validates only entries that
+  // are present in the ABox — there is no reverse heuristic for
+  // discovering newly-added artifact-flavoured ops in the bundled
+  // graph that should have been added to the ABox; that direction is
+  // the open coverage gap a future iteration could close.
+  {
+    const drift = detectArtifactKindsDrift(operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `artifact-kinds ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_ARTIFACT_KINDS_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(
+        `WARNING: ${message}\n  (set STRICT_ARTIFACT_KINDS_ABOX=1 to fail-fast on drift.)`,
+      );
+    }
+  }
+
+  // Lift 6 / #214: same per-fact-class drift detector for the
+  // runtime-states ABox. Catches: producedBy / witness.operationId /
+  // operationRequirements.operationId references to opIds that don't
+  // exist in the bundled graph (typo, renamed-upstream op, or stale
+  // entry). Cross-references to capabilities / semanticTypes now live
+  // in the semantics ABox and are covered by `detectSemanticsDrift`
+  // (Lift 7 / #216) and by the L3 cross-ABox invariants.
+  {
+    const drift = detectRuntimeStatesDrift(operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `runtime-states ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_RUNTIME_STATES_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(
+        `WARNING: ${message}\n  (set STRICT_RUNTIME_STATES_ABOX=1 to fail-fast on drift.)`,
+      );
+    }
+  }
+
+  // Lift 7 / #216: per-fact-class drift detector for the semantics
+  // ABox (semanticTypes + capabilities + identifiers). Catches:
+  // capabilities.producedBy / identifiers.boundBy references to
+  // opIds that don't exist in the bundled graph (typo,
+  // renamed-upstream op, or stale entry). Cross-sub-tree
+  // dead-entry checks (e.g. unreferenced semanticTypes) are
+  // deferred to the L3 invariant in
+  // `configs/<config>/regression-invariants.test.ts`, which sees
+  // both this ABox and the runtime-states ABox at once.
+  {
+    const drift = detectSemanticsDrift(operations, repoRoot);
+    if (drift.length > 0) {
+      const detail = drift.map((d) => `  - ${d}`).join('\n');
+      const message = `semantics ABox drift detected:\n${detail}`;
+      if (process.env.STRICT_SEMANTICS_ABOX === '1') {
+        throw new Error(message);
+      }
+      console.warn(`WARNING: ${message}\n  (set STRICT_SEMANTICS_ABOX=1 to fail-fast on drift.)`);
+    }
+  }
+
   const graph: OperationGraph = {
     operations,
     producersByType,
     responseProducersByType,
-    bootstrapSequences,
     domain,
     producersByState,
     establishersByType: Object.keys(establishersByType).length ? establishersByType : undefined,
@@ -480,13 +664,33 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   if (witnessIssues.length > 0) {
     const detail = witnessIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
     throw new DomainSemanticsValidationFailure(
-      `domain-semantics.json failed cross-reference validation against the bundled spec:\n${detail}`,
+      `graph domain failed cross-reference validation against the bundled spec:\n${detail}`,
+    );
+  }
+  // #162 PR 5: every semantic referenced by an operation's
+  // requestBodySemanticTypes must classify into one of the five
+  // terminal classifications (see bindSemanticInput.ts). An
+  // unclassified semantic means the planner has no rule for what value
+  // to bind into the request body — fail-fast here so a future spec
+  // change that introduces a new semantic without an accompanying
+  // domain-semantics declaration is caught at load time rather than
+  // surfacing as an unexplained placeholder in the emitted suite.
+  const classificationIssues = validateRequestBodySemanticsClassified(graph);
+  if (classificationIssues.length > 0) {
+    const detail = classificationIssues.map((i) => `  - [${i.invariant}] ${i.message}`).join('\n');
+    throw new DomainSemanticsValidationFailure(
+      `operation graph has unclassified requestBodySemanticTypes entries:\n${detail}`,
     );
   }
   return graph;
 }
 
-function normalizeOp(opId: string, op: RawOp): OperationNode {
+function normalizeOp(
+  opId: string,
+  op: RawOp,
+  edgeEstablishers: Set<string> | null,
+  kindIdentifiersByKind: Map<string, Set<string>> | null,
+): OperationNode {
   // Extract produced semantic types.
   // Priority:
   // 1. Explicit fields (producesSemanticTypes / producesSemanticType / produces / outputsSemanticTypes)
@@ -588,6 +792,20 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
     }
   }
 
+  // #305 Phase 4: pass through responseLeafPaths (flat list of all
+  // primitive leaf paths per status code). Used by the
+  // UpdatedFieldVisibleOnReadBack template instantiator.
+  let normalizedResponseLeafPaths: Record<string, string[]> | undefined;
+  if (op.responseLeafPaths && typeof op.responseLeafPaths === 'object') {
+    const tmp: Record<string, string[]> = {};
+    for (const [status, arr] of Object.entries(op.responseLeafPaths)) {
+      if (!Array.isArray(arr)) continue;
+      const paths = arr.filter((p): p is string => typeof p === 'string');
+      if (paths.length) tmp[status] = paths;
+    }
+    if (Object.keys(tmp).length) normalizedResponseLeafPaths = tmp;
+  }
+
   // Issue #104: x-semantic-establishes contributes synthetic produced
   // semantic types so BFS can schedule the establisher as a satisfier
   // for any consumer that needs the same identifier. Establishers are
@@ -602,10 +820,23 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
   // *consumed* prerequisites, not values established by this op. The
   // edge itself has no semantic type the planner can chain on, so we
   // don't touch `produces` for edges.
-  const establishes = normalizeEstablishes(op.establishes);
+  const establishes = normalizeEstablishes(op.establishes, opId, edgeEstablishers);
   const establishedSemantics = new Set<string>();
   if (establishes && establishes.shape !== 'edge') {
+    // #288 Phase 2: distinguish "owned identifier" from "scoping
+    // foreign-key" inside `identifiedBy[]`. The entity-kinds ABox lists
+    // the kind's TRUE identifiers (e.g. TenantClusterVariable.identifiers
+    // = ['ClusterVariableName']). Components present in `identifiedBy`
+    // but NOT in the kind's identifiers set are foreign-key references
+    // to other entities (e.g. `tenantId` path param on
+    // createTenantClusterVariable) and must remain in `requires` so the
+    // planner chains in the establisher of the referenced entity
+    // (createTenant). When the ABox doesn't list this kind (or no ABox
+    // is available), fall back to the legacy "all identifiedBy are
+    // self-minted" behaviour for backward compatibility.
+    const kindIdentifiers = kindIdentifiersByKind?.get(establishes.kind);
     for (const id of establishes.identifiedBy) {
+      if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
       produces.push(id.semanticType);
       establishedSemantics.add(id.semanticType);
     }
@@ -636,6 +867,7 @@ function normalizeOp(opId: string, op: RawOp): OperationNode {
     responseSemanticTypes: Object.keys(normalizedResponseSemanticTypes).length
       ? normalizedResponseSemanticTypes
       : undefined,
+    responseLeafPaths: normalizedResponseLeafPaths,
     pathParameters: extractPathParameters(op),
     optionalSubShapes: optionalSubShapes.length ? optionalSubShapes : undefined,
     responseSemanticLeaves: responseLeaves.length ? responseLeaves : undefined,
@@ -668,7 +900,11 @@ function extractRequestBodySemantics(op: RawOp): OperationNode['requestBodySeman
   return out.length ? out : undefined;
 }
 
-function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
+function normalizeEstablishes(
+  raw: unknown,
+  opId: string,
+  edgeEstablishers: Set<string> | null,
+): OperationNode['establishes'] {
   if (!raw || typeof raw !== 'object') return undefined;
   // biome-ignore lint/plugin: extractor JSON contract — fields validated below.
   const r = raw as { kind?: unknown; shape?: unknown; identifiedBy?: unknown };
@@ -711,19 +947,345 @@ function normalizeEstablishes(raw: unknown): OperationNode['establishes'] {
     if (e.acceptsExternal === true) entry.acceptsExternal = true;
     identifiedBy.push(entry);
   }
-  // Same `shape` restriction as the extractor: an unknown string would
-  // silently degrade to non-edge behaviour and `normalizeOp` would push
-  // the components into `produces` and strip them from `requires` —
-  // the exact opposite of the intended edge semantics. Reject unknown
-  // shapes wholesale.
+  // Lift 3 / #208: ABox is the authoritative source for `shape: 'edge'`
+  // when the active config has shipped an edges ABox. The spec
+  // annotation's `shape` field is consulted only as a fallback (for
+  // configs without an ABox) and as a drift signal (cross-validated by
+  // a separate check in loadGraph after all ops are normalised).
+  //
+  // When the ABox is present:
+  //   - opId in `edgeEstablishers` ⇒ `shape: 'edge'` (regardless of
+  //     what the spec annotation says).
+  //   - opId NOT in `edgeEstablishers` ⇒ `shape: undefined` (treat as
+  //     non-edge even if the spec annotation says `shape: 'edge'`; the
+  //     drift is surfaced as a warning by detectEdgeAnnotationDrift).
+  //
+  // When the ABox is absent (`edgeEstablishers === null`), fall back to
+  // the legacy spec-annotation behaviour for backward compat with
+  // configs that have not yet migrated.
   const rawShape = r.shape;
-  const shapeValid = rawShape === undefined || rawShape === 'edge';
-  if (!shapeValid) return undefined;
+  let resolvedShape: 'edge' | undefined;
+  if (edgeEstablishers !== null) {
+    resolvedShape = edgeEstablishers.has(opId) ? 'edge' : undefined;
+  } else {
+    // Legacy spec-driven behaviour: same `shape` restriction as the
+    // extractor. An unknown string would silently degrade to non-edge
+    // behaviour and `normalizeOp` would push the components into
+    // `produces` and strip them from `requires` — the exact opposite
+    // of the intended edge semantics. Reject unknown shapes wholesale.
+    const shapeValid = rawShape === undefined || rawShape === 'edge';
+    if (!shapeValid) return undefined;
+    resolvedShape = rawShape === 'edge' ? 'edge' : undefined;
+  }
   return {
     kind: r.kind,
-    shape: rawShape === 'edge' ? 'edge' : undefined,
+    shape: resolvedShape,
     identifiedBy,
   };
+}
+
+/**
+ * Lift 3 / #208: detect drift between the edges ABox (authoritative
+ * for `shape: 'edge'`) and the per-op `x-semantic-establishes.shape`
+ * annotations from the spec. Returns one human-readable line per
+ * disagreement; an empty array means the two are consistent.
+ *
+ * Two drift kinds:
+ *   - **ABox lists op X but spec annotation says non-edge** (or no
+ *     annotation at all): the planner will treat X as an edge
+ *     establisher, but the spec disagrees — likely an ABox typo or a
+ *     stale spec annotation.
+ *   - **Spec says X is `shape: 'edge'` but ABox does not list X**: the
+ *     planner now treats X as a non-edge (per ABox); the spec
+ *     annotation is being ignored — likely an ABox missed an op or a
+ *     spec annotation is stale.
+ *
+ * Either condition is loud: silently letting the planner classify the
+ * op the wrong way would re-introduce the partial-state hazard #112
+ * was meant to close.
+ */
+function detectEdgeAnnotationDrift(
+  candidateOps: Record<string, RawOp> | RawOp[],
+  edgeEstablishers: Set<string>,
+  operations: Record<string, OperationNode>,
+): string[] {
+  const drift: string[] = [];
+  const specEdgeOps = new Set<string>();
+  const iterate = (cb: (opId: string, op: RawOp) => void) => {
+    if (Array.isArray(candidateOps)) {
+      for (const op of candidateOps) {
+        const opId = op?.operationId || op?.id || op?.name;
+        if (opId) cb(opId, op);
+      }
+    } else {
+      for (const [opId, op] of Object.entries(candidateOps)) cb(opId, op);
+    }
+  };
+  iterate((opId, op) => {
+    const est = op.establishes;
+    if (est === null || typeof est !== 'object') return;
+    // biome-ignore lint/plugin: drift detection inspects raw spec-annotation contract; result is narrowed by literal comparison below.
+    const shape = (est as Record<string, unknown>).shape;
+    if (shape === 'edge') {
+      specEdgeOps.add(opId);
+    }
+  });
+  for (const opId of edgeEstablishers) {
+    if (!(opId in operations)) {
+      drift.push(`ABox lists '${opId}' as an edge establisher, but the op is not in the spec`);
+      continue;
+    }
+    if (!specEdgeOps.has(opId)) {
+      drift.push(
+        `ABox lists '${opId}' as an edge establisher, but the spec annotation does not have shape: 'edge' (ABox is authoritative; spec annotation will be ignored)`,
+      );
+    }
+  }
+  for (const opId of specEdgeOps) {
+    if (!edgeEstablishers.has(opId)) {
+      drift.push(
+        `spec annotates '${opId}' with shape: 'edge', but the ABox does not list it as an edge establisher (ABox is authoritative; '${opId}' will be treated as a non-edge establisher)`,
+      );
+    }
+  }
+  return drift;
+}
+
+/**
+ * Cross-validate the entity-kinds ABox against (1) the spec-emitted
+ * `kindRegistry` payload and (2) the bundled-graph use-sites. Lift 4 /
+ * #210 introduces two senses of drift with different lifetimes; both
+ * are checked here.
+ *
+ *   - **Sense 1 (transitional, `spec-vs-abox`)**: cross-checks the ABox
+ *     against the spec's `kindRegistry`. Useful migration scaffolding;
+ *     becomes a no-op once `x-semantic-kind` retires upstream.
+ *
+ *       - ABox lists kind X but kindRegistry does not.
+ *       - kindRegistry lists kind X but ABox does not.
+ *
+ *   - **Sense 2 (durable, `abox-vs-graph`)**: grounds drift in actual
+ *     runtime use of the bundled graph. Permanent gate that catches
+ *     "upstream added a new endpoint and we forgot to update the ABox".
+ *
+ *       - ABox lists kind X but no operation in the graph references
+ *         any of X's identifier types in `produces[]`, `requires[]`,
+ *         or `establishes.identifiedBy[]`. X is dead weight.
+ *
+ *   The reverse Sense-2 direction (semantic type appears in the graph
+ *   but no kind classifies it) is enforced as an L3 coverage invariant
+ *   in `configs/<config>/regression-invariants.test.ts` instead of
+ *   here, because it depends on per-config classification of which
+ *   semantic types are *identifiers* (vs ordinary value fields), which
+ *   the loader does not own.
+ */
+function detectEntityKindsDrift(
+  rawRegistry: RawGraphRoot['kindRegistry'] | undefined,
+  operations: Record<string, OperationNode>,
+  abox: ReturnType<typeof loadEntityKindsAbox>,
+): string[] {
+  const drift: string[] = [];
+  if (abox === null) return drift;
+
+  const aboxByName = new Map(abox.kinds.map((k) => [k.name, k]));
+
+  if (rawRegistry && Array.isArray(rawRegistry.kinds)) {
+    const specByName = new Map<string, { name?: unknown }>();
+    for (const k of rawRegistry.kinds) {
+      if (k && typeof k.name === 'string') specByName.set(k.name, k);
+    }
+    for (const [name] of aboxByName) {
+      if (!specByName.has(name)) {
+        drift.push(
+          `[spec-vs-abox] ABox lists kind '${name}', but spec kindRegistry does not (transitional check; safe to ignore once spec annotation retires upstream)`,
+        );
+      }
+    }
+    for (const [name] of specByName) {
+      if (!aboxByName.has(name)) {
+        drift.push(
+          `[spec-vs-abox] spec kindRegistry lists kind '${name}', but ABox does not (ABox is authoritative; spec entry will be ignored)`,
+        );
+      }
+    }
+  }
+
+  const referencedTypes = new Set<string>();
+  for (const op of Object.values(operations)) {
+    for (const t of op.produces) referencedTypes.add(t);
+    for (const t of op.requires.required) referencedTypes.add(t);
+    for (const t of op.requires.optional) referencedTypes.add(t);
+    if (op.establishes) {
+      for (const id of op.establishes.identifiedBy) referencedTypes.add(id.semanticType);
+    }
+  }
+  for (const [name, kind] of aboxByName) {
+    const used = kind.identifiers.some((t) => referencedTypes.has(t));
+    if (!used) {
+      drift.push(
+        `[abox-vs-graph] ABox lists kind '${name}' (identifiers: ${kind.identifiers.join(', ')}), but none of those identifier types are referenced by any operation in the graph (kind is dead weight; either remove from ABox or add a consumer op)`,
+      );
+    }
+  }
+
+  return drift;
+}
+
+/**
+ * Cross-validate the artifact-kinds ABox against the bundled-graph
+ * use-sites. Lift 5 / #212. Unlike the entity-kinds detector, there is
+ * no transitional `spec-vs-abox` sense — the data was never sourced
+ * from the upstream OpenAPI spec, so there is no second source of
+ * truth for the ABox to disagree with. Only the durable
+ * `abox-vs-graph` (sense-2) checks apply:
+ *
+ *   - rule operationIds reference real ops in the graph;
+ *   - rule artifactKind / semanticTypeMap.artifactKind /
+ *     fileExtensionMap.artifactKinds entries reference real kinds;
+ *   - every kind is referenced by at least one rule, semanticTypeMap
+ *     entry, or fileExtensionMap entry (no dead kinds).
+ *
+ * Returns an empty list when no ABox is shipped.
+ */
+function detectArtifactKindsDrift(
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadArtifactKindsAbox(repoRoot);
+  if (abox === null) return drift;
+
+  const kindNames = new Set(abox.kinds.map((k) => k.name));
+
+  for (const rule of abox.operationRules) {
+    if (!operations[rule.operationId]) {
+      drift.push(
+        `[abox-vs-graph] operationRules entry '${rule.operationId}' references an opId that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+      );
+    }
+    for (const r of rule.rules ?? []) {
+      if (!kindNames.has(r.artifactKind)) {
+        drift.push(
+          `[abox-vs-graph] operationRules['${rule.operationId}'].rules['${r.id ?? '<unnamed>'}'] references unknown artifactKind '${r.artifactKind}'`,
+        );
+      }
+    }
+  }
+  for (const m of abox.semanticTypeMap) {
+    if (!kindNames.has(m.artifactKind)) {
+      drift.push(
+        `[abox-vs-graph] semanticTypeMap entry '${m.semanticType}' → '${m.artifactKind}' references unknown artifactKind`,
+      );
+    }
+  }
+  for (const m of abox.fileExtensionMap) {
+    for (const kind of m.artifactKinds) {
+      if (!kindNames.has(kind)) {
+        drift.push(
+          `[abox-vs-graph] fileExtensionMap entry '${m.extension}' references unknown artifactKind '${kind}'`,
+        );
+      }
+    }
+  }
+
+  // Dead-weight check: every kind must be referenced from at least one
+  // of the three side-tables. A kind that nothing references can never
+  // be dispatched to, and is almost certainly a stale entry from an
+  // earlier API surface.
+  const referencedKinds = new Set<string>();
+  for (const rule of abox.operationRules) {
+    for (const r of rule.rules ?? []) referencedKinds.add(r.artifactKind);
+  }
+  for (const m of abox.semanticTypeMap) referencedKinds.add(m.artifactKind);
+  for (const m of abox.fileExtensionMap) {
+    for (const k of m.artifactKinds) referencedKinds.add(k);
+  }
+  for (const k of abox.kinds) {
+    if (!referencedKinds.has(k.name)) {
+      drift.push(
+        `[abox-vs-graph] ABox lists kind '${k.name}' but no operationRules / semanticTypeMap / fileExtensionMap entry references it (dead weight; either remove from ABox or add a referencing entry)`,
+      );
+    }
+  }
+
+  return drift;
+}
+
+function detectRuntimeStatesDrift(
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadRuntimeStatesAbox(repoRoot);
+  if (abox === null) return drift;
+
+  for (const s of abox.states) {
+    for (const opId of s.producedBy ?? []) {
+      if (!operations[opId]) {
+        drift.push(
+          `[abox-vs-graph] state '${s.name}'.producedBy references opId '${opId}' that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+        );
+      }
+    }
+    if (s.witness !== undefined && !operations[s.witness.operationId]) {
+      drift.push(
+        `[abox-vs-graph] state '${s.name}'.witness.operationId '${s.witness.operationId}' does not exist in the bundled graph`,
+      );
+    }
+  }
+  for (const r of abox.operationRequirements) {
+    if (!operations[r.operationId]) {
+      drift.push(
+        `[abox-vs-graph] operationRequirements entry '${r.operationId}' references an opId that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+      );
+    }
+  }
+
+  // Cross-sub-tree dead-state check is deferred to the L3 invariant in
+  // `configs/<name>/regression-invariants.test.ts`, which sees both the
+  // runtime-states ABox AND the semantics ABox at once (Lift 7 / #216).
+  // In-graphLoader detection would false-positive on states whose only
+  // live reference is via a `semanticTypes.*.witnesses` coupling, since
+  // this detector sees only the runtime-states ABox.
+
+  return drift;
+}
+
+function detectSemanticsDrift(
+  operations: Record<string, OperationNode>,
+  repoRoot: string,
+): string[] {
+  const drift: string[] = [];
+  const abox = loadSemanticsAbox(repoRoot);
+  if (abox === null) return drift;
+
+  for (const c of abox.capabilities ?? []) {
+    for (const opId of c.producedBy ?? []) {
+      if (!operations[opId]) {
+        drift.push(
+          `[abox-vs-graph] capability '${c.name}'.producedBy references opId '${opId}' that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+        );
+      }
+    }
+  }
+  for (const i of abox.identifiers ?? []) {
+    for (const opId of i.boundBy ?? []) {
+      if (!operations[opId]) {
+        drift.push(
+          `[abox-vs-graph] identifier '${i.name}'.boundBy references opId '${opId}' that does not exist in the bundled graph (typo, renamed-upstream op, or stale entry)`,
+        );
+      }
+    }
+  }
+
+  // Cross-sub-tree integrity (witnesses target runtimeStates|capabilities,
+  // dependsOn / validityState target runtimeStates, derivedVia targets
+  // capabilities) is enforced by post-overlay `validateDomainSemantics`
+  // in `loadGraph` for both the legacy-sidecar and ABox-only paths
+  // (PR #217 review), and by the L3 invariant in
+  // `configs/<name>/regression-invariants.test.ts` as a build-time
+  // belt-and-braces check.
+  return drift;
 }
 
 function extractPathParameters(op: RawOp): { name: string; semanticType?: string }[] | undefined {
@@ -763,7 +1325,7 @@ function deriveOptionalSubShapes(op: RawOp): NonNullable<OperationNode['optional
     const fieldPath = entry.fieldPath;
     if (typeof semantic !== 'string' || typeof fieldPath !== 'string') continue;
     const root = subShapeRootOf(fieldPath);
-    if (!root) continue;
+    if (root === null) continue;
     const list = groups.get(root) ?? [];
     list.push({ fieldPath, semantic });
     groups.set(root, list);
@@ -772,29 +1334,28 @@ function deriveOptionalSubShapes(op: RawOp): NonNullable<OperationNode['optional
 }
 
 // Strip the trailing leaf segment from a fieldPath to get its sub-shape
-// root, or `null` if no proper object/array-of-object ancestor exists.
-//   "startInstructions[].elementId" -> "startInstructions[]"
-//   "filter.processInstanceKey"      -> "filter"
+// root, or `null` if the fieldPath is an operator-object construct that
+// is not a real populated-vs-omitted shape.
+//
+// Post-#162-PR4 the variant suite owns EVERY populated-optional path —
+// nested object leaves, scalar-array leaves, and flat top-level scalars
+// alike — so the previous "only count nested object sub-shapes" filters
+// (`segments.length < 2`, `lastSegment.endsWith('[]')`) have been
+// removed. The `$` operator-object filter is preserved because
+// operator subtrees (`filter.x.$eq`, `.$in[]`, …) are pseudo-fields
+// the extractor surfaces for filter expressiveness, not a settable
+// shape.
+//
+//   "startInstructions[].elementId" -> "startInstructions[]"  (nested object)
+//   "filter.processInstanceKey"      -> "filter"             (nested object)
+//   "filter.tags[]"                   -> "filter"             (scalar array under filter)
+//   "tags[]"                          -> ""                   (top-level scalar array)
+//   "tenantId"                        -> ""                   (flat top-level scalar)
 //   "filter.elementId.$eq"           -> null  (operator object)
-//   "tags[]"                          -> null  (scalar array, no leaf segment)
-//   "filter.tags[]"                   -> null  (nested scalar array)
-//   "tenantId"                        -> null  (top-level scalar)
 function subShapeRootOf(fieldPath: string): string | null {
-  // Split into dot-separated segments.
   const segments = fieldPath.split('.');
-  if (segments.length < 2) return null;
   const lastSegment = segments[segments.length - 1];
-  // Operator-object syntax (filter.x.$eq, .$in[], etc.) — not a real
-  // populated-vs-omitted sub-shape.
   if (lastSegment.startsWith('$')) return null;
-  // Scalar-array item leaves (`tags[]`, `filter.tags[]`, etc.) — the
-  // extractor surfaces array items with a trailing `[]`. A scalar-array
-  // leaf is the same flavour of "set a primitive collection or omit it"
-  // exclusion as the top-level `tags[]` case; grouping it under its
-  // parent (`filter`) would produce a sub-shape whose only leaf is a
-  // scalar collection, which is not a populated-vs-omitted object shape
-  // worth a sibling positive-coverage scenario.
-  if (lastSegment.endsWith('[]')) return null;
   return segments.slice(0, -1).join('.');
 }
 

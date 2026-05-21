@@ -1,0 +1,67 @@
+{
+  "$comment": "Fixture registry consumed by chooseFixtureFromRegistry() in path-analyser/src/index.ts. Each entry's `providesStates` lists the runtime characteristics this specific fixture provides BEYOND what its `kind` already guarantees in artifactKinds.<kind>.producesStates. `providesValues` lists concrete values the fixture supplies for semantic types declared `kind: modelDerived` in domain-semantics (#162 PR 1 — element ids, job types, etc.; the planner reads these out-of-band at plan time, no API round-trip). The selector picks the entry whose effective providesStates (entry ∪ kind) covers the chain's required states; ties break by smallest providesStates set, then by array order here. See #159, #162.",
+  "artifacts": [
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/service-task.bpmn",
+      "description": "BPMN process with a service task and zeebe:taskDefinition type sampleJobType. Selected for chains whose consumer ops require ModelHasServiceTaskType (e.g. activateJobs, completeJob, failJob).",
+      "providesStates": ["ModelHasServiceTaskType"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "Activity_06kuv4r", "Event_0tll3bk"],
+        "JobType": ["sampleJobType"]
+      }
+    },
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/simple.bpmn",
+      "description": "Start → end only. An instance created from this BPMN reaches COMPLETED without external coordination (no service tasks, no user tasks, no timer events). Selected for chains whose consumer ops require ProcessInstanceCompleted (e.g. deleteProcessInstance).",
+      "providesStates": ["ProcessInstanceCompleted"],
+      "providesValues": {
+        "ElementId": ["Event_1qq1nf7", "Event_1ma9skw"]
+      }
+    },
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/user-task.bpmn",
+      "description": "BPMN process with a single Zeebe user task between start and end. Selected for chains whose consumer ops require ModelHasUserTask (e.g. updateUserTask, completeUserTask, assignUserTask discovered via searchUserTasks). See #305 Phase 3.",
+      "providesStates": ["ModelHasUserTask"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "UserTask_1", "EndEvent_1"]
+      }
+    },
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/incident-script-task.bpmn",
+      "description": "BPMN process with a script task whose FEEL expression `assert(missingVariable, missingVariable != null)` fails on every instance, emitting a single incident deterministically (no timing dependency). Selected for chains whose consumer ops require ModelEmitsIncident (e.g. getIncident discovered via searchIncidents). See #305 Phase 5a.",
+      "providesStates": ["ModelEmitsIncident"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "ScriptTask_1", "EndEvent_1"]
+      }
+    },
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/cancellable-blocked.bpmn",
+      "description": "BPMN process with a single service task wired to a unique job type `cancelProcessInstanceTestBlock` that is never activated anywhere else in the generated suite. The instance therefore stays ACTIVE indefinitely (no auto-completion, no race with parallel `activateJobs` runs that target other job types) until the test cancels it explicitly. Selected for chains whose consumer ops require `ModelHasCancellationBlocker` (e.g. cancelProcessInstance — see #305 Phase 5d-4 / #189). The unique job type is the whole point: do NOT consolidate with bpmn/service-task.bpmn (sampleJobType), or a parallel run that activates sampleJobType jobs could complete this PI before the cancel step fires.",
+      "providesStates": ["ModelHasCancellationBlocker"],
+      "providesValues": {
+        "ElementId": ["StartEvent_1", "ServiceTask_1", "EndEvent_1"],
+        "JobType": ["cancelProcessInstanceTestBlock"]
+      }
+    },
+    {
+      "kind": "form",
+      "path": "forms/simple.form",
+      "description": "Minimal Camunda form JSON"
+    },
+    {
+      "kind": "dmnDecision",
+      "path": "dmn/decision.dmn",
+      "description": "Single decision table"
+    },
+    {
+      "kind": "dmnDrd",
+      "path": "dmn/drd.dmn",
+      "description": "Simple DRD with two decisions"
+    }
+  ]
+}

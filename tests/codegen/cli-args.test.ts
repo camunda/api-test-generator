@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { parseCliArgs } from '../../path-analyser/src/codegen/cli-args.ts';
+import { parseCliArgs } from '../../materializer/src/cli-args.ts';
 
 describe('parseCliArgs', () => {
   test('default target is playwright', () => {

@@ -2,11 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { getActiveConfigName } from './active-config';
-import { CrossContaminationAnalyzer } from './cross-contamination-analyzer';
 import { GraphBuilder } from './graph-builder';
-import { RootDependencyAnalyzer } from './root-dependency-analyzer';
 import { SchemaAnalyzer } from './schema-analyzer';
-import { SemanticTypeLibraryBuilder } from './semantic-type-library-builder';
 import type { OpenAPISpec, Operation, OperationDependencyGraph, SemanticType } from './types';
 
 /**
@@ -18,16 +15,10 @@ import type { OpenAPISpec, Operation, OperationDependencyGraph, SemanticType } f
 export class SemanticGraphExtractor {
   private schemaAnalyzer: SchemaAnalyzer;
   private graphBuilder: GraphBuilder;
-  private semanticTypeLibraryBuilder: SemanticTypeLibraryBuilder;
-  private rootDependencyAnalyzer: RootDependencyAnalyzer;
-  private crossContaminationAnalyzer: CrossContaminationAnalyzer;
 
   constructor() {
     this.schemaAnalyzer = new SchemaAnalyzer();
     this.graphBuilder = new GraphBuilder();
-    this.semanticTypeLibraryBuilder = new SemanticTypeLibraryBuilder();
-    this.rootDependencyAnalyzer = new RootDependencyAnalyzer();
-    this.crossContaminationAnalyzer = new CrossContaminationAnalyzer();
   }
 
   /**
@@ -69,39 +60,7 @@ export class SemanticGraphExtractor {
 
     console.log(`Built dependency graph with ${graph.edges.length} dependencies`);
 
-    // Enhance with semantic type libraries
-    console.log(`Building semantic type libraries...`);
-    const semanticTypeLibrary = this.semanticTypeLibraryBuilder.buildLibrary(
-      semanticTypes,
-      spec,
-      operations,
-    );
-
-    // Analyze root dependencies and setup operations
-    console.log(`Analyzing root dependencies and setup operations...`);
-    const rootDependencies = this.rootDependencyAnalyzer.analyzeRootDependencies(graph);
-
-    // Find cross-contamination opportunities
-    console.log(`Finding cross-contamination opportunities...`);
-    const contaminationOpportunities =
-      this.crossContaminationAnalyzer.findContaminationOpportunities(
-        semanticTypes,
-        semanticTypeLibrary,
-      );
-
-    // Add enhanced analysis to the graph
-    const enhancedGraph: OperationDependencyGraph = {
-      ...graph,
-      semanticTypeLibrary,
-      rootDependencyAnalysis: rootDependencies,
-      crossContaminationMap: contaminationOpportunities,
-    };
-
-    console.log(
-      `Enhanced analysis complete - ${semanticTypeLibrary.semanticTypes.size} type libraries, ${rootDependencies.entryPointOperations.length} entry points, ${Object.keys(contaminationOpportunities).length} contamination scenarios`,
-    );
-
-    return enhancedGraph;
+    return graph;
   }
 
   /**
@@ -133,14 +92,6 @@ export class SemanticGraphExtractor {
         totalSemanticTypes: graph.semanticTypes.size,
         totalDependencies: graph.edges.length,
       },
-      // Enhanced analysis data
-      semanticTypeLibrary: graph.semanticTypeLibrary
-        ? {
-            semanticTypes: Array.from(graph.semanticTypeLibrary.semanticTypes.values()),
-          }
-        : undefined,
-      rootDependencyAnalysis: graph.rootDependencyAnalysis,
-      crossContaminationMap: graph.crossContaminationMap,
       // Issue #134 / camunda/camunda#52320: emit the upstream
       // `semantic-kinds.json` registry alongside the dependency graph so
       // the planner can consult kind-shape data (specifically:
@@ -209,6 +160,17 @@ function loadKindRegistry():
       const kinds: Array<{ name: string; shape?: string; identifiers?: string[] }> = [];
       for (const k of parsed.kinds) {
         if (!k || typeof k.name !== 'string') continue;
+        // Lift 3 / #208: the runtime planner only consumes `shape:
+        // 'external-entity'` entries from this registry (graphLoader
+        // builds an external-entity identifier set from them). Edge
+        // entries (`shape: 'edge'`) are now sourced authoritatively
+        // from the per-config ABox at `configs/<name>/ontology/
+        // edges.json`; the spec-derived edge entries here are dead
+        // weight at runtime and pruning them avoids wire-format
+        // confusion when the ABox and spec disagree. Plain entity
+        // entries (no `shape`) are kept for now — they will be lifted
+        // in Lift 4.
+        if (k.shape === 'edge') continue;
         const entry: { name: string; shape?: string; identifiers?: string[] } = { name: k.name };
         if (typeof k.shape === 'string') entry.shape = k.shape;
         if (Array.isArray(k.identifiers)) {

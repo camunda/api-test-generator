@@ -1,0 +1,26 @@
+{
+  "name": "materializer",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prebuild": "npm run build:emitter-sdk --prefix ..",
+    "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
+    "codegen:playwright": "npm run prebuild && tsx src/index.ts",
+    "codegen:playwright:all": "npm run prebuild && tsx src/index.ts --all",
+    "clean": "rimraf dist || rm -rf dist"
+  },
+  "dependencies": {
+    "@camunda8/emitter-sdk": "*",
+    "mustache": "^4.2.0",
+    "path-analyser": "*"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.6",
+    "@types/node": "^24.12.2",
+    "assert-json-body": "^1.7.1"
+  }
+}

@@ -48,7 +48,7 @@ describe('computeSeedBindings (#136)', () => {
             pathTemplate: '/v2/users',
             expect: { status: 201 },
             bodyKind: 'json',
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional fixture data — these are template placeholder strings
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional generator template placeholders, not JS interpolation
             bodyTemplate: { username: '${usernameVar}', password: '${passwordVar}' },
             extract: [{ fieldPath: 'username', bind: 'usernameVar', semantic: 'Username' }],
           },
@@ -81,7 +81,7 @@ describe('computeSeedBindings (#136)', () => {
             pathTemplate: '/v2/users',
             expect: { status: 201 },
             bodyKind: 'json',
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional fixture data — these are template placeholder strings
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional generator template placeholder, not JS interpolation
             bodyTemplate: { username: '${usernameVar}' },
             extract: [{ fieldPath: 'username', bind: 'usernameVar' }],
           },
@@ -115,7 +115,7 @@ describe('computeSeedBindings (#136)', () => {
             pathTemplate: '/v2/users',
             expect: { status: 201 },
             bodyKind: 'json',
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional fixture data — these are template placeholder strings
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional generator template placeholders, not JS interpolation
             bodyTemplate: { username: '${usernameVar}', tenantId: '${tenantIdVar}' },
           },
         ],
@@ -157,7 +157,7 @@ describe('computeSeedBindings (#136)', () => {
             pathTemplate: '/v2/documents',
             expect: { status: 201 },
             bodyKind: 'multipart',
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional fixture data — these are template placeholder strings
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional generator template placeholder, not JS interpolation
             multipartTemplate: { fileName: '${fileNameVar}' },
           },
         ],
@@ -181,7 +181,7 @@ describe('computeSeedBindings (#136)', () => {
             pathTemplate: '/x',
             expect: { status: 201 },
             bodyKind: 'json',
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional fixture data — these are template placeholder strings
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional generator template placeholders, not JS interpolation
             bodyTemplate: { b: '${bVar}', a: '${aVar}' },
           },
           {
@@ -190,7 +190,7 @@ describe('computeSeedBindings (#136)', () => {
             pathTemplate: '/y',
             expect: { status: 201 },
             bodyKind: 'json',
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional fixture data — these are template placeholder strings
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional generator template placeholders, not JS interpolation
             bodyTemplate: { c: '${cVar}', a: '${aVar}' },
           },
         ],

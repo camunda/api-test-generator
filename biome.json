@@ -16,12 +16,16 @@
   "files": {
     "includes": [
       "path-analyser/src/**/*.ts",
+      "emitter-sdk/src/**/*.ts",
       "path-analyser/scripts/**/*.ts",
+      "materializer/src/**/*.ts",
+      "materializer/scripts/**/*.{ts,js}",
       "request-validation/src/**/*.ts",
       "request-validation/scripts/**/*.ts",
       "semantic-graph-extractor/**/*.ts",
       "scripts/**/*.ts",
       "tests/**/*.ts",
+      "configs/**/*.ts",
       "!**/dist",
       "!**/generated",
       "!**/node_modules",
@@ -34,12 +38,16 @@
     "enabled": true,
     "includes": [
       "path-analyser/src/**/*.ts",
+      "emitter-sdk/src/**/*.ts",
       "path-analyser/scripts/**/*.ts",
+      "materializer/src/**/*.ts",
+      "materializer/scripts/**/*.{ts,js}",
       "request-validation/src/**/*.ts",
       "request-validation/scripts/**/*.ts",
       "semantic-graph-extractor/**/*.ts",
       "scripts/**/*.ts",
       "tests/**/*.ts",
+      "configs/**/*.ts",
       "!**/dist/**",
       "!**/generated/**",
       "!**/node_modules/**"

@@ -3,15 +3,16 @@ import {
   PlaywrightEmitter,
   playwrightSuiteFileName,
   renderPlaywrightSuite,
-} from '../../path-analyser/src/codegen/playwright/emitter.ts';
+} from '../../materializer/src/playwright/emitter.ts';
 import type {
   EndpointScenarioCollection,
   GlobalContextSeed,
 } from '../../path-analyser/src/types.ts';
+import { buildRoleDispatch } from './_helpers/roleDispatch.ts';
 
 // The tenant-related tests below all derive the emitter's universal-seed
 // behaviour from this fixture, mirroring the entry shipped in
-// path-analyser/domain-semantics.json so the assertions track production
+// the semantics ABox so the assertions track production
 // configuration shape.
 const TENANT_SEED: GlobalContextSeed = {
   binding: 'tenantIdVar',
@@ -45,6 +46,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('returns one EmittedFile per scenario collection with the expected file name', async () => {
     const files = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
@@ -56,6 +60,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('integration mode produces an integration.spec.ts file name', async () => {
     const files = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'integration',
     });
@@ -67,6 +74,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
     await expect(
       PlaywrightEmitter.emit(COLLECTION, {
         outDir: '/this/does/not/exist',
+        configName: 'test',
+        emitterConfig: {},
+        resolveConfigPath: (rel) => rel,
         suiteName: 'createWidget',
         mode: 'feature',
       }),
@@ -76,6 +86,9 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('rendered suite contains the expected Playwright preamble and describe block', async () => {
     const [file] = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
@@ -87,12 +100,16 @@ describe('PlaywrightEmitter (Emitter contract)', () => {
   test('renderPlaywrightSuite is byte-identical to the EmittedFile content', async () => {
     const [file] = await PlaywrightEmitter.emit(COLLECTION, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
     const direct = renderPlaywrightSuite(COLLECTION, {
       suiteName: 'createWidget',
       mode: 'feature',
+      recordResponses: false,
     });
     expect(file.content).toBe(direct);
   });
@@ -184,6 +201,9 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
   async function renderFirst(collection: EndpointScenarioCollection): Promise<string> {
     const [file] = await PlaywrightEmitter.emit(collection, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       globalContextSeeds: [TENANT_SEED],
@@ -223,24 +243,30 @@ describe('emitter: universal-seed prologue (no __seededTenant flag, #79/#80; ?? 
     expect(content).not.toMatch(/__seededTenant/);
   });
 
-  test('seedBindings entry NOT in globalContextSeeds still emits the `=== undefined` guard (#157 — pin both directions of the filter)', async () => {
-    // Class-scoped guard for the new filter. The fix in #157 must only
-    // drop bindings covered by globalContextSeeds; bindings that the
-    // planner needs seeded pre-step-0 but which have no domain-semantics
-    // entry must still produce the `=== undefined` guard form, because
-    // the universal-seed prologue won't cover them.
+  test('seedBindings entry NOT in globalContextSeeds emits the terse `??` form (#286 — unified seed emission)', async () => {
+    // Class-scoped guard for the unified seed-emission shape from
+    // #286. Pre-#286 the seedBindings loop emitted the verbose
+    //   `if (ctx['x'] === undefined) { ctx['x'] = seedBinding('x'); }`
+    // form for bindings NOT covered by globalContextSeeds, while the
+    // universal-seed prologue used the terse `??` form. #286
+    // collapsed both paths through `emitCtxSeeding` so every seeded
+    // line — planner-driven OR config-driven — uses the same shape.
     //
-    // A binding NOT in globalContextSeeds and listed in seedBindings:
-    const widgetKeyGuard = `if (ctx['widgetKeyVar'] === undefined) { ctx['widgetKeyVar'] = seedBinding('widgetKeyVar'); }`;
+    // The filter direction this test pins is unchanged: a binding
+    // listed in `seedBindings` but NOT in `globalContextSeeds` is
+    // still seeded by the planner-driven loop (it must not be
+    // dropped), but the emitted line now matches the prologue form.
+    const widgetKeyTerse = `ctx['widgetKeyVar'] = ctx['widgetKeyVar'] ?? seedBinding('widgetKeyVar');`;
+    const legacyGuard = `if (ctx['widgetKeyVar'] === undefined)`;
     const content = await renderFirst(
       buildCollectionWithBindings(
         { widgetKeyVar: '__PENDING__' },
         { seedBindings: ['widgetKeyVar'] },
       ),
     );
-    expect(countOccurrences(content, widgetKeyGuard)).toBe(1);
-    // And it does NOT receive a `??` line (because it's not in globalContextSeeds).
-    expect(content).not.toContain(`ctx['widgetKeyVar'] = ctx['widgetKeyVar'] ?? seedBinding(`);
+    expect(countOccurrences(content, widgetKeyTerse)).toBe(1);
+    // And the pre-#286 verbose guard form is gone.
+    expect(content).not.toContain(legacyGuard);
   });
 
   test('literal tenantIdVar still seeds even when an extract targets the same binding (#136)', async () => {
@@ -311,6 +337,9 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
   async function renderFirst(collection: EndpointScenarioCollection): Promise<string> {
     const [file] = await PlaywrightEmitter.emit(collection, {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
     });
@@ -321,7 +350,9 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
     const content = await renderFirst(
       buildCollectionWithExtracts([{ fieldPath: 'widgetKey', bind: 'widgetKeyVar' }]),
     );
-    expect(content).toContain("import { extractInto, seedBinding } from './support/seeding';");
+    expect(content).toContain(
+      "import { extractInto, seedBinding, initSpecSalt } from './support/seeding';",
+    );
   });
 
   test('emits exactly one extractInto(ctx, ...) call per extract entry', async () => {
@@ -379,7 +410,7 @@ describe('emitter: extractInto helper for response extraction (#84)', () => {
 //
 //   1. A class-scoped source scan rejects reintroduction of the literals
 //      'tenantIdVar', 'tenantId', '<default>', or '__seededTenant' anywhere
-//      in path-analyser/src/codegen/playwright/emitter.ts.
+//      in materializer/src/playwright/emitter.ts.
 //   2. Parallel-entry test: a *second* globalContextSeeds entry produces
 //      parallel code with no further emitter changes — proving the loop is
 //      generic and not a one-off branch dressed up as a loop.
@@ -391,7 +422,7 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     const path = await import('node:path');
     const url = await import('node:url');
     const here = path.dirname(url.fileURLToPath(import.meta.url));
-    const emitterPath = path.resolve(here, '../../path-analyser/src/codegen/playwright/emitter.ts');
+    const emitterPath = path.resolve(here, '../../materializer/src/playwright/emitter.ts');
     const source = await fs.readFile(emitterPath, 'utf8');
     // Strip line comments so the issue/PR cross-references in JSDoc don't
     // false-positive. Block comments are kept intentionally — a block
@@ -454,6 +485,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     };
     const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       globalContextSeeds: [TENANT_SEED, orgSeed],
@@ -473,6 +507,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
   test('without seeds the emitter writes no universal-seed prologue and no multipart strip branch', async () => {
     const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       // no globalContextSeeds
@@ -491,6 +528,9 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     };
     const [file] = await PlaywrightEmitter.emit(buildCollectionWithMultipart(), {
       outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
       suiteName: 'createWidget',
       mode: 'feature',
       globalContextSeeds: [seedOnly],
@@ -499,6 +539,120 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     expect(c).toContain(`ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`);
     expect(c).not.toMatch(/__tenantIdIsDefault/);
     expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
+  });
+
+  test('deploy-only scenario: sentinel local not emitted (deploy() receives strips, local is unused)', async () => {
+    // Regression guard: when a scenario's only multipart step is a 200 createDeployment
+    // step (routed through deploy()), the sentinel __<fieldName>IsDefault local must NOT
+    // be emitted. deploy() receives strips as a JSON literal argument; it never reads the
+    // prologue local. Emitting it produces an unused-variable Biome error in the generated
+    // suite.
+    const deployOnlyCollection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'deploy case',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createDeployment',
+              method: 'POST',
+              pathTemplate: '/deployments',
+              expect: { status: 200 },
+              bodyKind: 'multipart',
+              multipartTemplate: {
+                fields: { tenantId: '${' + 'tenantIdVar}' },
+                files: {},
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const [file] = await PlaywrightEmitter.emit(deployOnlyCollection, {
+      outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED],
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
+    });
+    const c = file.content;
+    // Seed assignment still emitted (always needed)
+    expect(c).toContain(`ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar');`);
+    // Sentinel local must NOT be emitted — no inline multipart step uses it
+    expect(c).not.toMatch(/__tenantIdIsDefault/);
+    expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
+  });
+
+  test('deploy step: no inline extractInto block emitted outside deploy() (no duplicate extraction)', async () => {
+    // Regression guard: deploy() already extracts all known deployment response
+    // fields (processDefinitionKeyVar, deploymentKeyVar, tenantIdVar, etc.)
+    // internally. The emitter must NOT also emit a `const json = await resp.json()`
+    // + extractInto loop for the same step — that would call json() twice and
+    // duplicate every assignment. Class-scoped: asserts the emitted suite never
+    // contains either artefact of the old inline extraction block after a deploy()
+    // call, regardless of which extract entries the planner attached.
+    const deployWithExtracts: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'deploy with extracts',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createDeployment',
+              method: 'POST',
+              pathTemplate: '/deployments',
+              expect: { status: 200 },
+              bodyKind: 'multipart',
+              multipartTemplate: { fields: {}, files: {} },
+              extract: [
+                { fieldPath: 'deploymentKey', bind: 'deploymentKeyVar' },
+                {
+                  fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+                  bind: 'processDefinitionKeyVar',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const [file] = await PlaywrightEmitter.emit(deployWithExtracts, {
+      outDir: '/unused',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
+    });
+    const c = file.content;
+    // deploy() call must be present
+    expect(c).toContain('await deploy(ctx, request,');
+    // No second json() read — deploy() owns the response body
+    const jsonReads = c.match(/const json = await \w+\.json\(\);/g) ?? [];
+    expect(jsonReads, 'resp.json() must not be called outside deploy()').toHaveLength(0);
+    // No inline extractInto — all extraction delegated to deploy()
+    const extractCalls = c.match(/extractInto\(ctx,/g) ?? [];
+    expect(extractCalls, 'extractInto must not be emitted inline for deploy steps').toHaveLength(0);
+    // extractInto must not be imported — suppressed calls must also suppress the import
+    expect(c, 'extractInto must not be imported when no calls are emitted').not.toContain(
+      'import { extractInto',
+    );
   });
 });
 
@@ -516,11 +670,14 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
     await expect(
       PlaywrightEmitter.emit(COLLECTION, {
         outDir: '/unused',
+        configName: 'test',
+        emitterConfig: {},
+        resolveConfigPath: (rel) => rel,
         suiteName: 'createWidget',
         mode: 'feature',
         globalContextSeeds: [badSeed],
       }),
-    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier/);
+    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier|must match pattern/);
   });
 
   test('rejects duplicate fieldName via renderPlaywrightSuite', () => {
@@ -556,7 +713,7 @@ describe('emitter: boundary safety re-validation (#87 review)', () => {
         mode: 'feature',
         globalContextSeeds: [badSeed],
       }),
-    ).toThrow(/globalContextSeedSentinelSafe|line terminator|control char/);
+    ).toThrow(/globalContextSeedSentinelSafe|line terminator|control char|must match pattern/);
   });
 
   test('accepts the production tenant seed shape', () => {
@@ -978,5 +1135,245 @@ describe('PlaywrightEmitter — eventual-consistency wrapping (#106)', () => {
     const matches = src.match(/awaitEventually\(/g) ?? [];
     expect(matches.length).toBe(1);
     expect(src).toContain("operationId: 'searchProcessInstances'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Import gating: deploy() vs resolveFixture vs authHeaders
+// ---------------------------------------------------------------------------
+//
+// These tests guard the three conditional import decisions added for the
+// deploy() helper. Each decision has a class-scoped rule:
+//
+//   1. deploy-only suite (all createDeployment multipart steps are status 200)
+//      → imports `deploy` from deployment, NOT resolveFixture, NOT authHeaders
+//      (deploy() handles auth internally; no inline request uses authHeaders)
+//
+//   2. non-200 createDeployment multipart step (falls through to inline path)
+//      → imports resolveFixture (the inline multipart path calls it), NOT deploy
+//
+//   3. mixed suite (200-deployment + non-deployment multipart)
+//      → imports both deploy and resolveFixture
+//
+// Regression risk: a change to the isDeploymentStep condition or import
+// flags that shifts a step between the deploy() path and the inline path
+// can produce a missing import (compile error in the generated suite) or
+// an unused import (Biome noUnusedImports error in the generated suite).
+
+describe('emitter: conditional import gating for deploy() and resolveFixture', () => {
+  function deployOnlyCollection(expectedStatus = 200): EndpointScenarioCollection {
+    return {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createDeployment',
+              method: 'POST',
+              pathTemplate: '/deployments',
+              expect: { status: expectedStatus },
+              bodyKind: 'multipart',
+              multipartTemplate: { fields: {}, files: {} },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  test('deploy-only suite: imports deploy, not resolveFixture, not authHeaders', () => {
+    const src = renderPlaywrightSuite(deployOnlyCollection(200), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
+    });
+    expect(src).toContain("import { deploy } from './support/deploymentGateway';");
+    expect(src).not.toContain('resolveFixture');
+    // authHeaders is handled internally by deploy(); suite must not import it
+    expect(src).not.toContain('authHeaders');
+    expect(src).toContain("import { buildBaseUrl } from './support/env';");
+    // Minimal fixture has no step.extract entries; extractInto is not needed
+    expect(src).not.toContain('extractInto');
+    expect(src).toContain("import { seedBinding, initSpecSalt } from './support/seeding';");
+  });
+
+  test('deploy-only suite: emits explicit expect(status).toBe(200) for each deploy step', () => {
+    // The explicit assertion keeps expect from @playwright/test from becoming
+    // unused in suites whose request plan consists entirely of deploy() steps,
+    // and mirrors the status-assertion pattern emitted for inline request steps.
+    const src = renderPlaywrightSuite(deployOnlyCollection(200), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+      ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
+    });
+    expect(src).toContain('expect(resp1.status()).toBe(200)');
+  });
+
+  test('deploy step with placeholder-alias extract: emits extractInto and imports it', () => {
+    // aliasProducerExtractsToPlaceholders can attach a placeholderAlias extract to a
+    // createDeployment step (e.g. bind processDefinitionIdVar from the same fieldPath as
+    // processDefinitionKeyVar when the next step's path uses {processDefinitionId}).
+    // The emitter must emit this extractInto call even for deployment steps; skipping it
+    // leaves the URL placeholder var unset in the generated test.
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+                extract: [
+                  {
+                    fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+                    bind: 'processDefinitionIdVar',
+                    note: 'placeholderAlias',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      { suiteName: 'createDeployment', mode: 'feature', recordResponses: false },
+    );
+    // The placeholder alias must be emitted even though the step goes through deploy()
+    expect(src).toContain("extractInto(ctx, 'processDefinitionIdVar'");
+    // extractInto must be imported
+    expect(src).toContain(
+      "import { extractInto, seedBinding, initSpecSalt } from './support/seeding';",
+    );
+  });
+
+  test('non-200 createDeployment multipart: imports resolveFixture, not deploy', () => {
+    // A non-200 createDeployment step (e.g. request-validation scenario) falls
+    // through to the inline multipart path which calls resolveFixture.
+    const src = renderPlaywrightSuite(deployOnlyCollection(400), {
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).not.toContain('import { deploy }');
+    expect(src).toContain("import { resolveFixture } from './support/fixtures';");
+    // Inline path uses authHeaders
+    expect(src).toContain('authHeaders');
+  });
+
+  test('mixed suite (200-deployment + non-deployment multipart): imports both', () => {
+    const src = renderPlaywrightSuite(
+      {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              // 200 deployment step → deploy()
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: {} },
+              },
+              // non-deployment multipart step → inline + resolveFixture
+              {
+                operationId: 'uploadDocument',
+                method: 'POST',
+                pathTemplate: '/documents',
+                expect: { status: 200 },
+                bodyKind: 'multipart',
+                multipartTemplate: { fields: {}, files: { file: '@@FILE:test.txt' } },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        suiteName: 'createDeployment',
+        mode: 'feature',
+        recordResponses: false,
+        ...buildRoleDispatch({ createDeployment: 'deploymentGateway' }),
+      },
+    );
+    expect(src).toContain("import { deploy } from './support/deploymentGateway';");
+    expect(src).toContain("import { resolveFixture } from './support/fixtures';");
+    // authHeaders is needed for the inline uploadDocument step
+    expect(src).toContain('authHeaders');
+  });
+});
+
+// #175 — per-spec-file initSpecSalt emission
+describe('emitter: initSpecSalt emission (#175)', () => {
+  test('emitted suite imports initSpecSalt from the seeding module', () => {
+    const src = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain("import { seedBinding, initSpecSalt } from './support/seeding';");
+  });
+
+  test('emitted suite calls initSpecSalt with the suite name', () => {
+    const src = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src).toContain('initSpecSalt("createWidget");');
+  });
+
+  test('different suite names produce different initSpecSalt calls', () => {
+    const src1 = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createRole',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    const src2 = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'assignRoleToClient',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    expect(src1).toContain('initSpecSalt("createRole");');
+    expect(src2).toContain('initSpecSalt("assignRoleToClient");');
+    expect(src1).not.toContain('initSpecSalt("assignRoleToClient");');
+    expect(src2).not.toContain('initSpecSalt("createRole");');
+  });
+
+  test('initSpecSalt call appears before test.describe', () => {
+    const src = renderPlaywrightSuite(COLLECTION, {
+      suiteName: 'createWidget',
+      mode: 'feature',
+      recordResponses: false,
+    });
+    const saltPos = src.indexOf('initSpecSalt("createWidget");');
+    const describePos = src.indexOf("test.describe('createWidget'");
+    expect(saltPos).toBeGreaterThan(-1);
+    expect(describePos).toBeGreaterThan(-1);
+    expect(saltPos).toBeLessThan(describePos);
   });
 });
