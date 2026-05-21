@@ -1,18 +1,16 @@
+import type { EmitContext } from '@camunda8/emitter-sdk';
 import { describe, expect, it } from 'vitest';
+import { createPythonSdkEmitter } from '../../../materializer/src/python-sdk/emitter.ts';
 import type { EndpointScenarioCollection, RequestStep } from '../../../path-analyser/src/types.ts';
 
 /**
- * Layer-1 Python SDK emitter fixture — red step
+ * Layer-1 Python SDK emitter fixture
  *
  * Hand-built minimal `EndpointScenarioCollection` for a simple endpoint
  * paired with the expected golden Python test file output.
  *
- * This fixture proves that when PythonSdkEmitter.emit() is implemented,
- * it produces a byte-identical `.py` file matching the golden output.
- *
- * The test deliberately FAILS until the emitter is implemented (red step
- * in red/green/class-scoped discipline). Layer-2 will depend on this
- * fixture to verify emitter purity via byte-comparison.
+ * This fixture proves `PythonSdkEmitter.emit()` produces a byte-identical
+ * `.py` file matching the golden output.
  */
 
 /**
@@ -87,42 +85,33 @@ const FIXTURE_ACTIVATE_JOBS: EndpointScenarioCollection = {
  *   - Response field extraction via extract_into() helper
  *   - Plain assert result is not None smoke test
  */
-const GOLDEN_ACTIVATE_JOBS_PY = `# Test for activateJobs
+const GOLDEN_ACTIVATE_JOBS_PY = `# Test suite for activateJobs
 # This file is auto-generated. Do not edit.
 
 from typing import Any
 import pytest
 from camunda.client import CamundaAsyncClient
+from camunda.models import ActivateJobsRequest
 from helper import extract_into, seedBinding
-
 
 @pytest.mark.asyncio
 async def test_sc_activate_jobs_simple(client: CamundaAsyncClient) -> None:
   """Activates jobs of a given type and extracts the first job key"""
-  
+
   ctx: dict[str, Any] = {}
-  
+
   # Seed scenario bindings
   ctx['workerType'] = 'MyWorkerType'
-  
-  # Seed runtime-generated bindings
-  if 'workerType' not in ctx:
-    ctx['workerType'] = seedBinding('workerType')
-  
+
   # Step 1: activateJobs
-  request_body = {
-    'type': ctx['workerType'],
-    'maxJobsToActivate': 1,
-    'timeout': 30000
-  }
+  request_body = {'type': ctx['workerType'], 'maxJobsToActivate': 1, 'timeout': 30000}
   result = await client.activate_jobs(data=ActivateJobsRequest.from_dict(request_body))
   assert result is not None, 'activateJobs must return a response'
-  
-  # Extract response fields
+
   extract_into(ctx, 'jobKey', result['jobs'][0]['key'])
 `;
 
-describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
+describe('PythonSdkEmitter Layer-1 fixture', () => {
   it('fixture has correct scenario structure for activateJobs', () => {
     expect(FIXTURE_ACTIVATE_JOBS.endpoint.operationId).toBe('activateJobs');
     expect(FIXTURE_ACTIVATE_JOBS.scenarios).toHaveLength(1);
@@ -172,8 +161,25 @@ describe('PythonSdkEmitter Layer-1 fixture (red step)', () => {
     expect(GOLDEN_ACTIVATE_JOBS_PY).not.toMatch(/jsonschema|pydantic|deepdiff/);
   });
 
-  it('golden output contains seed binding call for workerType', () => {
-    expect(GOLDEN_ACTIVATE_JOBS_PY).toContain("seedBinding('workerType')");
+  it('golden output does not emit seedBinding() for a literal binding', () => {
+    // workerType has a literal value ('MyWorkerType'), not a __PENDING__ marker,
+    // so the emitter must NOT produce a seedBinding() call for it.
+    expect(GOLDEN_ACTIVATE_JOBS_PY).not.toContain("seedBinding('workerType')");
+  });
+
+  it('emitter produces byte-identical output matching the golden', async () => {
+    const ctx: EmitContext = {
+      outDir: '/tmp/test',
+      suiteName: 'activateJobs',
+      mode: 'feature',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (p) => p,
+    };
+    const files = await createPythonSdkEmitter().emit(FIXTURE_ACTIVATE_JOBS, ctx);
+    expect(files).toHaveLength(1);
+    expect(files[0].relativePath).toBe('activateJobs.python_sdk.spec.py');
+    expect(files[0].content).toBe(GOLDEN_ACTIVATE_JOBS_PY);
   });
 
   it('fixture scenario bindings and seedBindings are aligned', () => {
