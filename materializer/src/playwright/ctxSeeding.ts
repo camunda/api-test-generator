@@ -44,6 +44,7 @@
 
 import type { RequestStep } from 'path-analyser/types';
 import { PENDING_BINDING } from 'path-analyser/types';
+import { camelCase } from './stepRenderer.js';
 
 /**
  * Compute the set of binding names that must be seeded with
@@ -100,7 +101,16 @@ const PLACEHOLDER_RE = /\\?\$\{([^}]+)\}/g;
 
 function collectPathTemplateRefs(pathTemplate: string | undefined, out: Set<string>): void {
   if (!pathTemplate) return;
-  for (const m of pathTemplate.matchAll(PATH_PLACEHOLDER_RE)) out.add(m[1]);
+  // Mirror stepRenderer.buildUrlExpression: every `{param}` placeholder in
+  // the URL is substituted at runtime as `ctx.${camelCase(param)}Var`, so
+  // the corresponding ctx binding name is `${camelCase(param)}Var` — NOT
+  // the raw placeholder name. Without this transform, path-only client-
+  // minted identifiers (e.g. usernameVar consumed by a 409-declaring
+  // DELETE /users/{username}) would never match the seeded ctx binding
+  // set and would silently miss `{ unique: true }` tagging. (#318 review.)
+  for (const m of pathTemplate.matchAll(PATH_PLACEHOLDER_RE)) {
+    out.add(`${camelCase(m[1])}Var`);
+  }
 }
 
 function walkForPlaceholders(node: unknown, out: Set<string>): void {
