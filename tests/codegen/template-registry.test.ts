@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { TEMPLATE_REGISTRY } from '../../materializer/src/templateRegistry.ts';
 import { loadScenarioTemplatesAbox } from '../../path-analyser/src/ontology/loader.ts';
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 
 /**
  * Registry / ABox symmetry guard (#333).

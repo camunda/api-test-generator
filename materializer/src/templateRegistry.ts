@@ -18,10 +18,10 @@
 //   3. Add one entry here.
 //
 // No other site in the orchestrator needs to know about the new
-// template. The L3 invariant in
-// `configs/<config>/regression-invariants.test.ts` asserts symmetric
-// equality between the ABox and this registry so an ABox row without a
-// registry entry (or vice versa) fails red.
+// template. The guard in `tests/codegen/template-registry.test.ts`
+// asserts symmetric equality between the active config's ABox and
+// this registry so an ABox row without a registry entry (or vice
+// versa) fails red.
 //
 // Step 2 of #333 (deriving the registry directly from the ABox) is
 // deferred; that requires teaching the materializer to dispatch
