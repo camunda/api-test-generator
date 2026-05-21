@@ -26,7 +26,12 @@ import {
  * Handles:
  * - null → None
  * - boolean → True/False
- * - string → properly escaped, with template ${var} → ctx['var'] conversion
+ * - string → properly escaped Python string, with whole-string template
+ *   placeholders (exactly "${varName}") expanded to ctx['varName'].
+ *   Partial templates like "proc_${RANDOM}" are rendered as quoted string
+ *   literals — only a value whose entire content is a single placeholder
+ *   is substituted. This matches the JS SDK emitter's treatment
+ *   (collectVarsFromTemplate uses /^\$\{([^}]+)\}$/).
  * - number → as-is
  * - array → [...]
  * - object → {...}
@@ -44,10 +49,13 @@ function toPythonLiteral(value: unknown): string {
 
   // Handle strings
   if (typeof value === 'string') {
-    // Check if this is a template placeholder (e.g., "${varName}")
-    if (value.includes('${')) {
-      // Replace ${varName} with ctx['varName'] (no quotes)
-      return value.replace(/\$\{([^}]+)\}/g, "ctx['$1']");
+    // Only substitute when the ENTIRE string is a single placeholder.
+    // Partial templates like "proc_${RANDOM}" must be rendered as quoted
+    // literals — substituting a substring would produce invalid Python
+    // (e.g. "prefix ctx['var'] suffix" is not an expression).
+    const wholePlaceholder = /^\$\{([^}]+)\}$/.exec(value);
+    if (wholePlaceholder) {
+      return `ctx['${wholePlaceholder[1]}']`;
     }
 
     // Regular string: choose quotes intelligently
