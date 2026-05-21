@@ -12,8 +12,10 @@
 // The collector is deliberately template-agnostic: a new
 // ScenarioTemplate added to `configs/<config>/ontology/scenario-templates.json`
 // (and emitted by the planner under a new subdirectory of
-// `scenarios/templates/`) extends suppression automatically as soon as
-// it is wired into `TEMPLATE_REGISTRY` (see `materializer/src/templateRegistry.ts`).
+// `scenarios/templates/`) extends suppression automatically as soon
+// as it is included in the `templates` option passed to `buildCoverage`
+// (in production, that's `TEMPLATE_REGISTRY` — see
+// `materializer/src/templateRegistry.ts`).
 //
 // `PrereqChain` steps are intentionally *excluded* from coverage —
 // they are scaffolding, not units-under-test. The Invoke/Observe vs

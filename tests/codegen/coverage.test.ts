@@ -114,7 +114,7 @@ describe('buildCoverage (#331)', () => {
     expect(result.suppressedOpIds.has('createTenant')).toBe(false);
   });
 
-  test('templates not wired into TEMPLATE_REGISTRY are skipped (no spec emitted, no coverage claimed)', async () => {
+  test('templates not present in the buildCoverage templates option are skipped (no spec emitted, no coverage claimed)', async () => {
     const root = path.join(tmp, 'scenarios', 'templates');
     await writeScenario(root, 'UnwiredTemplate', 'Thing', [
       { kind: 'invoke', operationId: 'doThing' },

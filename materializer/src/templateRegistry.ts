@@ -11,11 +11,17 @@
 //     registry to map template-name → emitted output directory when
 //     computing the per-endpoint feature-spec suppression set (#331).
 //
-// Adding a new ScenarioTemplate now requires three coordinated edits:
+// Adding a new ScenarioTemplate normally requires two coordinated edits:
 //
-//   1. Declare the TBox in `path-analyser/src/ontology/scenarioTemplateSchema.ts`.
-//   2. Add an ABox row in `configs/<config>/ontology/scenario-templates.json`.
-//   3. Add one entry here.
+//   1. Add an ABox row in `configs/<config>/ontology/scenario-templates.json`.
+//   2. Add one entry here.
+//
+// The TBox in `path-analyser/src/ontology/scenarioTemplateSchema.ts`
+// is name-agnostic (template names are just strings), so it only needs
+// updating when the ABox row *shape* changes (a new step kind, a new
+// `appliesTo` kind, etc.). Likewise, `emitTemplateSuites` only needs
+// extending when the new template's rendered shape genuinely differs
+// from the lifecycle templates it already handles.
 //
 // No other site in the orchestrator needs to know about the new
 // template. The guard in `tests/codegen/template-registry.test.ts`
