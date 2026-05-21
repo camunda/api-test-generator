@@ -18,9 +18,14 @@
  *
  * Canonical emission order (applied uniformly by both emitters):
  *
- *   1. Literal bindings from `scenario.bindings` (skip `PENDING_BINDING`).
+ *   1. Literal bindings from `scenario.bindings` (skip `PENDING_BINDING`,
+ *      AND skip names present in `uniqueBindings` — those need a
+ *      `{ unique: true }` seed and are re-routed into step 2 below, see
+ *      #320).
  *   2. Per-scenario `seedBindings` (filtered against globalSeedNames so
- *      a binding handled by the prologue is not also seeded here).
+ *      a binding handled by the prologue is not also seeded here), plus
+ *      any names whose literal was stripped by step 1's unique-set
+ *      exclusion.
  *   3. Universal-seed prologue from `globalContextSeeds`.
  *
  * Every seeded line uses the terse `??` form:
@@ -178,10 +183,24 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
   const lines: string[] = [];
   const globalSeedNames = new Set(globalContextSeeds.map((s) => s.binding));
 
+  // Literal writes from `scenario.bindings`, with two exclusions:
+  //   - `PENDING_BINDING` sentinel — routes through `seedBindings` instead.
+  //   - Names flagged unique by `uniqueBindings` — a deterministic literal
+  //     would defeat the `{ unique: true }` seed it needs (#320). The
+  //     literal is stripped here and the name is re-routed into
+  //     `seedNames` below so a `seedBinding(name, { unique: true })`
+  //     line is emitted in its place.
   const literalEntries = bindings
-    ? Object.entries(bindings).filter(([, v]) => v !== PENDING_BINDING)
+    ? Object.entries(bindings).filter(([k, v]) => v !== PENDING_BINDING && !unique.has(k))
     : [];
-  const seedNames = (seedBindings ?? []).filter((n) => !globalSeedNames.has(n));
+  const strippedForUnique = bindings
+    ? Object.entries(bindings)
+        .filter(([k, v]) => v !== PENDING_BINDING && unique.has(k))
+        .map(([k]) => k)
+    : [];
+  const seedNames = Array.from(new Set([...(seedBindings ?? []), ...strippedForUnique])).filter(
+    (n) => !globalSeedNames.has(n),
+  );
 
   if (literalEntries.length > 0 || seedNames.length > 0) {
     lines.push(`${indent}// Seed scenario bindings`);

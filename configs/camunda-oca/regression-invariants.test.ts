@@ -1954,6 +1954,83 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     }
     expect(offenders).toEqual([]);
   });
+
+  it('no emitted feature spec writes a deterministic literal for a binding that is also unique-seeded (#320)', () => {
+    // Class-scoped guard for #320: the materializer's `emitCtxSeeding`
+    // helper writes literal `ctx.<name> = "<value>";` lines for every
+    // entry in `scenario.bindings`. Pre-fix, if the same name was also
+    // flagged unique by `computeUniqueBindings` (because it is consumed
+    // by a 409-declaring step and therefore needs `{ unique: true }`),
+    // the literal would short-circuit the `??` seedBinding fallback and
+    // the second invocation of the run against the same cluster would
+    // 409.
+    //
+    // The fix re-routes any literal whose key is in `uniqueBindings`
+    // into a `seedBinding('<name>', { unique: true })` line instead.
+    // This invariant pins the post-condition at the only layer where
+    // the symptom is observable: no emitted spec should contain BOTH a
+    // literal write AND a unique-seed line for the same binding name.
+    //
+    // Original instance: `unassignMappingRuleFromGroup.feature.spec.ts`
+    // emitted `ctx.groupIdVar = 'group_1k29';` alongside no unique seed,
+    // because the literal short-circuited the entire seed branch. With
+    // the fix the literal is gone and only the unique seed remains —
+    // the offender set below is the empty set.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+
+    // For each spec, collect the set of binding names that are
+    // unique-seeded (`seedBinding('X', { unique: true })`) and the set
+    // that are deterministic-literal-written (`ctx.X = "..."` or
+    // `ctx['X'] = "..."`), and report any intersection. Both forms of
+    // ctx access exist in the emitted output depending on whether
+    // biome's `useDotNotation` autofix could rewrite the access.
+    const uniqueRe =
+      /seedBinding\(\s*['"]([A-Za-z_$][\w$]*)['"]\s*,\s*\{\s*unique:\s*true\s*\}\s*\)/g;
+    // Match both single- and double-quoted string literals: the
+    // generated suite is formatted by Biome with `quoteStyle: 'single'`
+    // (see biome.generated.json), but the upstream emitter or future
+    // formatter changes could produce either form. Accepting both
+    // keeps the invariant robust against quote-style drift.
+    const literalDotRe = /\bctx\.([A-Za-z_$][\w$]*)\s*=\s*(?:"[^"]*"|'[^']*')\s*;/g;
+    const literalBracketRe =
+      /\bctx\[\s*['"]([A-Za-z_$][\w$]*)['"]\s*\]\s*=\s*(?:"[^"]*"|'[^']*')\s*;/g;
+
+    const offenders: string[] = [];
+    let totalUnique = 0;
+    for (const f of specs) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      const uniqueNames = new Set<string>();
+      let m: RegExpExecArray | null;
+      while ((m = uniqueRe.exec(src)) !== null) uniqueNames.add(m[1]);
+      uniqueRe.lastIndex = 0;
+      if (uniqueNames.size === 0) continue;
+      totalUnique += uniqueNames.size;
+      const literalNames = new Set<string>();
+      while ((m = literalDotRe.exec(src)) !== null) literalNames.add(m[1]);
+      literalDotRe.lastIndex = 0;
+      while ((m = literalBracketRe.exec(src)) !== null) literalNames.add(m[1]);
+      literalBracketRe.lastIndex = 0;
+      const both = [...uniqueNames].filter((n) => literalNames.has(n));
+      if (both.length > 0) {
+        offenders.push(`${relative(REPO_ROOT, join(GENERATED_TESTS_DIR, f))}: ${both.join(', ')}`);
+      }
+    }
+
+    // Sanity: the bundled spec must non-trivially exercise the
+    // unique-seeded pattern; otherwise this invariant is vacuous and
+    // would silently pass even if `emitCtxSeeding` regressed.
+    expect(
+      totalUnique,
+      'expected at least one emitted spec to use seedBinding(..., { unique: true })',
+    ).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
 });
 
 describeForThisConfig('bundled-spec invariants: fixture selection by required state (#159)', () => {
