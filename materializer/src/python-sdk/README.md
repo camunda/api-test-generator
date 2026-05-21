@@ -192,7 +192,7 @@ docker-compose down
 
 ## Architecture & Purity
 
-The Python SDK emitter is **pure**: it accepts a scenario collection and context, and returns an in-memory list of `EmittedFile` objects. No filesystem or network I/O occurs during emission. The orchestrator (`path-analyser/src/codegen/orchestrator.ts`) handles directory creation and file writes.
+The Python SDK emitter is **pure**: it accepts a scenario collection and context, and returns an in-memory list of `EmittedFile` objects. No filesystem or network I/O occurs during emission. The orchestrator (`materializer/src/index.ts`) handles directory creation and file writes.
 
 ### EmitterFactory Pattern
 
