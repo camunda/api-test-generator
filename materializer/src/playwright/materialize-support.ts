@@ -540,8 +540,9 @@ export async function materializeResponseSchemas(
   }
   const targetDir = path.join(outDir, RESPONSE_SCHEMAS_DIR_NAME);
   await fs.mkdir(targetDir, { recursive: true });
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
   const result = spawnSync(
-    'npx',
+    npx,
     [
       '--no-install',
       'assert-json-body',
@@ -549,7 +550,7 @@ export async function materializeResponseSchemas(
       `--specFile=${resolvedSpec}`,
       `--outputDir=${targetDir}`,
     ],
-    { stdio: 'inherit', shell: true },
+    { stdio: 'inherit' },
   );
   if (result.status !== 0) {
     throw new Error(
