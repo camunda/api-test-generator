@@ -206,7 +206,7 @@ function renderScenarioTest(
     // Add query/path parameters (simplified for now)
     if (step.pathParams && step.pathParams.length > 0) {
       for (const param of step.pathParams) {
-        kwargs.push(`${param.name}=ctx.get('${param.var}')`);
+        kwargs.push(`${param.name}=ctx['${param.var}']`);
       }
     }
 
