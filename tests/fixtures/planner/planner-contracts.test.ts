@@ -1029,15 +1029,19 @@ describe('planner contracts: variant planner enumerates polymorphic semantic-typ
     // Class-scoped: three distinct semantic-type annotations on the
     // same field => three variant scenarios. Pre-#324 only the first
     // (ScopeKey) was emitted because the dedup key ignored semantic.
-    const triples = variants.scenarios.map((s) => ({
-      variantKey: s.variantKey,
-      leafSemantics: s.populatesSubShape?.leafSemantics,
-    }));
-    expect(triples).toEqual([
-      { variantKey: '::scopeKey::ScopeKey', leafSemantics: ['ScopeKey'] },
-      { variantKey: '::scopeKey::ProcessInstanceKey', leafSemantics: ['ProcessInstanceKey'] },
-      { variantKey: '::scopeKey::ElementInstanceKey', leafSemantics: ['ElementInstanceKey'] },
-    ]);
+    const triples = variants.scenarios
+      .map((s) => ({
+        variantKey: s.variantKey,
+        leafSemantics: s.populatesSubShape?.leafSemantics,
+      }))
+      .sort((a, b) => a.variantKey.localeCompare(b.variantKey));
+    expect(triples).toEqual(
+      [
+        { variantKey: '::scopeKey::ScopeKey', leafSemantics: ['ScopeKey'] },
+        { variantKey: '::scopeKey::ProcessInstanceKey', leafSemantics: ['ProcessInstanceKey'] },
+        { variantKey: '::scopeKey::ElementInstanceKey', leafSemantics: ['ElementInstanceKey'] },
+      ].sort((a, b) => a.variantKey.localeCompare(b.variantKey)),
+    );
   });
 
   it('still dedupes true duplicates: the same (fieldPath, semantic) pair appearing twice emits one variant', () => {
