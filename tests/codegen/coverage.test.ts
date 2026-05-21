@@ -57,7 +57,7 @@ describe('buildCoverage (#331)', () => {
     const result = await buildCoverage({
       templateScenariosRootDir: root,
       templatesAboxPath: undefined,
-      templates: [{ name: 'EntityLifecycle', outputDir: 'entities' }],
+      templateNames: ['EntityLifecycle'],
     });
 
     expect([...result.suppressedOpIds].sort()).toEqual(['createUser', 'getUser']);
@@ -86,10 +86,7 @@ describe('buildCoverage (#331)', () => {
     const result = await buildCoverage({
       templateScenariosRootDir: root,
       templatesAboxPath: aboxPath,
-      templates: [
-        { name: 'EntityLifecycle', outputDir: 'entities' },
-        { name: 'SmokeTemplate', outputDir: 'smoke' },
-      ],
+      templateNames: ['EntityLifecycle', 'SmokeTemplate'],
     });
 
     expect(result.suppressedOpIds.has('createUser')).toBe(true);
@@ -107,14 +104,14 @@ describe('buildCoverage (#331)', () => {
     const result = await buildCoverage({
       templateScenariosRootDir: root,
       templatesAboxPath: undefined,
-      templates: [{ name: 'EntityLifecycle', outputDir: 'entities' }],
+      templateNames: ['EntityLifecycle'],
     });
 
     expect([...result.suppressedOpIds].sort()).toEqual(['createUser', 'getUser']);
     expect(result.suppressedOpIds.has('createTenant')).toBe(false);
   });
 
-  test('templates not present in the buildCoverage templates option are skipped (no spec emitted, no coverage claimed)', async () => {
+  test('templates not present in the buildCoverage templateNames option are skipped (no spec emitted, no coverage claimed)', async () => {
     const root = path.join(tmp, 'scenarios', 'templates');
     await writeScenario(root, 'UnwiredTemplate', 'Thing', [
       { kind: 'invoke', operationId: 'doThing' },
@@ -123,7 +120,7 @@ describe('buildCoverage (#331)', () => {
     const result = await buildCoverage({
       templateScenariosRootDir: root,
       templatesAboxPath: undefined,
-      templates: [], // not wired
+      templateNames: [], // not wired
     });
 
     expect(result.suppressedOpIds.size).toBe(0);

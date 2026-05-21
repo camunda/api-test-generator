@@ -944,7 +944,7 @@ export interface GeneratedModelSpec {
 // BFS-derived `EndpointScenario`s. They are written to
 // `generated/<config>/scenarios/templates/<TemplateName>/<EdgeName>.json`
 // and consumed by the Playwright emitter to produce
-// `generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts`.
+// `generated/<config>/playwright/templates/EdgeLifecycle/<EdgeName>.lifecycle.spec.ts`.
 // The two output trees are independent — no field on `EndpointScenario`
 // is touched here.
 // ---------------------------------------------------------------------------

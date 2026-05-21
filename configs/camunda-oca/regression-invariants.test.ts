@@ -2327,7 +2327,8 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     // is unchanged, only the spec file moved.
     const spec = join(
       GENERATED_TESTS_DIR,
-      'state-transitions',
+      'templates',
+      'StateTransitionVisibleAfterAction',
       'Incident.resolveIncident.lifecycle.spec.ts',
     );
     if (!existsSync(spec)) {
@@ -7880,7 +7881,7 @@ describeForThisConfig('bundled-spec invariants: ontology visualisation emitter',
 // every (template × edge) pair declared in the ABoxes into a TemplateScenario
 // JSON file under generated/<config>/scenarios/templates/<TemplateName>/<EdgeName>.json,
 // and the Playwright emitter materialises one
-// generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts per edge.
+// generated/<config>/playwright/templates/EdgeLifecycle/<EdgeName>.lifecycle.spec.ts per edge.
 //
 // These invariants pin the structural contract of that output — coverage
 // (every edge has a JSON + a .spec.ts), shape (5 steps in the established →
@@ -7896,7 +7897,7 @@ describeForThisConfig(
   () => {
     const TEMPLATES_ROOT = join(SCENARIOS_DIR, 'templates');
     const EDGE_LIFECYCLE_DIR = join(TEMPLATES_ROOT, 'EdgeLifecycle');
-    const EDGES_SUITE_DIR = join(GENERATED_TESTS_DIR, 'edges');
+    const EDGES_SUITE_DIR = join(GENERATED_TESTS_DIR, 'templates', 'EdgeLifecycle');
 
     interface TemplateScenarioFile {
       templateName: string;
@@ -8107,7 +8108,7 @@ describeForThisConfig(
       }
     });
 
-    it('every edge has a generated Playwright lifecycle suite under generated/<config>/playwright/edges/', async () => {
+    it('every edge has a generated Playwright lifecycle suite under generated/<config>/playwright/templates/EdgeLifecycle/', async () => {
       const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const edges = loadEdgesAbox(REPO_ROOT);
       if (!edges) throw new Error('edges ABox missing');
@@ -8705,7 +8706,8 @@ describeForThisConfig(
     it('Incident.resolveIncident slice: emitted Playwright spec asserts state === RESOLVED via getIncident read-back', () => {
       const specPath = join(
         GENERATED_TESTS_DIR,
-        'state-transitions',
+        'templates',
+        'StateTransitionVisibleAfterAction',
         'Incident.resolveIncident.lifecycle.spec.ts',
       );
       if (!existsSync(specPath)) {
@@ -8726,7 +8728,8 @@ describeForThisConfig(
     it('UserTask.completeUserTask slice (#305 Phase 5d-2): emitted Playwright spec asserts state === COMPLETED via getUserTask read-back', () => {
       const specPath = join(
         GENERATED_TESTS_DIR,
-        'state-transitions',
+        'templates',
+        'StateTransitionVisibleAfterAction',
         'UserTask.completeUserTask.lifecycle.spec.ts',
       );
       if (!existsSync(specPath)) {
@@ -8747,7 +8750,8 @@ describeForThisConfig(
     it('ProcessInstance.cancelProcessInstance slice (#305 Phase 5d-4): emitted Playwright spec asserts state === CANCELED via getProcessInstance read-back, using cancellable-blocked.bpmn fixture', () => {
       const specPath = join(
         GENERATED_TESTS_DIR,
-        'state-transitions',
+        'templates',
+        'StateTransitionVisibleAfterAction',
         'ProcessInstance.cancelProcessInstance.lifecycle.spec.ts',
       );
       if (!existsSync(specPath)) {

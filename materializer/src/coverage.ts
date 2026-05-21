@@ -1,4 +1,4 @@
-// Scenario-template coverage extractor (#331).
+// Scenario-template coverage extractor (#331, #335).
 //
 // Walks the per-template scenario JSON files emitted by the planner
 // (`generated/<config>/scenarios/templates/<TemplateName>/*.json`) and
@@ -13,9 +13,15 @@
 // ScenarioTemplate added to `configs/<config>/ontology/scenario-templates.json`
 // (and emitted by the planner under a new subdirectory of
 // `scenarios/templates/`) extends suppression automatically as soon
-// as it is included in the `templates` option passed to `buildCoverage`
-// (in production, that's `TEMPLATE_REGISTRY` — see
-// `materializer/src/templateRegistry.ts`).
+// as its name appears in `templateNames`. In production the caller
+// passes the ABox's template names directly — there is no separate
+// materializer-side registry to keep in sync (#335).
+//
+// The on-disk output dir for each template is derived purely from the
+// template name: `playwright/templates/<TemplateName>/`. This mirrors
+// the planner's `scenarios/templates/<TemplateName>/` layout so the
+// scenario JSON → emitted spec relationship is visible from the
+// directory structure alone.
 //
 // `PrereqChain` steps are intentionally *excluded* from coverage —
 // they are scaffolding, not units-under-test. The Invoke/Observe vs
@@ -24,7 +30,16 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { TemplateBinding } from './templateRegistry.js';
+
+/**
+ * Subdirectory under the Playwright suite root where the materializer
+ * writes per-template suites. Derived purely from the template name —
+ * no taxonomy translation. Mirrors the planner's
+ * `scenarios/templates/<TemplateName>/` layout (#335).
+ */
+export function templateOutputDir(templateName: string): string {
+  return path.join('templates', templateName);
+}
 
 export interface CoverageEntry {
   operationId: string;
@@ -47,16 +62,16 @@ export interface BuildCoverageOptions {
    *  to treat every template as suppressing (the default). */
   templatesAboxPath: string | undefined;
   /**
-   * The materializer's scenario-template registry — the single source
-   * of truth for which templates emit a spec and where. For each
-   * scenario file under
-   * `<templateScenariosRootDir>/<binding.name>/<subjectName>.json` the
-   * recorded `emittedSpec` becomes
-   * `<binding.outputDir>/<subjectName>.lifecycle.spec.ts`. Templates
-   * not present in this registry are skipped (no spec is emitted on
+   * The set of scenario-template names the materializer recognises
+   * (in production, the names declared by the active config's
+   * scenario-templates ABox). For each scenario file under
+   * `<templateScenariosRootDir>/<templateName>/<subjectName>.json`
+   * the recorded `emittedSpec` becomes
+   * `templates/<templateName>/<subjectName>.lifecycle.spec.ts`.
+   * Templates not in this list are skipped (no spec is emitted on
    * disk, so coverage cannot legitimately claim the op).
    */
-  templates: readonly TemplateBinding[];
+  templateNames: readonly string[];
 }
 
 interface ScenarioStep {
@@ -95,10 +110,11 @@ export async function buildCoverage(opts: BuildCoverageOptions): Promise<Coverag
   }
   templateDirs.sort();
 
-  // Build a name → outputDir lookup from the registry. Templates the
-  // registry doesn't know about are skipped (no spec is emitted on disk,
-  // so coverage cannot legitimately claim the op).
-  const outputDirByName = new Map(opts.templates.map((t) => [t.name, t.outputDir]));
+  // Build a name → outputDir lookup. Templates not in `templateNames`
+  // are skipped (no spec is emitted on disk, so coverage cannot
+  // legitimately claim the op). The output dir is derived purely from
+  // the name (`templates/<TemplateName>/`) — no taxonomy table.
+  const outputDirByName = new Map(opts.templateNames.map((n) => [n, templateOutputDir(n)]));
 
   for (const templateName of templateDirs) {
     const templateDir = path.join(opts.templateScenariosRootDir, templateName);

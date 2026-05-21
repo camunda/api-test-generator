@@ -25,11 +25,12 @@ import {
   assertSafeGlobalContextSeeds,
   deriveArtifactKindsViews,
   deriveGlobalContextSeedsViews,
+  loadScenarioTemplatesAbox,
 } from 'path-analyser/ontology/loader';
 import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRoles';
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
-import { buildCoverage, type CoverageResult } from './coverage.js';
+import { buildCoverage, type CoverageResult, templateOutputDir } from './coverage.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -40,7 +41,6 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
-import { TEMPLATE_REGISTRY } from './templateRegistry.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -469,20 +469,29 @@ async function run() {
   await writeScaffolded(emitter, buildCtx('', 'feature'));
 
   if (positional === '--all') {
+    // #335: scenario-template names are derived from the active
+    // config's scenario-templates ABox — the single source of truth.
+    // The materializer is a generic transformer: for each ABox row it
+    // reads `scenarios/templates/<name>/` and emits to
+    // `playwright/templates/<name>/`. The on-disk layout mirrors the
+    // planner's so the scenario → emitted-spec relationship is visible
+    // from the directory structure alone. Returns `[]` when no ABox
+    // ships (template suites are then a no-op).
+    const templatesAbox = loadScenarioTemplatesAbox(repoRoot);
+    const templateNames = (templatesAbox?.templates ?? []).map((t) => t.name);
+
     // #331: scenario-template coverage. Build the suppression set
     // from on-disk template scenario JSONs before the feature loop so
     // operations covered by a well-formed scenario-template spec do
     // not also emit a structurally weaker per-endpoint feature spec.
     // Suppression only applies to emitters that ship the
-    // corresponding template suites; for now that is Playwright. The
-    // canonical list of templates lives in `TEMPLATE_REGISTRY`
-    // (#333) — see `materializer/src/templateRegistry.ts` and #331.
+    // corresponding template suites; for now that is Playwright.
     let coverage: CoverageResult = { suppressedOpIds: new Set(), entries: [] };
     if (emitter.id === PlaywrightEmitter.id) {
       coverage = await buildCoverage({
         templateScenariosRootDir: getTemplateScenariosRootDir(repoRoot),
         templatesAboxPath: path.join(configDir, 'ontology', 'scenario-templates.json'),
-        templates: TEMPLATE_REGISTRY,
+        templateNames,
       });
     }
     let count = 0;
@@ -535,28 +544,28 @@ async function run() {
     // Template-derived suites (Lift 22 / #270; extended in #280 with
     // EntityLifecycle, #305 with UpdatedFieldVisibleOnReadBack +
     // StateTransitionVisibleAfterAction). One Playwright suite per
-    // subject under `<playwrightSuiteDir>/<template.outputDir>/`.
+    // subject under `<playwrightSuiteDir>/templates/<TemplateName>/`.
     // Only the Playwright emitter wires this — other emitters opt in
     // by implementing their own template-aware renderer. The scenarios
     // are produced by the planner (`scenarioTemplateInstantiator.ts`);
     // if a directory is missing (older planner runs, configs that
     // don't ship the corresponding template), `emitTemplateSuites`
-    // no-ops. Adding a new template is one entry in `TEMPLATE_REGISTRY`
-    // (#333).
+    // no-ops. Adding a new template requires only an ABox row in
+    // `configs/<config>/ontology/scenario-templates.json` (#335).
     let lifecycleCount = 0;
     if (emitter.id === PlaywrightEmitter.id) {
       const seedsArg = globalContextSeeds.map((s) => ({
         binding: s.binding,
         seedRule: s.seedRule,
       }));
-      for (const template of TEMPLATE_REGISTRY) {
-        const templateOutDir = path.join(outDir, template.outputDir);
+      for (const templateName of templateNames) {
+        const templateOutDir = path.join(outDir, templateOutputDir(templateName));
         // Wipe the per-template subdir for the same reason the parent
         // `outDir` is wiped above: stale specs from a previous spec
         // version must not survive into the current run.
         await fs.rm(templateOutDir, { recursive: true, force: true });
         const written = await emitTemplateSuites({
-          scenariosDir: getTemplateScenariosDir(repoRoot, template.name),
+          scenariosDir: getTemplateScenariosDir(repoRoot, templateName),
           outDir: templateOutDir,
           globalContextSeeds: seedsArg,
         });

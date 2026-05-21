@@ -30,16 +30,16 @@ export interface TemplateGlobalContextSeed {
 
 export interface EmitTemplateSuitesOptions {
   /**
-   * Absolute path to the EdgeLifecycle scenarios directory, i.e.
-   * `generated/<config>/scenarios/templates/EdgeLifecycle/`.
-   * Each `.json` underneath is read and rendered to one
-   * `<EdgeName>.lifecycle.spec.ts`.
+   * Absolute path to a template's scenarios directory, i.e.
+   * `generated/<config>/scenarios/templates/<TemplateName>/`
+   * (e.g. `EdgeLifecycle`, `EntityLifecycle`). Each `.json` underneath
+   * is read and rendered to one `<Subject>.lifecycle.spec.ts`.
    */
   scenariosDir: string;
   /**
    * Absolute path to the destination directory, i.e.
-   * `generated/<config>/playwright/edges/`. Wiped and recreated by the
-   * caller (the materializer's `run()`).
+   * `generated/<config>/playwright/templates/<TemplateName>/`. Wiped
+   * and recreated by the caller (the materializer's `run()`).
    */
   outDir: string;
   /**
@@ -265,15 +265,15 @@ function renderLifecycleSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
@@ -650,15 +650,15 @@ function renderReadBackSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
@@ -837,15 +837,15 @@ function renderStateTransitionSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.state-transition');`);
