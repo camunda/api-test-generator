@@ -37,10 +37,10 @@ The operation-map file must be fetched before generation:
 npm run fetch-js-sdk-map
 ```
 
-This downloads the SDK's method-to-operationId mapping from the
-`@camunda8/orchestration-cluster-api` npm package and writes it to
-`spec/js-sdk/operation-map.json`. Without it, the emitter falls back to
-identity mapping (operationId unchanged).
+This performs a git sparse clone of `camunda/orchestration-cluster-api-js` and
+writes `examples/operation-map.json` to `spec/js-sdk/operation-map.json`.
+Requires `git` on PATH. Without it, the emitter falls back to identity mapping
+(operationId unchanged).
 
 ⚠️ **Warning**: Fallback identity mapping may not work for all operations —
 some SDK methods have different names than their operationIds. Run
@@ -54,3 +54,4 @@ some SDK methods have different names than their operationIds. Run
 | `CAMUNDA_CLIENT_ID` | — | OAuth2 client ID (SaaS) |
 | `CAMUNDA_CLIENT_SECRET` | — | OAuth2 client secret (SaaS) |
 | `CAMUNDA_OAUTH_URL` | — | OAuth2 token endpoint (SaaS) |
+| `JS_SDK_REF` | `main` | Branch, tag, or SHA of `camunda/orchestration-cluster-api-js` to fetch the operation map from |
