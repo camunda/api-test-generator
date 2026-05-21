@@ -1,4 +1,3 @@
-// biome-ignore-all lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholders mirror generator output.
 /**
  * Unit tests for `emitCtxSeeding` — the single source of truth for
  * ctx-seeding line emission shared by `emitter.ts` and

@@ -1992,8 +1992,14 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     // biome's `useDotNotation` autofix could rewrite the access.
     const uniqueRe =
       /seedBinding\(\s*['"]([A-Za-z_$][\w$]*)['"]\s*,\s*\{\s*unique:\s*true\s*\}\s*\)/g;
-    const literalDotRe = /\bctx\.([A-Za-z_$][\w$]*)\s*=\s*"[^"]*"\s*;/g;
-    const literalBracketRe = /\bctx\[\s*['"]([A-Za-z_$][\w$]*)['"]\s*\]\s*=\s*"[^"]*"\s*;/g;
+    // Match both single- and double-quoted string literals: the
+    // generated suite is formatted by Biome with `quoteStyle: 'single'`
+    // (see biome.generated.json), but the upstream emitter or future
+    // formatter changes could produce either form. Accepting both
+    // keeps the invariant robust against quote-style drift.
+    const literalDotRe = /\bctx\.([A-Za-z_$][\w$]*)\s*=\s*(?:"[^"]*"|'[^']*')\s*;/g;
+    const literalBracketRe =
+      /\bctx\[\s*['"]([A-Za-z_$][\w$]*)['"]\s*\]\s*=\s*(?:"[^"]*"|'[^']*')\s*;/g;
 
     const offenders: string[] = [];
     let totalUnique = 0;
