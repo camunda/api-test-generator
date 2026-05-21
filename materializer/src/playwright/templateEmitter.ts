@@ -38,7 +38,7 @@ export interface EmitTemplateSuitesOptions {
   scenariosDir: string;
   /**
    * Absolute path to the destination directory, i.e.
-   * `generated/<config>/playwright/edges/`. Wiped and recreated by the
+   * `generated/<config>/playwright/templates/EdgeLifecycle/`. Wiped and recreated by the
    * caller (the materializer's `run()`).
    */
   outDir: string;
@@ -265,15 +265,15 @@ function renderLifecycleSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
@@ -650,15 +650,15 @@ function renderReadBackSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
@@ -837,15 +837,15 @@ function renderStateTransitionSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.state-transition');`);

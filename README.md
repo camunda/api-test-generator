@@ -360,7 +360,7 @@ emits a self-contained, runnable Playwright project under
 runtime helpers (`support/`), fixtures, and a README.
 
 Template-derived suites (`#268` Phase 2 / `#270`) land under
-`generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts` —
+`generated/<config>/playwright/templates/EdgeLifecycle/<EdgeName>.lifecycle.spec.ts` —
 one per ABox-declared edge. Each suite runs the full lifecycle
 (establish → present-observe → revoke → absent-observe) and is sourced
 from `generated/<config>/scenarios/templates/EdgeLifecycle/<EdgeName>.json`,
