@@ -6715,11 +6715,22 @@ describeForThisConfig(
         // field's presence in the body is justified.
         if (fieldLeaves.some((l) => l.required)) continue;
         // Empty scaffolding for schema-required object/array fields
-        // (`filter: {}`, `elements: []`) is the minimal-required body
-        // shape — every nested leaf is genuinely absent, so the
-        // optional-leakage we guard against here did not occur.
+        // (`filter: {}`, `elements: []`, `mappingInstructions: [{...}]`)
+        // is the minimal-required body shape — the canonical body
+        // builder (#326) emits at most one placeholder element for a
+        // required `type: array` field, populated only with the
+        // schema-required nested properties of the item type. That is
+        // structurally distinct from the optional-leakage this guard
+        // catches: a feature-base scenario carrying *additional*
+        // variant-coverage content. The semantic-graph extractor flags
+        // every nested item leaf as optional (since it can't see the
+        // schema-level requiredness through `[]`), so the only
+        // distinguishing signal available here is the array length —
+        // anything beyond a single synthesised element would be true
+        // variant leakage.
         if (value === undefined || value === null) continue;
         if (Array.isArray(value) && value.length === 0) continue;
+        if (Array.isArray(value) && value.length === 1) continue;
         if (
           value !== null &&
           typeof value === 'object' &&

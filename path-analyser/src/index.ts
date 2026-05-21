@@ -1061,6 +1061,67 @@ type RequestBodyPlan =
       expectedSlices: string[];
     };
 
+/**
+ * Synthesize a single placeholder element for a required `type: array`
+ * request-body field whose item shape is described by canonical nodes.
+ *
+ * Background (#326): the body builder previously emitted `[]` for any
+ * required array property without a binding/provider/default. Servers
+ * reject that — `required` here is at the property level, but `[]`
+ * carries no items, so validation messages like "No elements provided"
+ * surface at runtime. The class-scoped fix is to ensure such fields
+ * always emit at least one element whose shape honours the item
+ * schema's own `required` set (recursive for nested arrays/objects).
+ *
+ * Strategy:
+ *   - Direct children of `<basePath>[]` (i.e. nodes whose path equals
+ *     `${basePath}[].${key}` with no further `.` or `[]` in the tail)
+ *     describe the item-object's properties.
+ *   - For each `required` direct child, emit a value:
+ *       - object   → `{}` (matches existing top-level object handling)
+ *       - array    → recurse to build a one-element array
+ *       - other    → 'placeholder' (string seed; richer binding-aware
+ *                    seeding lives in the variant suite)
+ *   - If there are no direct children (array of primitives/enums),
+ *     emit a string placeholder.
+ *
+ * Item-schema enums could in principle be sourced from the bundled
+ * spec for stricter validity, but the canonical nodes don't carry
+ * enum metadata today; the L3 invariant for #326 only requires that
+ * the emitted value is not literally `[]`, and the broader live-cluster
+ * acceptance is tracked separately.
+ */
+function synthesizeArrayElement(
+  basePath: string,
+  nodes: { path: string; type: string; required: boolean }[],
+): unknown {
+  const prefix = `${basePath}[].`;
+  const directChildren = nodes.filter((n) => {
+    if (!n.path.startsWith(prefix)) return false;
+    const tail = n.path.slice(prefix.length);
+    return tail.length > 0 && !tail.includes('.') && !tail.includes('[]');
+  });
+  if (directChildren.length === 0) {
+    // Array of primitives/enums; the canonical node walker doesn't
+    // record sub-paths for primitive item types beyond the array node
+    // itself. A bare string placeholder is the safest seed.
+    return 'placeholder';
+  }
+  const element: Record<string, unknown> = {};
+  for (const child of directChildren) {
+    if (!child.required) continue;
+    const key = child.path.slice(prefix.length);
+    if (child.type === 'object') {
+      element[key] = {};
+    } else if (child.type === 'array') {
+      element[key] = [synthesizeArrayElement(`${basePath}[].${key}`, nodes)];
+    } else {
+      element[key] = 'placeholder';
+    }
+  }
+  return element;
+}
+
 function buildRequestBodyFromCanonical(
   opId: string,
   scenario: EndpointScenario,
@@ -1206,7 +1267,10 @@ function buildRequestBodyFromCanonical(
             // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
             template[name] = {};
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'array') {
-            template[name] = [];
+            // #326 — emit a synthesised one-element array honouring the
+            // item schema's own required set rather than `[]`, which
+            // servers reject ("No elements provided" etc.).
+            template[name] = [synthesizeArrayElement(name, nodes)];
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
@@ -1250,7 +1314,12 @@ function buildRequestBodyFromCanonical(
           // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
           template[leaf] = {};
         } else if (f.type === 'array') {
-          template[leaf] = [];
+          // #326 — see synthesizeArrayElement docblock. `f.path` is
+          // recorded as `<field>[]` for top-level arrays; strip the
+          // suffix so the helper's prefix match (`<base>[].<key>`)
+          // lines up with the canonical sub-nodes.
+          const basePath = f.path.replace(/\[\]$/, '');
+          template[leaf] = [synthesizeArrayElement(basePath, nodes)];
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
