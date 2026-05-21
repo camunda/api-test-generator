@@ -106,7 +106,7 @@ public sealed class OrchestrationClusterClient
         CancellationToken cancellationToken = default)
     {
         return await PostJsonAsync<ActivateJobsRequest, ActivateJobsResponse>(
-            "/jobs/activation",
+            "/jobs/activate",
             request,
             cancellationToken);
     }
