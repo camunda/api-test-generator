@@ -42,7 +42,92 @@
  * together) rather than at the call sites.
  */
 
+import type { RequestStep } from 'path-analyser/types';
 import { PENDING_BINDING } from 'path-analyser/types';
+import { camelCase } from './stepRenderer.js';
+
+/**
+ * Compute the set of binding names that must be seeded with
+ * `{ unique: true }` for a given scenario's `requestPlan`.
+ *
+ * A binding qualifies as **unique** iff:
+ *
+ *   1. It is **client-minted** — referenced as a `${binding}` placeholder
+ *      in some step's `bodyTemplate` or as a `pathParams[].var`, AND
+ *   2. It is NOT extracted from any earlier step's response (i.e. not
+ *      bound via `extract[].bind` before its first consuming step), AND
+ *   3. The consuming step's operation declares an HTTP 409 (Conflict)
+ *      response in the OpenAPI spec (`step.declares409 === true`,
+ *      stamped by the planner from `Operation.responseLeafPaths['409']`).
+ *
+ * Without (3) the binding is safe to re-seed deterministically: the server
+ * will not 409 on a re-run, so cross-run uniqueness is unnecessary and
+ * keeping the seed deterministic preserves snapshot comparability.
+ *
+ * Without (2) the binding is server-minted (the client never sends it as
+ * input to the create endpoint); marking it unique would have no effect.
+ *
+ * See #304 for the underlying re-runnability problem and the design
+ * rationale (criterion = 409 declared ∧ client-minted).
+ */
+export function computeUniqueBindings(
+  requestPlan: readonly RequestStep[] | undefined,
+): Set<string> {
+  const unique = new Set<string>();
+  if (!requestPlan || requestPlan.length === 0) return unique;
+  const extracted = new Set<string>();
+  for (const step of requestPlan) {
+    if (step.declares409) {
+      for (const ref of collectBindingRefs(step)) {
+        if (!extracted.has(ref)) unique.add(ref);
+      }
+    }
+    for (const e of step.extract ?? []) extracted.add(e.bind);
+  }
+  return unique;
+}
+
+function collectBindingRefs(step: RequestStep): Set<string> {
+  const refs = new Set<string>();
+  for (const p of step.pathParams ?? []) refs.add(p.var);
+  collectPathTemplateRefs(step.pathTemplate, refs);
+  walkForPlaceholders(step.bodyTemplate, refs);
+  walkForPlaceholders(step.multipartTemplate, refs);
+  return refs;
+}
+
+const PATH_PLACEHOLDER_RE = /\{([A-Za-z_$][\w$]*)\}/g;
+const PLACEHOLDER_RE = /\\?\$\{([^}]+)\}/g;
+
+function collectPathTemplateRefs(pathTemplate: string | undefined, out: Set<string>): void {
+  if (!pathTemplate) return;
+  // Mirror stepRenderer.buildUrlExpression: every `{param}` placeholder in
+  // the URL is substituted at runtime as `ctx.${camelCase(param)}Var`, so
+  // the corresponding ctx binding name is `${camelCase(param)}Var` — NOT
+  // the raw placeholder name. Without this transform, path-only client-
+  // minted identifiers (e.g. usernameVar consumed by a 409-declaring
+  // DELETE /users/{username}) would never match the seeded ctx binding
+  // set and would silently miss `{ unique: true }` tagging. (#318 review.)
+  for (const m of pathTemplate.matchAll(PATH_PLACEHOLDER_RE)) {
+    out.add(`${camelCase(m[1])}Var`);
+  }
+}
+
+function walkForPlaceholders(node: unknown, out: Set<string>): void {
+  if (node === null || node === undefined) return;
+  if (typeof node === 'string') {
+    for (const m of node.matchAll(PLACEHOLDER_RE)) out.add(m[1]);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const v of node) walkForPlaceholders(v, out);
+    return;
+  }
+  if (typeof node === 'object') {
+    // biome-ignore lint/plugin: narrowed to non-null object above; Record cast is contract-safe.
+    for (const v of Object.values(node as Record<string, unknown>)) walkForPlaceholders(v, out);
+  }
+}
 
 /**
  * Subset of {@link GlobalContextSeed} consumed by this helper. The
@@ -64,10 +149,32 @@ export interface EmitCtxSeedingOptions {
   seedBindings: readonly string[] | undefined;
   /** Universal-seed prologue entries (the ABox-driven list). */
   globalContextSeeds: readonly CtxSeedingGlobal[];
+  /**
+   * Binding names that must be seeded with `{ unique: true }` so they
+   * diverge across separate run invocations. Populated by the emitter
+   * for client-minted identifiers consumed by operations that declare an
+   * HTTP 409 (Conflict) response — re-runs would otherwise collide on
+   * the previous run's identifiers (#304).
+   *
+   * **Keyed by binding name** (the ctx key being seeded), NOT by seed
+   * rule. For the `seedNames` loop the two coincide; for the
+   * `globalContextSeeds` loop the emitted `seedBinding(seedRule, ...)`
+   * call uses `seedRule` as the name argument while uniqueness is
+   * decided by membership of the ctx `binding` in this set. The
+   * resulting `seedBinding('seedRule', { unique: true })` is still
+   * correct: `seedBinding`'s name arg drives the per-binding counter
+   * seed, while the `unique` flag toggles which PRNG env is used.
+   */
+  uniqueBindings?: ReadonlySet<string>;
+}
+
+function seedCall(name: string, unique: boolean): string {
+  return unique ? `seedBinding('${name}', { unique: true })` : `seedBinding('${name}')`;
 }
 
 export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
-  const { indent, bindings, seedBindings, globalContextSeeds } = opts;
+  const { indent, bindings, seedBindings, globalContextSeeds, uniqueBindings } = opts;
+  const unique = uniqueBindings ?? new Set<string>();
   const lines: string[] = [];
   const globalSeedNames = new Set(globalContextSeeds.map((s) => s.binding));
 
@@ -82,13 +189,15 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
       lines.push(`${indent}ctx['${k}'] = ${JSON.stringify(v)};`);
     }
     for (const name of seedNames) {
-      lines.push(`${indent}ctx['${name}'] = ctx['${name}'] ?? seedBinding('${name}');`);
+      lines.push(
+        `${indent}ctx['${name}'] = ctx['${name}'] ?? ${seedCall(name, unique.has(name))};`,
+      );
     }
   }
 
   for (const seed of globalContextSeeds) {
     lines.push(
-      `${indent}ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? seedBinding('${seed.seedRule}');`,
+      `${indent}ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? ${seedCall(seed.seedRule, unique.has(seed.binding))};`,
     );
   }
 

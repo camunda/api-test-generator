@@ -8342,3 +8342,98 @@ describeForThisConfig(
     });
   },
 );
+
+// -----------------------------------------------------------------------------
+// #304 — Cross-run identifier uniqueness for client-minted bindings consumed
+// by operations that declare an HTTP 409 (Conflict) response.
+//
+// Class-scoped invariant: for every operation in the bundled graph whose
+// `responseLeafPaths` contains a '409' entry, if a feature spec file was
+// emitted for that operation AND that spec contains a seedBinding(...) call,
+// then every seedBinding(...) call inside that spec must pass `{ unique: true }`.
+//
+// Why "every call in the spec" rather than "only the path-param identifier":
+// the planner stamps `declares409` per-step, so the emitter unique-tags ALL
+// client-minted bindings consumed by that step's request — including
+// non-identifier fields like `passwordVar` on createUser. That is intentional:
+// non-identifier fields tagged unique are harmless (they just become non-
+// snapshot-stable), and identifier-shape detection at the emitter would be
+// strictly more complex without an observable benefit.
+//
+// A spec with zero seedBinding(...) calls (e.g. one whose payload bindings
+// all come from earlier-step `extractInto` calls — no client-minted seeds)
+// trivially passes.
+// -----------------------------------------------------------------------------
+
+describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
+  '#304: feature specs for ops declaring HTTP 409 use seedBinding({ unique: true }) for client-minted bindings',
+  () => {
+    it('every emitted feature spec for an op with `409` in responseLeafPaths flags ALL its seedBinding calls as { unique: true }', () => {
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Operation dependency graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      if (!existsSync(GENERATED_TESTS_DIR)) {
+        throw new Error(
+          `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operations?: Record<string, { responseLeafPaths?: Record<string, unknown> }>;
+      };
+      const opsRecord = graph.operations ?? {};
+      const opsWith409: string[] = [];
+      for (const [opId, op] of Object.entries(opsRecord)) {
+        if (op?.responseLeafPaths && '409' in op.responseLeafPaths) {
+          opsWith409.push(opId);
+        }
+      }
+      // Sanity: the upstream spec must actually declare 409 on at least the
+      // canonical create-style ops. If this fires, either the spec pin
+      // regressed or the loader stopped propagating responseLeafPaths.
+      expect(opsWith409.length).toBeGreaterThan(0);
+
+      // seedBinding(' …  ') with an exact match of zero or one `, { unique: true }`
+      // arg. We accept either single or double quotes around the name to be
+      // resilient to Biome formatter choices in generated output.
+      const seedCallRe =
+        /\bseedBinding\(\s*(['"])([A-Za-z_$][\w$]*)\1\s*(,\s*\{\s*unique:\s*true\s*\})?\s*\)/g;
+
+      const violations: string[] = [];
+      for (const opId of opsWith409) {
+        const specPath = join(GENERATED_TESTS_DIR, `${opId}.feature.spec.ts`);
+        if (!existsSync(specPath)) continue;
+        const src = readFileSync(specPath, 'utf8');
+        const matches = [...src.matchAll(seedCallRe)];
+        for (const m of matches) {
+          const bindingName = m[2];
+          const hasUnique = m[3] !== undefined;
+          if (!hasUnique) {
+            violations.push(
+              `${opId}.feature.spec.ts: seedBinding('${bindingName}') missing { unique: true }`,
+            );
+          }
+        }
+      }
+      expect(violations).toEqual([]);
+    });
+
+    it('feature specs for ops that do NOT declare 409 keep seedBinding calls deterministic (no { unique: true })', () => {
+      // Companion to the previous invariant: confirms we did not blanket-
+      // apply unique tagging. A representative non-409 op feature spec must
+      // contain at least one bare seedBinding() call. createDeployment is a
+      // safe pick — it doesn't declare 409 and consistently emits a seeded
+      // tenantId binding.
+      const specPath = join(GENERATED_TESTS_DIR, 'createDeployment.feature.spec.ts');
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      // At least one bare seedBinding('xxx') call (no `{ unique: true }`).
+      const bareCallRe = /\bseedBinding\(\s*['"][A-Za-z_$][\w$]*['"]\s*\)/;
+      expect(bareCallRe.test(src)).toBe(true);
+    });
+  },
+);

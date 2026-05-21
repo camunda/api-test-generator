@@ -467,6 +467,15 @@ export interface RequestStep {
    * discovery shape without re-deriving it.
    */
   discoveryIntent?: DiscoveryIntent;
+  /**
+   * Per-step copy of `Operation.responseLeafPaths['409']` presence — true
+   * when this step's operation declares an HTTP 409 (Conflict) response
+   * in the OpenAPI spec. Stamped by `buildRequestPlan` so the emitter can
+   * decide (together with "binding is client-minted") which seedBinding
+   * calls to mark `{ unique: true }` for cross-run identifier uniqueness
+   * (#304). Absent / false ⇒ no 409 declared.
+   */
+  declares409?: boolean;
 }
 
 /**

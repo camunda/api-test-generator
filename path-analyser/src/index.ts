@@ -648,6 +648,14 @@ function buildRequestPlan(
         ),
       },
     };
+    // #304: stamp 409-declaration so the emitter can flag client-minted
+    // identifier bindings consumed by this step as `{ unique: true }`,
+    // ensuring cross-run identifiers diverge and the second run against
+    // the same cluster doesn't 409 on the first run's IDs.
+    const declared = graph.operations[opRef.operationId]?.responseLeafPaths;
+    if (declared && '409' in declared) {
+      step.declares409 = true;
+    }
     // The legacy `response.*` valueBindings-driven extract block was
     // retired in #251 — the ABox no longer carries `response.*` entries
     // because the planner now auto-derives the equivalent extracts from
