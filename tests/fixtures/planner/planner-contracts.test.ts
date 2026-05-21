@@ -510,7 +510,7 @@ describe('planner contracts: variant planner respects success-status producer fi
     expect(variants.scenarios).toHaveLength(1);
     const [scenario] = variants.scenarios;
     expect(scenario.strategy).toBe('optionalSubShapeVariant');
-    expect(scenario.variantKey).toBe('addons[]::addons[].productId');
+    expect(scenario.variantKey).toBe('addons[]::addons[].productId::ProductId');
     expect(scenario.operations.map((o) => o.operationId)).toEqual(['placeOrder']);
   });
 });
@@ -972,5 +972,105 @@ describe('planner contracts: IncidentKey runtimeEmission discover-and-bind chain
       extractInto: 'incidentKeyVar',
       consistency: 'eventual',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture P: variant planner enumerates polymorphic semantic-type siblings on
+// the same field (#324)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the `evaluateExpression.scopeKey` shape exposed by the spec
+// bump in #322: a single optional flat top-level field that carries
+// MULTIPLE semantic-type annotations (e.g. `ScopeKey`,
+// `ProcessInstanceKey`, `ElementInstanceKey`). Pre-fix the planner's
+// variant dedup key was `${rootPath}::${fieldPath}` which collapsed all
+// polymorphic siblings into the first semantic — emitting one variant
+// instead of N.
+//
+// Class-scoped guarantee: for any optional field with N distinct
+// semantic-type annotations, the variant planner emits N variants —
+// one per `(rootPath, fieldPath, semantic)` triple — each carrying its
+// own `populatesSubShape.leafSemantics` value.
+const fixturePolymorphicSemanticSiblings: OperationGraph = makeGraph([
+  makeOp('mintScopeKey', {
+    produces: ['ScopeKey'],
+    providerMap: { ScopeKey: true },
+  }),
+  makeOp('mintProcessInstanceKey', {
+    produces: ['ProcessInstanceKey'],
+    providerMap: { ProcessInstanceKey: true },
+  }),
+  makeOp('mintElementInstanceKey', {
+    produces: ['ElementInstanceKey'],
+    providerMap: { ElementInstanceKey: true },
+  }),
+  makeOp('evaluateExpression', {
+    optionalSubShapes: [
+      {
+        rootPath: '',
+        leaves: [
+          { fieldPath: 'scopeKey', semantic: 'ScopeKey' },
+          { fieldPath: 'scopeKey', semantic: 'ProcessInstanceKey' },
+          { fieldPath: 'scopeKey', semantic: 'ElementInstanceKey' },
+        ],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: variant planner enumerates polymorphic semantic-type siblings (#324)', () => {
+  it('emits one variant per (fieldPath, semantic) for a flat optional with three semantic-type annotations', () => {
+    const variants = generateOptionalSubShapeVariants(
+      fixturePolymorphicSemanticSiblings,
+      'evaluateExpression',
+      { maxVariantsPerEndpoint: 10 },
+    );
+    // Class-scoped: three distinct semantic-type annotations on the
+    // same field => three variant scenarios. Pre-#324 only the first
+    // (ScopeKey) was emitted because the dedup key ignored semantic.
+    const triples = variants.scenarios
+      .map((s) => ({
+        variantKey: s.variantKey ?? '',
+        leafSemantics: s.populatesSubShape?.leafSemantics,
+      }))
+      .sort((a, b) => a.variantKey.localeCompare(b.variantKey));
+    expect(triples).toEqual(
+      [
+        { variantKey: '::scopeKey::ScopeKey', leafSemantics: ['ScopeKey'] },
+        { variantKey: '::scopeKey::ProcessInstanceKey', leafSemantics: ['ProcessInstanceKey'] },
+        { variantKey: '::scopeKey::ElementInstanceKey', leafSemantics: ['ElementInstanceKey'] },
+      ].sort((a, b) => a.variantKey.localeCompare(b.variantKey)),
+    );
+  });
+
+  it('still dedupes true duplicates: the same (fieldPath, semantic) pair appearing twice emits one variant', () => {
+    // Construct a fixture where the extractor emitted the same
+    // (fieldPath, semantic) pair twice in `requestBodySemanticTypes`
+    // (a legitimate occurrence — e.g. a field referenced from two
+    // oneOf branches that both annotate the same semantic). Pre- and
+    // post-#324 must both dedupe these.
+    const fixtureDuplicate: OperationGraph = makeGraph([
+      makeOp('mintScopeKey', {
+        produces: ['ScopeKey'],
+        providerMap: { ScopeKey: true },
+      }),
+      makeOp('evaluateExpression', {
+        optionalSubShapes: [
+          {
+            rootPath: '',
+            leaves: [
+              { fieldPath: 'scopeKey', semantic: 'ScopeKey' },
+              { fieldPath: 'scopeKey', semantic: 'ScopeKey' },
+            ],
+          },
+        ],
+      }),
+    ]);
+    const variants = generateOptionalSubShapeVariants(fixtureDuplicate, 'evaluateExpression', {
+      maxVariantsPerEndpoint: 10,
+    });
+    expect(variants.scenarios.length).toBe(1);
+    expect(variants.scenarios[0].variantKey).toBe('::scopeKey::ScopeKey');
   });
 });
