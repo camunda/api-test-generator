@@ -1031,7 +1031,7 @@ describe('planner contracts: variant planner enumerates polymorphic semantic-typ
     // (ScopeKey) was emitted because the dedup key ignored semantic.
     const triples = variants.scenarios
       .map((s) => ({
-        variantKey: s.variantKey,
+        variantKey: s.variantKey ?? '',
         leafSemantics: s.populatesSubShape?.leafSemantics,
       }))
       .sort((a, b) => a.variantKey.localeCompare(b.variantKey));
