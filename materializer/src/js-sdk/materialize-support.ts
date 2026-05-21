@@ -8,13 +8,13 @@
 //
 // Two sets of files are materialised:
 //   * support/ — runtime helpers (seeding.ts, seed-rules.json).
-//     Sources: path-analyser/src/codegen/support/ (shared with the
+//     Sources: materializer/src/playwright/support/ (shared with the
 //     Playwright emitter). Staged to
-//     dist/src/codegen/js-sdk/support-templates/ at build time.
+//     dist/src/js-sdk/support-templates/ at build time.
 //   * project root — package.json, tsconfig.json, vitest.config.ts,
 //     .env.example, README.md.
-//     Sources: path-analyser/src/codegen/js-sdk/project-templates/.
-//     Staged to dist/src/codegen/js-sdk/project-templates/ at build time.
+//     Sources: materializer/src/js-sdk/project-templates/.
+//     Staged to dist/src/js-sdk/project-templates/ at build time.
 // ---------------------------------------------------------------------------
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -56,7 +56,7 @@ function defaultProjectTemplatesDir(): string {
   if (here.includes(`${path.sep}dist${path.sep}`)) {
     return path.join(here, 'project-templates');
   }
-  // Source mode: templates are co-located in src/codegen/js-sdk/project-templates/.
+  // Source mode: templates are co-located in materializer/src/js-sdk/project-templates/.
   return path.resolve(here, 'project-templates');
 }
 

@@ -16,7 +16,7 @@ bundled OpenAPI spec before production use.
 
 ## Usage (sample)
 
-See [csharp-sdk/examples/usage.cs](csharp-sdk/examples/usage.cs) for a minimal example.
+See [examples/usage.cs](examples/usage.cs) for a minimal example.
 
 ## Build
 
