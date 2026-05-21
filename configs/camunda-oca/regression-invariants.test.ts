@@ -2031,6 +2031,142 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     ).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
+
+  it('no emitted feature spec emits `[]` for a request-body property that the spec marks `required` and `type: array` (#326)', () => {
+    // Class-scoped guard for #326: the body-builder, when producing
+    // "only required semantics" base scenarios, emits `<key>: []` for
+    // required array-typed properties. Live cluster rejects with 400
+    // (e.g. activateAdHocSubProcessActivities returns
+    //   {"title":"INVALID_ARGUMENT","status":400,"detail":"No elements provided."}
+    // for body `{ elements: [] }`).
+    //
+    // The fix must populate at least one valid element (e.g. the first
+    // enum value for array-of-enum; a recursively-built object for
+    // array-of-object). This invariant pins the post-condition at the
+    // emitted-spec layer: no spec file may bind a required-array
+    // property to the empty-array literal.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    if (!existsSync(BUNDLED_SPEC_PATH)) {
+      throw new Error(
+        `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run pipeline' first.`,
+      );
+    }
+    // Build a map: operationId -> Set of required-array property names.
+    // Walks request bodies only (responses are not body-builder output).
+    interface SpecNode {
+      $ref?: string;
+      type?: string;
+      required?: string[];
+      properties?: Record<string, SpecNode>;
+      allOf?: SpecNode[];
+      content?: Record<string, { schema?: SpecNode }>;
+      schema?: SpecNode;
+      requestBody?: SpecNode;
+      operationId?: string;
+    }
+    const spec: { paths?: Record<string, Record<string, SpecNode>> } = JSON.parse(
+      readFileSync(BUNDLED_SPEC_PATH, 'utf8'),
+    );
+    const isRecord = (v: unknown): v is Record<string, unknown> =>
+      v !== null && typeof v === 'object';
+    const resolve = (node: SpecNode | undefined, seen: Set<string>): SpecNode | undefined => {
+      if (!node) return undefined;
+      if (node.$ref) {
+        if (seen.has(node.$ref)) return undefined;
+        seen.add(node.$ref);
+        const parts = node.$ref.replace(/^#\//, '').split('/');
+        let cur: unknown = spec;
+        for (const p of parts) {
+          if (isRecord(cur) && p in cur) {
+            cur = cur[p];
+          } else {
+            return undefined;
+          }
+        }
+        if (!isRecord(cur)) return undefined;
+        // biome-ignore lint/plugin: runtime contract boundary — JSON node from bundled OpenAPI spec; SpecNode fields are all optional and accessed defensively downstream.
+        return resolve(cur as SpecNode, seen);
+      }
+      return node;
+    };
+    // Merge `required` lists and `properties` maps across the schema
+    // and every allOf branch (recursively): `required` and the
+    // properties it references can live in different branches (see
+    // UpdateGlobalTaskListenerRequest, where `required: ['eventTypes']`
+    // sits on the outer schema and the `eventTypes` property is
+    // contributed by `allOf: [GlobalTaskListenerBase]`).
+    const mergeSchema = (
+      schema: SpecNode | undefined,
+      seen: Set<string>,
+    ): { required: Set<string>; properties: Record<string, SpecNode> } => {
+      const required = new Set<string>();
+      const properties: Record<string, SpecNode> = {};
+      const s = resolve(schema, seen);
+      if (!s) return { required, properties };
+      for (const k of s.required ?? []) required.add(k);
+      for (const [k, v] of Object.entries(s.properties ?? {})) properties[k] = v;
+      for (const part of s.allOf ?? []) {
+        const sub = mergeSchema(part, seen);
+        for (const k of sub.required) required.add(k);
+        for (const [k, v] of Object.entries(sub.properties)) {
+          if (!(k in properties)) properties[k] = v;
+        }
+      }
+      return { required, properties };
+    };
+    const collectRequiredArrayKeys = (schema: SpecNode | undefined): Set<string> => {
+      const out = new Set<string>();
+      const { required, properties } = mergeSchema(schema, new Set());
+      for (const key of required) {
+        const propSchema = resolve(properties[key], new Set());
+        if (propSchema?.type === 'array') out.add(key);
+      }
+      return out;
+    };
+    const requiredArrayByOp = new Map<string, Set<string>>();
+    for (const ops of Object.values(spec.paths ?? {})) {
+      for (const op of Object.values(ops)) {
+        if (!op?.operationId) continue;
+        const body = resolve(op.requestBody, new Set());
+        const schema = body?.content?.['application/json']?.schema;
+        const keys = collectRequiredArrayKeys(schema);
+        if (keys.size > 0) requiredArrayByOp.set(op.operationId, keys);
+      }
+    }
+    expect(
+      requiredArrayByOp.size,
+      'bundled spec must declare at least one operation with a required array-typed body field (otherwise this invariant is vacuous)',
+    ).toBeGreaterThan(0);
+
+    // For each emitted feature spec, derive the operationId from the
+    // filename (`<operationId>.feature.spec.ts`) and scan for any
+    // `<requiredArrayKey>: []` literal in the source.
+    const offenders: string[] = [];
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+    for (const f of specs) {
+      const opId = f.replace(/\.feature\.spec\.ts$/, '');
+      const required = requiredArrayByOp.get(opId);
+      if (!required) continue;
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      for (const key of required) {
+        // Match `key: []` or `'key': []` or `"key": []` (with optional whitespace),
+        // bounded by `{`, `,`, or `\n` on the left to avoid substring false positives.
+        const re = new RegExp(`(?:[{,\\n]\\s*)(?:${key}|['"]${key}['"])\\s*:\\s*\\[\\s*\\]`, 'g');
+        if (re.test(src)) {
+          offenders.push(`${f}: ${key}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      'feature specs emitting `[]` for required-array body properties (#326)',
+    ).toEqual([]);
+  });
 });
 
 describeForThisConfig('bundled-spec invariants: fixture selection by required state (#159)', () => {
