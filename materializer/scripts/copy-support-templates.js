@@ -18,10 +18,10 @@
 //     fixtures.ts
 //     seed-rules.json
 //     await-eventually.ts
-//   dist/src/codegen/js-sdk/support-templates/
+//   dist/src/js-sdk/support-templates/
 //     seeding.ts
 //     seed-rules.json
-//   dist/src/codegen/js-sdk/project-templates/
+//   dist/src/js-sdk/project-templates/
 //     package.json
 //     tsconfig.json
 //     vitest.config.ts
@@ -73,7 +73,7 @@ async function main() {
   );
 
   // JS SDK support templates (subset of Playwright support)
-  const sdkSupportDestDir = path.join(root, 'dist/src/codegen/js-sdk/support-templates');
+  const sdkSupportDestDir = path.join(root, 'dist/src/js-sdk/support-templates');
   await fs.mkdir(sdkSupportDestDir, { recursive: true });
   for (const name of SDK_SUPPORT_FILES) {
     const src = path.join(supportSrcDir, name);
@@ -85,8 +85,8 @@ async function main() {
   );
 
   // JS SDK project templates (package.json, tsconfig, vitest.config, etc.)
-  const sdkProjSrcDir = path.join(root, 'src/codegen/js-sdk/project-templates');
-  const sdkProjDestDir = path.join(root, 'dist/src/codegen/js-sdk/project-templates');
+  const sdkProjSrcDir = path.join(root, 'src/js-sdk/project-templates');
+  const sdkProjDestDir = path.join(root, 'dist/src/js-sdk/project-templates');
   await fs.mkdir(sdkProjDestDir, { recursive: true });
   for (const name of SDK_PROJECT_FILES) {
     const src = path.join(sdkProjSrcDir, name);
