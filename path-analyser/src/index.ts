@@ -1061,6 +1061,89 @@ type RequestBodyPlan =
       expectedSlices: string[];
     };
 
+/**
+ * Synthesize a single placeholder element for a required `type: array`
+ * request-body field whose item shape is described by canonical nodes.
+ *
+ * Background (#326): the body builder previously emitted `[]` for any
+ * required array property without a binding/provider/default. Servers
+ * reject that — `required` here is at the property level, but `[]`
+ * carries no items, so validation messages like "No elements provided"
+ * surface at runtime. The class-scoped fix is to ensure such fields
+ * always emit at least one element whose shape honours the item
+ * schema's own `required` set, recursively across nested objects and
+ * arrays.
+ *
+ * Canonical-node layout reminder (see `walkSchema` in
+ * canonicalSchemas.ts):
+ *   - object property `foo`     → node path `foo`     (type matches schema)
+ *   - nested object `foo.bar`   → node path `foo.bar` (type 'object')
+ *   - array property `xs`       → node path `xs[]`    (type 'array')
+ *   - array item object's prop  → node path `xs[].k`  (type per schema)
+ *   - nested array under item   → node path `xs[].ys[]` (type 'array')
+ *
+ * The helper walks "direct children" of a given prefix (no further `.`
+ * in the tail), and:
+ *   - if the child tail ends with `[]` (a nested array property) it
+ *     recurses to build a one-element array;
+ *   - if the child is type `object` it recurses into the nested
+ *     object's required properties (avoids emitting `{}` for objects
+ *     that themselves declare required content);
+ *   - otherwise it seeds a string `'placeholder'`.
+ *
+ * Item-schema enums could in principle be sourced from the bundled
+ * spec for stricter validity, but the canonical nodes don't carry
+ * enum metadata today; the L3 invariant for #326 only requires that
+ * the emitted value is not literally `[]`, and the broader live-cluster
+ * acceptance is tracked separately.
+ */
+type CanonicalNode = { path: string; type: string; required: boolean };
+
+function synthesizeObjectFromPrefix(
+  prefix: string,
+  nodes: CanonicalNode[],
+): Record<string, unknown> {
+  const obj: Record<string, unknown> = {};
+  for (const n of nodes) {
+    if (!n.path.startsWith(prefix)) continue;
+    const tail = n.path.slice(prefix.length);
+    if (tail.length === 0) continue;
+    // Direct children only: tail is either `<key>` or `<key>[]` (no
+    // intermediate `.`). Deeper descendants are handled by recursion.
+    const isArrayChild = tail.endsWith('[]');
+    const inner = isArrayChild ? tail.slice(0, -2) : tail;
+    if (inner.length === 0 || inner.includes('.') || inner.includes('[]')) continue;
+    if (!n.required) continue;
+    if (Object.hasOwn(obj, inner)) continue;
+    if (isArrayChild) {
+      obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
+    } else if (n.type === 'object') {
+      obj[inner] = synthesizeObjectFromPrefix(`${prefix}${inner}.`, nodes);
+    } else if (n.type === 'array') {
+      // Defensive: walkSchema records arrays with a `[]` suffix on
+      // path, but if a future change ever records type:'array' on a
+      // bare-key node, treat it the same way to keep the synth
+      // schema-honest.
+      obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
+    } else {
+      obj[inner] = 'placeholder';
+    }
+  }
+  return obj;
+}
+
+function synthesizeArrayElement(basePath: string, nodes: CanonicalNode[]): unknown {
+  const prefix = `${basePath}[].`;
+  const hasItemProperties = nodes.some((n) => n.path.startsWith(prefix));
+  if (!hasItemProperties) {
+    // Array of primitives/enums; the canonical node walker doesn't
+    // record sub-paths for primitive item types beyond the array node
+    // itself. A bare string placeholder is the safest seed.
+    return 'placeholder';
+  }
+  return synthesizeObjectFromPrefix(prefix, nodes);
+}
+
 function buildRequestBodyFromCanonical(
   opId: string,
   scenario: EndpointScenario,
@@ -1206,7 +1289,10 @@ function buildRequestBodyFromCanonical(
             // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
             template[name] = {};
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'array') {
-            template[name] = [];
+            // #326 — emit a synthesised one-element array honouring the
+            // item schema's own required set rather than `[]`, which
+            // servers reject ("No elements provided" etc.).
+            template[name] = [synthesizeArrayElement(name, nodes)];
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
@@ -1250,7 +1336,12 @@ function buildRequestBodyFromCanonical(
           // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
           template[leaf] = {};
         } else if (f.type === 'array') {
-          template[leaf] = [];
+          // #326 — see synthesizeArrayElement docblock. `f.path` is
+          // recorded as `<field>[]` for top-level arrays; strip the
+          // suffix so the helper's prefix match (`<base>[].<key>`)
+          // lines up with the canonical sub-nodes.
+          const basePath = f.path.replace(/\[\]$/, '');
+          template[leaf] = [synthesizeArrayElement(basePath, nodes)];
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;

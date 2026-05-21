@@ -54,6 +54,148 @@ const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 
+// ---------------------------------------------------------------------------
+// Bundled-spec helpers (shared between #326 and #247 invariants).
+//
+// `resolve` and `mergeSchema` clone the `seen` set at every recursive
+// hop into a *sibling* branch (e.g. a separate `allOf` element, or a
+// separate property), so the cycle-break is per-resolution-chain, not
+// per-invocation. Sharing the set across siblings caused false negatives
+// when two branches referenced the same `$ref` (the second occurrence
+// would silently resolve to `undefined`, dropping its `required` /
+// `properties` contributions). See PR #329 review.
+// ---------------------------------------------------------------------------
+
+interface SpecNode {
+  $ref?: string;
+  type?: string;
+  required?: string[];
+  properties?: Record<string, SpecNode>;
+  allOf?: SpecNode[];
+  content?: Record<string, { schema?: SpecNode }>;
+  schema?: SpecNode;
+  requestBody?: SpecNode;
+  operationId?: string;
+  minItems?: number;
+}
+
+interface BundledSpec {
+  paths?: Record<string, Record<string, SpecNode>>;
+}
+
+const isSpecRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object';
+
+let _bundledSpecCache: BundledSpec | undefined;
+function loadBundledSpec(): BundledSpec {
+  if (!_bundledSpecCache) {
+    if (!existsSync(BUNDLED_SPEC_PATH)) {
+      throw new Error(
+        `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run pipeline' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary — JSON node from bundled OpenAPI spec; SpecNode fields are all optional and accessed defensively downstream.
+    _bundledSpecCache = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as BundledSpec;
+  }
+  return _bundledSpecCache;
+}
+
+function resolveSpecNode(
+  node: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): SpecNode | undefined {
+  if (!node) return undefined;
+  if (node.$ref) {
+    if (seen.has(node.$ref)) return undefined;
+    // Per-chain clone: this branch's resolution stack adds the ref,
+    // but sibling resolutions (separate allOf branches, separate
+    // properties) start from their own copy.
+    const next = new Set(seen);
+    next.add(node.$ref);
+    const parts = node.$ref.replace(/^#\//, '').split('/');
+    let cur: unknown = spec;
+    for (const p of parts) {
+      if (isSpecRecord(cur) && p in cur) {
+        cur = cur[p];
+      } else {
+        return undefined;
+      }
+    }
+    if (!isSpecRecord(cur)) return undefined;
+    // biome-ignore lint/plugin: runtime contract boundary — JSON node from bundled OpenAPI spec.
+    return resolveSpecNode(cur as SpecNode, spec, next);
+  }
+  return node;
+}
+
+function mergeSchemaShape(
+  schema: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): { required: Set<string>; properties: Record<string, SpecNode> } {
+  const required = new Set<string>();
+  const properties: Record<string, SpecNode> = {};
+  const s = resolveSpecNode(schema, spec, seen);
+  if (!s) return { required, properties };
+  for (const k of s.required ?? []) required.add(k);
+  for (const [k, v] of Object.entries(s.properties ?? {})) properties[k] = v;
+  for (const part of s.allOf ?? []) {
+    // Sibling allOf branches share no resolution stack — clone `seen`
+    // so a `$ref` repeated across siblings still resolves on each side.
+    const sub = mergeSchemaShape(part, spec, new Set(seen));
+    for (const k of sub.required) required.add(k);
+    for (const [k, v] of Object.entries(sub.properties)) {
+      if (!(k in properties)) properties[k] = v;
+    }
+  }
+  return { required, properties };
+}
+
+function collectRequiredArrayKeysFromSchema(
+  schema: SpecNode | undefined,
+  spec: BundledSpec,
+): Set<string> {
+  const out = new Set<string>();
+  const { required, properties } = mergeSchemaShape(schema, spec, new Set());
+  for (const key of required) {
+    const propSchema = resolveSpecNode(properties[key], spec, new Set());
+    if (propSchema?.type !== 'array') continue;
+    // `minItems: 0` explicitly permits empty arrays. Don't flag those
+    // even though the property is required — the spec endorses `[]`
+    // as a valid value, and the body-builder's empty-array emission is
+    // legal there. (#326 review)
+    if (typeof propSchema.minItems === 'number' && propSchema.minItems <= 0) continue;
+    out.add(key);
+  }
+  return out;
+}
+
+let _requiredArrayByOpCache: Map<string, Set<string>> | undefined;
+function getRequiredArrayByOp(): Map<string, Set<string>> {
+  if (_requiredArrayByOpCache) return _requiredArrayByOpCache;
+  const spec = loadBundledSpec();
+  const out = new Map<string, Set<string>>();
+  for (const ops of Object.values(spec.paths ?? {})) {
+    for (const op of Object.values(ops)) {
+      if (!op?.operationId) continue;
+      const body = resolveSpecNode(op.requestBody, spec, new Set());
+      const schema = body?.content?.['application/json']?.schema;
+      const keys = collectRequiredArrayKeysFromSchema(schema, spec);
+      if (keys.size > 0) out.set(op.operationId, keys);
+    }
+  }
+  _requiredArrayByOpCache = out;
+  return out;
+}
+
+// Escape a property name for safe interpolation into a RegExp. Required
+// because `$` and `.` (among others) are valid in JSON keys but carry
+// meaning in regex.
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 interface SemanticTypeEntry {
   semanticType: string;
   fieldPath: string;
@@ -2030,6 +2172,66 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
       'expected at least one emitted spec to use seedBinding(..., { unique: true })',
     ).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
+  });
+
+  it('no emitted feature spec emits `[]` for a request-body property that the spec marks `required` and `type: array` (#326)', () => {
+    // Class-scoped guard for #326: the body-builder, when producing
+    // "only required semantics" base scenarios, emits `<key>: []` for
+    // required array-typed properties. Live cluster rejects with 400
+    // (e.g. activateAdHocSubProcessActivities returns
+    //   {"title":"INVALID_ARGUMENT","status":400,"detail":"No elements provided."}
+    // for body `{ elements: [] }`).
+    //
+    // The fix must populate at least one valid element (e.g. the first
+    // enum value for array-of-enum; a recursively-built object for
+    // array-of-object). This invariant pins the post-condition at the
+    // emitted-spec layer: no spec file may bind a required-array
+    // property to the empty-array literal.
+    //
+    // Schemas that explicitly permit empty arrays via `minItems: 0`
+    // are excluded by `getRequiredArrayByOp()` so this guard does not
+    // produce false positives if the upstream spec ever marks such a
+    // property required-but-empty-allowed.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const requiredArrayByOp = getRequiredArrayByOp();
+    expect(
+      requiredArrayByOp.size,
+      'bundled spec must declare at least one operation with a required array-typed body field (otherwise this invariant is vacuous)',
+    ).toBeGreaterThan(0);
+
+    // For each emitted feature spec, derive the operationId from the
+    // filename (`<operationId>.feature.spec.ts`) and scan for any
+    // `<requiredArrayKey>: []` literal in the source.
+    const offenders: string[] = [];
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+    for (const f of specs) {
+      const opId = f.replace(/\.feature\.spec\.ts$/, '');
+      const required = requiredArrayByOp.get(opId);
+      if (!required) continue;
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      for (const key of required) {
+        // Match `key: []` or `'key': []` or `"key": []` (with optional whitespace),
+        // bounded by `{`, `,`, or `\n` on the left to avoid substring false positives.
+        // `key` is regex-escaped — JSON property names may contain `.`, `$`, etc.
+        const escaped = escapeRegex(key);
+        const re = new RegExp(
+          `(?:[{,\\n]\\s*)(?:${escaped}|['"]${escaped}['"])\\s*:\\s*\\[\\s*\\]`,
+          'g',
+        );
+        if (re.test(src)) {
+          offenders.push(`${f}: ${key}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      'feature specs emitting `[]` for required-array body properties (#326)',
+    ).toEqual([]);
   });
 });
 
@@ -6565,11 +6767,27 @@ describeForThisConfig(
         // field's presence in the body is justified.
         if (fieldLeaves.some((l) => l.required)) continue;
         // Empty scaffolding for schema-required object/array fields
-        // (`filter: {}`, `elements: []`) is the minimal-required body
-        // shape — every nested leaf is genuinely absent, so the
-        // optional-leakage we guard against here did not occur.
+        // (`filter: {}`, `elements: []`, `mappingInstructions: [{...}]`)
+        // is the minimal-required body shape — the canonical body
+        // builder (#326) emits at most one placeholder element for a
+        // required `type: array` field, populated only with the
+        // schema-required nested properties of the item type. That is
+        // structurally distinct from the optional-leakage this guard
+        // catches: a feature-base scenario carrying *additional*
+        // variant-coverage content. The semantic-graph extractor flags
+        // every nested item leaf as optional (since it can't see the
+        // schema-level requiredness through `[]`), so we cross-check
+        // the bundled spec directly: a length-1 array is exempt only
+        // when the spec marks `<field>` as a required `type: array`
+        // property on the operation's request body. Optional array
+        // fields (e.g. `tags: [..]`) are NOT exempt and would still
+        // be flagged here as variant leakage.
         if (value === undefined || value === null) continue;
         if (Array.isArray(value) && value.length === 0) continue;
+        if (Array.isArray(value) && value.length === 1) {
+          const requiredArrays = getRequiredArrayByOp().get(finalStep.operationId);
+          if (requiredArrays?.has(field)) continue;
+        }
         if (
           value !== null &&
           typeof value === 'object' &&
