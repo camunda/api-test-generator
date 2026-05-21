@@ -30,16 +30,16 @@ export interface TemplateGlobalContextSeed {
 
 export interface EmitTemplateSuitesOptions {
   /**
-   * Absolute path to the EdgeLifecycle scenarios directory, i.e.
-   * `generated/<config>/scenarios/templates/EdgeLifecycle/`.
-   * Each `.json` underneath is read and rendered to one
-   * `<EdgeName>.lifecycle.spec.ts`.
+   * Absolute path to a template's scenarios directory, i.e.
+   * `generated/<config>/scenarios/templates/<TemplateName>/`
+   * (e.g. `EdgeLifecycle`, `EntityLifecycle`). Each `.json` underneath
+   * is read and rendered to one `<Subject>.lifecycle.spec.ts`.
    */
   scenariosDir: string;
   /**
    * Absolute path to the destination directory, i.e.
-   * `generated/<config>/playwright/templates/EdgeLifecycle/`. Wiped and recreated by the
-   * caller (the materializer's `run()`).
+   * `generated/<config>/playwright/templates/<TemplateName>/`. Wiped
+   * and recreated by the caller (the materializer's `run()`).
    */
   outDir: string;
   /**
