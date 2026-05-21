@@ -216,9 +216,9 @@ function renderCsharpSuite(
   lines.push('            foreach (var (key, value) in files)');
   lines.push('            {');
   lines.push('                if (value is not string pathValue) continue;');
-  lines.push(
-    '                var path = pathValue.StartsWith("@@FILE:") ? pathValue[7..] : pathValue;',
-  );
+  lines.push('                var path = pathValue.StartsWith("@@FILE:")');
+  lines.push('                    ? Path.Combine(AppContext.BaseDirectory, pathValue[7..])');
+  lines.push('                    : pathValue;');
   lines.push('                var content = File.ReadAllBytes(path);');
   lines.push('                var fileName = Path.GetFileName(path);');
   lines.push(
