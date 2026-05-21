@@ -8865,3 +8865,221 @@ describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Enum-typed request-body field seeding (#338)
+// ---------------------------------------------------------------------------
+//
+// The planner previously discarded enum constraints on required request-body
+// fields: even though the extractor captured them, `buildRequestBodyFromCanonical`
+// fell through to the seedBinding fallback and emitted `${fieldVar}` placeholders
+// the universal seed prologue rewrote to random short strings. Servers reject
+// those with HTTP 400 "Value <random> is not a valid <Enum>." Same for arrays
+// whose items are enums (e.g. `permissionTypes: array of PermissionTypeEnum`):
+// the synthesised element was a literal `"placeholder"` string the server
+// rejected.
+//
+// This invariant is class-scoped (all required enum-typed request-body fields
+// across the bundled spec — not just `ownerType` / `permissionTypes` from
+// `createAuthorization` that triggered the bug report) so the same category
+// of bug cannot recur in a sibling op.
+describeForThisConfig(
+  'bundled-spec invariants: enum-typed request-body field seeding (#338)',
+  () => {
+    it('no feature or variant scenario seeds a ${...} placeholder or a "placeholder" array item for a required enum-typed request-body field', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
+        throw new Error(
+          `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+        );
+      }
+
+      interface SchemaObject {
+        type?: string;
+        $ref?: string;
+        required?: string[];
+        properties?: Record<string, SchemaObject>;
+        items?: SchemaObject;
+        oneOf?: SchemaObject[];
+        allOf?: SchemaObject[];
+        enum?: unknown[];
+      }
+
+      interface OpenApiSpec {
+        paths: Record<
+          string,
+          Record<
+            string,
+            {
+              operationId?: string;
+              requestBody?: { content?: { 'application/json'?: { schema?: SchemaObject } } };
+            }
+          >
+        >;
+        components?: { schemas?: Record<string, SchemaObject> };
+      }
+
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as OpenApiSpec;
+
+      function resolveRef(ref: string): SchemaObject | undefined {
+        const name = ref.split('/').pop() ?? '';
+        return spec.components?.schemas?.[name];
+      }
+
+      function resolveSchemaObj(s: SchemaObject, depth = 0): SchemaObject {
+        if (depth > 20) return s;
+        if (s.$ref) {
+          const target = resolveRef(s.$ref);
+          if (target) return resolveSchemaObj(target, depth + 1);
+        }
+        return s;
+      }
+
+      /** Walk $ref + allOf chain to find an enum array. */
+      function effectiveEnum(s: SchemaObject, depth = 0): unknown[] | undefined {
+        if (depth > 20) return undefined;
+        const r = resolveSchemaObj(s, depth);
+        if (Array.isArray(r.enum)) return r.enum;
+        if (Array.isArray(r.allOf)) {
+          for (const part of r.allOf) {
+            const e = effectiveEnum(part, depth + 1);
+            if (e) return e;
+          }
+        }
+        return undefined;
+      }
+
+      /**
+       * Walk a request-body schema (root + any oneOf variants) and collect,
+       * for every top-level required field, the enum values declared on the
+       * field's scalar schema (`fieldEnums`) and on its items' scalar schema
+       * when the field is an array (`itemEnums`).
+       */
+      function collectEnumFields(rootSchema: SchemaObject): {
+        fieldEnums: Map<string, unknown[]>;
+        itemEnums: Map<string, unknown[]>;
+      } {
+        const fieldEnums = new Map<string, unknown[]>();
+        const itemEnums = new Map<string, unknown[]>();
+        const branches: SchemaObject[] = [];
+        const root = resolveSchemaObj(rootSchema);
+        if (root.properties) branches.push(root);
+        for (const v of root.oneOf ?? []) branches.push(resolveSchemaObj(v));
+        for (const branch of branches) {
+          const required = new Set(branch.required ?? []);
+          for (const [field, sub] of Object.entries(branch.properties ?? {})) {
+            if (!required.has(field)) continue;
+            const fieldEnum = effectiveEnum(sub);
+            if (fieldEnum && fieldEnum.length > 0 && !fieldEnums.has(field)) {
+              fieldEnums.set(field, fieldEnum);
+            }
+            const resolved = resolveSchemaObj(sub);
+            if (resolved.type === 'array' && resolved.items) {
+              const itemEnum = effectiveEnum(resolved.items);
+              if (itemEnum && itemEnum.length > 0 && !itemEnums.has(field)) {
+                itemEnums.set(field, itemEnum);
+              }
+            }
+          }
+        }
+        return { fieldEnums, itemEnums };
+      }
+
+      // Build per-op map: opId -> { fieldEnums, itemEnums }
+      const enumFieldsByOp = new Map<
+        string,
+        { fieldEnums: Map<string, unknown[]>; itemEnums: Map<string, unknown[]> }
+      >();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(pathItem)) {
+          if (!op.operationId) continue;
+          const jsonBody = op.requestBody?.content?.['application/json']?.schema;
+          if (!jsonBody) continue;
+          const collected = collectEnumFields(jsonBody);
+          if (collected.fieldEnums.size > 0 || collected.itemEnums.size > 0) {
+            enumFieldsByOp.set(op.operationId, collected);
+          }
+        }
+      }
+
+      interface FeatureScenarioFile {
+        scenarios: {
+          id: string;
+          requestPlan?: { operationId: string; bodyTemplate?: Record<string, unknown> }[];
+        }[];
+      }
+
+      const offenders: {
+        file: string;
+        scenario: string;
+        operationId: string;
+        field: string;
+        value: string;
+        expectedEnum: unknown[];
+      }[] = [];
+      const placeholderPattern = /^\$\{[^}]+\}$/;
+
+      for (const dir of [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as FeatureScenarioFile;
+          for (const scenario of file.scenarios ?? []) {
+            for (const step of scenario.requestPlan ?? []) {
+              const enums = enumFieldsByOp.get(step.operationId);
+              if (!enums) continue;
+              for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
+                // Scalar enum field: a string that looks like ${var} is a placeholder seed.
+                const fieldEnum = enums.fieldEnums.get(field);
+                if (fieldEnum && typeof value === 'string' && placeholderPattern.test(value)) {
+                  offenders.push({
+                    file: f,
+                    scenario: scenario.id,
+                    operationId: step.operationId,
+                    field,
+                    value,
+                    expectedEnum: fieldEnum,
+                  });
+                  continue;
+                }
+                // Array enum field: any element that's a ${var} placeholder OR
+                // the generic synthesised "placeholder" literal is wrong.
+                const itemEnum = enums.itemEnums.get(field);
+                if (itemEnum && Array.isArray(value)) {
+                  for (const elem of value) {
+                    const isPlaceholderVar =
+                      typeof elem === 'string' && placeholderPattern.test(elem);
+                    const isGenericPlaceholder = elem === 'placeholder';
+                    if (isPlaceholderVar || isGenericPlaceholder) {
+                      offenders.push({
+                        file: f,
+                        scenario: scenario.id,
+                        operationId: step.operationId,
+                        field,
+                        value: JSON.stringify(elem),
+                        expectedEnum: itemEnum,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      expect(
+        offenders,
+        'A scenario bodyTemplate seeds a placeholder for a required enum-typed request-body field. ' +
+          'The planner must emit the first enum value as an inline literal instead of ${var} or "placeholder". ' +
+          'Server validation rejects unknown enum values with HTTP 400 (#338).',
+      ).toEqual([]);
+    });
+  },
+);

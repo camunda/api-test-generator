@@ -421,6 +421,20 @@ export interface RequestOneOfVariant {
   optional: string[];
   /** Effective JSON Schema type for each field in this variant ('object', 'array', 'string', …). */
   fieldTypes: Record<string, string>;
+  /**
+   * Enum values for scalar fields in this variant, captured from the
+   * field's resolved schema (`enum`, traversing $ref + allOf). Used by
+   * `buildRequestBodyFromCanonical` to emit an enum literal instead of a
+   * `${var}` placeholder for required enum-typed fields (#338).
+   */
+  fieldEnums?: Record<string, unknown[]>;
+  /**
+   * For `array` fields, enum values declared on the item schema (e.g.
+   * `permissionTypes: { type: 'array', items: { enum: […] } }`). Used to
+   * synthesise a one-element array containing an enum literal instead of
+   * the generic `['placeholder']` element (#338).
+   */
+  fieldItemEnums?: Record<string, unknown[]>;
   discriminator?: { field: string; value: string };
 }
 

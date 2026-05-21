@@ -1047,7 +1047,10 @@ function camelCase(name: string) {
 }
 
 type CanonicalShape = {
-  requestByMediaType?: Record<string, { path: string; type: string; required: boolean }[]>;
+  requestByMediaType?: Record<
+    string,
+    { path: string; type: string; required: boolean; enum?: unknown[]; itemEnum?: unknown[] }[]
+  >;
 };
 
 type RequestBodyPlan =
@@ -1091,13 +1094,20 @@ type RequestBodyPlan =
  *     that themselves declare required content);
  *   - otherwise it seeds a string `'placeholder'`.
  *
- * Item-schema enums could in principle be sourced from the bundled
- * spec for stricter validity, but the canonical nodes don't carry
- * enum metadata today; the L3 invariant for #326 only requires that
- * the emitted value is not literally `[]`, and the broader live-cluster
- * acceptance is tracked separately.
+ * Item-schema enums are sourced from the bundled spec (#338): top-level
+ * array nodes carry an `itemEnum` field captured during canonical-shape
+ * walking, and `buildRequestBodyFromCanonical` short-circuits to
+ * `[itemEnum[0]]` before delegating to this helper. The helper itself
+ * remains enum-unaware for deeper nested arrays — those still seed a
+ * `'placeholder'` element, tracked separately.
  */
-type CanonicalNode = { path: string; type: string; required: boolean };
+type CanonicalNode = {
+  path: string;
+  type: string;
+  required: boolean;
+  enum?: unknown[];
+  itemEnum?: unknown[];
+};
 
 function synthesizeObjectFromPrefix(
   prefix: string,
@@ -1283,6 +1293,12 @@ function buildRequestBodyFromCanonical(
             template[name] = `${'${'}${varName}}`;
           } else if (defaults && Object.hasOwn(defaults, name)) {
             template[name] = defaults[name];
+          } else if (chosenVariant?.fieldEnums?.[name]?.length) {
+            // #338 — schema declares an enum for this required field.
+            // Emit the first enum literal instead of seeding a
+            // `${var}` placeholder that the server rejects with 400.
+            const values = chosenVariant.fieldEnums[name];
+            template[name] = values[0];
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'object') {
             // Object-typed required field with no binding: emit {} rather than seeding
             // a string placeholder. An empty object is always a valid JSON value and
@@ -1292,7 +1308,16 @@ function buildRequestBodyFromCanonical(
             // #326 — emit a synthesised one-element array honouring the
             // item schema's own required set rather than `[]`, which
             // servers reject ("No elements provided" etc.).
-            template[name] = [synthesizeArrayElement(name, nodes)];
+            // #338 — when the array's item schema declares an enum
+            // (e.g. `permissionTypes: array of PermissionTypeEnum`),
+            // emit `[enum[0]]` instead of the generic placeholder
+            // element so the request validates server-side.
+            const itemEnum = chosenVariant?.fieldItemEnums?.[name];
+            if (itemEnum?.length) {
+              template[name] = [itemEnum[0]];
+            } else {
+              template[name] = [synthesizeArrayElement(name, nodes)];
+            }
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
@@ -1330,6 +1355,11 @@ function buildRequestBodyFromCanonical(
           template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
           template[leaf] = defaults[leaf];
+        } else if (f.enum?.length) {
+          // #338 — schema declares an enum for this required scalar
+          // field. Emit the first enum literal instead of seeding a
+          // `${var}` placeholder that the server rejects with 400.
+          template[leaf] = f.enum[0];
         } else if (f.type === 'object') {
           // Object-typed required field with no binding: emit {} rather than seeding
           // a string placeholder. An empty object is always a valid JSON value and
@@ -1340,8 +1370,16 @@ function buildRequestBodyFromCanonical(
           // recorded as `<field>[]` for top-level arrays; strip the
           // suffix so the helper's prefix match (`<base>[].<key>`)
           // lines up with the canonical sub-nodes.
-          const basePath = f.path.replace(/\[\]$/, '');
-          template[leaf] = [synthesizeArrayElement(basePath, nodes)];
+          // #338 — when the array's item schema declares an enum
+          // (captured on the canonical node as `itemEnum`), emit
+          // `[itemEnum[0]]` instead of synthesising a placeholder
+          // element. Servers reject `["placeholder"]` with 400.
+          if (f.itemEnum?.length) {
+            template[leaf] = [f.itemEnum[0]];
+          } else {
+            const basePath = f.path.replace(/\[\]$/, '');
+            template[leaf] = [synthesizeArrayElement(basePath, nodes)];
+          }
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
