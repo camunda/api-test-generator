@@ -31,10 +31,11 @@ import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRole
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult } from './coverage.js';
-import { createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
+import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -47,6 +48,7 @@ import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
 import { materializePythonSupport } from './python-sdk/materialize-support.js';
+import { createOperationMapSourceFromJson } from './python-sdk/sdk-mapping.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -57,9 +59,46 @@ import { materializePythonSupport } from './python-sdk/materialize-support.js';
 // pulled OCA-specific knowledge into a package that is supposed to be
 // config-agnostic.
 registerEmitter(PlaywrightEmitter);
-registerEmitter(createJsSdkEmitter());
-registerEmitter(createPythonSdkEmitter());
-registerEmitter(createCsharpEmitter({}));
+// SDK emitters are registered inside run() after repoRoot is resolved so
+// they can load operation-map.json files from the spec/ directory. Keeping
+// them here (at module level) would require resolving the repo root before
+// the CLI args are parsed, which is fragile on Windows paths and CI.
+
+/** Load the JS SDK operation map from spec/js-sdk/operation-map.json, or undefined if absent. */
+function loadJsSdkMap(repoRoot: string): OperationMapJsonSource | undefined {
+  const mapPath = path.join(repoRoot, 'spec', 'js-sdk', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return undefined;
+  try {
+    return OperationMapJsonSource.fromJson(fsSync.readFileSync(mapPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Load the Python SDK operation map from spec/python-sdk/operation-map.json, or undefined if absent. */
+function loadPythonSdkMap(
+  repoRoot: string,
+): ReturnType<typeof createOperationMapSourceFromJson> | undefined {
+  const mapPath = path.join(repoRoot, 'spec', 'python-sdk', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return undefined;
+  try {
+    return createOperationMapSourceFromJson(fsSync.readFileSync(mapPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Load the C# SDK operation map from csharp-sdk/examples/operation-map.json, or {} if absent. */
+function loadCsharpMap(repoRoot: string): CsharpOperationMap {
+  const mapPath = path.join(repoRoot, 'csharp-sdk', 'examples', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return {};
+  try {
+    // biome-ignore lint/plugin: runtime contract boundary — JSON from committed operation-map file
+    return JSON.parse(fsSync.readFileSync(mapPath, 'utf-8')) as CsharpOperationMap;
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Walk the active config's role bundles and register any role-hook
@@ -299,6 +338,14 @@ function findRepoRoot(start: string): string {
 async function run() {
   const { target, positional, help } = parseCliArgs(process.argv.slice(2));
   const repoRoot = findRepoRoot(process.cwd());
+
+  // Register SDK emitters here (not at module level) so operation-map.json
+  // files can be loaded from the resolved repoRoot. The Playwright emitter is
+  // already registered at module level (it has no file-system dependencies).
+  registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
+  registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
+  registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
+
   // loadGraph / loadGlobalContextSeeds were carved out of the original
   // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
   // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
@@ -411,6 +458,9 @@ async function run() {
   }
   if (emitter.id === 'csharp-sdk') {
     await materializeCsharpSupport(outDir);
+    // Vendor BPMN/DMN/form fixtures so @@FILE: paths in generated C# tests
+    // resolve to AppContext.BaseDirectory/fixtures/ at run time.
+    await materializeFixtures(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
