@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +61,7 @@ try {
   );
 
   mkdirSync(outDir, { recursive: true });
-  renameSync(path.join(tmpDir, FILE_PATH), outFile);
+  copyFileSync(path.join(tmpDir, FILE_PATH), outFile);
 
   console.log(`[fetch-js-sdk-map] Written to ${path.relative(repoRoot, outFile)}`);
 } catch (err) {

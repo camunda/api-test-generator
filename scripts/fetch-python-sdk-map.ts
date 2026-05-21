@@ -15,7 +15,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -77,7 +77,7 @@ try {
 
   // Ensure output directory exists and move the file into place
   mkdirSync(pythonSdkDir, { recursive: true });
-  renameSync(join(tmpDir, FILE_PATH), operationMapPath);
+  copyFileSync(join(tmpDir, FILE_PATH), operationMapPath);
   console.log(`[fetch-python-sdk-map] Written to ${operationMapPath}`);
 
   // Write metadata
