@@ -3168,48 +3168,33 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     expect(offenders).toEqual([]);
   });
 
-  it('operation-id keyset of Python SDK suite matches operation-map.json entries (#133)', () => {
+  it('every planned scenario has a materialized Python SDK test file (#133)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
     if (!existsSync(GENERATED_TESTS_DIR)) {
       throw new Error(
         `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
-    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
-      f.endsWith('.python_sdk.spec.py'),
-    );
-    if (files.length === 0) {
-      return;
-    }
-    const PYTHON_SDK_MAP_PATH = join(REPO_ROOT, 'spec', 'python-sdk', 'operation-map.json');
-    let operationMap: Record<string, unknown> | undefined;
-    if (existsSync(PYTHON_SDK_MAP_PATH)) {
-      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      operationMap = JSON.parse(readFileSync(PYTHON_SDK_MAP_PATH, 'utf8')) as Record<
-        string,
-        unknown
-      >;
-    } else {
-      return;
-    }
-    let assertionsRun = 0;
-    for (const file of files) {
-      const src = readFileSync(join(GENERATED_TESTS_DIR, file), 'utf8');
-      assertionsRun++;
-      const regexClientCall = /await\s+client\.([a-z_]+)\(/g;
-      const methodsSeen = new Set<string>();
-      let match;
-      while ((match = regexClientCall.exec(src)) !== null) {
-        methodsSeen.add(match[1]);
-      }
-      for (const method of methodsSeen) {
-        // Every method must either be in the operation-map or be a valid fallback (camelToSnake)
-        // If not in map, the fallback conversion is assumed valid
-        if (operationMap) {
-          expect(method).toBeTruthy();
-        }
-      }
-    }
-    expect(assertionsRun).toBeGreaterThan(0);
+    const missing = planned
+      .map((e) => `${e.operationId}.python_sdk.spec.py`)
+      .filter((f) => !existsSync(join(GENERATED_TESTS_DIR, f)));
+    expect(
+      missing,
+      'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
+    ).toEqual([]);
   });
 });
 
@@ -3245,45 +3230,33 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     ).toEqual([]);
   });
 
-  it('operation-id keyset of JS SDK suite matches operation-map.json entries (#131)', () => {
+  it('every planned scenario has a materialized JS SDK test file (#131)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
     if (!existsSync(GENERATED_TESTS_DIR)) {
       throw new Error(
         `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
       );
     }
-    const files = readdirSync(GENERATED_TESTS_DIR).filter((f) =>
-      f.endsWith('.feature.test.ts'),
-    );
-    if (files.length === 0) {
-      return;
-    }
-    const JS_SDK_MAP_PATH = join(REPO_ROOT, 'spec', 'js-sdk', 'operation-map.json');
-    let operationMap: Record<string, unknown> | undefined;
-    if (existsSync(JS_SDK_MAP_PATH)) {
-      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      operationMap = JSON.parse(readFileSync(JS_SDK_MAP_PATH, 'utf8')) as Record<
-        string,
-        unknown
-      >;
-    }
-    let assertionsRun = 0;
-    for (const file of files) {
-      const src = readFileSync(join(GENERATED_TESTS_DIR, file), 'utf8');
-      assertionsRun++;
-      const regexClientCall = /await\s+client\.([a-zA-Z]+)\(/g;
-      const methodsSeen = new Set<string>();
-      for (let m = regexClientCall.exec(src); m !== null; m = regexClientCall.exec(src)) {
-        methodsSeen.add(m[1]);
-      }
-      if (operationMap) {
-        for (const method of methodsSeen) {
-          if (!(method in operationMap)) {
-            // Fallback camelCase mapping is always valid; allow unknown methods
-          }
-        }
-      }
-    }
-    expect(assertionsRun).toBeGreaterThan(0);
+    const missing = planned
+      .map((e) => `${e.operationId}.feature.test.ts`)
+      .filter((f) => !existsSync(join(GENERATED_TESTS_DIR, f)));
+    expect(
+      missing,
+      'Planned scenarios exist but no JS SDK test file was materialized for these operationIds',
+    ).toEqual([]);
   });
 });
 
