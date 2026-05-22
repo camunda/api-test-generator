@@ -566,6 +566,13 @@ async function run() {
       const seedsArg = globalContextSeeds.map((s) => ({
         binding: s.binding,
         seedRule: s.seedRule,
+        // #342: forward `omitWhenUnbound` so the template emitter's
+        // `emitCtxSeeding` honours the same universal-prologue skip as
+        // the per-endpoint emitter. Without this, template-derived
+        // lifecycle suites would still auto-seed `tenantIdVar` and put
+        // a value on the wire for ops that the design says should omit
+        // the field.
+        omitWhenUnbound: s.omitWhenUnbound,
       }));
       for (const templateName of templateNames) {
         const templateOutDir = path.join(outDir, templateOutputDir(templateName));

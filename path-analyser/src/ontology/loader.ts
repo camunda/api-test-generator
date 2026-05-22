@@ -907,7 +907,6 @@ export function deriveGlobalContextSeedsViews(repoRoot: string): GlobalContextSe
  * accepted by the public Playwright emitter entry points
  * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`).
  *
- * The emitter interpolates `binding`, `fieldName`, `seedRule`, and
  * The emitter interpolates `binding`, `fieldName`, and `seedRule`
  * directly into emitted TS source as identifiers and single-quoted
  * string literals (#87). The graph loader validates the

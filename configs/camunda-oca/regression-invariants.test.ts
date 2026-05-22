@@ -4623,8 +4623,12 @@ describeForThisConfig(
 // don't bind it leave it undefined, and the request layer omits the
 // field on the wire — the REST Gateway then defaults the tenant
 // itself. Producer ops still mint a unique value via the per-scenario
-// `seedBindings` loop + the catch-all `${var}-${runId}-${counter:id}-${rand:6}`
-// seed rule.
+// `seedBindings` loop; `tenantIdVar` falls through the rule list in
+// `seed-rules.json` (no `/(key|id)$/` match — the binding ends in
+// `Var`) and lands on the catch-all `${var}-${rand:6}` rule, which
+// embeds a per-process random nonce so consecutive runs against a
+// live broker mint different tenant IDs and avoid the `409
+// ALREADY_EXISTS` re-run defect.
 //
 // The three class-scoped invariants below pin both halves of that
 // contract: the lifted runtime sentinel never appears on the wire,
@@ -4706,9 +4710,16 @@ describeForThisConfig(
         throw new Error(`ctxSeeding.ts not found at ${ctxSeedingPath}`);
       }
       const src = readFileSync(ctxSeedingPath, 'utf8');
-      // Strip line comments so JSDoc/issue cross-references can't
-      // satisfy the assertion accidentally.
+      // Strip both block and line comments so JSDoc/issue cross-
+      // references in either comment form cannot satisfy the assertion
+      // accidentally — the wiring must live in real code tokens. Block
+      // comments are stripped first because line-comment stripping is
+      // line-oriented and would otherwise leave `*` lines from a `/*`
+      // block. The naïve regex doesn't honour string literals, but
+      // neither `omitWhenUnbound` nor any of its surrounding tokens
+      // appear inside string literals in this file.
       const codeOnly = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
         .split('\n')
         .map((l) => l.replace(/\/\/.*$/, ''))
         .join('\n');

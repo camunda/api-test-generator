@@ -19,8 +19,7 @@
 // `tenantIdVar` binding). Each entry drives the per-scenario seed
 // prologue in the Playwright emitter:
 //
-//   - if (ctx['<binding>'] === undefined) { ctx['<binding>'] =
-//       seedBinding('<seedRule>'); }
+//   - ctx['<binding>'] = ctx['<binding>'] ?? seedBinding('<seedRule>');
 //
 // or — when `omitWhenUnbound` is `true` (#342) — the prologue is
 // skipped entirely so the binding is seeded only when the planner-

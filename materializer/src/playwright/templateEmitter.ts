@@ -26,6 +26,16 @@ import {
 export interface TemplateGlobalContextSeed {
   binding: string;
   seedRule: string;
+  /**
+   * Mirrors `GlobalContextSeed.omitWhenUnbound` (#342). When `true`,
+   * the universal-seed prologue (`emitCtxSeeding` in `ctxSeeding.ts`)
+   * skips this entry — the binding is seeded only when a per-scenario
+   * step produces or consumes it via `seedBindings`. Without this
+   * field threaded through to `emitCtxSeeding`, template suites would
+   * keep auto-seeding `tenantIdVar` and reintroduce the on-wire
+   * `<default>`-shaped behavior #342 retired.
+   */
+  omitWhenUnbound?: boolean;
 }
 
 export interface EmitTemplateSuitesOptions {
