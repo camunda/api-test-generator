@@ -8310,7 +8310,15 @@ describeForThisConfig(
             if (op?.operationId !== opId) continue;
             const body = resolveSpecNode(op.requestBody, spec, new Set());
             const schema = body?.content?.['application/json']?.schema;
+            if (!schema) return undefined;
             const { properties } = mergeSchemaShape(schema, spec, new Set());
+            if (
+              !properties ||
+              typeof properties !== 'object' ||
+              Object.keys(properties).length === 0
+            ) {
+              return undefined;
+            }
             return new Set(Object.keys(properties));
           }
         }
