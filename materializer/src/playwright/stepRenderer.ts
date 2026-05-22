@@ -109,6 +109,23 @@ export interface InlineStepRenderInput {
   method: string;
   /** Whether this step should be wrapped with `awaitEventually(...)`. */
   shouldAwaitEventually?: boolean;
+  /**
+   * Optional JS expression for the `predicate:` option of the
+   * `awaitEventually(...)` call. Must evaluate to a `(body: unknown)
+   * => boolean | Promise<boolean>` function. Only spliced in when
+   * {@link shouldAwaitEventually} is also true; ignored otherwise.
+   *
+   * Used by the EdgeLifecycle observe-membership step to drive
+   * polling toward the polarity of the membership assertion (present
+   * vs absent) instead of relying on the runtime's default
+   * `items.length > 0` heuristic, which is wrong for the absent case
+   * (an empty page is the success terminator, not a transient retry).
+   *
+   * The expression is interpolated verbatim into the emitted source —
+   * callers are responsible for producing a self-contained expression
+   * with balanced braces and any required type narrowing.
+   */
+  awaitEventuallyPredicate?: string;
 }
 
 /**
@@ -129,6 +146,7 @@ export function renderInlineStepLines({
   urlExpr,
   method,
   shouldAwaitEventually,
+  awaitEventuallyPredicate,
 }: InlineStepRenderInput): string[] {
   const lines: string[] = [];
   const bodyVar = `body${idx + 1}`;
@@ -171,9 +189,17 @@ export function renderInlineStepLines({
   if (shouldAwaitEventually) {
     lines.push(`    const ${varName} = await awaitEventually(`);
     lines.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
-    lines.push(
-      `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
-    );
+    if (awaitEventuallyPredicate) {
+      lines.push(`      {`);
+      lines.push(`        method: '${step.method.toUpperCase()}',`);
+      lines.push(`        operationId: '${step.operationId}',`);
+      lines.push(`        predicate: ${awaitEventuallyPredicate},`);
+      lines.push(`      },`);
+    } else {
+      lines.push(
+        `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
+      );
+    }
     lines.push(`    );`);
   } else {
     lines.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);

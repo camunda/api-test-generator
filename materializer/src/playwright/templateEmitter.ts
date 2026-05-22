@@ -490,6 +490,31 @@ function appendObserveMembershipStep(
   const respVar = `resp${idx + 1}`;
   const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
   const method = step.requestPlan.method.toLowerCase();
+  // Resolve binding name + access chains early so we can build the
+  // awaitEventually predicate (passed into `renderInlineStepLines`)
+  // and the post-call membership assertion from the same data. Both
+  // must agree on polarity and target binding \u2014 see #342 follow-up:
+  // without the predicate, the default `items.length > 0` heuristic
+  // drives polling and the absent case times out on a legitimately
+  // empty page (e.g. searchUsersForTenant after the only membership
+  // was unassigned).
+  const bindingName = resolveBindingNameForSemantic(
+    step.assertion.membershipSemanticType,
+    scenarioBindings,
+  );
+  const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
+  if (elementSegments.length === 0) {
+    throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
+  }
+  const shouldWrap = stepNeedsAwaitForOp(step.requestPlan, ecOps);
+  const predicateExpr = shouldWrap
+    ? buildMembershipPredicateExpr({
+        arrayPath: step.assertion.arrayPath,
+        elementSegments,
+        bindingName,
+        expect: step.assertion.expect,
+      })
+    : undefined;
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
   const inline = renderInlineStepLines({
     step: step.requestPlan,
@@ -497,7 +522,8 @@ function appendObserveMembershipStep(
     varName: respVar,
     urlExpr,
     method,
-    shouldAwaitEventually: stepNeedsAwaitForOp(step.requestPlan, ecOps),
+    shouldAwaitEventually: shouldWrap,
+    awaitEventuallyPredicate: predicateExpr,
   });
   for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
   // Membership assertion (template-unique). Walks the planner-declared
@@ -508,7 +534,7 @@ function appendObserveMembershipStep(
   const accessChain = buildOptionalAccessChain('__body', step.assertion.arrayPath);
   lines.push(`      const __raw = ${accessChain};`);
   // Fail loudly when the planner-declared arrayPath does not resolve to
-  // an array — the previous silent `Array.isArray(__raw) ? __raw : []`
+  // an array \u2014 the previous silent `Array.isArray(__raw) ? __raw : []`
   // fallback would let an absent-observe assertion pass against a
   // malformed response (e.g. server returned 200 with an unexpected
   // shape), masking real defects. (#274 review.)
@@ -518,16 +544,8 @@ function appendObserveMembershipStep(
   );
   lines.push('      }');
   lines.push('      const __arr: unknown[] = __raw;');
-  const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
-  if (elementSegments.length === 0) {
-    throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
-  }
   const elementAccess = buildOptionalAccessChain('r', elementSegments);
   lines.push(`      const __values = __arr.map((r) => ${elementAccess});`);
-  const bindingName = resolveBindingNameForSemantic(
-    step.assertion.membershipSemanticType,
-    scenarioBindings,
-  );
   const verb = step.assertion.expect === 'present' ? 'toContain' : 'not.toContain';
   lines.push(`      expect(__values).${verb}(ctx['${bindingName}']);`);
   // Note: the shared `renderInlineStepLines` does not emit extracts —
@@ -607,6 +625,60 @@ function buildOptionalAccessChain(rootExpr: string, segments: readonly string[])
     acc = `(${acc} as Record<string, unknown> | null | undefined)?.['${seg}']`;
   }
   return acc;
+}
+
+/**
+ * Build a self-contained JS expression for the `predicate:` option of
+ * the `awaitEventually(...)` call wrapping an observe-membership step
+ * (#342 follow-up). The predicate mirrors the post-call membership
+ * assertion so eventual-consistency polling converges to the SAME
+ * observable state the assertion checks for \u2014 not the runtime default
+ * (`items.length > 0`), which is wrong for both polarities:
+ *
+ *   - `expect: 'present'` \u2014 default returns `true` as soon as any item
+ *     surfaces, even if the specific binding value the test cares
+ *     about hasn't propagated yet.
+ *   - `expect: 'absent'`  \u2014 default keeps polling on an empty page,
+ *     so a tenant whose only membership was just revoked times out
+ *     even though the absent assertion would pass immediately.
+ *
+ * The returned expression is an arrow function literal `(body) => { ... }`
+ * that closes over the surrounding scope's `ctx` record (always in
+ * scope inside the emitted `test.step` callback). It narrows
+ * `body: unknown` defensively and returns `false` for any malformed
+ * shape (non-object body, missing array path, non-array value), which
+ * mirrors the assertion's own \u201cthrow on shape mismatch\u201d behaviour
+ * \u2014 the predicate will keep polling until either the shape becomes
+ * correct (and polarity matches) or the budget runs out.
+ */
+function buildMembershipPredicateExpr(opts: {
+  arrayPath: readonly string[];
+  elementSegments: readonly string[];
+  bindingName: string;
+  expect: 'present' | 'absent';
+}): string {
+  const { arrayPath, elementSegments, bindingName, expect } = opts;
+  // Identifier-safety: `bindingName` comes from `resolveBindingNameForSemantic`,
+  // which already enforces an identifier-shape, but we double-check
+  // here because the value is interpolated into a single-quoted JS
+  // string literal in the emitted source.
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bindingName)) {
+    throw new Error(
+      `buildMembershipPredicateExpr: bindingName '${bindingName}' is not a valid JS identifier.`,
+    );
+  }
+  const arrayAccess = buildOptionalAccessChain('body', arrayPath);
+  const elementAccess = buildOptionalAccessChain('r', elementSegments);
+  const negation = expect === 'absent' ? '!' : '';
+  return [
+    '(body) => {',
+    "        if (body === null || typeof body !== 'object') return false;",
+    `        const __raw = ${arrayAccess};`,
+    '        if (!Array.isArray(__raw)) return false;',
+    `        const __values = __raw.map((r) => ${elementAccess});`,
+    `        return ${negation}__values.includes(ctx['${bindingName}']);`,
+    '      }',
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
