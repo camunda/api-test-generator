@@ -107,12 +107,6 @@ export interface InlineStepRenderInput {
   varName: string;
   urlExpr: string;
   method: string;
-  /**
-   * Per-multipart-field sentinel locals declared in the test prologue.
-   * Used to strip default-valued fields from emitted multipart bodies.
-   * Empty for template-scenario callers (no multipart steps today).
-   */
-  sentinelLocals?: Map<string, string>;
   /** Whether this step should be wrapped with `awaitEventually(...)`. */
   shouldAwaitEventually?: boolean;
 }
@@ -134,12 +128,10 @@ export function renderInlineStepLines({
   varName,
   urlExpr,
   method,
-  sentinelLocals,
   shouldAwaitEventually,
 }: InlineStepRenderInput): string[] {
   const lines: string[] = [];
   const bodyVar = `body${idx + 1}`;
-  const sentinels = sentinelLocals ?? new Map<string, string>();
   lines.push(`    const url = baseUrl + ${urlExpr};`);
   if (step.bodyKind === 'json' && step.bodyTemplate) {
     const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
@@ -162,9 +154,6 @@ export function renderInlineStepLines({
       `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
     );
     lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
-    for (const [fieldName, local] of sentinels) {
-      lines.push(`      if (k === '${fieldName}' && ${local}) continue;`);
-    }
     lines.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
     lines.push(`    }`);
     lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {

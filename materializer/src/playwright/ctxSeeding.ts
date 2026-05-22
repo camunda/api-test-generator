@@ -143,6 +143,14 @@ function walkForPlaceholders(node: unknown, out: Set<string>): void {
 export interface CtxSeedingGlobal {
   readonly binding: string;
   readonly seedRule: string;
+  /**
+   * If true, the universal-seed prologue does NOT auto-seed this
+   * binding. The binding is seeded only when a per-scenario step
+   * names it via `scenario.seedBindings`. For scenarios that don't
+   * seed it, the binding stays `undefined` and the consuming
+   * request omits the field on the wire (#342).
+   */
+  readonly omitWhenUnbound?: boolean;
 }
 
 export interface EmitCtxSeedingOptions {
@@ -181,7 +189,13 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
   const { indent, bindings, seedBindings, globalContextSeeds, uniqueBindings } = opts;
   const unique = uniqueBindings ?? new Set<string>();
   const lines: string[] = [];
-  const globalSeedNames = new Set(globalContextSeeds.map((s) => s.binding));
+  // `omitWhenUnbound` seeds are excluded from the universal prologue
+  // but remain eligible for per-scenario seeding via `seedBindings`,
+  // so they are NOT added to `globalSeedNames` (which is the
+  // "don't seed twice" filter for the `seedNames` step). See #342.
+  const globalSeedNames = new Set(
+    globalContextSeeds.filter((s) => !s.omitWhenUnbound).map((s) => s.binding),
+  );
 
   // Literal writes from `scenario.bindings`, with two exclusions:
   //   - `PENDING_BINDING` sentinel — routes through `seedBindings` instead.
@@ -215,6 +229,7 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
   }
 
   for (const seed of globalContextSeeds) {
+    if (seed.omitWhenUnbound) continue;
     lines.push(
       `${indent}ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? ${seedCall(seed.seedRule, unique.has(seed.binding))};`,
     );

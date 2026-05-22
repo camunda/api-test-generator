@@ -80,7 +80,7 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
   // or hostile seed value cannot produce invalid (or unsafe) generated
   // code. The per-endpoint emitter's `assertSafeGlobalContextSeeds`
   // helper expects the full GlobalContextSeed schema (fieldName,
-  // defaultSentinel, …) which this entry point does not see — callers
+  // omitWhenUnbound, …) which this entry point does not see — callers
   // project to the narrow {binding, seedRule} shape on the way in. The
   // local check below covers the same risk surface (string-literal
   // injection) for that narrower payload. (#274 review.)

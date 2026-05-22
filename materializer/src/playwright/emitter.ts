@@ -460,38 +460,6 @@ function renderScenarioTest(
       uniqueBindings: computeUniqueBindings(s.requestPlan),
     }),
   );
-  // Multipart-sentinel locals (`__<fieldName>IsDefault`) are emitted
-  // alongside the prologue entries that drive them — only this
-  // emitter knows the sentinel exists, so the helper deliberately
-  // doesn't see this concern.
-  //
-  // Safety: `binding`, `fieldName`, `seedRule` are all required by the
-  // domain-semantics validator (#87) to match `/^[A-Za-z_$][A-Za-z0-9_$]*$/`,
-  // and `defaultSentinel` is required to contain no single quotes,
-  // backslashes, or line terminators. That lets us interpolate them
-  // directly into emitted single-quoted TS string literals without an
-  // escape pass.
-  //
-  // The local is only emitted when the scenario has at least one inline
-  // multipart step (i.e. a multipart step that is NOT dispatched to a
-  // role). Role-bound steps pass strips as a JSON literal argument and
-  // never read the prologue local; omitting it for role-only scenarios
-  // prevents an unused-variable error in the generated suite.
-  const hasInlineMultipartStep = (s.requestPlan ?? []).some(
-    (step) => step.bodyKind === 'multipart' && !!step.multipartTemplate && !findRoleForStep(step),
-  );
-  const sentinelLocals = new Map<string, string>(); // fieldName -> local var name
-  for (const seed of globalContextSeeds) {
-    if (
-      hasInlineMultipartStep &&
-      seed.stripFromMultipartWhenDefault &&
-      seed.defaultSentinel !== undefined
-    ) {
-      const local = `__${seed.fieldName}IsDefault`;
-      sentinelLocals.set(seed.fieldName, local);
-      body.push(`  const ${local} = ctx['${seed.binding}'] === '${seed.defaultSentinel}';`);
-    }
-  }
   if (!s.requestPlan) {
     body.push('  // No request plan available');
     body.push('});');
@@ -536,7 +504,6 @@ function renderScenarioTest(
       varName,
       urlExpr,
       method,
-      sentinelLocals,
       shouldAwaitEventually: stepNeedsAwaitForOp(step, ecOps),
     });
     const roleMatch = findRoleForStep(step);
@@ -552,12 +519,6 @@ function renderScenarioTest(
         .split('\n')
         .map((line: string, i: number) => (i === 0 ? line : `    ${line}`))
         .join('\n');
-      // Derive strip rules from globalContextSeeds so the helper has no
-      // hard-coded domain knowledge about sentinel values or field names.
-      const strips = globalContextSeeds
-        .filter((seed) => seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined)
-        .map((seed) => ({ fieldName: seed.fieldName, sentinel: seed.defaultSentinel }));
-      const stripsLit = JSON.stringify(strips);
       // Per-role data computed by the orchestrator. The deployment-gateway
       // hook's `extracts` payload is consumed by `materializeRoleSupportFiles`
       // when rendering the templated helper (#243), so it is also threaded
@@ -577,7 +538,6 @@ function renderScenarioTest(
         request: 'request',
         baseUrl: 'baseUrl',
         body: bodyIndented,
-        strips: stripsLit,
         ...extras,
         // Additional context vars used by the deploymentGateway template:
         url: buildUrlExpression(step.pathTemplate),

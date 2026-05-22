@@ -22,34 +22,34 @@
 //   - if (ctx['<binding>'] === undefined) { ctx['<binding>'] =
 //       seedBinding('<seedRule>'); }
 //
-// and, when `defaultSentinel` + `stripFromMultipartWhenDefault` are
-// both present, a multipart-loop branch that drops `fieldName` from
-// the request body when the binding equals the sentinel.
+// or — when `omitWhenUnbound` is `true` (#342) — the prologue is
+// skipped entirely so the binding is seeded only when the planner-
+// driven `seedBindings` list names it. Unseeded `omitWhenUnbound`
+// bindings stay `undefined`, so the request field is omitted on the
+// wire and the server applies its own default (e.g. the Camunda REST
+// Gateway treats a missing `tenantId` as the default tenant).
 //
 // Like Lifts 5/6/7, the data was never sourced from upstream OpenAPI
 // annotations — it has always lived in per-config ontology data.
 // Consequence: there is no `spec-vs-abox` (sense-1) drift to detect.
 //
-// Identifier / sentinel safety constraints (the same constraints
-// previously enforced by `domainSemanticsValidator.ts#GlobalContextSeedSchema`
+// Identifier safety constraints (the same constraints previously
+// enforced by `domainSemanticsValidator.ts#GlobalContextSeedSchema`
 // and `assertSafeGlobalContextSeeds`) are encoded in the JSON-Schema
 // `pattern` so they are caught at TBox validation time. The Playwright
-// emitter interpolates `binding`, `fieldName`, `seedRule`, and
-// `defaultSentinel` directly into emitted TS source as identifiers and
-// single-quoted string literals (#87), so the safety regex is
-// load-bearing.
+// emitter interpolates `binding`, `fieldName`, and `seedRule` directly
+// into emitted TS source as identifiers and single-quoted string
+// literals (#87), so the safety regex is load-bearing.
 //
-// Cross-property invariant (`stripFromMultipartWhenDefault === true`
-// requires `defaultSentinel` to be present) and uniqueness
-// (`binding`, `fieldName`) cannot be expressed in Draft-07 and are
-// re-checked in the loader.
+// Uniqueness (`binding`, `fieldName`) cannot be expressed in Draft-07
+// and is re-checked in the loader.
 
 export const globalContextSeedsSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
   $id: 'https://camunda.github.io/api-test-generator/ns/v1/global-context-seeds.schema.json',
   title: 'GlobalContextSeedsAbox',
   description:
-    'TBox JSON Schema for an ABox file describing the universal seed bindings every emitted scenario must populate before its request plan runs (e.g. a single-tenant `tenantIdVar` default). Each entry asserts: a context binding name, the request-body / multipart field name it maps to, the seed-rules.json key invoked at runtime, and (optionally) a sentinel value that triggers multipart-field stripping. The schema is intentionally agnostic to which API ships the seeds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/global-context-seeds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Identifier safety (binding/fieldName/seedRule must match /^[A-Za-z_$][A-Za-z0-9_$]*$/) and sentinel-string safety (no single-quotes, backslashes, line terminators, or control chars) are encoded in the `pattern` constraints because the emitter interpolates these values directly into emitted TS source as identifiers and single-quoted string literals (#87).',
+    'TBox JSON Schema for an ABox file describing the universal seed bindings every emitted scenario must populate before its request plan runs (e.g. a single-tenant `tenantIdVar` default). Each entry asserts: a context binding name, the request-body / multipart field name it maps to, the seed-rules.json key invoked at runtime, and (optionally) `omitWhenUnbound: true` to instruct the materializer to skip the universal-seed prologue and let the field be omitted on the wire when no per-scenario step seeds it. The schema is intentionally agnostic to which API ships the seeds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/global-context-seeds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Identifier safety (binding/fieldName/seedRule must match /^[A-Za-z_$][A-Za-z0-9_$]*$/) is encoded in the `pattern` constraints because the emitter interpolates these values directly into emitted TS source as identifiers and single-quoted string literals (#87).',
   type: 'object',
   additionalProperties: false,
   required: ['version', 'seeds'],
@@ -102,19 +102,10 @@ export const globalContextSeedsSchema = {
           description:
             'Key passed to seedBinding() at runtime; must match a rule in seed-rules.json. Constrained to a JS identifier so the emitter renders it as a safe single-quoted string literal.',
         },
-        defaultSentinel: {
-          type: 'string',
-          // Forbid single-quote, backslash, line terminators, and C0
-          // control chars — anything that could break the emitted
-          // single-quoted string literal or smuggle script.
-          pattern: "^[^'\\\\\\u0000-\\u001f\\u007f]*$",
-          description:
-            'Magic value that, when present in ctx[<binding>], triggers field-stripping in multipart bodies. Constrained so the emitted single-quoted string literal cannot break out of its quotes or carry control characters.',
-        },
-        stripFromMultipartWhenDefault: {
+        omitWhenUnbound: {
           type: 'boolean',
           description:
-            'If true, the emitter inserts a multipart-loop branch that drops `fieldName` when ctx[<binding>] equals `defaultSentinel`. Requires `defaultSentinel` to be present (checked by the loader).',
+            'If true, the materializer skips the universal-seed prologue for this entry — the binding is seeded only when a per-scenario step produces or consumes it (via `scenario.seedBindings`). For scenarios that do not seed it, the binding stays `undefined` and the request field is omitted on the wire (#342). Replaces the legacy `defaultSentinel`/`stripFromMultipartWhenDefault` mechanism, which sent a literal sentinel value on the wire and broke re-runnability for producer ops like `createTenant`.',
         },
         rationale: {
           type: 'string',

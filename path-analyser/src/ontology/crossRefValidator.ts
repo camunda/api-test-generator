@@ -78,8 +78,7 @@ export const GlobalContextSeedSchema = z
     binding: z.string().min(1),
     fieldName: z.string().min(1),
     seedRule: z.string().min(1),
-    defaultSentinel: z.string().optional(),
-    stripFromMultipartWhenDefault: z.boolean().optional(),
+    omitWhenUnbound: z.boolean().optional(),
     rationale: z.string().optional(),
   })
   .strict();
@@ -138,7 +137,7 @@ export function validateDomainSemantics(raw: unknown): DomainSemanticsValidation
  * Boundary-level safety assertion for `globalContextSeeds`.
  *
  * The Playwright emitter interpolates `binding`, `fieldName`, `seedRule`,
- * and `defaultSentinel` directly into emitted TS source as identifiers and
+ * and `seedRule` directly into emitted TS source as identifiers and
  * single-quoted string literals (#87). The loader validates the seeds when
  * reading the ontology-derived graph domain, but the public emitter entry points
  * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`)

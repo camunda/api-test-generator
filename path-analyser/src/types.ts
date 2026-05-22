@@ -551,11 +551,23 @@ export interface DomainSemantics {
 
 /**
  * One entry in {@link DomainSemantics.globalContextSeeds}. Drives the
- * Playwright emitter's per-scenario seed prologue: for every entry the
- * emitter writes an `if (ctx['<binding>'] === undefined) { ctx['<binding>'] =
- * seedBinding('<seedRule>'); }` guard and, when {@link defaultSentinel} +
- * {@link stripFromMultipartWhenDefault} are present, a multipart-loop branch
- * that drops {@link fieldName} when the binding equals the sentinel.
+ * Playwright emitter's per-scenario seed prologue: for non-omitting
+ * entries the emitter writes a `ctx['<binding>'] = ctx['<binding>'] ??
+ * seedBinding('<seedRule>');` line in the universal-seed prologue.
+ *
+ * When {@link omitWhenUnbound} is `true`, the universal prologue does
+ * NOT auto-seed the binding. Instead, the binding is seeded only when
+ * the planner-driven `seedBindings` list names it (i.e. a step in the
+ * scenario actively produces / consumes the value). For scenarios
+ * that don't seed it, the binding stays `undefined` and the request
+ * field is omitted on the wire — the server applies its own default
+ * (e.g. the Camunda REST Gateway treats a missing `tenantId` as the
+ * default tenant). This replaces the legacy
+ * `defaultSentinel`/`stripFromMultipartWhenDefault` mechanism (#342),
+ * which sent a literal sentinel value (`<default>`) on the wire and
+ * relied on a runtime strip branch — that approach broke
+ * re-runnability because the producer step (e.g. `createTenant`)
+ * sent the same `<default>` value on every run and 409-ed.
  */
 export interface GlobalContextSeed {
   /** ctx[<binding>] key the seed populates. */
@@ -564,10 +576,13 @@ export interface GlobalContextSeed {
   fieldName: string;
   /** Key passed to seedBinding() at runtime; must match a rule in seed-rules.json. */
   seedRule: string;
-  /** Magic value that, when present in ctx[<binding>], triggers field-stripping in multipart bodies. */
-  defaultSentinel?: string;
-  /** If true, the emitter inserts a multipart-loop branch that drops {@link fieldName} when ctx[<binding>] equals {@link defaultSentinel}. */
-  stripFromMultipartWhenDefault?: boolean;
+  /**
+   * If true, the materializer skips the universal-seed prologue for
+   * this entry — the binding is seeded only when a per-scenario step
+   * produces or consumes it. When unbound, the request field is
+   * omitted on the wire and the server applies its own default.
+   */
+  omitWhenUnbound?: boolean;
   /** Free-form documentation for maintainers. */
   rationale?: string;
 }
