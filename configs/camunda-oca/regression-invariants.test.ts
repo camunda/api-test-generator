@@ -95,6 +95,9 @@ interface SpecNode {
   required?: string[];
   properties?: Record<string, SpecNode>;
   allOf?: SpecNode[];
+  oneOf?: SpecNode[];
+  items?: SpecNode;
+  enum?: unknown[];
   content?: Record<string, { schema?: SpecNode }>;
   schema?: SpecNode;
   requestBody?: SpecNode;
@@ -173,6 +176,30 @@ function mergeSchemaShape(
     }
   }
   return { required, properties };
+}
+
+/**
+ * Walk a (possibly `$ref`- or `allOf`-wrapped) schema node and return its
+ * `enum` array if one is declared anywhere along the chain. Used by the
+ * `#338` invariant to recover enum constraints from spec nodes that are
+ * frequently wrapped as `allOf: [{ $ref: '#/components/schemas/SomeEnum' }]`
+ * (e.g. `resourceType`, `permissionTypes.items`).
+ *
+ * Returns the raw enum array — callers compare emitted values against it.
+ */
+function effectiveEnumFromSpec(
+  node: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): unknown[] | undefined {
+  const r = resolveSpecNode(node, spec, seen);
+  if (!r) return undefined;
+  if (Array.isArray(r.enum)) return r.enum;
+  for (const part of r.allOf ?? []) {
+    const e = effectiveEnumFromSpec(part, spec, new Set(seen));
+    if (e) return e;
+  }
+  return undefined;
 }
 
 function collectRequiredArrayKeysFromSchema(
@@ -8886,7 +8913,7 @@ describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
 describeForThisConfig(
   'bundled-spec invariants: enum-typed request-body field seeding (#338)',
   () => {
-    it('no feature or variant scenario seeds a ${...} placeholder or a "placeholder" array item for a required enum-typed request-body field', () => {
+    it('every required enum-typed request-body field is seeded with a valid enum literal (no ${...} placeholder, no "placeholder" array element, no non-member literal)', () => {
       if (!existsSync(FEATURE_SCENARIOS_DIR)) {
         throw new Error(
           `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
@@ -8898,89 +8925,47 @@ describeForThisConfig(
         );
       }
 
-      interface SchemaObject {
-        type?: string;
-        $ref?: string;
-        required?: string[];
-        properties?: Record<string, SchemaObject>;
-        items?: SchemaObject;
-        oneOf?: SchemaObject[];
-        allOf?: SchemaObject[];
-        enum?: unknown[];
-      }
-
-      interface OpenApiSpec {
-        paths: Record<
-          string,
-          Record<
-            string,
-            {
-              operationId?: string;
-              requestBody?: { content?: { 'application/json'?: { schema?: SchemaObject } } };
-            }
-          >
-        >;
-        components?: { schemas?: Record<string, SchemaObject> };
-      }
-
-      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-      const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as OpenApiSpec;
-
-      function resolveRef(ref: string): SchemaObject | undefined {
-        const name = ref.split('/').pop() ?? '';
-        return spec.components?.schemas?.[name];
-      }
-
-      function resolveSchemaObj(s: SchemaObject, depth = 0): SchemaObject {
-        if (depth > 20) return s;
-        if (s.$ref) {
-          const target = resolveRef(s.$ref);
-          if (target) return resolveSchemaObj(target, depth + 1);
-        }
-        return s;
-      }
-
-      /** Walk $ref + allOf chain to find an enum array. */
-      function effectiveEnum(s: SchemaObject, depth = 0): unknown[] | undefined {
-        if (depth > 20) return undefined;
-        const r = resolveSchemaObj(s, depth);
-        if (Array.isArray(r.enum)) return r.enum;
-        if (Array.isArray(r.allOf)) {
-          for (const part of r.allOf) {
-            const e = effectiveEnum(part, depth + 1);
-            if (e) return e;
-          }
-        }
-        return undefined;
-      }
+      const spec = loadBundledSpec();
 
       /**
-       * Walk a request-body schema (root + any oneOf variants) and collect,
-       * for every top-level required field, the enum values declared on the
-       * field's scalar schema (`fieldEnums`) and on its items' scalar schema
-       * when the field is an array (`itemEnums`).
+       * Walk a request-body schema and collect, for every required
+       * top-level field across the root branch and any `oneOf` variants,
+       * the enum values declared on the field's scalar schema
+       * (`fieldEnums`) and on its items' scalar schema when the field is
+       * an array (`itemEnums`).
+       *
+       * Uses the shared `mergeSchemaShape` / `resolveSpecNode` helpers
+       * so `allOf`-composed bodies (or oneOf variants composed via
+       * `allOf`) contribute their required+properties — otherwise the
+       * invariant would silently skip enum-typed required fields hidden
+       * behind `allOf` wrappers (review comment on #339).
        */
-      function collectEnumFields(rootSchema: SchemaObject): {
+      function collectEnumFields(rootSchema: SpecNode | undefined): {
         fieldEnums: Map<string, unknown[]>;
         itemEnums: Map<string, unknown[]>;
       } {
         const fieldEnums = new Map<string, unknown[]>();
         const itemEnums = new Map<string, unknown[]>();
-        const branches: SchemaObject[] = [];
-        const root = resolveSchemaObj(rootSchema);
-        if (root.properties) branches.push(root);
-        for (const v of root.oneOf ?? []) branches.push(resolveSchemaObj(v));
+        const branches: SpecNode[] = [];
+        const rootResolved = resolveSpecNode(rootSchema, spec, new Set());
+        if (rootResolved) branches.push(rootResolved);
+        for (const variant of rootResolved?.oneOf ?? []) {
+          const v = resolveSpecNode(variant, spec, new Set());
+          if (v) branches.push(v);
+        }
+
         for (const branch of branches) {
-          const required = new Set(branch.required ?? []);
-          for (const [field, sub] of Object.entries(branch.properties ?? {})) {
-            if (!required.has(field)) continue;
-            const fieldEnum = effectiveEnum(sub);
+          const { required, properties } = mergeSchemaShape(branch, spec, new Set());
+          for (const field of required) {
+            const sub = properties[field];
+            if (!sub) continue;
+            const fieldEnum = effectiveEnumFromSpec(sub, spec, new Set());
             if (fieldEnum && fieldEnum.length > 0 && !fieldEnums.has(field)) {
               fieldEnums.set(field, fieldEnum);
             }
-            const resolved = resolveSchemaObj(sub);
-            if (resolved.type === 'array' && resolved.items) {
-              const itemEnum = effectiveEnum(resolved.items);
+            const resolvedSub = resolveSpecNode(sub, spec, new Set());
+            if (resolvedSub?.type === 'array' && resolvedSub.items) {
+              const itemEnum = effectiveEnumFromSpec(resolvedSub.items, spec, new Set());
               if (itemEnum && itemEnum.length > 0 && !itemEnums.has(field)) {
                 itemEnums.set(field, itemEnum);
               }
@@ -8998,7 +8983,8 @@ describeForThisConfig(
       for (const pathItem of Object.values(spec.paths ?? {})) {
         for (const op of Object.values(pathItem)) {
           if (!op.operationId) continue;
-          const jsonBody = op.requestBody?.content?.['application/json']?.schema;
+          const body = resolveSpecNode(op.requestBody, spec, new Set());
+          const jsonBody = body?.content?.['application/json']?.schema;
           if (!jsonBody) continue;
           const collected = collectEnumFields(jsonBody);
           if (collected.fieldEnums.size > 0 || collected.itemEnums.size > 0) {
@@ -9014,15 +9000,30 @@ describeForThisConfig(
         }[];
       }
 
+      type OffenderReason = 'placeholder-var' | 'placeholder-literal' | 'non-enum-member';
       const offenders: {
         file: string;
         scenario: string;
         operationId: string;
         field: string;
-        value: string;
+        value: unknown;
         expectedEnum: unknown[];
+        reason: OffenderReason;
       }[] = [];
       const placeholderPattern = /^\$\{[^}]+\}$/;
+
+      function classifyScalar(value: unknown, expectedEnum: unknown[]): OffenderReason | null {
+        if (typeof value === 'string' && placeholderPattern.test(value)) return 'placeholder-var';
+        if (!expectedEnum.includes(value)) return 'non-enum-member';
+        return null;
+      }
+
+      function classifyArrayElement(elem: unknown, expectedEnum: unknown[]): OffenderReason | null {
+        if (typeof elem === 'string' && placeholderPattern.test(elem)) return 'placeholder-var';
+        if (elem === 'placeholder') return 'placeholder-literal';
+        if (!expectedEnum.includes(elem)) return 'non-enum-member';
+        return null;
+      }
 
       for (const dir of [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
         if (!existsSync(dir)) continue;
@@ -9035,35 +9036,35 @@ describeForThisConfig(
               const enums = enumFieldsByOp.get(step.operationId);
               if (!enums) continue;
               for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
-                // Scalar enum field: a string that looks like ${var} is a placeholder seed.
                 const fieldEnum = enums.fieldEnums.get(field);
-                if (fieldEnum && typeof value === 'string' && placeholderPattern.test(value)) {
-                  offenders.push({
-                    file: f,
-                    scenario: scenario.id,
-                    operationId: step.operationId,
-                    field,
-                    value,
-                    expectedEnum: fieldEnum,
-                  });
-                  continue;
+                if (fieldEnum) {
+                  const reason = classifyScalar(value, fieldEnum);
+                  if (reason) {
+                    offenders.push({
+                      file: f,
+                      scenario: scenario.id,
+                      operationId: step.operationId,
+                      field,
+                      value,
+                      expectedEnum: fieldEnum,
+                      reason,
+                    });
+                    continue;
+                  }
                 }
-                // Array enum field: any element that's a ${var} placeholder OR
-                // the generic synthesised "placeholder" literal is wrong.
                 const itemEnum = enums.itemEnums.get(field);
                 if (itemEnum && Array.isArray(value)) {
                   for (const elem of value) {
-                    const isPlaceholderVar =
-                      typeof elem === 'string' && placeholderPattern.test(elem);
-                    const isGenericPlaceholder = elem === 'placeholder';
-                    if (isPlaceholderVar || isGenericPlaceholder) {
+                    const reason = classifyArrayElement(elem, itemEnum);
+                    if (reason) {
                       offenders.push({
                         file: f,
                         scenario: scenario.id,
                         operationId: step.operationId,
                         field,
-                        value: JSON.stringify(elem),
+                        value: elem,
                         expectedEnum: itemEnum,
+                        reason,
                       });
                     }
                   }
@@ -9076,9 +9077,10 @@ describeForThisConfig(
 
       expect(
         offenders,
-        'A scenario bodyTemplate seeds a placeholder for a required enum-typed request-body field. ' +
-          'The planner must emit the first enum value as an inline literal instead of ${var} or "placeholder". ' +
-          'Server validation rejects unknown enum values with HTTP 400 (#338).',
+        'A scenario bodyTemplate seeds an invalid value for a required enum-typed request-body field. ' +
+          'The planner must emit a literal that is a member of the declared enum (#338). ' +
+          'Servers reject ${var} placeholders, "placeholder" array elements, and non-member literals ' +
+          'with HTTP 400.',
       ).toEqual([]);
     });
   },

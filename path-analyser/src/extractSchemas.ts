@@ -385,9 +385,11 @@ function effectiveType(schema: JsonSchema, components: Components): string {
 
 /**
  * Walk a (possibly $ref- or allOf-wrapped) schema and return its `enum`
- * array if one is declared. Used by `findOneOfGroups` and `walkSchema` to
- * surface enum constraints to the planner so it can emit a real enum
- * literal instead of seeding a `${var}` placeholder (#338).
+ * array if one is declared. Used by `findOneOfGroups` (in this module)
+ * to populate per-variant `fieldEnums` / `fieldItemEnums` so the planner
+ * can emit a real enum literal instead of seeding a `${var}` placeholder
+ * (#338). The canonical-schema walker in `canonicalSchemas.ts` performs
+ * the same role for the non-oneOf path via its own resolver.
  *
  * Returns `undefined` when no enum is declared anywhere along the chain.
  * The result is the raw `enum` array — callers pick the first value.
