@@ -4606,6 +4606,179 @@ describeForThisConfig(
 );
 
 // ---------------------------------------------------------------------------
+// globalContextSeeds — omit-when-unbound replaces the sentinel mechanism (#342)
+// ---------------------------------------------------------------------------
+//
+// #342 retired the `defaultSentinel` / `stripFromMultipartWhenDefault`
+// mechanism. Previously, the materializer hard-coded a `<default>`
+// sentinel into every multipart scenario whose body referenced
+// `globalContextSeeds[i].fieldName`, and the emitted suite tested for
+// that sentinel at runtime to strip the field. That broke
+// re-runnability for producer ops like `createTenant`, which sent
+// `tenantId: '<default>'` and received `409 ALREADY_EXISTS` on the
+// second run.
+//
+// Post-#342 the contract is: a seed entry with `omitWhenUnbound: true`
+// is NOT auto-seeded by the universal-seed prologue. Consumers that
+// don't bind it leave it undefined, and the request layer omits the
+// field on the wire — the REST Gateway then defaults the tenant
+// itself. Producer ops still mint a unique value via the per-scenario
+// `seedBindings` loop; `tenantIdVar` falls through the rule list in
+// `seed-rules.json` (no `/(key|id)$/` match — the binding ends in
+// `Var`) and lands on the catch-all `${var}-${rand:6}` rule, which
+// embeds a per-process random nonce so consecutive runs against a
+// live broker mint different tenant IDs and avoid the `409
+// ALREADY_EXISTS` re-run defect.
+//
+// The three class-scoped invariants below pin both halves of that
+// contract: the lifted runtime sentinel never appears on the wire,
+// the universal-seed prologue skips `omitWhenUnbound` entries, and
+// the JSON Schema published to external SHACL/OWL consumers does not
+// re-introduce the legacy fields.
+describeForThisConfig(
+  'bundled-spec invariants: omit-when-unbound replaces sentinel mechanism (#342)',
+  () => {
+    it('no scenario request body, multipart field, or query value carries the literal `<default>` sentinel on the wire', () => {
+      if (!existsSync(SCENARIOS_DIR)) {
+        throw new Error(
+          `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+
+      const offenders: { file: string; scenarioId: string; jsonPath: string }[] = [];
+
+      function walk(value: unknown, jsonPath: string, onHit: (jp: string) => void): void {
+        if (value === '<default>') {
+          onHit(jsonPath);
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i++) {
+            walk(value[i], `${jsonPath}[${i}]`, onHit);
+          }
+          return;
+        }
+        if (value && typeof value === 'object') {
+          for (const [k, v] of Object.entries(value)) {
+            walk(v, `${jsonPath}.${k}`, onHit);
+          }
+        }
+      }
+
+      for (const f of readdirSync(SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as {
+          scenarios?: { id: string; requestPlan?: unknown[] }[];
+        };
+        for (const scenario of file.scenarios ?? []) {
+          for (let i = 0; i < (scenario.requestPlan ?? []).length; i++) {
+            const step = (scenario.requestPlan ?? [])[i];
+            walk(step, `requestPlan[${i}]`, (jp) => {
+              offenders.push({ file: f, scenarioId: scenario.id, jsonPath: jp });
+            });
+          }
+        }
+      }
+
+      expect(
+        offenders,
+        'The legacy `<default>` sentinel must not appear in any scenario request payload. ' +
+          'Post-#342 the binding is either minted (producer scenarios via `seedBindings`) or ' +
+          'left undefined so the request layer omits the field and the REST Gateway defaults ' +
+          'the tenant. A live `<default>` value here means the sentinel mechanism leaked back ' +
+          'into the planner or the seed rule.',
+      ).toEqual([]);
+    });
+
+    it('the materializer source filters `omitWhenUnbound` seeds out of the universal-seed prologue', () => {
+      // Source-level class-scoped invariant: emitted Playwright suites
+      // share the SAME `ctx['x'] = ctx['x'] ?? seedBinding('x')` line
+      // shape for both the universal-seed prologue and the per-scenario
+      // seedBindings loop, so we cannot distinguish them at the byte
+      // level in the emitted output. The contract therefore must hold
+      // at the source: `materializer/src/playwright/ctxSeeding.ts`
+      // must (a) exclude `omitWhenUnbound` seeds from `globalSeedNames`
+      // (so the per-scenario loop does not re-seed them from the
+      // global list) and (b) skip them in the universal prologue
+      // emission loop. Both gates encode the same `omitWhenUnbound`
+      // contract; either being absent would cause `<default>`-style
+      // auto-seeding to creep back in for tenants and break
+      // re-runnability for producer ops.
+      const ctxSeedingPath = join(REPO_ROOT, 'materializer', 'src', 'playwright', 'ctxSeeding.ts');
+      if (!existsSync(ctxSeedingPath)) {
+        throw new Error(`ctxSeeding.ts not found at ${ctxSeedingPath}`);
+      }
+      const src = readFileSync(ctxSeedingPath, 'utf8');
+      // Strip both block and line comments so JSDoc/issue cross-
+      // references in either comment form cannot satisfy the assertion
+      // accidentally — the wiring must live in real code tokens. Block
+      // comments are stripped first because line-comment stripping is
+      // line-oriented and would otherwise leave `*` lines from a `/*`
+      // block. The naïve regex doesn't honour string literals, but
+      // neither `omitWhenUnbound` nor any of its surrounding tokens
+      // appear inside string literals in this file.
+      const codeOnly = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n');
+      expect(
+        codeOnly,
+        'ctxSeeding.ts must reference `omitWhenUnbound` in source (#342). The filter on ' +
+          '`globalSeedNames` and the skip in the universal-prologue emission loop are the ' +
+          'two gates that prevent `tenantIdVar` (and any future omit-when-unbound binding) ' +
+          'from being auto-seeded into every scenario.',
+      ).toMatch(/omitWhenUnbound/);
+      // The interface declaration alone is insufficient — the filter
+      // must consult the property. Two distinct uses (filter + skip
+      // statement) are expected.
+      const useCount = (codeOnly.match(/omitWhenUnbound/g) ?? []).length;
+      expect(
+        useCount,
+        'ctxSeeding.ts must reference `omitWhenUnbound` at least twice (interface + filter + ' +
+          'skip statement). A single reference suggests the gate was deleted or stubbed.',
+      ).toBeGreaterThanOrEqual(2);
+    });
+
+    it('the generated JSON Schema for globalContextSeeds publishes `omitWhenUnbound` and not the legacy sentinel fields', () => {
+      const schemaPath = join(
+        REPO_ROOT,
+        'ontology',
+        'vocabulary',
+        'global-context-seeds.schema.json',
+      );
+      if (!existsSync(schemaPath)) {
+        throw new Error(
+          `global-context-seeds.schema.json not found at ${schemaPath}. Run 'npm run build:ontology' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as {
+        definitions?: { GlobalContextSeed?: { properties?: Record<string, unknown> } };
+      };
+      const itemProps = schema.definitions?.GlobalContextSeed?.properties ?? {};
+      expect(
+        'omitWhenUnbound' in itemProps,
+        'The published JSON Schema must declare `omitWhenUnbound` (#342). External SHACL/OWL ' +
+          'consumers depend on this field to determine whether a seed is auto-seeded or omitted.',
+      ).toBe(true);
+      expect(
+        'defaultSentinel' in itemProps,
+        'The published JSON Schema must NOT re-introduce `defaultSentinel` (#342). The sentinel ' +
+          'mechanism was removed because it broke re-runnability for producer ops like ' +
+          'createTenant. Regenerate via `npm run build:ontology`.',
+      ).toBe(false);
+      expect(
+        'stripFromMultipartWhenDefault' in itemProps,
+        'The published JSON Schema must NOT re-introduce `stripFromMultipartWhenDefault` (#342). ' +
+          'Regenerate via `npm run build:ontology`.',
+      ).toBe(false);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
 // globalContextSeeds substitution into multipart templates (#200 — Lift 0)
 // ---------------------------------------------------------------------------
 //
@@ -4616,12 +4789,10 @@ describeForThisConfig(
 // supposed to be byte-identical: every multipart scenario whose request
 // body declares a `globalContextSeeds[i].fieldName` field must still
 // emit `template.fields[fieldName] = "${binding}"`, AND the scenario's
-// `bindings[binding]` must equal `__PENDING__` so the emitter's
-// universal-seed prologue (codegen/playwright/emitter.ts) can rewrite
-// it to the runtime sentinel (`<default>`). This invariant locks both
-// directions and is class-scoped (every multipart scenario across the
-// bundled output, not just createDeployment) so the same regression
-// can't recur in a sibling op.
+// `bindings[binding]` must equal `__PENDING__` so the materializer's
+// per-scenario seedBindings loop mints a value via the catch-all id
+// seed rule (#342 — previously the universal-seed prologue rewrote it
+// to the `<default>` sentinel; that mechanism is now gone).
 describeForThisConfig(
   'bundled-spec invariants: globalContextSeeds substitution survives Lift 0 (#200)',
   () => {
@@ -8878,10 +9049,14 @@ describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
     it('feature specs for ops that do NOT declare 409 keep seedBinding calls deterministic (no { unique: true })', () => {
       // Companion to the previous invariant: confirms we did not blanket-
       // apply unique tagging. A representative non-409 op feature spec must
-      // contain at least one bare seedBinding() call. createDeployment is a
+      // contain at least one bare seedBinding() call. broadcastSignal is a
       // safe pick — it doesn't declare 409 and consistently emits a seeded
-      // tenantId binding.
-      const specPath = join(GENERATED_TESTS_DIR, 'createDeployment.feature.spec.ts');
+      // signalNameVar binding.
+      //
+      // Previously this used createDeployment, but #342 made tenantIdVar
+      // omitWhenUnbound, so createDeployment now (correctly) has no
+      // seedBinding calls at all.
+      const specPath = join(GENERATED_TESTS_DIR, 'broadcastSignal.feature.spec.ts');
       if (!existsSync(specPath)) {
         return;
       }

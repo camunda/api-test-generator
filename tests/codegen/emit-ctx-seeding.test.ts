@@ -169,3 +169,78 @@ describe('emitCtxSeeding: unique-binding override of literal (#320)', () => {
     expect(seedLineCount).toBe(1);
   });
 });
+
+describe('emitCtxSeeding: omitWhenUnbound bindings (#342)', () => {
+  // `omitWhenUnbound` is the post-#342 replacement for the legacy
+  // `<default>` sentinel + multipart-strip mechanism. The contract is:
+  //
+  //   - Universal-seed prologue: skip (already guarded by an earlier
+  //     test in this file).
+  //   - Per-scenario `seedBindings` loop: skip UNLESS the binding is
+  //     also in `uniqueBindings`. The unique-set is the producer
+  //     signal — any op declaring HTTP 409 on the binding is treated
+  //     as a producer that mints a fresh value (#320), and producers
+  //     genuinely need a seed to send in the request body. Pure
+  //     consumers (e.g. `createDeployment`, `createProcessInstance`)
+  //     must leave `ctx[binding]` undefined so the multipart/JSON
+  //     emitter drops the field on the wire and the broker applies
+  //     its default tenant.
+  //
+  // Without this guard the catch-all seed-rule mints a random tenant
+  // id (`tenantIdVar-abc123`) that the broker legitimately rejects
+  // as unknown — the live-broker regression that surfaced 26 failing
+  // Playwright tests on PR #343.
+
+  const tenantSeed = {
+    binding: 'tenantIdVar',
+    seedRule: 'tenantIdVar',
+    omitWhenUnbound: true,
+  } as const;
+
+  it('skips per-scenario seed for an omitWhenUnbound binding when it is NOT in uniqueBindings (consumer case)', () => {
+    const lines = emitCtxSeeding({
+      indent: '    ',
+      bindings: undefined,
+      seedBindings: ['tenantIdVar'],
+      globalContextSeeds: [tenantSeed],
+      uniqueBindings: new Set(),
+    });
+    const joined = lines.join('\n');
+    expect(joined).not.toContain("seedBinding('tenantIdVar'");
+    expect(joined).not.toContain("ctx['tenantIdVar']");
+  });
+
+  it('emits per-scenario seed for an omitWhenUnbound binding when it IS in uniqueBindings (producer case)', () => {
+    const lines = emitCtxSeeding({
+      indent: '    ',
+      bindings: undefined,
+      seedBindings: ['tenantIdVar'],
+      globalContextSeeds: [tenantSeed],
+      uniqueBindings: new Set(['tenantIdVar']),
+    });
+    const joined = lines.join('\n');
+    expect(joined).toContain(
+      `ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar', { unique: true });`,
+    );
+  });
+
+  it('class-scoped: skips per-scenario seed for ANY omitWhenUnbound binding listed in seedBindings (consumer case)', () => {
+    // Generalised guard — the same pattern must hold for any future
+    // binding flagged with omitWhenUnbound (not just tenantIdVar).
+    const lines = emitCtxSeeding({
+      indent: '    ',
+      bindings: undefined,
+      seedBindings: ['fooVar', 'barVar', 'bazVar'],
+      globalContextSeeds: [
+        { binding: 'fooVar', seedRule: 'fooVar', omitWhenUnbound: true },
+        { binding: 'barVar', seedRule: 'barVar', omitWhenUnbound: true },
+        { binding: 'bazVar', seedRule: 'bazVar' /* not omitWhenUnbound */ },
+      ],
+      uniqueBindings: new Set(),
+    });
+    const joined = lines.join('\n');
+    expect(joined).not.toContain("ctx['fooVar']");
+    expect(joined).not.toContain("ctx['barVar']");
+    expect(joined).toContain(`ctx['bazVar'] = ctx['bazVar'] ?? seedBinding('bazVar');`);
+  });
+});

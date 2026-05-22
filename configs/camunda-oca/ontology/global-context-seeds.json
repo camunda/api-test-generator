@@ -10,9 +10,8 @@
       "binding": "tenantIdVar",
       "fieldName": "tenantId",
       "seedRule": "tenantIdVar",
-      "defaultSentinel": "<default>",
-      "stripFromMultipartWhenDefault": true,
-      "rationale": "Camunda single-tenant mode default — every emitted scenario seeds tenantIdVar via the seed rule (which yields '<default>'), and multipart bodies must drop the tenantId field when the default sentinel is present so the broker assigns the default tenant."
+      "omitWhenUnbound": true,
+      "rationale": "Camunda single-tenant mode default — the materializer must NOT auto-seed tenantIdVar from the universal prologue. When a per-scenario step seeds it (e.g. a producer like createTenant or a chained consumer that extracts the response), the seed-rules.json catch-all id rule mints a unique tenant id. When no step seeds it, ctx['tenantIdVar'] stays undefined and the consuming request omits the tenantId field, letting the REST Gateway apply the default tenant (#342). Replaces the legacy `<default>` sentinel + multipart-strip mechanism, which sent a literal sentinel on the wire and broke re-runnability for producer ops."
     }
   ]
 }

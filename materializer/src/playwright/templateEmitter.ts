@@ -26,6 +26,19 @@ import {
 export interface TemplateGlobalContextSeed {
   binding: string;
   seedRule: string;
+  /**
+   * Mirrors `GlobalContextSeed.omitWhenUnbound` (#342). When `true`,
+   * `emitCtxSeeding` in `ctxSeeding.ts` skips this entry in BOTH the
+   * universal-seed prologue AND the per-scenario `seedBindings` loop
+   * for consumer-only scenarios; only scenarios that must mint a
+   * fresh value to send (signalled by membership in the emitter's
+   * `uniqueBindings` set — see #320) still seed the binding. Without
+   * this field threaded through to `emitCtxSeeding`, template suites
+   * would auto-seed consumer-only bindings like `tenantIdVar` and
+   * send a fabricated value on the wire that the broker rejects as
+   * unknown.
+   */
+  omitWhenUnbound?: boolean;
 }
 
 export interface EmitTemplateSuitesOptions {
@@ -80,7 +93,7 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
   // or hostile seed value cannot produce invalid (or unsafe) generated
   // code. The per-endpoint emitter's `assertSafeGlobalContextSeeds`
   // helper expects the full GlobalContextSeed schema (fieldName,
-  // defaultSentinel, …) which this entry point does not see — callers
+  // omitWhenUnbound, …) which this entry point does not see — callers
   // project to the narrow {binding, seedRule} shape on the way in. The
   // local check below covers the same risk surface (string-literal
   // injection) for that narrower payload. (#274 review.)
