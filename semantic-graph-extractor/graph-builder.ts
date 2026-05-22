@@ -64,7 +64,17 @@ export class GraphBuilder {
     // Find matches between produced and consumed types
     for (const produced of producedTypes) {
       for (const consumed of consumedTypes) {
-        if (produced.semanticType === consumed.semanticType) {
+        // #330: a consumer whose schema is a union of branded-key
+        // schemas (e.g. `ResourceKey = oneOf [ProcessDefinitionKey,
+        // FormKey, …]`) is satisfied by any producer of any single
+        // branch. The edge is labelled with the PRODUCER's semantic
+        // type so materialisation can chase the producer's actual
+        // response field path — the union itself has no field path of
+        // its own.
+        const matchesSingular = produced.semanticType === consumed.semanticType;
+        const matchesAlternative =
+          consumed.semanticTypeAlternatives?.includes(produced.semanticType) === true;
+        if (matchesSingular || matchesAlternative) {
           const dependency: DependencyEdge = {
             sourceOperationId: sourceOp.operationId,
             targetOperationId: targetOp.operationId,
@@ -111,6 +121,9 @@ export class GraphBuilder {
       if (param.semanticType) {
         consumed.push({
           semanticType: param.semanticType,
+          // #330: propagate union alternatives so findDependencies can
+          // match producers of any branch.
+          semanticTypeAlternatives: param.semanticTypeAlternatives,
           fieldPath: `${param.location}.${param.name}`,
           required: param.required,
           description: param.description,
