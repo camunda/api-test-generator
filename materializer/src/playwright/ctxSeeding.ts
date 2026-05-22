@@ -212,8 +212,21 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
         .filter(([k, v]) => v !== PENDING_BINDING && unique.has(k))
         .map(([k]) => k)
     : [];
+  // `omitWhenUnbound` bindings (e.g. `tenantIdVar`) must NOT be seeded
+  // by consumer ops — the binding has to stay `undefined` so the
+  // outgoing request omits the field on the wire and the broker
+  // applies its default (#342). Producers that mint the value still
+  // need a fresh seed; they're identified by membership in
+  // `uniqueBindings` (any op declaring HTTP 409 on the binding is
+  // implicitly a producer in this codegen — see #320). Skipping in the
+  // consumer case prevents the catch-all seed-rule from minting a
+  // random tenant id (e.g. `tenantIdVar-abc123`) that the broker
+  // legitimately rejects as unknown.
+  const omitWhenUnboundNames = new Set(
+    globalContextSeeds.filter((s) => s.omitWhenUnbound).map((s) => s.binding),
+  );
   const seedNames = Array.from(new Set([...(seedBindings ?? []), ...strippedForUnique])).filter(
-    (n) => !globalSeedNames.has(n),
+    (n) => !globalSeedNames.has(n) && (!omitWhenUnboundNames.has(n) || unique.has(n)),
   );
 
   if (literalEntries.length > 0 || seedNames.length > 0) {

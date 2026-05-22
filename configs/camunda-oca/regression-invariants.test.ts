@@ -9049,10 +9049,14 @@ describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
     it('feature specs for ops that do NOT declare 409 keep seedBinding calls deterministic (no { unique: true })', () => {
       // Companion to the previous invariant: confirms we did not blanket-
       // apply unique tagging. A representative non-409 op feature spec must
-      // contain at least one bare seedBinding() call. createDeployment is a
+      // contain at least one bare seedBinding() call. broadcastSignal is a
       // safe pick — it doesn't declare 409 and consistently emits a seeded
-      // tenantId binding.
-      const specPath = join(GENERATED_TESTS_DIR, 'createDeployment.feature.spec.ts');
+      // signalNameVar binding.
+      //
+      // Previously this used createDeployment, but #342 made tenantIdVar
+      // omitWhenUnbound, so createDeployment now (correctly) has no
+      // seedBinding calls at all.
+      const specPath = join(GENERATED_TESTS_DIR, 'broadcastSignal.feature.spec.ts');
       if (!existsSync(specPath)) {
         return;
       }
