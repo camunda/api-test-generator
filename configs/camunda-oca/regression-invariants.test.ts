@@ -95,6 +95,9 @@ interface SpecNode {
   required?: string[];
   properties?: Record<string, SpecNode>;
   allOf?: SpecNode[];
+  oneOf?: SpecNode[];
+  items?: SpecNode;
+  enum?: unknown[];
   content?: Record<string, { schema?: SpecNode }>;
   schema?: SpecNode;
   requestBody?: SpecNode;
@@ -173,6 +176,30 @@ function mergeSchemaShape(
     }
   }
   return { required, properties };
+}
+
+/**
+ * Walk a (possibly `$ref`- or `allOf`-wrapped) schema node and return its
+ * `enum` array if one is declared anywhere along the chain. Used by the
+ * `#338` invariant to recover enum constraints from spec nodes that are
+ * frequently wrapped as `allOf: [{ $ref: '#/components/schemas/SomeEnum' }]`
+ * (e.g. `resourceType`, `permissionTypes.items`).
+ *
+ * Returns the raw enum array — callers compare emitted values against it.
+ */
+function effectiveEnumFromSpec(
+  node: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): unknown[] | undefined {
+  const r = resolveSpecNode(node, spec, seen);
+  if (!r) return undefined;
+  if (Array.isArray(r.enum)) return r.enum;
+  for (const part of r.allOf ?? []) {
+    const e = effectiveEnumFromSpec(part, spec, new Set(seen));
+    if (e) return e;
+  }
+  return undefined;
 }
 
 function collectRequiredArrayKeysFromSchema(
@@ -8862,6 +8889,199 @@ describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
       // At least one bare seedBinding('xxx') call (no `{ unique: true }`).
       const bareCallRe = /\bseedBinding\(\s*['"][A-Za-z_$][\w$]*['"]\s*\)/;
       expect(bareCallRe.test(src)).toBe(true);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Enum-typed request-body field seeding (#338)
+// ---------------------------------------------------------------------------
+//
+// The planner previously discarded enum constraints on required request-body
+// fields: even though the extractor captured them, `buildRequestBodyFromCanonical`
+// fell through to the seedBinding fallback and emitted `${fieldVar}` placeholders
+// the universal seed prologue rewrote to random short strings. Servers reject
+// those with HTTP 400 "Value <random> is not a valid <Enum>." Same for arrays
+// whose items are enums (e.g. `permissionTypes: array of PermissionTypeEnum`):
+// the synthesised element was a literal `"placeholder"` string the server
+// rejected.
+//
+// This invariant is class-scoped (all required enum-typed request-body fields
+// across the bundled spec — not just `ownerType` / `permissionTypes` from
+// `createAuthorization` that triggered the bug report) so the same category
+// of bug cannot recur in a sibling op.
+describeForThisConfig(
+  'bundled-spec invariants: enum-typed request-body field seeding (#338)',
+  () => {
+    it('every required enum-typed request-body field is seeded with a valid enum literal (no ${...} placeholder, no "placeholder" array element, no non-member literal)', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
+        throw new Error(
+          `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+        );
+      }
+
+      const spec = loadBundledSpec();
+
+      /**
+       * Walk a request-body schema and collect, for every required
+       * top-level field across the root branch and any `oneOf` variants,
+       * the enum values declared on the field's scalar schema
+       * (`fieldEnums`) and on its items' scalar schema when the field is
+       * an array (`itemEnums`).
+       *
+       * Uses the shared `mergeSchemaShape` / `resolveSpecNode` helpers
+       * so `allOf`-composed bodies (or oneOf variants composed via
+       * `allOf`) contribute their required+properties — otherwise the
+       * invariant would silently skip enum-typed required fields hidden
+       * behind `allOf` wrappers (review comment on #339).
+       */
+      function collectEnumFields(rootSchema: SpecNode | undefined): {
+        fieldEnums: Map<string, unknown[]>;
+        itemEnums: Map<string, unknown[]>;
+      } {
+        const fieldEnums = new Map<string, unknown[]>();
+        const itemEnums = new Map<string, unknown[]>();
+        const branches: SpecNode[] = [];
+        const rootResolved = resolveSpecNode(rootSchema, spec, new Set());
+        if (rootResolved) branches.push(rootResolved);
+        for (const variant of rootResolved?.oneOf ?? []) {
+          const v = resolveSpecNode(variant, spec, new Set());
+          if (v) branches.push(v);
+        }
+
+        for (const branch of branches) {
+          const { required, properties } = mergeSchemaShape(branch, spec, new Set());
+          for (const field of required) {
+            const sub = properties[field];
+            if (!sub) continue;
+            const fieldEnum = effectiveEnumFromSpec(sub, spec, new Set());
+            if (fieldEnum && fieldEnum.length > 0 && !fieldEnums.has(field)) {
+              fieldEnums.set(field, fieldEnum);
+            }
+            const resolvedSub = resolveSpecNode(sub, spec, new Set());
+            if (resolvedSub?.type === 'array' && resolvedSub.items) {
+              const itemEnum = effectiveEnumFromSpec(resolvedSub.items, spec, new Set());
+              if (itemEnum && itemEnum.length > 0 && !itemEnums.has(field)) {
+                itemEnums.set(field, itemEnum);
+              }
+            }
+          }
+        }
+        return { fieldEnums, itemEnums };
+      }
+
+      // Build per-op map: opId -> { fieldEnums, itemEnums }
+      const enumFieldsByOp = new Map<
+        string,
+        { fieldEnums: Map<string, unknown[]>; itemEnums: Map<string, unknown[]> }
+      >();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(pathItem)) {
+          if (!op.operationId) continue;
+          const body = resolveSpecNode(op.requestBody, spec, new Set());
+          const jsonBody = body?.content?.['application/json']?.schema;
+          if (!jsonBody) continue;
+          const collected = collectEnumFields(jsonBody);
+          if (collected.fieldEnums.size > 0 || collected.itemEnums.size > 0) {
+            enumFieldsByOp.set(op.operationId, collected);
+          }
+        }
+      }
+
+      interface FeatureScenarioFile {
+        scenarios: {
+          id: string;
+          requestPlan?: { operationId: string; bodyTemplate?: Record<string, unknown> }[];
+        }[];
+      }
+
+      type OffenderReason = 'placeholder-var' | 'placeholder-literal' | 'non-enum-member';
+      const offenders: {
+        file: string;
+        scenario: string;
+        operationId: string;
+        field: string;
+        value: unknown;
+        expectedEnum: unknown[];
+        reason: OffenderReason;
+      }[] = [];
+      const placeholderPattern = /^\$\{[^}]+\}$/;
+
+      function classifyScalar(value: unknown, expectedEnum: unknown[]): OffenderReason | null {
+        if (typeof value === 'string' && placeholderPattern.test(value)) return 'placeholder-var';
+        if (!expectedEnum.includes(value)) return 'non-enum-member';
+        return null;
+      }
+
+      function classifyArrayElement(elem: unknown, expectedEnum: unknown[]): OffenderReason | null {
+        if (typeof elem === 'string' && placeholderPattern.test(elem)) return 'placeholder-var';
+        if (elem === 'placeholder') return 'placeholder-literal';
+        if (!expectedEnum.includes(elem)) return 'non-enum-member';
+        return null;
+      }
+
+      for (const dir of [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as FeatureScenarioFile;
+          for (const scenario of file.scenarios ?? []) {
+            for (const step of scenario.requestPlan ?? []) {
+              const enums = enumFieldsByOp.get(step.operationId);
+              if (!enums) continue;
+              for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
+                const fieldEnum = enums.fieldEnums.get(field);
+                if (fieldEnum) {
+                  const reason = classifyScalar(value, fieldEnum);
+                  if (reason) {
+                    offenders.push({
+                      file: f,
+                      scenario: scenario.id,
+                      operationId: step.operationId,
+                      field,
+                      value,
+                      expectedEnum: fieldEnum,
+                      reason,
+                    });
+                    continue;
+                  }
+                }
+                const itemEnum = enums.itemEnums.get(field);
+                if (itemEnum && Array.isArray(value)) {
+                  for (const elem of value) {
+                    const reason = classifyArrayElement(elem, itemEnum);
+                    if (reason) {
+                      offenders.push({
+                        file: f,
+                        scenario: scenario.id,
+                        operationId: step.operationId,
+                        field,
+                        value: elem,
+                        expectedEnum: itemEnum,
+                        reason,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      expect(
+        offenders,
+        'A scenario bodyTemplate seeds an invalid value for a required enum-typed request-body field. ' +
+          'The planner must emit a literal that is a member of the declared enum (#338). ' +
+          'Servers reject ${var} placeholders, "placeholder" array elements, and non-member literals ' +
+          'with HTTP 400.',
+      ).toEqual([]);
     });
   },
 );

@@ -9,6 +9,22 @@ export interface CanonicalNodeMeta {
   type: string;
   required: boolean;
   semanticProvider?: string; // semantic type if x-semantic-provider: true
+  /**
+   * Enum values declared on this field's schema (after $ref + allOf
+   * resolution). Present for scalar leaf nodes whose schema constrains
+   * the value to a fixed set. Used by `buildRequestBodyFromCanonical`
+   * to emit an enum literal instead of seeding a `${var}` placeholder
+   * (#338).
+   */
+  enum?: unknown[];
+  /**
+   * Enum values declared on this array node's item schema. Present for
+   * top-level array fields whose items are scalar enums (e.g.
+   * `permissionTypes: { type: 'array', items: { enum: […] } }`). Used
+   * by the array synthesiser to emit `[enum[0]]` instead of the generic
+   * `['placeholder']` element (#338).
+   */
+  itemEnum?: unknown[];
 }
 
 export interface OperationCanonicalShapes {
@@ -29,6 +45,7 @@ interface SchemaObject {
   anyOf?: SchemaObject[];
   oneOf?: SchemaObject[];
   'x-semantic-provider'?: boolean;
+  enum?: unknown[];
   // Permissive escape hatch so the allOf merger can copy over arbitrary
   // OpenAPI keywords (description, example, format, …) without per-key
   // typing or unsafe casts.
@@ -178,6 +195,13 @@ function walkSchema(
   if (type === 'array' && schema.items) {
     const childPath = `${pathSoFar}[]`;
     const childPointer = `${pointer}/items`;
+    // Capture an item-level enum (e.g. `permissionTypes: { type: 'array',
+    // items: { enum: […] } }`) so the array synthesiser can emit
+    // `[enum[0]]` instead of the generic `['placeholder']` element
+    // (#338). `schema.items` may itself be a $ref / allOf, so resolve
+    // it before reading `.enum`.
+    const resolvedItems = resolveSchema(schema.items, components);
+    const itemEnum = Array.isArray(resolvedItems.enum) ? resolvedItems.enum : undefined;
     acc.push({
       path: `${pathSoFar}[]`,
       pointer: childPointer,
@@ -186,6 +210,7 @@ function walkSchema(
       semanticProvider: schema['x-semantic-provider']
         ? inferSemanticTypeFromPath(pathSoFar)
         : undefined,
+      itemEnum,
     });
     walkSchema(schema.items, childPointer, childPath, acc, seen, components, false, depth + 1);
     return;
@@ -194,7 +219,19 @@ function walkSchema(
     const semantic = schema['x-semantic-provider']
       ? inferSemanticTypeFromPath(pathSoFar)
       : undefined;
-    acc.push({ path: pathSoFar, pointer, type, required, semanticProvider: semantic });
+    // Capture leaf enum (e.g. `ownerType: { enum: ['USER', …] }`) so
+    // `buildRequestBodyFromCanonical` can emit an enum literal instead
+    // of seeding a `${var}` placeholder (#338). `schema` at this point
+    // is already $ref/allOf-resolved by the recursive descent above.
+    const enumValues = Array.isArray(schema.enum) ? schema.enum : undefined;
+    acc.push({
+      path: pathSoFar,
+      pointer,
+      type,
+      required,
+      semanticProvider: semantic,
+      enum: enumValues,
+    });
   }
 }
 
