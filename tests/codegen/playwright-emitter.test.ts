@@ -15,8 +15,8 @@ import { buildRoleDispatch } from './_helpers/roleDispatch.ts';
 // the semantics ABox so the assertions track production
 // configuration shape.
 // The prologue-driven tests below use the plain seed shape; the
-// `omitWhenUnbound` variant (#342) is exercised separately in the
-// dedicated `omit-when-unbound` describe block.
+// omit-when-unbound behavior (#342) is exercised in emitCtxSeeding tests
+// (tests/codegen/emit-ctx-seeding.test.ts) and via the boundary-safety checks below.
 const TENANT_SEED: GlobalContextSeed = {
   binding: 'tenantIdVar',
   fieldName: 'tenantId',
