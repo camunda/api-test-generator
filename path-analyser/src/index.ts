@@ -1402,8 +1402,19 @@ function buildRequestBodyFromCanonical(
         }
       }
     }
-    // Fill a few optional fields if present and we have bindings
-    for (const f of nodes.filter((n) => !n.required && !n.path.includes('[]'))) {
+    // Fill a few optional fields if present and we have bindings.
+    //
+    // Restricted to top-level fields (no '.' in path): otherwise the
+    // leaf-projection (`path.split('.').pop()`) silently lifts deeply
+    // nested optional properties (e.g. `filter.name` in a SearchQueryRequest
+    // whose top is `{additionalProperties: false, properties: {sort, filter,
+    // page}}`) into the top-level body when a binding happens to share
+    // the leaf name (e.g. `nameVar`). The server then rejects the request
+    // with 400 "Request property [name] cannot be parsed". This is the
+    // same defect class as #174 sub-class 1.
+    for (const f of nodes.filter(
+      (n) => !n.required && !n.path.includes('[]') && !n.path.includes('.'),
+    )) {
       const leaf = f.path.split('.').pop() ?? '';
       if (allowedFields && !allowedFields.has(leaf)) continue;
       const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
@@ -1415,11 +1426,18 @@ function buildRequestBodyFromCanonical(
         }
       }
     }
-    // Fallback: ensure all domain request.* bindings are present even if canonical nodes are missing (e.g., oneOf variants).
+    // Fallback: ensure all domain request.* bindings are present even if
+    // canonical nodes are missing (e.g., oneOf variants). Restricted to
+    // top-level fields for the same reason as the loop above — deep-leaf
+    // bleed-up corrupts the body shape for any schema with
+    // additionalProperties:false.
     const leafSet = new Set(
-      nodes.filter((n) => !n.path.includes('[]')).map((n) => n.path.split('.').pop() ?? ''),
+      nodes
+        .filter((n) => !n.path.includes('[]') && !n.path.includes('.'))
+        .map((n) => n.path.split('.').pop() ?? ''),
     );
     for (const [fieldPath, param] of Object.entries(bindingMap)) {
+      if (fieldPath.includes('.')) continue;
       const leaf = fieldPath.split('.').pop() ?? '';
       if (!leafSet.has(leaf)) continue; // don't inject fields not in schema
       if (allowedFields && !allowedFields.has(leaf)) continue;
