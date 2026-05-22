@@ -8287,6 +8287,78 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
+    it('every observe step bodyTemplate has only top-level keys declared by the operation request schema (defect-class guard: deep-leaf bleed-up #344-followup)', async () => {
+      // Class-scoped guard for a planner defect where
+      // `buildRequestBodyFromCanonical` lifts deeply-nested optional
+      // fields (e.g. `filter.name`) into the top-level body when a
+      // matching binding (e.g. `nameVar`) is in scope. The server
+      // rejects the request with 400 "Request property [X] cannot be
+      // parsed" because schemas like `MappingRuleSearchQueryRequest`
+      // declare `additionalProperties: false` with only
+      // {sort, filter, page} at the top level.
+      //
+      // The bug surfaces on /search observe steps for membership edges
+      // where a prereq chain establishes a binding whose leaf name
+      // collides with a deep optional schema property — but the defect
+      // is structural in the body builder, not specific to one edge.
+      // This invariant fails for every such case so the same class of
+      // bleed-up cannot recur silently in a sibling edge.
+      const spec = loadBundledSpec();
+      function topLevelKeysForOp(opId: string): Set<string> | undefined {
+        for (const pathOps of Object.values(spec.paths ?? {})) {
+          for (const op of Object.values(pathOps)) {
+            if (op?.operationId !== opId) continue;
+            const body = resolveSpecNode(op.requestBody, spec, new Set());
+            const schema = body?.content?.['application/json']?.schema;
+            if (!schema) return undefined;
+            const { properties } = mergeSchemaShape(schema, spec, new Set());
+            if (
+              !properties ||
+              typeof properties !== 'object' ||
+              Object.keys(properties).length === 0
+            ) {
+              return undefined;
+            }
+            return new Set(Object.keys(properties));
+          }
+        }
+        return undefined;
+      }
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      const offenders: string[] = [];
+      for (const edge of edges.edges) {
+        const file = loadTemplateFile(edge.name);
+        for (const [i, step] of file.scenario.steps.entries()) {
+          if (step.kind !== 'observe') continue;
+          // biome-ignore lint/plugin: runtime contract boundary — requestPlan typed as unknown in scenario file.
+          const rp = step.requestPlan as {
+            operationId?: string;
+            bodyTemplate?: Record<string, unknown>;
+          };
+          const opId = rp.operationId;
+          const body = rp.bodyTemplate;
+          if (!opId || !body || typeof body !== 'object') continue;
+          const allowed = topLevelKeysForOp(opId);
+          if (!allowed) continue; // no JSON body schema → nothing to check
+          for (const k of Object.keys(body)) {
+            if (!allowed.has(k)) {
+              offenders.push(
+                `${edge.name}: step[${i}] observe.${opId} bodyTemplate has top-level key '${k}' which is not a top-level property of the request schema (allowed: {${[...allowed].join(', ')}}).`,
+              );
+            }
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Every observe-step body must only carry top-level keys the request schema declares. ' +
+          'Deep schema leaves (e.g. filter.name) must not be lifted to the top level — ' +
+          'servers with additionalProperties:false reject those with 400.',
+      ).toEqual([]);
+    });
+
     it('RoleUserMembership observe pins arrayPath=[items] and elementField=username (ambiguity-stability guard for findMembershipArrayPath)', () => {
       // Stability guard for the array-locator heuristic: when more than
       // one identifiedBy semantic appears array-nested in the same
