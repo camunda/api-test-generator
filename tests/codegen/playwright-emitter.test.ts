@@ -504,7 +504,7 @@ describe('emitter: globalContextSeeds is the only source of universal-seed knowl
     expect(c).toContain(`ctx['orgIdVar'] = ctx['orgIdVar'] ?? seedBinding('orgIdVar');`);
     // Post-#342 the sentinel locals and multipart-strip branches are
     // gone — the multipart loop now omits undefined / null values
-    // naturally (see the omit-when-unbound describe block below).
+    // naturally.
     expect(c).not.toMatch(/IsDefault/);
     expect(c).not.toMatch(/&& __\w+IsDefault\) continue;/);
   });
