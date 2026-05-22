@@ -556,12 +556,15 @@ export interface DomainSemantics {
  * seedBinding('<seedRule>');` line in the universal-seed prologue.
  *
  * When {@link omitWhenUnbound} is `true`, the universal prologue does
- * NOT auto-seed the binding. Instead, the binding is seeded only when
- * the planner-driven `seedBindings` list names it (i.e. a step in the
- * scenario actively produces / consumes the value). For scenarios
- * that don't seed it, the binding stays `undefined` and the request
- * field is omitted on the wire — the server applies its own default
- * (e.g. the Camunda REST Gateway treats a missing `tenantId` as the
+ * NOT auto-seed the binding. The materializer additionally skips it
+ * in the per-scenario `seedBindings` loop unless the scenario marks
+ * the binding as needing a fresh value (currently signalled by
+ * membership in the emitter's `uniqueBindings` set — populated for
+ * ops that declare HTTP 409, see #320). In other words: producer
+ * scenarios that must mint a value still seed; consumer-only
+ * scenarios leave the binding `undefined` so the request field is
+ * omitted on the wire and the server applies its own default (e.g.
+ * the Camunda REST Gateway treats a missing `tenantId` as the
  * default tenant). This replaces the legacy
  * `defaultSentinel`/`stripFromMultipartWhenDefault` mechanism (#342),
  * which sent a literal sentinel value (`<default>`) on the wire and
@@ -578,9 +581,13 @@ export interface GlobalContextSeed {
   seedRule: string;
   /**
    * If true, the materializer skips the universal-seed prologue for
-   * this entry — the binding is seeded only when a per-scenario step
-   * produces or consumes it. When unbound, the request field is
-   * omitted on the wire and the server applies its own default.
+   * this entry AND skips it in the per-scenario `seedBindings` loop
+   * for consumer-only scenarios. The binding is seeded only when the
+   * scenario must mint a fresh value to send (currently: ops that
+   * declare HTTP 409, via the emitter's `uniqueBindings` set —
+   * see #320). When left unseeded, the binding stays `undefined` and
+   * the request field is omitted on the wire so the server applies
+   * its own default (#342).
    */
   omitWhenUnbound?: boolean;
   /** Free-form documentation for maintainers. */

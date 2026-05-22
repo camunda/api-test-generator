@@ -67,7 +67,7 @@
         },
         "omitWhenUnbound": {
           "type": "boolean",
-          "description": "If true, the materializer skips the universal-seed prologue for this entry — the binding is seeded only when a per-scenario step produces or consumes it (via `scenario.seedBindings`). For scenarios that do not seed it, the binding stays `undefined` and the request field is omitted on the wire (#342). Replaces the legacy `defaultSentinel`/`stripFromMultipartWhenDefault` mechanism, which sent a literal sentinel value on the wire and broke re-runnability for producer ops like `createTenant`."
+          "description": "If true, the materializer skips the universal-seed prologue for this entry AND skips it in the per-scenario `seedBindings` loop for consumer-only scenarios. The binding is seeded only when the scenario must mint a fresh value to send (currently: ops that declare HTTP 409, via the emitter's `uniqueBindings` set — see #320). When left unseeded, the binding stays `undefined` and the request field is omitted on the wire so the server applies its own default (#342). Replaces the legacy `defaultSentinel`/`stripFromMultipartWhenDefault` mechanism, which sent a literal sentinel value on the wire and broke re-runnability for producer ops like `createTenant`."
         },
         "rationale": {
           "type": "string",

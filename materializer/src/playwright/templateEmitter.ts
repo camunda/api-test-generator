@@ -28,12 +28,15 @@ export interface TemplateGlobalContextSeed {
   seedRule: string;
   /**
    * Mirrors `GlobalContextSeed.omitWhenUnbound` (#342). When `true`,
-   * the universal-seed prologue (`emitCtxSeeding` in `ctxSeeding.ts`)
-   * skips this entry — the binding is seeded only when a per-scenario
-   * step produces or consumes it via `seedBindings`. Without this
-   * field threaded through to `emitCtxSeeding`, template suites would
-   * keep auto-seeding `tenantIdVar` and reintroduce the on-wire
-   * `<default>`-shaped behavior #342 retired.
+   * `emitCtxSeeding` in `ctxSeeding.ts` skips this entry in BOTH the
+   * universal-seed prologue AND the per-scenario `seedBindings` loop
+   * for consumer-only scenarios; only scenarios that must mint a
+   * fresh value to send (signalled by membership in the emitter's
+   * `uniqueBindings` set — see #320) still seed the binding. Without
+   * this field threaded through to `emitCtxSeeding`, template suites
+   * would auto-seed consumer-only bindings like `tenantIdVar` and
+   * send a fabricated value on the wire that the broker rejects as
+   * unknown.
    */
   omitWhenUnbound?: boolean;
 }
