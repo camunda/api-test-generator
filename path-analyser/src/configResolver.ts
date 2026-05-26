@@ -157,6 +157,20 @@ export function getPlaywrightSuiteDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'playwright');
 }
 
+/**
+ * Output directory for a non-Playwright SDK emitter.
+ *
+ * Each SDK target gets its own subdirectory under `generated/<config>/` so
+ * every `codegen:<target>` run produces a self-contained, runnable artifact
+ * without conflicting with the Playwright suite's scaffolding.
+ *
+ * @param emitterId  The `EmitterStrategy.id` value (e.g. `'js-sdk'`,
+ *                   `'python-sdk'`, `'csharp-sdk'`).
+ */
+export function getSdkOutDir(repoRoot: string, emitterId: string): string {
+  return path.join(getGeneratedDir(repoRoot), emitterId);
+}
+
 export function getRequestValidationSuiteDir(repoRoot: string): string {
   return path.join(getGeneratedDir(repoRoot), 'request-validation');
 }
