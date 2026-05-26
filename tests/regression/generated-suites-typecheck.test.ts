@@ -65,7 +65,8 @@ describe.each(SUITES)('emitted $label suite typechecks under strict mode', ({
           `Run \`npm run testsuite:generate && npm run generate:request-validation\` to produce it before running this test.`,
       );
     }
-    const result = spawnSync('npx', ['--no-install', 'tsc', '--noEmit', '-p', tsconfig], {
+    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const result = spawnSync(npx, ['--no-install', 'tsc', '--noEmit', '-p', tsconfig], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
     });

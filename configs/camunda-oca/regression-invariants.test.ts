@@ -12,6 +12,7 @@ import {
   getGraphDir,
   getPlaywrightSuiteDir,
   getScenariosDir,
+  getSdkOutDir,
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
@@ -52,6 +53,9 @@ const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
 const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
+const JS_SDK_DIR = getSdkOutDir(REPO_ROOT, 'js-sdk');
+const PYTHON_SDK_DIR = getSdkOutDir(REPO_ROOT, 'python-sdk');
+const CSHARP_SDK_DIR = getSdkOutDir(REPO_ROOT, 'csharp-sdk');
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 
 // #331: opIds whose per-endpoint feature spec is intentionally omitted
@@ -9436,3 +9440,216 @@ describeForThisConfig(
     });
   },
 );
+
+describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)', () => {
+  it('every URL placeholder in Python SDK suite is either seeded or extracted (mirrors Bug A)', () => {
+    // Mirrors the Playwright invariant: all ctx reads must resolve to bound
+    // values at test time. Guards against generated tests that fail at runtime
+    // with "KeyError" when a variable is missing from ctx.
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = readdirSync(PYTHON_SDK_DIR).filter((f) => f.endsWith('.python_sdk.spec.py'));
+    if (files.length === 0) {
+      // No Python SDK tests generated yet; skip
+      return;
+    }
+
+    const offenders: Array<{ file: string; placeholder: string; reason: string }> = [];
+    let assertionsRun = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      assertionsRun++;
+      const contextRefs = new Set<string>();
+      const regexCtxRead = /ctx\['([^']+)'\]/g;
+      let match: RegExpExecArray | null;
+      while ((match = regexCtxRead.exec(src)) !== null) {
+        contextRefs.add(match[1]);
+      }
+      const boundVars = new Set<string>();
+      const regexCtxWrite = /ctx\['([^']+)'\]\s*=/g;
+      while ((match = regexCtxWrite.exec(src)) !== null) {
+        boundVars.add(match[1]);
+      }
+      for (const ref of contextRefs) {
+        if (!boundVars.has(ref)) {
+          offenders.push({ file, placeholder: ref, reason: 'ctx read without prior binding' });
+        }
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+
+  it('every planned scenario has a materialized Python SDK test file (#133)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
+    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
+    // so the set of operations they CAN emit is identical. We use the JS SDK's
+    // emitted .feature.test.ts files as the reference set: any operationId covered
+    // by the JS SDK must also have a Python SDK file, and vice versa.
+    const jsSdkEmitted = new Set(
+      readdirSync(JS_SDK_DIR)
+        .filter((f) => f.endsWith('.feature.test.ts'))
+        .map((f) => f.replace(/\.feature\.test\.ts$/, '')),
+    );
+    if (jsSdkEmitted.size === 0) {
+      throw new Error('No JS SDK .feature.test.ts files found — run codegen:js-sdk:all first.');
+    }
+    const missing = planned
+      .filter((e) => jsSdkEmitted.has(e.operationId))
+      .map((e) => `${e.operationId}.python_sdk.spec.py`)
+      .filter((f) => !existsSync(join(PYTHON_SDK_DIR, f)));
+    expect(
+      missing,
+      'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', () => {
+  it('every URL placeholder in JS SDK suite is either seeded or extracted (mirrors Bug A)', () => {
+    // The JS SDK emitter resolves ${var} body-template placeholders to
+    // ctx["var"] at code-generation time. Any remaining ${...} literal in
+    // the emitted .test.ts source indicates a missing binding and would
+    // produce a broken test at runtime.
+    if (!existsSync(JS_SDK_DIR)) {
+      throw new Error(
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = readdirSync(JS_SDK_DIR).filter((f) => f.endsWith('.feature.test.ts'));
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(join(JS_SDK_DIR, f), 'utf8');
+      if (/\$\{[^}]+\}/.test(src)) {
+        offenders.push(f);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted JS SDK test file(s) contain unresolved ${...} placeholder strings. ' +
+        'The emitter must resolve every body-template placeholder to ctx["<var>"] before emitting.',
+    ).toEqual([]);
+  });
+
+  it('every planned scenario has a materialized JS SDK test file (#131)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
+    if (!existsSync(JS_SDK_DIR)) {
+      throw new Error(
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // JS SDK and Python SDK hard-fail on scenarios whose prereqs require multipart
+    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
+    // so the set of operations they CAN emit is identical. We use the Python SDK's
+    // emitted .python_sdk.spec.py files as the reference set: any operationId
+    // covered by the Python SDK must also have a JS SDK file, and vice versa.
+    const pythonSdkEmitted = new Set(
+      readdirSync(PYTHON_SDK_DIR)
+        .filter((f) => f.endsWith('.python_sdk.spec.py'))
+        .map((f) => f.replace(/\.python_sdk\.spec\.py$/, '')),
+    );
+    if (pythonSdkEmitted.size === 0) {
+      throw new Error(
+        'No Python SDK .python_sdk.spec.py files found — run codegen:python-sdk:all first.',
+      );
+    }
+    const missing = planned
+      .filter((e) => pythonSdkEmitted.has(e.operationId))
+      .map((e) => `${e.operationId}.feature.test.ts`)
+      .filter((f) => !existsSync(join(JS_SDK_DIR, f)));
+    expect(
+      missing,
+      'Planned scenarios exist but no JS SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', () => {
+  it('every emitted C# file is placed under the csharp/ subdirectory (#132)', () => {
+    if (!existsSync(CSHARP_SDK_DIR)) {
+      throw new Error(
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const CSHARP_DIR = join(CSHARP_SDK_DIR, 'csharp');
+    if (!existsSync(CSHARP_DIR)) {
+      return;
+    }
+    const files = readdirSync(CSHARP_DIR).filter((f) => f.endsWith('.cs'));
+    if (files.length === 0) {
+      return;
+    }
+    const badNames = files.filter(
+      (f) => !/^[a-zA-Z][a-zA-Z0-9]+\.(feature|integration|variant)\.cs$/.test(f),
+    );
+    expect(
+      badNames,
+      'C# emitted files must follow <operationId>.<mode>.cs naming convention',
+    ).toEqual([]);
+  });
+
+  it('every emitted C# file uses the Camunda.Orchestration.RestSdk.Generated namespace (#132)', () => {
+    if (!existsSync(CSHARP_SDK_DIR)) {
+      throw new Error(
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const CSHARP_DIR = join(CSHARP_SDK_DIR, 'csharp');
+    if (!existsSync(CSHARP_DIR)) {
+      return;
+    }
+    const files = readdirSync(CSHARP_DIR).filter((f) => f.endsWith('.cs'));
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(join(CSHARP_DIR, f), 'utf8');
+      if (!src.includes('namespace Camunda.Orchestration.RestSdk.Generated')) {
+        offenders.push(f);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted C# file(s) are missing the Camunda.Orchestration.RestSdk.Generated namespace declaration.',
+    ).toEqual([]);
+  });
+});
