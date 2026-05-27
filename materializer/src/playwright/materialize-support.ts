@@ -15,8 +15,7 @@
 //                          list into <outDir>/. This module exposes the
 //                          pure file-list builder via
 //                          `loadProjectScaffoldingFiles()` so PlaywrightEmitter.scaffold
-//                          and the legacy `emitPlaywrightSuite` entrypoint
-//                          share the same template-discovery logic.
+//                          can discover templates consistently.
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
 //                fixtures.ts, seed-rules.json, await-eventually.ts).
 //                Sources:
