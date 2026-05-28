@@ -1,3 +1,4 @@
+import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/domainSemanticsValidator';
 import type {
   EndpointScenario,
@@ -5,8 +6,7 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
-import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
-import { FallbackMappingSource, type SdkMappingSource } from './sdk-mapping.js';
+import type { SdkMappingSource } from './sdk-mapping.js';
 
 export type CsharpOperationMap = Record<string, string>;
 
@@ -36,7 +36,7 @@ export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrate
     resolveMethod(opId: string): string {
       const entry = source.find(([op]) => op === opId);
       if (entry) return entry[1];
-      return toPascalCase(opId) + 'Async';
+      return `${toPascalCase(opId)}Async`;
     },
   };
   return {

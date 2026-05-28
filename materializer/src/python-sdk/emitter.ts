@@ -3,13 +3,9 @@
  * Lowers scenario collections into executable Python test code using the Camunda Python SDK.
  */
 
-import type {
-  EmitContext,
-  EmittedFile,
-  EmitterStrategy,
-} from '@camunda8/emitter-sdk';
+import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import type { EndpointScenarioCollection } from 'path-analyser/types';
-import { toPythonLiteral, type OperationMapSource } from './sdk-mapping.js';
+import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
 /**
  * Build the file name a scenario collection lowers to.
@@ -17,7 +13,10 @@ import { toPythonLiteral, type OperationMapSource } from './sdk-mapping.js';
  */
 export function pythonSuiteFileName(collection: EndpointScenarioCollection): string {
   const operationId = collection.endpoint.operationId;
-  const snakeCase = operationId.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+  const snakeCase = operationId
+    .replace(/([A-Z])/g, '_$1')
+    .toLowerCase()
+    .replace(/^_/, '');
   return `test_${snakeCase}.py`;
 }
 
@@ -33,7 +32,10 @@ export function pythonSuiteFileName(collection: EndpointScenarioCollection): str
  */
 export function buildPythonUrlExpression(pathTemplate: string): string {
   const toSnakeCase = (s: string): string =>
-    s.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    s
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '');
 
   let result = pathTemplate;
   result = result.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
@@ -59,7 +61,7 @@ export function renderPythonStringLiteral(value: string): string {
  */
 export function renderPythonBody(
   bodyTemplate: unknown,
-  bindings: Record<string, string | undefined>,
+  _bindings: Record<string, string | undefined>,
 ): string {
   if (!bodyTemplate) return '{}';
 
@@ -68,9 +70,12 @@ export function renderPythonBody(
 
   // Replace placeholders with Python context variable references
   // Commit 7082e67 — whole-string-only placeholder substitution
-  result = result.replace(/"\$\{([^}]+)\}"/g, (match, varName: string) => {
+  result = result.replace(/"\$\{([^}]+)\}"/g, (_match, varName: string) => {
     // Convert to snake_case for Python
-    const snakeVar = varName.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    const snakeVar = varName
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '');
     return `ctx.get('${snakeVar}')`;
   });
 
@@ -90,10 +95,7 @@ export function createPythonSdkEmitter(
     id: 'python-sdk',
     name: 'Python SDK',
     supportedConfigs: ['*'],
-    async emit(
-      collection: EndpointScenarioCollection,
-      ctx: EmitContext,
-    ): Promise<EmittedFile[]> {
+    async emit(collection: EndpointScenarioCollection, _ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderPythonSuite(collection, { operationMap });
       return [
         {
@@ -110,7 +112,7 @@ export function createPythonSdkEmitter(
  */
 export function renderPythonSuite(
   collection: EndpointScenarioCollection,
-  opts: {
+  _opts: {
     operationMap?: OperationMapSource;
   } = {},
 ): string {

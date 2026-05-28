@@ -79,7 +79,6 @@ export interface OperationMap {
 export function createOperationMapSourceFromJson(jsonString: string): OperationMapSource {
   let raw: unknown;
   try {
-    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON from operation-map file
     raw = JSON.parse(jsonString);
   } catch (e) {
     throw new Error(
@@ -92,6 +91,7 @@ export function createOperationMapSourceFromJson(jsonString: string): OperationM
     throw new Error('operation-map.json must be a JSON object');
   }
 
+  // biome-ignore lint/plugin: runtime contract boundary — parsed JSON validated as a plain object above
   const map = raw as Record<string, unknown>;
   return new OperationMapSource(map);
 }
@@ -114,6 +114,7 @@ export class OperationMapSource {
   lookup(operationId: string): OperationMapEntry | undefined {
     const entry = this.map[operationId];
     if (!entry || typeof entry !== 'object') return undefined;
+    // biome-ignore lint/plugin: runtime contract boundary — entry validated as a non-null object above
     return entry as OperationMapEntry;
   }
 
