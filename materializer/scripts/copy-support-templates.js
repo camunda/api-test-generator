@@ -1,14 +1,16 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 // ---------------------------------------------------------------------------
-// Stages the runtime support templates that the Playwright emitter vendors
-// into every generated test suite.
+// Stages the runtime support templates that emitters vendor into generated
+// test suites.
 //
-// The canonical runtime support sources live in src/playwright/support/.
-// Some logic here is intentionally duplicated in analyser-owned code
-// (for example, the deterministicSuffix algorithm), but analyser code does
-// not import these materializer support sources across the workspace boundary.
-// This script copies them as-is into a templates directory under dist/ where
-// the emitter's materializeSupport() resolves them at codegen time.
+// The Playwright emitter vendors runtime support files from
+// src/playwright/support/. This script copies them into a templates
+// directory under dist/ where materializeSupport() resolves them at
+// codegen time.
+//
+// SDK emitters (js-sdk, python-sdk, csharp-sdk) handle their own
+// scaffolding via SDK-specific materialize<Sdk>Support() functions;
+// they do not use this template-staging infrastructure.
 //
 // Output layout:
 //   dist/src/playwright/support-templates/
