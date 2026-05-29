@@ -634,15 +634,18 @@ async function main() {
     { name: 'unsecured', scenarios: deduped.filter((s) => s.type !== 'auth-absent') },
     { name: 'secured', scenarios: deduped },
   ] as const;
+  // Clean the whole suite output dir before emitting so that (a) stale spec
+  // files from a prior run cannot survive into either profile, and (b) legacy
+  // top-level artifacts from before the profile split — when spec files and
+  // scaffolding lived directly under `opts.outDir` rather than in
+  // `unsecured/`/`secured/` subdirs — are removed and can't be accidentally
+  // executed or mistaken for current output. The emitter recreates each
+  // profile dir (and the parent) recursively; MANIFEST/COVERAGE are rewritten
+  // into the recreated parent below.
+  fs.rmSync(opts.outDir, { recursive: true, force: true });
   for (const profile of PROFILES) {
-    const profileDir = path.join(opts.outDir, profile.name);
-    // Clean the profile dir before emitting so stale spec files from a prior
-    // run (e.g. an operation removed from the spec, or a different pinned spec
-    // that flagged different ops) cannot survive into the new suite. The
-    // emitter recreates all scaffolding + support files from scratch.
-    fs.rmSync(profileDir, { recursive: true, force: true });
     await emitQaTests(profile.scenarios, {
-      outDir: profileDir,
+      outDir: path.join(opts.outDir, profile.name),
       qaImportDepth: opts.qaImportDepth,
       standalone: opts.standalone,
       specCommit,

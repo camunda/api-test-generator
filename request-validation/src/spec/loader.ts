@@ -120,6 +120,9 @@ export async function loadSpec(file: string): Promise<SpecModel> {
     if (!isRecord(methods)) continue;
     // Path-level parameters are inherited by every operation under the path.
     const pathLevelParams = Array.isArray(methods.parameters) ? methods.parameters : [];
+    // Path-item-level `security` sits between operation-level and global in the
+    // OpenAPI precedence chain (op.security ?? pathItem.security ?? global).
+    const pathLevelSecurity = methods.security;
     for (const [m, op] of Object.entries(methods)) {
       const method = m.toUpperCase();
       if (!isRecord(op)) continue;
@@ -183,6 +186,7 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         mediaTypes,
         conditionalAuth:
           securityRequiresConditional(op.security, conditionalSchemes) ??
+          securityRequiresConditional(pathLevelSecurity, conditionalSchemes) ??
           securityRequiresConditional(globalSecurity, conditionalSchemes) ??
           false,
       });

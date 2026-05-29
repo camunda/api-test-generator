@@ -130,6 +130,45 @@ describe('request-validation: auth-absent loader derivation (#346)', () => {
     expect(byId.get('inheritsOp')?.conditionalAuth).toBe(true);
     expect(byId.get('overridesOp')?.conditionalAuth).toBe(false);
   });
+
+  it('honours path-item-level security between operation-level and global (op ?? pathItem ?? global)', async () => {
+    const pathItemPath = join(tmp, 'spec-path-item.json');
+    writeFileSync(
+      pathItemPath,
+      JSON.stringify({
+        openapi: '3.0.3',
+        info: { title: 'fixture', version: '1.0.0' },
+        // No global security — proves the path-item level is what flags the op.
+        components: {
+          securitySchemes: {
+            BearerAuth: { type: 'http', scheme: 'bearer', 'x-enforcement': 'conditional' },
+          },
+        },
+        paths: {
+          // Path-item declares conditional security; the op declares none, so
+          // it must inherit the path-item requirement.
+          '/path-secured': {
+            security: [{ BearerAuth: [] }],
+            get: { operationId: 'inheritsPathOp', responses: { '200': { description: 'ok' } } },
+          },
+          // Path-item is conditional, but the op overrides with explicit public
+          // — op-level precedence wins, so it must NOT be flagged.
+          '/path-overridden': {
+            security: [{ BearerAuth: [] }],
+            get: {
+              operationId: 'overridesPathOp',
+              security: [],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      }),
+    );
+    const model = await loadSpec(pathItemPath);
+    const byId = new Map(model.operations.map((o) => [o.operationId, o]));
+    expect(byId.get('inheritsPathOp')?.conditionalAuth).toBe(true);
+    expect(byId.get('overridesPathOp')?.conditionalAuth).toBe(false);
+  });
 });
 
 describe('request-validation: generateAuthAbsent contract (#346)', () => {
