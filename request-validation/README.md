@@ -43,8 +43,33 @@ If you are not deep into the codebase, here is the 30‑second view:
 | `format-invalid`                   | Violates `format` (e.g. date-time, uuid)           |
 | `allof-missing-required`           | Missing fields mandated by merged `allOf`          |
 | `allof-conflict`                   | Conflicting values across `allOf` parts            |
+| `auth-absent`                      | Request without credentials against a conditionally-secured op — expects 401 (secured profile only) |
 
-All generated scenarios currently expect 400; "stateful" follow-on semantic checks are out of scope here.
+Most generated scenarios expect HTTP 400. The exception is `auth-absent`,
+which expects 401 and is emitted only into the secured profile (see below);
+"stateful" follow-on semantic checks are out of scope here.
+
+### Secured / unsecured profiles
+
+The suite is emitted as **two parallel, self-contained profiles** under
+`generated/<config>/request-validation/`:
+
+| Profile      | Contents                                  | Run against            |
+|--------------|-------------------------------------------|------------------------|
+| `unsecured/` | The 400-validation tests (baseline)       | a server with auth off |
+| `secured/`   | The same 400 tests **plus** `auth-absent` (401) tests | a server started with auth on |
+
+The `auth-absent` tests are derived purely from data: an operation is flagged
+when it declares (or inherits) a `security` block referencing a security scheme
+whose `x-enforcement` is `conditional` (camunda/camunda#53708). An explicit
+`security: []` (publicly unauthenticated at runtime) is never flagged. When the
+bundled spec carries no `x-enforcement` annotations the `auth-absent` set is
+empty and the two profiles are byte-identical.
+
+Each profile is a standalone Playwright suite (own scaffolding + `support/`).
+The local runner (`npm run test:pw:request-validation`) runs the `unsecured`
+profile by default; set `RV_PROFILE=secured` to run the secured one (supply
+credentials via `CAMUNDA_BASIC_AUTH_USER` / `CAMUNDA_BASIC_AUTH_PASSWORD`).
 
 ### Quickstart: generate against `stable/8.9` and run against a local cluster
 
@@ -58,8 +83,8 @@ npm run generate:request-validation
 # 2. Start a local Camunda 8.9 cluster (defaults to http://localhost:8080).
 c8ctl cluster start 8.9
 
-# 3. Install + run the generated suite in place.
-cd generated/<config>/request-validation
+# 3. Install + run the generated suite in place (unsecured profile).
+cd generated/<config>/request-validation/unsecured
 npm install
 CORE_APPLICATION_URL=http://localhost:8080 npm test
 ```
@@ -82,17 +107,20 @@ npm run regenerate
 
 Artifacts are written to `generated/`. By default the suite is **standalone** —
 it vendors its runtime helpers and project scaffolding so it can run in place
-with no external dependency other than a running Camunda server:
+with no external dependency other than a running Camunda server. Pick a profile
+(`unsecured/` or `secured/` — see above):
 
 ```
-cd generated/<config>/request-validation
+cd generated/<config>/request-validation/unsecured
 npm install
 CORE_APPLICATION_URL=http://localhost:8080 npm test
 ```
 
-For a cluster that requires Basic auth:
+For a cluster that requires Basic auth (and to run the `secured/` profile,
+which adds the 401 auth-absent tests):
 
 ```
+cd generated/<config>/request-validation/secured
 CAMUNDA_BASIC_AUTH_USER=demo CAMUNDA_BASIC_AUTH_PASSWORD=demo npm test
 ```
 

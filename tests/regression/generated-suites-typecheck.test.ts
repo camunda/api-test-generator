@@ -42,8 +42,15 @@ const SUITES: readonly Suite[] = [
     tsconfig: path.join(getPlaywrightSuiteDir(REPO_ROOT), 'tsconfig.json'),
   },
   {
-    label: 'request-validation',
-    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'tsconfig.json'),
+    // The request-validation suite is emitted as two parallel self-contained
+    // profiles (unsecured/ + secured/), each with its own tsconfig.json. Both
+    // must typecheck under strict mode.
+    label: 'request-validation (unsecured)',
+    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'unsecured', 'tsconfig.json'),
+  },
+  {
+    label: 'request-validation (secured)',
+    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'secured', 'tsconfig.json'),
   },
 ];
 

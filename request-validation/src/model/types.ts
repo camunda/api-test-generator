@@ -43,6 +43,16 @@ export interface OperationModel {
   multipartRequiredProps?: string[];
   /** All request body media types advertised by the operation */
   mediaTypes?: string[];
+  /**
+   * True when the operation is secured *conditionally* on the `auth`
+   * deployment-mode axis: it declares (or inherits) a `security` requirement
+   * that references a security scheme whose `x-enforcement` is `conditional`
+   * (camunda/camunda#53708). Such an operation returns 401 when called
+   * without credentials against a server started in secured mode, and is
+   * unauthenticated otherwise. An explicit `security: []` override (publicly
+   * unauthenticated at runtime) yields `false`.
+   */
+  conditionalAuth?: boolean;
 }
 
 export interface ParameterModel {
@@ -82,7 +92,8 @@ export type ScenarioKind =
   | 'oneof-cross-bleed'
   | 'discriminator-structure-mismatch'
   | 'allof-missing-required'
-  | 'allof-conflict';
+  | 'allof-conflict'
+  | 'auth-absent';
 
 export interface ValidationScenario {
   id: string;
