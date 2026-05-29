@@ -2843,7 +2843,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // valid enum member only by ASCII case. Catches any future analyser
     // (e.g. a sibling oneOf/anyOf walker) that re-introduces a case-only
     // mutation.
-    const REQUEST_VALIDATION_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
     if (!existsSync(REQUEST_VALIDATION_DIR)) {
       throw new Error(
         `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
@@ -2961,7 +2967,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // Catches the original `searchVariables - Param query.truncateValues
     // wrong type` case (path `/variables/search` carrying `truncateValues`
     // in slot 2) and any sibling emitter regression.
-    const REQUEST_VALIDATION_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
     if (!existsSync(REQUEST_VALIDATION_DIR)) {
       throw new Error(
         `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
@@ -3044,7 +3056,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // Catches not just the original `minLength: 1` empty-string emission
     // (paramConstraintViolations.ts) but any sibling code path that
     // synthesises a path-routing-significant violator in future.
-    const REQUEST_VALIDATION_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
     if (!existsSync(REQUEST_VALIDATION_DIR)) {
       throw new Error(
         `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
@@ -3179,6 +3197,91 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     expect(offenders).toEqual([]);
   });
 });
+
+describeForThisConfig(
+  'bundled-spec invariants: request-validation secured/unsecured profile split (#346)',
+  () => {
+    // The request-validation suite is emitted as two parallel self-contained
+    // profiles. The unsecured profile is the deployment-mode-agnostic 400
+    // baseline; the secured profile adds auth-absent (HTTP 401) tests for
+    // conditionally-secured operations (camunda/camunda#53708). These
+    // invariants pin the contract regardless of whether the *currently pinned*
+    // spec carries `x-enforcement` annotations (with none, the auth-absent set
+    // is empty and the two profiles coincide — the assertions hold either way).
+    const RV_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const UNSECURED_DIR = join(RV_DIR, 'unsecured');
+    const SECURED_DIR = join(RV_DIR, 'secured');
+
+    function requireDir(dir: string): void {
+      if (!existsSync(dir)) {
+        throw new Error(
+          `Generated request-validation profile directory not found at ${dir}. ` +
+            `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+        );
+      }
+    }
+
+    function specFiles(dir: string): string[] {
+      return readdirSync(dir)
+        .filter((f) => f.endsWith('.spec.ts'))
+        .sort();
+    }
+
+    it('emits both profiles as self-contained suites with spec files', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      expect(specFiles(UNSECURED_DIR).length).toBeGreaterThan(0);
+      expect(specFiles(SECURED_DIR).length).toBeGreaterThan(0);
+      // Each profile carries its own standalone scaffolding so it runs in place.
+      for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+        expect(existsSync(join(dir, 'playwright.config.ts'))).toBe(true);
+        expect(existsSync(join(dir, 'tsconfig.json'))).toBe(true);
+        expect(existsSync(join(dir, 'support', 'http.ts'))).toBe(true);
+      }
+    });
+
+    it('never expects a 401 in the unsecured profile (class-scoped)', () => {
+      requireDir(UNSECURED_DIR);
+      const offenders: string[] = [];
+      for (const f of specFiles(UNSECURED_DIR)) {
+        const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
+        if (/scenarioKind:\s*['"]auth-absent['"]/.test(src)) offenders.push(`${f}: auth-absent`);
+        if (/assertResponseStatus\([^)]*,\s*401\s*,/.test(src)) offenders.push(`${f}: 401`);
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('every auth-absent test in the secured profile is an unauthenticated 401 (class-scoped)', () => {
+      requireDir(SECURED_DIR);
+      // Match each emitted auth-absent test block and assert its shape.
+      const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'auth-absent'[^]*?}\);/g;
+      const offenders: string[] = [];
+      for (const f of specFiles(SECURED_DIR)) {
+        const src = readFileSync(join(SECURED_DIR, f), 'utf8');
+        let block: RegExpExecArray | null;
+        TEST_BLOCK.lastIndex = 0;
+        while ((block = TEST_BLOCK.exec(src)) !== null) {
+          const text = block[0];
+          if (!/assertResponseStatus\([^)]*,\s*401\s*,/.test(text)) {
+            offenders.push(`${f}: auth-absent block does not assert 401`);
+          }
+          if (!/headers:\s*\{\}/.test(text)) {
+            offenders.push(`${f}: auth-absent block sends auth headers`);
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('secured profile is a superset of the unsecured profile spec files', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      const securedSet = new Set(specFiles(SECURED_DIR));
+      const missing = specFiles(UNSECURED_DIR).filter((f) => !securedSet.has(f));
+      expect(missing).toEqual([]);
+    });
+  },
+);
 
 describeForThisConfig('bundled-spec invariants: scenario seed-binding completeness (#136)', () => {
   // Class-scoped invariant pinning the planner-side fix for #136.
@@ -3980,6 +4083,7 @@ describeForThisConfig(
         'generated',
         CONFIG_NAME,
         'request-validation',
+        'unsecured',
       );
       if (!existsSync(REQUEST_VALIDATION_DIR)) {
         throw new Error(

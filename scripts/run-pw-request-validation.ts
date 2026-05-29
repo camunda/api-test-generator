@@ -15,7 +15,12 @@ import { getRequestValidationSuiteDir } from '../path-analyser/src/configResolve
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), '..');
 
-const config = join(getRequestValidationSuiteDir(REPO_ROOT), 'playwright.config.ts');
+// The request-validation suite is emitted as two parallel profiles
+// (unsecured/ and secured/). Default to the unsecured profile — it runs
+// against a plain local dev server. Set RV_PROFILE=secured to run the suite
+// that adds the auth-absent (401) tests against a secured server.
+const profile = process.env.RV_PROFILE === 'secured' ? 'secured' : 'unsecured';
+const config = join(getRequestValidationSuiteDir(REPO_ROOT), profile, 'playwright.config.ts');
 
 const child = spawn('npx', ['playwright', 'test', '-c', config, ...process.argv.slice(2)], {
   stdio: 'inherit',

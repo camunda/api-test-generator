@@ -337,6 +337,8 @@ function buildBaseTitle(s: ValidationScenario): string {
       return `${s.operationId} - allOf missing required`;
     case 'allof-conflict':
       return `${s.operationId} - allOf conflict`;
+    case 'auth-absent':
+      return `${s.operationId} - Missing authentication`;
     default:
       return s.id; // Fallback is globally unique id
   }
