@@ -373,6 +373,25 @@ fix: address review comments — …
   matters.
 - Reference the closing issue in the PR description (`Closes #NN`).
 
+## PR review
+
+- **Request a Copilot review on every PR.** It is a cheap first pass that
+  catches obvious issues (typos, missing null checks, mis-named symbols,
+  shadowed variables, unhandled error branches) before human reviewers
+  spend time on them. Click "Request review" → "Copilot" in the PR UI, or
+  add it via `gh` when opening the PR.
+- **Address Copilot review comments before requesting human review.** Fix
+  the ones that are real, reply on each thread to record the resolution
+  (don't silently resolve), and after pushing fixes, re-request a Copilot
+  review via the "Re-request review" button in the PR UI so it can
+  confirm. The `copilot-pull-request-reviewer` integration is a GitHub
+  App and cannot be re-requested via the REST/GraphQL review-request
+  APIs — use the UI button (or push a new commit, which usually retriggers
+  it on its own).
+- Disagreeing with a Copilot suggestion is fine — reply with the reason
+  (e.g. "intentional: contract boundary, see L42") and resolve. Don't
+  resolve threads silently; the reply is the audit trail.
+
 ## Continuous integration
 
 Single workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml). Runs
