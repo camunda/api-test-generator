@@ -189,7 +189,17 @@ public sealed class OrchestrationClusterClient
         response.EnsureSuccessStatusCode();
     }
 
-    private Uri BuildUri(string path) => new(baseUri, path);
+    private Uri BuildUri(string path)
+    {
+        // System.Uri treats a leading '/' in `path` as host-absolute and would
+        // drop the base path segment (e.g. "/v2"), sending requests to the wrong
+        // endpoint. Normalise so the base always ends with '/' and the relative
+        // path never starts with one, preserving the full base path on combine.
+        var normalizedBase = baseUri.AbsoluteUri.EndsWith('/')
+            ? baseUri
+            : new Uri(baseUri.AbsoluteUri + "/");
+        return new Uri(normalizedBase, path.TrimStart('/'));
+    }
 
     private static T Deserialize<T>(string json)
     {

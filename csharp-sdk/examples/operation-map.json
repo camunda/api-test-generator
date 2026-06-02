@@ -50,14 +50,14 @@
 	],
 	"searchJobs": [
 		{
-			"file": "Client/OrchestrationClusterClient.cs",
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
 			"region": "SearchJobsAsync",
 			"label": "Search jobs"
 		}
 	],
 	"failJob": [
 		{
-			"file": "Client/OrchestrationClusterClient.cs",
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
 			"region": "FailJobAsync",
 			"label": "Fail job"
 		}

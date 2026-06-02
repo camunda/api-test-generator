@@ -21,7 +21,7 @@ import {
  * JavaScript test convention: `<operationId>.<mode>.test.ts`
  *
  * @example
- * 'listProcessInstances' ΓåÆ 'listProcessInstances.feature.test.ts'
+ * 'listProcessInstances' -> 'listProcessInstances.feature.test.ts'
  */
 export function jsSuiteFileName(
   collection: EndpointScenarioCollection,
@@ -155,7 +155,7 @@ function renderScenarioTest(
     operationMap?: OperationMapJsonSource;
   } = {},
 ): void {
-  const testName = `${scenario.id} ΓÇö ${escapeQuotesForString(scenario.name || 'scenario')}`;
+  const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
 
   lines.push('  it(');
   lines.push(`    '${testName}',`);
@@ -276,8 +276,8 @@ function renderRequestStep(
  * Most SDKs use camelCase for method names.
  *
  * @example
- * 'listProcessInstances' ΓåÆ 'listProcessInstances'
- * 'CreateProcessInstance' ΓåÆ 'createProcessInstance'
+ * 'listProcessInstances' -> 'listProcessInstances'
+ * 'CreateProcessInstance' -> 'createProcessInstance'
  */
 function toCamelCase(str: string): string {
   if (!str) return str;

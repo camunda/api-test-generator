@@ -46,7 +46,7 @@ authors = [
     {name = "api-test-generator", email = "none@example.com"}
 ]
 dependencies = [
-    "camunda-sdk>=0.0.1",
+    "camunda-orchestration-sdk>=10.0.0",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "httpx>=0.24",
@@ -228,7 +228,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         An httpx AsyncClient configured for the test environment
     """
     async with httpx.AsyncClient(
-        base_url="http://localhost:8080/api",
+        base_url="http://localhost:8080/v2",
         timeout=30.0,
     ) as client:
         yield client

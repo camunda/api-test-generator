@@ -72,9 +72,12 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
             declaration: false,
             sourceMap: true,
             outDir: './dist',
-            rootDir: './src',
+            noEmit: true,
           },
-          include: ['src/**/*.ts'],
+          // Generated suites are emitted at <opId>/<opId>.<mode>.test.ts
+          // (the scaffold has no src/ directory), so include every .ts in
+          // the project rather than a non-existent src/ root.
+          include: ['**/*.ts'],
           exclude: ['node_modules', 'dist'],
         },
         null,
