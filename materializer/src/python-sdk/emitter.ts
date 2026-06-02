@@ -110,6 +110,12 @@ export function createPythonSdkEmitter(
     id: 'python-sdk',
     name: 'Python SDK',
     supportedConfigs: ['*'],
+    sdkMap: {
+      repo: 'camunda/orchestration-cluster-api-python',
+      path: 'examples/operation-map.json',
+      refEnv: 'PYTHON_SDK_REF',
+      out: 'spec/python-sdk/operation-map.json',
+    },
     async emit(collection: EndpointScenarioCollection, _ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderPythonSuite(collection, { operationMap });
       return [

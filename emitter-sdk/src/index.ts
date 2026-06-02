@@ -49,6 +49,7 @@ export {
 export type {
   EmitContext,
   EmittedFile,
+  EmitterSdkMap,
   EmitterStrategy,
   JSONSchema,
   LoadedRoleBundle,

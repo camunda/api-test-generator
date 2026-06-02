@@ -338,31 +338,109 @@ function findRepoRoot(start: string): string {
   );
 }
 
-async function run() {
-  const { target, positional, help } = parseCliArgs(process.argv.slice(2));
-  const repoRoot = findRepoRoot(process.cwd());
+/**
+ * Per-target run environment. Shared, target-independent inputs computed
+ * once in {@link run} and threaded into {@link runForTarget} so a single
+ * `--all-targets` invocation can iterate emitters without recomputing
+ * config/scenario locations per target.
+ */
+interface TargetRunEnv {
+  repoRoot: string;
+  /** `--all` sentinel or a single operationId. */
+  positional: string;
+  configName: string;
+  configDir: string;
+  baseDir: string;
+  featureDir: string;
+  variantDir: string;
+}
 
-  // Register SDK emitters here (not at module level) so operation-map.json
-  // files can be loaded from the resolved repoRoot. The Playwright emitter is
-  // already registered at module level (it has no file-system dependencies).
+/**
+ * Register the file-system-backed SDK emitters. Kept here (not at module
+ * level) so operation-map.json files load from the resolved repoRoot. The
+ * factories tolerate an absent map (fall back to operationId-derived method
+ * names), so this is safe to call even when the maps haven't been fetched —
+ * e.g. for the `list-targets` projection. The Playwright emitter is already
+ * registered at module level (it has no file-system dependencies).
+ */
+function registerSdkEmitters(repoRoot: string): void {
   registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
   registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
   registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
+}
 
-  // loadGraph / loadGlobalContextSeeds were carved out of the original
-  // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
-  // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
-  // Keep the contract; pass the conventional path so we don't churn the
-  // planner-side API in this PR.
-  const baseDir = path.join(repoRoot, 'path-analyser');
-  // Per-config output partition (#128 PR 2): scenario inputs and the
-  // emitted Playwright suite all live under generated/<config>/.
-  const featureDir = getFeatureOutputDir(repoRoot);
-  const variantDir = getVariantOutputDir(repoRoot);
+/**
+ * `list-targets` projection: print the registered emitters as JSON so the
+ * build system (e.g. the generic SDK-map fetcher) can read the registry
+ * instead of duplicating the per-target list across npm scripts. The
+ * registry is the single source of truth; this is its cross-process seam.
+ */
+function printTargetsJson(): void {
+  const targets = listEmitters().map((e) => ({
+    id: e.id,
+    name: e.name,
+    supportedConfigs: e.supportedConfigs,
+    sdkMap: e.sdkMap,
+  }));
+  console.log(JSON.stringify(targets, null, 2));
+}
+
+async function run() {
+  const { target, positional, help, allTargets, listTargets } = parseCliArgs(process.argv.slice(2));
+  const repoRoot = findRepoRoot(process.cwd());
+  registerSdkEmitters(repoRoot);
+
+  // `list-targets` is a pure registry projection — it needs neither a
+  // positional nor the active config, so handle it before any other gate.
+  if (listTargets) {
+    printTargetsJson();
+    return;
+  }
 
   if (help || !positional) {
     printUsage();
     process.exit(1);
+  }
+
+  // loadGraph / loadGlobalContextSeeds were carved out of the original
+  // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
+  // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
+  // Per-config output partition (#128 PR 2): scenario inputs and the
+  // emitted suites all live under generated/<config>/.
+  const configName = getActiveConfigName(repoRoot);
+  const configDir = getActiveConfigDir(repoRoot);
+  const enabledEmitters = loadEnabledEmitters(configDir);
+  const env: TargetRunEnv = {
+    repoRoot,
+    positional,
+    configName,
+    configDir,
+    baseDir: path.join(repoRoot, 'path-analyser'),
+    featureDir: getFeatureOutputDir(repoRoot),
+    variantDir: getVariantOutputDir(repoRoot),
+  };
+
+  // `--all-targets`: derive the target list from the config's enabled
+  // emitters, intersected with the registry and each emitter's
+  // supportedConfigs. The registry is authoritative — npm scripts no
+  // longer enumerate `codegen:<target>` per emitter.
+  if (allTargets) {
+    const targets = enabledEmitters.filter((id) => {
+      const e = getEmitter(id);
+      if (!e) {
+        console.warn(
+          `Config '${configName}' enables emitter '${id}', but no emitter with that id is registered; skipping.`,
+        );
+        return false;
+      }
+      return e.supportedConfigs.includes('*') || e.supportedConfigs.includes(configName);
+    });
+    for (const id of targets) {
+      const emitter = getEmitter(id);
+      if (!emitter) continue; // unreachable: filtered above, but keeps types honest
+      await runForTarget(emitter, env);
+    }
+    return;
   }
 
   const emitter = getEmitter(target);
@@ -381,9 +459,6 @@ async function run() {
   //      config authorises. Both must agree before the orchestrator invokes
   //      `emit()` — otherwise an emitter could write into a config that
   //      didn't opt in to its output shape, or vice versa.
-  const configName = getActiveConfigName(repoRoot);
-  const configDir = getActiveConfigDir(repoRoot);
-  const enabledEmitters = loadEnabledEmitters(configDir);
   if (!enabledEmitters.includes(emitter.id)) {
     console.error(
       `Emitter '${emitter.id}' is not enabled in config '${configName}'. ` +
@@ -398,6 +473,18 @@ async function run() {
     );
     process.exit(1);
   }
+
+  await runForTarget(emitter, env);
+}
+
+/**
+ * Materialise a single emitter's suites. The caller guarantees the emitter
+ * is registered, enabled by the active config, and supports it. Pure per
+ * target: all shared inputs arrive via {@link TargetRunEnv}, so this is the
+ * unit iterated by `--all-targets`.
+ */
+async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promise<void> {
+  const { repoRoot, positional, configName, configDir, baseDir, featureDir, variantDir } = env;
   const emitterConfig = loadEmitterConfig(configDir, emitter);
   const resolveConfigPath = (relative: string): string => path.resolve(configDir, relative);
 
