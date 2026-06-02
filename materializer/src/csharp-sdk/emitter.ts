@@ -384,7 +384,9 @@ function buildRequestParts(step: RequestStep): string {
 
   if (step.pathParams?.length) {
     for (const p of step.pathParams) {
-      entries.push(`          [${stringLiteral(p.name)}] = RequireBinding(ctx, ${stringLiteral(p.var)}),`);
+      entries.push(
+        `          [${stringLiteral(p.name)}] = RequireBinding(ctx, ${stringLiteral(p.var)}),`,
+      );
     }
   }
 
