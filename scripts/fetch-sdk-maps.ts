@@ -4,7 +4,7 @@
  *
  * Replaces the per-language `fetch-js-sdk-map` / `fetch-python-sdk-map`
  * scripts. Reads the emitter registry via
- * `materializer/src/index.ts list-targets --json`, then for every emitter
+ * `materializer/src/index.ts list-targets`, then for every emitter
  * that declares an `sdkMap`, sparse-clones the upstream repo and copies the
  * map into place. Adding an SDK emitter no longer requires a new fetch
  * script — declare `sdkMap` on the `EmitterStrategy` and it is picked up
@@ -65,9 +65,15 @@ function isTargetProjection(value: unknown): value is TargetProjection {
   return true;
 }
 
+// `npx` ships as a `.cmd` shim on Windows; Node's execFileSync (no shell) only
+// auto-resolves bare `.exe` names, so the platform-correct binary is required.
+const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+
 /** Read the emitter registry projection from the orchestrator's list-targets command. */
 function loadTargets(): TargetProjection[] {
-  const raw = execFileSync('npx', ['tsx', ORCHESTRATOR, 'list-targets'], {
+  // `--no-install` keeps the run offline/deterministic: use the repo's pinned
+  // tsx rather than letting npx auto-install tooling.
+  const raw = execFileSync(NPX, ['--no-install', 'tsx', ORCHESTRATOR, 'list-targets'], {
     cwd: REPO_ROOT,
     encoding: 'utf-8',
   });
