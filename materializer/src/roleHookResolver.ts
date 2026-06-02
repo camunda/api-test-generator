@@ -30,6 +30,20 @@
  */
 import { type EmitterStrategy, getRoleHookProvider } from '@camunda8/emitter-sdk';
 
+/**
+ * Thrown when two role-hook providers attempt to populate the same role
+ * key. This is a deterministic, expected failure (not a bug in the
+ * provider's compute()), so the orchestrator catches it specifically and
+ * exits with the message — any other error from a provider should bubble
+ * up with its full stack trace.
+ */
+export class RoleHookConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RoleHookConflictError';
+  }
+}
+
 export interface RoleHookCtx {
   /** Absolute path to the repo root. Forwarded to provider.compute(). */
   repoRoot: string;
@@ -64,7 +78,7 @@ export async function resolveRoleExtras(
     if (extras === undefined) continue;
     if (!roleExtras) roleExtras = new Map<string, Record<string, unknown>>();
     if (roleExtras.has(provider.role)) {
-      throw new Error(
+      throw new RoleHookConflictError(
         `Role-hook provider for hook ${JSON.stringify(
           hook,
         )} attempted to overwrite extras for role ${JSON.stringify(

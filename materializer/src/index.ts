@@ -42,7 +42,7 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
-import { resolveRoleExtras } from './roleHookResolver.js';
+import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -412,12 +412,16 @@ async function run() {
   // the corresponding role's extras. Operations actually dispatched to
   // the unbacked role surface a named error at materialization time
   // (`findRoleForStep` in playwright/emitter.ts and the support-template
-  // assertions in materialize-support.ts). The resolver throws on
-  // duplicate-role conflicts (formerly `process.exit(1)` here).
+  // assertions in materialize-support.ts). The resolver throws
+  // `RoleHookConflictError` on duplicate-role conflicts (formerly
+  // `process.exit(1)` here); any other error from a provider’s
+  // `compute()` propagates with its full stack so unexpected hook bugs
+  // remain debuggable.
   try {
     roleExtras = await resolveRoleExtras(emitter, { repoRoot, configName });
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+    if (!(err instanceof RoleHookConflictError)) throw err;
+    console.error(err.message);
     process.exit(1);
   }
 

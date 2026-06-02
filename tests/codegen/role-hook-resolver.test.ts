@@ -5,8 +5,8 @@
 // remain usable from configs that don't ship a deploymentGateway role
 // bundle (e.g. camunda-hub, where 0/9 operations are multipart).
 //
-// Each `it` pins one named property of the contract documented in
-// `materializer/src/roleHookResolver.ts`.
+// Each `test(...)` block pins one named property of the contract
+// documented in `materializer/src/roleHookResolver.ts`.
 
 import {
   _resetRegistriesForTests,
@@ -15,7 +15,10 @@ import {
   registerRoleHookProvider,
 } from '@camunda8/emitter-sdk';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { resolveRoleExtras } from '../../materializer/src/roleHookResolver.ts';
+import {
+  RoleHookConflictError,
+  resolveRoleExtras,
+} from '../../materializer/src/roleHookResolver.ts';
 
 const CTX = { repoRoot: '/tmp/never-read', configName: 'unit-test' };
 
@@ -77,9 +80,12 @@ describe('resolveRoleExtras (#350 — advisory roleHooks)', () => {
     expect(result?.has('deploymentGateway')).toBe(false);
   });
 
-  test('two providers populating the same role throw (no silent overwrite)', async () => {
+  test('two providers populating the same role throw RoleHookConflictError (no silent overwrite)', async () => {
     registerRoleHookProvider(provider('hookA', 'sharedRole', { a: 1 }));
     registerRoleHookProvider(provider('hookB', 'sharedRole', { b: 2 }));
+    await expect(resolveRoleExtras(emitter(['hookA', 'hookB']), CTX)).rejects.toThrowError(
+      RoleHookConflictError,
+    );
     await expect(resolveRoleExtras(emitter(['hookA', 'hookB']), CTX)).rejects.toThrowError(
       /attempted to overwrite extras for role "sharedRole"/,
     );
