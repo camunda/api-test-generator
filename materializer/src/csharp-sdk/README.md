@@ -27,7 +27,7 @@ directory.
 ## SDK method mapping
 
 The emitter maps `operationId` values to SDK methods using a mapping loaded from
-`spec/csharp-sdk/operation-map.json` in the repository root. If no mapping is available, the
+`csharp-sdk/examples/operation-map.json` in the repository root. If no mapping is available, the
 emitter falls back to `PascalCase(operationId) + "Async"`.
 
 ## Running the tests

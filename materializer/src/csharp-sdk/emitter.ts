@@ -58,13 +58,18 @@ export function renderCsharpSdkSuite(
 }
 
 export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrategy {
-  const source = mapping ? Object.entries(mapping) : [];
+  // Index the operation map by operationId for O(1) lookup per emitted step,
+  // instead of an O(n) linear scan over every entry on each resolveMethod call.
+  const methodByOpId = new Map<string, string>();
+  if (mapping) {
+    for (const [opId, entries] of Object.entries(mapping)) {
+      const first = entries?.[0];
+      if (isCsharpOperationMapEntry(first)) methodByOpId.set(opId, first.region);
+    }
+  }
   const mappingSource: SdkMappingSource = {
     resolveMethod(opId: string): string {
-      const entry = source.find(([op]) => op === opId);
-      const first = entry?.[1]?.[0];
-      if (isCsharpOperationMapEntry(first)) return first.region;
-      return `${toPascalCase(opId)}Async`;
+      return methodByOpId.get(opId) ?? `${toPascalCase(opId)}Async`;
     },
   };
   return {

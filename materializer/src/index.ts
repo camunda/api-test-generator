@@ -460,10 +460,11 @@ async function run() {
     await materializePythonSupport(outDir);
   }
   if (emitter.id === 'csharp-sdk') {
+    // materializeCsharpSupport already vendors the active config's BPMN/DMN/form
+    // fixtures into <outDir>/fixtures/ so @@FILE: paths in generated C# tests
+    // resolve to AppContext.BaseDirectory/fixtures/ at run time. No separate
+    // materializeFixtures() call is needed (it would duplicate the copy).
     await materializeCsharpSupport(outDir);
-    // Vendor BPMN/DMN/form fixtures so @@FILE: paths in generated C# tests
-    // resolve to AppContext.BaseDirectory/fixtures/ at run time.
-    await materializeFixtures(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
