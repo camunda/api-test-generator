@@ -13,6 +13,18 @@
         "maxChainAlternatives": 20,
         "maxVariantsPerEndpoint": 20
       }
+    },
+    "camunda-hub": {
+      "description": "Camunda Hub Public API V2 (spike — request-validation only)",
+      "spec": {
+        "source": "github:camunda/camunda-hub",
+        "$comment": "Hub spec lives at restapi/public-api/src/main/resources/openapi/v2/ in the (private) camunda/camunda-hub repo. Pinned ref + expected hash live in configs/camunda-hub/spec-pin.json. This config currently exercises only the request-validation (negative) suite; positive-test ABox authoring is deferred — see the camunda-hub config README/issue."
+      },
+      "planner": {
+        "$comment": "Same caps as camunda-oca; not load-bearing for request-validation, but kept consistent so a future positive-suite extension does not need a config edit.",
+        "maxChainAlternatives": 20,
+        "maxVariantsPerEndpoint": 20
+      }
     }
   }
 }
