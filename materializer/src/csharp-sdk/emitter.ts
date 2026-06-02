@@ -106,6 +106,7 @@ function buildSuiteSource(
 
   lines.push('using System;');
   lines.push('using System.Collections.Generic;');
+  lines.push('using System.IO;');
   lines.push('using System.Net.Http;');
   lines.push('using System.Threading.Tasks;');
   lines.push('using Camunda.Orchestration.Sdk;');
@@ -141,9 +142,18 @@ function renderScenarioTest(
   body.push(`      // ${title}`);
   body.push('      var ctx = new Dictionary<string, object?>();');
 
-  const globalSeedNames = new Set(globalContextSeeds.map((seed) => seed.binding));
+  const globalSeedNames = new Set(
+    globalContextSeeds.filter((seed) => !seed.omitWhenUnbound).map((seed) => seed.binding),
+  );
   const seedBindingsList = (s.seedBindings ?? []).filter((k) => !globalSeedNames.has(k));
-  const sentinelLocals = new Map<string, string>();
+  // `omitWhenUnbound` seeds are NOT auto-seeded in the universal prologue;
+  // the binding stays null so the outgoing request omits the field and the
+  // broker applies its default (#342). Mirrors the Playwright ctxSeeding
+  // contract in materializer/src/playwright/ctxSeeding.ts. We track the
+  // mapped field names so multipart bodies can null-guard them.
+  const omitWhenUnboundFields = new Set(
+    globalContextSeeds.filter((seed) => seed.omitWhenUnbound).map((seed) => seed.fieldName),
+  );
 
   if (s.bindings && Object.keys(s.bindings).length > 0) {
     body.push('      // Seed scenario bindings');
@@ -161,16 +171,10 @@ function renderScenarioTest(
     }
   }
   for (const seed of globalContextSeeds) {
+    if (seed.omitWhenUnbound) continue;
     body.push(
       `      SeedBindingIfMissing(ctx, ${stringLiteral(seed.binding)}, ${stringLiteral(seed.seedRule)});`,
     );
-    if (seed.stripFromMultipartWhenDefault && seed.defaultSentinel !== undefined) {
-      const local = `__${seed.fieldName}IsDefault`;
-      sentinelLocals.set(seed.fieldName, local);
-      body.push(
-        `      var ${local} = IsDefaultSentinel(ctx, ${stringLiteral(seed.binding)}, ${stringLiteral(seed.defaultSentinel)});`,
-      );
-    }
   }
 
   if (!s.requestPlan) {
@@ -198,11 +202,15 @@ function renderScenarioTest(
 
       body.push(`        var ${fieldsVar} = new Dictionary<string, object?>();`);
       for (const [fieldName, fieldValue] of Object.entries(multipart.fields)) {
-        const local = sentinelLocals.get(fieldName);
         const valueExpr = renderCsharpValue(fieldValue, '        ');
-        if (local) {
+        if (omitWhenUnboundFields.has(fieldName)) {
+          // Unbound `omitWhenUnbound` fields resolve to a null ctx lookup;
+          // omit them from the multipart body so the broker applies its
+          // default (#342) rather than sending an empty value.
+          const local = `__${toSafeIdentifier(fieldName)}Val`;
+          body.push(`        var ${local} = ${valueExpr};`);
           body.push(
-            `        if (!${local}) ${fieldsVar}[${stringLiteral(fieldName)}] = ${valueExpr};`,
+            `        if (${local} is not null) ${fieldsVar}[${stringLiteral(fieldName)}] = ${local};`,
           );
         } else {
           body.push(`        ${fieldsVar}[${stringLiteral(fieldName)}] = ${valueExpr};`);
@@ -221,15 +229,12 @@ function renderScenarioTest(
       const documentFileField = step.operationId === 'createDocuments' ? 'files' : 'file';
 
       if (expectError) {
-        body.push('        var ex = await Assert.ThrowsAsync<HttpSdkException>(async () =>');
+        body.push('        var ex = await Assert.ThrowsAsync<CamundaSdkException>(async () =>');
         body.push('        {');
         if (method === 'DeployResourcesFromFilesAsync') {
           const resources = multipart.files.resources;
           const filesExpr = renderFileArray(resources);
-          const tenantExpr = renderTenantExpr(
-            multipart.fields.tenantId,
-            sentinelLocals.get('tenantId'),
-          );
+          const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
           body.push(`          var resourceFiles = ${filesExpr};`);
           body.push(`          await Client.${method}(resourceFiles, ${tenantExpr});`);
         } else if (emptyDocumentFiles) {
@@ -251,7 +256,7 @@ function renderScenarioTest(
           body.push(`          await Client.${method}(content${idx + 1});`);
         }
         body.push('        });');
-        body.push(`        Assert.Equal(${step.expect.status}, ex.Status);`);
+        body.push(`        Assert.Equal((int?)${step.expect.status}, ex.Status);`);
         body.push('      }');
         return;
       }
@@ -259,10 +264,7 @@ function renderScenarioTest(
       if (method === 'DeployResourcesFromFilesAsync') {
         const resources = multipart.files.resources;
         const filesExpr = renderFileArray(resources);
-        const tenantExpr = renderTenantExpr(
-          multipart.fields.tenantId,
-          sentinelLocals.get('tenantId'),
-        );
+        const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
         body.push(`        var resourceFiles = ${filesExpr};`);
         body.push(
           `        var result${idx + 1} = await Client.${method}(resourceFiles, ${tenantExpr});`,
@@ -320,7 +322,7 @@ function renderScenarioTest(
 
     const requestParts = buildRequestParts(step);
     if (expectError) {
-      body.push('        var ex = await Assert.ThrowsAsync<HttpSdkException>(async () => {');
+      body.push('        var ex = await Assert.ThrowsAsync<CamundaSdkException>(async () => {');
       if (requestParts.length > 0) {
         body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
         body.push(`          await Client.${method}(${requestVar});`);
@@ -328,7 +330,7 @@ function renderScenarioTest(
         body.push(`          await Client.${method}();`);
       }
       body.push('        });');
-      body.push(`        Assert.Equal(${step.expect.status}, ex.Status);`);
+      body.push(`        Assert.Equal((int?)${step.expect.status}, ex.Status);`);
       body.push('      }');
       return;
     }
@@ -483,10 +485,8 @@ function renderFileArray(value: unknown): string {
   return 'Array.Empty<string>()';
 }
 
-function renderTenantExpr(value: unknown, sentinelLocal?: string): string {
-  const expr = value !== undefined ? renderCsharpValue(value) : 'null';
-  if (sentinelLocal) return `(${sentinelLocal} ? null : ${expr})`;
-  return expr;
+function renderTenantExpr(value: unknown): string {
+  return value !== undefined ? renderCsharpValue(value) : 'null';
 }
 
 function escapeInterpolatedLiteral(value: string): string {

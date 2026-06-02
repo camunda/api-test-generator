@@ -7,8 +7,12 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import { createPythonSdkEmitter, pythonSuiteFileName, renderPythonSuite } from '../../../materializer/src/python-sdk/emitter.js';
-import type { EndpointScenarioCollection } from '../../../path-analyser/src/types.js';
+import {
+  createPythonSdkEmitter,
+  pythonSuiteFileName,
+  renderPythonSuite,
+} from '../../materializer/src/python-sdk/emitter.js';
+import type { EndpointScenarioCollection } from '../../path-analyser/src/types.js';
 
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },

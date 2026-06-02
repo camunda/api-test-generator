@@ -1,4 +1,4 @@
-﻿/**
+/**
  * JavaScript SDK project materialization.
  *
  * Sets up scaffolding and support files needed for an emitted JavaScript test suite.

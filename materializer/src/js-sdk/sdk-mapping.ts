@@ -1,7 +1,7 @@
-﻿/**
+/**
  * JavaScript SDK operation map loading and source code generation.
  *
- * The JavaScript SDK operation-map.json maps OpenAPI operationId ΓåÆ SDK method name.
+ * The JavaScript SDK operation-map.json maps OpenAPI operationId → SDK method name.
  * This module loads it and provides JavaScript-specific utilities for rendering
  * test code (string escaping, URL expressions with template literals, body substitution).
  */
@@ -76,7 +76,7 @@ export class OperationMapJsonSource {
  * with backslashes.
  *
  * @example
- * toJavaScriptLiteral("hello's world") ΓåÆ "hello\\'s world"
+ * toJavaScriptLiteral("hello's world") → "hello\\'s world"
  */
 export function toJavaScriptLiteral(value: string): string {
   return value
@@ -96,7 +96,7 @@ export function toJavaScriptLiteral(value: string): string {
  *
  * @example
  * buildJavaScriptUrlExpression('/tasks/{taskId}')
- * ΓåÆ "`/tasks/${ctx['taskId'] ?? '{taskId}'}`"
+ * → "`/tasks/${ctx['taskId'] ?? '{taskId}'}`"
  *
  * @param pathTemplate OpenAPI-style path with {paramName} placeholders
  * @param pathParams Optional path-param mappings from the planner
@@ -127,7 +127,7 @@ export function buildJavaScriptUrlExpression(
  *
  * @example
  * renderJavaScriptBody({ name: "${userName}" }, {...})
- * ΓåÆ { name: ctx['userName'] }
+ * → { name: ctx['userName'] }
  *
  * @param bodyTemplate Request body template (may contain ${...} placeholders)
  * @param bindings Available context bindings (for validation if needed)

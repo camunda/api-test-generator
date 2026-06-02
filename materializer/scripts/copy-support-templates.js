@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 // ---------------------------------------------------------------------------
 // Stages the runtime support templates that emitters vendor into generated
 // test suites.

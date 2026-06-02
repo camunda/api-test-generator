@@ -12,9 +12,12 @@ export interface SdkMappingSource {
 
 export class FallbackMappingSource implements SdkMappingSource {
   resolveMethod(operationId: string): string {
+    // Capitalise the first letter of each `-`/`_`-separated segment while
+    // preserving existing camelCase humps, so `createProcessInstance` becomes
+    // `CreateProcessInstanceAsync` (not `CreateprocessinstanceAsync`).
     const pascal = operationId
       .split(/[-_]/)
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join('');
     return `${pascal}Async`;
   }

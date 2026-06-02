@@ -56,30 +56,45 @@ export function renderPythonStringLiteral(value: string): string {
 }
 
 /**
+ * Render an arbitrary JSON-like value as a valid Python literal.
+ * Booleans/None map to Python spelling; whole-string `${var}` placeholders
+ * become `ctx.get('snake_var')` lookups; everything else is escaped.
+ */
+function renderPythonValue(value: unknown): string {
+  if (value === null || value === undefined) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') {
+    const whole = /^\$\{([^}]+)\}$/.exec(value);
+    if (whole) {
+      const snakeVar = whole[1]
+        .replace(/([A-Z])/g, '_$1')
+        .toLowerCase()
+        .replace(/^_/, '');
+      return `ctx.get('${snakeVar}')`;
+    }
+    return renderPythonStringLiteral(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => renderPythonValue(v)).join(', ')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value).map(([k, v]) => `'${k}': ${renderPythonValue(v)}`);
+    return `{${entries.join(', ')}}`;
+  }
+  return 'None';
+}
+
+/**
  * Render request body as a Python dictionary.
- * Substitutes placeholders like "${varName}" with ctx['var_name'].
+ * Substitutes placeholders like "${varName}" with ctx.get('var_name').
  */
 export function renderPythonBody(
   bodyTemplate: unknown,
   _bindings: Record<string, string | undefined>,
 ): string {
   if (!bodyTemplate) return '{}';
-
-  const json = JSON.stringify(bodyTemplate, null, 2);
-  let result = json;
-
-  // Replace placeholders with Python context variable references
-  // Commit 7082e67 — whole-string-only placeholder substitution
-  result = result.replace(/"\$\{([^}]+)\}"/g, (_match, varName: string) => {
-    // Convert to snake_case for Python
-    const snakeVar = varName
-      .replace(/([A-Z])/g, '_$1')
-      .toLowerCase()
-      .replace(/^_/, '');
-    return `ctx.get('${snakeVar}')`;
-  });
-
-  return result;
+  return renderPythonValue(bodyTemplate);
 }
 
 /**

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * JavaScript SDK test suite emitter.
  * Lowers scenario collections into executable JavaScript/TypeScript test code
  * using the Camunda JavaScript SDK and Vitest.
@@ -91,6 +91,7 @@ export function renderJsSuite(
   lines.push(' */');
   lines.push('');
   lines.push("import { describe, it, expect, beforeEach } from 'vitest';");
+  lines.push("import { createApiClient } from '@camunda8/sdk';");
   lines.push("import type { ApiClient, RestClientError } from '@camunda8/sdk';");
   lines.push('');
 

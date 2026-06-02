@@ -1,4 +1,4 @@
-﻿import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import {
   createJsSdkEmitter,
   jsSuiteFileName,
@@ -71,6 +71,6 @@ describe('JavaScript SDK Emitter', () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — asserting the emitter produces this exact template-literal string in output
     expect(output).toContain("const url1 = `/widgets/${ctx['widgetIdVar'] ?? '{widgetId}'}`;");
     expect(output).toContain('expect(response1.status).toBe(200);');
-    expect(output).toContain("ctx['widgetId'] = response1.data?.id;");
+    expect(output).toContain("ctx['widgetId'] = response1.data?.data?.id;");
   });
 });

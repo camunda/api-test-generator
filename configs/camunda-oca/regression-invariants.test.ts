@@ -3,7 +3,7 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: error message text intentionally describes literal `${...}` placeholder syntax.
 // biome-ignore-all lint/correctness/noUnusedVariables: legacy declaration retained alongside its sibling describe blocks; safe to remove in a follow-up cleanup.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
@@ -9441,46 +9441,56 @@ describeForThisConfig(
   },
 );
 
+// Operations are emitted per-SDK with these layouts (see the respective
+// emitters): JS  -> <opId>/<opId>.<mode>.test.ts, C# -> <opId>/<opId>.<mode>.Tests.cs,
+// Python (flat) -> test_<snake_op_id>.py. These helpers walk the real output
+// so the invariants assert against what the emitters actually produce.
+function collectFilesRecursive(dir: string, suffix: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true })
+    .map((entry) => String(entry))
+    .filter((rel) => rel.endsWith(suffix));
+}
+
+function pythonSnakeCase(operationId: string): string {
+  return operationId
+    .replace(/([A-Z])/g, '_$1')
+    .toLowerCase()
+    .replace(/^_/, '');
+}
+
 describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)', () => {
-  it('every URL placeholder in Python SDK suite is either seeded or extracted (mirrors Bug A)', () => {
-    // Mirrors the Playwright invariant: all ctx reads must resolve to bound
-    // values at test time. Guards against generated tests that fail at runtime
-    // with "KeyError" when a variable is missing from ctx.
+  it('no emitted Python SDK test contains an unresolved ${...} placeholder (#133)', () => {
     if (!existsSync(PYTHON_SDK_DIR)) {
       throw new Error(
         `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const files = readdirSync(PYTHON_SDK_DIR).filter((f) => f.endsWith('.python_sdk.spec.py'));
+    // Python suites are emitted flat as test_<snake_op_id>.py.
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
     if (files.length === 0) {
-      // No Python SDK tests generated yet; skip
       return;
     }
 
-    const offenders: Array<{ file: string; placeholder: string; reason: string }> = [];
+    const offenders: string[] = [];
     let assertionsRun = 0;
     for (const file of files) {
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       assertionsRun++;
-      const contextRefs = new Set<string>();
-      const regexCtxRead = /ctx\['([^']+)'\]/g;
-      let match: RegExpExecArray | null;
-      while ((match = regexCtxRead.exec(src)) !== null) {
-        contextRefs.add(match[1]);
-      }
-      const boundVars = new Set<string>();
-      const regexCtxWrite = /ctx\['([^']+)'\]\s*=/g;
-      while ((match = regexCtxWrite.exec(src)) !== null) {
-        boundVars.add(match[1]);
-      }
-      for (const ref of contextRefs) {
-        if (!boundVars.has(ref)) {
-          offenders.push({ file, placeholder: ref, reason: 'ctx read without prior binding' });
-        }
+      // The Python emitter resolves ${var} body-template placeholders to
+      // ctx.get('<snake_var>') at code-generation time. Any remaining ${...}
+      // literal indicates a missing binding and would break the test.
+      if (/\$\{[^}]+\}/.test(src)) {
+        offenders.push(file);
       }
     }
     expect(assertionsRun).toBeGreaterThan(0);
-    expect(offenders).toEqual([]);
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) contain unresolved ${...} placeholder strings.',
+    ).toEqual([]);
   });
 
   it('every planned scenario has a materialized Python SDK test file (#133)', () => {
@@ -9506,19 +9516,19 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
     // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
     // so the set of operations they CAN emit is identical. We use the JS SDK's
-    // emitted .feature.test.ts files as the reference set: any operationId covered
-    // by the JS SDK must also have a Python SDK file, and vice versa.
+    // emitted <opId>/<opId>.feature.test.ts files as the reference set: any
+    // operationId covered by the JS SDK must also have a Python SDK file.
     const jsSdkEmitted = new Set(
-      readdirSync(JS_SDK_DIR)
-        .filter((f) => f.endsWith('.feature.test.ts'))
-        .map((f) => f.replace(/\.feature\.test\.ts$/, '')),
+      collectFilesRecursive(JS_SDK_DIR, '.feature.test.ts').map((rel) =>
+        basename(rel).replace(/\.feature\.test\.ts$/, ''),
+      ),
     );
     if (jsSdkEmitted.size === 0) {
       throw new Error('No JS SDK .feature.test.ts files found — run codegen:js-sdk:all first.');
     }
     const missing = planned
       .filter((e) => jsSdkEmitted.has(e.operationId))
-      .map((e) => `${e.operationId}.python_sdk.spec.py`)
+      .map((e) => `test_${pythonSnakeCase(e.operationId)}.py`)
       .filter((f) => !existsSync(join(PYTHON_SDK_DIR, f)));
     expect(
       missing,
@@ -9532,21 +9542,28 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     // The JS SDK emitter resolves ${var} body-template placeholders to
     // ctx["var"] at code-generation time. Any remaining ${...} literal in
     // the emitted .test.ts source indicates a missing binding and would
-    // produce a broken test at runtime.
+    // produce a broken test at runtime. Suites are emitted per-operation as
+    // <opId>/<opId>.<mode>.test.ts, so we walk recursively.
     if (!existsSync(JS_SDK_DIR)) {
       throw new Error(
         `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const files = readdirSync(JS_SDK_DIR).filter((f) => f.endsWith('.feature.test.ts'));
+    const files = collectFilesRecursive(JS_SDK_DIR, '.test.ts');
     if (files.length === 0) {
       return;
     }
     const offenders: string[] = [];
-    for (const f of files) {
-      const src = readFileSync(join(JS_SDK_DIR, f), 'utf8');
-      if (/\$\{[^}]+\}/.test(src)) {
-        offenders.push(f);
+    for (const rel of files) {
+      const src = readFileSync(join(JS_SDK_DIR, rel), 'utf8');
+      // A resolved placeholder is rendered as a `${ctx[...]}` template-literal
+      // interpolation; `${RANDOM}` is an intentional runtime seed token emitted
+      // verbatim inside single-quoted seed strings (identical to the canonical
+      // Playwright emitter). An UNRESOLVED body-template placeholder is any other
+      // bare `${identifier}` the emitter failed to lower to a ctx read.
+      const placeholders = src.match(/\$\{[^}]*\}/g) ?? [];
+      if (placeholders.some((p) => !p.includes('ctx') && p !== '${RANDOM}')) {
+        offenders.push(rel);
       }
     }
     expect(
@@ -9576,25 +9593,22 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
         `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    // JS SDK and Python SDK hard-fail on scenarios whose prereqs require multipart
-    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
-    // so the set of operations they CAN emit is identical. We use the Python SDK's
-    // emitted .python_sdk.spec.py files as the reference set: any operationId
-    // covered by the Python SDK must also have a JS SDK file, and vice versa.
-    const pythonSdkEmitted = new Set(
+    // JS SDK and Python SDK emit the same set of operations (identical hard-fail
+    // logic for multipart prereqs). We use the Python SDK's emitted
+    // test_<snake_op_id>.py files as the reference set: any operationId covered
+    // by the Python SDK must also have a JS SDK file.
+    const pythonSdkSnakeNames = new Set(
       readdirSync(PYTHON_SDK_DIR)
-        .filter((f) => f.endsWith('.python_sdk.spec.py'))
-        .map((f) => f.replace(/\.python_sdk\.spec\.py$/, '')),
+        .filter((f) => f.startsWith('test_') && f.endsWith('.py'))
+        .map((f) => f.replace(/^test_/, '').replace(/\.py$/, '')),
     );
-    if (pythonSdkEmitted.size === 0) {
-      throw new Error(
-        'No Python SDK .python_sdk.spec.py files found — run codegen:python-sdk:all first.',
-      );
+    if (pythonSdkSnakeNames.size === 0) {
+      throw new Error('No Python SDK test_*.py files found — run codegen:python-sdk:all first.');
     }
     const missing = planned
-      .filter((e) => pythonSdkEmitted.has(e.operationId))
-      .map((e) => `${e.operationId}.feature.test.ts`)
-      .filter((f) => !existsSync(join(JS_SDK_DIR, f)));
+      .filter((e) => pythonSdkSnakeNames.has(pythonSnakeCase(e.operationId)))
+      .map((e) => join(e.operationId, `${e.operationId}.feature.test.ts`))
+      .filter((rel) => !existsSync(join(JS_SDK_DIR, rel)));
     expect(
       missing,
       'Planned scenarios exist but no JS SDK test file was materialized for these operationIds',
@@ -9603,53 +9617,48 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
 });
 
 describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', () => {
-  it('every emitted C# file is placed under the csharp/ subdirectory (#132)', () => {
+  it('every emitted C# file follows the <opId>/<opId>.<mode>.Tests.cs convention (#132)', () => {
     if (!existsSync(CSHARP_SDK_DIR)) {
       throw new Error(
         `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const CSHARP_DIR = join(CSHARP_SDK_DIR, 'csharp');
-    if (!existsSync(CSHARP_DIR)) {
-      return;
-    }
-    const files = readdirSync(CSHARP_DIR).filter((f) => f.endsWith('.cs'));
+    // Only operation test files follow the naming convention; vendored support
+    // files (e.g. TestFixtureBase.cs) are emitted at the suite root and exempt.
+    const files = collectFilesRecursive(CSHARP_SDK_DIR, '.Tests.cs');
     if (files.length === 0) {
       return;
     }
     const badNames = files.filter(
-      (f) => !/^[a-zA-Z][a-zA-Z0-9]+\.(feature|integration|variant)\.cs$/.test(f),
+      (rel) =>
+        !/^[a-zA-Z][a-zA-Z0-9]+\.(feature|integration|variant)\.Tests\.cs$/.test(basename(rel)),
     );
     expect(
       badNames,
-      'C# emitted files must follow <operationId>.<mode>.cs naming convention',
+      'C# emitted files must follow <operationId>.<mode>.Tests.cs naming convention',
     ).toEqual([]);
   });
 
-  it('every emitted C# file uses the Camunda.Orchestration.RestSdk.Generated namespace (#132)', () => {
+  it('every emitted C# file declares the CamundaIntegrationTests namespace (#132)', () => {
     if (!existsSync(CSHARP_SDK_DIR)) {
       throw new Error(
         `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
       );
     }
-    const CSHARP_DIR = join(CSHARP_SDK_DIR, 'csharp');
-    if (!existsSync(CSHARP_DIR)) {
-      return;
-    }
-    const files = readdirSync(CSHARP_DIR).filter((f) => f.endsWith('.cs'));
+    const files = collectFilesRecursive(CSHARP_SDK_DIR, '.cs');
     if (files.length === 0) {
       return;
     }
     const offenders: string[] = [];
-    for (const f of files) {
-      const src = readFileSync(join(CSHARP_DIR, f), 'utf8');
-      if (!src.includes('namespace Camunda.Orchestration.RestSdk.Generated')) {
-        offenders.push(f);
+    for (const rel of files) {
+      const src = readFileSync(join(CSHARP_SDK_DIR, rel), 'utf8');
+      if (!src.includes('namespace CamundaIntegrationTests')) {
+        offenders.push(rel);
       }
     }
     expect(
       offenders,
-      'Emitted C# file(s) are missing the Camunda.Orchestration.RestSdk.Generated namespace declaration.',
+      'Emitted C# file(s) are missing the CamundaIntegrationTests namespace declaration.',
     ).toEqual([]);
   });
 });
