@@ -8,7 +8,34 @@ import type {
 } from 'path-analyser/types';
 import type { SdkMappingSource } from './sdk-mapping.js';
 
-export type CsharpOperationMap = Record<string, string>;
+/**
+ * A single operation-map entry as committed in
+ * `csharp-sdk/examples/operation-map.json`. The SDK method to invoke is
+ * the `region` (e.g. `CreateDeploymentAsync`); `file`/`label` are metadata
+ * used by the SDK's own `@@FILE`/region extraction tooling.
+ */
+export interface CsharpOperationMapEntry {
+  file: string;
+  region: string;
+  label?: string;
+}
+
+/**
+ * operationId → ordered SDK references. Each value is an array because an
+ * operation may map to more than one SDK region; the emitter uses the
+ * first entry's `region` as the method name.
+ */
+export type CsharpOperationMap = Record<string, CsharpOperationMapEntry[]>;
+
+function isCsharpOperationMapEntry(value: unknown): value is CsharpOperationMapEntry {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'region' in value &&
+    typeof value.region === 'string' &&
+    value.region.length > 0
+  );
+}
 
 export function csharpSdkSuiteFileName(
   collection: EndpointScenarioCollection,
@@ -35,7 +62,8 @@ export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrate
   const mappingSource: SdkMappingSource = {
     resolveMethod(opId: string): string {
       const entry = source.find(([op]) => op === opId);
-      if (entry) return entry[1];
+      const first = entry?.[1]?.[0];
+      if (isCsharpOperationMapEntry(first)) return first.region;
       return `${toPascalCase(opId)}Async`;
     },
   };
