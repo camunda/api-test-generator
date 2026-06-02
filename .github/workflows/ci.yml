@@ -35,6 +35,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Check for UTF-8 BOMs
+        # Git's eol normalisation does not strip BOMs and Biome does not flag
+        # them; this guard fails the build on any BOM in a tracked text file.
+        # See scripts/check-no-bom.sh and .editorconfig (charset = utf-8).
+        run: npm run check:no-bom
+
       - name: Read pinned spec ref
         id: pin
         # The bundled-spec invariants are evaluated against a specific

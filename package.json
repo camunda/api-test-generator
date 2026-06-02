@@ -44,6 +44,7 @@
     "coverage:report": "tsx scripts/render-coverage-report.ts",
     "pipeline": "npm run fetch-spec && npm run fetch-python-sdk-map && npm run fetch-js-sdk-map && npm run testsuite:generate && npm run generate:request-validation",
     "lint": "biome check",
+    "check:no-bom": "bash scripts/check-no-bom.sh",
     "lint:fix": "biome check --write",
     "lint:generated": "biome check --config-path=biome.generated.json",
     "biome:fix-generated": "biome check --config-path=biome.generated.json --write --unsafe",

@@ -1,0 +1,21 @@
+# EditorConfig — https://editorconfig.org
+# Keeps source bytes consistent across Windows / macOS / Linux editors.
+# Git's .gitattributes normalises line endings; this file normalises the
+# remaining encoding/whitespace concerns that git cannot (notably: no BOM).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Markdown preserves trailing whitespace (hard line breaks).
+[*.md]
+trim_trailing_whitespace = false
+
+# Windows-only scripts keep their native line endings (matches .gitattributes).
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
