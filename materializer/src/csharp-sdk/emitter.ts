@@ -384,7 +384,7 @@ function buildRequestParts(step: RequestStep): string {
 
   if (step.pathParams?.length) {
     for (const p of step.pathParams) {
-      entries.push(`          [${stringLiteral(p.name)}] = ctx[${stringLiteral(p.var)}],`);
+      entries.push(`          [${stringLiteral(p.name)}] = RequireBinding(ctx, ${stringLiteral(p.var)}),`);
     }
   }
 
@@ -431,7 +431,7 @@ function renderCsharpValue(value: unknown, indent = ''): string {
 function renderTemplateString(value: string): string {
   const fullMatch = value.match(/^\$\{([^}]+)\}$/);
   if (fullMatch) {
-    return `ctx[${stringLiteral(fullMatch[1])}]`;
+    return `RequireBinding(ctx, ${stringLiteral(fullMatch[1])})`;
   }
   const templateRe = /\$\{([^}]+)\}/g;
   if (!templateRe.test(value)) {
@@ -445,7 +445,7 @@ function renderTemplateString(value: string): string {
     const [token, name] = match;
     const prefix = value.slice(lastIndex, match.index);
     if (prefix) parts.push(escapeInterpolatedLiteral(prefix));
-    parts.push(`{ctx[${stringLiteral(name)}]}`);
+    parts.push(`{RequireBinding(ctx, ${stringLiteral(name)})}`);
     lastIndex = match.index + token.length;
     match = templateRe.exec(value);
   }

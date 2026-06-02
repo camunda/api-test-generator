@@ -43,6 +43,25 @@ public abstract class TestFixtureBase
         return SeedEnv.Instance.Generate(varName);
     }
 
+    /// <summary>
+    /// Read a required binding from the test context. Unlike the raw indexer
+    /// (<c>ctx[binding]</c>), a missing or null binding surfaces a clear,
+    /// deterministic <see cref="InvalidOperationException"/> naming the binding
+    /// instead of a bare <see cref="KeyNotFoundException"/> thrown from deep in
+    /// the request-building code.
+    /// </summary>
+    protected static object RequireBinding(Dictionary<string, object?> ctx, string binding)
+    {
+        if (!ctx.TryGetValue(binding, out var value) || value is null)
+        {
+            throw new InvalidOperationException(
+                $"Required binding '{binding}' was not present in the test context. " +
+                "Ensure the producing step seeded it before this request.");
+        }
+
+        return value;
+    }
+
     protected static T BuildRequest<T>(Dictionary<string, object?> data) where T : class, new()
     {
         var json = JsonSerializer.Serialize(data, JsonOptions);

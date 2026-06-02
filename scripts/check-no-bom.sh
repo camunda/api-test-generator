@@ -15,8 +15,10 @@ set -euo pipefail
 # git grep's PCRE engine (-P) interprets \xEF as a Unicode codepoint in UTF
 # mode, so it will not match a raw BOM byte. Use a basic-regex literal byte
 # sequence anchored to the start of the (first) line instead. `-I` skips
-# files git treats as binary.
-bom_files="$(git grep --cached -I -l -e "^$(printf '\xEF\xBB\xBF')" || true)"
+# files git treats as binary. Plain `git grep` (no --cached) scans the
+# working-tree content of tracked files, so it also catches BOMs in
+# modified-but-unstaged edits — not just what is currently staged.
+bom_files="$(git grep -I -l -e "^$(printf '\xEF\xBB\xBF')" || true)"
 
 if [ -n "$bom_files" ]; then
   {
