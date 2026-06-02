@@ -5,7 +5,6 @@ import {
   type EmitContext,
   type EmitterStrategy,
   getEmitter,
-  getRoleHookProvider,
   type LoadedRoleBundle,
   listEmitters,
   type RoleHookProvider,
@@ -43,6 +42,7 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
+import { resolveRoleExtras } from './roleHookResolver.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -407,30 +407,18 @@ async function run() {
       : undefined;
     getRoleForOperationFn = (opId: string) => getEmitterRoleForOperation(domain, opId);
   }
-  for (const hook of emitter.roleHooks ?? []) {
-    const provider = getRoleHookProvider(hook);
-    if (!provider) {
-      console.error(
-        `Emitter ${JSON.stringify(emitter.id)} declares roleHook ${JSON.stringify(
-          hook,
-        )} but no provider is registered for that hook name.`,
-      );
-      process.exit(1);
-    }
-    const extras = await provider.compute({ repoRoot, configName });
-    if (extras === undefined) continue;
-    if (!roleExtras) roleExtras = new Map<string, Record<string, unknown>>();
-    if (roleExtras.has(provider.role)) {
-      console.error(
-        `Role-hook provider for hook ${JSON.stringify(
-          hook,
-        )} attempted to overwrite extras for role ${JSON.stringify(
-          provider.role,
-        )} already populated by an earlier hook. Hook providers must own disjoint roles.`,
-      );
-      process.exit(1);
-    }
-    roleExtras.set(provider.role, extras);
+  // #350: roleHook resolution. Declarations are advisory — a config that
+  // doesn't ship a provider for a declared hook simply doesn't populate
+  // the corresponding role's extras. Operations actually dispatched to
+  // the unbacked role surface a named error at materialization time
+  // (`findRoleForStep` in playwright/emitter.ts and the support-template
+  // assertions in materialize-support.ts). The resolver throws on
+  // duplicate-role conflicts (formerly `process.exit(1)` here).
+  try {
+    roleExtras = await resolveRoleExtras(emitter, { repoRoot, configName });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
   }
 
   // #243: Vendor per-role helper files now that `roleExtras` is populated,
