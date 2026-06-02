@@ -3,7 +3,7 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: error message text intentionally describes literal `${...}` placeholder syntax.
 // biome-ignore-all lint/correctness/noUnusedVariables: legacy declaration retained alongside its sibling describe blocks; safe to remove in a follow-up cleanup.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
@@ -12,6 +12,7 @@ import {
   getGraphDir,
   getPlaywrightSuiteDir,
   getScenariosDir,
+  getSdkOutDir,
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
@@ -52,6 +53,9 @@ const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
 const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
+const JS_SDK_DIR = getSdkOutDir(REPO_ROOT, 'js-sdk');
+const PYTHON_SDK_DIR = getSdkOutDir(REPO_ROOT, 'python-sdk');
+const CSHARP_SDK_DIR = getSdkOutDir(REPO_ROOT, 'csharp-sdk');
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 
 // #331: opIds whose per-endpoint feature spec is intentionally omitted
@@ -9436,3 +9440,225 @@ describeForThisConfig(
     });
   },
 );
+
+// Operations are emitted per-SDK with these layouts (see the respective
+// emitters): JS  -> <opId>/<opId>.<mode>.test.ts, C# -> <opId>/<opId>.<mode>.Tests.cs,
+// Python (flat) -> test_<snake_op_id>.py. These helpers walk the real output
+// so the invariants assert against what the emitters actually produce.
+function collectFilesRecursive(dir: string, suffix: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true })
+    .map((entry) => String(entry))
+    .filter((rel) => rel.endsWith(suffix));
+}
+
+function pythonSnakeCase(operationId: string): string {
+  return operationId
+    .replace(/([A-Z])/g, '_$1')
+    .toLowerCase()
+    .replace(/^_/, '');
+}
+
+describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)', () => {
+  it('no emitted Python SDK test contains an unresolved ${...} placeholder (#133)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Python suites are emitted flat as test_<snake_op_id>.py.
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    const offenders: string[] = [];
+    let assertionsRun = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      assertionsRun++;
+      // The Python emitter resolves ${var} body-template placeholders to
+      // ctx.get('<snake_var>') at code-generation time. Any remaining ${...}
+      // literal indicates a missing binding and would break the test.
+      if (/\$\{[^}]+\}/.test(src)) {
+        offenders.push(file);
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) contain unresolved ${...} placeholder strings.',
+    ).toEqual([]);
+  });
+
+  it('every planned scenario has a materialized Python SDK test file (#133)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
+    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
+    // so the set of operations they CAN emit is identical. We use the JS SDK's
+    // emitted <opId>/<opId>.feature.test.ts files as the reference set: any
+    // operationId covered by the JS SDK must also have a Python SDK file.
+    const jsSdkEmitted = new Set(
+      collectFilesRecursive(JS_SDK_DIR, '.feature.test.ts').map((rel) =>
+        basename(rel).replace(/\.feature\.test\.ts$/, ''),
+      ),
+    );
+    if (jsSdkEmitted.size === 0) {
+      throw new Error('No JS SDK .feature.test.ts files found — run codegen:js-sdk:all first.');
+    }
+    const missing = planned
+      .filter((e) => jsSdkEmitted.has(e.operationId))
+      .map((e) => `test_${pythonSnakeCase(e.operationId)}.py`)
+      .filter((f) => !existsSync(join(PYTHON_SDK_DIR, f)));
+    expect(
+      missing,
+      'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', () => {
+  it('every URL placeholder in JS SDK suite is either seeded or extracted (mirrors Bug A)', () => {
+    // The JS SDK emitter resolves ${var} body-template placeholders to
+    // ctx["var"] at code-generation time. Any remaining ${...} literal in
+    // the emitted .test.ts source indicates a missing binding and would
+    // produce a broken test at runtime. Suites are emitted per-operation as
+    // <opId>/<opId>.<mode>.test.ts, so we walk recursively.
+    if (!existsSync(JS_SDK_DIR)) {
+      throw new Error(
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = collectFilesRecursive(JS_SDK_DIR, '.test.ts');
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const rel of files) {
+      const src = readFileSync(join(JS_SDK_DIR, rel), 'utf8');
+      // A resolved placeholder is rendered as a `${ctx[...]}` template-literal
+      // interpolation; `${RANDOM}` is an intentional runtime seed token emitted
+      // verbatim inside single-quoted seed strings (identical to the canonical
+      // Playwright emitter). An UNRESOLVED body-template placeholder is any other
+      // bare `${identifier}` the emitter failed to lower to a ctx read.
+      const placeholders = src.match(/\$\{[^}]*\}/g) ?? [];
+      if (placeholders.some((p) => !p.includes('ctx') && p !== '${RANDOM}')) {
+        offenders.push(rel);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted JS SDK test file(s) contain unresolved ${...} placeholder strings. ' +
+        'The emitter must resolve every body-template placeholder to ctx["<var>"] before emitting.',
+    ).toEqual([]);
+  });
+
+  it('every planned scenario has a materialized JS SDK test file (#131)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
+    if (!existsSync(JS_SDK_DIR)) {
+      throw new Error(
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // JS SDK and Python SDK emit the same set of operations (identical hard-fail
+    // logic for multipart prereqs). We use the Python SDK's emitted
+    // test_<snake_op_id>.py files as the reference set: any operationId covered
+    // by the Python SDK must also have a JS SDK file.
+    const pythonSdkSnakeNames = new Set(
+      readdirSync(PYTHON_SDK_DIR)
+        .filter((f) => f.startsWith('test_') && f.endsWith('.py'))
+        .map((f) => f.replace(/^test_/, '').replace(/\.py$/, '')),
+    );
+    if (pythonSdkSnakeNames.size === 0) {
+      throw new Error('No Python SDK test_*.py files found — run codegen:python-sdk:all first.');
+    }
+    const missing = planned
+      .filter((e) => pythonSdkSnakeNames.has(pythonSnakeCase(e.operationId)))
+      .map((e) => join(e.operationId, `${e.operationId}.feature.test.ts`))
+      .filter((rel) => !existsSync(join(JS_SDK_DIR, rel)));
+    expect(
+      missing,
+      'Planned scenarios exist but no JS SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', () => {
+  it('every emitted C# file follows the <opId>/<opId>.<mode>.Tests.cs convention (#132)', () => {
+    if (!existsSync(CSHARP_SDK_DIR)) {
+      throw new Error(
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Only operation test files follow the naming convention; vendored support
+    // files (e.g. TestFixtureBase.cs) are emitted at the suite root and exempt.
+    const files = collectFilesRecursive(CSHARP_SDK_DIR, '.Tests.cs');
+    if (files.length === 0) {
+      return;
+    }
+    const badNames = files.filter(
+      (rel) =>
+        !/^[a-zA-Z][a-zA-Z0-9]+\.(feature|integration|variant)\.Tests\.cs$/.test(basename(rel)),
+    );
+    expect(
+      badNames,
+      'C# emitted files must follow <operationId>.<mode>.Tests.cs naming convention',
+    ).toEqual([]);
+  });
+
+  it('every emitted C# file declares the CamundaIntegrationTests namespace (#132)', () => {
+    if (!existsSync(CSHARP_SDK_DIR)) {
+      throw new Error(
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = collectFilesRecursive(CSHARP_SDK_DIR, '.cs');
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const rel of files) {
+      const src = readFileSync(join(CSHARP_SDK_DIR, rel), 'utf8');
+      if (!src.includes('namespace CamundaIntegrationTests')) {
+        offenders.push(rel);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted C# file(s) are missing the CamundaIntegrationTests namespace declaration.',
+    ).toEqual([]);
+  });
+});

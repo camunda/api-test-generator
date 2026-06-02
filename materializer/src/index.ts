@@ -16,6 +16,7 @@ import {
   getActiveConfigName,
   getFeatureOutputDir,
   getPlaywrightSuiteDir,
+  getSdkOutDir,
   getSpecBundleDir,
   getTemplateScenariosDir,
   getTemplateScenariosRootDir,
@@ -32,6 +33,11 @@ import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyse
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult, templateOutputDir } from './coverage.js';
 import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js';
+import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
+import { createJsSdkEmitter } from './js-sdk/emitter.js';
+import { materializeSdkSupport } from './js-sdk/materialize-support.js';
+import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -42,6 +48,9 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
+import { createPythonSdkEmitter } from './python-sdk/emitter.js';
+import { materializePythonSupport } from './python-sdk/materialize-support.js';
+import { createOperationMapSourceFromJson } from './python-sdk/sdk-mapping.js';
 import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
@@ -53,6 +62,46 @@ import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js'
 // pulled OCA-specific knowledge into a package that is supposed to be
 // config-agnostic.
 registerEmitter(PlaywrightEmitter);
+// SDK emitters are registered inside run() after repoRoot is resolved so
+// they can load operation-map.json files from the spec/ directory. Keeping
+// them here (at module level) would require resolving the repo root before
+// the CLI args are parsed, which is fragile on Windows paths and CI.
+
+/** Load the JS SDK operation map from spec/js-sdk/operation-map.json, or undefined if absent. */
+function loadJsSdkMap(repoRoot: string): OperationMapJsonSource | undefined {
+  const mapPath = path.join(repoRoot, 'spec', 'js-sdk', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return undefined;
+  try {
+    return OperationMapJsonSource.fromJson(fsSync.readFileSync(mapPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Load the Python SDK operation map from spec/python-sdk/operation-map.json, or undefined if absent. */
+function loadPythonSdkMap(
+  repoRoot: string,
+): ReturnType<typeof createOperationMapSourceFromJson> | undefined {
+  const mapPath = path.join(repoRoot, 'spec', 'python-sdk', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return undefined;
+  try {
+    return createOperationMapSourceFromJson(fsSync.readFileSync(mapPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Load the C# SDK operation map from csharp-sdk/examples/operation-map.json, or {} if absent. */
+function loadCsharpMap(repoRoot: string): CsharpOperationMap {
+  const mapPath = path.join(repoRoot, 'csharp-sdk', 'examples', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return {};
+  try {
+    // biome-ignore lint/plugin: runtime contract boundary — JSON from committed operation-map file
+    return JSON.parse(fsSync.readFileSync(mapPath, 'utf-8')) as CsharpOperationMap;
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Walk the active config's role bundles and register any role-hook
@@ -292,6 +341,14 @@ function findRepoRoot(start: string): string {
 async function run() {
   const { target, positional, help } = parseCliArgs(process.argv.slice(2));
   const repoRoot = findRepoRoot(process.cwd());
+
+  // Register SDK emitters here (not at module level) so operation-map.json
+  // files can be loaded from the resolved repoRoot. The Playwright emitter is
+  // already registered at module level (it has no file-system dependencies).
+  registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
+  registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
+  registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
+
   // loadGraph / loadGlobalContextSeeds were carved out of the original
   // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
   // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
@@ -302,7 +359,6 @@ async function run() {
   // emitted Playwright suite all live under generated/<config>/.
   const featureDir = getFeatureOutputDir(repoRoot);
   const variantDir = getVariantOutputDir(repoRoot);
-  const outDir = getPlaywrightSuiteDir(repoRoot);
 
   if (help || !positional) {
     printUsage();
@@ -345,10 +401,19 @@ async function run() {
   const emitterConfig = loadEmitterConfig(configDir, emitter);
   const resolveConfigPath = (relative: string): string => path.resolve(configDir, relative);
 
-  // Wipe before write so emitted spec files left over from a previous spec
-  // version cannot survive into the current run. Without this, local
-  // pre-push validation can diverge from CI (which always sees a fresh tree).
-  // The support/ tree, README.md, and responses.json are re-materialised below.
+  // Each emitter owns its own output directory so every `codegen:<target>` run
+  // produces a self-contained, runnable artifact. Playwright writes to
+  // generated/<config>/playwright/; SDK emitters write to
+  // generated/<config>/<emitter-id>/ and materialise their own scaffolding
+  // so the output is runnable without a prior playwright run.
+  const outDir =
+    emitter.id === 'playwright'
+      ? getPlaywrightSuiteDir(repoRoot)
+      : getSdkOutDir(repoRoot, emitter.id);
+
+  // Wipe before write so stale files from a previous spec version cannot
+  // survive into the current run. Each emitter owns its own directory so
+  // the wipe is always safe regardless of target.
   await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(outDir, { recursive: true });
   // Lift 12 / #231: per-role template bundles for the active config's
@@ -387,6 +452,19 @@ async function run() {
     // here (rather than a separate npm script) so every codegen run produces
     // a runnable suite as a single artifact.
     await materializeResponseSchemas(outDir);
+  }
+  if (emitter.id === 'js-sdk') {
+    await materializeSdkSupport(outDir);
+  }
+  if (emitter.id === 'python-sdk') {
+    await materializePythonSupport(outDir);
+  }
+  if (emitter.id === 'csharp-sdk') {
+    // materializeCsharpSupport already vendors the active config's BPMN/DMN/form
+    // fixtures into <outDir>/fixtures/ so @@FILE: paths in generated C# tests
+    // resolve to AppContext.BaseDirectory/fixtures/ at run time. No separate
+    // materializeFixtures() call is needed (it would duplicate the copy).
+    await materializeCsharpSupport(outDir);
   }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));

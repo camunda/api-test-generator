@@ -1,0 +1,65 @@
+{
+	"createDeployment": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "CreateDeploymentAsync",
+			"label": "Deploy resources"
+		}
+	],
+	"createProcessInstance": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "CreateProcessInstanceAsync",
+			"label": "Create process instance"
+		}
+	],
+	"searchProcessInstances": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "SearchProcessInstancesAsync",
+			"label": "Search process instances"
+		}
+	],
+	"activateJobs": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "ActivateJobsAsync",
+			"label": "Activate jobs"
+		}
+	],
+	"completeJob": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "CompleteJobAsync",
+			"label": "Complete job"
+		}
+	],
+	"cancelProcessInstance": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "CancelProcessInstanceAsync",
+			"label": "Cancel process instance"
+		}
+	],
+	"getProcessInstance": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "GetProcessInstanceAsync",
+			"label": "Get process instance"
+		}
+	],
+	"searchJobs": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "SearchJobsAsync",
+			"label": "Search jobs"
+		}
+	],
+	"failJob": [
+		{
+			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
+			"region": "FailJobAsync",
+			"label": "Fail job"
+		}
+	]
+}

@@ -10,7 +10,7 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": ["vitest/globals", "node"]
   },
   "include": ["**/*.ts", "../configs/**/*.ts"]
 }
