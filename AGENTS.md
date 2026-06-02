@@ -378,8 +378,9 @@ fix: address review comments — …
 - **Request a Copilot review on every PR.** It is a cheap first pass that
   catches obvious issues (typos, missing null checks, misnamed symbols,
   shadowed variables, unhandled error branches) before human reviewers
-  spend time on them. Click "Request review" → "Copilot" in the PR UI, or
-  add it via `gh` when opening the PR.
+  spend time on them. Click "Request review" → "Copilot" in the PR UI
+  (the REST/GraphQL APIs — and `gh`, which wraps them — cannot request
+  the Copilot reviewer; see the note below).
 - **Address Copilot review comments before requesting human review.** Fix
   the ones that are real, reply on each thread to record the resolution
   (don't silently resolve), then re-trigger Copilot on the updated HEAD.
@@ -390,11 +391,13 @@ fix: address review comments — …
   - Push a new commit. This usually (but not always) retriggers Copilot
     automatically via webhook.
 
-  What does **not** work: the REST `POST /pulls/{n}/requested_reviewers`
-  endpoint and the GraphQL `requestReviews` mutation. The
-  `copilot-pull-request-reviewer` integration is a GitHub App, not a
-  collaborator/user, so both APIs reject it. Use the UI button or a new
-  commit.
+  What does **not** work: the REST
+  `POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers`
+  endpoint and the GraphQL `requestReviews` mutation (and therefore
+  `gh pr edit --add-reviewer` / `gh pr create --reviewer`, which wrap the
+  REST endpoint). The `copilot-pull-request-reviewer` integration is a
+  GitHub App, not a collaborator/user, so all of these reject it. Use
+  the UI button or a new commit.
 - Disagreeing with a Copilot suggestion is fine — reply with the reason
   (e.g. "intentional: contract boundary, see L42") and resolve. Don't
   resolve threads silently; the reply is the audit trail.
