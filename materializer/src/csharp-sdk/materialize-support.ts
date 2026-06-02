@@ -8,6 +8,7 @@
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getActiveConfigDir } from 'path-analyser/configResolver';
 
 export const CSHARP_PROJECT_TEMPLATE_FILES = [
   'CamundaIntegrationTests.csproj',
@@ -23,19 +24,36 @@ function defaultProjectTemplatesDir(): string {
   return path.resolve(here, 'project-templates');
 }
 
+/**
+ * Locate the active config's `fixtures/` directory
+ * (#221 / Lift 11: `configs/<config>/fixtures/`).
+ *
+ * Walks up from this module's location looking for a repo root (one
+ * containing `configs.json`) and then resolves the active config's
+ * fixtures dir via `getActiveConfigDir`. This handles both tsx (source)
+ * and dist runtime modes without a hard-coded depth, and respects the
+ * active `CONFIG`. Mirrors the canonical Playwright resolver in
+ * `materializer/src/playwright/materialize-support.ts`.
+ *
+ * Throws if no `configs.json` is found in any ancestor: a hard-coded
+ * fallback would silently copy the wrong fixtures (or a non-existent
+ * top-level `fixtures/`) whenever this module was relocated or a
+ * non-default CONFIG was active.
+ */
 function defaultFixturesDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   let dir = here;
-  for (let i = 0; i < 6; i++) {
-    const candidate = path.join(dir, 'fixtures');
-    if (existsSync(path.join(candidate, 'bpmn'))) {
-      return candidate;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(path.join(dir, 'configs.json'))) {
+      return path.join(getActiveConfigDir(dir), 'fixtures');
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return path.resolve(here, '..', '..', '..', '..', 'fixtures');
+  throw new Error(
+    `defaultFixturesDir: could not locate a repo root (no configs.json found in any ancestor of ${here}).`,
+  );
 }
 
 export async function materializeCsharpSupport(

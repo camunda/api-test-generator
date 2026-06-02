@@ -1,5 +1,5 @@
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
-import { assertSafeGlobalContextSeeds } from 'path-analyser/domainSemanticsValidator';
+import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
