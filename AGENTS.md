@@ -376,7 +376,7 @@ fix: address review comments — …
 ## PR review
 
 - **Request a Copilot review on every PR.** It is a cheap first pass that
-  catches obvious issues (typos, missing null checks, mis-named symbols,
+  catches obvious issues (typos, missing null checks, misnamed symbols,
   shadowed variables, unhandled error branches) before human reviewers
   spend time on them. Click "Request review" → "Copilot" in the PR UI, or
   add it via `gh` when opening the PR.
