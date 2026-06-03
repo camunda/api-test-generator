@@ -44,6 +44,12 @@ export function createJsSdkEmitter(
     id: 'js-sdk',
     name: 'JavaScript SDK',
     supportedConfigs: ['*'],
+    sdkMap: {
+      repo: 'camunda/orchestration-cluster-api-js',
+      path: 'examples/operation-map.json',
+      refEnv: 'JS_SDK_REF',
+      out: 'spec/js-sdk/operation-map.json',
+    },
     async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderJsSuite(collection, {
         mode: ctx.mode,

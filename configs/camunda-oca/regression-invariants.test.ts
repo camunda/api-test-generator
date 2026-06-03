@@ -9463,7 +9463,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
   it('no emitted Python SDK test contains an unresolved ${...} placeholder (#133)', () => {
     if (!existsSync(PYTHON_SDK_DIR)) {
       throw new Error(
-        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     // Python suites are emitted flat as test_<snake_op_id>.py.
@@ -9510,7 +9510,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     }
     if (!existsSync(PYTHON_SDK_DIR)) {
       throw new Error(
-        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:python-sdk:all' (or 'npm run testsuite:generate') first.`,
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
@@ -9524,7 +9524,7 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       ),
     );
     if (jsSdkEmitted.size === 0) {
-      throw new Error('No JS SDK .feature.test.ts files found — run codegen:js-sdk:all first.');
+      throw new Error('No JS SDK .feature.test.ts files found — run codegen:all first.');
     }
     const missing = planned
       .filter((e) => jsSdkEmitted.has(e.operationId))
@@ -9546,7 +9546,7 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     // <opId>/<opId>.<mode>.test.ts, so we walk recursively.
     if (!existsSync(JS_SDK_DIR)) {
       throw new Error(
-        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     const files = collectFilesRecursive(JS_SDK_DIR, '.test.ts');
@@ -9590,7 +9590,7 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
     }
     if (!existsSync(JS_SDK_DIR)) {
       throw new Error(
-        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:js-sdk:all' (or 'npm run testsuite:generate') first.`,
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     // JS SDK and Python SDK emit the same set of operations (identical hard-fail
@@ -9603,7 +9603,7 @@ describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', ()
         .map((f) => f.replace(/^test_/, '').replace(/\.py$/, '')),
     );
     if (pythonSdkSnakeNames.size === 0) {
-      throw new Error('No Python SDK test_*.py files found — run codegen:python-sdk:all first.');
+      throw new Error('No Python SDK test_*.py files found — run codegen:all first.');
     }
     const missing = planned
       .filter((e) => pythonSdkSnakeNames.has(pythonSnakeCase(e.operationId)))
@@ -9620,7 +9620,7 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
   it('every emitted C# file follows the <opId>/<opId>.<mode>.Tests.cs convention (#132)', () => {
     if (!existsSync(CSHARP_SDK_DIR)) {
       throw new Error(
-        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     // Only operation test files follow the naming convention; vendored support
@@ -9642,7 +9642,7 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
   it('every emitted C# file declares the CamundaIntegrationTests namespace (#132)', () => {
     if (!existsSync(CSHARP_SDK_DIR)) {
       throw new Error(
-        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:csharp-sdk:all' (or 'npm run testsuite:generate') first.`,
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
       );
     }
     const files = collectFilesRecursive(CSHARP_SDK_DIR, '.cs');

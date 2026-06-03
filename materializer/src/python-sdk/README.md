@@ -197,7 +197,7 @@ Implements `EmitterStrategy`:
 ## Operation Map
 
 The emitter optionally consumes `spec/python-sdk/operation-map.json` (fetched
-via `npm run fetch-python-sdk-map`), mapping OpenAPI operationId → SDK method names.
+via `npm run fetch-sdk-maps`), mapping OpenAPI operationId → SDK method names.
 
 When present, the emitter can validate:
 - SDK method coverage (which operations have SDK bindings?)
