@@ -399,6 +399,11 @@ async function run() {
 
   if (help || !positional) {
     printUsage();
+    console.error(
+      'Additional commands/options:\n' +
+        '  list-targets   Print the registered emitters as JSON and exit\n' +
+        '  --all-targets  Run codegen for every enabled+registered emitter (ignores --target)\n',
+    );
     process.exit(1);
   }
 
