@@ -169,7 +169,7 @@ describe('shouldSkipForMultipart (#135)', () => {
     expect(shouldSkipForMultipart(s, op)).toBe(false);
   });
 
-  it('passes through scenario kinds that the adapter can wrap meaningfully (additional-prop, missing-required, …)', () => {
+  it('skips additional-prop / additional-prop-general on multipart-only ops (#364 — unknown form parts ignored → 201)', () => {
     const op = multipartOnlyOp({
       multipartSchema: {
         type: 'object',
@@ -178,11 +178,32 @@ describe('shouldSkipForMultipart (#135)', () => {
     });
     const cases: ValidationScenario[] = [
       scenario({ type: 'additional-prop', requestBody: { file: 'x', __extra__: 1 } }),
+      scenario({ type: 'additional-prop-general', requestBody: { file: 'x', __extra__: 1 } }),
+    ];
+    for (const s of cases) {
+      expect(shouldSkipForMultipart(s, op)).toBe(true);
+    }
+  });
+
+  it('still passes through scenario kinds the adapter can wrap meaningfully (missing-required, missing-body)', () => {
+    const op = multipartOnlyOp({
+      multipartSchema: {
+        type: 'object',
+        properties: { file: { type: 'string', format: 'binary' } },
+      },
+    });
+    const cases: ValidationScenario[] = [
       scenario({ type: 'missing-required', target: 'file', requestBody: {} }),
       scenario({ type: 'missing-body' }),
     ];
     for (const s of cases) {
       expect(shouldSkipForMultipart(s, op)).toBe(false);
     }
+  });
+
+  it('does NOT skip additional-prop on JSON-body ops (additionalProperties:false is enforced → 400)', () => {
+    const op = jsonOp();
+    const s = scenario({ type: 'additional-prop', requestBody: { name: 'x', __extra__: 1 } });
+    expect(shouldSkipForMultipart(s, op)).toBe(false);
   });
 });

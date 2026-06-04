@@ -20,10 +20,18 @@ import type { OperationModel, SchemaFragment, ValidationScenario } from '../mode
  *      mutations don't translate to a multipart `files=...` repetition
  *      pattern; the broker accepts the upload and returns 201.
  *
+ *   4. `additional-prop` / `additional-prop-general` (#364) — multipart
+ *      endpoints have no `additionalProperties: false` enforcement on
+ *      form data the way a JSON body does, so an unknown extra form part
+ *      is silently ignored and the upload returns 201, not the expected
+ *      400. (Verified live: `POST /v2/documents -F file=x
+ *      -F __unexpectedField=x` → 201.) Unconditional for multipart-only
+ *      ops — any extra part is ignored regardless of the target.
+ *
  * `shouldSkipForMultipart` returns `true` for scenarios that fall into
  * any of those classes on a multipart-only operation. Other scenarios
- * (additional-prop, missing-required, etc.) flow through the existing
- * adaptation pass unchanged.
+ * (missing-required, etc.) flow through the existing adaptation pass
+ * unchanged.
  *
  * A targeted multipart-aware mutation strategy (omit a required part,
  * send wrong Content-Type per part, exceed declared size) is a separate
@@ -64,6 +72,12 @@ function isArrayPart(schema: SchemaFragment | undefined): boolean {
 export function shouldSkipForMultipart(scenario: ValidationScenario, op: OperationModel): boolean {
   if (!isMultipartOnly(op)) return false;
   if (scenario.type === 'body-top-type-mismatch') return true;
+  // #364 — an unknown extra form part is ignored by multipart endpoints
+  // (no additionalProperties:false on form data), so the upload returns 201
+  // rather than 400. Drop regardless of target.
+  if (scenario.type === 'additional-prop' || scenario.type === 'additional-prop-general') {
+    return true;
+  }
   if (scenario.type === 'type-mismatch') {
     const part = topLevelMultipartPart(op, scenario.target);
     if (isBinaryPart(part)) return true;
