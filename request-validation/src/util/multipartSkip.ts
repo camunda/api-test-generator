@@ -24,9 +24,11 @@ import type { OperationModel, SchemaFragment, ValidationScenario } from '../mode
  *      endpoints have no `additionalProperties: false` enforcement on
  *      form data the way a JSON body does, so an unknown extra form part
  *      is silently ignored and the upload returns 201, not the expected
- *      400. (Verified live: `POST /v2/documents -F file=x
- *      -F __unexpectedField=x` → 201.) Unconditional for multipart-only
- *      ops — any extra part is ignored regardless of the target.
+ *      400. Unconditional for multipart-only ops — any extra part is
+ *      ignored regardless of the target. Verified live:
+ *
+ *          POST /v2/documents -F file=x -F __unexpectedField=x   -> 201
+ *
  *
  * `shouldSkipForMultipart` returns `true` for scenarios that fall into
  * any of those classes on a multipart-only operation. Other scenarios
