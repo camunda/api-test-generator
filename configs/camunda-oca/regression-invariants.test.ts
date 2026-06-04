@@ -3701,17 +3701,21 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
   // — not from the synthetic `fc:pos:<endpoint>:<semantic>` placeholder
   // the pre-PR-1 planner used.
   //
-  // The 4 single-deploy ElementId consumer sites covered here:
+  // The 5 single-deploy ElementId consumer sites covered here:
   //   - createProcessInstance        :: startInstructions[].elementId
   //   - activateAdHocSubProcessActivities :: elements[].elementId
   //   - completeJob                  :: result.activateElements[].elementId
   //   - modifyProcessInstance        :: activateInstructions[].elementId
+  //   - modifyProcessInstancesBatchOperation :: moveInstructions[].{source,target}ElementId
   //
-  // Other ElementId consumer sites that remain uncovered by PR 1:
-  //   - modifyProcessInstancesBatchOperation :: moveInstructions[].sourceElementId
-  //     (single-endpoint chain — the planner doesn't insert a
-  //      createDeployment prerequisite for batch operations even though
-  //      sourceElementId needs a model. Separate chain-construction issue.)
+  // The batch operation was originally carved out (#165): the early
+  // single-step-chain planner emitted no `createDeployment` prerequisite,
+  // so the ElementId leaf fell back to a synthetic placeholder. The
+  // planner now chains the deploy prerequisite and the optionalSubShape
+  // variant generator resolves `elementIdVar` via runtime emission
+  // (activateJobs → `json.jobs[0].elementId`), so the guard below applies.
+  //
+  // Other ElementId consumer sites that remain uncovered here:
   //   - migrateProcessInstance / migrateProcessInstancesBatchOperation
   //     (multi-deploy: source-model + target-model — needs per-deploy-step
   //      fixture selection. PR 1's helper takes the FIRST deploy step.)
@@ -3791,6 +3795,11 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
       variantFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
       varName: 'elementIdVar',
     },
+    {
+      endpoint: 'modifyProcessInstancesBatchOperation',
+      variantFile: 'post--process-instances--modification-scenarios.json',
+      varName: 'elementIdVar',
+    },
   ];
 
   for (const t of TARGETS) {
@@ -3829,6 +3838,33 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
       ).toBe(true);
     });
   }
+
+  // #165 — class-faithful guard for the batch operation. The generic
+  // file-wide `ctx.elementIdVar` check above is too weak to catch this
+  // issue's original symptom: a single-step chain (no `createDeployment`
+  // prerequisite) emitted a "lying" scenario where `elementIdVar` was
+  // seeded but the request body never consumed it (`sourceElementId`
+  // held a synthetic literal). A file-wide reference can be satisfied by
+  // a seed line alone. Here we assert the binding is wired into the
+  // `moveInstructions` body itself — the property that was broken — for
+  // both the source and target ElementId variants.
+  it('modifyProcessInstancesBatchOperation :: moveInstructions wires ctx.elementIdVar into the body (#165)', () => {
+    const spec = join(GENERATED_TESTS_DIR, 'modifyProcessInstancesBatchOperation.variant.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(
+        'expected emitted spec not found: modifyProcessInstancesBatchOperation.variant.spec.ts',
+      );
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(
+      src.includes('sourceElementId: ctx.elementIdVar'),
+      'sourceElementId variant must wire ctx.elementIdVar into moveInstructions (not a synthetic placeholder)',
+    ).toBe(true);
+    expect(
+      src.includes('targetElementId: ctx.elementIdVar'),
+      'targetElementId variant must wire ctx.elementIdVar into moveInstructions (not a synthetic placeholder)',
+    ).toBe(true);
+  });
 });
 
 describeForThisConfig(
