@@ -1,0 +1,31 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "kinds": [
+    {
+      "@type": "EntityKind",
+      "name": "Folder",
+      "shape": "entity",
+      "identifiers": [
+        "FolderKey"
+      ],
+      "establishedBy": "createFolder",
+      "observableVia": "getFolder",
+      "revokedBy": "deleteFolder",
+      "description": "A Camunda Hub folder, identified by its server-minted folderKey (present in FolderResult, absent from FolderCreateRequest). Established by createFolder (POST /folders, requires projectKey from the global-context seed), observed via getFolder (GET /folders/{folderKey} -> 200), revoked via deleteFolder (DELETE -> 204). Carries the EntityLifecycle CRUD triple only. updateFolder (PATCH) is a mutator, but read-after-write is not modelled: mutators are forbidden on shape:'entity' and the UpdatedFieldVisibleOnReadBack template appliesTo shape:'runtime-entity' only (see #360 gap: in-API-mutable entities have no read-back template). parentFolderKey (folder->folder containment) and the folder->file containment are deferred (EdgeLifecycle needs dedicated assign/observe ops; Hub establishes containment via a create-body field and observes it via getFolder.content)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "File",
+      "shape": "entity",
+      "identifiers": [
+        "FileKey"
+      ],
+      "establishedBy": "createFile",
+      "observableVia": "getFile",
+      "revokedBy": "deleteFile",
+      "description": "A Camunda Hub file, identified by its server-minted fileKey (present in FileResult, absent from FileCreateRequest). Established by createFile (POST /files, requires projectKey from the global-context seed; folderKey optional), observed via getFile (GET /files/{fileKey} -> 200), revoked via deleteFile (DELETE -> 204). Carries the EntityLifecycle CRUD triple only. updateFile (PATCH) is NOT modelled as a mutator here: (a) mutators are forbidden on shape:'entity'; (b) updateFile additionally requires the current `revision` (optimistic-concurrency token from FileResult.revision) and can return 409 on a stale value — a dependency pattern with no current ontology/emitter support (see #360 gap)."
+    }
+  ]
+}
