@@ -89,6 +89,16 @@ function buildFile(
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
   const httpImport = standalone ? './support/http' : `${'../'.repeat(depth)}utils/http`;
+  // #362 — multipart requests that need auth attach authHeaders() (Authorization
+  // only, no JSON content-type that would break the multipart boundary). Import
+  // it only when the file actually emits such a request, so JSON-only files
+  // don't carry an unused import (the generated suite lints with noUnusedImports).
+  // This condition must mirror the `headersExpr` selection below exactly —
+  // `headersExpr` emits authHeaders() for any multipart+auth scenario (it does
+  // not depend on multipartForm), so gating the import on multipartForm here
+  // would risk referencing authHeaders() without importing it.
+  const usesAuthHeaders = scenarios.some((s) => s.headersAuth && s.bodyEncoding === 'multipart');
+  const authImport = usesAuthHeaders ? 'authHeaders, ' : '';
   const lines: string[] = [];
   lines.push(LICENSE_HEADER.trimEnd());
   const meta: string[] = [];
@@ -101,14 +111,16 @@ function buildFile(
   lines.push(meta.join('\n'));
   if (standalone) {
     lines.push("import {test} from '@playwright/test'");
-    lines.push(`import {jsonHeaders, buildUrl, assertResponseStatus} from '${httpImport}'`);
+    lines.push(
+      `import {${authImport}jsonHeaders, buildUrl, assertResponseStatus} from '${httpImport}'`,
+    );
   } else {
     // Legacy QA-tree mode: the external `utils/http` module does not export
     // `assertResponseStatus`, so fall back to a bare `expect(...).toBe(...)`
     // assertion. Diagnostics-rich failure messages and report attachments are
     // a standalone-only feature.
     lines.push("import {expect, test} from '@playwright/test'");
-    lines.push(`import {jsonHeaders, buildUrl} from '${httpImport}'`);
+    lines.push(`import {${authImport}jsonHeaders, buildUrl} from '${httpImport}'`);
   }
   lines.push('');
   lines.push(`test.describe('${describeTitle}', () => {`);
@@ -179,7 +191,7 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
   }
   const headersExpr = s.headersAuth
     ? s.bodyEncoding === 'multipart'
-      ? '{}'
+      ? 'authHeaders()'
       : 'jsonHeaders()'
     : '{}';
   const dataPart =
