@@ -3848,7 +3848,7 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
   // a seed line alone. Here we assert the binding is wired into the
   // `moveInstructions` body itself — the property that was broken — for
   // both the source and target ElementId variants.
-it('modifyProcessInstancesBatchOperation :: moveInstructions wires ctx.elementIdVar into the body (#165)', () => {
+  it('modifyProcessInstancesBatchOperation :: moveInstructions wires ctx.elementIdVar into the body (#165)', () => {
     const spec = join(GENERATED_TESTS_DIR, 'modifyProcessInstancesBatchOperation.variant.spec.ts');
     if (!existsSync(spec)) {
       throw new Error(
