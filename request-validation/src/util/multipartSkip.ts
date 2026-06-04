@@ -1,9 +1,10 @@
 import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
 
 /**
- * Multipart-only operations need three classes of JSON-derived
+ * Multipart-only operations need four classes of JSON-derived
  * validation scenarios dropped before the multipart-adaptation pass
- * tries to wrap them as form-data submissions (#135):
+ * tries to wrap them as form-data submissions (rules 1-3 from #135;
+ * rule 4 from #364):
  *
  *   1. `body-top-type-mismatch` — there is no JSON top-level type to
  *      invert. Wrapping `[]` / scalar bodies as form data produces a
