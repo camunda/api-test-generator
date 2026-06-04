@@ -97,9 +97,7 @@ function buildFile(
   // `headersExpr` emits authHeaders() for any multipart+auth scenario (it does
   // not depend on multipartForm), so gating the import on multipartForm here
   // would risk referencing authHeaders() without importing it.
-  const usesAuthHeaders = scenarios.some(
-    (s) => s.headersAuth && s.bodyEncoding === 'multipart',
-  );
+  const usesAuthHeaders = scenarios.some((s) => s.headersAuth && s.bodyEncoding === 'multipart');
   const authImport = usesAuthHeaders ? 'authHeaders, ' : '';
   const lines: string[] = [];
   lines.push(LICENSE_HEADER.trimEnd());
