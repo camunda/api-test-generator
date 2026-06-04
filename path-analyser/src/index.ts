@@ -1675,18 +1675,24 @@ function normaliseProvidesValues(input: unknown): Record<string, string[]> | und
 
 /**
  * Validate and copy a registry entry's `providesElements` shape (#172).
- * Each entry must be an object with string `id` and string `type`; anything
- * malformed is dropped so a bad entry doesn't poison the cache. Returns
- * `undefined` when no usable entry survives.
+ * Each entry must be an object with non-empty string `id` and `type`;
+ * values are trimmed and anything malformed or blank is dropped so a bad
+ * entry (the config is an unchecked boundary) doesn't silently survive and
+ * then fail type-matching downstream. Returns `undefined` when no usable
+ * entry survives.
  */
 function normaliseProvidesElements(input: unknown): { id: string; type: string }[] | undefined {
   if (!Array.isArray(input)) return undefined;
   const out: { id: string; type: string }[] = [];
   for (const x of input) {
     if (!x || typeof x !== 'object' || Array.isArray(x)) continue;
-    const id = Reflect.get(x, 'id');
-    const type = Reflect.get(x, 'type');
-    if (typeof id === 'string' && typeof type === 'string') out.push({ id, type });
+    const rawId = Reflect.get(x, 'id');
+    const rawType = Reflect.get(x, 'type');
+    if (typeof rawId !== 'string' || typeof rawType !== 'string') continue;
+    const id = rawId.trim();
+    const type = rawType.trim();
+    if (id.length === 0 || type.length === 0) continue;
+    out.push({ id, type });
   }
   return out.length > 0 ? out : undefined;
 }

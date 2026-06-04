@@ -720,8 +720,8 @@ export interface SemanticTypeSpec {
    * semantic, in preference order. When a `modelDerived` variant leaf is
    * resolved at the chain's `createDeployment` step, the planner picks the
    * first element in the fixture's `providesElements` whose `type` appears
-   * in this list (earliest list entry wins on ties). When omitted, the
-   * planner falls back to the fixture's first declared element.
+   * in this list (earliest list entry wins on ties). When omitted or
+   * empty, the planner falls back to the fixture's first declared element.
    *
    * The strings are opaque to the planner — they are matched against
    * `providesElements[].type` by pure equality, so all BPMN/OCA element
