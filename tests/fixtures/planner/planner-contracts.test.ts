@@ -4,6 +4,7 @@ import {
   generateScenariosForEndpoint,
 } from '../../../path-analyser/src/scenarioGenerator.ts';
 import type {
+  DomainSemantics,
   EndpointScenarioCollection,
   OperationGraph,
   OperationNode,
@@ -1072,5 +1073,89 @@ describe('planner contracts: variant planner enumerates polymorphic semantic-typ
     });
     expect(variants.scenarios.length).toBe(1);
     expect(variants.scenarios[0].variantKey).toBe('::scopeKey::ScopeKey');
+  });
+});
+
+describe('planner contracts: modelDerived variant leaf records a fulfillment marker (#172)', () => {
+  // A `modelDerived` optional leaf (e.g. `startInstructions[].elementId`)
+  // has no in-API producer — its only legitimate values come from the
+  // deployed model, which is not chosen until the request-plan builder
+  // picks a deploy fixture. The variant generator therefore installs a
+  // SYNTHETIC placeholder AND records a `modelDerivedBindings` marker so
+  // the later builder can replace the placeholder with a real element id
+  // selected by type from the fixture. This L2 fixture pins that handoff:
+  // pre-#172 the marker did not exist and the synthetic placeholder
+  // leaked unchanged into the emitted suite (the broker-invalid value).
+  function modelDerivedGraph(): OperationGraph {
+    const graph = makeGraph([
+      // Endpoint with a single optional modelDerived leaf and NO producer
+      // for `ElementId` anywhere in the graph (so the bare-endpoint
+      // fallback fires).
+      makeOp('createProcessInstanceL2', {
+        optionalSubShapes: [
+          {
+            rootPath: 'startInstructions[]',
+            leaves: [{ fieldPath: 'elementId', semantic: 'ElementId' }],
+          },
+        ],
+      }),
+    ]);
+    const domain: DomainSemantics = {
+      version: 1,
+      semanticTypes: {
+        ElementId: { kind: 'modelDerived' },
+      },
+    };
+    graph.domain = domain;
+    return graph;
+  }
+
+  it('installs a synthetic placeholder AND records (varName, semantic, placeholder)', () => {
+    const variants = generateOptionalSubShapeVariants(
+      modelDerivedGraph(),
+      'createProcessInstanceL2',
+      {
+        maxVariantsPerEndpoint: 10,
+      },
+    );
+    expect(variants.scenarios.length).toBe(1);
+    const scenario = variants.scenarios[0];
+    const bound = scenario.bindings?.elementIdVar;
+    // The bare-endpoint fallback synthesises `<camelLower(sem)>_<suffix>`.
+    expect(typeof bound).toBe('string');
+    expect(bound).toMatch(/^elementId_/);
+    // The marker is recorded, carrying the EXACT synthetic placeholder so
+    // the request-plan builder overwrites nothing else.
+    expect(scenario.modelDerivedBindings).toEqual([
+      { varName: 'elementIdVar', semantic: 'ElementId', placeholder: bound },
+    ]);
+  });
+
+  it('does NOT record a marker for a producer-bound (non-modelDerived) leaf', () => {
+    // Class-scoped guard: the marker must be installed ONLY for the
+    // modelDerived fallback, never for a leaf that has a real producer.
+    // Otherwise the request-plan builder could clobber an authoritative
+    // producer/extract binding. Here `ScopeKey` has a producer, so the
+    // variant binds it via the chain and records no marker.
+    const graph = makeGraph([
+      makeOp('mintScopeKeyL2', {
+        produces: ['ScopeKey'],
+        providerMap: { ScopeKey: true },
+      }),
+      makeOp('endpointWithProducedLeaf', {
+        optionalSubShapes: [
+          {
+            rootPath: '',
+            leaves: [{ fieldPath: 'scopeKey', semantic: 'ScopeKey' }],
+          },
+        ],
+      }),
+    ]);
+    const variants = generateOptionalSubShapeVariants(graph, 'endpointWithProducedLeaf', {
+      maxVariantsPerEndpoint: 10,
+    });
+    for (const s of variants.scenarios) {
+      expect(s.modelDerivedBindings).toBeUndefined();
+    }
   });
 });

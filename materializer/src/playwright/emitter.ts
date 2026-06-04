@@ -457,7 +457,7 @@ function renderScenarioTest(
       bindings: s.bindings,
       seedBindings: s.seedBindings,
       globalContextSeeds,
-      uniqueBindings: computeUniqueBindings(s.requestPlan),
+      uniqueBindings: computeUniqueBindings(s.requestPlan, s.modelDerivedLiteralBindings),
     }),
   );
   if (!s.requestPlan) {

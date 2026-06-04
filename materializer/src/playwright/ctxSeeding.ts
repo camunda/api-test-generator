@@ -77,6 +77,7 @@ import { camelCase } from './stepRenderer.js';
  */
 export function computeUniqueBindings(
   requestPlan: readonly RequestStep[] | undefined,
+  excluded?: readonly string[] | ReadonlySet<string>,
 ): Set<string> {
   const unique = new Set<string>();
   if (!requestPlan || requestPlan.length === 0) return unique;
@@ -88,6 +89,16 @@ export function computeUniqueBindings(
       }
     }
     for (const e of step.extract ?? []) extracted.add(e.bind);
+  }
+  // #172: never unique-seed an authoritative model-derived literal. Such a
+  // binding (e.g. `elementIdVar` resolved to a real flow-node id) is a
+  // lookup into the deployed model, not a client-minted identifier; the
+  // 409 that flagged it as "unique" is triggered by a different field.
+  // Re-seeding it would re-introduce the broker-invalid synthetic value
+  // the planner fix removed. The planner marks these on
+  // `EndpointScenario.modelDerivedLiteralBindings`.
+  if (excluded) {
+    for (const name of excluded) unique.delete(name);
   }
   return unique;
 }

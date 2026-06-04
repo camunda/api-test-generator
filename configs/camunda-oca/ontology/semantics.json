@@ -30,7 +30,25 @@
     {
       "name": "ElementId",
       "kind": "modelDerived",
-      "$comment": "Element IDs are defined inside the deployed BPMN model. The planner reads them out-of-band from the chosen fixture's providesValues at plan time \u2014 no Camunda API round-trip required. See #162 PR 1."
+      "modelElementTypes": [
+        "serviceTask",
+        "userTask",
+        "scriptTask",
+        "businessRuleTask",
+        "sendTask",
+        "receiveTask",
+        "manualTask",
+        "callActivity",
+        "subProcess",
+        "intermediateCatchEvent",
+        "intermediateThrowEvent",
+        "exclusiveGateway",
+        "parallelGateway",
+        "inclusiveGateway",
+        "eventBasedGateway",
+        "endEvent"
+      ],
+      "$comment": "Element IDs are defined inside the deployed BPMN model. The planner reads them out-of-band from the chosen fixture at plan time - no Camunda API round-trip required (#162 PR 1). For modelDerived variant leaves resolved from a fixture (e.g. startInstructions[].elementId), the planner selects an id from the fixture's providesElements BY TYPE using modelElementTypes (preference order; executable/terminal flow nodes first, then endEvent). startEvent is deliberately ABSENT: the broker rejects a start event as a startInstructions target, and excluding the type here makes the rule robust to models with multiple start events (plain/message/signal/timer). See #172."
     },
     {
       "name": "JobType",

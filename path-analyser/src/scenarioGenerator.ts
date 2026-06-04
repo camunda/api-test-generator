@@ -2122,6 +2122,24 @@ export function generateOptionalSubShapeVariants(
         // the basic-chain planner produced earlier in this pass.
         if (baseScenario.bindings[varName] === undefined) {
           baseScenario.bindings[varName] = value;
+          // #172: a `modelDerived` leaf (e.g. `startInstructions[].elementId`)
+          // has no producer-chain value reachable at this stage, so `value`
+          // above is a SYNTHETIC placeholder. Record the binding so the
+          // request-plan builder can replace it with a real value selected
+          // from the chain's chosen deploy fixture (`providesElements`,
+          // by type). Recorded ONLY when we actually installed the
+          // placeholder (never in the producer-chain branch above), and
+          // carries the exact placeholder so the fulfiller overwrites
+          // nothing else. Other classifications carry an authoritative
+          // value already and must not be touched at the deploy step.
+          if (bound.classification === 'modelDerived' && varName) {
+            baseScenario.modelDerivedBindings ||= [];
+            baseScenario.modelDerivedBindings.push({
+              varName,
+              semantic: leaf.semantic,
+              placeholder: value,
+            });
+          }
         }
         scenario = baseScenario;
       }

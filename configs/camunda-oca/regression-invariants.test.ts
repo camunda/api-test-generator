@@ -3831,6 +3831,207 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
   }
 });
 
+describeForThisConfig('bundled-spec invariants: modelDerived element selection (#172)', () => {
+  // #172: createProcessInstance.startInstructions[].elementId (and the
+  // runtimeInstructions[].afterElementId sibling) were emitting a synthetic
+  // placeholder (`elementId_<suffix>`) that the live broker rejects with
+  // HTTP 400 "unsupported element type". `ElementId` is `modelDerived`: its
+  // only valid values are flow-node ids from the deployed BPMN model. The
+  // fix resolves the leaf from the chosen deploy fixture's `providesElements`
+  // BY TYPE, using the `ElementId` semantic's `modelElementTypes` preference
+  // list — which deliberately excludes `startEvent` (the broker rejects a
+  // start event as a startInstructions target, even for models with several
+  // start events).
+  //
+  // Two guards, both class-scoped:
+  //   (A) config honesty + selection: for EVERY bpmnProcess fixture, the
+  //       `providesElements` tags are honest against the BPMN XML, and the
+  //       by-type selection never picks a start event.
+  //   (B) end-to-end: every createProcessInstance variant that binds
+  //       `elementIdVar` binds it to a real, non-start, non-synthetic
+  //       element id of the model its chain deploys.
+
+  const FIXTURES_DIR = join(import.meta.dirname, 'fixtures');
+  const SEMANTICS_PATH = join(import.meta.dirname, 'ontology', 'semantics.json');
+  const REGISTRY_PATH = join(FIXTURES_DIR, 'deployment-artifacts.json');
+
+  interface ProvidesElement {
+    id: string;
+    type: string;
+  }
+  interface RegistryEntry {
+    kind: string;
+    path: string;
+    providesElements?: ProvidesElement[];
+  }
+
+  function loadRegistry(): RegistryEntry[] {
+    const raw = readFileSync(REGISTRY_PATH, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const parsed = JSON.parse(raw) as { artifacts: RegistryEntry[] };
+    return parsed.artifacts;
+  }
+
+  function loadElementIdAcceptableTypes(): string[] {
+    const raw = readFileSync(SEMANTICS_PATH, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const parsed = JSON.parse(raw) as {
+      semanticTypes: { name: string; kind?: string; modelElementTypes?: string[] }[];
+    };
+    const elementId = parsed.semanticTypes.find((t) => t.name === 'ElementId');
+    if (!elementId) throw new Error('semantics.json: no ElementId semantic type entry');
+    if (elementId.kind !== 'modelDerived') {
+      throw new Error("semantics.json: ElementId must be kind 'modelDerived'");
+    }
+    if (!elementId.modelElementTypes?.length) {
+      throw new Error('semantics.json: ElementId.modelElementTypes must be a non-empty list');
+    }
+    return elementId.modelElementTypes;
+  }
+
+  // Parse the BPMN XML for elements of a given (local) tag name, returning
+  // their ids. Matches `<startEvent id="X">` and `<bpmn:startEvent id="X">`
+  // (any/no namespace prefix). The `bpmndi:` diagram section uses
+  // `bpmnElement=` rather than `id=` on a different tag, so process-element
+  // tags are not matched there.
+  function bpmnElementIds(xml: string, localTag: string): Set<string> {
+    const ids = new Set<string>();
+    const re = new RegExp(`<(?:[A-Za-z][\\w.-]*:)?${localTag}\\b[^>]*\\bid="([^"]+)"`, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) ids.add(m[1]);
+    return ids;
+  }
+
+  // Pure replica of path-analyser's selectModelDerivedElementValue: pick the
+  // first acceptable type (in preference order) that has a matching element.
+  function selectByType(
+    providesElements: ProvidesElement[] | undefined,
+    acceptableTypes: string[],
+  ): string | undefined {
+    if (!providesElements?.length) return undefined;
+    for (const t of acceptableTypes) {
+      const hit = providesElements.find((e) => e.type === t);
+      if (hit) return hit.id;
+    }
+    return undefined;
+  }
+
+  it('(A) every bpmnProcess fixture: providesElements tags are honest and selection avoids start events', () => {
+    const acceptableTypes = loadElementIdAcceptableTypes();
+    // The acceptable-type list must NOT include startEvent — that is the
+    // whole point of the fix and protects against a config regression that
+    // would re-admit a start event regardless of fixture contents.
+    expect(
+      acceptableTypes.includes('startEvent'),
+      "ElementId.modelElementTypes must NOT include 'startEvent' (broker rejects start events as startInstructions targets)",
+    ).toBe(false);
+
+    const bpmnFixtures = loadRegistry().filter((e) => e.kind === 'bpmnProcess');
+    expect(bpmnFixtures.length, 'expected at least one bpmnProcess fixture').toBeGreaterThan(0);
+
+    for (const fixture of bpmnFixtures) {
+      const xml = readFileSync(join(FIXTURES_DIR, fixture.path), 'utf8');
+      expect(
+        fixture.providesElements !== undefined && fixture.providesElements.length > 0,
+        `${fixture.path}: bpmnProcess fixture must declare providesElements`,
+      ).toBe(true);
+
+      // Honesty: every declared (id,type) must appear in the BPMN XML with
+      // that exact element type. Guards against a config tag that lies
+      // about an element's type (which would defeat the type-based select).
+      for (const el of fixture.providesElements ?? []) {
+        const idsOfType = bpmnElementIds(xml, el.type);
+        expect(
+          idsOfType.has(el.id),
+          `${fixture.path}: providesElements declares {id:${el.id}, type:${el.type}} but the BPMN has no <${el.type}> with that id`,
+        ).toBe(true);
+      }
+
+      // Selection: the by-type pick must be defined and must NOT be a start
+      // event of this model — for ANY number of start events.
+      const startEventIds = bpmnElementIds(xml, 'startEvent');
+      const picked = selectByType(fixture.providesElements, acceptableTypes);
+      expect(
+        picked,
+        `${fixture.path}: type-based ElementId selection yielded no element — providesElements lacks any acceptable type`,
+      ).toBeDefined();
+      expect(
+        picked !== undefined && startEventIds.has(picked),
+        `${fixture.path}: type-based ElementId selection picked '${picked}', which is a bpmn:startEvent — broker would reject it`,
+      ).toBe(false);
+    }
+  });
+
+  interface DeployStep {
+    operationId?: string;
+    multipartTemplate?: { files?: Record<string, string> };
+  }
+  interface CpiVariantScenario {
+    id?: string;
+    bindings?: Record<string, string>;
+    requestPlan?: DeployStep[];
+  }
+  interface CpiVariantFile {
+    endpoint: { operationId: string };
+    scenarios: CpiVariantScenario[];
+  }
+
+  function deployedBpmnPath(scenario: CpiVariantScenario): string | undefined {
+    for (const step of scenario.requestPlan ?? []) {
+      const ref = step.multipartTemplate?.files?.resources;
+      if (typeof ref === 'string' && ref.startsWith('@@FILE:') && ref.endsWith('.bpmn')) {
+        return ref.slice('@@FILE:'.length);
+      }
+    }
+    return undefined;
+  }
+
+  it('(B) createProcessInstance: every elementIdVar binding is a real, non-start, non-synthetic model element id', () => {
+    const path = join(VARIANT_SCENARIOS_DIR, 'post--process-instances-scenarios.json');
+    if (!existsSync(path)) {
+      throw new Error(
+        "expected variant-output JSON not found: post--process-instances-scenarios.json — run 'npm run testsuite:generate'",
+      );
+    }
+    const raw = readFileSync(path, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const collection = JSON.parse(raw) as CpiVariantFile;
+
+    const bound = collection.scenarios.filter((s) => typeof s.bindings?.elementIdVar === 'string');
+    // createProcessInstance has startInstructions[].elementId AND
+    // runtimeInstructions[].afterElementId — both modelDerived ElementId
+    // sites — so at least one variant must bind elementIdVar.
+    expect(
+      bound.length,
+      'expected at least one createProcessInstance variant binding elementIdVar',
+    ).toBeGreaterThan(0);
+
+    for (const scenario of bound) {
+      const value = scenario.bindings?.elementIdVar ?? '';
+      // Not the synthetic fallback the fix removed.
+      expect(
+        /^elementId_/.test(value),
+        `${scenario.id}: elementIdVar='${value}' is a synthetic placeholder (#172 regression)`,
+      ).toBe(false);
+      // And, parsed against the model the chain actually deploys, not a
+      // start event.
+      const bpmnRel = deployedBpmnPath(scenario);
+      expect(
+        bpmnRel,
+        `${scenario.id}: could not determine the deployed BPMN from the requestPlan`,
+      ).toBeDefined();
+      if (bpmnRel) {
+        const xml = readFileSync(join(FIXTURES_DIR, bpmnRel), 'utf8');
+        const startEventIds = bpmnElementIds(xml, 'startEvent');
+        expect(
+          startEventIds.has(value),
+          `${scenario.id}: elementIdVar='${value}' is a bpmn:startEvent in ${bpmnRel} — broker would reject it`,
+        ).toBe(false);
+      }
+    }
+  });
+});
+
 describeForThisConfig(
   'bundled-spec invariants: jobType binds from chosen fixture (#163 review)',
   () => {

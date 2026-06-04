@@ -104,4 +104,33 @@ describe('computeUniqueBindings (#304 / #318 review)', () => {
     ];
     expect(computeUniqueBindings(plan)).toEqual(new Set(['resourceNameVar']));
   });
+
+  it('excludes authoritative model-derived literals from the unique set (#172)', () => {
+    // createProcessInstance declares 409 and references BOTH a client-minted
+    // identifier (`nameVar`) and a modelDerived element id (`elementIdVar`)
+    // in its body. Without the exclusion, `computeUniqueBindings` sweeps
+    // BOTH into the unique set, and the emitter strips the planner's literal
+    // `elementIdVar=Event_1ma9skw` and re-seeds it — re-introducing the
+    // broker-invalid synthetic value #172 fixed. The planner marks
+    // `elementIdVar` on `scenario.modelDerivedLiteralBindings`; passing it as
+    // the exclusion arg must drop ONLY that name, leaving `nameVar` unique.
+    const plan: RequestStep[] = [
+      step({
+        operationId: 'createProcessInstance',
+        declares409: true,
+        bodyTemplate: {
+          name: '${nameVar}',
+          startInstructions: [{ elementId: '${elementIdVar}' }],
+        },
+      }),
+    ];
+    expect(computeUniqueBindings(plan)).toEqual(new Set(['nameVar', 'elementIdVar']));
+    expect(computeUniqueBindings(plan, ['elementIdVar'])).toEqual(new Set(['nameVar']));
+    // A Set exclusion arg is accepted identically to an array.
+    expect(computeUniqueBindings(plan, new Set(['elementIdVar']))).toEqual(new Set(['nameVar']));
+    // Excluding a name that was never unique is a no-op (never throws).
+    expect(computeUniqueBindings(plan, ['notPresentVar'])).toEqual(
+      new Set(['nameVar', 'elementIdVar']),
+    );
+  });
 });
