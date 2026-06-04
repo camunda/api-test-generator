@@ -93,8 +93,12 @@ function buildFile(
   // only, no JSON content-type that would break the multipart boundary). Import
   // it only when the file actually emits such a request, so JSON-only files
   // don't carry an unused import (the generated suite lints with noUnusedImports).
+  // This condition must mirror the `headersExpr` selection below exactly —
+  // `headersExpr` emits authHeaders() for any multipart+auth scenario (it does
+  // not depend on multipartForm), so gating the import on multipartForm here
+  // would risk referencing authHeaders() without importing it.
   const usesAuthHeaders = scenarios.some(
-    (s) => s.headersAuth && s.bodyEncoding === 'multipart' && !!s.multipartForm,
+    (s) => s.headersAuth && s.bodyEncoding === 'multipart',
   );
   const authImport = usesAuthHeaders ? 'authHeaders, ' : '';
   const lines: string[] = [];
