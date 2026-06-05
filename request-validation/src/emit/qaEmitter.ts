@@ -115,14 +115,21 @@ function buildFile(
   const usesJsonHeaders = scenarios.some(
     (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding !== 'multipart',
   );
-  // `assertResponseStatus` exists only in the standalone support module; legacy
-  // QA-tree mode falls back to a bare `expect(...).toBe(...)` assertion.
+  // The assertion helpers exist only in the standalone support module; legacy
+  // QA-tree mode falls back to a bare `expect(...).toBe(...)` assertion. Import
+  // the one-of variant only when a scenario carries `acceptableStatuses`
+  // (auth-deny), and the single variant only when a non-one-of scenario exists,
+  // so neither is an unused import (rbac files use only the one-of variant).
+  const oneOf = (s: ValidationScenario): boolean => !!s.acceptableStatuses?.length;
+  const usesOneOfAssert = standalone && scenarios.some(oneOf);
+  const usesSingleAssert = standalone && scenarios.some((s) => !oneOf(s));
   const httpHelpers = [
     usesAuthHeaders ? 'authHeaders' : null,
     usesDenyProbe ? 'denyProbeHeaders' : null,
     usesJsonHeaders ? 'jsonHeaders' : null,
     'buildUrl',
-    standalone ? 'assertResponseStatus' : null,
+    usesSingleAssert ? 'assertResponseStatus' : null,
+    usesOneOfAssert ? 'assertResponseStatusOneOf' : null,
   ].filter((x): x is string => x !== null);
   const lines: string[] = [];
   lines.push(LICENSE_HEADER.trimEnd());
@@ -243,11 +250,20 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
     } else if (s.requestBody) {
       ctxParts.push(`body: requestBody`);
     }
-    lines.push(
-      `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} });`,
-    );
+    if (s.acceptableStatuses?.length) {
+      // Deny-tests (#359): pass on any of the acceptable statuses (e.g. 403 or 404).
+      lines.push(
+        `    await assertResponseStatusOneOf(testInfo, res, ${JSON.stringify(s.acceptableStatuses)}, { ${ctxParts.join(', ')} });`,
+      );
+    } else {
+      lines.push(
+        `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} });`,
+      );
+    }
   } else {
-    // Legacy QA-tree mode: bare assertion, no attachments.
+    // Legacy QA-tree mode: bare assertion, no attachments. (auth-deny never
+    // reaches legacy mode — buildFile throws for auth-deny when !standalone — so
+    // acceptableStatuses cannot occur here.)
     lines.push(`    expect(res.status()).toBe(${s.expectedStatus});`);
   }
   lines.push('  });');
