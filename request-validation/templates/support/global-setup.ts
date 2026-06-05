@@ -70,9 +70,17 @@ async function globalSetup(): Promise<void> {
       return;
     }
     if (Date.now() > deadlineMs) {
+      // A 409 on create means the user pre-existed; if it was created with a
+      // different password, basic auth will never succeed and the poll just
+      // times out. Surface that as the likely cause.
+      const hint =
+        res.status === 409
+          ? ` The probe user already existed (create returned HTTP 409); if it was provisioned with a different password, ` +
+            `set RBAC_DENY_PROBE_PASSWORD to match the existing user (or delete the user and re-run).`
+          : '';
       throw new Error(
         `[rbac global-setup] probe user '${username}' did not become authenticatable within 60s ` +
-          `(last topology status: ${ping?.status ?? 'no response'}).`,
+          `(create: HTTP ${res.status}, last topology status: ${ping?.status ?? 'no response'}).${hint}`,
       );
     }
     await sleep(2_000);

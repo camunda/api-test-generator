@@ -98,6 +98,17 @@ function buildFile(
   //   - auth + non-multipart  -> jsonHeaders()
   //   - otherwise             -> {} (no helper)
   const usesDenyProbe = scenarios.some((s) => s.type === 'auth-deny');
+  // auth-deny relies on denyProbeHeaders(), which only exists in the vendored
+  // standalone support module. Legacy QA-tree mode imports helpers from the
+  // external `utils/http`, which has no such symbol — fail fast rather than emit
+  // uncompilable specs. (In practice auth-deny only lands in the standalone-only
+  // `rbac` profile, so this is a guard, not a reachable path today.)
+  if (usesDenyProbe && !standalone) {
+    throw new Error(
+      'auth-deny scenarios require the standalone support module (denyProbeHeaders); ' +
+        'they are not supported in legacy QA-tree mode (--no-standalone / --qa-import-depth).',
+    );
+  }
   const usesAuthHeaders = scenarios.some(
     (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding === 'multipart',
   );
