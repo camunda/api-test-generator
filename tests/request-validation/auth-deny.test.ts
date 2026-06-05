@@ -4,7 +4,7 @@ import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitt
 import type { OperationModel } from '../../request-validation/src/model/types.js';
 
 /**
- * Guards the read-side RBAC deny (HTTP 403) feature (#359).
+ * Guards the read-side RBAC deny (HTTP 403) feature.
  *
  * Analysis: each slice-allowlisted get-by-key read yields an `auth-deny`
  *   scenario with a known-existing key and a strict 403 expectation.
@@ -60,7 +60,7 @@ const ops: OperationModel[] = [
   { operationId: 'createUser', method: 'POST', path: '/users', tags: [], parameters: [] },
 ];
 
-describe('request-validation: auth-deny analysis (#359)', () => {
+describe('request-validation: auth-deny analysis', () => {
   it('emits an auth-deny scenario for each slice-allowlisted get-by-key read only', () => {
     const scenarios = generateAuthDeny(ops, {});
     expect(scenarios.map((s) => s.operationId).sort()).toEqual([...SLICE_OPS].sort());
@@ -90,7 +90,7 @@ describe('request-validation: auth-deny analysis (#359)', () => {
   });
 });
 
-describe('request-validation: auth-deny emitter shape (#359)', () => {
+describe('request-validation: auth-deny emitter shape', () => {
   it('authenticates as the probe user (denyProbeHeaders), never the admin, and asserts 403', () => {
     const u = generateAuthDeny(ops, { onlyOperations: new Set(['getUser']) })[0];
     const rendered = renderScenarioForTest(u, 'getUser - Denied (no permission)');

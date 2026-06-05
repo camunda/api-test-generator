@@ -6,7 +6,7 @@
  * except in compliance with the Camunda License 1.0.
  */
 
-// Vendored support file. Provisions the read-side RBAC deny-test fixtures (#359):
+// Vendored support file. Provisions the read-side RBAC deny-test fixtures:
 //   1. a probe user — a non-admin user with NO authorization grants; the `rbac`
 //      profile's deny-tests authenticate as it (denyProbeHeaders()) so an
 //      authorizations-enabled server rejects the request.
