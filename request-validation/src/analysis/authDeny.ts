@@ -8,31 +8,47 @@ interface Opts {
 /**
  * Generate auth-deny (HTTP 403) scenarios for the `rbac` profile.
  *
- * Read-side RBAC deny-tests (#359, generic vertical slice): for a get-by-key
- * read endpoint, issue the request AS A FRESHLY-PROVISIONED NON-ADMIN USER WITH
- * ZERO GRANTS (rendered as `denyProbeHeaders()` by the emitter, NOT the admin
- * `authHeaders()`), and expect an authorizations-enabled server to deny it. The
- * probe user is created by the suite global-setup; the target key references a
- * known-existing resource so the response is a genuine authorization deny rather
- * than a 404-not-found.
+ * Read-side RBAC deny-tests: for a get-by-key read endpoint, issue the request
+ * AS A FRESHLY-PROVISIONED NON-ADMIN USER WITH ZERO GRANTS (rendered as
+ * `denyProbeHeaders()` by the emitter, NOT the admin `authHeaders()`), and expect
+ * an authorizations-enabled server to deny it. The probe user and the target
+ * resources are created by the suite global-setup; the key references a
+ * KNOWN-EXISTING resource so the response is a genuine authorization deny (admin
+ * would see it at 200) rather than a 404-not-found that any caller would get.
  *
  * "Generic" = we assert the endpoint is permission-gated without naming the
- * exact permission. Precise per-permission deny/allow pairs are a follow-up
- * (#374); broadening beyond the slice allowlist is #373; search/list endpoints
- * use a different (200 + empty items) oracle and are out of scope here (#375).
+ * exact permission. Precise per-permission deny/allow pairs, and search/list
+ * endpoints (which use a 200 + empty-items oracle), are tracked as separate
+ * follow-ups.
  */
 
-// Vertical-slice allowlist (#359). Maps each get-by-key operation's path token(s)
-// to a known-existing resource key, so the deny is an authorization decision and
-// not a 404-not-found. Broadening to all get-by-key reads is tracked in #373.
+// Allowlist of get-by-key reads to deny-test — the client-minted tier.
+// Each maps the operation's path token to a fixed id that global-setup
+// provisions (as admin) so the resource exists — making the probe's failure an
+// authorization decision, not a 404-not-found. The ids here MUST match the
+// fixtures created in templates/support/global-setup.ts.
+//
+// Server-minted-key resources (Authorization, Document) and deploy/runtime
+// resources (process/decision definitions, instances, …) are deliberately
+// excluded here — they need, respectively, a setup→test key handoff and the
+// positive suite's deploy/execution machinery (tracked as separate follow-ups).
 const SLICE: Record<string, Record<string, string>> = {
-  // GET /users/{username} — fetch the always-present admin user as the probe.
+  // GET /users/{username} — the always-present admin user (no fixture needed).
   getUser: { username: 'demo' },
+  getTenant: { tenantId: 'rbac-probe-tenant' },
+  getGroup: { groupId: 'rbac-probe-group' },
+  getRole: { roleId: 'rbac-probe-role' },
+  getMappingRule: { mappingRuleId: 'rbac-probe-mapping' },
+  getGlobalClusterVariable: { name: 'rbac-probe-clustervar' },
+  // getGlobalTaskListener deferred: its create body (`type`, `eventTypes`) isn't
+  // confirmed; add once the fixture create is verified.
 };
 
-// An unauthorized get-by-key may be answered with 403 (forbidden) or, if the
-// resource is filtered to "not visible", 404. Both are legitimate deny signals;
-// the exact value is pinned by live verification. Default 403.
+// An unauthorized get-by-key on an existing resource is forbidden with 403 — the
+// observed behaviour across the current OCA resources (admin sees the resource
+// at 200; the zero-grant probe gets 403). We assert 403 strictly. (Camunda could
+// also "hide" a resource with 404, but that hasn't been observed here and a 404
+// would be ambiguous with a missing endpoint on an older server.)
 const DENY_STATUS = 403;
 
 export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationScenario[] {

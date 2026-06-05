@@ -92,9 +92,10 @@ function buildFile(
   // Generated files lint with noUnusedImports, so import only the http helpers
   // the file's scenarios actually reference. Each condition must mirror the
   // `headersExpr` selection below exactly:
-  //   - auth-deny             -> denyProbeHeaders()  (read-side RBAC deny, #359)
+  //   - auth-deny             -> denyProbeHeaders()  (read-side RBAC deny)
   //   - auth + multipart      -> authHeaders()       (Authorization only, no JSON
-  //                                                    content-type — #362)
+  //                                                    content-type that would
+  //                                                    break the multipart boundary)
   //   - auth + non-multipart  -> jsonHeaders()
   //   - otherwise             -> {} (no helper)
   const usesDenyProbe = scenarios.some((s) => s.type === 'auth-deny');
@@ -209,7 +210,7 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
   }
   const headersExpr =
     s.type === 'auth-deny'
-      ? // Read-side RBAC deny (#359): authenticate as the zero-grant probe user,
+      ? // Read-side RBAC deny: authenticate as the zero-grant probe user,
         // never the admin, so the authorizations-enabled server denies the request.
         'denyProbeHeaders()'
       : s.headersAuth

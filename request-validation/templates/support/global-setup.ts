@@ -6,18 +6,71 @@
  * except in compliance with the Camunda License 1.0.
  */
 
-// Vendored support file. Provisions the read-side RBAC deny-test probe user
-// (#359): a non-admin user with NO authorization grants. The `rbac` profile's
-// deny-tests authenticate as this user (denyProbeHeaders()) so an
-// authorizations-enabled server rejects the request.
+// Vendored support file. Provisions the read-side RBAC deny-test fixtures:
+//   1. a probe user — a non-admin user with NO authorization grants; the `rbac`
+//      profile's deny-tests authenticate as it (denyProbeHeaders()) so an
+//      authorizations-enabled server rejects the request.
+//   2. one instance of each get-by-key resource the deny-tests target, created
+//      as admin with a fixed id. These exist purely so the probe's read has a
+//      real target — making its failure a genuine authorization denial (admin
+//      would see the resource at 200) rather than a 404-not-found. They carry no
+//      grants. The fixed ids MUST match the auth-deny allowlist in the
+//      api-test-generator that emitted this suite (its authDeny analysis pass).
 //
 // Runs only for the `rbac` profile (gated on RV_PROFILE); a no-op otherwise, so
-// the unsecured/secured suites are unaffected. Idempotent: an already-existing
-// probe user (HTTP 409) is treated as success.
+// the unsecured/secured suites are unaffected. All creates are idempotent — an
+// already-existing resource (HTTP 409) is treated as success.
 
 import { authHeaders, basicAuthHeaders, credentials, denyProbeCredentials } from './env';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** POST a create body as admin; accept any 2xx (create endpoints return
+ *  200/201/204) or 409 (already exists from a prior run) as success. */
+async function provision(
+  label: string,
+  path: string,
+  body: unknown,
+  admin: Record<string, string>,
+): Promise<number> {
+  const res = await fetch(`${credentials.baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...admin },
+    body: JSON.stringify(body),
+  });
+  // Any 2xx (create endpoints variously return 200/201/204) or 409 (already
+  // exists from a prior run) is success.
+  if (!res.ok && res.status !== 409) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `[rbac global-setup] failed to provision ${label}: HTTP ${res.status} ${text.slice(0, 300)}`,
+    );
+  }
+  return res.status;
+}
+
+// Get-by-key resources the deny-tests fetch — created with the fixed ids the
+// generator's auth-deny allowlist references. Created as admin, no grants.
+const FIXTURES: ReadonlyArray<{ label: string; path: string; body: unknown }> = [
+  { label: 'tenant', path: '/v2/tenants', body: { tenantId: 'rbac-probe-tenant', name: 'RBAC Probe Tenant' } },
+  { label: 'group', path: '/v2/groups', body: { groupId: 'rbac-probe-group', name: 'RBAC Probe Group' } },
+  { label: 'role', path: '/v2/roles', body: { roleId: 'rbac-probe-role', name: 'RBAC Probe Role' } },
+  {
+    label: 'mapping-rule',
+    path: '/v2/mapping-rules',
+    body: {
+      mappingRuleId: 'rbac-probe-mapping',
+      claimName: 'rbac-probe-claim',
+      claimValue: 'rbac-probe-value',
+      name: 'RBAC Probe Mapping',
+    },
+  },
+  {
+    label: 'cluster-variable',
+    path: '/v2/cluster-variables/global',
+    body: { name: 'rbac-probe-clustervar', value: 'rbac-probe' },
+  },
+];
 
 async function globalSetup(): Promise<void> {
   if (process.env.RV_PROFILE !== 'rbac') return;
@@ -26,10 +79,16 @@ async function globalSetup(): Promise<void> {
   if (!admin.Authorization) {
     throw new Error(
       '[rbac global-setup] No admin credentials. Set CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD ' +
-        'so the probe user can be provisioned.',
+        'so the probe user and fixtures can be provisioned.',
     );
   }
 
+  // 1. Get-by-key target resources (existence makes the probe's read a real deny).
+  for (const f of FIXTURES) {
+    await provision(f.label, f.path, f.body, admin);
+  }
+
+  // 2. The zero-grant probe user.
   const { username, password } = denyProbeCredentials;
   const res = await fetch(`${credentials.baseUrl}/v2/users`, {
     method: 'POST',
