@@ -6,7 +6,7 @@ interface Opts {
 }
 
 /**
- * Generate auth-deny (HTTP 403/404) scenarios for the `rbac` profile.
+ * Generate auth-deny (HTTP 403) scenarios for the `rbac` profile.
  *
  * Read-side RBAC deny-tests (#359): for a get-by-key read endpoint, issue the
  * request AS A FRESHLY-PROVISIONED NON-ADMIN USER WITH ZERO GRANTS (rendered as
