@@ -275,6 +275,31 @@ export interface EndpointScenario {
     leafPaths: string[]; // semantic-typed leaves to populate
     leafSemantics: string[]; // matching semantic types in same order
   };
+  // #172: transient planner-internal handoff from the variant generator
+  // (`generateOptionalSubShapeVariants` bare-endpoint fallback) to the
+  // request-plan builder. The fallback installs a SYNTHETIC placeholder
+  // for a `modelDerived` leaf because the deploy fixture is not yet chosen
+  // at that stage; this records (varName, semantic, the exact placeholder)
+  // so `buildRequestPlan`'s `createDeployment` step can replace the
+  // placeholder with a real value selected from the chosen fixture's
+  // `providesElements` (by type, via `semanticTypes.<X>.modelElementTypes`).
+  // Set ONLY when a placeholder was actually installed (never in the
+  // producer-chain branch), and consumed + deleted before serialization —
+  // it must not leak into emitted scenario JSON.
+  modelDerivedBindings?: { varName: string; semantic: string; placeholder: string }[];
+  // #172: binding names the planner resolved to an AUTHORITATIVE model
+  // value (a real flow-node id read out-of-band from the chosen deploy
+  // fixture's `providesElements`, by type). Unlike client-minted
+  // identifiers (`tenantIdVar`, `usernameVar`, …) — which the emitter
+  // deliberately strips and re-seeds with `{ unique: true }` for
+  // cross-run 409 avoidance (#304/#320) — a model-derived value is a
+  // lookup into the deployed model and MUST be transmitted verbatim:
+  // re-seeding it would re-introduce the broker-invalid placeholder the
+  // fix removed. The materializer subtracts these names from its
+  // `uniqueBindings` set so the literal survives. Persisted (unlike the
+  // transient `modelDerivedBindings` handoff above) because the
+  // distinction is only knowable at plan time.
+  modelDerivedLiteralBindings?: string[];
   filtersUsed?: string[]; // semantic / parameter filters applied
   syntheticBindings?: string[]; // variables created without a producing op
   // Issue #134: semantic types whose value was client-minted at scenario-
@@ -689,6 +714,25 @@ export interface SemanticTypeSpec {
     extractKey: string;
     consistency?: 'eventual' | 'strong';
   };
+  /**
+   * For `kind === 'modelDerived'` semantics resolved from a deployment
+   * fixture (#172): the acceptable model-element `type` values for this
+   * semantic, in preference order. When a `modelDerived` variant leaf is
+   * resolved at the chain's `createDeployment` step, the planner picks the
+   * first element in the fixture's `providesElements` whose `type` appears
+   * in this list (earliest list entry wins on ties). When omitted or
+   * empty, the planner falls back to the fixture's first declared element.
+   *
+   * The strings are opaque to the planner — they are matched against
+   * `providesElements[].type` by pure equality, so all BPMN/OCA element
+   * vocabulary stays in config (the fixture registry + this list) and
+   * never enters generic planner code. Example: `ElementId` lists every
+   * executable / terminal flow-node type but NOT `startEvent`, encoding
+   * the broker rule that a start event is not a valid
+   * `startInstructions[].elementId` target regardless of how many start
+   * events the deployed model contains.
+   */
+  modelElementTypes?: string[];
 }
 
 export interface IdentifierSpec {
@@ -860,6 +904,21 @@ export interface ArtifactRegistryEntry {
    * fixture-derived value must be declared here.
    */
   providesValues?: Record<string, string[]>;
+  /**
+   * Structured flow-node inventory this fixture's model contains, each
+   * tagged with its element `type` (#172). Unlike the flat ordered
+   * `providesValues.<Semantic>` lists (index-0 selection), this lets the
+   * planner pick a value by *type* via a per-semantic acceptable-types
+   * selector (`semanticTypes.<X>.modelElementTypes`) rather than by
+   * position — so a model with several start events (plain / message /
+   * signal / timer) can never have one accidentally selected for a field
+   * that rejects start events (e.g. `startInstructions[].elementId`).
+   *
+   * The `type` string is opaque to the planner: it matches the config's
+   * own per-semantic acceptable-types list by pure string equality, so no
+   * BPMN/OCA element vocabulary leaks into generic planner code.
+   */
+  providesElements?: { id: string; type: string }[];
 }
 
 export interface OperationArtifactRuleSpec {

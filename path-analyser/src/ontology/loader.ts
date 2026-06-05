@@ -714,6 +714,7 @@ export interface SemanticsViews {
       witnesses?: string;
       kind?: 'modelDerived' | 'attribute' | 'serverEmergent' | 'runtimeEmission';
       clientMinted?: boolean;
+      modelElementTypes?: string[];
       emittedBy?: {
         predecessor: string;
         guardedBy?: string[];
@@ -756,6 +757,7 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
     if (t.witnesses !== undefined) entry.witnesses = t.witnesses;
     if (t.kind !== undefined) entry.kind = t.kind;
     if (t.clientMinted !== undefined) entry.clientMinted = t.clientMinted;
+    if (t.modelElementTypes !== undefined) entry.modelElementTypes = [...t.modelElementTypes];
     if (t.emittedBy !== undefined) {
       const eb: NonNullable<SemanticsViews['semanticTypes'][string]['emittedBy']> = {
         predecessor: t.emittedBy.predecessor,

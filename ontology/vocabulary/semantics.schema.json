@@ -81,6 +81,14 @@
           "type": "boolean",
           "description": "When true, values are minted by the planner / client rather than returned by a producer endpoint. Required when `kind === \"attribute\"` (loader-enforced)."
         },
+        "modelElementTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "For `kind === \"modelDerived\"` semantics resolved from a deployment fixture (#172): the acceptable model-element `type` values for this semantic, in preference order. When a modelDerived variant leaf is resolved at the chain's createDeployment step, the planner picks the first element in the chosen fixture's `providesElements` whose `type` appears in this list (earliest entry wins). Omitted or empty ⇒ the planner falls back to the fixture's first declared element. The strings are matched against `providesElements[].type` by pure equality, so BPMN/OCA element vocabulary stays in config and never enters generic planner code. Example: `ElementId` lists every executable/terminal flow-node type but NOT `startEvent`, encoding the broker rule that a start event is not a valid `startInstructions[].elementId` target regardless of how many start events the model contains."
+        },
         "emittedBy": {
           "type": "object",
           "additionalProperties": false,

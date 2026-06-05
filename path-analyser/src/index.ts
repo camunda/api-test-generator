@@ -514,6 +514,10 @@ async function main() {
           requestIndex.byOperation,
           successStatusByOp,
         );
+        // #172: the modelDerivedBindings marker is a planner-internal
+        // handoff consumed by buildRequestPlan's deploy step. Drop it so it
+        // never leaks into emitted variant scenario JSON.
+        s.modelDerivedBindings = undefined;
         s.seedBindings = computeSeedBindings(s);
       }
       if (variantCollection.scenarios.length) {
@@ -1566,6 +1570,44 @@ function buildRequestBodyFromCanonical(
         scenario.bindings ||= {};
         if (!scenario.bindings[varName]) scenario.bindings[varName] = jobTypeValue;
       }
+      // #172: fulfill modelDerived variant placeholders from the chosen
+      // deploy fixture. The variant generator installs a synthetic
+      // placeholder for a modelDerived leaf (e.g.
+      // `startInstructions[].elementId`) because the real value — a model
+      // flow-node id — is only knowable once the deploy fixture is selected
+      // (here). Replace the placeholder with an id picked BY TYPE from the
+      // fixture's `providesElements`, using the per-semantic acceptable-type
+      // list (`semanticTypes.<X>.modelElementTypes`). Strictly guarded so we
+      // never touch a runtime-emission or producer-chain binding:
+      //   - sole deployment step (avoid source/target ambiguity in
+      //     multi-deploy migration chains), and
+      //   - the binding still equals the exact recorded placeholder (so a
+      //     real/extracted value is never clobbered — runtime-emission
+      //     leaves carry `__PENDING__` + a step extract and never a
+      //     modelDerivedBindings marker).
+      if (scenario.modelDerivedBindings?.length) {
+        const deployOpCount = scenario.operations.filter((o) =>
+          isDeploymentGatewayOp(graph.domain, o.operationId),
+        ).length;
+        if (deployOpCount === 1) {
+          for (const m of scenario.modelDerivedBindings) {
+            if (scenario.bindings?.[m.varName] !== m.placeholder) continue;
+            const acceptableTypes = graph.domain?.semanticTypes?.[m.semantic]?.modelElementTypes;
+            const picked = selectModelDerivedElementValue(regHit.providesElements, acceptableTypes);
+            if (picked !== undefined) {
+              scenario.bindings ||= {};
+              scenario.bindings[m.varName] = picked;
+              // Mark as an authoritative model value so the materializer
+              // does NOT strip + unique-seed it (#172; see the field doc
+              // on EndpointScenario.modelDerivedLiteralBindings).
+              scenario.modelDerivedLiteralBindings ||= [];
+              if (!scenario.modelDerivedLiteralBindings.includes(m.varName)) {
+                scenario.modelDerivedLiteralBindings.push(m.varName);
+              }
+            }
+          }
+        }
+      }
       template.files.resources = fileRef;
     }
     // Wire global context seeds (e.g. tenantIdVar) into multipart fields by
@@ -1631,7 +1673,59 @@ function normaliseProvidesValues(input: unknown): Record<string, string[]> | und
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-// -------- Artifact Registry support ---------
+/**
+ * Validate and copy a registry entry's `providesElements` shape (#172).
+ * Each entry must be an object with non-empty string `id` and `type`;
+ * values are trimmed and anything malformed or blank is dropped so a bad
+ * entry (the config is an unchecked boundary) doesn't silently survive and
+ * then fail type-matching downstream. Returns `undefined` when no usable
+ * entry survives.
+ */
+function normaliseProvidesElements(input: unknown): { id: string; type: string }[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const out: { id: string; type: string }[] = [];
+  for (const x of input) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) continue;
+    const rawId = Reflect.get(x, 'id');
+    const rawType = Reflect.get(x, 'type');
+    if (typeof rawId !== 'string' || typeof rawType !== 'string') continue;
+    const id = rawId.trim();
+    const type = rawType.trim();
+    if (id.length === 0 || type.length === 0) continue;
+    out.push({ id, type });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Pick a model-element id from a fixture's `providesElements` for a
+ * `modelDerived` semantic (#172), selecting BY TYPE rather than position.
+ *
+ * `acceptableTypes` (from `semanticTypes.<X>.modelElementTypes`) lists the
+ * element `type` values valid for the semantic, in preference order: the
+ * first list entry with a matching element wins. When `acceptableTypes` is
+ * absent/empty the first declared element is returned (positional
+ * fallback). Returns `undefined` when no acceptable element exists so the
+ * caller keeps the synthetic placeholder (body stays well-formed).
+ *
+ * Pure string-equality matching — the planner carries no BPMN/OCA element
+ * vocabulary; both the candidate `type`s and the acceptable list live in
+ * config.
+ */
+function selectModelDerivedElementValue(
+  providesElements: { id: string; type: string }[] | undefined,
+  acceptableTypes: string[] | undefined,
+): string | undefined {
+  if (!providesElements?.length) return undefined;
+  if (acceptableTypes?.length) {
+    for (const t of acceptableTypes) {
+      const hit = providesElements.find((e) => e.type === t);
+      if (hit) return hit.id;
+    }
+    return undefined;
+  }
+  return providesElements[0].id;
+}
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
   if (artifactsRegistryCache) return artifactsRegistryCache;
@@ -1684,6 +1778,7 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
       description: e.description,
       providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
       providesValues: normaliseProvidesValues(e.providesValues),
+      providesElements: normaliseProvidesElements(e.providesElements),
     }));
     return artifactsRegistryCache || [];
   }
@@ -1828,7 +1923,13 @@ function chooseFixtureFromRegistry(
   requiredStates: ReadonlySet<string>,
   kindLevelProvides: ReadonlySet<string>,
   hardRequiredStates?: ReadonlySet<string>,
-): { ref: string; providesValues?: Record<string, string[]> } | undefined {
+):
+  | {
+      ref: string;
+      providesValues?: Record<string, string[]>;
+      providesElements?: { id: string; type: string }[];
+    }
+  | undefined {
   if (!kind) return undefined;
   const candidates = getArtifactsRegistry().filter((e) => e.kind === kind);
   if (candidates.length === 0) return undefined;
@@ -1867,6 +1968,7 @@ function chooseFixtureFromRegistry(
     return {
       ref: `@@FILE:${fallback.path}`,
       providesValues: fallback.providesValues,
+      providesElements: fallback.providesElements,
     };
   }
   const best = covers.reduce((acc, e) => {
@@ -1877,6 +1979,7 @@ function chooseFixtureFromRegistry(
   return {
     ref: `@@FILE:${best.path}`,
     providesValues: best.providesValues,
+    providesElements: best.providesElements,
   };
 }
 
