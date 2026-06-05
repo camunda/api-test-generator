@@ -83,7 +83,12 @@ waits until it is authenticatable; the deny-tests then run as it. The probe
 credentials default to `rbac-deny-probe` and can be overridden via
 `RBAC_DENY_PROBE_USER` / `RBAC_DENY_PROBE_PASSWORD`.
 
+`docker/docker-compose.rbac.yml` brings up a matching cluster (authorizations on,
+Basic auth, `demo/demo` admin) — the same `CAMUNDA_SECURITY_*` config
+camunda/camunda's own OC e2e suite uses:
+
 ```
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.rbac.yml up -d
 RV_PROFILE=rbac CORE_APPLICATION_URL=http://localhost:8080 \
   CAMUNDA_BASIC_AUTH_USER=demo CAMUNDA_BASIC_AUTH_PASSWORD=demo \
   npm run test:pw:request-validation
