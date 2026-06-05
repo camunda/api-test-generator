@@ -107,7 +107,14 @@ export interface ValidationScenario {
   params?: Record<string, string>;
   expectedStatus: number; // usually 400
   description: string;
-  headersAuth: boolean; // whether to send auth headers
+  /**
+   * Whether to send the configured *admin* credentials, i.e. authHeaders()
+   * (multipart) / jsonHeaders() (JSON). false → no headers ({}).
+   * NOTE: this flag does not govern `auth-deny` scenarios — those always
+   * authenticate as the zero-grant probe user via denyProbeHeaders() (a
+   * different principal) regardless of this value, which they leave false.
+   */
+  headersAuth: boolean;
   source?: 'body' | 'query' | 'path' | 'header' | 'cookie';
   /** How to encode the body; defaults to json if omitted */
   bodyEncoding?: 'json' | 'multipart';
