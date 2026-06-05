@@ -89,42 +89,7 @@ export async function assertResponseStatus(
 ): Promise<void> {
   const actual = res.status();
   if (actual === expected) return;
-  const summary = await attachStatusFailure(testInfo, res, String(expected), ctx);
-  expect(actual, summary).toBe(expected);
-}
 
-/**
- * Like `assertResponseStatus`, but passes when the actual status is ANY of
- * `expected`. Used by RBAC deny-tests (#359), where a denial may be 403
- * (forbidden) or 404 (resource filtered to not-visible) depending on the
- * resource. Same artifact/diagnostic behaviour on failure.
- */
-export async function assertResponseStatusOneOf(
-  testInfo: TestInfo,
-  res: APIResponse,
-  expected: number[],
-  ctx: RequestContext,
-): Promise<void> {
-  const actual = res.status();
-  if (expected.includes(actual)) return;
-  const summary = await attachStatusFailure(testInfo, res, expected.join(' or '), ctx);
-  expect(expected, summary).toContain(actual);
-}
-
-/**
- * On a status mismatch: fetch the body, attach `request.json` / `response.json`
- * to the Playwright report (so `show-report` and the JSON reporter carry full
- * payloads), and return a diagnostic summary for the inline `expect` message.
- * `expectedLabel` is rendered verbatim (a single status, or e.g. "403 or 404").
- * Shared by the single- and one-of status assertions.
- */
-async function attachStatusFailure(
-  testInfo: TestInfo,
-  res: APIResponse,
-  expectedLabel: string,
-  ctx: RequestContext,
-): Promise<string> {
-  const actual = res.status();
   let bodyText = '';
   try {
     bodyText = await res.text();
@@ -138,7 +103,7 @@ async function attachStatusFailure(
       scenarioKind: ctx.scenarioKind,
       method: ctx.method,
       url: ctx.url,
-      expectedStatus: expectedLabel,
+      expectedStatus: expected,
       body: ctx.body,
       multipart: ctx.multipart,
     },
@@ -171,15 +136,15 @@ async function attachStatusFailure(
     contentType: 'application/json',
   });
 
-  return (
+  const summary =
     `${ctx.method} ${ctx.url}\n` +
     `  operationId:     ${ctx.operationId}\n` +
     `  scenarioKind:    ${ctx.scenarioKind}\n` +
-    `  expected status: ${expectedLabel}\n` +
+    `  expected status: ${expected}\n` +
     `  actual status:   ${actual} ${res.statusText()}\n` +
     `  request body:    ${formatRequestPayload(ctx)}\n` +
-    `  response body:   ${truncate(bodyText, 500)}`
-  );
+    `  response body:   ${truncate(bodyText, 500)}`;
+  expect(actual, summary).toBe(expected);
 }
 
 function formatRequestPayload(ctx: RequestContext): string {

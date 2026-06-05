@@ -44,13 +44,12 @@ const SLICE: Record<string, Record<string, string>> = {
   // confirmed; add once the fixture create is verified.
 };
 
-// An unauthorized get-by-key on an existing resource is denied with either 403
-// (forbidden) or 404 (filtered to "not visible") depending on the resource —
-// both are legitimate denials (admin sees the resource at 200). We accept either
-// rather than pin a brittle per-resource code (statuses also vary across server
-// versions). `expectedStatus` carries the primary (403) for tooling that reads a
-// single value; `acceptableStatuses` is what the emitted test asserts.
-const DENY_STATUSES = [403, 404];
+// An unauthorized get-by-key on an existing resource is forbidden with 403 — the
+// observed behaviour across the current OCA resources (admin sees the resource
+// at 200; the zero-grant probe gets 403). We assert 403 strictly. (Camunda could
+// also "hide" a resource with 404, but that hasn't been observed here and a 404
+// would be ambiguous with a missing endpoint on an older server — see #380.)
+const DENY_STATUS = 403;
 
 export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
@@ -65,8 +64,7 @@ export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationS
       path: op.path,
       type: 'auth-deny',
       params: knownKeys,
-      expectedStatus: DENY_STATUSES[0],
-      acceptableStatuses: DENY_STATUSES,
+      expectedStatus: DENY_STATUS,
       description: 'Request as a non-admin user with no grants is denied (authorizations enabled)',
       // Not admin auth — the emitter renders denyProbeHeaders() for auth-deny.
       headersAuth: false,

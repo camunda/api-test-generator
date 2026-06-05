@@ -4,14 +4,14 @@ import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitt
 import type { OperationModel } from '../../request-validation/src/model/types.js';
 
 /**
- * Guards the read-side RBAC deny (HTTP 403/404) feature (#359).
+ * Guards the read-side RBAC deny (HTTP 403) feature (#359).
  *
  * Analysis: each slice-allowlisted get-by-key read yields an `auth-deny`
- *   scenario with a known-existing key and an acceptable-status set [403, 404].
+ *   scenario with a known-existing key and a strict 403 expectation.
  *   Non-allowlisted reads and write ops yield nothing.
  * Emitter: an auth-deny scenario authenticates as the zero-grant probe user
  *   (`denyProbeHeaders()`), never the admin (`authHeaders()`/`jsonHeaders()`),
- *   and asserts the deny via the one-of helper.
+ *   and asserts 403.
  */
 
 const SLICE_OPS = [
@@ -66,10 +66,9 @@ describe('request-validation: auth-deny analysis (#359)', () => {
     expect(scenarios.map((s) => s.operationId).sort()).toEqual([...SLICE_OPS].sort());
   });
 
-  it('each scenario is a 403/404 deny on a known-existing key', () => {
+  it('each scenario is a strict 403 deny on a known-existing key', () => {
     for (const s of generateAuthDeny(ops, {})) {
       expect(s.type).toBe('auth-deny');
-      expect(s.acceptableStatuses).toEqual([403, 404]);
       expect(s.expectedStatus).toBe(403);
       expect(s.method).toBe('GET');
       expect(s.headersAuth).toBe(false);
@@ -92,15 +91,13 @@ describe('request-validation: auth-deny analysis (#359)', () => {
 });
 
 describe('request-validation: auth-deny emitter shape (#359)', () => {
-  it('authenticates as the probe user (denyProbeHeaders), never the admin, and asserts 403-or-404', () => {
+  it('authenticates as the probe user (denyProbeHeaders), never the admin, and asserts 403', () => {
     const u = generateAuthDeny(ops, { onlyOperations: new Set(['getUser']) })[0];
     const rendered = renderScenarioForTest(u, 'getUser - Denied (no permission)');
     expect(rendered).toContain('headers: denyProbeHeaders()');
     expect(rendered).not.toContain('authHeaders()');
     expect(rendered).not.toContain('jsonHeaders()');
     expect(rendered).not.toContain('headers: {}');
-    expect(rendered).toContain('assertResponseStatusOneOf(testInfo, res, [403,404]');
-    // never the single-status assertion for a deny-test
-    expect(rendered).not.toMatch(/assertResponseStatus\(testInfo/);
+    expect(rendered).toContain('assertResponseStatus(testInfo, res, 403');
   });
 });

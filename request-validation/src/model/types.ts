@@ -106,13 +106,6 @@ export interface ValidationScenario {
   requestBody?: unknown;
   params?: Record<string, string>;
   expectedStatus: number; // usually 400
-  /**
-   * If set, the emitted test passes when the actual status is ANY of these
-   * (rendered via assertResponseStatusOneOf), not just `expectedStatus`. Used by
-   * `auth-deny` (#359), where a denial may be 403 (forbidden) or 404 (filtered to
-   * not-visible). `expectedStatus` should be the primary/first of these.
-   */
-  acceptableStatuses?: number[];
   description: string;
   /**
    * Whether to send the configured *admin* credentials, i.e. authHeaders()
