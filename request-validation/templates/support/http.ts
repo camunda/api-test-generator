@@ -7,14 +7,22 @@
  */
 
 // Vendored support file. Trimmed subset of the Camunda QA suite's utils/http
-// module — exposes only the symbols the generated specs actually import:
-// `jsonHeaders`, `buildUrl`, and `assertResponseStatus`. Auth/base-URL
-// handling lives in `./env`.
+// module — exposes the symbols the generated specs import: `buildUrl`,
+// `assertResponseStatus`, and the header/credential helpers re-exported from
+// `./env` (`jsonHeaders`, `authHeaders`, `basicAuthHeaders`, `denyProbeHeaders`,
+// `denyProbeCredentials`). Auth/base-URL handling lives in `./env`.
 
 import { type APIResponse, expect, type TestInfo } from '@playwright/test';
 import { credentials } from './env';
 
-export { jsonHeaders, authHeaders, credentials } from './env';
+export {
+  jsonHeaders,
+  authHeaders,
+  basicAuthHeaders,
+  denyProbeHeaders,
+  denyProbeCredentials,
+  credentials,
+} from './env';
 
 const API_VERSION = 'v2';
 

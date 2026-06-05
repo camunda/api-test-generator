@@ -49,27 +49,53 @@ Most generated scenarios expect HTTP 400. The exception is `auth-absent`,
 which expects 401 and is emitted only into the secured profile (see below);
 "stateful" follow-on semantic checks are out of scope here.
 
-### Secured / unsecured profiles
+### Profiles (unsecured / secured / rbac)
 
-The suite is emitted as **two parallel, self-contained profiles** under
+The suite is emitted as **parallel, self-contained profiles** under
 `generated/<config>/request-validation/`:
 
 | Profile      | Contents                                  | Run against            |
 |--------------|-------------------------------------------|------------------------|
 | `unsecured/` | The 400-validation tests (baseline)       | a server with auth off |
 | `secured/`   | The same 400 tests **plus** `auth-absent` (401) tests | a server started with auth on |
+| `rbac/`      | Read-side RBAC `auth-deny` (403) tests (#359) | a server with **authorizations enabled** |
 
 The `auth-absent` tests are derived purely from data: an operation is flagged
 when it declares (or inherits) a `security` block referencing a security scheme
 whose `x-enforcement` is `conditional` (camunda/camunda#53708). An explicit
 `security: []` (publicly unauthenticated at runtime) is never flagged. When the
 bundled spec carries no `x-enforcement` annotations the `auth-absent` set is
-empty and the two profiles are byte-identical.
+empty and the unsecured/secured profiles are byte-identical.
 
 Each profile is a standalone Playwright suite (own scaffolding + `support/`).
 The local runner (`npm run test:pw:request-validation`) runs the `unsecured`
 profile by default; set `RV_PROFILE=secured` to run the secured one (supply
 credentials via `CAMUNDA_BASIC_AUTH_USER` / `CAMUNDA_BASIC_AUTH_PASSWORD`).
+
+#### rbac profile (read-side RBAC deny-tests)
+
+`auth-deny` (403) tests authenticate as a **zero-grant probe user** and assert a
+get-by-key read is denied. Run with `RV_PROFILE=rbac` against a server started
+with **authorizations enabled** (so denials produce 403, not just 401), using
+admin credentials in `CAMUNDA_BASIC_AUTH_USER` / `CAMUNDA_BASIC_AUTH_PASSWORD`.
+The suite's Playwright `globalSetup` provisions the probe user (no grants) and
+waits until it is authenticatable; the deny-tests then run as it. The probe
+credentials default to `rbac-deny-probe` and can be overridden via
+`RBAC_DENY_PROBE_USER` / `RBAC_DENY_PROBE_PASSWORD`.
+
+`docker/docker-compose.rbac.yml` brings up a matching cluster (authorizations on,
+Basic auth, `demo/demo` admin) — the same `CAMUNDA_SECURITY_*` config
+camunda/camunda's own OC e2e suite uses:
+
+```
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.rbac.yml up -d
+RV_PROFILE=rbac CORE_APPLICATION_URL=http://localhost:8080 \
+  CAMUNDA_BASIC_AUTH_USER=demo CAMUNDA_BASIC_AUTH_PASSWORD=demo \
+  npm run test:pw:request-validation
+```
+
+This is the generic vertical slice (currently `getUser`); broadening and precise
+per-permission deny/allow pairs are tracked in #373 / #374 / #375.
 
 ### Quickstart: generate against `stable/8.9` and run against a local cluster
 

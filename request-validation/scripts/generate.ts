@@ -12,6 +12,7 @@ import {
 } from '../src/analysis/advancedSchema.js';
 import { generateAllOfConflicts, generateAllOfMissingRequired } from '../src/analysis/allOf.js';
 import { generateAuthAbsent } from '../src/analysis/authAbsent.js';
+import { generateAuthDeny } from '../src/analysis/authDeny.js';
 import { generateBodyTopTypeMismatch, generateMissingBody } from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
 import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
@@ -224,6 +225,16 @@ async function main() {
   if (wantKind('auth-absent')) {
     scenarios.push(
       ...generateAuthAbsent(model.operations, {
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
+  }
+  // auth-deny (HTTP 403) scenarios are read-side RBAC deny-tests (#359). Like
+  // auth-absent they depend only on the operation, not body/parameter shape, and
+  // are emitted exclusively into the `rbac` profile (see profile split below).
+  if (wantKind('auth-deny')) {
+    scenarios.push(
+      ...generateAuthDeny(model.operations, {
         onlyOperations: opts.onlyOperations,
       }),
     );
@@ -618,21 +629,29 @@ async function main() {
     deduped.push(...filtered);
   }
 
-  // ---- Profile split: parallel secured / unsecured suites ----
+  // ---- Profile split: parallel unsecured / secured / rbac suites ----
   // The negative-validation tests (400s) are deployment-mode-agnostic and run
-  // in both profiles. The auth-absent (401) tests only make sense against a
-  // server started in secured mode, so they go into the `secured` suite only.
+  // in both unsecured and secured. The auth-absent (401) tests only make sense
+  // against a server started in secured mode, so they go into `secured` only.
+  // The auth-deny (403) tests are read-side RBAC deny-tests (#359): they need an
+  // authorizations-enabled broker + a provisioned zero-grant probe user, so they
+  // live in their own `rbac` profile and are excluded from unsecured/secured.
   //
   //   generated/<config>/request-validation/unsecured/   — 400 tests only
   //   generated/<config>/request-validation/secured/     — 400 tests + 401 tests
+  //   generated/<config>/request-validation/rbac/         — 403 deny tests only
   //
   // Each subdir is a self-contained standalone suite (own scaffolding +
   // support). When the bundled spec carries no `x-enforcement: conditional`
   // annotations (no conditionally-secured ops), the auth-absent set is empty
-  // and the two suites are byte-identical.
+  // and the unsecured/secured suites are byte-identical.
   const PROFILES = [
-    { name: 'unsecured', scenarios: deduped.filter((s) => s.type !== 'auth-absent') },
-    { name: 'secured', scenarios: deduped },
+    {
+      name: 'unsecured',
+      scenarios: deduped.filter((s) => s.type !== 'auth-absent' && s.type !== 'auth-deny'),
+    },
+    { name: 'secured', scenarios: deduped.filter((s) => s.type !== 'auth-deny') },
+    { name: 'rbac', scenarios: deduped.filter((s) => s.type === 'auth-deny') },
   ] as const;
   // Clean the whole suite output dir before emitting so that (a) stale spec
   // files from a prior run cannot survive into either profile, and (b) legacy
@@ -655,6 +674,7 @@ async function main() {
   console.log('[generate] Summary:', {
     totalScenarios: deduped.length,
     authAbsent: deduped.filter((s) => s.type === 'auth-absent').length,
+    authDeny: deduped.filter((s) => s.type === 'auth-deny').length,
     profiles: PROFILES.map((p) => `${p.name}:${p.scenarios.length}`),
     kinds: Array.from(new Set(deduped.map((s) => s.type))).sort(),
     deepMode: opts.deep,
