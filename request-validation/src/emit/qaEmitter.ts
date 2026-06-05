@@ -89,16 +89,30 @@ function buildFile(
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
   const httpImport = standalone ? './support/http' : `${'../'.repeat(depth)}utils/http`;
-  // #362 — multipart requests that need auth attach authHeaders() (Authorization
-  // only, no JSON content-type that would break the multipart boundary). Import
-  // it only when the file actually emits such a request, so JSON-only files
-  // don't carry an unused import (the generated suite lints with noUnusedImports).
-  // This condition must mirror the `headersExpr` selection below exactly —
-  // `headersExpr` emits authHeaders() for any multipart+auth scenario (it does
-  // not depend on multipartForm), so gating the import on multipartForm here
-  // would risk referencing authHeaders() without importing it.
-  const usesAuthHeaders = scenarios.some((s) => s.headersAuth && s.bodyEncoding === 'multipart');
-  const authImport = usesAuthHeaders ? 'authHeaders, ' : '';
+  // Generated files lint with noUnusedImports, so import only the http helpers
+  // the file's scenarios actually reference. Each condition must mirror the
+  // `headersExpr` selection below exactly:
+  //   - auth-deny             -> denyProbeHeaders()  (read-side RBAC deny, #359)
+  //   - auth + multipart      -> authHeaders()       (Authorization only, no JSON
+  //                                                    content-type — #362)
+  //   - auth + non-multipart  -> jsonHeaders()
+  //   - otherwise             -> {} (no helper)
+  const usesDenyProbe = scenarios.some((s) => s.type === 'auth-deny');
+  const usesAuthHeaders = scenarios.some(
+    (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding === 'multipart',
+  );
+  const usesJsonHeaders = scenarios.some(
+    (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding !== 'multipart',
+  );
+  // `assertResponseStatus` exists only in the standalone support module; legacy
+  // QA-tree mode falls back to a bare `expect(...).toBe(...)` assertion.
+  const httpHelpers = [
+    usesAuthHeaders ? 'authHeaders' : null,
+    usesDenyProbe ? 'denyProbeHeaders' : null,
+    usesJsonHeaders ? 'jsonHeaders' : null,
+    'buildUrl',
+    standalone ? 'assertResponseStatus' : null,
+  ].filter((x): x is string => x !== null);
   const lines: string[] = [];
   lines.push(LICENSE_HEADER.trimEnd());
   const meta: string[] = [];
@@ -109,19 +123,12 @@ function buildFile(
   if (specCommit) meta.push(` * Spec Commit: ${specCommit}`);
   meta.push(' */');
   lines.push(meta.join('\n'));
-  if (standalone) {
-    lines.push("import {test} from '@playwright/test'");
-    lines.push(
-      `import {${authImport}jsonHeaders, buildUrl, assertResponseStatus} from '${httpImport}'`,
-    );
-  } else {
-    // Legacy QA-tree mode: the external `utils/http` module does not export
-    // `assertResponseStatus`, so fall back to a bare `expect(...).toBe(...)`
-    // assertion. Diagnostics-rich failure messages and report attachments are
-    // a standalone-only feature.
-    lines.push("import {expect, test} from '@playwright/test'");
-    lines.push(`import {${authImport}jsonHeaders, buildUrl} from '${httpImport}'`);
-  }
+  lines.push(
+    standalone
+      ? "import {test} from '@playwright/test'"
+      : "import {expect, test} from '@playwright/test'",
+  );
+  lines.push(`import {${httpHelpers.join(', ')}} from '${httpImport}'`);
   lines.push('');
   lines.push(`test.describe('${describeTitle}', () => {`);
   // Pre-compute base titles and detect duplicates for uniqueness
@@ -189,11 +196,16 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
       lines.push(`    const requestBody = ${body};`);
     }
   }
-  const headersExpr = s.headersAuth
-    ? s.bodyEncoding === 'multipart'
-      ? 'authHeaders()'
-      : 'jsonHeaders()'
-    : '{}';
+  const headersExpr =
+    s.type === 'auth-deny'
+      ? // Read-side RBAC deny (#359): authenticate as the zero-grant probe user,
+        // never the admin, so the authorizations-enabled server denies the request.
+        'denyProbeHeaders()'
+      : s.headersAuth
+        ? s.bodyEncoding === 'multipart'
+          ? 'authHeaders()'
+          : 'jsonHeaders()'
+        : '{}';
   const dataPart =
     s.bodyEncoding === 'multipart' && s.multipartForm
       ? ',\n      multipart: formData'
@@ -351,6 +363,8 @@ function buildBaseTitle(s: ValidationScenario): string {
       return `${s.operationId} - allOf conflict`;
     case 'auth-absent':
       return `${s.operationId} - Missing authentication`;
+    case 'auth-deny':
+      return `${s.operationId} - Denied (no permission)`;
     default:
       return s.id; // Fallback is globally unique id
   }

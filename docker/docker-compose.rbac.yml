@@ -1,0 +1,26 @@
+# RBAC overlay for the read-side deny-tests (api-test-generator #359).
+#
+# Layers an authorizations-enabled, basic-auth secured cluster on top of the
+# base docker-compose.yml, with `demo/demo` as the initial admin. The suite
+# global-setup provisions a zero-grant probe user; the `rbac` profile's
+# deny-tests authenticate as it and expect 403.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.rbac.yml up -d
+#   RV_PROFILE=rbac CORE_APPLICATION_URL=http://localhost:8080 \
+#     CAMUNDA_BASIC_AUTH_USER=demo CAMUNDA_BASIC_AUTH_PASSWORD=demo \
+#     npm run test:pw:request-validation
+services:
+  camunda:
+    environment:
+      # Require authentication AND enforce authorizations (403 on missing grants).
+      CAMUNDA_SECURITY_AUTHENTICATION_UNPROTECTEDAPI: 'false'
+      CAMUNDA_SECURITY_AUTHENTICATION_METHOD: 'basic'
+      CAMUNDA_SECURITY_AUTHORIZATIONS_ENABLED: 'true'
+      # Seed the initial admin (demo/demo) so the global-setup can provision the
+      # probe user and tests can authenticate as admin.
+      CAMUNDA_SECURITY_INITIALIZATION_USERS_0_USERNAME: 'demo'
+      CAMUNDA_SECURITY_INITIALIZATION_USERS_0_PASSWORD: 'demo'
+      CAMUNDA_SECURITY_INITIALIZATION_USERS_0_NAME: 'Demo'
+      CAMUNDA_SECURITY_INITIALIZATION_USERS_0_EMAIL: 'demo@example.com'
+      CAMUNDA_SECURITY_INITIALIZATION_DEFAULTROLES_ADMIN_USERS_0: 'demo'

@@ -26,7 +26,7 @@ export const STANDALONE_ROOT_FILES = [
 ] as const;
 
 /** Files copied into <outDir>/support/ (runtime helpers imported by specs). */
-export const STANDALONE_SUPPORT_FILES = ['env.ts', 'http.ts'] as const;
+export const STANDALONE_SUPPORT_FILES = ['env.ts', 'http.ts', 'global-setup.ts'] as const;
 
 /** Files copied into <outDir>/scripts/ (post-run analyser, run via `npm run summarize`). */
 export const STANDALONE_SCRIPT_FILES = ['summarize-failures.mjs'] as const;

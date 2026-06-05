@@ -93,7 +93,8 @@ export type ScenarioKind =
   | 'discriminator-structure-mismatch'
   | 'allof-missing-required'
   | 'allof-conflict'
-  | 'auth-absent';
+  | 'auth-absent'
+  | 'auth-deny';
 
 export interface ValidationScenario {
   id: string;

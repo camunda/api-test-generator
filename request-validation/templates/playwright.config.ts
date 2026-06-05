@@ -12,6 +12,9 @@ export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
+  // Provisions the zero-grant RBAC deny-test probe user (#359). No-op unless
+  // RV_PROFILE=rbac, so the unsecured/secured suites are unaffected.
+  globalSetup: './support/global-setup',
   // `list` for an immediately-readable inline summary; `json` so
   // `npm run summarize` can produce a grouped failure breakdown;
   // `html` so `npx playwright show-report` opens the full failure detail

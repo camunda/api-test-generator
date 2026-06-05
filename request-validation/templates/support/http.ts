@@ -14,7 +14,14 @@
 import { type APIResponse, expect, type TestInfo } from '@playwright/test';
 import { credentials } from './env';
 
-export { jsonHeaders, authHeaders, credentials } from './env';
+export {
+  jsonHeaders,
+  authHeaders,
+  basicAuthHeaders,
+  denyProbeHeaders,
+  denyProbeCredentials,
+  credentials,
+} from './env';
 
 const API_VERSION = 'v2';
 
