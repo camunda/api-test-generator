@@ -24,7 +24,8 @@ import { authHeaders, basicAuthHeaders, credentials, denyProbeCredentials } from
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** POST a create body as admin; accept 201 (created) or 409 (already exists). */
+/** POST a create body as admin; accept any 2xx (create endpoints return
+ *  200/201/204) or 409 (already exists from a prior run) as success. */
 async function provision(
   label: string,
   path: string,
