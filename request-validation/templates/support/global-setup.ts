@@ -14,7 +14,8 @@
 //      as admin with a fixed id. These exist purely so the probe's read has a
 //      real target — making its failure a genuine authorization denial (admin
 //      would see the resource at 200) rather than a 404-not-found. They carry no
-//      grants. The fixed ids MUST match the SLICE in src/analysis/authDeny.ts.
+//      grants. The fixed ids MUST match the auth-deny allowlist in the
+//      api-test-generator that emitted this suite (its authDeny analysis pass).
 //
 // Runs only for the `rbac` profile (gated on RV_PROFILE); a no-op otherwise, so
 // the unsecured/secured suites are unaffected. All creates are idempotent — an
