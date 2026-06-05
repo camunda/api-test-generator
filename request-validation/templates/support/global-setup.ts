@@ -50,7 +50,7 @@ async function provision(
 }
 
 // Get-by-key resources the deny-tests fetch — created with the fixed ids the
-// SLICE in src/analysis/authDeny.ts references. Created as admin, no grants.
+// generator's auth-deny allowlist references. Created as admin, no grants.
 const FIXTURES: ReadonlyArray<{ label: string; path: string; body: unknown }> = [
   { label: 'tenant', path: '/v2/tenants', body: { tenantId: 'rbac-probe-tenant', name: 'RBAC Probe Tenant' } },
   { label: 'group', path: '/v2/groups', body: { groupId: 'rbac-probe-group', name: 'RBAC Probe Group' } },
