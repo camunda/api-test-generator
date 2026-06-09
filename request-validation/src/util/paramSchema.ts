@@ -6,7 +6,7 @@ import type { ParameterModel } from '../model/types.js';
  * are the only fields the constraint/not-found generators read.
  */
 export interface SchemaFragment {
-  type?: string;
+  type?: string | string[];
   pattern?: string;
   minLength?: number;
   maxLength?: number;
@@ -20,7 +20,7 @@ export interface ResolvedParamSchema {
   minLength?: number;
   maxLength?: number;
   enumValues?: unknown[];
-  type?: string;
+  type?: string | string[];
 }
 
 function isSchemaFragment(v: unknown): v is SchemaFragment {
@@ -44,7 +44,7 @@ export function resolveParamSchema(p: ParameterModel): ResolvedParamSchema | und
     if (typeof s.minLength === 'number' && out.minLength === undefined) out.minLength = s.minLength;
     if (typeof s.maxLength === 'number' && out.maxLength === undefined) out.maxLength = s.maxLength;
     if (Array.isArray(s.enum) && !out.enumValues) out.enumValues = s.enum.slice();
-    if (typeof s.type === 'string' && !out.type) out.type = s.type;
+    if (s.type !== undefined && out.type === undefined) out.type = s.type;
   }
   merge(schema);
   if (Array.isArray(schema.allOf)) {

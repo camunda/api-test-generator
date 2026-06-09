@@ -28,7 +28,9 @@ const FAKE_NUMERIC_KEY = '9'.repeat(16);
 const FAKE_STRING_CANDIDATES = ['nonexistent-fake-id', 'nonexistent', 'zzzznonexistentzzzz'];
 
 function isNumericKeyParam(r: ResolvedParamSchema): boolean {
-  if (r.type === 'integer' || r.type === 'number') return true;
+  const t = r.type;
+  if (t === 'integer' || t === 'number') return true;
+  if (Array.isArray(t) && t.some((x) => x === 'integer' || x === 'number')) return true;
   return r.pattern === '^-?[0-9]+$';
 }
 

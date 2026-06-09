@@ -89,6 +89,18 @@ describe('request-validation: 404 fake-ID value synthesis (#381)', () => {
     expect(/^-?[0-9]+$/.test(v)).toBe(true);
   });
 
+  it('OAS 3.1 array-typed numeric key (e.g. type: ["integer","null"]) → numeric fake', () => {
+    // OpenAPI 3.1 models nullable numeric types as a `type` array. The shared
+    // resolver must not drop array-typed `type` info: a flat read that only
+    // honoured `type: 'integer'` would mistake this for a free string and
+    // synthesise a malformed key.
+    const arrayTypeKeySchema = { type: ['integer', 'null'] };
+    const v = fakePathParamValue(pathParam('someKey', arrayTypeKeySchema));
+    expect(v).toBeDefined();
+    if (!v) return;
+    expect(/^-?[0-9]+$/.test(v)).toBe(true);
+  });
+
   it('unsynthesisable param (pattern no candidate satisfies) → undefined (caller skips)', () => {
     // Composite key `<digits>-<digits>` — neither a plain number nor the
     // string candidates match, so no guaranteed-valid value exists.
