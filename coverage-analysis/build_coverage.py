@@ -28,6 +28,7 @@ Each request-validation test's bucket (bad-request / not-found / forbidden /
 unauthorized / conflict) is derived from its asserted HTTP status, not assumed.
 """
 import csv
+import io
 import json
 import os
 import re
@@ -803,7 +804,9 @@ for r in rows:
     by_cat[r['category']].append(r)
 
 cat_path = os.path.join(OUT, 'category_breakdown.md')
-fp = open(cat_path, 'w', encoding='utf-8')
+# Build into an in-memory buffer and write once at the end, so a mid-build
+# exception can't leave a partially-written file and no handle is leaked.
+fp = io.StringIO()
 fp.write('# api-test-generator — Per-category breakdown\n\n')
 fp.write(f'Total test declarations: **{len(rows)}** across **{len(entity_totals)}** entities.\n\n')
 fp.write('This file answers, per category: **(1) Form** (the canonical sequence), '
@@ -885,5 +888,6 @@ for cat in cat_order:
                      f'`{r["file"]}:{r["line"]}` | {test_name_cell} |\n')
         fp.write('\n')
 
-fp.close()
+with open(cat_path, 'w', encoding='utf-8') as _cat_fp:
+    _cat_fp.write(fp.getvalue())
 print(f"wrote {cat_path}")
