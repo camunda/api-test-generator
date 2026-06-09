@@ -70,6 +70,11 @@ const FIXTURES: ReadonlyArray<{ label: string; path: string; body: unknown }> = 
     path: '/v2/cluster-variables/global',
     body: { name: 'rbac-probe-clustervar', value: 'rbac-probe' },
   },
+  {
+    label: 'global-task-listener',
+    path: '/v2/global-task-listeners',
+    body: { id: 'rbac-probe-gtl', type: 'rbac-probe-listener', eventTypes: ['all'] },
+  },
 ];
 
 async function globalSetup(): Promise<void> {
