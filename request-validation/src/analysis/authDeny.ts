@@ -40,8 +40,7 @@ const SLICE: Record<string, Record<string, string>> = {
   getRole: { roleId: 'rbac-probe-role' },
   getMappingRule: { mappingRuleId: 'rbac-probe-mapping' },
   getGlobalClusterVariable: { name: 'rbac-probe-clustervar' },
-  // getGlobalTaskListener deferred: its create body (`type`, `eventTypes`) isn't
-  // confirmed; add once the fixture create is verified.
+  getGlobalTaskListener: { id: 'rbac-probe-gtl' },
 };
 
 // An unauthorized get-by-key on an existing resource is forbidden with 403 — the

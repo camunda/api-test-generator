@@ -21,6 +21,7 @@ const SLICE_OPS = [
   'getRole',
   'getMappingRule',
   'getGlobalClusterVariable',
+  'getGlobalTaskListener',
 ];
 
 const ops: OperationModel[] = [
@@ -45,6 +46,13 @@ const ops: OperationModel[] = [
     operationId: 'getGlobalClusterVariable',
     method: 'GET',
     path: '/cluster-variables/global/{name}',
+    tags: [],
+    parameters: [],
+  },
+  {
+    operationId: 'getGlobalTaskListener',
+    method: 'GET',
+    path: '/global-task-listeners/{id}',
     tags: [],
     parameters: [],
   },
