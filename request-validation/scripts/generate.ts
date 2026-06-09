@@ -22,6 +22,7 @@ import { generateEnumViolations } from '../src/analysis/enumViolations.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
 import { generateMultipartMissingRequired } from '../src/analysis/multipartMissingRequired.js';
+import { generateNotFoundFakeId } from '../src/analysis/notFoundFakeId.js';
 import {
   generateDiscriminatorStructureMismatch,
   generateOneOfCrossBleed,
@@ -235,6 +236,16 @@ async function main() {
   if (wantKind('auth-deny')) {
     scenarios.push(
       ...generateAuthDeny(model.operations, {
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
+  }
+  // not-found-fake-id (HTTP 404) scenarios are not "deep": they depend only on
+  // the operation's path params + declared responses, not on body shape. They
+  // are auth-independent and land in both profiles.
+  if (wantKind('not-found-fake-id')) {
+    scenarios.push(
+      ...generateNotFoundFakeId(model.operations, {
         onlyOperations: opts.onlyOperations,
       }),
     );

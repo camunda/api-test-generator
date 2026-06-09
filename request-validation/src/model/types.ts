@@ -53,6 +53,21 @@ export interface OperationModel {
    * unauthenticated at runtime) yields `false`.
    */
   conditionalAuth?: boolean;
+  /**
+   * Response status codes the operation declares in its OpenAPI `responses`
+   * map (e.g. `['200','400','404','500']`). Used by the not-found-fake-id
+   * generator to emit a 404 test only when the contract actually allows a
+   * 404 (#381 / #279).
+   */
+  responseCodes?: string[];
+  /**
+   * True when the operation's success (2xx) JSON response schema is a
+   * paginated collection (its top-level object has an `items` or `page`
+   * property). Such list/search endpoints return an empty `200` — not a
+   * `404` — for a nonexistent parent id, so the not-found-fake-id generator
+   * excludes them (#372 pattern 3 / #381).
+   */
+  successIsCollection?: boolean;
 }
 
 export interface ParameterModel {
@@ -93,6 +108,7 @@ export type ScenarioKind =
   | 'discriminator-structure-mismatch'
   | 'allof-missing-required'
   | 'allof-conflict'
+  | 'not-found-fake-id'
   | 'auth-absent'
   | 'auth-deny';
 

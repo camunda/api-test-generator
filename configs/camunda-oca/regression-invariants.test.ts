@@ -2836,6 +2836,102 @@ describeForThisConfig('bundled-spec invariants: x-semantic-establishes (#104)', 
   });
 });
 
+describeForThisConfig('bundled-spec invariants: 404 fake-ID emitter (#381 / #279)', () => {
+  const UNSECURED_DIR = join(
+    REPO_ROOT,
+    'generated',
+    CONFIG_NAME,
+    'request-validation',
+    'unsecured',
+  );
+
+  function requireSuiteDir(): void {
+    if (!existsSync(UNSECURED_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${UNSECURED_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+  }
+
+  // Match each individual `test( ... });` block and capture its own
+  // scenarioKind. Anchoring on per-block `scenarioKind` (rather than embedding
+  // the literal kind inside a lazy cross-test span) prevents a match from
+  // greedily spanning earlier tests in the same file and mislabelling the
+  // operationId. The generated suite is biome-formatted (single quotes,
+  // 2-space indent) after emission, so the closing `\n  });` is stable.
+  const TEST_BLOCK = /test\('[^]*?scenarioKind:\s*'([^']+)',[^]*?\n {2}\}\);/g;
+
+  function collectBlocks(): { file: string; operationId: string; block: string }[] {
+    const out: { file: string; operationId: string; block: string }[] = [];
+    for (const f of readdirSync(UNSECURED_DIR)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
+      let m: RegExpExecArray | null;
+      TEST_BLOCK.lastIndex = 0;
+      while ((m = TEST_BLOCK.exec(src)) !== null) {
+        if (m[1] !== 'not-found-fake-id') continue;
+        const block = m[0];
+        const opMatch = /operationId:\s*'([^']+)'/.exec(block);
+        out.push({
+          file: relative(REPO_ROOT, join(UNSECURED_DIR, f)),
+          operationId: opMatch ? opMatch[1] : '<unknown>',
+          block,
+        });
+      }
+    }
+    return out;
+  }
+
+  it('emits a 404 fake-ID test for singleton GET key endpoints, every one asserting 404', () => {
+    requireSuiteDir();
+    const blocks = collectBlocks();
+    // Non-vacuous: the pinned spec has ~31 eligible singleton GET endpoints.
+    expect(blocks.length).toBeGreaterThan(20);
+    // Representative singleton endpoints (numeric key + string id) must be present.
+    const ops = new Set(blocks.map((b) => b.operationId));
+    expect(ops.has('getProcessInstance')).toBe(true);
+    expect(ops.has('getGroup')).toBe(true);
+    // Class-scoped: every not-found-fake-id block asserts exactly 404 and
+    // nothing else (no 400/200 rides in under this kind).
+    const wrongStatus = blocks.filter((b) => !/,\s*404,/.test(b.block));
+    expect(wrongStatus.map((b) => `${b.operationId} @ ${b.file}`)).toEqual([]);
+  });
+
+  it('emits only GET (read-by-key) endpoints — mutating/command ops 503/400, not 404 (#279)', () => {
+    requireSuiteDir();
+    // v1 is scoped to safe, idempotent reads, which have unambiguous
+    // "resource not found" → 404 semantics. A missing key on a mutating or
+    // command endpoint (job completion, incident resolution, process-instance
+    // cancellation, user-task actions) is a command rejection (503) or a
+    // validation 400, not a clean 404. Class-scoped: assert no emitted block
+    // carries a non-GET method, so a future change can't silently re-admit
+    // them.
+    const nonGet = collectBlocks().filter((b) => !/method:\s*'GET'/.test(b.block));
+    expect(nonGet.map((b) => `${b.operationId} @ ${b.file}`)).toEqual([]);
+  });
+
+  it('excludes paginated-collection / search-under-parent endpoints — empty 200, not 404 (#372)', () => {
+    requireSuiteDir();
+    const ops = new Set(collectBlocks().map((b) => b.operationId));
+    // These declare a 404 in the spec but actually return an empty 200 for a
+    // nonexistent parent id (issue #372 pattern 3), so a fake-ID 404 test for
+    // them would be a false positive. The successIsCollection filter must
+    // keep them out.
+    for (const collectionOp of [
+      'searchUsersForGroup',
+      'searchClientsForGroup',
+      'searchMappingRulesForGroup',
+      'searchRolesForGroup',
+      'searchClientsForRole',
+      'searchGroupsForRole',
+      'searchUsersForRole',
+    ]) {
+      expect(ops.has(collectionOp)).toBe(false);
+    }
+  });
+});
+
 describeForThisConfig('bundled-spec invariants: emitted request-validation suite (#129)', () => {
   it('emits zero case-only enum mutations when enumCaseInsensitive is true', () => {
     // The camunda-oca config sets `enumCaseInsensitive: true` in
