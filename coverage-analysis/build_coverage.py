@@ -11,12 +11,20 @@ Scans every generator test source and emits, next to this script:
   - coverage_matrix.csv : entity x operation grid, variant counts (same columns as upstream)
   - coverage_matrix.md, gaps.md, category_breakdown.md
 
-Test sources scanned:
-  - generated/camunda-oca/playwright/*.feature.spec.ts            (feature emitter, happy + observe-absence)
-  - generated/camunda-oca/playwright/*.variant.spec.ts            (variant emitter, schema/input variants)
-  - generated/camunda-oca/playwright/edges/*.lifecycle.spec.ts    (edge lifecycle: establish -> present -> revoke -> absent)
-  - generated/camunda-oca/playwright/entities/*.lifecycle.spec.ts (entity lifecycle: create -> present -> update -> present -> delete -> absent)
-  - generated/camunda-oca/request-validation/*.spec.ts            (negative request-validation, all bad-request)
+Test sources scanned (layout as of the secured/unsecured profile split #346,
+RBAC deny tests #359, and the templates/ lifecycle relocation):
+  - generated/camunda-oca/playwright/*.feature.spec.ts                         (feature emitter, happy + observe-absence)
+  - generated/camunda-oca/playwright/*.variant.spec.ts                         (variant emitter, schema/input variants)
+  - generated/camunda-oca/playwright/templates/EdgeLifecycle/*.spec.ts         (edge lifecycle: establish -> present -> revoke -> absent)
+  - generated/camunda-oca/playwright/templates/EntityLifecycle/*.spec.ts       (entity lifecycle: create -> present -> update -> present -> delete -> absent)
+  - generated/camunda-oca/playwright/templates/StateTransitionVisibleAfterAction/*.spec.ts (state transition -> read-back)
+  - generated/camunda-oca/playwright/templates/UpdatedFieldVisibleOnReadBack/*.spec.ts     (field mutation -> read-back)
+  - generated/camunda-oca/request-validation/unsecured/*.spec.ts               (negative: 400 bad-request + 404 not-found)
+  - generated/camunda-oca/request-validation/rbac/*.spec.ts                    (RBAC deny: 403 forbidden)
+  - generated/camunda-oca/request-validation/secured/*.spec.ts                 (401 auth-absent only; the rest duplicate unsecured)
+
+Each request-validation test's bucket (bad-request / not-found / forbidden /
+unauthorized / conflict) is derived from its asserted HTTP status, not assumed.
 """
 import csv
 import json
@@ -26,9 +34,20 @@ from collections import defaultdict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PLAYWRIGHT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'generated', 'camunda-oca', 'playwright'))
-EDGES_DIR = os.path.join(PLAYWRIGHT_DIR, 'edges')
-ENTITIES_DIR = os.path.join(PLAYWRIGHT_DIR, 'entities')
+TEMPLATES_DIR = os.path.join(PLAYWRIGHT_DIR, 'templates')
+EDGES_DIR = os.path.join(TEMPLATES_DIR, 'EdgeLifecycle')
+ENTITIES_DIR = os.path.join(TEMPLATES_DIR, 'EntityLifecycle')
+STATE_TRANSITION_DIR = os.path.join(TEMPLATES_DIR, 'StateTransitionVisibleAfterAction')
+READBACK_DIR = os.path.join(TEMPLATES_DIR, 'UpdatedFieldVisibleOnReadBack')
+# request-validation is emitted as parallel profiles since the secured/unsecured
+# split (#346) and RBAC deny tests (#359). unsecured/ is the 400+404 baseline;
+# rbac/ adds 403 deny tests; secured/ duplicates unsecured plus 401 auth-absent
+# (dormant unless the spec carries x-enforcement annotations — the pinned OCA
+# spec does not, so on it secured == unsecured).
 REQVAL_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'generated', 'camunda-oca', 'request-validation'))
+REQVAL_UNSECURED = os.path.join(REQVAL_DIR, 'unsecured')
+REQVAL_RBAC = os.path.join(REQVAL_DIR, 'rbac')
+REQVAL_SECURED = os.path.join(REQVAL_DIR, 'secured')
 EDGES_ABOX = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'configs', 'camunda-oca', 'ontology', 'edges.json'))
 SPEC_PATH = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'spec', 'camunda-oca', 'bundled', 'rest-api.bundle.json'))
 OUT = SCRIPT_DIR
@@ -336,6 +355,23 @@ EDGE_INDEX = load_edge_index()
 PAGINATION_BODY_RE = re.compile(r'\bpage\s*:\s*\{|\bsort\s*:\s*\[')
 FILTER_BODY_RE = re.compile(r'\bfilter\s*:\s*\{')
 
+# Each negative test asserts its expected HTTP status as the 3rd arg of
+# assertResponseStatus(testInfo, res, <status>, ...). We read it per-test and
+# map it to the matrix variant column, rather than assuming every
+# request-validation test is a 400 (true before #346/#359, not after).
+STATUS_RE = re.compile(r'assertResponseStatus\(\s*\w+\s*,\s*\w+\s*,\s*(\d{3})')
+STATUS_VARIANT = {
+    '400': 'bad-request',
+    '401': 'unauthorized',
+    '403': 'forbidden',
+    '404': 'not-found',
+    '409': 'conflict',
+}
+
+def status_variant_of(body, default='bad-request'):
+    m = STATUS_RE.search(body)
+    return STATUS_VARIANT.get(m.group(1), default) if m else default
+
 def read_tests(path):
     """Yield (test_name, line_number, body_text) per test() block. body_text
     is the source from the test() start to the next test() start (or EOF),
@@ -420,7 +456,7 @@ if os.path.isdir(EDGES_DIR):
             method, path, entity, operation = '', '', 'unknown', 'lifecycle'
         for name, line_no, _body in read_tests(os.path.join(EDGES_DIR, f)):
             rows.append({
-                'file': f'edges/{f}', 'line': line_no, 'source': 'lifecycle',
+                'file': f'templates/EdgeLifecycle/{f}', 'line': line_no, 'source': 'lifecycle',
                 'entity': entity, 'operation': 'lifecycle',
                 'method': method, 'path': path, 'operationId': op_id,
                 'category': 'B. Membership/Association',
@@ -444,7 +480,7 @@ if os.path.isdir(ENTITIES_DIR):
         entity = PASCAL_TO_SLUG.get(ent_pascal, ent_pascal.lower())
         for name, line_no, _body in read_tests(os.path.join(ENTITIES_DIR, f)):
             rows.append({
-                'file': f'entities/{f}', 'line': line_no, 'source': 'lifecycle',
+                'file': f'templates/EntityLifecycle/{f}', 'line': line_no, 'source': 'lifecycle',
                 'entity': entity, 'operation': 'lifecycle',
                 'method': '', 'path': '', 'operationId': '',
                 'category': category_of('', entity),
@@ -454,19 +490,53 @@ if os.path.isdir(ENTITIES_DIR):
                 'test_name': name,
             })
 
-# --- 5c. request-validation/*.spec.ts ---
-# Every test in this emitter is a bad-request negative. Test names start with
-# the operationId: '<operationId> - <kind description>'. Each kind (Missing
-# body, Additional prop, oneOf ambiguous, ...) is recorded as the form_step
-# detail; the matrix variant is uniformly 'bad-request'.
-if os.path.isdir(REQVAL_DIR):
-    for f in sorted(os.listdir(REQVAL_DIR)):
+# --- 5b''. new lifecycle templates (#305): StateTransitionVisibleAfterAction
+# (invoke a state transition, read back the new state) and
+# UpdatedFieldVisibleOnReadBack (mutate a field, read it back). Files are named
+# <Entity>.<op>.lifecycle.spec.ts; the entity is the leading PascalCase segment.
+for tdir, form in [(STATE_TRANSITION_DIR, 'state-transition'), (READBACK_DIR, 'read-back')]:
+    if not os.path.isdir(tdir):
+        continue
+    tname = os.path.basename(tdir)
+    for f in sorted(os.listdir(tdir)):
         if not f.endswith('.spec.ts'):
             continue
-        for name, line_no, _body in read_tests(os.path.join(REQVAL_DIR, f)):
+        ent_pascal = f.split('.')[0]
+        entity = PASCAL_TO_SLUG.get(ent_pascal, _camel_to_kebab(ent_pascal))
+        for name, line_no, _body in read_tests(os.path.join(tdir, f)):
+            rows.append({
+                'file': f'templates/{tname}/{f}', 'line': line_no, 'source': form,
+                'entity': entity, 'operation': 'lifecycle',
+                'method': '', 'path': '', 'operationId': '',
+                'category': category_of('', entity),
+                'form_step': form,
+                'prerequisite': PREREQ_BY_ENTITY.get(entity, 'unknown'),
+                'variants': 'happy-path',
+                'test_name': name,
+            })
+
+# --- 5c. request-validation profiles (#346 split, #359 rbac) ---
+# Test names start with the operationId: '<operationId> - <kind description>'.
+# The matrix variant is derived from the asserted HTTP status (400 bad-request,
+# 404 not-found, 403 forbidden, 401 unauthorized, 409 conflict), not assumed.
+#   unsecured/ : 400 + 404 baseline negative suite.
+#   rbac/      : 403 RBAC deny tests.
+#   secured/   : duplicates unsecured PLUS 401 auth-absent — we take ONLY the 401
+#                tests to avoid double-counting (0 on the pinned spec, which has
+#                no x-enforcement annotations).
+def emit_reqval(dirpath, source, only_variant=None):
+    if not os.path.isdir(dirpath):
+        return
+    profile = os.path.basename(dirpath)
+    for f in sorted(os.listdir(dirpath)):
+        if not f.endswith('.spec.ts'):
+            continue
+        for name, line_no, body in read_tests(os.path.join(dirpath, f)):
+            variant = status_variant_of(body)
+            if only_variant is not None and variant != only_variant:
+                continue
             tm = REQVAL_TEST_NAME_RE.match(name)
             op_id = tm.group('op') if tm else ''
-            desc = tm.group('desc').strip() if tm else ''
             if op_id:
                 method, path, entity, operation = resolve_op(op_id)
                 if entity == 'unknown':
@@ -474,15 +544,19 @@ if os.path.isdir(REQVAL_DIR):
             else:
                 method, path, entity, operation = '', '', 'unknown', 'other'
             rows.append({
-                'file': f'request-validation/{f}', 'line': line_no, 'source': 'request-validation',
+                'file': f'request-validation/{profile}/{f}', 'line': line_no, 'source': source,
                 'entity': entity, 'operation': operation,
                 'method': method, 'path': path, 'operationId': op_id,
                 'category': category_of(op_id, entity),
                 'form_step': f'negative-{operation}' if operation in ('create','get','update','delete','search') else 'negative-other',
                 'prerequisite': prerequisite_of(op_id, entity),
-                'variants': 'bad-request',
+                'variants': variant,
                 'test_name': name,
             })
+
+emit_reqval(REQVAL_UNSECURED, 'request-validation')             # 400 + 404
+emit_reqval(REQVAL_RBAC, 'rbac-deny')                           # 403
+emit_reqval(REQVAL_SECURED, 'auth-absent', only_variant='unauthorized')  # 401 only (0 on pinned spec)
 
 # ---------- 6. write tests.csv ----------
 tests_csv = os.path.join(OUT, 'tests.csv')
@@ -542,9 +616,11 @@ with open(md_path, 'w', encoding='utf-8') as fp:
              '`bpmn`/`dmn`/`drd`/`form`/`path`/`cycle/...`/`oneOf ...` → `data-driven`, '
              '`variant-N - scenario` → `unlabeled`), '
              '(2) test-body shape (`page: {` / `sort: [` → `pagination-sort`, '
-             '`filter: {` → `filter`), and (3) fixed labels for the lifecycle and '
-             'request-validation emitters (`happy-path|observe-absence` and '
-             '`bad-request` respectively). See `build_coverage.py` for the rule table.\n\n')
+             '`filter: {` → `filter`), and (3) for the lifecycle emitters a fixed '
+             '`happy-path|observe-absence`, while each request-validation test is '
+             'bucketed by its asserted HTTP status (400 → `bad-request`, 404 → '
+             '`not-found`, 403 → `forbidden`, 401 → `unauthorized`, 409 → `conflict`). '
+             'See `build_coverage.py` for the rule table.\n\n')
     fp.write('Legend: ✓ = at least 1, blank = 0.\n\n')
 
     fp.write('## At-a-glance presence (✓ = ≥1 test)\n\n')

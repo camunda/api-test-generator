@@ -25,15 +25,21 @@ so the two suites can be diffed directly. Answers the questions in
 
 ## Test sources scanned
 
-The generator emits tests into five locations; `build_coverage.py` scans all of them:
+The generator emits tests into several locations; `build_coverage.py` scans all of them. (Layout reflects the secured/unsecured profile split (#346), RBAC deny tests (#359), and the `templates/` lifecycle relocation.)
 
 | location | emitter | tag in `tests.csv` `source` column |
 |---|---|---|
 | `generated/camunda-oca/playwright/<operationId>.feature.spec.ts` | feature emitter (happy path + basic shape) | `feature` |
 | `generated/camunda-oca/playwright/<operationId>.variant.spec.ts` | variant emitter (schema/input variations: `bpmn`, `oneOf …`, etc.) | `variant` |
-| `generated/camunda-oca/playwright/edges/<EdgeName>.lifecycle.spec.ts` | edge lifecycle template (`establish → observe present → revoke → observe absent`) | `lifecycle` |
-| `generated/camunda-oca/playwright/entities/<EntityName>.lifecycle.spec.ts` | entity lifecycle template (`create → present → update → present → delete → absent`) | `lifecycle` |
-| `generated/camunda-oca/request-validation/<entity>-validation-api-tests.spec.ts` | request-validation emitter (negative schema cases, all bad-request) | `request-validation` |
+| `generated/camunda-oca/playwright/templates/EdgeLifecycle/<EdgeName>.lifecycle.spec.ts` | edge lifecycle (`establish → present → revoke → absent`) | `lifecycle` |
+| `generated/camunda-oca/playwright/templates/EntityLifecycle/<EntityName>.lifecycle.spec.ts` | entity lifecycle (`create → present → update → present → delete → absent`) | `lifecycle` |
+| `generated/camunda-oca/playwright/templates/StateTransitionVisibleAfterAction/<Entity>.<op>.lifecycle.spec.ts` | state-transition read-back (#305) | `state-transition` |
+| `generated/camunda-oca/playwright/templates/UpdatedFieldVisibleOnReadBack/<Entity>.<op>.lifecycle.spec.ts` | field-mutation read-back (#305) | `read-back` |
+| `generated/camunda-oca/request-validation/unsecured/<entity>-validation-api-tests.spec.ts` | request-validation negatives — **400 bad-request + 404 not-found** | `request-validation` |
+| `generated/camunda-oca/request-validation/rbac/<entity>-validation-api-tests.spec.ts` | RBAC deny tests — **403 forbidden** | `rbac-deny` |
+| `generated/camunda-oca/request-validation/secured/<entity>-validation-api-tests.spec.ts` | **401 auth-absent only** (the rest duplicate `unsecured/`; 0 unless the spec carries `x-enforcement`) | `auth-absent` |
+
+Each request-validation test's bucket is derived from its **asserted HTTP status**, not assumed — so 400/404/403/401 land in the right matrix column.
 
 ## Regenerate
 
@@ -85,46 +91,40 @@ Upstream snapshot:
 unique-test count; variant columns are label-occurrences, so a test tagged
 `happy-path|filter` shows up in both.
 
+Generator figures are for the pinned OCA spec (`configs/camunda-oca/spec-pin.json`).
+
 |  | upstream | generator |
 |---|---:|---:|
-| Unique tests | 1001 | **1617** |
+| Unique tests | 1001 | **1596** |
 | Entities | 33 | 37 |
-| Happy-path (occurrences) | 173 | 211 |
-| Bad-request (400, occurrences) | 195 | **1071** |
-| Pagination-sort (occurrences) | 53 | **85** |
-| Filter (occurrences) | 85 | **196** |
+| Happy-path (occurrences) | 173 | 142 |
+| Bad-request (400, occurrences) | 195 | **1068** |
+| Pagination-sort (occurrences) | 53 | **89** |
+| Filter (occurrences) | 85 | **216** |
 | Observe-absence | 2 | 48 |
-| Data-driven / oneOf variants | 5 | 302 |
-| Unauthorized (401) | 165 | **0** |
-| Not-found (404) | 127 | **0** |
+| Data-driven / oneOf variants | 5 | 320 |
+| Unauthorized (401) | 165 | **0** (dormant — see below) |
+| Not-found (404) | 127 | **31** |
 | Conflict (409) | 31 | **0** |
-| Forbidden (403) | 29 | **0** |
+| Forbidden (403) | 29 | **7** |
 
-**The generator emits 616 more tests than upstream.** It dominates upstream on 400 bad-request coverage (the `request-validation` emitter alone produces 1071 tests across 17 violation kinds: `additional-prop`, `constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`, `missing-required`, `missing-required-combo`, `oneof-ambiguous`, `oneof-cross-bleed`, `oneof-none-match`, `param-constraint-violation`, `param-missing`, `param-type-mismatch`, `type-mismatch`, `union`, `unique-items-violation`, and `additional-prop-general`).
+**The generator emits ~595 more tests than upstream.** It dominates upstream on 400 bad-request coverage (the `request-validation` emitter produces 1068 bad-request tests across ~17 violation kinds: `additional-prop`, `constraint-violation`, `enum-violation`, `format-invalid`, `missing-body`, `missing-required`, `missing-required-combo`, `oneof-ambiguous`, `oneof-cross-bleed`, `oneof-none-match`, `param-constraint-violation`, `param-missing`, `param-type-mismatch`, `type-mismatch`, `union`, `unique-items-violation`, `additional-prop-general`), plus **31 not-found (404)** fake-ID tests and **7 forbidden (403)** RBAC deny tests.
 
 **Pagination/filter counts need a caveat.** The generator's variant emitter sends `page: { after: cursor }` and `filter: { ... }` in request bodies on many search and batch-operation specs (detected by the classifier from the test body shape), so the variant column counts are non-zero. But these tests only assert `status === 200`; they do **not** assert pagination *correctness* (e.g. "page 2 yields the next N items, no overlap with page 1") or filter *correctness* (e.g. "filtering by `status=active` returns only active rows"). Upstream's 53 pagination and 85 filter tests are behaviour assertions, not request-shape assertions — so although the generator's pagination/filter counts now exceed upstream, the *semantic depth* is still much lower. The numeric comparison is a request-shape comparison, not a behaviour-coverage comparison.
 
-The buckets where the generator currently emits zero tests:
+Status of the error-status buckets:
 
-- **401 unauthorized** (165 in upstream) — verified zero: no test asserts `status === 401` anywhere in the suite. Needs deployment-mode-aware auth context, see `camunda/camunda#52511`.
-- **403 forbidden** (29 in upstream) — verified zero. Needs RBAC ABox + restricted-token test infrastructure.
-- **404 not-found** (127 in upstream) — see note below; the matrix says zero, but the generator *does* assert 404 in 10 entity-lifecycle tests (final "observe absent" phase). The real gap is the fake-ID variant. Needs `ontology/` semantic-type-based fake-ID generation on path params.
-- **409 conflict** (31 in upstream) — verified zero. Needs `duplicatePolicy` ABox slice (designed in 8.8, not yet landed; see #277).
+- **404 not-found** — covered: **31** fake-ID tests (path param replaced with a generated invalid ID, expect 404), plus the 48 `observe-absence` after-delete 404s tracked separately (see note below). Upstream has 127; the kinds now overlap.
+- **403 forbidden** — covered: **7** RBAC deny tests (`rbac/` profile, #359) — a non-admin/no-permission caller against read endpoints, expect 403. This is the read-side slice; write-side deny is gated upstream (camunda/camunda#54727).
+- **401 unauthorized** — capability present but **dormant on the pinned spec**: the `secured/` profile emits an auth-absent (no-credentials → 401) test per conditionally-secured operation, but only for specs that carry `x-enforcement: conditional` annotations. The pinned OCA spec has none, so the count is 0 here; against an annotated spec (e.g. `main`) it activates (≈188 auth-absent tests, verified live).
+- **409 conflict** — still zero. Needs a `duplicatePolicy` ABox slice (see #277).
 
 ### Note on the `not-found` count
 
-The matrix shows `not-found: 0` for the generator, but this is a semantic distinction inherited from upstream's taxonomy, not "the generator never asserts 404". Upstream splits 404 assertions into two buckets:
+The generator now asserts 404 in two distinct shapes, kept in separate matrix columns:
 
-- **`observe-absence`** — `GET` after `DELETE`, expect 404. Entity *was* created, now gone. Generator currently has **48 of these** (10 entity-lifecycle + 12 edge-lifecycle + 26 from feature/variant emitters that include `negative empty` semantics).
-- **`not-found`** — `GET` against a fake/never-existing ID, expect 404. Entity *was never* created. Generator currently has **0** of these.
-
-Concretely, every entity-lifecycle test ends with:
-
-```typescript
-expect(resp4.status()).toBe(404);  // observe absent (after the prior delete)
-```
-
-These are real 404 assertions — they just exercise the "after-delete" path, not the "fake-ID" path. The capability gap is specifically the fake-ID pattern (replace `{tenantId}` with a generated invalid ID, call `GET /tenants/{tenantId}`, expect 404). Upstream's 127 `not-found` tests are mostly that fake-ID pattern.
+- **`observe-absence`** — `GET` after `DELETE`, expect 404. Entity *was* created, now gone. **48** of these (entity- + edge-lifecycle + feature/variant `negative empty`).
+- **`not-found`** — `GET`/mutate against a fake, never-created ID, expect 404. **31** of these (the fake-ID pattern, e.g. `GET /tenants/{tenantId}` with a generated invalid id).
 
 See `gaps.md` for the categorised per-entity list.
 
