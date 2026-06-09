@@ -83,12 +83,14 @@ entities is 333 tests.
    so this is only a "lifecycle slice" gap, not an overall gap.
 3. **Negative paths.** Upstream has **194** negative tests across these
    9 entities (400/401/403/404/409). The generator's `request-validation`
-   emitter covers 400-class negatives separately (1071 tests
-   suite-wide); the generator emits **0** for 401/403/404/409 across the
-   entire suite. So:
-   - 400 — generator has parallel coverage via `request-validation/`.
-   - 401/403/404/409 — generator has **no** coverage for these 9 entities
-     (or any entity). Tracked in #279, methodology in #277.
+   emitter covers the negative classes separately (≈1068 bad-request + 31
+   not-found + 7 RBAC-deny, suite-wide). So:
+   - 400 — generator has parallel coverage via `request-validation/unsecured/`.
+   - 404 — generator emits fake-ID not-found tests (31 suite-wide).
+   - 403 — generator emits RBAC-deny tests (`rbac/` profile, 7; read-side, WIP).
+   - 401 — auth-absent capability present but 0 on the pinned spec (no
+     `x-enforcement` annotations); activates on annotated specs.
+   - 409 — no generator coverage yet. Tracked in #279, methodology in #277.
 
 ## True disjoint, summarised
 

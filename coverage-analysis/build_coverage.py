@@ -54,7 +54,8 @@ OUT = SCRIPT_DIR
 
 # ---------- 1. operationId -> (METHOD, path) from the bundled OpenAPI ----------
 def load_ops():
-    spec = json.load(open(SPEC_PATH))
+    with open(SPEC_PATH, encoding='utf-8') as fp:
+        spec = json.load(fp)
     ops = {}
     for path, methods in spec.get('paths', {}).items():
         for method, op in methods.items():
@@ -335,7 +336,8 @@ REQVAL_TEST_NAME_RE = re.compile(r'^(?P<op>[A-Za-z][A-Za-z0-9]*)\s*-\s*(?P<desc>
 # establishedBy operationId (assignRoleToUser) -> entity (role) via the spec.
 def load_edge_index():
     try:
-        edges = json.load(open(EDGES_ABOX))
+        with open(EDGES_ABOX, encoding='utf-8') as fp:
+            edges = json.load(fp)
     except FileNotFoundError:
         return {}
     idx = {}

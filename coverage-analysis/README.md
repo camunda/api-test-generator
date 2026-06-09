@@ -134,12 +134,16 @@ See `gaps.md` for the categorised per-entity list.
   When emitters change names (or new ones are added) update `variants_of()` in
   `build_coverage.py`.
 - The generator emits substantial 400/bad-request coverage via the
-  `request-validation` emitter (1000+ tests across 17 violation kinds), and
+  `request-validation` emitter (1000+ tests across ~17 violation kinds), and
   the variant emitter exercises pagination (`page.after` cursor) and filter
   request shapes on many search/batch-operation specs (detected by the
-  classifier from the test body, not the test name). The buckets where the
-  generator emits **zero** tests are: 401, 403, 404, 409. These are a
-  generator capability gap — see `gaps.md` for the per-entity breakdown.
+  classifier from the test body, not the test name). It also emits 404
+  not-found (fake-ID) and 403 RBAC-deny tests. The buckets where the generator
+  emits **zero** tests on the pinned spec are: **409 conflict** (no
+  `duplicatePolicy` slice yet) and **401 unauthorized** (auth-absent is
+  emitted only for operations annotated `x-enforcement: conditional`, which the
+  pinned OCA spec lacks — it activates on annotated specs). See `gaps.md` for
+  the per-entity breakdown.
 - The pagination-sort / filter counts in `coverage_matrix.csv` reflect
   request-shape coverage (the test sends `page: { ... }` or
   `filter: { ... }`), not behaviour coverage (the test asserts pagination
