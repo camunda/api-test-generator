@@ -106,7 +106,7 @@ Generator figures are for the pinned OCA spec (`configs/camunda-oca/spec-pin.jso
 | Happy-path (occurrences) | 173 | 142 |
 | Bad-request (400, occurrences) | 195 | **1068** |
 | Pagination-sort (occurrences) | 53 | **89** |
-| Filter (occurrences) | 85 | **216** |
+| Filter (occurrences) | 85 | **213** |
 | Observe-absence | 2 | 48 |
 | Data-driven / oneOf variants | 5 | 320 |
 | Unauthorized (401) | 165 | **0** (dormant — see below) |

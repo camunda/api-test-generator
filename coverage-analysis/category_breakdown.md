@@ -1204,11 +1204,11 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `cancelBatchOperation.feature.spec.ts`, `getBatchOperation.feature.spec.ts`, `request-validation/unsecured/batchoperations-validation-api-tests.spec.ts`, `resumeBatchOperation.feature.spec.ts`, `searchBatchOperations.feature.spec.ts`, `searchBatchOperations.variant.spec.ts`, `suspendBatchOperation.feature.spec.ts`
 - **Observation channel**: GET = 1, Search = 3
 - **Form-step counts**: observe-present-get=1, observe-present-search=3, mutate=2, delete=1, observe-absence=1, negative-get=1, negative-search=6
-- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=6, not-found=1, pagination-sort=2, filter=4
+- **Variants**: happy-path=5, observe-absence=1, data-driven=2, bad-request=6, not-found=1, pagination-sort=2, filter=3
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
-| observe-present-get | happy-path, filter | `getBatchOperation.feature.spec.ts:12` | feature-1 - getBatchOperation - base (1) |
+| observe-present-get | happy-path | `getBatchOperation.feature.spec.ts:12` | feature-1 - getBatchOperation - base (1) |
 | observe-present-search | happy-path | `searchBatchOperations.feature.spec.ts:12` | feature-1 - searchBatchOperations - base (1) |
 | observe-present-search | data-driven, pagination-sort | `searchBatchOperations.variant.spec.ts:12` | variant-1 - searchBatchOperations - path #1 |
 | observe-present-search | data-driven, pagination-sort | `searchBatchOperations.variant.spec.ts:64` | variant-2 - searchBatchOperations - path #1 |
@@ -1257,12 +1257,12 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 - **Files**: `assignUserTask.feature.spec.ts`, `getFormByKey.feature.spec.ts`, `getUserTaskForm.feature.spec.ts`, `request-validation/unsecured/forms-validation-api-tests.spec.ts`, `request-validation/unsecured/usertasks-validation-api-tests.spec.ts`, `searchUserTaskAuditLogs.feature.spec.ts`, `searchUserTaskAuditLogs.variant.spec.ts`, `searchUserTaskEffectiveVariables.feature.spec.ts`, `searchUserTaskVariables.feature.spec.ts`, `searchUserTaskVariables.variant.spec.ts`, `searchUserTasks.feature.spec.ts`, `searchUserTasks.variant.spec.ts`, `templates/StateTransitionVisibleAfterAction/UserTask.completeUserTask.lifecycle.spec.ts`, `templates/UpdatedFieldVisibleOnReadBack/UserTask.updateUserTask.lifecycle.spec.ts`, `unassignUserTask.feature.spec.ts`
 - **Observation channel**: GET = 2, Search = 17
 - **Form-step counts**: observe-present-get=2, observe-present-search=17, mutate=1, delete=1, observe-absence=1, negative-get=6, negative-update=10, negative-delete=1, negative-search=30
-- **Variants**: happy-path=10, observe-absence=1, data-driven=13, bad-request=44, not-found=3, pagination-sort=6, filter=17
+- **Variants**: happy-path=10, observe-absence=1, data-driven=13, bad-request=44, not-found=3, pagination-sort=6, filter=15
 
 | form step | variants | file:line | test name |
 |--|--|--|--|
 | observe-present-get | happy-path | `getFormByKey.feature.spec.ts:13` | feature-1 - getFormByKey - base (1) |
-| observe-present-get | happy-path, filter | `getUserTaskForm.feature.spec.ts:13` | feature-1 - getUserTaskForm - base (1) |
+| observe-present-get | happy-path | `getUserTaskForm.feature.spec.ts:13` | feature-1 - getUserTaskForm - base (1) |
 | observe-present-search | happy-path, filter | `searchUserTaskAuditLogs.feature.spec.ts:13` | feature-1 - searchUserTaskAuditLogs - base (1) |
 | observe-present-search | data-driven, pagination-sort, filter | `searchUserTaskAuditLogs.variant.spec.ts:13` | variant-1 - searchUserTaskAuditLogs - bpmn #1 |
 | observe-present-search | data-driven, pagination-sort, filter | `searchUserTaskAuditLogs.variant.spec.ts:110` | variant-2 - searchUserTaskAuditLogs - bpmn #1 |
@@ -1281,7 +1281,7 @@ Categories and the entity → category mapping mirror the upstream `c8-orchestra
 | observe-present-search | data-driven, pagination-sort | `searchUserTasks.variant.spec.ts:509` | variant-8 - searchUserTasks - path #1 |
 | observe-present-search | data-driven, pagination-sort | `searchUserTasks.variant.spec.ts:559` | variant-9 - searchUserTasks - path #1 |
 | mutate | happy-path, filter | `assignUserTask.feature.spec.ts:10` | feature-1 - assignUserTask - base (1) |
-| delete | happy-path, filter | `unassignUserTask.feature.spec.ts:10` | feature-1 - unassignUserTask - base (1) |
+| delete | happy-path | `unassignUserTask.feature.spec.ts:10` | feature-1 - unassignUserTask - base (1) |
 | observe-absence | observe-absence | `searchUserTasks.feature.spec.ts:34` | feature-2 - searchUserTasks - negative empty (2) |
 | negative-get | not-found | `request-validation/unsecured/forms-validation-api-tests.spec.ts:18` | getFormByKey - Nonexistent formKey returns 404 |
 | negative-get | bad-request | `request-validation/unsecured/forms-validation-api-tests.spec.ts:30` | getFormByKey - Path param formKey pattern violation |

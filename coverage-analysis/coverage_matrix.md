@@ -43,9 +43,9 @@ Legend: ✓ = at least 1, blank = 0.
 | decision-instance | get | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | decision-instance | delete | 50 | ✓ | ✓ |  |  |  |  |  | ✓ |  | ✓ |  |
 | decision-instance | search | 20 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
-| user-task | get | 8 | ✓ | ✓ |  |  | ✓ |  |  | ✓ |  |  |  |
+| user-task | get | 8 | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |
 | user-task | update | 11 | ✓ | ✓ |  |  |  |  |  | ✓ |  |  |  |
-| user-task | delete | 2 | ✓ | ✓ |  |  |  |  |  | ✓ |  |  |  |
+| user-task | delete | 2 | ✓ | ✓ |  |  |  |  |  |  |  |  |  |
 | user-task | search | 48 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
 | user-task | lifecycle | 2 | ✓ |  |  |  |  |  |  |  |  |  |  |
 | cluster-variables | create | 25 |  | ✓ |  |  |  |  |  |  |  |  |  |
@@ -106,7 +106,7 @@ Legend: ✓ = at least 1, blank = 0.
 | document | lifecycle | 1 | ✓ |  |  |  |  |  |  |  | ✓ |  |  |
 | decision-requirements | get | 6 | ✓ | ✓ |  |  | ✓ |  |  |  |  |  |  |
 | decision-requirements | search | 11 | ✓ | ✓ |  |  |  |  | ✓ | ✓ | ✓ | ✓ |  |
-| batch-operation | get | 2 | ✓ |  |  |  | ✓ |  |  | ✓ |  |  |  |
+| batch-operation | get | 2 | ✓ |  |  |  | ✓ |  |  |  |  |  |  |
 | batch-operation | update | 2 | ✓ |  |  |  |  |  |  | ✓ |  |  |  |
 | batch-operation | delete | 1 | ✓ |  |  |  |  |  |  | ✓ |  |  |  |
 | batch-operation | search | 10 | ✓ | ✓ |  |  |  |  | ✓ |  | ✓ | ✓ |  |
@@ -162,9 +162,9 @@ Legend: ✓ = at least 1, blank = 0.
 | decision-instance | get | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | decision-instance | delete | 50 | 2 | 38 |  |  |  |  |  | 11 |  | 10 |  |
 | decision-instance | search | 20 | 1 | 6 |  |  |  |  | 2 | 10 | 1 | 12 |  |
-| user-task | get | 8 | 2 | 3 |  |  | 3 |  |  | 1 |  |  |  |
+| user-task | get | 8 | 2 | 3 |  |  | 3 |  |  |  |  |  |  |
 | user-task | update | 11 | 1 | 10 |  |  |  |  |  | 1 |  |  |  |
-| user-task | delete | 2 | 1 | 1 |  |  |  |  |  | 1 |  |  |  |
+| user-task | delete | 2 | 1 | 1 |  |  |  |  |  |  |  |  |  |
 | user-task | search | 48 | 4 | 30 |  |  |  |  | 6 | 14 | 1 | 13 |  |
 | user-task | lifecycle | 2 | 2 |  |  |  |  |  |  |  |  |  |  |
 | cluster-variables | create | 25 |  | 25 |  |  |  |  |  |  |  |  |  |
@@ -225,7 +225,7 @@ Legend: ✓ = at least 1, blank = 0.
 | document | lifecycle | 1 | 1 |  |  |  |  |  |  |  | 1 |  |  |
 | decision-requirements | get | 6 | 2 | 2 |  |  | 2 |  |  |  |  |  |  |
 | decision-requirements | search | 11 | 1 | 5 |  |  |  |  | 2 | 2 | 1 | 4 |  |
-| batch-operation | get | 2 | 1 |  |  |  | 1 |  |  | 1 |  |  |  |
+| batch-operation | get | 2 | 1 |  |  |  | 1 |  |  |  |  |  |  |
 | batch-operation | update | 2 | 2 |  |  |  |  |  |  | 2 |  |  |  |
 | batch-operation | delete | 1 | 1 |  |  |  |  |  |  | 1 |  |  |  |
 | batch-operation | search | 10 | 1 | 6 |  |  |  |  | 2 |  | 1 | 2 |  |

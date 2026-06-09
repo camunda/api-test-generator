@@ -32,9 +32,9 @@ process-definition,search,11,1,5,0,0,0,0,2,2,1,4,0
 decision-instance,get,2,1,1,0,0,0,0,0,0,0,0,0
 decision-instance,delete,50,2,38,0,0,0,0,0,11,0,10,0
 decision-instance,search,20,1,6,0,0,0,0,2,10,1,12,0
-user-task,get,8,2,3,0,0,3,0,0,1,0,0,0
+user-task,get,8,2,3,0,0,3,0,0,0,0,0,0
 user-task,update,11,1,10,0,0,0,0,0,1,0,0,0
-user-task,delete,2,1,1,0,0,0,0,0,1,0,0,0
+user-task,delete,2,1,1,0,0,0,0,0,0,0,0,0
 user-task,search,48,4,30,0,0,0,0,6,14,1,13,0
 user-task,lifecycle,2,2,0,0,0,0,0,0,0,0,0,0
 cluster-variables,create,25,0,25,0,0,0,0,0,0,0,0,0
@@ -95,7 +95,7 @@ document,get,1,0,0,0,0,1,0,0,0,0,0,0
 document,lifecycle,1,1,0,0,0,0,0,0,0,1,0,0
 decision-requirements,get,6,2,2,0,0,2,0,0,0,0,0,0
 decision-requirements,search,11,1,5,0,0,0,0,2,2,1,4,0
-batch-operation,get,2,1,0,0,0,1,0,0,1,0,0,0
+batch-operation,get,2,1,0,0,0,1,0,0,0,0,0,0
 batch-operation,update,2,2,0,0,0,0,0,0,2,0,0,0
 batch-operation,delete,1,1,0,0,0,0,0,0,1,0,0,0
 batch-operation,search,10,1,6,0,0,0,0,2,0,1,2,0

@@ -448,7 +448,10 @@ for f in sorted(os.listdir(PLAYWRIGHT_DIR)):
         # NAME classification ("no info derivable from test name"); a dynamic
         # `variant-N - scenario` test that also has a filter body is both
         # name-unlabeled and body-filter, so it carries both labels.
-        extras = body_extra_variants(body)
+        # Only operations that take a request body can legitimately carry these
+        # shapes; skip GET/DELETE so a `filter:`/`page:` in a *prerequisite* call
+        # within the test block doesn't mislabel the main op (#278 review).
+        extras = body_extra_variants(body) if method not in ('GET', 'DELETE') else []
         if extras:
             base = variants.split('|')
             variants = '|'.join(base + [e for e in extras if e not in base])
