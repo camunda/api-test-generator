@@ -68,6 +68,22 @@ def load_ops():
                 ops[op_id] = (method.upper(), path)
     return ops
 
+# Fail fast with a diagnostic message if the inputs haven't been generated yet,
+# rather than crashing deep in load_ops()/the scan with a bare FileNotFoundError.
+# spec/ and generated/ are gitignored — see the Regenerate section in README.md.
+def _preflight():
+    missing = [p for p in (SPEC_PATH, PLAYWRIGHT_DIR) if not os.path.exists(p)]
+    if missing:
+        raise SystemExit(
+            'coverage-analysis: required generator output is missing:\n'
+            + '\n'.join(f'  - {p}' for p in missing)
+            + '\n\nRun the generator first (spec/ and generated/ are gitignored):\n'
+              '  npm run pipeline\n'
+              '  python3 coverage-analysis/build_coverage.py\n'
+        )
+
+_preflight()
+
 OPS = load_ops()
 
 # ---------- 2. entity mapping (path's first segment -> entity slug used in

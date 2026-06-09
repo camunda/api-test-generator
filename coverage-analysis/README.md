@@ -11,6 +11,12 @@ produces a coverage matrix in the same shape as
 so the two suites can be diffed directly. Answers the questions in
 [issue #275](https://github.com/camunda/api-test-generator/issues/275).
 
+> **Authoritative numbers:** the committed artifacts in this directory
+> (`tests.csv`, `coverage_matrix.csv`/`.md`, `gaps.md`, `category_breakdown.md`)
+> and the tables in this README are the source of truth for this branch,
+> regenerated from the current generator (pinned OCA spec). Any coverage figures
+> in the PR description are an earlier hand-written summary and may be stale.
+
 ## Files
 
 | file | what it is |
