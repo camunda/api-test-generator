@@ -3,8 +3,9 @@
 Build api-test-generator coverage matrix in the same shape as the upstream
 c8-orchestration-cluster-e2e-test-suite/coverage-analysis/coverage_matrix.csv.
 
-Run from this script's directory:
-    python3 build_coverage.py
+Paths resolve via __file__, so it can be run from anywhere — e.g. from the
+repo root:
+    python3 coverage-analysis/build_coverage.py
 
 Scans every generator test source and emits, next to this script:
   - tests.csv           : per-test labels (file, line, source, entity, operation, variants, test_name, ...)
@@ -72,7 +73,9 @@ def load_ops():
 # rather than crashing deep in load_ops()/the scan with a bare FileNotFoundError.
 # spec/ and generated/ are gitignored — see the Regenerate section in README.md.
 def _preflight():
-    missing = [p for p in (SPEC_PATH, PLAYWRIGHT_DIR) if not os.path.exists(p)]
+    # request-validation/unsecured is the largest bucket (400 + 404); requiring it
+    # too means a positive-only run fails fast instead of silently undercounting.
+    missing = [p for p in (SPEC_PATH, PLAYWRIGHT_DIR, REQVAL_UNSECURED) if not os.path.exists(p)]
     if missing:
         raise SystemExit(
             'coverage-analysis: required generator output is missing:\n'
