@@ -215,7 +215,9 @@ def category_of(op_id, entity):
 # Generator's variant vocabulary is simpler than upstream's (no 401/403/400/etc.),
 # so the form-step set we actually produce is a subset.
 def form_step_of(operation, variants):
-    if variants == 'observe-absence':
+    # variants is a multi-label '|'-joined string (e.g. 'happy-path|observe-absence'),
+    # so test membership rather than exact equality.
+    if 'observe-absence' in variants.split('|'):
         return 'observe-absence'
     if operation == 'create':
         return 'create'

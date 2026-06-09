@@ -5,7 +5,7 @@ Answers @jwulf's ask on #279:
 > the ~30 tests in the OCA suite.
 
 The 10 new generated tests are the entity-lifecycle suite under
-`generated/camunda-oca/playwright/entities/<Entity>.lifecycle.spec.ts`,
+`generated/camunda-oca/playwright/templates/EntityLifecycle/<Entity>.lifecycle.spec.ts`,
 produced by the `EntityLifecycle` scenario template (#280). The ~30
 upstream tests are the matching slice of category **A. Entity Lifecycle
 (CRUD)** in [c8-orchestration-cluster-e2e-test-suite/coverage-analysis](https://github.com/camunda/camunda/tree/main/qa/c8-orchestration-cluster-e2e-test-suite/coverage-analysis)
@@ -19,16 +19,16 @@ spec; cluster-variables has two namespace variants (global / per-tenant).
 
 | spec file | entity slug |
 |---|---|
-| `entities/Authorization.lifecycle.spec.ts` | `authorization` |
-| `entities/Document.lifecycle.spec.ts` | `document` |
-| `entities/GlobalClusterVariable.lifecycle.spec.ts` | `cluster-variables` (global namespace) |
-| `entities/TenantClusterVariable.lifecycle.spec.ts` | `cluster-variables` (per-tenant namespace) |
-| `entities/GlobalTaskListener.lifecycle.spec.ts` | `global-task-listener` |
-| `entities/Group.lifecycle.spec.ts` | `group` |
-| `entities/MappingRule.lifecycle.spec.ts` | `mapping-rule` |
-| `entities/Role.lifecycle.spec.ts` | `role` |
-| `entities/Tenant.lifecycle.spec.ts` | `tenant` |
-| `entities/User.lifecycle.spec.ts` | `user` |
+| `templates/EntityLifecycle/Authorization.lifecycle.spec.ts` | `authorization` |
+| `templates/EntityLifecycle/Document.lifecycle.spec.ts` | `document` |
+| `templates/EntityLifecycle/GlobalClusterVariable.lifecycle.spec.ts` | `cluster-variables` (global namespace) |
+| `templates/EntityLifecycle/TenantClusterVariable.lifecycle.spec.ts` | `cluster-variables` (per-tenant namespace) |
+| `templates/EntityLifecycle/GlobalTaskListener.lifecycle.spec.ts` | `global-task-listener` |
+| `templates/EntityLifecycle/Group.lifecycle.spec.ts` | `group` |
+| `templates/EntityLifecycle/MappingRule.lifecycle.spec.ts` | `mapping-rule` |
+| `templates/EntityLifecycle/Role.lifecycle.spec.ts` | `role` |
+| `templates/EntityLifecycle/Tenant.lifecycle.spec.ts` | `tenant` |
+| `templates/EntityLifecycle/User.lifecycle.spec.ts` | `user` |
 
 ## Upstream's matching slice — 333 tests across the same 9 entities
 
