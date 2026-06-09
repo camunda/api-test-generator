@@ -110,6 +110,29 @@ function buildParameter(raw: unknown): ParameterModel | undefined {
   };
 }
 
+function extractResponseInfo(op: Record<string, unknown>): {
+  responseCodes: string[];
+  successIsCollection: boolean;
+} {
+  const responses = isRecord(op.responses) ? op.responses : {};
+  const responseCodes = Object.keys(responses);
+  let successIsCollection = false;
+  for (const code of ['200', '201']) {
+    const r = responses[code];
+    if (!isRecord(r) || !isRecord(r.content)) continue;
+    const json = asSchemaFragment(r.content['application/json']);
+    const schema = json?.schema ? asSchemaFragment(json.schema) : undefined;
+    if (schema && isRecord(schema.properties)) {
+      const props = Object.keys(schema.properties);
+      if (props.includes('items') || props.includes('page')) {
+        successIsCollection = true;
+        break;
+      }
+    }
+  }
+  return { responseCodes, successIsCollection };
+}
+
 export async function loadSpec(file: string): Promise<SpecModel> {
   const api: unknown = await SwaggerParser.dereference(file);
   const operations: OperationModel[] = [];
@@ -170,6 +193,7 @@ export async function loadSpec(file: string): Promise<SpecModel> {
           discriminator = asDiscriminator(requestBodySchema.discriminator);
         }
       }
+      const { responseCodes, successIsCollection } = extractResponseInfo(op);
       operations.push({
         operationId,
         method,
@@ -184,6 +208,8 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         multipartSchema,
         multipartRequiredProps,
         mediaTypes,
+        responseCodes,
+        successIsCollection,
         conditionalAuth:
           securityRequiresConditional(op.security, conditionalSchemes) ??
           securityRequiresConditional(pathLevelSecurity, conditionalSchemes) ??

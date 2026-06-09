@@ -377,6 +377,8 @@ function buildBaseTitle(s: ValidationScenario): string {
       return `${s.operationId} - Missing authentication`;
     case 'auth-deny':
       return `${s.operationId} - Denied (no permission)`;
+    case 'not-found-fake-id':
+      return `${s.operationId} - Nonexistent ${s.target} returns 404`;
     default:
       return s.id; // Fallback is globally unique id
   }
