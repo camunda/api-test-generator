@@ -504,7 +504,7 @@ if os.path.isdir(ENTITIES_DIR):
         if not m:
             continue
         ent_pascal = m.group('entity')
-        entity = PASCAL_TO_SLUG.get(ent_pascal, ent_pascal.lower())
+        entity = PASCAL_TO_SLUG.get(ent_pascal, _camel_to_kebab(ent_pascal))
         for name, line_no, _body in read_tests(os.path.join(ENTITIES_DIR, f)):
             rows.append({
                 'file': f'templates/EntityLifecycle/{f}', 'line': line_no, 'source': 'lifecycle',
