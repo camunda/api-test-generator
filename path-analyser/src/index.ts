@@ -514,6 +514,10 @@ async function main() {
           requestIndex.byOperation,
           successStatusByOp,
         );
+        // #172: the modelDerivedBindings marker is a planner-internal
+        // handoff consumed by buildRequestPlan's deploy step. Drop it so it
+        // never leaks into emitted variant scenario JSON.
+        s.modelDerivedBindings = undefined;
         s.seedBindings = computeSeedBindings(s);
       }
       if (variantCollection.scenarios.length) {
@@ -648,6 +652,14 @@ function buildRequestPlan(
         ),
       },
     };
+    // #304: stamp 409-declaration so the emitter can flag client-minted
+    // identifier bindings consumed by this step as `{ unique: true }`,
+    // ensuring cross-run identifiers diverge and the second run against
+    // the same cluster doesn't 409 on the first run's IDs.
+    const declared = graph.operations[opRef.operationId]?.responseLeafPaths;
+    if (declared && '409' in declared) {
+      step.declares409 = true;
+    }
     // The legacy `response.*` valueBindings-driven extract block was
     // retired in #251 — the ABox no longer carries `response.*` entries
     // because the planner now auto-derives the equivalent extracts from
@@ -662,21 +674,40 @@ function buildRequestPlan(
     // identifier echoes for downstream filters.)
     // Canonical request body synthesis for POST/PUT/PATCH using requestByMediaType
     if (['POST', 'PUT', 'PATCH'].includes(opRef.method)) {
-      const plan = buildRequestBodyFromCanonical(
-        opRef.operationId,
-        scenario,
-        graph,
-        canonical,
-        requestGroupsIndex,
-        isFinal,
-      );
-      if (plan?.kind === 'json') {
-        step.bodyTemplate = plan.template;
+      // #309 Phase A — intentional discovery body wrapping. When the
+      // planner stamped a `discoveryIntent` on this opRef (it's the
+      // inserted runtimeEmission discovery step, e.g. searchUserTasks
+      // for UserTaskKey), emit ONLY the structurally-correct filter
+      // wrapper `{ filter: { [filterBy]: '${fromBinding}' } }` and
+      // skip the generic semantics synthesis pass. The intent guarantees
+      // the upstream producer's binding name (`fromBinding`) was already
+      // bound by an earlier step's extract; this step must therefore
+      // query for *that exact* runtime-emitted entity, not throw a flat
+      // bag of placeholder filters at the server.
+      if (opRef.discoveryIntent) {
+        const intent = opRef.discoveryIntent;
+        step.bodyTemplate = {
+          filter: { [intent.filterBy]: `\${${intent.fromBinding}}` },
+        };
         step.bodyKind = 'json';
-      } else if (plan?.kind === 'multipart') {
-        step.multipartTemplate = plan.template;
-        step.bodyKind = 'multipart';
-        step.expectedDeploymentSlices = plan.expectedSlices;
+        step.discoveryIntent = intent;
+      } else {
+        const plan = buildRequestBodyFromCanonical(
+          opRef.operationId,
+          scenario,
+          graph,
+          canonical,
+          requestGroupsIndex,
+          isFinal,
+        );
+        if (plan?.kind === 'json') {
+          step.bodyTemplate = plan.template;
+          step.bodyKind = 'json';
+        } else if (plan?.kind === 'multipart') {
+          step.multipartTemplate = plan.template;
+          step.bodyKind = 'multipart';
+          step.expectedDeploymentSlices = plan.expectedSlices;
+        }
       }
     }
     if (isFinal && resp?.fields?.length) {
@@ -1020,7 +1051,10 @@ function camelCase(name: string) {
 }
 
 type CanonicalShape = {
-  requestByMediaType?: Record<string, { path: string; type: string; required: boolean }[]>;
+  requestByMediaType?: Record<
+    string,
+    { path: string; type: string; required: boolean; enum?: unknown[]; itemEnum?: unknown[] }[]
+  >;
 };
 
 type RequestBodyPlan =
@@ -1033,6 +1067,96 @@ type RequestBodyPlan =
       };
       expectedSlices: string[];
     };
+
+/**
+ * Synthesize a single placeholder element for a required `type: array`
+ * request-body field whose item shape is described by canonical nodes.
+ *
+ * Background (#326): the body builder previously emitted `[]` for any
+ * required array property without a binding/provider/default. Servers
+ * reject that — `required` here is at the property level, but `[]`
+ * carries no items, so validation messages like "No elements provided"
+ * surface at runtime. The class-scoped fix is to ensure such fields
+ * always emit at least one element whose shape honours the item
+ * schema's own `required` set, recursively across nested objects and
+ * arrays.
+ *
+ * Canonical-node layout reminder (see `walkSchema` in
+ * canonicalSchemas.ts):
+ *   - object property `foo`     → node path `foo`     (type matches schema)
+ *   - nested object `foo.bar`   → node path `foo.bar` (type 'object')
+ *   - array property `xs`       → node path `xs[]`    (type 'array')
+ *   - array item object's prop  → node path `xs[].k`  (type per schema)
+ *   - nested array under item   → node path `xs[].ys[]` (type 'array')
+ *
+ * The helper walks "direct children" of a given prefix (no further `.`
+ * in the tail), and:
+ *   - if the child tail ends with `[]` (a nested array property) it
+ *     recurses to build a one-element array;
+ *   - if the child is type `object` it recurses into the nested
+ *     object's required properties (avoids emitting `{}` for objects
+ *     that themselves declare required content);
+ *   - otherwise it seeds a string `'placeholder'`.
+ *
+ * Item-schema enums are sourced from the bundled spec (#338): top-level
+ * array nodes carry an `itemEnum` field captured during canonical-shape
+ * walking, and `buildRequestBodyFromCanonical` short-circuits to
+ * `[itemEnum[0]]` before delegating to this helper. The helper itself
+ * remains enum-unaware for deeper nested arrays — those still seed a
+ * `'placeholder'` element, tracked separately.
+ */
+type CanonicalNode = {
+  path: string;
+  type: string;
+  required: boolean;
+  enum?: unknown[];
+  itemEnum?: unknown[];
+};
+
+function synthesizeObjectFromPrefix(
+  prefix: string,
+  nodes: CanonicalNode[],
+): Record<string, unknown> {
+  const obj: Record<string, unknown> = {};
+  for (const n of nodes) {
+    if (!n.path.startsWith(prefix)) continue;
+    const tail = n.path.slice(prefix.length);
+    if (tail.length === 0) continue;
+    // Direct children only: tail is either `<key>` or `<key>[]` (no
+    // intermediate `.`). Deeper descendants are handled by recursion.
+    const isArrayChild = tail.endsWith('[]');
+    const inner = isArrayChild ? tail.slice(0, -2) : tail;
+    if (inner.length === 0 || inner.includes('.') || inner.includes('[]')) continue;
+    if (!n.required) continue;
+    if (Object.hasOwn(obj, inner)) continue;
+    if (isArrayChild) {
+      obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
+    } else if (n.type === 'object') {
+      obj[inner] = synthesizeObjectFromPrefix(`${prefix}${inner}.`, nodes);
+    } else if (n.type === 'array') {
+      // Defensive: walkSchema records arrays with a `[]` suffix on
+      // path, but if a future change ever records type:'array' on a
+      // bare-key node, treat it the same way to keep the synth
+      // schema-honest.
+      obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
+    } else {
+      obj[inner] = 'placeholder';
+    }
+  }
+  return obj;
+}
+
+function synthesizeArrayElement(basePath: string, nodes: CanonicalNode[]): unknown {
+  const prefix = `${basePath}[].`;
+  const hasItemProperties = nodes.some((n) => n.path.startsWith(prefix));
+  if (!hasItemProperties) {
+    // Array of primitives/enums; the canonical node walker doesn't
+    // record sub-paths for primitive item types beyond the array node
+    // itself. A bare string placeholder is the safest seed.
+    return 'placeholder';
+  }
+  return synthesizeObjectFromPrefix(prefix, nodes);
+}
 
 function buildRequestBodyFromCanonical(
   opId: string,
@@ -1173,13 +1297,31 @@ function buildRequestBodyFromCanonical(
             template[name] = `${'${'}${varName}}`;
           } else if (defaults && Object.hasOwn(defaults, name)) {
             template[name] = defaults[name];
+          } else if (chosenVariant?.fieldEnums?.[name]?.length) {
+            // #338 — schema declares an enum for this required field.
+            // Emit the first enum literal instead of seeding a
+            // `${var}` placeholder that the server rejects with 400.
+            const values = chosenVariant.fieldEnums[name];
+            template[name] = values[0];
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'object') {
             // Object-typed required field with no binding: emit {} rather than seeding
             // a string placeholder. An empty object is always a valid JSON value and
             // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
             template[name] = {};
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'array') {
-            template[name] = [];
+            // #326 — emit a synthesised one-element array honouring the
+            // item schema's own required set rather than `[]`, which
+            // servers reject ("No elements provided" etc.).
+            // #338 — when the array's item schema declares an enum
+            // (e.g. `permissionTypes: array of PermissionTypeEnum`),
+            // emit `[enum[0]]` instead of the generic placeholder
+            // element so the request validates server-side.
+            const itemEnum = chosenVariant?.fieldItemEnums?.[name];
+            if (itemEnum?.length) {
+              template[name] = [itemEnum[0]];
+            } else {
+              template[name] = [synthesizeArrayElement(name, nodes)];
+            }
           } else {
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
@@ -1217,13 +1359,31 @@ function buildRequestBodyFromCanonical(
           template[leaf] = `${'${'}${varName}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
           template[leaf] = defaults[leaf];
+        } else if (f.enum?.length) {
+          // #338 — schema declares an enum for this required scalar
+          // field. Emit the first enum literal instead of seeding a
+          // `${var}` placeholder that the server rejects with 400.
+          template[leaf] = f.enum[0];
         } else if (f.type === 'object') {
           // Object-typed required field with no binding: emit {} rather than seeding
           // a string placeholder. An empty object is always a valid JSON value and
           // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
           template[leaf] = {};
         } else if (f.type === 'array') {
-          template[leaf] = [];
+          // #326 — see synthesizeArrayElement docblock. `f.path` is
+          // recorded as `<field>[]` for top-level arrays; strip the
+          // suffix so the helper's prefix match (`<base>[].<key>`)
+          // lines up with the canonical sub-nodes.
+          // #338 — when the array's item schema declares an enum
+          // (captured on the canonical node as `itemEnum`), emit
+          // `[itemEnum[0]]` instead of synthesising a placeholder
+          // element. Servers reject `["placeholder"]` with 400.
+          if (f.itemEnum?.length) {
+            template[leaf] = [f.itemEnum[0]];
+          } else {
+            const basePath = f.path.replace(/\[\]$/, '');
+            template[leaf] = [synthesizeArrayElement(basePath, nodes)];
+          }
         } else {
           scenario.bindings ||= {};
           if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
@@ -1246,8 +1406,19 @@ function buildRequestBodyFromCanonical(
         }
       }
     }
-    // Fill a few optional fields if present and we have bindings
-    for (const f of nodes.filter((n) => !n.required && !n.path.includes('[]'))) {
+    // Fill a few optional fields if present and we have bindings.
+    //
+    // Restricted to top-level fields (no '.' in path): otherwise the
+    // leaf-projection (`path.split('.').pop()`) silently lifts deeply
+    // nested optional properties (e.g. `filter.name` in a SearchQueryRequest
+    // whose top is `{additionalProperties: false, properties: {sort, filter,
+    // page}}`) into the top-level body when a binding happens to share
+    // the leaf name (e.g. `nameVar`). The server then rejects the request
+    // with 400 "Request property [name] cannot be parsed". This is the
+    // same defect class as #174 sub-class 1.
+    for (const f of nodes.filter(
+      (n) => !n.required && !n.path.includes('[]') && !n.path.includes('.'),
+    )) {
       const leaf = f.path.split('.').pop() ?? '';
       if (allowedFields && !allowedFields.has(leaf)) continue;
       const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
@@ -1259,11 +1430,18 @@ function buildRequestBodyFromCanonical(
         }
       }
     }
-    // Fallback: ensure all domain request.* bindings are present even if canonical nodes are missing (e.g., oneOf variants).
+    // Fallback: ensure all domain request.* bindings are present even if
+    // canonical nodes are missing (e.g., oneOf variants). Restricted to
+    // top-level fields for the same reason as the loop above — deep-leaf
+    // bleed-up corrupts the body shape for any schema with
+    // additionalProperties:false.
     const leafSet = new Set(
-      nodes.filter((n) => !n.path.includes('[]')).map((n) => n.path.split('.').pop() ?? ''),
+      nodes
+        .filter((n) => !n.path.includes('[]') && !n.path.includes('.'))
+        .map((n) => n.path.split('.').pop() ?? ''),
     );
     for (const [fieldPath, param] of Object.entries(bindingMap)) {
+      if (fieldPath.includes('.')) continue;
       const leaf = fieldPath.split('.').pop() ?? '';
       if (!leafSet.has(leaf)) continue; // don't inject fields not in schema
       if (allowedFields && !allowedFields.has(leaf)) continue;
@@ -1350,10 +1528,16 @@ function buildRequestBodyFromCanonical(
       // characteristics on the fixture falls through to the most generic
       // candidate.
       const requiredStates = computeDeploymentRequiredStates(scenario, graph.domain);
+      const hardRequiredStates = computeDeploymentHardRequiredStates(scenario, graph.domain);
       const kindLevelProvides = new Set<string>(
         kind ? (graph.domain?.artifactKinds?.[kind]?.producesStates ?? []) : [],
       );
-      const regHit = chooseFixtureFromRegistry(kind, requiredStates, kindLevelProvides);
+      const regHit = chooseFixtureFromRegistry(
+        kind,
+        requiredStates,
+        kindLevelProvides,
+        hardRequiredStates,
+      );
       if (!regHit) {
         // Lift 17 / #257 retired the hard-coded `defaultFixtures` map
         // and the `'@@FILE:bpmn/simple.bpmn'` second-fallback that
@@ -1385,6 +1569,44 @@ function buildRequestBodyFromCanonical(
         const varName = 'jobTypeVar';
         scenario.bindings ||= {};
         if (!scenario.bindings[varName]) scenario.bindings[varName] = jobTypeValue;
+      }
+      // #172: fulfill modelDerived variant placeholders from the chosen
+      // deploy fixture. The variant generator installs a synthetic
+      // placeholder for a modelDerived leaf (e.g.
+      // `startInstructions[].elementId`) because the real value — a model
+      // flow-node id — is only knowable once the deploy fixture is selected
+      // (here). Replace the placeholder with an id picked BY TYPE from the
+      // fixture's `providesElements`, using the per-semantic acceptable-type
+      // list (`semanticTypes.<X>.modelElementTypes`). Strictly guarded so we
+      // never touch a runtime-emission or producer-chain binding:
+      //   - sole deployment step (avoid source/target ambiguity in
+      //     multi-deploy migration chains), and
+      //   - the binding still equals the exact recorded placeholder (so a
+      //     real/extracted value is never clobbered — runtime-emission
+      //     leaves carry `__PENDING__` + a step extract and never a
+      //     modelDerivedBindings marker).
+      if (scenario.modelDerivedBindings?.length) {
+        const deployOpCount = scenario.operations.filter((o) =>
+          isDeploymentGatewayOp(graph.domain, o.operationId),
+        ).length;
+        if (deployOpCount === 1) {
+          for (const m of scenario.modelDerivedBindings) {
+            if (scenario.bindings?.[m.varName] !== m.placeholder) continue;
+            const acceptableTypes = graph.domain?.semanticTypes?.[m.semantic]?.modelElementTypes;
+            const picked = selectModelDerivedElementValue(regHit.providesElements, acceptableTypes);
+            if (picked !== undefined) {
+              scenario.bindings ||= {};
+              scenario.bindings[m.varName] = picked;
+              // Mark as an authoritative model value so the materializer
+              // does NOT strip + unique-seed it (#172; see the field doc
+              // on EndpointScenario.modelDerivedLiteralBindings).
+              scenario.modelDerivedLiteralBindings ||= [];
+              if (!scenario.modelDerivedLiteralBindings.includes(m.varName)) {
+                scenario.modelDerivedLiteralBindings.push(m.varName);
+              }
+            }
+          }
+        }
       }
       template.files.resources = fileRef;
     }
@@ -1451,7 +1673,59 @@ function normaliseProvidesValues(input: unknown): Record<string, string[]> | und
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-// -------- Artifact Registry support ---------
+/**
+ * Validate and copy a registry entry's `providesElements` shape (#172).
+ * Each entry must be an object with non-empty string `id` and `type`;
+ * values are trimmed and anything malformed or blank is dropped so a bad
+ * entry (the config is an unchecked boundary) doesn't silently survive and
+ * then fail type-matching downstream. Returns `undefined` when no usable
+ * entry survives.
+ */
+function normaliseProvidesElements(input: unknown): { id: string; type: string }[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const out: { id: string; type: string }[] = [];
+  for (const x of input) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) continue;
+    const rawId = Reflect.get(x, 'id');
+    const rawType = Reflect.get(x, 'type');
+    if (typeof rawId !== 'string' || typeof rawType !== 'string') continue;
+    const id = rawId.trim();
+    const type = rawType.trim();
+    if (id.length === 0 || type.length === 0) continue;
+    out.push({ id, type });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Pick a model-element id from a fixture's `providesElements` for a
+ * `modelDerived` semantic (#172), selecting BY TYPE rather than position.
+ *
+ * `acceptableTypes` (from `semanticTypes.<X>.modelElementTypes`) lists the
+ * element `type` values valid for the semantic, in preference order: the
+ * first list entry with a matching element wins. When `acceptableTypes` is
+ * absent/empty the first declared element is returned (positional
+ * fallback). Returns `undefined` when no acceptable element exists so the
+ * caller keeps the synthetic placeholder (body stays well-formed).
+ *
+ * Pure string-equality matching — the planner carries no BPMN/OCA element
+ * vocabulary; both the candidate `type`s and the acceptable list live in
+ * config.
+ */
+function selectModelDerivedElementValue(
+  providesElements: { id: string; type: string }[] | undefined,
+  acceptableTypes: string[] | undefined,
+): string | undefined {
+  if (!providesElements?.length) return undefined;
+  if (acceptableTypes?.length) {
+    for (const t of acceptableTypes) {
+      const hit = providesElements.find((e) => e.type === t);
+      if (hit) return hit.id;
+    }
+    return undefined;
+  }
+  return providesElements[0].id;
+}
 let artifactsRegistryCache: ArtifactRegistryEntry[] | undefined;
 function getArtifactsRegistry(): ArtifactRegistryEntry[] {
   if (artifactsRegistryCache) return artifactsRegistryCache;
@@ -1504,6 +1778,7 @@ function getArtifactsRegistry(): ArtifactRegistryEntry[] {
       description: e.description,
       providesStates: Array.isArray(e.providesStates) ? [...e.providesStates] : undefined,
       providesValues: normaliseProvidesValues(e.providesValues),
+      providesElements: normaliseProvidesElements(e.providesElements),
     }));
     return artifactsRegistryCache || [];
   }
@@ -1611,44 +1886,77 @@ function resolveProvider(opId: string, field: string, scenario: EndpointScenario
  * Pick the fixture registry entry whose effective providesStates (per-entry ∪
  * kind-level `artifactKinds.<kind>.producesStates`) covers `requiredStates`.
  *
- * Selection algorithm (#159, PR A):
+ * Selection algorithm:
  *   1. Filter to entries whose `kind` matches.
- *   2. Of those, keep entries whose effective providesStates is a superset of
- *      `requiredStates`. An empty `requiredStates` matches every entry — so
- *      chains that don't impose runtime characteristics on the fixture fall
- *      through to step 3 with all candidates.
- *   3. Tie-break: smallest |entry.providesStates| wins (most specific match;
- *      fewer extra states the chain didn't ask for). Ties at that point
- *      break by array order in the registry.
+ *   2. Two-tier match (#305 Phase 3):
+ *        a. Keep entries whose effective providesStates is a superset of
+ *           `requiredStates` (hard + soft). An empty `requiredStates`
+ *           matches every entry — chains that don't impose runtime
+ *           characteristics on the fixture fall through to the tie-break.
+ *        b. If no entry covers (a) AND `hardRequiredStates` is non-empty,
+ *           retry the superset check against `hardRequiredStates` alone.
+ *           Hard states (semantic `op.requires`, `runtimeEmission.emittedBy.
+ *           guardedBy` guards) are necessary for the chain to function at
+ *           runtime; soft states (`chainCleanupRequires`) are hygiene
+ *           preferences that may legitimately conflict with a hard
+ *           requirement — e.g. a self-completing BPMN cannot simultaneously
+ *           contain a user-task element. Correctness wins over hygiene.
+ *   3. Tie-break across surviving candidates: smallest |entry.providesStates|
+ *      wins (most specific match; fewer extra states the chain didn't ask
+ *      for). Ties break by array order in the registry.
  *
  * Returns the chosen entry's `@@FILE:<path>` ref plus its `providesValues`
  * (the per-fixture modelDerived value source — #162 PR 1), or `undefined`
- * when no entry of the right kind exists at all (the caller then falls
- * back to a hard-coded default).
+ * when no entry of the right kind exists at all.
  *
- * When no entry of the right kind covers `requiredStates` (a real
+ * When neither (a) nor (b) finds a covering candidate (a real
  * misconfiguration — the chain asked for a state nothing provides), the
  * function still returns the first entry of that kind so the caller can
  * emit a runnable suite; the diagnostic should be caught earlier by the
  * fixture-registry validator or the bundled-spec invariants.
+ *
+ * `hardRequiredStates` is optional — callers that don't compute a hard/
+ * soft split pass `undefined` and get single-tier (a)-only selection.
  */
 function chooseFixtureFromRegistry(
   kind: string | undefined,
   requiredStates: ReadonlySet<string>,
   kindLevelProvides: ReadonlySet<string>,
-): { ref: string; providesValues?: Record<string, string[]> } | undefined {
+  hardRequiredStates?: ReadonlySet<string>,
+):
+  | {
+      ref: string;
+      providesValues?: Record<string, string[]>;
+      providesElements?: { id: string; type: string }[];
+    }
+  | undefined {
   if (!kind) return undefined;
   const candidates = getArtifactsRegistry().filter((e) => e.kind === kind);
   if (candidates.length === 0) return undefined;
 
-  const covers = candidates.filter((e) => {
+  const effectiveProvides = (e: { providesStates?: string[] }) => {
     const provides = new Set<string>(kindLevelProvides);
     for (const s of e.providesStates ?? []) provides.add(s);
-    for (const r of requiredStates) {
-      if (!provides.has(r)) return false;
-    }
+    return provides;
+  };
+  const isSuperset = (provides: Set<string>, required: ReadonlySet<string>) => {
+    for (const r of required) if (!provides.has(r)) return false;
     return true;
-  });
+  };
+
+  // Two-tier selection (#305 Phase 3): try the full requirement set first
+  // (hard + soft). If nothing covers, drop the soft `chainCleanupRequires`
+  // bias and retry with hardRequiredStates alone — hard states (semantic
+  // op.requires, runtimeEmission `emittedBy.guardedBy` guards) are
+  // necessary for the chain to function at runtime; soft states are
+  // hygiene preferences that may legitimately conflict with a hard
+  // requirement (e.g. a self-completing BPMN can't also contain a
+  // user-task element). Only when no fixture covers the hard set
+  // either do we fall through to the first registered candidate.
+  let covers = candidates.filter((e) => isSuperset(effectiveProvides(e), requiredStates));
+  if (covers.length === 0 && hardRequiredStates && hardRequiredStates.size > 0) {
+    covers = candidates.filter((e) => isSuperset(effectiveProvides(e), hardRequiredStates));
+  }
 
   // Fall back to the first registered candidate when the requirement is
   // unsatisfiable — the caller still gets a runnable suite, and the
@@ -1660,6 +1968,7 @@ function chooseFixtureFromRegistry(
     return {
       ref: `@@FILE:${fallback.path}`,
       providesValues: fallback.providesValues,
+      providesElements: fallback.providesElements,
     };
   }
   const best = covers.reduce((acc, e) => {
@@ -1670,6 +1979,7 @@ function chooseFixtureFromRegistry(
   return {
     ref: `@@FILE:${best.path}`,
     providesValues: best.providesValues,
+    providesElements: best.providesElements,
   };
 }
 
@@ -1701,7 +2011,9 @@ function chooseFixtureFromRegistry(
  * fixture of the right kind is acceptable.
  */
 function computeDeploymentRequiredStates(
-  scenario: { operations?: ReadonlyArray<{ operationId: string }> } | undefined,
+  scenario:
+    | { operations?: ReadonlyArray<{ operationId: string }>; producedSemanticTypes?: string[] }
+    | undefined,
   domain: DomainSemantics | undefined,
 ): Set<string> {
   const result = new Set<string>();
@@ -1713,6 +2025,7 @@ function computeDeploymentRequiredStates(
     for (const s of req.requires ?? []) result.add(s);
     for (const s of req.chainCleanupRequires ?? []) result.add(s);
   }
+  for (const g of collectRuntimeEmissionGuards(scenario, domain)) result.add(g);
   // States produced by non-deployment-gateway ops earlier in the chain are
   // satisfied by their own producer step; the deployment gateway doesn't
   // need to provide them. The deployment-gateway op is identified via the
@@ -1725,4 +2038,94 @@ function computeDeploymentRequiredStates(
     for (const s of req.implicitAdds ?? []) result.delete(s);
   }
   return result;
+}
+
+/**
+ * #305 Phase 3 — the **hard** subset of deployment-required states: those
+ * whose absence would break the chain at runtime (semantic op.requires +
+ * runtimeEmission `emittedBy.guardedBy` guards), excluding the soft
+ * hygiene preferences from `chainCleanupRequires`. Used by the fixture
+ * selector as a fallback predicate when no candidate covers the full
+ * (hard ∪ soft) requirement set — a self-completing BPMN can't
+ * simultaneously contain a user-task element, so the selector must
+ * privilege correctness over hygiene.
+ */
+function computeDeploymentHardRequiredStates(
+  scenario:
+    | { operations?: ReadonlyArray<{ operationId: string }>; producedSemanticTypes?: string[] }
+    | undefined,
+  domain: DomainSemantics | undefined,
+): Set<string> {
+  const result = new Set<string>();
+  if (!scenario?.operations || !domain?.operationRequirements) return result;
+  const opReqs = domain.operationRequirements;
+  for (const opRef of scenario.operations) {
+    const req = opReqs[opRef.operationId];
+    if (!req) continue;
+    for (const s of req.requires ?? []) result.add(s);
+  }
+  for (const g of collectRuntimeEmissionGuards(scenario, domain)) result.add(g);
+  for (const opRef of scenario.operations) {
+    if (isDeploymentGatewayOp(domain, opRef.operationId)) continue;
+    const req = opReqs[opRef.operationId];
+    if (!req) continue;
+    for (const s of req.produces ?? []) result.delete(s);
+    for (const s of req.implicitAdds ?? []) result.delete(s);
+  }
+  return result;
+}
+
+/**
+ * Walk the scenario's `producedSemanticTypes` and yield every
+ * `emittedBy.guardedBy` capability declared by a `runtimeEmission`
+ * semantic type in the ABox. Shared by `computeDeploymentRequiredStates`
+ * and `computeDeploymentHardRequiredStates`.
+ */
+function collectRuntimeEmissionGuards(
+  scenario:
+    | { producedSemanticTypes?: string[]; operations?: ReadonlyArray<{ operationId: string }> }
+    | undefined,
+  domain: DomainSemantics | undefined,
+): string[] {
+  const out: string[] = [];
+  const semantics = domain?.semanticTypes;
+  if (!semantics || !scenario) return out;
+  const seen = new Set<string>();
+  for (const s of scenario.producedSemanticTypes ?? []) {
+    const decl = semantics[s];
+    if (decl?.kind === 'runtimeEmission' && decl.emittedBy?.guardedBy) {
+      for (const g of decl.emittedBy.guardedBy) {
+        if (!seen.has(g)) {
+          seen.add(g);
+          out.push(g);
+        }
+      }
+    }
+  }
+  // Feature/variant scenarios are cloned from the canonical scenario with
+  // `producedSemanticTypes` stripped (overlay rebuild). Re-derive the
+  // guards by scanning operations for any `runtimeEmission` semantic whose
+  // `discoveredVia.operationId` appears in the chain — that's the
+  // structural signal that the planner expanded a runtimeEmission for
+  // this scenario, independent of whether `producedSemanticTypes` was
+  // re-hydrated.
+  const opIds = new Set((scenario.operations ?? []).map((o) => o.operationId));
+  if (opIds.size > 0) {
+    for (const decl of Object.values(semantics)) {
+      if (
+        decl?.kind === 'runtimeEmission' &&
+        decl.discoveredVia?.operationId &&
+        opIds.has(decl.discoveredVia.operationId) &&
+        decl.emittedBy?.guardedBy
+      ) {
+        for (const g of decl.emittedBy.guardedBy) {
+          if (!seen.has(g)) {
+            seen.add(g);
+            out.push(g);
+          }
+        }
+      }
+    }
+  }
+  return out;
 }

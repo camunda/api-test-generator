@@ -177,7 +177,7 @@ import { resolveFile } from './fixtures.js';
 const EXTRACTS: DeployExtract[] = {{{extracts}}};
 
 export async function deploy(
-  ctx, request, body, baseUrl, strips,
+  ctx, request, body, baseUrl,
 ) { /* loops EXTRACTS internally */ }
 ```
 
@@ -222,7 +222,7 @@ HTML-escaped.
 `call-site.tmpl` for the role:
 
 ```hbs
-const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}}, {{{strips}}});
+const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}});
 ```
 
 Rendered spec file (excerpt):
@@ -235,7 +235,7 @@ import { deploy } from './support/deploymentGateway';
 
 test('publish a process and start an instance', async ({ request, baseUrl }, ctx) => {
   // ... earlier steps ...
-  const resp7 = await deploy(ctx, request, body7, baseUrl, STRIPS);
+  const resp7 = await deploy(ctx, request, body7, baseUrl);
   // ... later steps consume ctx.processDefinitionKeyVar ...
 });
 ```
@@ -265,7 +265,7 @@ spec file:
 | `supportImportPath` | string | Renderer-computed relative path from the current spec file to `playwright/support/<role>` (no extension; Playwright/TypeScript resolves both `.ts` and `.js` per the suite's `tsconfig`). Typically `./support/<role>` for spec files at the suite root, `../support/<role>` for spec files in subdirectories. Authors should always interpolate this with triple-braces. |
 
 Per-step variables (`respVar`, `body`, `operationId`,
-`pathTemplate`, `method`, `request`, `baseUrl`, `strips`, `ctx`,
+`pathTemplate`, `method`, `request`, `baseUrl`, `ctx`,
 `defaultRender`) are **not** in `imports.tmpl` scope. Referencing
 them is a template-render error so that mistakes fail at codegen time
 rather than producing whichever step's value happened to win.
@@ -332,7 +332,6 @@ extensions are documented in this file under the per-emitter section.
 | `request` | string | Name of the Playwright `request` fixture in scope (typically `request`). |
 | `baseUrl` | string | Name of the base-URL variable in scope (typically `baseUrl`). |
 | `body` | string | TypeScript expression evaluating to the request body for this step. JSON literal, multipart builder call, or `undefined`. |
-| `strips` | string | JSON literal expression for the strip-on-sentinel rules derived from `globalContextSeeds`. |
 
 `roleExtras` populated by registered `RoleHookProvider`s is also spread
 into both the call-site scope and the support-file template scope (see
@@ -356,7 +355,7 @@ one — e.g. the OCA `deploymentGateway` role wraps a multipart upload
 with response-field extraction and an OCA-specific error envelope.
 
 ```hbs
-const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}}, {{{strips}}});
+const {{respVar}} = await deploy({{{ctx}}}, {{{request}}}, {{{body}}}, {{{baseUrl}}});
 ```
 
 ### Wrap

@@ -28,8 +28,37 @@ function loadCredentials(): Credentials {
 
 export const credentials: Credentials = loadCredentials();
 
+/**
+ * Credentials for the read-side RBAC deny-test probe user (#359) — a non-admin
+ * user with NO grants, created by the suite global-setup. Deny-tests authenticate
+ * as this user so an authorizations-enabled server rejects the request. Defaults
+ * to `rbac-deny-probe` / a fixed dev password; override via env for CI.
+ */
+export interface ProbeCredentials {
+  username: string;
+  password: string;
+}
+
+export const denyProbeCredentials: ProbeCredentials = {
+  username: process.env.RBAC_DENY_PROBE_USER || 'rbac-deny-probe',
+  password: process.env.RBAC_DENY_PROBE_PASSWORD || 'rbac-deny-probe-pw',
+};
+
 function encode(value: string): string {
   return Buffer.from(value).toString('base64');
+}
+
+/** Basic-auth header for an arbitrary user (used by the RBAC deny probe). */
+export function basicAuthHeaders(username: string, password: string): Record<string, string> {
+  return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+}
+
+/**
+ * Authorization header for the zero-grant RBAC deny-test probe user (#359).
+ * Never the admin — the whole point is that this principal lacks permissions.
+ */
+export function denyProbeHeaders(): Record<string, string> {
+  return basicAuthHeaders(denyProbeCredentials.username, denyProbeCredentials.password);
 }
 
 /**

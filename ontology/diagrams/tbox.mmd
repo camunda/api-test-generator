@@ -1,0 +1,16 @@
+%% api-test-generator Ontology TBox (camunda-oca) — 7 JSON Schema slices
+graph LR
+  edge["**Edge**<br/>edge.schema.json"]
+  entity_kinds["**EntityKind**<br/>entity-kinds.schema.json"]
+  artifact_kinds["**ArtifactKind**<br/>artifact-kinds.schema.json"]
+  runtime_states["**RuntimeState**<br/>runtime-states.schema.json"]
+  semantics["**SemanticType**<br/>semantics.schema.json"]
+  global_context_seeds["**GlobalContextSeed**<br/>global-context-seeds.schema.json"]
+  scenario_template["**ScenarioTemplate**<br/>scenario-template.schema.json"]
+
+  edge -->|"endpoints.from/to"| entity_kinds
+  edge -->|"identifiedBy"| semantics
+  artifact_kinds -->|"producesSemantics"| semantics
+  runtime_states -->|"operationRequirements"| entity_kinds
+  scenario_template -->|"appliesTo (edge)"| edge
+  scenario_template -->|"appliesTo (entity)"| entity_kinds

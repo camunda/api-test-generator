@@ -270,3 +270,160 @@ describe('SemanticGraphExtractor.extractGraph(): JSON input parsing', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// #330 — parameter whose schema is a union of branded-key schemas.
+//
+// `getResourceContent` declares `path.resourceKey` as `$ref: ResourceKey`
+// where `ResourceKey = oneOf [ProcessDefinitionKey, FormKey]`. Each branch
+// carries its own `x-semantic-type` and has a producer in the graph.
+//
+// Pre-#330 behaviour (the bug):
+//   - `findSemanticTypeInSchema` only walked `allOf`, so the union returned
+//     `undefined`.
+//   - A ref-name heuristic synthesised the string "ResourceKey" \u2014 a name
+//     no schema, producer or consumer in the spec ever uses.
+//   - The graph-builder's strict `===` equality found zero producers of
+//     "ResourceKey", so the consumer had zero incoming edges and the planner
+//     fell back to a free-form placeholder that fails the server's `LongKey`
+//     regex (`^-?[0-9]+$`).
+//
+// Post-#330: the extractor walks `oneOf` (and `anyOf`, `$ref`), collects every
+// branch's `x-semantic-type` into `semanticTypeAlternatives`, and the
+// graph-builder treats a producer of any branch as a valid edge source.
+// ---------------------------------------------------------------------------
+const fixtureUnionOfBrandedKeysParam: OpenAPISpec = {
+  openapi: '3.0.3',
+  info: { title: 'fixture-union-of-branded-keys-param', version: '0.0.0' },
+  components: {
+    schemas: {
+      ProcessDefinitionKey: {
+        type: 'string',
+        'x-semantic-type': 'ProcessDefinitionKey',
+      },
+      FormKey: {
+        type: 'string',
+        'x-semantic-type': 'FormKey',
+      },
+      ResourceKey: {
+        oneOf: [
+          { $ref: '#/components/schemas/ProcessDefinitionKey' },
+          { $ref: '#/components/schemas/FormKey' },
+        ],
+      },
+    },
+  },
+  paths: {
+    '/process-definitions/deploy': {
+      post: {
+        operationId: 'deployProcessDefinition',
+        responses: {
+          '200': {
+            description: 'ok',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    processDefinitionKey: {
+                      type: 'string',
+                      'x-semantic-type': 'ProcessDefinitionKey',
+                      'x-semantic-provider': true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/forms/deploy': {
+      post: {
+        operationId: 'deployForm',
+        responses: {
+          '200': {
+            description: 'ok',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    formKey: {
+                      type: 'string',
+                      'x-semantic-type': 'FormKey',
+                      'x-semantic-provider': true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/resources/{resourceKey}/content': {
+      get: {
+        operationId: 'getResourceContent',
+        parameters: [
+          {
+            name: 'resourceKey',
+            in: 'path',
+            required: true,
+            schema: { $ref: '#/components/schemas/ResourceKey' },
+          },
+        ],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+  },
+};
+
+describe('#330: parameter with oneOf-of-branded-keys schema', () => {
+  it('records every branch x-semantic-type in semanticTypeAlternatives', () => {
+    const analyzer = new SchemaAnalyzer();
+    const operations = analyzer.extractOperations(fixtureUnionOfBrandedKeysParam);
+    const consumer = operations.find((o) => o.operationId === 'getResourceContent');
+    expect(consumer, 'getResourceContent operation must be extracted').toBeDefined();
+    const param = consumer?.parameters.find((p) => p.name === 'resourceKey');
+    expect(param).toBeDefined();
+    expect(param?.semanticTypeAlternatives).toEqual(
+      expect.arrayContaining(['ProcessDefinitionKey', 'FormKey']),
+    );
+    // Singular is set to the first branch for back-compat with code paths
+    // that key on a single string (planner `requires`, scenario generator
+    // path-param lookup).
+    expect(param?.semanticType).toBe('ProcessDefinitionKey');
+  });
+
+  it('does NOT fall back to the ref-name heuristic when union branches resolve', () => {
+    const analyzer = new SchemaAnalyzer();
+    const operations = analyzer.extractOperations(fixtureUnionOfBrandedKeysParam);
+    const consumer = operations.find((o) => o.operationId === 'getResourceContent');
+    const param = consumer?.parameters.find((p) => p.name === 'resourceKey');
+    // Pre-#330 the heuristic synthesised the literal string "ResourceKey",
+    // which appears nowhere in `components.schemas` as a semantic type.
+    expect(param?.semanticType).not.toBe('ResourceKey');
+    expect(param?.semanticTypeAlternatives).not.toContain('ResourceKey');
+  });
+
+  it('creates an edge from any branch producer to the union consumer', () => {
+    const graph = buildGraphFrom(fixtureUnionOfBrandedKeysParam);
+
+    const fromProcess = graph.edges.find(
+      (e) =>
+        e.sourceOperationId === 'deployProcessDefinition' &&
+        e.targetOperationId === 'getResourceContent',
+    );
+    const fromForm = graph.edges.find(
+      (e) => e.sourceOperationId === 'deployForm' && e.targetOperationId === 'getResourceContent',
+    );
+
+    expect(fromProcess, 'expected edge deployProcessDefinition → getResourceContent').toBeDefined();
+    expect(fromForm, 'expected edge deployForm → getResourceContent').toBeDefined();
+    // Edge label is the PRODUCER's branch type (not the union name) so
+    // materialisation can chase the producer's response field path.
+    expect(fromProcess?.semanticType).toBe('ProcessDefinitionKey');
+    expect(fromForm?.semanticType).toBe('FormKey');
+  });
+});

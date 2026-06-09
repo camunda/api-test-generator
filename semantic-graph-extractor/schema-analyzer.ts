@@ -163,6 +163,13 @@ export class SchemaAnalyzer {
     // Extract response semantic types
     const responseSemanticTypes = this.extractResponseSemanticTypes(operation.responses, spec);
 
+    // #305 Phase 4: collect every primitive response leaf path per
+    // status code (regardless of `x-semantic-type`). Powers the
+    // UpdatedFieldVisibleOnReadBack instantiator's name-based bridge
+    // from a mutator's emitted request body to the fetcher's
+    // observable response.
+    const responseLeafPaths = this.extractResponseLeafPaths(operation.responses, spec);
+
     // Classify operation type
     const operationType = this.classifyOperation(operation, path, method);
 
@@ -310,6 +317,7 @@ export class SchemaAnalyzer {
       operationMetadata,
       conditionalIdempotency,
       establishes,
+      responseLeafPaths,
     };
   }
 
@@ -342,29 +350,40 @@ export class SchemaAnalyzer {
    */
   private extractParameter(param: ParameterObject, spec: OpenAPISpec): OperationParameter {
     let semanticType: string | undefined;
+    let semanticTypeAlternatives: string[] | undefined;
     let provider: boolean | undefined;
     if (param.schema) {
-      // If schema is a $ref, resolve and search for x-semantic-type
+      // #330: collect every branch semantic type reachable through
+      // `$ref` / `allOf` / `oneOf` / `anyOf`. Works for both inline and
+      // referenced schemas.
+      const alternatives = this.findSemanticTypeAlternativesInSchema(param.schema, spec);
+      if (alternatives.length > 0) {
+        semanticTypeAlternatives = alternatives;
+        semanticType = alternatives[0];
+      }
       if ('$ref' in param.schema && param.schema.$ref) {
         const ref = param.schema.$ref;
         const resolved = this.resolveReference<Schema>(ref, spec);
         if (resolved) {
-          semanticType = this.findSemanticTypeInSchema(resolved);
+          // Provider flag still keys off the (single) resolved schema's
+          // own annotation — unions don't carry `x-semantic-provider`.
           if (semanticType && resolved['x-semantic-provider'] === true) {
             provider = true;
           }
-          // Heuristic: if still not found, derive from last segment of ref if it looks like a semantic type (PascalCase + Key suffix)
+          // #330: ref-name heuristic only fires when union-walking also
+          // returned nothing. Its previous role of short-circuiting with
+          // a synthetic name (e.g. `ResourceKey`) actively suppressed the
+          // union resolution; kept here as a tertiary fallback for
+          // operations whose key-shaped ref still has no branch
+          // annotations, so behaviour doesn't regress.
           if (!semanticType) {
             const name = ref.split('/').pop();
             if (name && /[A-Z]/.test(name) && /Key$/.test(name)) {
-              // Only assign if that schema ultimately expands to a semantic type in its allOf/oneOf chain
               semanticType = name;
             }
           }
         }
       } else if (!('$ref' in param.schema)) {
-        // Direct inline schema: check x-semantic-type
-        semanticType = param.schema['x-semantic-type'];
         if (semanticType && param.schema['x-semantic-provider'] === true) {
           provider = true;
         }
@@ -378,6 +397,7 @@ export class SchemaAnalyzer {
       name: param.name,
       location: param.in,
       semanticType,
+      semanticTypeAlternatives,
       required: param.required || param.in === 'path', // path params are always required
       description: param.description,
       schema,
@@ -453,6 +473,93 @@ export class SchemaAnalyzer {
     }
 
     return result;
+  }
+
+  /**
+   * #305 Phase 4: collect ALL primitive leaf paths from a response
+   * schema, regardless of semantic-type annotation. Used by the
+   * UpdatedFieldVisibleOnReadBack instantiator to name-match a
+   * mutator's emitted body fields against the fetcher's observable
+   * response shape. Arrays appear as `prefix[].leaf`. Cycles in `$ref`
+   * chains are broken with a per-walk seen-set.
+   */
+  private extractResponseLeafPaths(
+    responses: ResponsesObject,
+    spec: OpenAPISpec,
+  ): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+    for (const [statusCode, response] of Object.entries(responses)) {
+      let resolved: ResponseObject | null;
+      if (response && typeof response === 'object' && '$ref' in response) {
+        resolved = this.resolveReference<ResponseObject>(response.$ref, spec);
+        if (!resolved) continue;
+      } else {
+        resolved = response;
+      }
+      const leaves: string[] = [];
+      if (resolved.content) {
+        for (const mediaType of Object.values(resolved.content)) {
+          if (mediaType.schema) {
+            this.collectLeafPaths(mediaType.schema, '', leaves, spec, new Set());
+          }
+        }
+      }
+      result[statusCode] = Array.from(new Set(leaves));
+    }
+    return result;
+  }
+
+  private collectLeafPaths(
+    schema: Schema | ReferenceObject,
+    fieldPath: string,
+    leaves: string[],
+    spec: OpenAPISpec,
+    seenRefs: Set<string>,
+  ): void {
+    const actual: Schema | ReferenceObject = schema;
+    if ('$ref' in schema && schema.$ref) {
+      if (seenRefs.has(schema.$ref)) return;
+      const nextSeen = new Set(seenRefs);
+      nextSeen.add(schema.$ref);
+      const resolved = this.resolveReference<Schema>(schema.$ref, spec);
+      if (!resolved) return;
+      this.collectLeafPaths(resolved, fieldPath, leaves, spec, nextSeen);
+      return;
+    }
+    // biome-ignore lint/plugin: After the $ref branch, value is structurally a Schema.
+    const s = actual as Schema;
+    const hasProps = s.properties && Object.keys(s.properties).length > 0;
+    const hasItems = !!s.items;
+    const hasComposite = !!(s.allOf || s.oneOf || s.anyOf);
+    if (!hasProps && !hasItems && !hasComposite) {
+      if (fieldPath) leaves.push(fieldPath);
+      return;
+    }
+    if (s.properties) {
+      for (const [name, sub] of Object.entries(s.properties)) {
+        const next = fieldPath ? `${fieldPath}.${name}` : name;
+        this.collectLeafPaths(sub, next, leaves, spec, seenRefs);
+      }
+    }
+    if (s.items) {
+      const next = fieldPath ? `${fieldPath}[]` : '[]';
+      this.collectLeafPaths(s.items, next, leaves, spec, seenRefs);
+    }
+    if (s.allOf) {
+      s.allOf.forEach((sub) => {
+        this.collectLeafPaths(sub, fieldPath, leaves, spec, seenRefs);
+      });
+    }
+    if (s.oneOf) {
+      s.oneOf.forEach((sub) => {
+        this.collectLeafPaths(sub, fieldPath, leaves, spec, seenRefs);
+      });
+    }
+    if (s.anyOf) {
+      s.anyOf.forEach((sub) => {
+        this.collectLeafPaths(sub, fieldPath, leaves, spec, seenRefs);
+      });
+    }
   }
 
   /**
@@ -685,6 +792,53 @@ export class SchemaAnalyzer {
     }
 
     return undefined;
+  }
+
+  /**
+   * #330: collect ALL semantic-type annotations reachable from a schema by
+   * walking `$ref`, `allOf`, `oneOf` and `anyOf` transitively. Used for
+   * parameters whose declared schema is a union of branded-key schemas
+   * (e.g. `ResourceKey = oneOf [ProcessDefinitionKey, FormKey, …]`) so the
+   * graph builder can recognise a producer of any single branch as a valid
+   * satisfier for the union consumer.
+   *
+   * De-duplicated, declaration-order preserved (matters because callers pick
+   * the first entry as the singular `semanticType` for back-compat).
+   * `$ref` cycles are broken by a `seen` set keyed on the ref pointer.
+   */
+  private findSemanticTypeAlternativesInSchema(
+    schema: Schema | ReferenceObject,
+    spec: OpenAPISpec,
+    seen: Set<string> = new Set(),
+  ): string[] {
+    const out: string[] = [];
+    const push = (st: string | undefined) => {
+      if (st && !out.includes(st)) out.push(st);
+    };
+    if ('$ref' in schema) {
+      const ref = schema.$ref;
+      if (!ref) return out;
+      if (seen.has(ref)) return out;
+      seen.add(ref);
+      const resolved = this.resolveReference<Schema>(ref, spec);
+      if (resolved) {
+        for (const st of this.findSemanticTypeAlternativesInSchema(resolved, spec, seen)) {
+          push(st);
+        }
+      }
+      return out;
+    }
+    push(schema['x-semantic-type']);
+    for (const branch of schema.allOf ?? []) {
+      for (const st of this.findSemanticTypeAlternativesInSchema(branch, spec, seen)) push(st);
+    }
+    for (const branch of schema.oneOf ?? []) {
+      for (const st of this.findSemanticTypeAlternativesInSchema(branch, spec, seen)) push(st);
+    }
+    for (const branch of schema.anyOf ?? []) {
+      for (const st of this.findSemanticTypeAlternativesInSchema(branch, spec, seen)) push(st);
+    }
+    return out;
   }
 
   /**

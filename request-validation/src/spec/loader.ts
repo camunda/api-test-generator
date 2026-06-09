@@ -49,6 +49,51 @@ function asDiscriminator(
   return { propertyName, mapping };
 }
 
+/**
+ * Collect the names of security schemes that declare `x-enforcement:
+ * conditional` (camunda/camunda#53708). These are enforced only under
+ * certain deployment-mode profiles (e.g. the `auth: [secured]` axis) and
+ * bypassed otherwise, so an operation referencing one is the auth-absent
+ * (401) test surface for the secured profile.
+ */
+function collectConditionalSchemes(api: unknown): Set<string> {
+  const names = new Set<string>();
+  if (isRecord(api) && isRecord(api.components) && isRecord(api.components.securitySchemes)) {
+    for (const [name, scheme] of Object.entries(api.components.securitySchemes)) {
+      if (isRecord(scheme) && scheme['x-enforcement'] === 'conditional') {
+        names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * Evaluate an OpenAPI `security` requirement list against the set of
+ * conditionally-enforced scheme names.
+ *
+ * - `true`      — at least one requirement references a conditional scheme.
+ * - `false`     — the list is present but references no conditional scheme
+ *                 (including the explicit `security: []` public override).
+ * - `undefined` — no `security` declared at this level; the caller should
+ *                 fall back to the global `security`.
+ */
+function securityRequiresConditional(
+  security: unknown,
+  conditional: Set<string>,
+): boolean | undefined {
+  if (!Array.isArray(security)) return undefined;
+  if (security.length === 0) return false;
+  for (const requirement of security) {
+    if (isRecord(requirement)) {
+      for (const schemeName of Object.keys(requirement)) {
+        if (conditional.has(schemeName)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function buildParameter(raw: unknown): ParameterModel | undefined {
   if (!isRecord(raw)) return undefined;
   const name = asString(raw.name);
@@ -65,14 +110,42 @@ function buildParameter(raw: unknown): ParameterModel | undefined {
   };
 }
 
+function extractResponseInfo(op: Record<string, unknown>): {
+  responseCodes: string[];
+  successIsCollection: boolean;
+} {
+  const responses = isRecord(op.responses) ? op.responses : {};
+  const responseCodes = Object.keys(responses);
+  let successIsCollection = false;
+  for (const code of ['200', '201']) {
+    const r = responses[code];
+    if (!isRecord(r) || !isRecord(r.content)) continue;
+    const json = asSchemaFragment(r.content['application/json']);
+    const schema = json?.schema ? asSchemaFragment(json.schema) : undefined;
+    if (schema && isRecord(schema.properties)) {
+      const props = Object.keys(schema.properties);
+      if (props.includes('items') || props.includes('page')) {
+        successIsCollection = true;
+        break;
+      }
+    }
+  }
+  return { responseCodes, successIsCollection };
+}
+
 export async function loadSpec(file: string): Promise<SpecModel> {
   const api: unknown = await SwaggerParser.dereference(file);
   const operations: OperationModel[] = [];
   const paths = isRecord(api) && isRecord(api.paths) ? api.paths : {};
+  const conditionalSchemes = collectConditionalSchemes(api);
+  const globalSecurity = isRecord(api) ? api.security : undefined;
   for (const [p, methods] of Object.entries(paths)) {
     if (!isRecord(methods)) continue;
     // Path-level parameters are inherited by every operation under the path.
     const pathLevelParams = Array.isArray(methods.parameters) ? methods.parameters : [];
+    // Path-item-level `security` sits between operation-level and global in the
+    // OpenAPI precedence chain (op.security ?? pathItem.security ?? global).
+    const pathLevelSecurity = methods.security;
     for (const [m, op] of Object.entries(methods)) {
       const method = m.toUpperCase();
       if (!isRecord(op)) continue;
@@ -120,6 +193,7 @@ export async function loadSpec(file: string): Promise<SpecModel> {
           discriminator = asDiscriminator(requestBodySchema.discriminator);
         }
       }
+      const { responseCodes, successIsCollection } = extractResponseInfo(op);
       operations.push({
         operationId,
         method,
@@ -134,6 +208,13 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         multipartSchema,
         multipartRequiredProps,
         mediaTypes,
+        responseCodes,
+        successIsCollection,
+        conditionalAuth:
+          securityRequiresConditional(op.security, conditionalSchemes) ??
+          securityRequiresConditional(pathLevelSecurity, conditionalSchemes) ??
+          securityRequiresConditional(globalSecurity, conditionalSchemes) ??
+          false,
       });
     }
   }

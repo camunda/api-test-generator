@@ -15,7 +15,19 @@ import { getRequestValidationSuiteDir } from '../path-analyser/src/configResolve
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), '..');
 
-const config = join(getRequestValidationSuiteDir(REPO_ROOT), 'playwright.config.ts');
+// The request-validation suite is emitted as parallel profiles:
+//   unsecured/ — 400 validation tests, plain local dev server (default)
+//   secured/   — 400 tests + auth-absent (401) tests, secured server
+//   rbac/      — read-side RBAC deny (403) tests; needs an authorizations-enabled
+//                server + admin creds (the global-setup provisions a zero-grant
+//                probe user). Select via RV_PROFILE=secured | rbac.
+const PROFILES = ['unsecured', 'secured', 'rbac'] as const;
+type Profile = (typeof PROFILES)[number];
+function isProfile(v: string | undefined): v is Profile {
+  return v !== undefined && PROFILES.some((p) => p === v);
+}
+const profile: Profile = isProfile(process.env.RV_PROFILE) ? process.env.RV_PROFILE : 'unsecured';
+const config = join(getRequestValidationSuiteDir(REPO_ROOT), profile, 'playwright.config.ts');
 
 const child = spawn('npx', ['playwright', 'test', '-c', config, ...process.argv.slice(2)], {
   stdio: 'inherit',

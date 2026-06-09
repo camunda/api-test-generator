@@ -1,0 +1,29 @@
+%% api-test-generator ABox (camunda-oca) — entity kinds and membership edges
+graph LR
+  Role(Role)
+  User(User)
+  Tenant(Tenant)
+  Group(Group)
+  MappingRule(MappingRule)
+  GlobalTaskListener(GlobalTaskListener)
+  GlobalClusterVariable(GlobalClusterVariable)
+  TenantClusterVariable(TenantClusterVariable)
+  Authorization(Authorization)
+  Document(Document)
+  Client(Client)
+  UserTask{UserTask}
+  Incident{Incident}
+  ProcessInstance{ProcessInstance}
+
+  Role -->|"RoleUserMembership"| User
+  Tenant -->|"TenantUserMembership"| User
+  Group -->|"GroupUserMembership"| User
+  Role -->|"RoleMappingRuleMembership"| MappingRule
+  Group -->|"GroupMappingRuleMembership"| MappingRule
+  Tenant -->|"TenantMappingRuleMembership"| MappingRule
+  Role -->|"RoleGroupMembership"| Group
+  Role -->|"RoleClientMembership"| Client
+  Group -->|"GroupClientMembership"| Client
+  Tenant -->|"TenantClientMembership"| Client
+  Tenant -->|"TenantGroupMembership"| Group
+  Tenant -->|"TenantRoleMembership"| Role

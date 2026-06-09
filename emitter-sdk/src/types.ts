@@ -187,6 +187,20 @@ export interface EmitterStrategy {
   readonly roleHooks?: readonly string[];
 
   /**
+   * Declarative upstream operation-map source for SDK emitters. When
+   * present, the generic SDK-map fetcher (`scripts/fetch-sdk-maps.ts`,
+   * driven off the `list-targets` projection) sparse-clones `repo` and
+   * copies `path` to `out`, instead of each emitter shipping its own
+   * bespoke `fetch-<lang>-map` script.
+   *
+   * This is **declarative metadata only** — the emitter never performs
+   * the fetch itself, preserving the purity of {@link emit}. The
+   * orchestrator/build layer reads the declaration and runs the (impure)
+   * clone. Omit for emitters with no upstream map (e.g. Playwright).
+   */
+  readonly sdkMap?: EmitterSdkMap;
+
+  /**
    * One-shot per-suite scaffolding. Returns the framing files for the
    * emitted project (e.g. `package.json`, `tsconfig.json`, `README.md`,
    * `playwright.config.ts`). Called once per CLI invocation, before any
@@ -200,6 +214,25 @@ export interface EmitterStrategy {
    * filesystem, no network, no global state.
    */
   emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]>;
+}
+
+/**
+ * Declarative description of an emitter's upstream operation-map source.
+ * Consumed by the generic SDK-map fetcher and exposed via the
+ * `list-targets` registry projection.
+ */
+export interface EmitterSdkMap {
+  /** Upstream repository, `owner/name` (e.g. `camunda/orchestration-cluster-api-js`). */
+  readonly repo: string;
+  /** Path to the map file within the upstream repo (e.g. `examples/operation-map.json`). */
+  readonly path: string;
+  /**
+   * Environment variable controlling the fetched ref (branch/tag/SHA).
+   * Defaults to `main` when the variable is unset.
+   */
+  readonly refEnv: string;
+  /** Output path, relative to the repo root (e.g. `spec/js-sdk/operation-map.json`). */
+  readonly out: string;
 }
 
 /**

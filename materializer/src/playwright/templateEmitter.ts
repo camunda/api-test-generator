@@ -6,6 +6,7 @@ import type {
   RequestStep,
   TemplateScenarioFile,
 } from 'path-analyser/types';
+import { computeUniqueBindings, emitCtxSeeding } from './ctxSeeding.js';
 import {
   buildUrlExpression,
   escapeQuotes,
@@ -25,20 +26,33 @@ import {
 export interface TemplateGlobalContextSeed {
   binding: string;
   seedRule: string;
+  /**
+   * Mirrors `GlobalContextSeed.omitWhenUnbound` (#342). When `true`,
+   * `emitCtxSeeding` in `ctxSeeding.ts` skips this entry in BOTH the
+   * universal-seed prologue AND the per-scenario `seedBindings` loop
+   * for consumer-only scenarios; only scenarios that must mint a
+   * fresh value to send (signalled by membership in the emitter's
+   * `uniqueBindings` set — see #320) still seed the binding. Without
+   * this field threaded through to `emitCtxSeeding`, template suites
+   * would auto-seed consumer-only bindings like `tenantIdVar` and
+   * send a fabricated value on the wire that the broker rejects as
+   * unknown.
+   */
+  omitWhenUnbound?: boolean;
 }
 
 export interface EmitTemplateSuitesOptions {
   /**
-   * Absolute path to the EdgeLifecycle scenarios directory, i.e.
-   * `generated/<config>/scenarios/templates/EdgeLifecycle/`.
-   * Each `.json` underneath is read and rendered to one
-   * `<EdgeName>.lifecycle.spec.ts`.
+   * Absolute path to a template's scenarios directory, i.e.
+   * `generated/<config>/scenarios/templates/<TemplateName>/`
+   * (e.g. `EdgeLifecycle`, `EntityLifecycle`). Each `.json` underneath
+   * is read and rendered to one `<Subject>.lifecycle.spec.ts`.
    */
   scenariosDir: string;
   /**
    * Absolute path to the destination directory, i.e.
-   * `generated/<config>/playwright/edges/`. Wiped and recreated by the
-   * caller (the materializer's `run()`).
+   * `generated/<config>/playwright/templates/<TemplateName>/`. Wiped
+   * and recreated by the caller (the materializer's `run()`).
    */
   outDir: string;
   /**
@@ -79,7 +93,7 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
   // or hostile seed value cannot produce invalid (or unsafe) generated
   // code. The per-endpoint emitter's `assertSafeGlobalContextSeeds`
   // helper expects the full GlobalContextSeed schema (fieldName,
-  // defaultSentinel, …) which this entry point does not see — callers
+  // omitWhenUnbound, …) which this entry point does not see — callers
   // project to the narrow {binding, seedRule} shape on the way in. The
   // local check below covers the same risk surface (string-literal
   // injection) for that narrower payload. (#274 review.)
@@ -144,6 +158,33 @@ function renderLifecycleSuite(
   // (materializer CLI, future per-suite invocations) and must not produce
   // a syntactically valid spec that secretly elides a step.
   const subjectKind = file.subjectKind;
+  if (subjectKind === 'RuntimeEntity') {
+    // RuntimeEntity templates share the 3-step shape but differ on the
+    // observe step's assertion kind: `fieldEquals` (#305 Phase 4,
+    // UpdatedFieldVisibleOnReadBack) vs `stateEquals` (#305 Phase 5d /
+    // #189, StateTransitionVisibleAfterAction). Dispatch on the third
+    // step's assertion kind so each render path is self-contained.
+    if (steps.length !== 3) {
+      throw new Error(
+        `RuntimeEntity template ${file.subjectName} must have exactly 3 steps; got ${steps.length}.`,
+      );
+    }
+    const observe = steps[2];
+    if (observe.kind !== 'observe') {
+      throw new Error(
+        `RuntimeEntity template ${file.subjectName} step 2 must be an observe step (got '${observe.kind}').`,
+      );
+    }
+    if (observe.assertion.kind === 'fieldEquals') {
+      return renderReadBackSuite(file, globalContextSeeds);
+    }
+    if (observe.assertion.kind === 'stateEquals') {
+      return renderStateTransitionSuite(file, globalContextSeeds);
+    }
+    throw new Error(
+      `RuntimeEntity template ${file.subjectName} observe.assertion.kind must be 'fieldEquals' or 'stateEquals' (got '${observe.assertion.kind}').`,
+    );
+  }
   if (subjectKind !== 'Edge' && subjectKind !== 'Entity') {
     throw new Error(
       `Unknown subjectKind '${String(subjectKind)}' on template scenario for ${file.subjectName}.`,
@@ -162,13 +203,23 @@ function renderLifecycleSuite(
   if (establish.kind !== 'invoke') {
     throw new Error(`Step 1 of ${file.subjectName} must be an invoke step.`);
   }
-  if (observePresent.kind !== 'observe' || observePresent.assertion.expect !== 'present') {
+  if (
+    observePresent.kind !== 'observe' ||
+    observePresent.assertion.kind === 'fieldEquals' ||
+    observePresent.assertion.kind === 'stateEquals' ||
+    observePresent.assertion.expect !== 'present'
+  ) {
     throw new Error(`Step 2 of ${file.subjectName} must be a present-observe step.`);
   }
   if (revoke.kind !== 'invoke') {
     throw new Error(`Step 3 of ${file.subjectName} must be an invoke step.`);
   }
-  if (observeAbsent.kind !== 'observe' || observeAbsent.assertion.expect !== 'absent') {
+  if (
+    observeAbsent.kind !== 'observe' ||
+    observeAbsent.assertion.kind === 'fieldEquals' ||
+    observeAbsent.assertion.kind === 'stateEquals' ||
+    observeAbsent.assertion.expect !== 'absent'
+  ) {
     throw new Error(`Step 4 of ${file.subjectName} must be an absent-observe step.`);
   }
   // Per-subject assertion-kind consistency check. The instantiator
@@ -227,15 +278,15 @@ function renderLifecycleSuite(
 
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
-  lines.push("import { authHeaders, buildBaseUrl } from '../support/env';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
-  lines.push(`import { ${seedingImports.join(', ')} } from '../support/seeding';`);
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
   if (needsAwaitEventually) {
-    lines.push("import { awaitEventually } from '../support/await-eventually';");
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
   }
   if (needsResolveFixture) {
-    lines.push("import { resolveFixture } from '../support/fixtures';");
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
   }
   lines.push('');
   lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
@@ -247,26 +298,18 @@ function renderLifecycleSuite(
   lines.push('    const baseUrl = buildBaseUrl();');
   lines.push('    const ctx: Record<string, unknown> = {};');
 
-  // (1) universal-seed prologue
-  const globalSeedNames = new Set(globalContextSeeds.map((s) => s.binding));
-  for (const seed of globalContextSeeds) {
-    lines.push(
-      `    ctx['${seed.binding}'] = ctx['${seed.binding}'] ?? seedBinding('${seed.seedRule}');`,
-    );
-  }
-
-  // (2) per-scenario seedBindings (filtered to avoid double-seeding globals)
-  const seedNames = (prereq.seedBindings ?? []).filter((n) => !globalSeedNames.has(n));
-  for (const name of seedNames) {
-    lines.push(`    if (ctx['${name}'] === undefined) {`);
-    lines.push(`      ctx['${name}'] = seedBinding('${name}');`);
-    lines.push('    }');
-  }
-  for (const [k, v] of Object.entries(prereq.bindings)) {
-    if (v === '__PENDING__') continue;
-    if (globalSeedNames.has(k)) continue; // already covered by prologue
-    lines.push(`    ctx['${k}'] = ${JSON.stringify(v)};`);
-  }
+  // Canonical seeding: literals → planner seedBindings → universal
+  // prologue. Shared with `emitter.ts` via `emitCtxSeeding` (#286) so
+  // the two emitters can no longer drift on form or ordering.
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
+    }),
+  );
 
   // (3) prereqChain inline
   let stepIdx = 0;
@@ -447,6 +490,31 @@ function appendObserveMembershipStep(
   const respVar = `resp${idx + 1}`;
   const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
   const method = step.requestPlan.method.toLowerCase();
+  // Resolve binding name + access chains early so we can build the
+  // awaitEventually predicate (passed into `renderInlineStepLines`)
+  // and the post-call membership assertion from the same data. Both
+  // must agree on polarity and target binding \u2014 see #342 follow-up:
+  // without the predicate, the default `items.length > 0` heuristic
+  // drives polling and the absent case times out on a legitimately
+  // empty page (e.g. searchUsersForTenant after the only membership
+  // was unassigned).
+  const bindingName = resolveBindingNameForSemantic(
+    step.assertion.membershipSemanticType,
+    scenarioBindings,
+  );
+  const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
+  if (elementSegments.length === 0) {
+    throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
+  }
+  const shouldWrap = stepNeedsAwaitForOp(step.requestPlan, ecOps);
+  const predicateExpr = shouldWrap
+    ? buildMembershipPredicateExpr({
+        arrayPath: step.assertion.arrayPath,
+        elementSegments,
+        bindingName,
+        expect: step.assertion.expect,
+      })
+    : undefined;
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
   const inline = renderInlineStepLines({
     step: step.requestPlan,
@@ -454,7 +522,8 @@ function appendObserveMembershipStep(
     varName: respVar,
     urlExpr,
     method,
-    shouldAwaitEventually: stepNeedsAwaitForOp(step.requestPlan, ecOps),
+    shouldAwaitEventually: shouldWrap,
+    awaitEventuallyPredicate: predicateExpr,
   });
   for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
   // Membership assertion (template-unique). Walks the planner-declared
@@ -465,7 +534,7 @@ function appendObserveMembershipStep(
   const accessChain = buildOptionalAccessChain('__body', step.assertion.arrayPath);
   lines.push(`      const __raw = ${accessChain};`);
   // Fail loudly when the planner-declared arrayPath does not resolve to
-  // an array — the previous silent `Array.isArray(__raw) ? __raw : []`
+  // an array \u2014 the previous silent `Array.isArray(__raw) ? __raw : []`
   // fallback would let an absent-observe assertion pass against a
   // malformed response (e.g. server returned 200 with an unexpected
   // shape), masking real defects. (#274 review.)
@@ -475,16 +544,8 @@ function appendObserveMembershipStep(
   );
   lines.push('      }');
   lines.push('      const __arr: unknown[] = __raw;');
-  const elementSegments = step.assertion.elementField.split('.').filter((s) => s.length > 0);
-  if (elementSegments.length === 0) {
-    throw new Error(`Empty elementField on observe assertion for operationId=${step.operationId}.`);
-  }
   const elementAccess = buildOptionalAccessChain('r', elementSegments);
   lines.push(`      const __values = __arr.map((r) => ${elementAccess});`);
-  const bindingName = resolveBindingNameForSemantic(
-    step.assertion.membershipSemanticType,
-    scenarioBindings,
-  );
   const verb = step.assertion.expect === 'present' ? 'toContain' : 'not.toContain';
   lines.push(`      expect(__values).${verb}(ctx['${bindingName}']);`);
   // Note: the shared `renderInlineStepLines` does not emit extracts —
@@ -564,6 +625,447 @@ function buildOptionalAccessChain(rootExpr: string, segments: readonly string[])
     acc = `(${acc} as Record<string, unknown> | null | undefined)?.['${seg}']`;
   }
   return acc;
+}
+
+/**
+ * Build a self-contained JS expression for the `predicate:` option of
+ * the `awaitEventually(...)` call wrapping an observe-membership step
+ * (#342 follow-up). The predicate mirrors the post-call membership
+ * assertion so eventual-consistency polling converges to the SAME
+ * observable state the assertion checks for \u2014 not the runtime default
+ * (`items.length > 0`), which is wrong for both polarities:
+ *
+ *   - `expect: 'present'` \u2014 default returns `true` as soon as any item
+ *     surfaces, even if the specific binding value the test cares
+ *     about hasn't propagated yet.
+ *   - `expect: 'absent'`  \u2014 default keeps polling on an empty page,
+ *     so a tenant whose only membership was just revoked times out
+ *     even though the absent assertion would pass immediately.
+ *
+ * The returned expression is an arrow function literal `(body) => { ... }`
+ * that closes over the surrounding scope's `ctx` record (always in
+ * scope inside the emitted `test.step` callback). It narrows
+ * `body: unknown` defensively and returns `false` for any malformed
+ * shape (non-object body, missing array path, non-array value), which
+ * mirrors the assertion's own \u201cthrow on shape mismatch\u201d behaviour
+ * \u2014 the predicate will keep polling until either the shape becomes
+ * correct (and polarity matches) or the budget runs out.
+ */
+function buildMembershipPredicateExpr(opts: {
+  arrayPath: readonly string[];
+  elementSegments: readonly string[];
+  bindingName: string;
+  expect: 'present' | 'absent';
+}): string {
+  const { arrayPath, elementSegments, bindingName, expect } = opts;
+  // Identifier-safety: `bindingName` comes from `resolveBindingNameForSemantic`,
+  // which already enforces an identifier-shape, but we double-check
+  // here because the value is interpolated into a single-quoted JS
+  // string literal in the emitted source.
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bindingName)) {
+    throw new Error(
+      `buildMembershipPredicateExpr: bindingName '${bindingName}' is not a valid JS identifier.`,
+    );
+  }
+  const arrayAccess = buildOptionalAccessChain('body', arrayPath);
+  const elementAccess = buildOptionalAccessChain('r', elementSegments);
+  const negation = expect === 'absent' ? '!' : '';
+  return [
+    '(body) => {',
+    "        if (body === null || typeof body !== 'object') return false;",
+    `        const __raw = ${arrayAccess};`,
+    '        if (!Array.isArray(__raw)) return false;',
+    `        const __values = __raw.map((r) => ${elementAccess});`,
+    `        return ${negation}__values.includes(ctx['${bindingName}']);`,
+    '      }',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// #305 Phase 4 — UpdatedFieldVisibleOnReadBack render path
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a 3-step `UpdatedFieldVisibleOnReadBack` template scenario:
+ *   1. prereqChain inline (establish the runtime entity + bind its id)
+ *   2. invoke (mutator)
+ *   3. observe (fetcher; assert each `fieldEquals` tuple)
+ *
+ * Parallel to {@link renderLifecycleSuite}'s 5-step shape but no
+ * revoke / absent-observe pair (runtime-emitted entities don't have a
+ * client-facing teardown).
+ */
+function renderReadBackSuite(
+  file: TemplateScenarioFile,
+  globalContextSeeds: readonly TemplateGlobalContextSeed[],
+): string {
+  const scenario = file.scenario;
+  const steps = scenario.steps;
+  if (steps.length !== 3) {
+    throw new Error(
+      `UpdatedFieldVisibleOnReadBack template ${file.subjectName} must have exactly 3 steps; got ${steps.length}.`,
+    );
+  }
+  const [prereq, mutate, observe] = steps;
+  if (prereq.kind !== 'prereqChain') {
+    throw new Error(`Step 0 of ${file.subjectName} must be a prereqChain step.`);
+  }
+  if (mutate.kind !== 'invoke') {
+    throw new Error(`Step 1 of ${file.subjectName} must be an invoke step.`);
+  }
+  if (observe.kind !== 'observe' || observe.assertion.kind !== 'fieldEquals') {
+    throw new Error(
+      `Step 2 of ${file.subjectName} must be an observe step with assertion.kind='fieldEquals'.`,
+    );
+  }
+  const allRequestSteps: RequestStep[] = [
+    ...prereq.requestPlan,
+    mutate.requestPlan,
+    observe.requestPlan,
+  ];
+  const ecOps = new Set<string>(scenario.eventuallyConsistentOps ?? []);
+  const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
+  const needsAwaitEventually =
+    allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps)) ||
+    ecOps.has(observe.operationId);
+  const needsResolveFixture = allRequestSteps.some(
+    (rp) => rp.bodyKind === 'multipart' && !!rp.multipartTemplate,
+  );
+
+  const lines: string[] = [];
+  lines.push("import { expect, test } from '@playwright/test';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  const seedingImports = ['initSpecSalt', 'seedBinding'];
+  if (needsExtractInto) seedingImports.push('extractInto');
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
+  }
+  if (needsResolveFixture) {
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
+  }
+  lines.push('');
+  lines.push(`initSpecSalt('${file.subjectName}.lifecycle');`);
+  lines.push('');
+  lines.push(`test.describe('${file.subjectName} read-back', () => {`);
+  lines.push(
+    `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }) => {`,
+  );
+  lines.push('    const baseUrl = buildBaseUrl();');
+  lines.push('    const ctx: Record<string, unknown> = {};');
+
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
+    }),
+  );
+
+  let stepIdx = 0;
+  for (const rp of prereq.requestPlan) {
+    lines.push('');
+    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    stepIdx++;
+  }
+
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    mutate.requestPlan,
+    stepIdx,
+    `invoke (mutate): ${mutate.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+
+  lines.push('');
+  appendObserveFieldEqualsStep(
+    lines,
+    observe,
+    mutate.requestPlan,
+    stepIdx,
+    `observe (read-back): ${observe.operationId}`,
+    ecOps,
+  );
+
+  lines.push('  });');
+  lines.push('});');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * Render an observe step whose assertion is `fieldEquals`. The
+ * expected value for each tuple is sourced directly from the mutator
+ * request body literal at `requestBodyPath` (because the planner emits
+ * concrete values at body materialisation time, not symbolic
+ * placeholders). The actual value is read from the fetcher 2xx
+ * response body at `responseBodyPath`.
+ */
+function appendObserveFieldEqualsStep(
+  lines: string[],
+  step: ObserveStep,
+  mutatorStep: RequestStep,
+  idx: number,
+  label: string,
+  ecOps: ReadonlySet<string>,
+): void {
+  if (step.assertion.kind !== 'fieldEquals') {
+    throw new Error(
+      `appendObserveFieldEqualsStep called with assertion.kind='${step.assertion.kind}'`,
+    );
+  }
+  const respVar = `resp${idx + 1}`;
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const method = step.requestPlan.method.toLowerCase();
+  const isEC = ecOps.has(step.operationId);
+  lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
+  if (isEC) {
+    lines.push(`      const url = baseUrl + ${urlExpr};`);
+    lines.push(`      const ${respVar} = await awaitEventually(`);
+    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        {`);
+    lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
+    lines.push(`          operationId: '${step.operationId}',`);
+    lines.push(`        },`);
+    lines.push(`      );`);
+  } else {
+    const inline = renderInlineStepLines({
+      step: step.requestPlan,
+      idx,
+      varName: respVar,
+      urlExpr,
+      method,
+      shouldAwaitEventually: false,
+    });
+    for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  }
+  lines.push(`      if (${respVar}.status() !== 200) {`);
+  lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
+  lines.push('      }');
+  lines.push(`      expect(${respVar}.status()).toBe(200);`);
+  lines.push(`      const __body = await ${respVar}.json();`);
+  for (const f of step.assertion.fields) {
+    const expectedValue = pluckByPath(mutatorStep.bodyTemplate, f.requestBodyPath);
+    if (expectedValue === undefined) {
+      throw new Error(
+        `fieldEquals: mutator body has no value at path ${JSON.stringify(f.requestBodyPath)} for observe operationId=${step.operationId}.`,
+      );
+    }
+    const accessExpr = buildOptionalAccessChain('__body', stripArrayMarkers(f.responseBodyPath));
+    const literal = JSON.stringify(expectedValue);
+    lines.push(`      expect(${accessExpr}).toEqual(${literal});`);
+  }
+  lines.push('    });');
+  for (const wait of step.requestPlan.eventualWaitsAfter ?? []) {
+    appendEventualWait(lines, wait, idx);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #305 Phase 5d / #189 — StateTransitionVisibleAfterAction render path
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a 3-step `StateTransitionVisibleAfterAction` template
+ * scenario (per Incident.resolveIncident, etc.):
+ *   1. prereqChain inline (establish the runtime entity + bind its id,
+ *      typically deploy → createProcessInstance → searchIncidents)
+ *   2. invoke (transition op, e.g. resolveIncident)
+ *   3. observe (fetcher; assert body.<stateField> === expectedState)
+ *
+ * Parallel to {@link renderReadBackSuite}; differs only in the
+ * observe step's assertion shape — `stateEquals` reads the expected
+ * value from the assertion itself rather than the mutator body.
+ */
+function renderStateTransitionSuite(
+  file: TemplateScenarioFile,
+  globalContextSeeds: readonly TemplateGlobalContextSeed[],
+): string {
+  const scenario = file.scenario;
+  const steps = scenario.steps;
+  if (steps.length !== 3) {
+    throw new Error(
+      `StateTransitionVisibleAfterAction template ${file.subjectName} must have exactly 3 steps; got ${steps.length}.`,
+    );
+  }
+  const [prereq, transition, observe] = steps;
+  if (prereq.kind !== 'prereqChain') {
+    throw new Error(`Step 0 of ${file.subjectName} must be a prereqChain step.`);
+  }
+  if (transition.kind !== 'invoke') {
+    throw new Error(`Step 1 of ${file.subjectName} must be an invoke step.`);
+  }
+  if (observe.kind !== 'observe' || observe.assertion.kind !== 'stateEquals') {
+    throw new Error(
+      `Step 2 of ${file.subjectName} must be an observe step with assertion.kind='stateEquals'.`,
+    );
+  }
+  const allRequestSteps: RequestStep[] = [
+    ...prereq.requestPlan,
+    transition.requestPlan,
+    observe.requestPlan,
+  ];
+  const ecOps = new Set<string>(scenario.eventuallyConsistentOps ?? []);
+  const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
+  const needsAwaitEventually =
+    allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps)) ||
+    ecOps.has(observe.operationId);
+  const needsResolveFixture = allRequestSteps.some(
+    (rp) => rp.bodyKind === 'multipart' && !!rp.multipartTemplate,
+  );
+
+  const lines: string[] = [];
+  lines.push("import { expect, test } from '@playwright/test';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  const seedingImports = ['initSpecSalt', 'seedBinding'];
+  if (needsExtractInto) seedingImports.push('extractInto');
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
+  }
+  if (needsResolveFixture) {
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
+  }
+  lines.push('');
+  lines.push(`initSpecSalt('${file.subjectName}.state-transition');`);
+  lines.push('');
+  const fromTo = `${observe.assertion.fromState} → ${observe.assertion.expectedState}`;
+  lines.push(`test.describe('${file.subjectName} state transition (${fromTo})', () => {`);
+  lines.push(
+    `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }) => {`,
+  );
+  lines.push('    const baseUrl = buildBaseUrl();');
+  lines.push('    const ctx: Record<string, unknown> = {};');
+
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
+    }),
+  );
+
+  let stepIdx = 0;
+  for (const rp of prereq.requestPlan) {
+    lines.push('');
+    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    stepIdx++;
+  }
+
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    transition.requestPlan,
+    stepIdx,
+    `invoke (transition): ${transition.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+
+  lines.push('');
+  appendObserveStateEqualsStep(
+    lines,
+    observe,
+    stepIdx,
+    `observe (read-back): ${observe.operationId}`,
+    ecOps,
+  );
+
+  lines.push('  });');
+  lines.push('});');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * Render an observe step whose assertion is `stateEquals`. Reads the
+ * fetcher's 200 response and asserts a single equality on the named
+ * state field against the literal `expectedState` from the assertion.
+ */
+function appendObserveStateEqualsStep(
+  lines: string[],
+  step: ObserveStep,
+  idx: number,
+  label: string,
+  ecOps: ReadonlySet<string>,
+): void {
+  if (step.assertion.kind !== 'stateEquals') {
+    throw new Error(
+      `appendObserveStateEqualsStep called with assertion.kind='${step.assertion.kind}'`,
+    );
+  }
+  const respVar = `resp${idx + 1}`;
+  const urlExpr = buildUrlExpression(step.requestPlan.pathTemplate);
+  const method = step.requestPlan.method.toLowerCase();
+  const isEC = ecOps.has(step.operationId);
+  lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
+  if (isEC) {
+    lines.push(`      const url = baseUrl + ${urlExpr};`);
+    lines.push(`      const ${respVar} = await awaitEventually(`);
+    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        {`);
+    lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
+    lines.push(`          operationId: '${step.operationId}',`);
+    lines.push(`        },`);
+    lines.push(`      );`);
+  } else {
+    const inline = renderInlineStepLines({
+      step: step.requestPlan,
+      idx,
+      varName: respVar,
+      urlExpr,
+      method,
+      shouldAwaitEventually: false,
+    });
+    for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  }
+  lines.push(`      if (${respVar}.status() !== 200) {`);
+  lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
+  lines.push('      }');
+  lines.push(`      expect(${respVar}.status()).toBe(200);`);
+  lines.push(`      const __body = await ${respVar}.json();`);
+  const accessExpr = buildOptionalAccessChain(
+    '__body',
+    stripArrayMarkers(step.assertion.responseBodyPath),
+  );
+  const literal = JSON.stringify(step.assertion.expectedState);
+  lines.push(`      expect(${accessExpr}).toEqual(${literal});`);
+  lines.push('    });');
+  for (const wait of step.requestPlan.eventualWaitsAfter ?? []) {
+    appendEventualWait(lines, wait, idx);
+  }
+}
+/**
+ * Walk `body` along `path` (object property names) and return the
+ * primitive/array value at that leaf, or `undefined` if any segment
+ * misses. Used to extract the literal value the planner emitted for a
+ * given request-body leaf so the read-back assertion can match exactly.
+ */
+function pluckByPath(body: unknown, path: readonly string[]): unknown {
+  let node: unknown = body;
+  for (const seg of path) {
+    if (node === null || typeof node !== 'object') return undefined;
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON body template
+    node = (node as Record<string, unknown>)[seg];
+  }
+  return node;
+}
+
+/**
+ * Strip array `[]` markers from response-leaf path segments — the
+ * planner records `candidateGroups[]` to indicate an array property,
+ * but the runtime read accesses the array via the bare property name.
+ */
+function stripArrayMarkers(path: readonly string[]): string[] {
+  return path.map((s) => s.replace(/\[\]$/, ''));
 }
 
 function resolveBindingNameForSemantic(

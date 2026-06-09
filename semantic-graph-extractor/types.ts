@@ -290,6 +290,16 @@ export interface Operation {
   parameters: OperationParameter[];
   requestBodySemanticTypes: SemanticTypeReference[];
   responseSemanticTypes: Record<string, SemanticTypeReference[]>; // keyed by status code
+  /**
+   * Flat list of all primitive (and array-of-primitive) leaf paths per
+   * response status code, irrespective of whether the leaf carries an
+   * `x-semantic-type` annotation. Used by the scenario-template
+   * instantiator (#305 Phase 4) to bridge a mutator's emitted request
+   * body to a fetcher's observable response by leaf-name. Cycles in
+   * `$ref` chains are broken with seen-set tracking; arrays appear as
+   * `prefix[].leafName`.
+   */
+  responseLeafPaths: Record<string, string[]>;
   eventuallyConsistent?: boolean;
   // NEW: Enhanced analysis
   operationType: OperationType;
@@ -330,6 +340,19 @@ export interface OperationParameter {
   name: string;
   location: 'path' | 'query' | 'header' | 'cookie';
   semanticType?: string;
+  /**
+   * #330: when the parameter's schema resolves (transitively through `$ref`,
+   * `allOf`, `oneOf`, `anyOf`) to a UNION of branded-key schemas, every branch
+   * that carries an `x-semantic-type` lands here. `semanticType` itself is set
+   * to the first alternative for back-compat with code paths that key on a
+   * single string (graph-builder fallback, planner `requires`, scenario
+   * generator's path-param lookup). The graph builder additionally treats any
+   * producer of ANY alternative as a valid edge for this consumer.
+   *
+   * Always includes `semanticType` as its first element when both are present,
+   * so callers iterating alternatives don't need to also iterate the singular.
+   */
+  semanticTypeAlternatives?: string[];
   required: boolean;
   description?: string;
   // NEW: Schema validation details
@@ -353,6 +376,14 @@ export interface ParameterSchema {
 
 export interface SemanticTypeReference {
   semanticType: string;
+  /**
+   * #330: parallel to `OperationParameter.semanticTypeAlternatives`. When the
+   * source schema for this reference resolves to a union of branded-key
+   * schemas, every branch's `x-semantic-type` lands here. The graph builder
+   * matches a producer against any alternative when emitting an edge from
+   * `produced → consumed`. Always includes `semanticType` as its first element.
+   */
+  semanticTypeAlternatives?: string[];
   fieldPath: string;
   required: boolean;
   description?: string;

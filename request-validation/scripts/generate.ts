@@ -11,6 +11,8 @@ import {
   generateUniqueItemsViolations,
 } from '../src/analysis/advancedSchema.js';
 import { generateAllOfConflicts, generateAllOfMissingRequired } from '../src/analysis/allOf.js';
+import { generateAuthAbsent } from '../src/analysis/authAbsent.js';
+import { generateAuthDeny } from '../src/analysis/authDeny.js';
 import { generateBodyTopTypeMismatch, generateMissingBody } from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
 import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
@@ -20,6 +22,7 @@ import { generateEnumViolations } from '../src/analysis/enumViolations.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
 import { generateMultipartMissingRequired } from '../src/analysis/multipartMissingRequired.js';
+import { generateNotFoundFakeId } from '../src/analysis/notFoundFakeId.js';
 import {
   generateDiscriminatorStructureMismatch,
   generateOneOfCrossBleed,
@@ -213,6 +216,36 @@ async function main() {
   if (wantKind('union')) {
     scenarios.push(
       ...generateUnionViolations(model.operations, {
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
+  }
+  // auth-absent (HTTP 401) scenarios are not "deep": they depend only on the
+  // operation's conditional-auth status, not on body/parameter shape. They are
+  // emitted exclusively into the `secured` profile (see profile split below).
+  if (wantKind('auth-absent')) {
+    scenarios.push(
+      ...generateAuthAbsent(model.operations, {
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
+  }
+  // auth-deny (HTTP 403) scenarios are read-side RBAC deny-tests (#359). Like
+  // auth-absent they depend only on the operation, not body/parameter shape, and
+  // are emitted exclusively into the `rbac` profile (see profile split below).
+  if (wantKind('auth-deny')) {
+    scenarios.push(
+      ...generateAuthDeny(model.operations, {
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
+  }
+  // not-found-fake-id (HTTP 404) scenarios are not "deep": they depend only on
+  // the operation's path params + declared responses, not on body shape. They
+  // are auth-independent and land in both profiles.
+  if (wantKind('not-found-fake-id')) {
+    scenarios.push(
+      ...generateNotFoundFakeId(model.operations, {
         onlyOperations: opts.onlyOperations,
       }),
     );
@@ -607,15 +640,53 @@ async function main() {
     deduped.push(...filtered);
   }
 
-  await emitQaTests(deduped, {
-    outDir: opts.outDir,
-    qaImportDepth: opts.qaImportDepth,
-    standalone: opts.standalone,
-    specCommit,
-    generationTimestamp,
-  });
+  // ---- Profile split: parallel unsecured / secured / rbac suites ----
+  // The negative-validation tests (400s) are deployment-mode-agnostic and run
+  // in both unsecured and secured. The auth-absent (401) tests only make sense
+  // against a server started in secured mode, so they go into `secured` only.
+  // The auth-deny (403) tests are read-side RBAC deny-tests (#359): they need an
+  // authorizations-enabled broker + a provisioned zero-grant probe user, so they
+  // live in their own `rbac` profile and are excluded from unsecured/secured.
+  //
+  //   generated/<config>/request-validation/unsecured/   — 400 tests only
+  //   generated/<config>/request-validation/secured/     — 400 tests + 401 tests
+  //   generated/<config>/request-validation/rbac/         — 403 deny tests only
+  //
+  // Each subdir is a self-contained standalone suite (own scaffolding +
+  // support). When the bundled spec carries no `x-enforcement: conditional`
+  // annotations (no conditionally-secured ops), the auth-absent set is empty
+  // and the unsecured/secured suites are byte-identical.
+  const PROFILES = [
+    {
+      name: 'unsecured',
+      scenarios: deduped.filter((s) => s.type !== 'auth-absent' && s.type !== 'auth-deny'),
+    },
+    { name: 'secured', scenarios: deduped.filter((s) => s.type !== 'auth-deny') },
+    { name: 'rbac', scenarios: deduped.filter((s) => s.type === 'auth-deny') },
+  ] as const;
+  // Clean the whole suite output dir before emitting so that (a) stale spec
+  // files from a prior run cannot survive into either profile, and (b) legacy
+  // top-level artifacts from before the profile split — when spec files and
+  // scaffolding lived directly under `opts.outDir` rather than in
+  // `unsecured/`/`secured/` subdirs — are removed and can't be accidentally
+  // executed or mistaken for current output. The emitter recreates each
+  // profile dir (and the parent) recursively; MANIFEST/COVERAGE are rewritten
+  // into the recreated parent below.
+  fs.rmSync(opts.outDir, { recursive: true, force: true });
+  for (const profile of PROFILES) {
+    await emitQaTests(profile.scenarios, {
+      outDir: path.join(opts.outDir, profile.name),
+      qaImportDepth: opts.qaImportDepth,
+      standalone: opts.standalone,
+      specCommit,
+      generationTimestamp,
+    });
+  }
   console.log('[generate] Summary:', {
     totalScenarios: deduped.length,
+    authAbsent: deduped.filter((s) => s.type === 'auth-absent').length,
+    authDeny: deduped.filter((s) => s.type === 'auth-deny').length,
+    profiles: PROFILES.map((p) => `${p.name}:${p.scenarios.length}`),
     kinds: Array.from(new Set(deduped.map((s) => s.type))).sort(),
     deepMode: opts.deep,
     maxMissing: opts.maxMissing ?? null,

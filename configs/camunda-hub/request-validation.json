@@ -1,0 +1,4 @@
+{
+  "$comment": "Per-config request-validation settings for camunda-hub. Hub does not (yet) declare a position on enum case-insensitivity; default `false` emits case-only mutations as 400-expecting tests, which is the conservative choice. Revisit if hub's parser turns out to accept enum values case-insensitively.",
+  "enumCaseInsensitive": false
+}

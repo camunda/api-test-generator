@@ -46,11 +46,6 @@ export interface PlaywrightRoleScope extends CommonRoleScope {
    * JSON literal, multipart builder call, or `undefined`.
    */
   body: string;
-  /**
-   * JSON literal expression for the strip-on-sentinel rules derived from
-   * `globalContextSeeds`.
-   */
-  strips: string;
 }
 
 /**

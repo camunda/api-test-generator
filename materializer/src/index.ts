@@ -5,7 +5,6 @@ import {
   type EmitContext,
   type EmitterStrategy,
   getEmitter,
-  getRoleHookProvider,
   type LoadedRoleBundle,
   listEmitters,
   type RoleHookProvider,
@@ -17,17 +16,28 @@ import {
   getActiveConfigName,
   getFeatureOutputDir,
   getPlaywrightSuiteDir,
+  getSdkOutDir,
+  getSpecBundleDir,
   getTemplateScenariosDir,
+  getTemplateScenariosRootDir,
   getVariantOutputDir,
 } from 'path-analyser/configResolver';
 import {
   assertSafeGlobalContextSeeds,
   deriveArtifactKindsViews,
   deriveGlobalContextSeedsViews,
+  loadScenarioTemplatesAbox,
 } from 'path-analyser/ontology/loader';
 import { getEmitterRoleForOperation } from 'path-analyser/ontology/operationRoles';
 import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyser/types';
 import { parseCliArgs } from './cli-args.js';
+import { buildCoverage, type CoverageResult, templateOutputDir } from './coverage.js';
+import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js';
+import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
+import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
+import { createJsSdkEmitter } from './js-sdk/emitter.js';
+import { materializeSdkSupport } from './js-sdk/materialize-support.js';
+import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter } from './playwright/emitter.js';
 import {
@@ -38,6 +48,10 @@ import {
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
+import { createPythonSdkEmitter } from './python-sdk/emitter.js';
+import { materializePythonSupport } from './python-sdk/materialize-support.js';
+import { createOperationMapSourceFromJson } from './python-sdk/sdk-mapping.js';
+import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js';
 
 // Built-in emitter registrations. RoleHookProviders are no longer
 // registered statically here: every provider lives next to its role
@@ -48,6 +62,46 @@ import { emitTemplateSuites } from './playwright/templateEmitter.js';
 // pulled OCA-specific knowledge into a package that is supposed to be
 // config-agnostic.
 registerEmitter(PlaywrightEmitter);
+// SDK emitters are registered inside run() after repoRoot is resolved so
+// they can load operation-map.json files from the spec/ directory. Keeping
+// them here (at module level) would require resolving the repo root before
+// the CLI args are parsed, which is fragile on Windows paths and CI.
+
+/** Load the JS SDK operation map from spec/js-sdk/operation-map.json, or undefined if absent. */
+function loadJsSdkMap(repoRoot: string): OperationMapJsonSource | undefined {
+  const mapPath = path.join(repoRoot, 'spec', 'js-sdk', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return undefined;
+  try {
+    return OperationMapJsonSource.fromJson(fsSync.readFileSync(mapPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Load the Python SDK operation map from spec/python-sdk/operation-map.json, or undefined if absent. */
+function loadPythonSdkMap(
+  repoRoot: string,
+): ReturnType<typeof createOperationMapSourceFromJson> | undefined {
+  const mapPath = path.join(repoRoot, 'spec', 'python-sdk', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return undefined;
+  try {
+    return createOperationMapSourceFromJson(fsSync.readFileSync(mapPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Load the C# SDK operation map from csharp-sdk/examples/operation-map.json, or {} if absent. */
+function loadCsharpMap(repoRoot: string): CsharpOperationMap {
+  const mapPath = path.join(repoRoot, 'csharp-sdk', 'examples', 'operation-map.json');
+  if (!fsSync.existsSync(mapPath)) return {};
+  try {
+    // biome-ignore lint/plugin: runtime contract boundary — JSON from committed operation-map file
+    return JSON.parse(fsSync.readFileSync(mapPath, 'utf-8')) as CsharpOperationMap;
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Walk the active config's role bundles and register any role-hook
@@ -284,24 +338,114 @@ function findRepoRoot(start: string): string {
   );
 }
 
+/**
+ * Per-target run environment. Shared, target-independent inputs computed
+ * once in {@link run} and threaded into {@link runForTarget} so a single
+ * `--all-targets` invocation can iterate emitters without recomputing
+ * config/scenario locations per target.
+ */
+interface TargetRunEnv {
+  repoRoot: string;
+  /** `--all` sentinel or a single operationId. */
+  positional: string;
+  configName: string;
+  configDir: string;
+  baseDir: string;
+  featureDir: string;
+  variantDir: string;
+}
+
+/**
+ * Register the file-system-backed SDK emitters. Kept here (not at module
+ * level) so operation-map.json files load from the resolved repoRoot. The
+ * factories tolerate an absent map (fall back to operationId-derived method
+ * names), so this is safe to call even when the maps haven't been fetched —
+ * e.g. for the `list-targets` projection. The Playwright emitter is already
+ * registered at module level (it has no file-system dependencies).
+ */
+function registerSdkEmitters(repoRoot: string): void {
+  registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
+  registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
+  registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
+}
+
+/**
+ * `list-targets` projection: print the registered emitters as JSON so the
+ * build system (e.g. the generic SDK-map fetcher) can read the registry
+ * instead of duplicating the per-target list across npm scripts. The
+ * registry is the single source of truth; this is its cross-process seam.
+ */
+function printTargetsJson(): void {
+  const targets = listEmitters().map((e) => ({
+    id: e.id,
+    name: e.name,
+    supportedConfigs: e.supportedConfigs,
+    sdkMap: e.sdkMap,
+  }));
+  console.log(JSON.stringify(targets, null, 2));
+}
+
 async function run() {
-  const { target, positional, help } = parseCliArgs(process.argv.slice(2));
+  const { target, positional, help, allTargets, listTargets } = parseCliArgs(process.argv.slice(2));
   const repoRoot = findRepoRoot(process.cwd());
-  // loadGraph / loadGlobalContextSeeds were carved out of the original
-  // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
-  // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
-  // Keep the contract; pass the conventional path so we don't churn the
-  // planner-side API in this PR.
-  const baseDir = path.join(repoRoot, 'path-analyser');
-  // Per-config output partition (#128 PR 2): scenario inputs and the
-  // emitted Playwright suite all live under generated/<config>/.
-  const featureDir = getFeatureOutputDir(repoRoot);
-  const variantDir = getVariantOutputDir(repoRoot);
-  const outDir = getPlaywrightSuiteDir(repoRoot);
+  registerSdkEmitters(repoRoot);
+
+  // `list-targets` is a pure registry projection — it needs neither a
+  // positional nor the active config, so handle it before any other gate.
+  if (listTargets) {
+    printTargetsJson();
+    return;
+  }
 
   if (help || !positional) {
     printUsage();
+    console.error(
+      'Additional commands/options:\n' +
+        '  list-targets   Print the registered emitters as JSON and exit\n' +
+        '  --all-targets  Run codegen for every enabled+registered emitter (ignores --target)\n',
+    );
     process.exit(1);
+  }
+
+  // loadGraph / loadGlobalContextSeeds were carved out of the original
+  // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
+  // (they compute repoRoot internally as `path.resolve(baseDir, '..')`).
+  // Per-config output partition (#128 PR 2): scenario inputs and the
+  // emitted suites all live under generated/<config>/.
+  const configName = getActiveConfigName(repoRoot);
+  const configDir = getActiveConfigDir(repoRoot);
+  const enabledEmitters = loadEnabledEmitters(configDir);
+  const env: TargetRunEnv = {
+    repoRoot,
+    positional,
+    configName,
+    configDir,
+    baseDir: path.join(repoRoot, 'path-analyser'),
+    featureDir: getFeatureOutputDir(repoRoot),
+    variantDir: getVariantOutputDir(repoRoot),
+  };
+
+  // `--all-targets`: derive the target list from the config's enabled
+  // emitters, intersected with the registry and each emitter's
+  // supportedConfigs. The registry is authoritative — npm scripts no
+  // longer enumerate `codegen:<target>` per emitter.
+  if (allTargets) {
+    const targets = enabledEmitters.filter((id) => {
+      const e = getEmitter(id);
+      if (!e) {
+        console.warn(
+          `Config '${configName}' enables emitter '${id}', but no emitter with that id is registered; skipping.`,
+        );
+        return false;
+      }
+      return e.supportedConfigs.includes('*') || e.supportedConfigs.includes(configName);
+    });
+    for (const id of targets) {
+      const emitter = getEmitter(id);
+      if (!emitter) continue; // unreachable: filtered above, but keeps types honest
+      await runForTarget(emitter, env);
+    }
+    return;
   }
 
   const emitter = getEmitter(target);
@@ -320,9 +464,6 @@ async function run() {
   //      config authorises. Both must agree before the orchestrator invokes
   //      `emit()` — otherwise an emitter could write into a config that
   //      didn't opt in to its output shape, or vice versa.
-  const configName = getActiveConfigName(repoRoot);
-  const configDir = getActiveConfigDir(repoRoot);
-  const enabledEmitters = loadEnabledEmitters(configDir);
   if (!enabledEmitters.includes(emitter.id)) {
     console.error(
       `Emitter '${emitter.id}' is not enabled in config '${configName}'. ` +
@@ -337,13 +478,34 @@ async function run() {
     );
     process.exit(1);
   }
+
+  await runForTarget(emitter, env);
+}
+
+/**
+ * Materialise a single emitter's suites. The caller guarantees the emitter
+ * is registered, enabled by the active config, and supports it. Pure per
+ * target: all shared inputs arrive via {@link TargetRunEnv}, so this is the
+ * unit iterated by `--all-targets`.
+ */
+async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promise<void> {
+  const { repoRoot, positional, configName, configDir, baseDir, featureDir, variantDir } = env;
   const emitterConfig = loadEmitterConfig(configDir, emitter);
   const resolveConfigPath = (relative: string): string => path.resolve(configDir, relative);
 
-  // Wipe before write so emitted spec files left over from a previous spec
-  // version cannot survive into the current run. Without this, local
-  // pre-push validation can diverge from CI (which always sees a fresh tree).
-  // The support/ tree, README.md, and responses.json are re-materialised below.
+  // Each emitter owns its own output directory so every `codegen:<target>` run
+  // produces a self-contained, runnable artifact. Playwright writes to
+  // generated/<config>/playwright/; SDK emitters write to
+  // generated/<config>/<emitter-id>/ and materialise their own scaffolding
+  // so the output is runnable without a prior playwright run.
+  const outDir =
+    emitter.id === 'playwright'
+      ? getPlaywrightSuiteDir(repoRoot)
+      : getSdkOutDir(repoRoot, emitter.id);
+
+  // Wipe before write so stale files from a previous spec version cannot
+  // survive into the current run. Each emitter owns its own directory so
+  // the wipe is always safe regardless of target.
   await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(outDir, { recursive: true });
   // Lift 12 / #231: per-role template bundles for the active config's
@@ -383,6 +545,19 @@ async function run() {
     // a runnable suite as a single artifact.
     await materializeResponseSchemas(outDir);
   }
+  if (emitter.id === 'js-sdk') {
+    await materializeSdkSupport(outDir);
+  }
+  if (emitter.id === 'python-sdk') {
+    await materializePythonSupport(outDir);
+  }
+  if (emitter.id === 'csharp-sdk') {
+    // materializeCsharpSupport already vendors the active config's BPMN/DMN/form
+    // fixtures into <outDir>/fixtures/ so @@FILE: paths in generated C# tests
+    // resolve to AppContext.BaseDirectory/fixtures/ at run time. No separate
+    // materializeFixtures() call is needed (it would duplicate the copy).
+    await materializeCsharpSupport(outDir);
+  }
 
   const files = (await fs.readdir(featureDir)).filter((f) => f.endsWith('-scenarios.json'));
   const globalContextSeeds = await loadGlobalContextSeeds(baseDir);
@@ -402,30 +577,22 @@ async function run() {
       : undefined;
     getRoleForOperationFn = (opId: string) => getEmitterRoleForOperation(domain, opId);
   }
-  for (const hook of emitter.roleHooks ?? []) {
-    const provider = getRoleHookProvider(hook);
-    if (!provider) {
-      console.error(
-        `Emitter ${JSON.stringify(emitter.id)} declares roleHook ${JSON.stringify(
-          hook,
-        )} but no provider is registered for that hook name.`,
-      );
-      process.exit(1);
-    }
-    const extras = await provider.compute({ repoRoot, configName });
-    if (extras === undefined) continue;
-    if (!roleExtras) roleExtras = new Map<string, Record<string, unknown>>();
-    if (roleExtras.has(provider.role)) {
-      console.error(
-        `Role-hook provider for hook ${JSON.stringify(
-          hook,
-        )} attempted to overwrite extras for role ${JSON.stringify(
-          provider.role,
-        )} already populated by an earlier hook. Hook providers must own disjoint roles.`,
-      );
-      process.exit(1);
-    }
-    roleExtras.set(provider.role, extras);
+  // #350: roleHook resolution. Declarations are advisory — a config that
+  // doesn't ship a provider for a declared hook simply doesn't populate
+  // the corresponding role's extras. Operations actually dispatched to
+  // the unbacked role surface a named error at materialization time
+  // (`findRoleForStep` in playwright/emitter.ts and the support-template
+  // assertions in materialize-support.ts). The resolver throws
+  // `RoleHookConflictError` on duplicate-role conflicts (formerly
+  // `process.exit(1)` here); any other error from a provider’s
+  // `compute()` propagates with its full stack so unexpected hook bugs
+  // remain debuggable.
+  try {
+    roleExtras = await resolveRoleExtras(emitter, { repoRoot, configName });
+  } catch (err) {
+    if (!(err instanceof RoleHookConflictError)) throw err;
+    console.error(err.message);
+    process.exit(1);
   }
 
   // #243: Vendor per-role helper files now that `roleExtras` is populated,
@@ -466,13 +633,50 @@ async function run() {
   await writeScaffolded(emitter, buildCtx('', 'feature'));
 
   if (positional === '--all') {
+    // #335: scenario-template names are derived from the active
+    // config's scenario-templates ABox — the single source of truth.
+    // The materializer is a generic transformer: for each ABox row it
+    // reads `scenarios/templates/<name>/` and emits to
+    // `playwright/templates/<name>/`. The on-disk layout mirrors the
+    // planner's so the scenario → emitted-spec relationship is visible
+    // from the directory structure alone. Returns `[]` when no ABox
+    // ships (template suites are then a no-op).
+    const templatesAbox = loadScenarioTemplatesAbox(repoRoot);
+    const templateNames = (templatesAbox?.templates ?? []).map((t) => t.name);
+
+    // #331: scenario-template coverage. Build the suppression set
+    // from on-disk template scenario JSONs before the feature loop so
+    // operations covered by a well-formed scenario-template spec do
+    // not also emit a structurally weaker per-endpoint feature spec.
+    // Suppression only applies to emitters that ship the
+    // corresponding template suites; for now that is Playwright.
+    let coverage: CoverageResult = { suppressedOpIds: new Set(), entries: [] };
+    if (emitter.id === PlaywrightEmitter.id) {
+      coverage = await buildCoverage({
+        templateScenariosRootDir: getTemplateScenariosRootDir(repoRoot),
+        templatesAboxPath: path.join(configDir, 'ontology', 'scenario-templates.json'),
+        templateNames,
+      });
+    }
     let count = 0;
+    let suppressedCount = 0;
+    // #335: track which opIds were emitted as feature specs so the
+    // coverage summary can compute the unmapped set (ops in the spec
+    // that are neither emitted as a feature spec nor suppressed by a
+    // scenario-template lifecycle suite). Should be empty on a healthy
+    // spec; a non-empty set surfaces planner / coverage drift.
+    const emittedFeatureOpIds = new Set<string>();
     for (const f of files) {
       try {
         const content = await fs.readFile(path.join(featureDir, f), 'utf8');
         const parsed = parseScenarioCollection(content);
         if (!parsed.endpoint?.operationId) continue;
+        if (coverage.suppressedOpIds.has(parsed.endpoint.operationId)) {
+          suppressedCount++;
+          continue;
+        }
         await writeEmitted(emitter, parsed, buildCtx(parsed.endpoint.operationId, 'feature'));
+        emittedFeatureOpIds.add(parsed.endpoint.operationId);
         count++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -509,44 +713,89 @@ async function run() {
       }
     }
     // Template-derived suites (Lift 22 / #270; extended in #280 with
-    // EntityLifecycle). One Playwright suite per subject under
-    // `<playwrightSuiteDir>/edges/` (Edge templates) or
-    // `<playwrightSuiteDir>/entities/` (Entity templates). Only the
-    // Playwright emitter wires this — other emitters opt in by
-    // implementing their own template-aware renderer. The scenarios
+    // EntityLifecycle, #305 with UpdatedFieldVisibleOnReadBack +
+    // StateTransitionVisibleAfterAction). One Playwright suite per
+    // subject under `<playwrightSuiteDir>/templates/<TemplateName>/`.
+    // Only the Playwright emitter wires this — other emitters opt in
+    // by implementing their own template-aware renderer. The scenarios
     // are produced by the planner (`scenarioTemplateInstantiator.ts`);
     // if a directory is missing (older planner runs, configs that
     // don't ship the corresponding template), `emitTemplateSuites`
-    // no-ops.
+    // no-ops. Adding a new template requires only an ABox row in
+    // `configs/<config>/ontology/scenario-templates.json` (#335).
     let lifecycleCount = 0;
     if (emitter.id === PlaywrightEmitter.id) {
       const seedsArg = globalContextSeeds.map((s) => ({
         binding: s.binding,
         seedRule: s.seedRule,
+        // #342: forward `omitWhenUnbound` so the template emitter's
+        // `emitCtxSeeding` honours the same universal-prologue skip as
+        // the per-endpoint emitter. Without this, template-derived
+        // lifecycle suites would still auto-seed `tenantIdVar` and put
+        // a value on the wire for ops that the design says should omit
+        // the field.
+        omitWhenUnbound: s.omitWhenUnbound,
       }));
-      const edgesOutDir = path.join(outDir, 'edges');
-      // Wipe the per-template subdir for the same reason the parent
-      // `outDir` is wiped above: stale specs from a previous spec version
-      // must not survive into the current run.
-      await fs.rm(edgesOutDir, { recursive: true, force: true });
-      const edgesWritten = await emitTemplateSuites({
-        scenariosDir: getTemplateScenariosDir(repoRoot, 'EdgeLifecycle'),
-        outDir: edgesOutDir,
-        globalContextSeeds: seedsArg,
-      });
-      lifecycleCount += edgesWritten.length;
-
-      const entitiesOutDir = path.join(outDir, 'entities');
-      await fs.rm(entitiesOutDir, { recursive: true, force: true });
-      const entitiesWritten = await emitTemplateSuites({
-        scenariosDir: getTemplateScenariosDir(repoRoot, 'EntityLifecycle'),
-        outDir: entitiesOutDir,
-        globalContextSeeds: seedsArg,
-      });
-      lifecycleCount += entitiesWritten.length;
+      for (const templateName of templateNames) {
+        const templateOutDir = path.join(outDir, templateOutputDir(templateName));
+        // Wipe the per-template subdir for the same reason the parent
+        // `outDir` is wiped above: stale specs from a previous spec
+        // version must not survive into the current run.
+        await fs.rm(templateOutDir, { recursive: true, force: true });
+        const written = await emitTemplateSuites({
+          scenariosDir: getTemplateScenariosDir(repoRoot, templateName),
+          outDir: templateOutDir,
+          globalContextSeeds: seedsArg,
+        });
+        lifecycleCount += written.length;
+      }
     }
+    // #335: build a deterministic coverage summary alongside the raw
+    // suppression set / entries. The summary block answers "how many
+    // operations in the spec are covered, by what kind of suite, and
+    // by which template" without requiring readers to re-walk the
+    // feature-output / template-scenarios directories. The summary is
+    // emitted for every emitter so PR diffs and the
+    // `npm run coverage:report` script see the same shape regardless
+    // of which target the materializer was invoked for.
+    const allSpecOpIds = await loadSpecOperationIds(getSpecBundleDir(repoRoot));
+    const summary = buildCoverageSummary({
+      allSpecOpIds,
+      emittedFeatureOpIds,
+      suppressedOpIds: coverage.suppressedOpIds,
+      entries: coverage.entries,
+      variantSpecs: variantCount,
+      lifecycleSpecs: lifecycleCount,
+    });
+    // #331: persist the coverage artefact alongside the suites so it
+    // is diffable in PRs and consumable by the L3 invariant in
+    // configs/<config>/regression-invariants.test.ts. Written for
+    // every emitter so the artefact's presence is independent of
+    // whether the current target shipped template suites this run.
+    await fs.writeFile(
+      path.join(outDir, 'coverage.json'),
+      `${JSON.stringify(
+        {
+          version: 2,
+          config: configName,
+          emitter: emitter.id,
+          summary,
+          suppressedOpIds: [...coverage.suppressedOpIds].sort(),
+          entries: [...coverage.entries].sort((a, b) =>
+            a.operationId === b.operationId
+              ? a.template === b.template
+                ? a.aboxRow.localeCompare(b.aboxRow) || a.stepKind.localeCompare(b.stepKind)
+                : a.template.localeCompare(b.template)
+              : a.operationId.localeCompare(b.operationId),
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
     console.log(
-      `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites) in ${outDir} (target: ${emitter.id})`,
+      `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites, -${suppressedCount} suppressed by scenario-template coverage) in ${outDir} (target: ${emitter.id})`,
     );
     return;
   }

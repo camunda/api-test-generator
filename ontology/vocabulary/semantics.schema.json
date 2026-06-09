@@ -72,13 +72,78 @@
           "enum": [
             "modelDerived",
             "attribute",
-            "serverEmergent"
+            "serverEmergent",
+            "runtimeEmission"
           ],
-          "description": "How the planner obtains a value for this semantic type (#162). `modelDerived` reads from a deployment artifact in the same chain. `attribute` is a free-form label minted by the planner; requires `clientMinted: true`. `serverEmergent` is a server-minted lifecycle key the client cannot pre-mint. Absent `kind` falls back to the existing planner classification chain."
+          "description": "How the planner obtains a value for this semantic type. `modelDerived` (#162) reads from a deployment artifact in the same chain. `attribute` (#162) is a free-form label minted by the planner; requires `clientMinted: true`. `serverEmergent` (#162) is a server-minted lifecycle key the client cannot pre-mint and has no discovery surface — the planner falls through to a placeholder. `runtimeEmission` (#305) is a server-minted key that *is* discoverable via a search endpoint after a known producing side-effect; the entry declares both `emittedBy` (producing predecessor + capability guards) and `discoveredVia` (search-op + extraction + consistency model). As of #305 Phase 1 the planner does not yet consume these fields — the produce → discover → bind chain is planned in Phase 3. Absent `kind` falls back to the existing planner classification chain."
         },
         "clientMinted": {
           "type": "boolean",
           "description": "When true, values are minted by the planner / client rather than returned by a producer endpoint. Required when `kind === \"attribute\"` (loader-enforced)."
+        },
+        "modelElementTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "For `kind === \"modelDerived\"` semantics resolved from a deployment fixture (#172): the acceptable model-element `type` values for this semantic, in preference order. When a modelDerived variant leaf is resolved at the chain's createDeployment step, the planner picks the first element in the chosen fixture's `providesElements` whose `type` appears in this list (earliest entry wins). Omitted or empty ⇒ the planner falls back to the fixture's first declared element. The strings are matched against `providesElements[].type` by pure equality, so BPMN/OCA element vocabulary stays in config and never enters generic planner code. Example: `ElementId` lists every executable/terminal flow-node type but NOT `startEvent`, encoding the broker rule that a start event is not a valid `startInstructions[].elementId` target regardless of how many start events the model contains."
+        },
+        "emittedBy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "predecessor"
+          ],
+          "description": "Required when `kind === \"runtimeEmission\"` (#305 Phase 1). Declares how the key comes into existence at runtime: the producing predecessor that must run before the key is observable, and any capability guards the predecessor's deployment artefact must satisfy (e.g. the BPMN must contain a user-task element for `UserTaskKey` to be emitted).",
+          "properties": {
+            "predecessor": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name of a runtime state (`runtimeStates`) that must hold before this key can be discovered. Typically the post-condition of a `createXxx` operation that triggers the key emission (e.g. `ProcessInstanceExists` for `UserTaskKey`). No cross-ABox validation is performed at load time as of #305 Phase 1; the resolver is intended to land alongside the planner support in Phase 3."
+            },
+            "guardedBy": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Capability names whose presence is required for the predecessor to actually emit a key of this type — e.g. `ProcessInstanceExists` alone is not enough to emit a `UserTaskKey`; the deployed BPMN must contain a user-task element (`ModelHasUserTask`). Empty/omitted = no capability guard. No cross-ABox validation is performed at load time as of #305 Phase 1; the resolver is intended to land alongside the planner support in Phase 3."
+            }
+          }
+        },
+        "discoveredVia": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operationId",
+            "extractKey"
+          ],
+          "description": "Required when `kind === \"runtimeEmission\"` (#305 Phase 1). Declares how the planner reads the emitted key back from the system after the predecessor has run.",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "OperationId of the search/get endpoint that surfaces the emitted key (e.g. `searchUserTasks`). No graph cross-ref (that the op exists in the bundled spec) is performed at load time as of #305 Phase 1; an L3 abox-vs-graph invariant is intended to land alongside the first ABox entry that uses `runtimeEmission` in Phase 3."
+            },
+            "filterBy": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Request filter field on the discovery operation that the planner populates with an upstream-known key (typically `processInstanceKey` or `scopeKey`) to scope the result set to the producing predecessor's emissions. Omitted when the discovery op is unfiltered (rare; only sensible when fixture isolation makes a single global result the right one)."
+            },
+            "extractKey": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Response field name on each discovery-op result item whose value the planner binds as a value of this semantic type (e.g. `userTaskKey`). Documentary at the ABox layer; the planner reads it at scenario-generation time."
+            },
+            "consistency": {
+              "enum": [
+                "eventual",
+                "strong"
+              ],
+              "description": "Whether the discovery op returns the emitted key strongly-consistently (`strong` — read after producer returns succeeds first time) or only eventually (`eventual` — the planner must poll until the item appears, via the existing `await-eventually` helper). Mirrors the `runtimeStates.eventual` flag's intent. Defaults to `strong` if omitted — most Camunda read-after-write surfaces are strongly consistent; `eventual` is the explicit opt-in for emitters that need polling."
+            }
+          }
         },
         "$comment": {
           "type": "string",

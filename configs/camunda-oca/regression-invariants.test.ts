@@ -3,7 +3,7 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: error message text intentionally describes literal `${...}` placeholder syntax.
 // biome-ignore-all lint/correctness/noUnusedVariables: legacy declaration retained alongside its sibling describe blocks; safe to remove in a follow-up cleanup.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
@@ -12,6 +12,7 @@ import {
   getGraphDir,
   getPlaywrightSuiteDir,
   getScenariosDir,
+  getSdkOutDir,
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
@@ -52,7 +53,202 @@ const SCENARIOS_DIR = getScenariosDir(REPO_ROOT);
 const FEATURE_SCENARIOS_DIR = getFeatureOutputDir(REPO_ROOT);
 const VARIANT_SCENARIOS_DIR = getVariantOutputDir(REPO_ROOT);
 const GENERATED_TESTS_DIR = getPlaywrightSuiteDir(REPO_ROOT);
+const JS_SDK_DIR = getSdkOutDir(REPO_ROOT, 'js-sdk');
+const PYTHON_SDK_DIR = getSdkOutDir(REPO_ROOT, 'python-sdk');
+const CSHARP_SDK_DIR = getSdkOutDir(REPO_ROOT, 'csharp-sdk');
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
+
+// #331: opIds whose per-endpoint feature spec is intentionally omitted
+// because a scenario-template instantiation already encodes the
+// canonical functional test for that operation. Materializer writes
+// the coverage artefact alongside the suite. Loaded lazily — feature-
+// presence invariants subtract this set; the lifecycle specs under
+// `edges/`, `entities/`, `runtime-entities/`, and `state-transitions/`
+// are the regression guard for the suppressed operations.
+let _suppressedOpIdsCache: Set<string> | undefined;
+function loadSuppressedOpIds(): Set<string> {
+  if (_suppressedOpIdsCache) return _suppressedOpIdsCache;
+  const coveragePath = join(GENERATED_TESTS_DIR, 'coverage.json');
+  if (!existsSync(coveragePath)) {
+    _suppressedOpIdsCache = new Set();
+    return _suppressedOpIdsCache;
+  }
+  // biome-ignore lint/plugin: runtime contract boundary — materializer-emitted coverage artefact; only `suppressedOpIds: string[]` is read.
+  const parsed = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+    suppressedOpIds?: string[];
+  };
+  _suppressedOpIdsCache = new Set(parsed.suppressedOpIds ?? []);
+  return _suppressedOpIdsCache;
+}
+
+// ---------------------------------------------------------------------------
+// Bundled-spec helpers (shared between #326 and #247 invariants).
+//
+// `resolve` and `mergeSchema` clone the `seen` set at every recursive
+// hop into a *sibling* branch (e.g. a separate `allOf` element, or a
+// separate property), so the cycle-break is per-resolution-chain, not
+// per-invocation. Sharing the set across siblings caused false negatives
+// when two branches referenced the same `$ref` (the second occurrence
+// would silently resolve to `undefined`, dropping its `required` /
+// `properties` contributions). See PR #329 review.
+// ---------------------------------------------------------------------------
+
+interface SpecNode {
+  $ref?: string;
+  type?: string;
+  required?: string[];
+  properties?: Record<string, SpecNode>;
+  allOf?: SpecNode[];
+  oneOf?: SpecNode[];
+  items?: SpecNode;
+  enum?: unknown[];
+  content?: Record<string, { schema?: SpecNode }>;
+  schema?: SpecNode;
+  requestBody?: SpecNode;
+  operationId?: string;
+  minItems?: number;
+}
+
+interface BundledSpec {
+  paths?: Record<string, Record<string, SpecNode>>;
+}
+
+const isSpecRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object';
+
+let _bundledSpecCache: BundledSpec | undefined;
+function loadBundledSpec(): BundledSpec {
+  if (!_bundledSpecCache) {
+    if (!existsSync(BUNDLED_SPEC_PATH)) {
+      throw new Error(
+        `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run pipeline' first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary — JSON node from bundled OpenAPI spec; SpecNode fields are all optional and accessed defensively downstream.
+    _bundledSpecCache = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as BundledSpec;
+  }
+  return _bundledSpecCache;
+}
+
+function resolveSpecNode(
+  node: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): SpecNode | undefined {
+  if (!node) return undefined;
+  if (node.$ref) {
+    if (seen.has(node.$ref)) return undefined;
+    // Per-chain clone: this branch's resolution stack adds the ref,
+    // but sibling resolutions (separate allOf branches, separate
+    // properties) start from their own copy.
+    const next = new Set(seen);
+    next.add(node.$ref);
+    const parts = node.$ref.replace(/^#\//, '').split('/');
+    let cur: unknown = spec;
+    for (const p of parts) {
+      if (isSpecRecord(cur) && p in cur) {
+        cur = cur[p];
+      } else {
+        return undefined;
+      }
+    }
+    if (!isSpecRecord(cur)) return undefined;
+    // biome-ignore lint/plugin: runtime contract boundary — JSON node from bundled OpenAPI spec.
+    return resolveSpecNode(cur as SpecNode, spec, next);
+  }
+  return node;
+}
+
+function mergeSchemaShape(
+  schema: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): { required: Set<string>; properties: Record<string, SpecNode> } {
+  const required = new Set<string>();
+  const properties: Record<string, SpecNode> = {};
+  const s = resolveSpecNode(schema, spec, seen);
+  if (!s) return { required, properties };
+  for (const k of s.required ?? []) required.add(k);
+  for (const [k, v] of Object.entries(s.properties ?? {})) properties[k] = v;
+  for (const part of s.allOf ?? []) {
+    // Sibling allOf branches share no resolution stack — clone `seen`
+    // so a `$ref` repeated across siblings still resolves on each side.
+    const sub = mergeSchemaShape(part, spec, new Set(seen));
+    for (const k of sub.required) required.add(k);
+    for (const [k, v] of Object.entries(sub.properties)) {
+      if (!(k in properties)) properties[k] = v;
+    }
+  }
+  return { required, properties };
+}
+
+/**
+ * Walk a (possibly `$ref`- or `allOf`-wrapped) schema node and return its
+ * `enum` array if one is declared anywhere along the chain. Used by the
+ * `#338` invariant to recover enum constraints from spec nodes that are
+ * frequently wrapped as `allOf: [{ $ref: '#/components/schemas/SomeEnum' }]`
+ * (e.g. `resourceType`, `permissionTypes.items`).
+ *
+ * Returns the raw enum array — callers compare emitted values against it.
+ */
+function effectiveEnumFromSpec(
+  node: SpecNode | undefined,
+  spec: BundledSpec,
+  seen: Set<string>,
+): unknown[] | undefined {
+  const r = resolveSpecNode(node, spec, seen);
+  if (!r) return undefined;
+  if (Array.isArray(r.enum)) return r.enum;
+  for (const part of r.allOf ?? []) {
+    const e = effectiveEnumFromSpec(part, spec, new Set(seen));
+    if (e) return e;
+  }
+  return undefined;
+}
+
+function collectRequiredArrayKeysFromSchema(
+  schema: SpecNode | undefined,
+  spec: BundledSpec,
+): Set<string> {
+  const out = new Set<string>();
+  const { required, properties } = mergeSchemaShape(schema, spec, new Set());
+  for (const key of required) {
+    const propSchema = resolveSpecNode(properties[key], spec, new Set());
+    if (propSchema?.type !== 'array') continue;
+    // `minItems: 0` explicitly permits empty arrays. Don't flag those
+    // even though the property is required — the spec endorses `[]`
+    // as a valid value, and the body-builder's empty-array emission is
+    // legal there. (#326 review)
+    if (typeof propSchema.minItems === 'number' && propSchema.minItems <= 0) continue;
+    out.add(key);
+  }
+  return out;
+}
+
+let _requiredArrayByOpCache: Map<string, Set<string>> | undefined;
+function getRequiredArrayByOp(): Map<string, Set<string>> {
+  if (_requiredArrayByOpCache) return _requiredArrayByOpCache;
+  const spec = loadBundledSpec();
+  const out = new Map<string, Set<string>>();
+  for (const ops of Object.values(spec.paths ?? {})) {
+    for (const op of Object.values(ops)) {
+      if (!op?.operationId) continue;
+      const body = resolveSpecNode(op.requestBody, spec, new Set());
+      const schema = body?.content?.['application/json']?.schema;
+      const keys = collectRequiredArrayKeysFromSchema(schema, spec);
+      if (keys.size > 0) out.set(op.operationId, keys);
+    }
+  }
+  _requiredArrayByOpCache = out;
+  return out;
+}
+
+// Escape a property name for safe interpolation into a RegExp. Required
+// because `$` and `.` (among others) are valid in JSON keys but carry
+// meaning in regex.
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 interface SemanticTypeEntry {
   semanticType: string;
@@ -114,6 +310,9 @@ interface VariantScenarioFile {
 
 let cachedGraph: DependencyGraph | undefined;
 let cachedOperationById: Map<string, OperationNode> | undefined;
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
 function loadGraph(): DependencyGraph {
   if (cachedGraph) return cachedGraph;
   if (!existsSync(GRAPH_PATH)) {
@@ -204,18 +403,23 @@ describeForThisConfig('bundled-spec invariants: extractor classification', () =>
     expect(node?.required).toBe(false);
   });
 
-  it('createDeployment provides the full {DecisionDefinitionId, DecisionDefinitionKey, DecisionRequirementsKey, FormKey, ProcessDefinitionId, ProcessDefinitionKey} provider set (#34 / #137)', () => {
+  it('createDeployment provides the full {DecisionDefinitionId, DecisionDefinitionKey, DecisionRequirementsKey, DeploymentKey, FormKey, ProcessDefinitionId, ProcessDefinitionKey} provider set (#34 / #137)', () => {
     // Locks in `x-semantic-provider` array-form recognition: the response
     // payload uses array-form `x-semantic-provider` on `deployments[].*`,
     // and #34 made the inheritedProvider flag thread through the nested
     // object subtrees so every listed key is flagged provider:true. The
     // pinned spec bump (#134, camunda/camunda PR #52322, merge SHA
     // b9d355d) added DecisionDefinitionId to the authoritative set —
-    // see #137 for the rationale and the migration trail.
+    // see #137 for the rationale and the migration trail. The subsequent
+    // bump to camunda/camunda main HEAD (d29d644) added DeploymentKey
+    // as a top-level `x-semantic-provider` on the `DeploymentResult`
+    // response envelope itself (alongside the existing nested
+    // `deployments[].*` providers).
     expect(providersOf('createDeployment')).toEqual([
       'DecisionDefinitionId',
       'DecisionDefinitionKey',
       'DecisionRequirementsKey',
+      'DeploymentKey',
       'FormKey',
       'ProcessDefinitionId',
       'ProcessDefinitionKey',
@@ -277,6 +481,373 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       .map((s) => ({ id: s.id, ops: s.operations.map((o) => o.operationId) }))
       .filter((s) => s.ops.includes('searchElementInstances'));
     expect(offenders).toEqual([]);
+  });
+
+  it('every scenario whose chain consumes a createDeployment-authoritative semantic includes createDeployment as a producer step (#305 Phase 2 — deployment-as-planner-producer guard)', () => {
+    // Class-scoped pin of the property #305's Phase 3 must preserve:
+    // the `deploymentGateway` codegen role is a per-test call-site
+    // helper, NOT a semantic substitute for the planner step. If a
+    // chain references an operation that requires a semantic
+    // createDeployment authoritatively produces (e.g.
+    // ProcessDefinitionKey on createProcessInstance, FormKey on
+    // updateUserTaskForm, etc.), then createDeployment must appear in
+    // the same chain as a real producer step. The scenario JSON is
+    // the planner's output contract; this invariant fails if a future
+    // refactor lets the role hook short-circuit deployment planning.
+    //
+    // Defect class: any chain in which a deployment-derived key is
+    // sourced from a placeholder seedBinding or from an unrelated
+    // ancestor instead of an in-chain createDeployment.
+    //
+    // The "authoritative" set comes from the #34/#137 invariant above
+    // and matches createDeployment's response provider:true semantics:
+    // ProcessDefinitionKey/Id, DecisionDefinitionKey/Id,
+    // DecisionRequirementsKey, FormKey.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    loadGraph();
+    const deploymentDerivedSemantics = new Set([
+      'ProcessDefinitionKey',
+      'ProcessDefinitionId',
+      'DecisionDefinitionKey',
+      'DecisionDefinitionId',
+      'DecisionRequirementsKey',
+      'FormKey',
+    ]);
+    function consumesDeploymentDerived(opId: string): boolean {
+      // Use findOperation so unknown opIds throw rather than silently
+      // making the invariant a no-op (which would mask drift between
+      // the scenarios and the graph).
+      const op = findOperation(opId);
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (e.required && deploymentDerivedSemantics.has(e.semanticType)) return true;
+      }
+      for (const p of op.parameters ?? []) {
+        if (p.required && p.semanticType && deploymentDerivedSemantics.has(p.semanticType)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    const offenders: { file: string; scenario: string; ops: string[] }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      for (const s of file.scenarios ?? []) {
+        if (s.id === 'unsatisfied') continue;
+        const ops = s.operations.map((o) => o.operationId);
+        if (ops.length <= 1) continue;
+        // Exclude createDeployment itself from the chain when checking
+        // who consumes deployment-derived semantics — we want the
+        // *downstream* consumers' transitive need to be satisfied by
+        // an in-chain createDeployment.
+        const downstreamConsumers = ops.filter(
+          (o) => o !== 'createDeployment' && consumesDeploymentDerived(o),
+        );
+        if (downstreamConsumers.length === 0) continue;
+        if (!ops.includes('createDeployment')) {
+          offenders.push({ file: f, scenario: s.id, ops });
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Every chain that consumes a deployment-derived semantic (ProcessDefinitionKey/Id, DecisionDefinitionKey/Id, DecisionRequirementsKey, FormKey) must include createDeployment as a producer step. The deploymentGateway codegen role is an emitter call-site helper, not a planner substitute (#305 corrected acceptance criterion #3).',
+    ).toEqual([]);
+  });
+
+  it('every endpoint that consumes a runtimeEmission-classified semantic in a required path-param plans a real discovery chain — no synthetic-only resolution (#305 Phase 3)', () => {
+    // Class-scoped guard for the runtimeEmission promotion (#305):
+    // when a semantic type is reclassified from `serverEmergent` to
+    // `runtimeEmission`, every endpoint that consumes it in a required
+    // path-param must plan a chain that (a) is not `unsatisfied` and
+    // (b) includes the declared `discoveredVia.operationId` ahead of
+    // the consuming op. Regression would mean the planner silently
+    // falls back to a synthetic `seedBinding(...)` placeholder, which
+    // makes the integration test a no-op.
+    if (!existsSync(SCENARIOS_DIR)) {
+      throw new Error(
+        `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    const semanticsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const semantics = JSON.parse(readFileSync(semanticsPath, 'utf8')) as {
+      semanticTypes?: Array<{
+        name: string;
+        kind?: string;
+        discoveredVia?: { operationId?: string };
+      }>;
+    };
+    const runtimeEmissionByName = new Map<string, string>();
+    for (const t of semantics.semanticTypes ?? []) {
+      if (t.kind === 'runtimeEmission' && t.discoveredVia?.operationId) {
+        runtimeEmissionByName.set(t.name, t.discoveredVia.operationId);
+      }
+    }
+    if (runtimeEmissionByName.size === 0) return; // no-op until Phase 3 lands UserTaskKey
+
+    loadGraph();
+    const offenders: { file: string; scenario: string; semantic: string; reason: string }[] = [];
+    for (const f of readdirSync(SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as ScenarioFile;
+      const endpointOp = findOperation(file.endpoint.operationId);
+      // Required path-param semantics on the endpoint under test.
+      const requiredPathSemantics = (endpointOp.parameters ?? [])
+        .filter((p) => p.location === 'path' && p.required && p.semanticType)
+        .map((p) => p.semanticType)
+        .filter((s): s is string => typeof s === 'string');
+      const relevant = requiredPathSemantics.filter((s) => runtimeEmissionByName.has(s));
+      if (relevant.length === 0) continue;
+      // Also flag the empty-success case: a relevant endpoint that only
+      // plans `unsatisfied` scenarios passes the per-scenario checks
+      // below trivially (the loop body is skipped). A regression where
+      // the planner stops expanding the discovery chain and falls back
+      // to `unsatisfied` would otherwise go undetected. (PR #308
+      // review.)
+      const satisfiable = (file.scenarios ?? []).filter((s) => s.id !== 'unsatisfied');
+      if (satisfiable.length === 0) {
+        for (const sem of relevant) {
+          offenders.push({
+            file: f,
+            scenario: '(none — all scenarios unsatisfied)',
+            semantic: sem,
+            reason: `endpoint '${file.endpoint.operationId}' planned no satisfiable chain for required path-param semantic '${sem}'`,
+          });
+        }
+        continue;
+      }
+      for (const s of satisfiable) {
+        const ops = s.operations.map((o) => o.operationId);
+        for (const sem of relevant) {
+          const discoveryOp = runtimeEmissionByName.get(sem);
+          if (!discoveryOp) continue;
+          const discIdx = ops.indexOf(discoveryOp);
+          // Use lastIndexOf for the consuming-endpoint op: variant
+          // scenarios can legitimately invoke the endpoint more than
+          // once (e.g. warm-up + final). The discovery op must precede
+          // the FINAL consumer invocation, not the warm-up one. (PR
+          // #308 review.)
+          const endIdx = ops.lastIndexOf(file.endpoint.operationId);
+          if (discIdx < 0) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              semantic: sem,
+              reason: `discovery op '${discoveryOp}' missing from chain ${JSON.stringify(ops)}`,
+            });
+          } else if (endIdx >= 0 && discIdx > endIdx) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              semantic: sem,
+              reason: `discovery op '${discoveryOp}' appears after the consuming op '${file.endpoint.operationId}'`,
+            });
+          }
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Every endpoint that consumes a runtimeEmission semantic in a required path-param must plan a chain whose discoveredVia.operationId precedes the consuming op (#305 Phase 3). A failure here usually means the planner silently fell back to `seedBinding(...)` for the target semantic instead of expanding the discovery chain.',
+    ).toEqual([]);
+  });
+
+  it('every planner-inserted runtimeEmission discovery step has a discoveryIntent and a body shaped exactly { filter: { [filterBy]: <bound> } } (#309 Phase A)', () => {
+    // Class-scoped guard for #309 Phase A. The pre-Phase-A planner
+    // emitted a flat top-level body for the inserted discovery step
+    // (every filter field as a placeholder), so the chain ran but
+    // queried for the wrong entity and the test passed for the wrong
+    // reason. Phase A stamps `discoveryIntent` on the OperationRef
+    // and the body builder emits ONLY the forward-bound filter wrapper.
+    //
+    // What this guards (per the issue #309 design table):
+    //   - The intentional-discovery regime must NEVER share the
+    //     exploratory-search regime's body shape — `{ filter: {
+    //       processInstanceKey: '${processInstanceKeyVar}' } }`, not
+    //     `{ processInstanceKey: '${processInstanceKeyVar}', state: ... }`.
+    //   - `filterBy` MUST resolve to the upstream producer's binding
+    //     (forward-bind), not a synthetic placeholder.
+    //   - User-authored search tests (no discoveryIntent stamped) are
+    //     untouched — they keep whatever shape the generic body builder
+    //     produces (today `{}` for a base-feature scenario).
+    if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+      throw new Error(
+        `Feature-output scenarios directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // Independently identify the runtimeEmission discovery ops from the
+    // ABox so this invariant can fail when a discovery op appears in a
+    // chain *without* the planner having stamped a DiscoveryIntent on
+    // it. Looking only at already-stamped intents would only validate
+    // the body shape — not catch the regression where the stamp itself
+    // is missing.
+    const semanticsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'semantics.json');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const semantics = JSON.parse(readFileSync(semanticsPath, 'utf8')) as {
+      semanticTypes?: Array<{
+        name: string;
+        kind?: string;
+        discoveredVia?: { operationId?: string };
+      }>;
+    };
+    const discoveryOpIds = new Set<string>();
+    for (const t of semantics.semanticTypes ?? []) {
+      if (t.kind === 'runtimeEmission' && t.discoveredVia?.operationId) {
+        discoveryOpIds.add(t.discoveredVia.operationId);
+      }
+    }
+    if (discoveryOpIds.size === 0) return; // no-op until an ABox declares one
+    interface DiscoveryIntentLite {
+      filterBy: string;
+      fromSemantic: string;
+      fromBinding: string;
+      extractKey: string;
+      extractInto: string;
+      consistency: 'eventual' | 'strong';
+    }
+    interface OpRefLite {
+      operationId: string;
+      discoveryIntent?: DiscoveryIntentLite;
+    }
+    interface RequestStepLite {
+      operationId: string;
+      bodyTemplate?: unknown;
+      discoveryIntent?: DiscoveryIntentLite;
+    }
+    interface ScenarioLite {
+      id: string;
+      operations: OpRefLite[];
+      requestPlan?: RequestStepLite[];
+    }
+    interface FileLite {
+      endpoint: { operationId: string };
+      scenarios: ScenarioLite[];
+    }
+    const offenders: { file: string; scenario: string; op: string; reason: string }[] = [];
+    let intentCount = 0;
+    for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const file = JSON.parse(readFileSync(join(FEATURE_SCENARIOS_DIR, f), 'utf8')) as FileLite;
+      const endpointOpId = file.endpoint.operationId;
+      for (const s of file.scenarios) {
+        for (const op of s.operations) {
+          // Phase A only governs planner-inserted discovery steps —
+          // i.e. an ABox runtimeEmission op appearing as a prereq, not
+          // as the endpoint under test (which is the exploratory regime
+          // and uses the generic body builder).
+          const isInsertedDiscovery =
+            discoveryOpIds.has(op.operationId) && op.operationId !== endpointOpId;
+          if (!isInsertedDiscovery) continue;
+          if (!op.discoveryIntent) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason:
+                'planner-inserted runtimeEmission discovery op is missing discoveryIntent stamp — body would fall through to the generic builder (wrong regime)',
+            });
+            continue;
+          }
+          intentCount++;
+          const intent = op.discoveryIntent;
+          // Find the matching requestPlan step (must exist; body builder
+          // skips ops without a plan only for GET/DELETE — discovery
+          // ops are POST searches).
+          const step = (s.requestPlan ?? []).find((st) => st.operationId === op.operationId);
+          if (!step) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: 'discoveryIntent stamped but no matching requestPlan step found',
+            });
+            continue;
+          }
+          if (!step.discoveryIntent) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason:
+                'requestPlan step missing discoveryIntent — body builder bypassed the Phase A branch',
+            });
+            continue;
+          }
+          const body = step.bodyTemplate;
+          if (!isPlainRecord(body)) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate must be a plain object, got ${typeof body}`,
+            });
+            continue;
+          }
+          const bodyObj = body;
+          const topKeys = Object.keys(bodyObj);
+          if (topKeys.length !== 1 || topKeys[0] !== 'filter') {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate must have exactly one top-level key 'filter', got [${topKeys.join(', ')}]`,
+            });
+            continue;
+          }
+          const filterRaw = bodyObj.filter;
+          if (!isPlainRecord(filterRaw)) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate.filter must be a plain object, got ${typeof filterRaw}`,
+            });
+            continue;
+          }
+          const filter = filterRaw;
+          const filterKeys = Object.keys(filter);
+          if (filterKeys.length !== 1 || filterKeys[0] !== intent.filterBy) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate.filter must have exactly one key '${intent.filterBy}', got [${filterKeys.join(', ')}]`,
+            });
+            continue;
+          }
+          const value = filter[intent.filterBy];
+          const expected = `\${${intent.fromBinding}}`;
+          if (value !== expected) {
+            offenders.push({
+              file: f,
+              scenario: s.id,
+              op: op.operationId,
+              reason: `bodyTemplate.filter.${intent.filterBy} must equal '${expected}', got ${JSON.stringify(value)}`,
+            });
+          }
+        }
+      }
+    }
+    // Sanity: this invariant is a no-op without runtimeEmission ABox
+    // entries; with the camunda-oca config there must be at least one
+    // (UserTaskKey × searchUserTasks). A zero here means either the
+    // ABox regressed or the planner stopped stamping the intent.
+    expect(
+      intentCount,
+      'expected at least one stamped discoveryIntent (UserTaskKey via searchUserTasks)',
+    ).toBeGreaterThan(0);
+    expect(
+      offenders,
+      "Every planner-inserted runtimeEmission discovery step must carry a discoveryIntent and a body shaped exactly { filter: { [filterBy]: '${fromBinding}' } }. Per the #309 design table, this is the intentional-discovery regime — it MUST NOT share the exploratory-search regime's flat top-level body shape, and it MUST forward-bind to the upstream producer's binding.",
+    ).toEqual([]);
   });
 
   it('every endpoint whose only required semantic has a self-sufficient authoritative producer plans at least one chain (#95)', () => {
@@ -1352,6 +1923,97 @@ describeForThisConfig('bundled-spec invariants: planner variant output (#37)', (
 });
 
 describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () => {
+  it('no emitted Playwright suite uses the legacy `=== undefined` guard around `seedBinding(` (#286)', () => {
+    // Class-scoped guard for the #286 normalisation. Pre-#286 the
+    // per-scenario seedBindings loop in BOTH emitters emitted
+    //
+    //   if (ctx['<k>'] === undefined) { ctx['<k>'] = seedBinding('<k>'); }
+    //
+    // while the universal-seed prologue used the terse `??` form.
+    // #286 collapses both paths through `materializer/src/playwright/
+    // ctxSeeding.ts` and emits the `??` form uniformly. This
+    // invariant rejects any reappearance of the verbose form across
+    // every emitted suite — feature, variant, AND lifecycle (entities/
+    // and edges/ subdirectories) — so a future emitter contributor
+    // who copies the old shape (or biome:fix-generated rewriting a
+    // `??` into `if`) is caught by the regen, not by review.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    function* walkSpecs(dir: string): Generator<string> {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          yield* walkSpecs(full);
+        } else if (entry.isFile() && entry.name.endsWith('.spec.ts')) {
+          yield full;
+        }
+      }
+    }
+    // Matches both the single-line form (`if (ctx['x'] === undefined)
+    // { ctx['x'] = seedBinding('x'); }`) and the multi-line form the
+    // template emitter used pre-#286 (`if (ctx['x'] === undefined) {\n
+    // ctx['x'] = seedBinding('x');\n }`). The `[\s\S]*?` allows the
+    // newline-separated body without depending on the `s` flag.
+    const legacyPattern = /===\s*undefined[\s\S]*?seedBinding\s*\(/;
+    const offenders: string[] = [];
+    for (const full of walkSpecs(GENERATED_TESTS_DIR)) {
+      const src = readFileSync(full, 'utf8');
+      // Restrict the search to spans that wouldn't accidentally
+      // match unrelated `=== undefined` checks followed by a seed
+      // many lines later: take the body line by line and only flag
+      // matches within a 3-line sliding window.
+      const lines = src.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const window = lines.slice(i, i + 3).join('\n');
+        if (legacyPattern.test(window) && window.includes('ctx[')) {
+          offenders.push(`${relative(REPO_ROOT, full)}:${i + 1}`);
+          break;
+        }
+      }
+    }
+    expect(
+      offenders,
+      'Every emitted Playwright suite must seed bindings via the terse `??` form (#286). The legacy `=== undefined` guard means an emitter regressed to the pre-#286 shape; both `materializer/src/playwright/emitter.ts` and `templateEmitter.ts` must call `emitCtxSeeding` from `materializer/src/playwright/ctxSeeding.ts`.',
+    ).toEqual([]);
+  });
+
+  it('generated package.json has no script that references `./openapi.json`', () => {
+    // The pre-fix `responses:regenerate` script pointed at
+    // `./openapi.json`, which the codegen never wrote next to the
+    // suite's package.json. Running `npm run responses:regenerate`
+    // out of the box failed with "Local spec file not found". This
+    // invariant rejects any script in the generated package.json
+    // whose command-line references the literal `./openapi.json`.
+    // Class-scoped: any reintroduction of that dead-on-arrival
+    // shape — under any script name — fails.
+    const pkgPath = join(GENERATED_TESTS_DIR, 'package.json');
+    if (!existsSync(pkgPath)) {
+      throw new Error(
+        `Generated package.json not found at ${pkgPath}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const pkgRaw = readFileSync(pkgPath, 'utf8');
+    const pkgParsed: unknown = JSON.parse(pkgRaw);
+    function isRecord(v: unknown): v is Record<string, unknown> {
+      return typeof v === 'object' && v !== null && !Array.isArray(v);
+    }
+    const scripts = isRecord(pkgParsed) && isRecord(pkgParsed.scripts) ? pkgParsed.scripts : {};
+    const offenders: { name: string; command: string }[] = [];
+    for (const [name, raw] of Object.entries(scripts)) {
+      if (typeof raw !== 'string') continue;
+      if (/(^|\s|=)\.\/(openapi\.json)(\s|$)/.test(raw)) {
+        offenders.push({ name, command: raw });
+      }
+    }
+    expect(
+      offenders,
+      'No script in the generated package.json may reference `./openapi.json` — the codegen does not materialise that file next to the suite, so any such script fails on first invocation. To regenerate `responses.json` against a different spec, use the npx command documented in README.md instead.',
+    ).toEqual([]);
+  });
+
   it('no generated test contains a stray __invalidEnum sentinel object (#39)', () => {
     // Layer-3 mirror of the targeted enum-violation test in
     // tests/request-validation/. Catches any future analyser that
@@ -1429,6 +2091,10 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     let totalExpected = 0;
     let totalActual = 0;
     let suitesWithEc = 0;
+    // #331: suppressed opIds have no feature spec to wrap — the
+    // equivalent eventually-consistent reads inside their lifecycle
+    // spec are guarded by the template emitter's own wrap logic.
+    const suppressed = loadSuppressedOpIds();
 
     for (const f of readdirSync(FEATURE_SCENARIOS_DIR)) {
       if (!f.endsWith('-scenarios.json')) continue;
@@ -1436,6 +2102,7 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
       // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary; shape locally typed as CollectionLite
       const coll = JSON.parse(raw) as CollectionLite;
       if (!coll || typeof coll !== 'object') continue;
+      if (suppressed.has(coll.endpoint?.operationId)) continue;
       const expected = expectedWraps(coll);
       if (expected === 0) continue;
       suitesWithEc++;
@@ -1488,6 +2155,143 @@ describeForThisConfig('bundled-spec invariants: emitted Playwright suite', () =>
     }
     expect(offenders).toEqual([]);
   });
+
+  it('no emitted feature spec writes a deterministic literal for a binding that is also unique-seeded (#320)', () => {
+    // Class-scoped guard for #320: the materializer's `emitCtxSeeding`
+    // helper writes literal `ctx.<name> = "<value>";` lines for every
+    // entry in `scenario.bindings`. Pre-fix, if the same name was also
+    // flagged unique by `computeUniqueBindings` (because it is consumed
+    // by a 409-declaring step and therefore needs `{ unique: true }`),
+    // the literal would short-circuit the `??` seedBinding fallback and
+    // the second invocation of the run against the same cluster would
+    // 409.
+    //
+    // The fix re-routes any literal whose key is in `uniqueBindings`
+    // into a `seedBinding('<name>', { unique: true })` line instead.
+    // This invariant pins the post-condition at the only layer where
+    // the symptom is observable: no emitted spec should contain BOTH a
+    // literal write AND a unique-seed line for the same binding name.
+    //
+    // Original instance: `unassignMappingRuleFromGroup.feature.spec.ts`
+    // emitted `ctx.groupIdVar = 'group_1k29';` alongside no unique seed,
+    // because the literal short-circuited the entire seed branch. With
+    // the fix the literal is gone and only the unique seed remains —
+    // the offender set below is the empty set.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+
+    // For each spec, collect the set of binding names that are
+    // unique-seeded (`seedBinding('X', { unique: true })`) and the set
+    // that are deterministic-literal-written (`ctx.X = "..."` or
+    // `ctx['X'] = "..."`), and report any intersection. Both forms of
+    // ctx access exist in the emitted output depending on whether
+    // biome's `useDotNotation` autofix could rewrite the access.
+    const uniqueRe =
+      /seedBinding\(\s*['"]([A-Za-z_$][\w$]*)['"]\s*,\s*\{\s*unique:\s*true\s*\}\s*\)/g;
+    // Match both single- and double-quoted string literals: the
+    // generated suite is formatted by Biome with `quoteStyle: 'single'`
+    // (see biome.generated.json), but the upstream emitter or future
+    // formatter changes could produce either form. Accepting both
+    // keeps the invariant robust against quote-style drift.
+    const literalDotRe = /\bctx\.([A-Za-z_$][\w$]*)\s*=\s*(?:"[^"]*"|'[^']*')\s*;/g;
+    const literalBracketRe =
+      /\bctx\[\s*['"]([A-Za-z_$][\w$]*)['"]\s*\]\s*=\s*(?:"[^"]*"|'[^']*')\s*;/g;
+
+    const offenders: string[] = [];
+    let totalUnique = 0;
+    for (const f of specs) {
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      const uniqueNames = new Set<string>();
+      let m: RegExpExecArray | null;
+      while ((m = uniqueRe.exec(src)) !== null) uniqueNames.add(m[1]);
+      uniqueRe.lastIndex = 0;
+      if (uniqueNames.size === 0) continue;
+      totalUnique += uniqueNames.size;
+      const literalNames = new Set<string>();
+      while ((m = literalDotRe.exec(src)) !== null) literalNames.add(m[1]);
+      literalDotRe.lastIndex = 0;
+      while ((m = literalBracketRe.exec(src)) !== null) literalNames.add(m[1]);
+      literalBracketRe.lastIndex = 0;
+      const both = [...uniqueNames].filter((n) => literalNames.has(n));
+      if (both.length > 0) {
+        offenders.push(`${relative(REPO_ROOT, join(GENERATED_TESTS_DIR, f))}: ${both.join(', ')}`);
+      }
+    }
+
+    // Sanity: the bundled spec must non-trivially exercise the
+    // unique-seeded pattern; otherwise this invariant is vacuous and
+    // would silently pass even if `emitCtxSeeding` regressed.
+    expect(
+      totalUnique,
+      'expected at least one emitted spec to use seedBinding(..., { unique: true })',
+    ).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+
+  it('no emitted feature spec emits `[]` for a request-body property that the spec marks `required` and `type: array` (#326)', () => {
+    // Class-scoped guard for #326: the body-builder, when producing
+    // "only required semantics" base scenarios, emits `<key>: []` for
+    // required array-typed properties. Live cluster rejects with 400
+    // (e.g. activateAdHocSubProcessActivities returns
+    //   {"title":"INVALID_ARGUMENT","status":400,"detail":"No elements provided."}
+    // for body `{ elements: [] }`).
+    //
+    // The fix must populate at least one valid element (e.g. the first
+    // enum value for array-of-enum; a recursively-built object for
+    // array-of-object). This invariant pins the post-condition at the
+    // emitted-spec layer: no spec file may bind a required-array
+    // property to the empty-array literal.
+    //
+    // Schemas that explicitly permit empty arrays via `minItems: 0`
+    // are excluded by `getRequiredArrayByOp()` so this guard does not
+    // produce false positives if the upstream spec ever marks such a
+    // property required-but-empty-allowed.
+    if (!existsSync(GENERATED_TESTS_DIR)) {
+      throw new Error(
+        `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+      );
+    }
+    const requiredArrayByOp = getRequiredArrayByOp();
+    expect(
+      requiredArrayByOp.size,
+      'bundled spec must declare at least one operation with a required array-typed body field (otherwise this invariant is vacuous)',
+    ).toBeGreaterThan(0);
+
+    // For each emitted feature spec, derive the operationId from the
+    // filename (`<operationId>.feature.spec.ts`) and scan for any
+    // `<requiredArrayKey>: []` literal in the source.
+    const offenders: string[] = [];
+    const specs = readdirSync(GENERATED_TESTS_DIR).filter((f) => f.endsWith('.feature.spec.ts'));
+    expect(specs.length, 'at least one feature spec must be emitted').toBeGreaterThan(0);
+    for (const f of specs) {
+      const opId = f.replace(/\.feature\.spec\.ts$/, '');
+      const required = requiredArrayByOp.get(opId);
+      if (!required) continue;
+      const src = readFileSync(join(GENERATED_TESTS_DIR, f), 'utf8');
+      for (const key of required) {
+        // Match `key: []` or `'key': []` or `"key": []` (with optional whitespace),
+        // bounded by `{`, `,`, or `\n` on the left to avoid substring false positives.
+        // `key` is regex-escaped — JSON property names may contain `.`, `$`, etc.
+        const escaped = escapeRegex(key);
+        const re = new RegExp(
+          `(?:[{,\\n]\\s*)(?:${escaped}|['"]${escaped}['"])\\s*:\\s*\\[\\s*\\]`,
+          'g',
+        );
+        if (re.test(src)) {
+          offenders.push(`${f}: ${key}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      'feature specs emitting `[]` for required-array body properties (#326)',
+    ).toEqual([]);
+  });
 });
 
 describeForThisConfig('bundled-spec invariants: fixture selection by required state (#159)', () => {
@@ -1530,6 +2334,60 @@ describeForThisConfig('bundled-spec invariants: fixture selection by required st
     expect(src, 'activateJobs must deploy the service-task fixture').toContain(
       '@@FILE:bpmn/service-task.bpmn',
     );
+  });
+
+  it('Incident.resolveIncident lifecycle spec deploys bpmn/incident-script-task.bpmn and chains searchIncidents → getIncident (#305 Phase 5a)', () => {
+    // Phase 5a promoted IncidentKey serverEmergent → runtimeEmission, gated
+    // by the new ModelEmitsIncident capability. The selector must pick the
+    // new incident-script-task fixture (the only one declaring
+    // providesStates: ['ModelEmitsIncident']) for any chain that consumes
+    // IncidentKey in a required path-param. The chain must also include a
+    // searchIncidents discovery step, an extracted incidentKey binding, and
+    // a getIncident step that consumes the bound key — the same shape as
+    // the UserTaskKey pilot (#305 Phase 3) but for incidents.
+    //
+    // Without the ABox promotion + fixture, getIncident would dead-end on
+    // IncidentKey (synthetic seed only), the emitted spec would have a
+    // single getIncident step seeded with `seedBinding('incidentKeyVar')`,
+    // and the test would be a no-op against any real broker.
+    //
+    // #331: getIncident's per-endpoint feature spec is now suppressed
+    // because `Incident.resolveIncident` (StateTransitionVisibleAfterAction
+    // template) is the canonical runtime-discovery test. The same chain
+    // assertions hold against the lifecycle spec — the production behaviour
+    // is unchanged, only the spec file moved.
+    const spec = join(
+      GENERATED_TESTS_DIR,
+      'templates',
+      'StateTransitionVisibleAfterAction',
+      'Incident.resolveIncident.lifecycle.spec.ts',
+    );
+    if (!existsSync(spec)) {
+      throw new Error(`expected emitted spec ${spec} not found — run 'npm run testsuite:generate'`);
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(src, 'Incident.resolveIncident must deploy the incident-emitting fixture').toContain(
+      '@@FILE:bpmn/incident-script-task.bpmn',
+    );
+    expect(src, 'Incident.resolveIncident must include searchIncidents discovery step').toContain(
+      "test.step('prereq: searchIncidents'",
+    );
+    expect(src, 'Incident.resolveIncident must include getIncident endpoint step').toContain(
+      "test.step('observe (read-back): getIncident'",
+    );
+    expect(
+      src,
+      'Incident.resolveIncident must extract incidentKey from searchIncidents response',
+    ).toMatch(/extractInto\(ctx, 'incidentKeyVar', json\d*\?\.items\?\.\[0\]\?\.incidentKey\)/);
+    expect(
+      src,
+      'Incident.resolveIncident must consume the runtime-discovered incidentKey',
+    ).toContain('${ctx.incidentKeyVar');
+    // Negative: must NOT fall back to seeded-only resolution.
+    expect(
+      src,
+      'Incident.resolveIncident must NOT seed incidentKeyVar — the runtimeEmission chain supplies it',
+    ).not.toContain("seedBinding('incidentKeyVar')");
   });
 
   it('createProcessInstance.feature.spec.ts deploys bpmn/simple.bpmn (chainCleanupRequires ProcessInstanceCompleted, #249)', () => {
@@ -1978,6 +2836,102 @@ describeForThisConfig('bundled-spec invariants: x-semantic-establishes (#104)', 
   });
 });
 
+describeForThisConfig('bundled-spec invariants: 404 fake-ID emitter (#381 / #279)', () => {
+  const UNSECURED_DIR = join(
+    REPO_ROOT,
+    'generated',
+    CONFIG_NAME,
+    'request-validation',
+    'unsecured',
+  );
+
+  function requireSuiteDir(): void {
+    if (!existsSync(UNSECURED_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${UNSECURED_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+  }
+
+  // Match each individual `test( ... });` block and capture its own
+  // scenarioKind. Anchoring on per-block `scenarioKind` (rather than embedding
+  // the literal kind inside a lazy cross-test span) prevents a match from
+  // greedily spanning earlier tests in the same file and mislabelling the
+  // operationId. The generated suite is biome-formatted (single quotes,
+  // 2-space indent) after emission, so the closing `\n  });` is stable.
+  const TEST_BLOCK = /test\('[^]*?scenarioKind:\s*'([^']+)',[^]*?\n {2}\}\);/g;
+
+  function collectBlocks(): { file: string; operationId: string; block: string }[] {
+    const out: { file: string; operationId: string; block: string }[] = [];
+    for (const f of readdirSync(UNSECURED_DIR)) {
+      if (!f.endsWith('.spec.ts')) continue;
+      const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
+      let m: RegExpExecArray | null;
+      TEST_BLOCK.lastIndex = 0;
+      while ((m = TEST_BLOCK.exec(src)) !== null) {
+        if (m[1] !== 'not-found-fake-id') continue;
+        const block = m[0];
+        const opMatch = /operationId:\s*'([^']+)'/.exec(block);
+        out.push({
+          file: relative(REPO_ROOT, join(UNSECURED_DIR, f)),
+          operationId: opMatch ? opMatch[1] : '<unknown>',
+          block,
+        });
+      }
+    }
+    return out;
+  }
+
+  it('emits a 404 fake-ID test for singleton GET key endpoints, every one asserting 404', () => {
+    requireSuiteDir();
+    const blocks = collectBlocks();
+    // Non-vacuous: the pinned spec has ~31 eligible singleton GET endpoints.
+    expect(blocks.length).toBeGreaterThan(20);
+    // Representative singleton endpoints (numeric key + string id) must be present.
+    const ops = new Set(blocks.map((b) => b.operationId));
+    expect(ops.has('getProcessInstance')).toBe(true);
+    expect(ops.has('getGroup')).toBe(true);
+    // Class-scoped: every not-found-fake-id block asserts exactly 404 and
+    // nothing else (no 400/200 rides in under this kind).
+    const wrongStatus = blocks.filter((b) => !/,\s*404,/.test(b.block));
+    expect(wrongStatus.map((b) => `${b.operationId} @ ${b.file}`)).toEqual([]);
+  });
+
+  it('emits only GET (read-by-key) endpoints — mutating/command ops 503/400, not 404 (#279)', () => {
+    requireSuiteDir();
+    // v1 is scoped to safe, idempotent reads, which have unambiguous
+    // "resource not found" → 404 semantics. A missing key on a mutating or
+    // command endpoint (job completion, incident resolution, process-instance
+    // cancellation, user-task actions) is a command rejection (503) or a
+    // validation 400, not a clean 404. Class-scoped: assert no emitted block
+    // carries a non-GET method, so a future change can't silently re-admit
+    // them.
+    const nonGet = collectBlocks().filter((b) => !/method:\s*'GET'/.test(b.block));
+    expect(nonGet.map((b) => `${b.operationId} @ ${b.file}`)).toEqual([]);
+  });
+
+  it('excludes paginated-collection / search-under-parent endpoints — empty 200, not 404 (#372)', () => {
+    requireSuiteDir();
+    const ops = new Set(collectBlocks().map((b) => b.operationId));
+    // These declare a 404 in the spec but actually return an empty 200 for a
+    // nonexistent parent id (issue #372 pattern 3), so a fake-ID 404 test for
+    // them would be a false positive. The successIsCollection filter must
+    // keep them out.
+    for (const collectionOp of [
+      'searchUsersForGroup',
+      'searchClientsForGroup',
+      'searchMappingRulesForGroup',
+      'searchRolesForGroup',
+      'searchClientsForRole',
+      'searchGroupsForRole',
+      'searchUsersForRole',
+    ]) {
+      expect(ops.has(collectionOp)).toBe(false);
+    }
+  });
+});
+
 describeForThisConfig('bundled-spec invariants: emitted request-validation suite (#129)', () => {
   it('emits zero case-only enum mutations when enumCaseInsensitive is true', () => {
     // The camunda-oca config sets `enumCaseInsensitive: true` in
@@ -1989,7 +2943,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // valid enum member only by ASCII case. Catches any future analyser
     // (e.g. a sibling oneOf/anyOf walker) that re-introduces a case-only
     // mutation.
-    const REQUEST_VALIDATION_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
     if (!existsSync(REQUEST_VALIDATION_DIR)) {
       throw new Error(
         `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
@@ -2107,7 +3067,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // Catches the original `searchVariables - Param query.truncateValues
     // wrong type` case (path `/variables/search` carrying `truncateValues`
     // in slot 2) and any sibling emitter regression.
-    const REQUEST_VALIDATION_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
     if (!existsSync(REQUEST_VALIDATION_DIR)) {
       throw new Error(
         `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
@@ -2190,7 +3156,13 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // Catches not just the original `minLength: 1` empty-string emission
     // (paramConstraintViolations.ts) but any sibling code path that
     // synthesises a path-routing-significant violator in future.
-    const REQUEST_VALIDATION_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
     if (!existsSync(REQUEST_VALIDATION_DIR)) {
       throw new Error(
         `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
@@ -2325,6 +3297,91 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     expect(offenders).toEqual([]);
   });
 });
+
+describeForThisConfig(
+  'bundled-spec invariants: request-validation secured/unsecured profile split (#346)',
+  () => {
+    // The request-validation suite is emitted as two parallel self-contained
+    // profiles. The unsecured profile is the deployment-mode-agnostic 400
+    // baseline; the secured profile adds auth-absent (HTTP 401) tests for
+    // conditionally-secured operations (camunda/camunda#53708). These
+    // invariants pin the contract regardless of whether the *currently pinned*
+    // spec carries `x-enforcement` annotations (with none, the auth-absent set
+    // is empty and the two profiles coincide — the assertions hold either way).
+    const RV_DIR = join(REPO_ROOT, 'generated', CONFIG_NAME, 'request-validation');
+    const UNSECURED_DIR = join(RV_DIR, 'unsecured');
+    const SECURED_DIR = join(RV_DIR, 'secured');
+
+    function requireDir(dir: string): void {
+      if (!existsSync(dir)) {
+        throw new Error(
+          `Generated request-validation profile directory not found at ${dir}. ` +
+            `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+        );
+      }
+    }
+
+    function specFiles(dir: string): string[] {
+      return readdirSync(dir)
+        .filter((f) => f.endsWith('.spec.ts'))
+        .sort();
+    }
+
+    it('emits both profiles as self-contained suites with spec files', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      expect(specFiles(UNSECURED_DIR).length).toBeGreaterThan(0);
+      expect(specFiles(SECURED_DIR).length).toBeGreaterThan(0);
+      // Each profile carries its own standalone scaffolding so it runs in place.
+      for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+        expect(existsSync(join(dir, 'playwright.config.ts'))).toBe(true);
+        expect(existsSync(join(dir, 'tsconfig.json'))).toBe(true);
+        expect(existsSync(join(dir, 'support', 'http.ts'))).toBe(true);
+      }
+    });
+
+    it('never expects a 401 in the unsecured profile (class-scoped)', () => {
+      requireDir(UNSECURED_DIR);
+      const offenders: string[] = [];
+      for (const f of specFiles(UNSECURED_DIR)) {
+        const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
+        if (/scenarioKind:\s*['"]auth-absent['"]/.test(src)) offenders.push(`${f}: auth-absent`);
+        if (/assertResponseStatus\([^)]*,\s*401\s*,/.test(src)) offenders.push(`${f}: 401`);
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('every auth-absent test in the secured profile is an unauthenticated 401 (class-scoped)', () => {
+      requireDir(SECURED_DIR);
+      // Match each emitted auth-absent test block and assert its shape.
+      const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'auth-absent'[^]*?}\);/g;
+      const offenders: string[] = [];
+      for (const f of specFiles(SECURED_DIR)) {
+        const src = readFileSync(join(SECURED_DIR, f), 'utf8');
+        let block: RegExpExecArray | null;
+        TEST_BLOCK.lastIndex = 0;
+        while ((block = TEST_BLOCK.exec(src)) !== null) {
+          const text = block[0];
+          if (!/assertResponseStatus\([^)]*,\s*401\s*,/.test(text)) {
+            offenders.push(`${f}: auth-absent block does not assert 401`);
+          }
+          if (!/headers:\s*\{\}/.test(text)) {
+            offenders.push(`${f}: auth-absent block sends auth headers`);
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('secured profile is a superset of the unsecured profile spec files', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      const securedSet = new Set(specFiles(SECURED_DIR));
+      const missing = specFiles(UNSECURED_DIR).filter((f) => !securedSet.has(f));
+      expect(missing).toEqual([]);
+    });
+  },
+);
 
 describeForThisConfig('bundled-spec invariants: scenario seed-binding completeness (#136)', () => {
   // Class-scoped invariant pinning the planner-side fix for #136.
@@ -2740,17 +3797,21 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
   // — not from the synthetic `fc:pos:<endpoint>:<semantic>` placeholder
   // the pre-PR-1 planner used.
   //
-  // The 4 single-deploy ElementId consumer sites covered here:
+  // The 5 single-deploy ElementId consumer sites covered here:
   //   - createProcessInstance        :: startInstructions[].elementId
   //   - activateAdHocSubProcessActivities :: elements[].elementId
   //   - completeJob                  :: result.activateElements[].elementId
   //   - modifyProcessInstance        :: activateInstructions[].elementId
+  //   - modifyProcessInstancesBatchOperation :: moveInstructions[].{source,target}ElementId
   //
-  // Other ElementId consumer sites that remain uncovered by PR 1:
-  //   - modifyProcessInstancesBatchOperation :: moveInstructions[].sourceElementId
-  //     (single-endpoint chain — the planner doesn't insert a
-  //      createDeployment prerequisite for batch operations even though
-  //      sourceElementId needs a model. Separate chain-construction issue.)
+  // The batch operation was originally carved out (#165): the early
+  // single-step-chain planner emitted no `createDeployment` prerequisite,
+  // so the ElementId leaf fell back to a synthetic placeholder. The
+  // planner now chains the deploy prerequisite and the optionalSubShape
+  // variant generator resolves `elementIdVar` via runtime emission
+  // (activateJobs → `json.jobs[0].elementId`), so the guard below applies.
+  //
+  // Other ElementId consumer sites that remain uncovered here:
   //   - migrateProcessInstance / migrateProcessInstancesBatchOperation
   //     (multi-deploy: source-model + target-model — needs per-deploy-step
   //      fixture selection. PR 1's helper takes the FIRST deploy step.)
@@ -2830,6 +3891,11 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
       variantFile: 'post--process-instances--{processInstanceKey}--modification-scenarios.json',
       varName: 'elementIdVar',
     },
+    {
+      endpoint: 'modifyProcessInstancesBatchOperation',
+      variantFile: 'post--process-instances--modification-scenarios.json',
+      varName: 'elementIdVar',
+    },
   ];
 
   for (const t of TARGETS) {
@@ -2868,6 +3934,234 @@ describeForThisConfig('bundled-spec invariants: modelDerived value source (#162 
       ).toBe(true);
     });
   }
+
+  // #165 — class-faithful guard for the batch operation. The generic
+  // file-wide `ctx.elementIdVar` check above is too weak to catch this
+  // issue's original symptom: a single-step chain (no `createDeployment`
+  // prerequisite) emitted a "lying" scenario where `elementIdVar` was
+  // seeded but the request body never consumed it (`sourceElementId`
+  // held a synthetic literal). A file-wide reference can be satisfied by
+  // a seed line alone. Here we assert the binding is wired into the
+  // `moveInstructions` body itself — the property that was broken — for
+  // both the source and target ElementId variants.
+  it('modifyProcessInstancesBatchOperation :: moveInstructions wires ctx.elementIdVar into the body (#165)', () => {
+    const spec = join(GENERATED_TESTS_DIR, 'modifyProcessInstancesBatchOperation.variant.spec.ts');
+    if (!existsSync(spec)) {
+      throw new Error(
+        'expected emitted spec not found: modifyProcessInstancesBatchOperation.variant.spec.ts',
+      );
+    }
+    const src = readFileSync(spec, 'utf8');
+    expect(
+      src.includes('sourceElementId: ctx.elementIdVar'),
+      'sourceElementId variant must wire ctx.elementIdVar into moveInstructions (not a synthetic placeholder)',
+    ).toBe(true);
+    expect(
+      src.includes('targetElementId: ctx.elementIdVar'),
+      'targetElementId variant must wire ctx.elementIdVar into moveInstructions (not a synthetic placeholder)',
+    ).toBe(true);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: modelDerived element selection (#172)', () => {
+  // #172: createProcessInstance.startInstructions[].elementId (and the
+  // runtimeInstructions[].afterElementId sibling) were emitting a synthetic
+  // placeholder (`elementId_<suffix>`) that the live broker rejects with
+  // HTTP 400 "unsupported element type". `ElementId` is `modelDerived`: its
+  // only valid values are flow-node ids from the deployed BPMN model. The
+  // fix resolves the leaf from the chosen deploy fixture's `providesElements`
+  // BY TYPE, using the `ElementId` semantic's `modelElementTypes` preference
+  // list — which deliberately excludes `startEvent` (the broker rejects a
+  // start event as a startInstructions target, even for models with several
+  // start events).
+  //
+  // Two guards, both class-scoped:
+  //   (A) config honesty + selection: for EVERY bpmnProcess fixture, the
+  //       `providesElements` tags are honest against the BPMN XML, and the
+  //       by-type selection never picks a start event.
+  //   (B) end-to-end: every createProcessInstance variant that binds
+  //       `elementIdVar` binds it to a real, non-start, non-synthetic
+  //       element id of the model its chain deploys.
+
+  const FIXTURES_DIR = join(import.meta.dirname, 'fixtures');
+  const SEMANTICS_PATH = join(import.meta.dirname, 'ontology', 'semantics.json');
+  const REGISTRY_PATH = join(FIXTURES_DIR, 'deployment-artifacts.json');
+
+  interface ProvidesElement {
+    id: string;
+    type: string;
+  }
+  interface RegistryEntry {
+    kind: string;
+    path: string;
+    providesElements?: ProvidesElement[];
+  }
+
+  function loadRegistry(): RegistryEntry[] {
+    const raw = readFileSync(REGISTRY_PATH, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const parsed = JSON.parse(raw) as { artifacts: RegistryEntry[] };
+    return parsed.artifacts;
+  }
+
+  function loadElementIdAcceptableTypes(): string[] {
+    const raw = readFileSync(SEMANTICS_PATH, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const parsed = JSON.parse(raw) as {
+      semanticTypes: { name: string; kind?: string; modelElementTypes?: string[] }[];
+    };
+    const elementId = parsed.semanticTypes.find((t) => t.name === 'ElementId');
+    if (!elementId) throw new Error('semantics.json: no ElementId semantic type entry');
+    if (elementId.kind !== 'modelDerived') {
+      throw new Error("semantics.json: ElementId must be kind 'modelDerived'");
+    }
+    if (!elementId.modelElementTypes?.length) {
+      throw new Error('semantics.json: ElementId.modelElementTypes must be a non-empty list');
+    }
+    return elementId.modelElementTypes;
+  }
+
+  // Parse the BPMN XML for elements of a given (local) tag name, returning
+  // their ids. Matches `<startEvent id="X">` and `<bpmn:startEvent id="X">`
+  // (any/no namespace prefix). The `bpmndi:` diagram section uses
+  // `bpmnElement=` rather than `id=` on a different tag, so process-element
+  // tags are not matched there.
+  function bpmnElementIds(xml: string, localTag: string): Set<string> {
+    const ids = new Set<string>();
+    const re = new RegExp(`<(?:[A-Za-z][\\w.-]*:)?${localTag}\\b[^>]*\\bid="([^"]+)"`, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) ids.add(m[1]);
+    return ids;
+  }
+
+  // Pure replica of path-analyser's selectModelDerivedElementValue: pick the
+  // first acceptable type (in preference order) that has a matching element.
+  function selectByType(
+    providesElements: ProvidesElement[] | undefined,
+    acceptableTypes: string[],
+  ): string | undefined {
+    if (!providesElements?.length) return undefined;
+    for (const t of acceptableTypes) {
+      const hit = providesElements.find((e) => e.type === t);
+      if (hit) return hit.id;
+    }
+    return undefined;
+  }
+
+  it('(A) every bpmnProcess fixture: providesElements tags are honest and selection avoids start events', () => {
+    const acceptableTypes = loadElementIdAcceptableTypes();
+    // The acceptable-type list must NOT include startEvent — that is the
+    // whole point of the fix and protects against a config regression that
+    // would re-admit a start event regardless of fixture contents.
+    expect(
+      acceptableTypes.includes('startEvent'),
+      "ElementId.modelElementTypes must NOT include 'startEvent' (broker rejects start events as startInstructions targets)",
+    ).toBe(false);
+
+    const bpmnFixtures = loadRegistry().filter((e) => e.kind === 'bpmnProcess');
+    expect(bpmnFixtures.length, 'expected at least one bpmnProcess fixture').toBeGreaterThan(0);
+
+    for (const fixture of bpmnFixtures) {
+      const xml = readFileSync(join(FIXTURES_DIR, fixture.path), 'utf8');
+      expect(
+        fixture.providesElements !== undefined && fixture.providesElements.length > 0,
+        `${fixture.path}: bpmnProcess fixture must declare providesElements`,
+      ).toBe(true);
+
+      // Honesty: every declared (id,type) must appear in the BPMN XML with
+      // that exact element type. Guards against a config tag that lies
+      // about an element's type (which would defeat the type-based select).
+      for (const el of fixture.providesElements ?? []) {
+        const idsOfType = bpmnElementIds(xml, el.type);
+        expect(
+          idsOfType.has(el.id),
+          `${fixture.path}: providesElements declares {id:${el.id}, type:${el.type}} but the BPMN has no <${el.type}> with that id`,
+        ).toBe(true);
+      }
+
+      // Selection: the by-type pick must be defined and must NOT be a start
+      // event of this model — for ANY number of start events.
+      const startEventIds = bpmnElementIds(xml, 'startEvent');
+      const picked = selectByType(fixture.providesElements, acceptableTypes);
+      expect(
+        picked,
+        `${fixture.path}: type-based ElementId selection yielded no element — providesElements lacks any acceptable type`,
+      ).toBeDefined();
+      expect(
+        picked !== undefined && startEventIds.has(picked),
+        `${fixture.path}: type-based ElementId selection picked '${picked}', which is a bpmn:startEvent — broker would reject it`,
+      ).toBe(false);
+    }
+  });
+
+  interface DeployStep {
+    operationId?: string;
+    multipartTemplate?: { files?: Record<string, string> };
+  }
+  interface CpiVariantScenario {
+    id?: string;
+    bindings?: Record<string, string>;
+    requestPlan?: DeployStep[];
+  }
+  interface CpiVariantFile {
+    endpoint: { operationId: string };
+    scenarios: CpiVariantScenario[];
+  }
+
+  function deployedBpmnPath(scenario: CpiVariantScenario): string | undefined {
+    for (const step of scenario.requestPlan ?? []) {
+      const ref = step.multipartTemplate?.files?.resources;
+      if (typeof ref === 'string' && ref.startsWith('@@FILE:') && ref.endsWith('.bpmn')) {
+        return ref.slice('@@FILE:'.length);
+      }
+    }
+    return undefined;
+  }
+
+  it('(B) createProcessInstance: every elementIdVar binding is a real, non-start, non-synthetic model element id', () => {
+    const path = join(VARIANT_SCENARIOS_DIR, 'post--process-instances-scenarios.json');
+    if (!existsSync(path)) {
+      throw new Error(
+        "expected variant-output JSON not found: post--process-instances-scenarios.json — run 'npm run testsuite:generate'",
+      );
+    }
+    const raw = readFileSync(path, 'utf8');
+    // biome-ignore lint/plugin: parsed JSON is a runtime contract boundary
+    const collection = JSON.parse(raw) as CpiVariantFile;
+
+    const bound = collection.scenarios.filter((s) => typeof s.bindings?.elementIdVar === 'string');
+    // createProcessInstance has startInstructions[].elementId AND
+    // runtimeInstructions[].afterElementId — both modelDerived ElementId
+    // sites — so at least one variant must bind elementIdVar.
+    expect(
+      bound.length,
+      'expected at least one createProcessInstance variant binding elementIdVar',
+    ).toBeGreaterThan(0);
+
+    for (const scenario of bound) {
+      const value = scenario.bindings?.elementIdVar ?? '';
+      // Not the synthetic fallback the fix removed.
+      expect(
+        /^elementId_/.test(value),
+        `${scenario.id}: elementIdVar='${value}' is a synthetic placeholder (#172 regression)`,
+      ).toBe(false);
+      // And, parsed against the model the chain actually deploys, not a
+      // start event.
+      const bpmnRel = deployedBpmnPath(scenario);
+      expect(
+        bpmnRel,
+        `${scenario.id}: could not determine the deployed BPMN from the requestPlan`,
+      ).toBeDefined();
+      if (bpmnRel) {
+        const xml = readFileSync(join(FIXTURES_DIR, bpmnRel), 'utf8');
+        const startEventIds = bpmnElementIds(xml, 'startEvent');
+        expect(
+          startEventIds.has(value),
+          `${scenario.id}: elementIdVar='${value}' is a bpmn:startEvent in ${bpmnRel} — broker would reject it`,
+        ).toBe(false);
+      }
+    }
+  });
 });
 
 describeForThisConfig(
@@ -3126,6 +4420,7 @@ describeForThisConfig(
         'generated',
         CONFIG_NAME,
         'request-validation',
+        'unsecured',
       );
       if (!existsSync(REQUEST_VALIDATION_DIR)) {
         throw new Error(
@@ -3381,11 +4676,23 @@ describeForThisConfig('bundled-spec invariants: suite-partition cut (#162 PR 4)'
     // without a corresponding `.feature.spec.ts` means the emitter
     // dropped the suite silently — exactly the failure mode the
     // partition cut is supposed to prevent.
+    //
+    // #331: operations covered by a scenario-template instantiation
+    // (EdgeLifecycle / EntityLifecycle / UpdatedFieldVisibleOnReadBack /
+    // StateTransitionVisibleAfterAction) are intentionally suppressed
+    // — the lifecycle spec under edges/, entities/, runtime-entities/,
+    // or state-transitions/ is the canonical functional test. Read
+    // the suppression set from the coverage artefact and exclude
+    // those opIds from this guard. A separate invariant below pins
+    // the inverse (every suppressed opId is backed by an emitted
+    // lifecycle spec).
+    const suppressed = loadSuppressedOpIds();
     const offenders: { jsonFile: string; expectedSpec: string }[] = [];
     for (const { file, parsed } of loadAllFeatureFiles()) {
       if (!parsed.scenarios?.length) continue;
       const opId = parsed.endpoint?.operationId;
       if (!opId) continue;
+      if (suppressed.has(opId)) continue;
       const expectedSpec = `${opId}.feature.spec.ts`;
       const specPath = join(GENERATED_TESTS_DIR, expectedSpec);
       if (!existsSync(specPath)) {
@@ -3396,6 +4703,54 @@ describeForThisConfig('bundled-spec invariants: suite-partition cut (#162 PR 4)'
       offenders,
       'Feature scenario JSON without a matching .feature.spec.ts in the playwright suite directory.',
     ).toEqual([]);
+  });
+
+  it('every scenario-template-suppressed opId is backed by an emitted lifecycle spec (#331)', () => {
+    // The inverse of the partition-cut guard above. The coverage
+    // artefact declares which opIds the materializer suppressed
+    // because a scenario-template instantiation already covers them;
+    // for every such opId there must be a `coverage.entries[]` row
+    // pointing at an emitted lifecycle spec that actually exists on
+    // disk. Without this guard a generator regression that emitted
+    // an empty coverage map (or one pointing at non-existent specs)
+    // would silently delete the feature spec for an operation that
+    // now has no test at all.
+    const coveragePath = join(GENERATED_TESTS_DIR, 'coverage.json');
+    if (!existsSync(coveragePath)) {
+      throw new Error(
+        `coverage artefact not found at ${coveragePath} — run 'npm run testsuite:generate'`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary — materializer-emitted coverage artefact.
+    const cov = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+      suppressedOpIds?: string[];
+      entries?: Array<{ operationId: string; emittedSpec: string }>;
+    };
+    const entries = cov.entries ?? [];
+    const opToSpecs = new Map<string, string[]>();
+    for (const e of entries) {
+      const arr = opToSpecs.get(e.operationId) ?? [];
+      arr.push(e.emittedSpec);
+      opToSpecs.set(e.operationId, arr);
+    }
+    const offenders: { opId: string; reason: string }[] = [];
+    for (const opId of cov.suppressedOpIds ?? []) {
+      const specs = opToSpecs.get(opId);
+      if (!specs || specs.length === 0) {
+        offenders.push({ opId, reason: 'no coverage entry' });
+        continue;
+      }
+      const missing = specs.filter((rel) => !existsSync(join(GENERATED_TESTS_DIR, rel)));
+      if (missing.length > 0) {
+        offenders.push({ opId, reason: `missing emitted spec(s): ${missing.join(', ')}` });
+      }
+    }
+    expect(
+      offenders,
+      'Operations whose feature spec was suppressed must be covered by an emitted lifecycle spec.',
+    ).toEqual([]);
+    // Sanity: the bundled spec exercises this pattern non-trivially.
+    expect((cov.suppressedOpIds ?? []).length).toBeGreaterThan(0);
   });
 
   it('variant suite covers every flat top-level optional present in the feature suite pre-cut (#162 PR 4)', () => {
@@ -3692,6 +5047,179 @@ describeForThisConfig(
 );
 
 // ---------------------------------------------------------------------------
+// globalContextSeeds — omit-when-unbound replaces the sentinel mechanism (#342)
+// ---------------------------------------------------------------------------
+//
+// #342 retired the `defaultSentinel` / `stripFromMultipartWhenDefault`
+// mechanism. Previously, the materializer hard-coded a `<default>`
+// sentinel into every multipart scenario whose body referenced
+// `globalContextSeeds[i].fieldName`, and the emitted suite tested for
+// that sentinel at runtime to strip the field. That broke
+// re-runnability for producer ops like `createTenant`, which sent
+// `tenantId: '<default>'` and received `409 ALREADY_EXISTS` on the
+// second run.
+//
+// Post-#342 the contract is: a seed entry with `omitWhenUnbound: true`
+// is NOT auto-seeded by the universal-seed prologue. Consumers that
+// don't bind it leave it undefined, and the request layer omits the
+// field on the wire — the REST Gateway then defaults the tenant
+// itself. Producer ops still mint a unique value via the per-scenario
+// `seedBindings` loop; `tenantIdVar` falls through the rule list in
+// `seed-rules.json` (no `/(key|id)$/` match — the binding ends in
+// `Var`) and lands on the catch-all `${var}-${rand:6}` rule, which
+// embeds a per-process random nonce so consecutive runs against a
+// live broker mint different tenant IDs and avoid the `409
+// ALREADY_EXISTS` re-run defect.
+//
+// The three class-scoped invariants below pin both halves of that
+// contract: the lifted runtime sentinel never appears on the wire,
+// the universal-seed prologue skips `omitWhenUnbound` entries, and
+// the JSON Schema published to external SHACL/OWL consumers does not
+// re-introduce the legacy fields.
+describeForThisConfig(
+  'bundled-spec invariants: omit-when-unbound replaces sentinel mechanism (#342)',
+  () => {
+    it('no scenario request body, multipart field, or query value carries the literal `<default>` sentinel on the wire', () => {
+      if (!existsSync(SCENARIOS_DIR)) {
+        throw new Error(
+          `Scenarios directory not found at ${SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+
+      const offenders: { file: string; scenarioId: string; jsonPath: string }[] = [];
+
+      function walk(value: unknown, jsonPath: string, onHit: (jp: string) => void): void {
+        if (value === '<default>') {
+          onHit(jsonPath);
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i++) {
+            walk(value[i], `${jsonPath}[${i}]`, onHit);
+          }
+          return;
+        }
+        if (value && typeof value === 'object') {
+          for (const [k, v] of Object.entries(value)) {
+            walk(v, `${jsonPath}.${k}`, onHit);
+          }
+        }
+      }
+
+      for (const f of readdirSync(SCENARIOS_DIR)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const file = JSON.parse(readFileSync(join(SCENARIOS_DIR, f), 'utf8')) as {
+          scenarios?: { id: string; requestPlan?: unknown[] }[];
+        };
+        for (const scenario of file.scenarios ?? []) {
+          for (let i = 0; i < (scenario.requestPlan ?? []).length; i++) {
+            const step = (scenario.requestPlan ?? [])[i];
+            walk(step, `requestPlan[${i}]`, (jp) => {
+              offenders.push({ file: f, scenarioId: scenario.id, jsonPath: jp });
+            });
+          }
+        }
+      }
+
+      expect(
+        offenders,
+        'The legacy `<default>` sentinel must not appear in any scenario request payload. ' +
+          'Post-#342 the binding is either minted (producer scenarios via `seedBindings`) or ' +
+          'left undefined so the request layer omits the field and the REST Gateway defaults ' +
+          'the tenant. A live `<default>` value here means the sentinel mechanism leaked back ' +
+          'into the planner or the seed rule.',
+      ).toEqual([]);
+    });
+
+    it('the materializer source filters `omitWhenUnbound` seeds out of the universal-seed prologue', () => {
+      // Source-level class-scoped invariant: emitted Playwright suites
+      // share the SAME `ctx['x'] = ctx['x'] ?? seedBinding('x')` line
+      // shape for both the universal-seed prologue and the per-scenario
+      // seedBindings loop, so we cannot distinguish them at the byte
+      // level in the emitted output. The contract therefore must hold
+      // at the source: `materializer/src/playwright/ctxSeeding.ts`
+      // must (a) exclude `omitWhenUnbound` seeds from `globalSeedNames`
+      // (so the per-scenario loop does not re-seed them from the
+      // global list) and (b) skip them in the universal prologue
+      // emission loop. Both gates encode the same `omitWhenUnbound`
+      // contract; either being absent would cause `<default>`-style
+      // auto-seeding to creep back in for tenants and break
+      // re-runnability for producer ops.
+      const ctxSeedingPath = join(REPO_ROOT, 'materializer', 'src', 'playwright', 'ctxSeeding.ts');
+      if (!existsSync(ctxSeedingPath)) {
+        throw new Error(`ctxSeeding.ts not found at ${ctxSeedingPath}`);
+      }
+      const src = readFileSync(ctxSeedingPath, 'utf8');
+      // Strip both block and line comments so JSDoc/issue cross-
+      // references in either comment form cannot satisfy the assertion
+      // accidentally — the wiring must live in real code tokens. Block
+      // comments are stripped first because line-comment stripping is
+      // line-oriented and would otherwise leave `*` lines from a `/*`
+      // block. The naïve regex doesn't honour string literals, but
+      // neither `omitWhenUnbound` nor any of its surrounding tokens
+      // appear inside string literals in this file.
+      const codeOnly = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n');
+      expect(
+        codeOnly,
+        'ctxSeeding.ts must reference `omitWhenUnbound` in source (#342). The filter on ' +
+          '`globalSeedNames` and the skip in the universal-prologue emission loop are the ' +
+          'two gates that prevent `tenantIdVar` (and any future omit-when-unbound binding) ' +
+          'from being auto-seeded into every scenario.',
+      ).toMatch(/omitWhenUnbound/);
+      // The interface declaration alone is insufficient — the filter
+      // must consult the property. Two distinct uses (filter + skip
+      // statement) are expected.
+      const useCount = (codeOnly.match(/omitWhenUnbound/g) ?? []).length;
+      expect(
+        useCount,
+        'ctxSeeding.ts must reference `omitWhenUnbound` at least twice (interface + filter + ' +
+          'skip statement). A single reference suggests the gate was deleted or stubbed.',
+      ).toBeGreaterThanOrEqual(2);
+    });
+
+    it('the generated JSON Schema for globalContextSeeds publishes `omitWhenUnbound` and not the legacy sentinel fields', () => {
+      const schemaPath = join(
+        REPO_ROOT,
+        'ontology',
+        'vocabulary',
+        'global-context-seeds.schema.json',
+      );
+      if (!existsSync(schemaPath)) {
+        throw new Error(
+          `global-context-seeds.schema.json not found at ${schemaPath}. Run 'npm run build:ontology' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as {
+        definitions?: { GlobalContextSeed?: { properties?: Record<string, unknown> } };
+      };
+      const itemProps = schema.definitions?.GlobalContextSeed?.properties ?? {};
+      expect(
+        'omitWhenUnbound' in itemProps,
+        'The published JSON Schema must declare `omitWhenUnbound` (#342). External SHACL/OWL ' +
+          'consumers depend on this field to determine whether a seed is auto-seeded or omitted.',
+      ).toBe(true);
+      expect(
+        'defaultSentinel' in itemProps,
+        'The published JSON Schema must NOT re-introduce `defaultSentinel` (#342). The sentinel ' +
+          'mechanism was removed because it broke re-runnability for producer ops like ' +
+          'createTenant. Regenerate via `npm run build:ontology`.',
+      ).toBe(false);
+      expect(
+        'stripFromMultipartWhenDefault' in itemProps,
+        'The published JSON Schema must NOT re-introduce `stripFromMultipartWhenDefault` (#342). ' +
+          'Regenerate via `npm run build:ontology`.',
+      ).toBe(false);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
 // globalContextSeeds substitution into multipart templates (#200 — Lift 0)
 // ---------------------------------------------------------------------------
 //
@@ -3702,12 +5230,10 @@ describeForThisConfig(
 // supposed to be byte-identical: every multipart scenario whose request
 // body declares a `globalContextSeeds[i].fieldName` field must still
 // emit `template.fields[fieldName] = "${binding}"`, AND the scenario's
-// `bindings[binding]` must equal `__PENDING__` so the emitter's
-// universal-seed prologue (codegen/playwright/emitter.ts) can rewrite
-// it to the runtime sentinel (`<default>`). This invariant locks both
-// directions and is class-scoped (every multipart scenario across the
-// bundled output, not just createDeployment) so the same regression
-// can't recur in a sibling op.
+// `bindings[binding]` must equal `__PENDING__` so the materializer's
+// per-scenario seedBindings loop mints a value via the catch-all id
+// seed rule (#342 — previously the universal-seed prologue rewrote it
+// to the `<default>` sentinel; that mechanism is now gone).
 describeForThisConfig(
   'bundled-spec invariants: globalContextSeeds substitution survives Lift 0 (#200)',
   () => {
@@ -4302,7 +5828,13 @@ describeForThisConfig('bundled-spec invariants: entity-kinds ABox cross-referenc
     // (e.g. server-minted resources whose existence is only implied by
     // path-param conventions). These are deliberate ABox-only entries
     // and must not trip the spec-vs-abox drift check.
-    const ABOX_AUTHORITATIVE_KINDS = new Set(['Authorization', 'Document']);
+    const ABOX_AUTHORITATIVE_KINDS = new Set([
+      'Authorization',
+      'Document',
+      'UserTask',
+      'Incident',
+      'ProcessInstance',
+    ]);
     const unaccounted = aboxOnly.filter((n) => !ABOX_AUTHORITATIVE_KINDS.has(n));
     expect(
       unaccounted,
@@ -5975,11 +7507,27 @@ describeForThisConfig(
         // field's presence in the body is justified.
         if (fieldLeaves.some((l) => l.required)) continue;
         // Empty scaffolding for schema-required object/array fields
-        // (`filter: {}`, `elements: []`) is the minimal-required body
-        // shape — every nested leaf is genuinely absent, so the
-        // optional-leakage we guard against here did not occur.
+        // (`filter: {}`, `elements: []`, `mappingInstructions: [{...}]`)
+        // is the minimal-required body shape — the canonical body
+        // builder (#326) emits at most one placeholder element for a
+        // required `type: array` field, populated only with the
+        // schema-required nested properties of the item type. That is
+        // structurally distinct from the optional-leakage this guard
+        // catches: a feature-base scenario carrying *additional*
+        // variant-coverage content. The semantic-graph extractor flags
+        // every nested item leaf as optional (since it can't see the
+        // schema-level requiredness through `[]`), so we cross-check
+        // the bundled spec directly: a length-1 array is exempt only
+        // when the spec marks `<field>` as a required `type: array`
+        // property on the operation's request body. Optional array
+        // fields (e.g. `tags: [..]`) are NOT exempt and would still
+        // be flagged here as variant leakage.
         if (value === undefined || value === null) continue;
         if (Array.isArray(value) && value.length === 0) continue;
+        if (Array.isArray(value) && value.length === 1) {
+          const requiredArrays = getRequiredArrayByOp().get(finalStep.operationId);
+          if (requiredArrays?.has(field)) continue;
+        }
         if (
           value !== null &&
           typeof value === 'object' &&
@@ -6551,6 +8099,15 @@ describeForThisConfig(
       // EntityLifecycle). Extending this map is mandatory whenever a
       // new subject-shape's ABox grows a new role field.
       const ENTITY_ROLES = new Set(['establishedBy', 'revokedBy', 'observableVia']);
+      // RuntimeEntity-subject templates (#305 Phase 4) resolve roles
+      // against the runtime-entity ABox fields `mutators[]` (plural,
+      // referenced symbolically as `mutator` from steps) and
+      // `fetcher`. The compiler fans `mutator` out to one scenario
+      // per entry at instantiation time. #305 Phase 5d / #189 adds
+      // `transition` for the StateTransitionVisibleAfterAction
+      // template, which fans `transition` out to one scenario per
+      // `transitions[]` entry.
+      const RUNTIME_ENTITY_ROLES = new Set(['mutator', 'fetcher', 'transition']);
       const offenders: string[] = [];
       for (const tpl of templates.templates) {
         const validRoles =
@@ -6558,7 +8115,9 @@ describeForThisConfig(
             ? EDGE_ROLES
             : tpl.appliesTo.kind === 'Entity'
               ? ENTITY_ROLES
-              : new Set<string>();
+              : tpl.appliesTo.kind === 'RuntimeEntity'
+                ? RUNTIME_ENTITY_ROLES
+                : new Set<string>();
         for (let i = 0; i < tpl.steps.length; i++) {
           const step = tpl.steps[i];
           const ref = step.kind === 'PrereqChain' ? step.for : step.op;
@@ -6573,7 +8132,8 @@ describeForThisConfig(
         offenders,
         `Every template step's role reference must resolve to a known field on its appliesTo subject ABox. ` +
           `For 'Edge' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
-          `For 'Entity' subjects, valid roles are: establishedBy, revokedBy, observableVia.`,
+          `For 'Entity' subjects, valid roles are: establishedBy, revokedBy, observableVia. ` +
+          `For 'RuntimeEntity' subjects, valid roles are: mutator, fetcher, transition.`,
       ).toEqual([]);
     });
 
@@ -6828,6 +8388,128 @@ describeForThisConfig('bundled-spec invariants: ontology publishing surface (#27
       },
       60_000,
     );
+
+    it.skipIf(!shouldRun)(
+      'every published SVG URL HEADs 200',
+      async () => {
+        const SVG_BASE = 'https://camunda.github.io/api-test-generator/ns/v1/viz/camunda-oca/';
+        const svgFiles = ['tbox.svg', 'abox.svg', 'operations.svg'];
+        const offenders: string[] = [];
+        for (const file of svgFiles) {
+          const url = `${SVG_BASE}${file}`;
+          try {
+            const res = await fetch(url, { method: 'HEAD' });
+            if (res.status !== 200) {
+              offenders.push(`${url}: HTTP ${res.status}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            offenders.push(`${url}: fetch failed — ${msg}`);
+          }
+        }
+        expect(
+          offenders,
+          'Every viz SVG URL must resolve to HTTP 200. Check publish-ontology.yml run history if this fails.',
+        ).toEqual([]);
+      },
+      60_000,
+    );
+
+    it.skipIf(!shouldRun)(
+      'ontology-bundle.ttl HEADs 200',
+      async () => {
+        const url = 'https://camunda.github.io/api-test-generator/ns/v1/ontology-bundle.ttl';
+        let status: number | null = null;
+        try {
+          const res = await fetch(url, { method: 'HEAD' });
+          status = res.status;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`${url}: fetch failed — ${msg}`);
+        }
+        expect(status, `${url} must resolve to HTTP 200`).toBe(200);
+      },
+      60_000,
+    );
+  });
+});
+
+// ===========================================================================
+// Ontology visualisation emitter (Step 1 of viz issue).
+//
+// Guards that the TBox and ABox emitter functions (from
+// scripts/visualise-ontology.ts) produce non-empty DOT/Mermaid output
+// against the live committed ABox files.
+//
+// Drift between the committed ontology/diagrams/*.mmd snapshots and
+// what the emitter would generate today is NOT enforced per-PR — it
+// would poison every concurrent PR whenever any ontology change merges.
+// The .github/workflows/refresh-ontology-diagrams.yml workflow opens
+// an auto-PR after every push to main (and nightly as a safety net)
+// to keep the committed snapshots fresh.
+//
+// These invariants are fast (no pipeline output required — they read
+// only the committed ABox JSON files) and run in every PR CI pass.
+// ===========================================================================
+describeForThisConfig('bundled-spec invariants: ontology visualisation emitter', () => {
+  it('emitTboxDot produces non-empty DOT output', async () => {
+    const { emitTboxDot } = await import('../../scripts/visualise-ontology.ts');
+    const dot = emitTboxDot('camunda-oca');
+    expect(dot.trim().length, 'TBox DOT must not be empty').toBeGreaterThan(0);
+    expect(dot, 'TBox DOT must start with digraph').toMatch(/^digraph TBox/);
+    expect(dot, 'TBox DOT must declare at least one node').toContain('edge');
+    expect(dot, 'TBox DOT must declare at least one edge relation').toContain('->');
+  });
+
+  it('emitTboxMmd produces non-empty Mermaid output', async () => {
+    const { emitTboxMmd } = await import('../../scripts/visualise-ontology.ts');
+    const mmd = emitTboxMmd('camunda-oca');
+    expect(mmd.trim().length, 'TBox Mermaid must not be empty').toBeGreaterThan(0);
+    expect(mmd, 'TBox Mermaid must start with graph').toContain('graph LR');
+  });
+
+  it('emitAboxDot produces non-empty DOT output for the camunda-oca ABox', async () => {
+    const { emitAboxDot } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const bundle = buildBundle();
+    const dot = emitAboxDot(bundle);
+    expect(dot.trim().length, 'ABox DOT must not be empty').toBeGreaterThan(0);
+    expect(dot, 'ABox DOT must start with digraph ABox').toMatch(/^digraph ABox/);
+    expect(dot, 'ABox DOT must declare at least one entity-kind node').toContain('Role');
+    expect(dot, 'ABox DOT must declare at least one membership edge').toContain('->');
+  });
+
+  it('emitAboxMmd produces non-empty Mermaid output for the camunda-oca ABox', async () => {
+    const { emitAboxMmd } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const bundle = buildBundle();
+    const mmd = emitAboxMmd(bundle);
+    expect(mmd.trim().length, 'ABox Mermaid must not be empty').toBeGreaterThan(0);
+    expect(mmd, 'ABox Mermaid must start with graph').toContain('graph LR');
+  });
+
+  // Regression for the "literal \n in SVG" bug: DOT labels must contain the
+  // 2-char newline escape (backslash + n) — not the 3-char over-escaped
+  // sequence (backslash + backslash + n), which Graphviz unescapes to a
+  // literal '\n' string in the rendered SVG. Class-scoped: applies to every
+  // label in every DOT emitter that doesn't require pipeline output.
+  it('DOT emitters must not over-escape newlines in labels', async () => {
+    const { emitTboxDot, emitAboxDot } = await import('../../scripts/visualise-ontology.ts');
+    const { buildBundle } = await import('../../scripts/export-ontology.ts');
+    const bundle = buildBundle();
+    const outputs: Record<string, string> = {
+      tbox: emitTboxDot('camunda-oca'),
+      abox: emitAboxDot(bundle),
+    };
+    for (const [name, dot] of Object.entries(outputs)) {
+      const labelMatches = dot.match(/label="[^"]*"/g) ?? [];
+      for (const match of labelMatches) {
+        expect(
+          match.includes('\\\\n'),
+          `${name} DOT label over-escapes newline (renders as literal \\n in SVG): ${match}`,
+        ).toBe(false);
+      }
+    }
   });
 });
 
@@ -6838,7 +8520,7 @@ describeForThisConfig('bundled-spec invariants: ontology publishing surface (#27
 // every (template × edge) pair declared in the ABoxes into a TemplateScenario
 // JSON file under generated/<config>/scenarios/templates/<TemplateName>/<EdgeName>.json,
 // and the Playwright emitter materialises one
-// generated/<config>/playwright/edges/<EdgeName>.lifecycle.spec.ts per edge.
+// generated/<config>/playwright/templates/EdgeLifecycle/<EdgeName>.lifecycle.spec.ts per edge.
 //
 // These invariants pin the structural contract of that output — coverage
 // (every edge has a JSON + a .spec.ts), shape (5 steps in the established →
@@ -6854,7 +8536,7 @@ describeForThisConfig(
   () => {
     const TEMPLATES_ROOT = join(SCENARIOS_DIR, 'templates');
     const EDGE_LIFECYCLE_DIR = join(TEMPLATES_ROOT, 'EdgeLifecycle');
-    const EDGES_SUITE_DIR = join(GENERATED_TESTS_DIR, 'edges');
+    const EDGES_SUITE_DIR = join(GENERATED_TESTS_DIR, 'templates', 'EdgeLifecycle');
 
     interface TemplateScenarioFile {
       templateName: string;
@@ -7046,6 +8728,78 @@ describeForThisConfig(
       ).toEqual([]);
     });
 
+    it('every observe step bodyTemplate has only top-level keys declared by the operation request schema (defect-class guard: deep-leaf bleed-up #344-followup)', async () => {
+      // Class-scoped guard for a planner defect where
+      // `buildRequestBodyFromCanonical` lifts deeply-nested optional
+      // fields (e.g. `filter.name`) into the top-level body when a
+      // matching binding (e.g. `nameVar`) is in scope. The server
+      // rejects the request with 400 "Request property [X] cannot be
+      // parsed" because schemas like `MappingRuleSearchQueryRequest`
+      // declare `additionalProperties: false` with only
+      // {sort, filter, page} at the top level.
+      //
+      // The bug surfaces on /search observe steps for membership edges
+      // where a prereq chain establishes a binding whose leaf name
+      // collides with a deep optional schema property — but the defect
+      // is structural in the body builder, not specific to one edge.
+      // This invariant fails for every such case so the same class of
+      // bleed-up cannot recur silently in a sibling edge.
+      const spec = loadBundledSpec();
+      function topLevelKeysForOp(opId: string): Set<string> | undefined {
+        for (const pathOps of Object.values(spec.paths ?? {})) {
+          for (const op of Object.values(pathOps)) {
+            if (op?.operationId !== opId) continue;
+            const body = resolveSpecNode(op.requestBody, spec, new Set());
+            const schema = body?.content?.['application/json']?.schema;
+            if (!schema) return undefined;
+            const { properties } = mergeSchemaShape(schema, spec, new Set());
+            if (
+              !properties ||
+              typeof properties !== 'object' ||
+              Object.keys(properties).length === 0
+            ) {
+              return undefined;
+            }
+            return new Set(Object.keys(properties));
+          }
+        }
+        return undefined;
+      }
+      const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
+      const edges = loadEdgesAbox(REPO_ROOT);
+      if (!edges) throw new Error('edges ABox missing');
+      const offenders: string[] = [];
+      for (const edge of edges.edges) {
+        const file = loadTemplateFile(edge.name);
+        for (const [i, step] of file.scenario.steps.entries()) {
+          if (step.kind !== 'observe') continue;
+          // biome-ignore lint/plugin: runtime contract boundary — requestPlan typed as unknown in scenario file.
+          const rp = step.requestPlan as {
+            operationId?: string;
+            bodyTemplate?: Record<string, unknown>;
+          };
+          const opId = rp.operationId;
+          const body = rp.bodyTemplate;
+          if (!opId || !body || typeof body !== 'object') continue;
+          const allowed = topLevelKeysForOp(opId);
+          if (!allowed) continue; // no JSON body schema → nothing to check
+          for (const k of Object.keys(body)) {
+            if (!allowed.has(k)) {
+              offenders.push(
+                `${edge.name}: step[${i}] observe.${opId} bodyTemplate has top-level key '${k}' which is not a top-level property of the request schema (allowed: {${[...allowed].join(', ')}}).`,
+              );
+            }
+          }
+        }
+      }
+      expect(
+        offenders,
+        'Every observe-step body must only carry top-level keys the request schema declares. ' +
+          'Deep schema leaves (e.g. filter.name) must not be lifted to the top level — ' +
+          'servers with additionalProperties:false reject those with 400.',
+      ).toEqual([]);
+    });
+
     it('RoleUserMembership observe pins arrayPath=[items] and elementField=username (ambiguity-stability guard for findMembershipArrayPath)', () => {
       // Stability guard for the array-locator heuristic: when more than
       // one identifiedBy semantic appears array-nested in the same
@@ -7065,7 +8819,7 @@ describeForThisConfig(
       }
     });
 
-    it('every edge has a generated Playwright lifecycle suite under generated/<config>/playwright/edges/', async () => {
+    it('every edge has a generated Playwright lifecycle suite under generated/<config>/playwright/templates/EdgeLifecycle/', async () => {
       const { loadEdgesAbox } = await import('../../path-analyser/src/ontology/loader.js');
       const edges = loadEdgesAbox(REPO_ROOT);
       if (!edges) throw new Error('edges ABox missing');
@@ -7384,3 +9138,860 @@ describeForThisConfig(
     });
   },
 );
+
+// ===========================================================================
+// #305 Phase 4 — UpdatedFieldVisibleOnReadBack RuntimeEntity scenarios.
+//
+// Conditional invariants (skip when the template emitted no scenarios for
+// this config, e.g. configs without runtime-entity ABox rows). When
+// scenarios DO exist, assert structural well-formedness so a future
+// regression in the compiler or extractor surfaces here rather than at
+// test-runtime against a live broker.
+// ===========================================================================
+describeForThisConfig(
+  'bundled-spec invariants: UpdatedFieldVisibleOnReadBack scenarios (#305 Phase 4)',
+  () => {
+    const READBACK_DIR = join(SCENARIOS_DIR, 'templates', 'UpdatedFieldVisibleOnReadBack');
+
+    interface ReadBackField {
+      leafName: string;
+      requestBodyPath: string[];
+      responseBodyPath: string[];
+    }
+    interface ReadBackFile {
+      templateName: string;
+      subjectName: string;
+      subjectKind: string;
+      scenario: {
+        steps: Array<{
+          kind: string;
+          operationId?: string;
+          assertion?: { kind: string; fields?: ReadBackField[] };
+          requestPlan?: { bodyTemplate?: unknown };
+        }>;
+      };
+    }
+
+    function loadAll(): { file: string; data: ReadBackFile }[] {
+      if (!existsSync(READBACK_DIR)) return [];
+      const out: { file: string; data: ReadBackFile }[] = [];
+      for (const f of readdirSync(READBACK_DIR)) {
+        if (!f.endsWith('.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+        const data = JSON.parse(readFileSync(join(READBACK_DIR, f), 'utf8')) as ReadBackFile;
+        out.push({ file: f, data });
+      }
+      return out;
+    }
+
+    it('every emitted scenario has the canonical 3-step shape (prereqChain → invoke → observe.fieldEquals)', () => {
+      const all = loadAll();
+      if (all.length === 0) return; // no runtime-entity ABox rows for this config
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const kinds = data.scenario.steps.map((s) => s.kind);
+        if (
+          kinds.length !== 3 ||
+          kinds[0] !== 'prereqChain' ||
+          kinds[1] !== 'invoke' ||
+          kinds[2] !== 'observe'
+        ) {
+          offenders.push(
+            `${file}: expected [prereqChain, invoke, observe], got ${JSON.stringify(kinds)}`,
+          );
+          continue;
+        }
+        const observe = data.scenario.steps[2];
+        if (observe.assertion?.kind !== 'fieldEquals') {
+          offenders.push(
+            `${file}: observe.assertion.kind expected 'fieldEquals', got '${observe.assertion?.kind}'`,
+          );
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it("every fieldEquals assertion has a non-empty fields[] and each field's responseBodyPath is a live response leaf of the fetcher", () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operationsById?: Record<string, { responseLeafPaths?: Record<string, string[]> }>;
+      };
+      const opsById = graph.operationsById ?? {};
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const observe = data.scenario.steps[2];
+        const fields = observe.assertion?.fields;
+        if (!Array.isArray(fields) || fields.length === 0) {
+          offenders.push(`${file}: fieldEquals.fields[] must be non-empty`);
+          continue;
+        }
+        const fetcherOpId = observe.operationId;
+        if (typeof fetcherOpId !== 'string') {
+          offenders.push(`${file}: observe.operationId missing`);
+          continue;
+        }
+        const liveLeaves = new Set(opsById[fetcherOpId]?.responseLeafPaths?.['200'] ?? []);
+        if (liveLeaves.size === 0) {
+          offenders.push(
+            `${file}: fetcher='${fetcherOpId}' has no 2xx responseLeafPaths in the graph`,
+          );
+          continue;
+        }
+        for (const f of fields) {
+          const dotted = f.responseBodyPath.join('.');
+          if (!liveLeaves.has(dotted)) {
+            offenders.push(
+              `${file}: responseBodyPath '${dotted}' is not a live 200-response leaf of '${fetcherOpId}'`,
+            );
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it("every fieldEquals assertion's expected value can be plucked from the mutator's emitted bodyTemplate at requestBodyPath", () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const invoke = data.scenario.steps[1];
+        const observe = data.scenario.steps[2];
+        const body = invoke.requestPlan?.bodyTemplate;
+        for (const f of observe.assertion?.fields ?? []) {
+          let node: unknown = body;
+          for (const seg of f.requestBodyPath) {
+            if (node === null || typeof node !== 'object') {
+              node = undefined;
+              break;
+            }
+            // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+            node = (node as Record<string, unknown>)[seg];
+          }
+          if (node === undefined) {
+            offenders.push(
+              `${file}: mutator body missing value at ${JSON.stringify(f.requestBodyPath)}`,
+            );
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+  },
+);
+
+// ===========================================================================
+// #305 Phase 5d / #189 — StateTransitionVisibleAfterAction RuntimeEntity
+// scenarios.
+//
+// Same shape as the Phase 4 readback invariants above: skip when the
+// template emitted nothing for this config (no runtime-entity ABox row
+// with transitions[]), otherwise assert structural well-formedness of
+// the compiled scenarios AND the emitted Playwright spec for the
+// `resolveIncident` first-slice. Future transitions (completeJob,
+// completeUserTask, cancelProcessInstance, …) drop into the same
+// guard as soon as their ABox rows land.
+// ===========================================================================
+describeForThisConfig(
+  'bundled-spec invariants: StateTransitionVisibleAfterAction scenarios (#305 Phase 5d / #189)',
+  () => {
+    const STATE_TRANSITION_DIR = join(
+      SCENARIOS_DIR,
+      'templates',
+      'StateTransitionVisibleAfterAction',
+    );
+
+    interface StateTransitionFile {
+      templateName: string;
+      subjectName: string;
+      subjectKind: string;
+      scenario: {
+        steps: Array<{
+          kind: string;
+          operationId?: string;
+          assertion?: {
+            kind: string;
+            responseBodyPath?: string[];
+            expectedState?: string;
+            fromState?: string;
+            transitionOp?: string;
+          };
+        }>;
+      };
+    }
+
+    function loadAll(): { file: string; data: StateTransitionFile }[] {
+      if (!existsSync(STATE_TRANSITION_DIR)) return [];
+      const out: { file: string; data: StateTransitionFile }[] = [];
+      for (const f of readdirSync(STATE_TRANSITION_DIR)) {
+        if (!f.endsWith('.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+        const data = JSON.parse(
+          readFileSync(join(STATE_TRANSITION_DIR, f), 'utf8'),
+        ) as StateTransitionFile;
+        out.push({ file: f, data });
+      }
+      return out;
+    }
+
+    it('every emitted scenario has the canonical 3-step shape (prereqChain → invoke → observe.stateEquals)', () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const kinds = data.scenario.steps.map((s) => s.kind);
+        if (
+          kinds.length !== 3 ||
+          kinds[0] !== 'prereqChain' ||
+          kinds[1] !== 'invoke' ||
+          kinds[2] !== 'observe'
+        ) {
+          offenders.push(
+            `${file}: expected [prereqChain, invoke, observe], got ${JSON.stringify(kinds)}`,
+          );
+          continue;
+        }
+        const observe = data.scenario.steps[2];
+        if (observe.assertion?.kind !== 'stateEquals') {
+          offenders.push(
+            `${file}: observe.assertion.kind expected 'stateEquals', got '${observe.assertion?.kind}'`,
+          );
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it("every stateEquals assertion's responseBodyPath is a live 200-response leaf of the fetcher", () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed pipeline JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operationsById?: Record<string, { responseLeafPaths?: Record<string, string[]> }>;
+      };
+      const opsById = graph.operationsById ?? {};
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const observe = data.scenario.steps[2];
+        const fetcherOpId = observe.operationId;
+        if (typeof fetcherOpId !== 'string') {
+          offenders.push(`${file}: observe.operationId missing`);
+          continue;
+        }
+        const liveLeaves = new Set(opsById[fetcherOpId]?.responseLeafPaths?.['200'] ?? []);
+        if (liveLeaves.size === 0) {
+          offenders.push(
+            `${file}: fetcher='${fetcherOpId}' has no 2xx responseLeafPaths in the graph`,
+          );
+          continue;
+        }
+        const path = observe.assertion?.responseBodyPath;
+        if (!Array.isArray(path) || path.length === 0) {
+          offenders.push(`${file}: stateEquals.responseBodyPath must be non-empty`);
+          continue;
+        }
+        const dotted = path.join('.');
+        if (!liveLeaves.has(dotted)) {
+          offenders.push(
+            `${file}: stateEquals.responseBodyPath '${dotted}' is not a live 200-response leaf of '${fetcherOpId}'`,
+          );
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('every stateEquals assertion carries non-empty fromState, expectedState, and transitionOp', () => {
+      const all = loadAll();
+      if (all.length === 0) return;
+      const offenders: string[] = [];
+      for (const { file, data } of all) {
+        const a = data.scenario.steps[2].assertion;
+        if (a?.kind !== 'stateEquals') continue;
+        if (!a.fromState) offenders.push(`${file}: stateEquals.fromState missing`);
+        if (!a.expectedState) offenders.push(`${file}: stateEquals.expectedState missing`);
+        if (!a.transitionOp) offenders.push(`${file}: stateEquals.transitionOp missing`);
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('Incident.resolveIncident slice: emitted Playwright spec asserts state === RESOLVED via getIncident read-back', () => {
+      const specPath = join(
+        GENERATED_TESTS_DIR,
+        'templates',
+        'StateTransitionVisibleAfterAction',
+        'Incident.resolveIncident.lifecycle.spec.ts',
+      );
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const required = [
+        "operationId: 'getIncident'",
+        "operationId: 'searchIncidents'",
+        '/resolution',
+        ".state).toEqual('RESOLVED')",
+        'incident-script-task.bpmn',
+      ];
+      const missing = required.filter((needle) => !src.includes(needle));
+      expect(missing).toEqual([]);
+    });
+
+    it('UserTask.completeUserTask slice (#305 Phase 5d-2): emitted Playwright spec asserts state === COMPLETED via getUserTask read-back', () => {
+      const specPath = join(
+        GENERATED_TESTS_DIR,
+        'templates',
+        'StateTransitionVisibleAfterAction',
+        'UserTask.completeUserTask.lifecycle.spec.ts',
+      );
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const required = [
+        "operationId: 'getUserTask'",
+        "operationId: 'searchUserTasks'",
+        '/completion',
+        ".state).toEqual('COMPLETED')",
+        'user-task.bpmn',
+      ];
+      const missing = required.filter((needle) => !src.includes(needle));
+      expect(missing).toEqual([]);
+    });
+
+    it('ProcessInstance.cancelProcessInstance slice (#305 Phase 5d-4): emitted Playwright spec asserts state === CANCELED via getProcessInstance read-back, using cancellable-blocked.bpmn fixture', () => {
+      const specPath = join(
+        GENERATED_TESTS_DIR,
+        'templates',
+        'StateTransitionVisibleAfterAction',
+        'ProcessInstance.cancelProcessInstance.lifecycle.spec.ts',
+      );
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      const required = [
+        "operationId: 'getProcessInstance'",
+        'invoke (transition): cancelProcessInstance',
+        '/cancellation',
+        ".state).toEqual('CANCELED')",
+        'cancellable-blocked.bpmn',
+      ];
+      const missing = required.filter((needle) => !src.includes(needle));
+      expect(missing).toEqual([]);
+    });
+  },
+);
+
+// -----------------------------------------------------------------------------
+// #304 — Cross-run identifier uniqueness for client-minted bindings consumed
+// by operations that declare an HTTP 409 (Conflict) response.
+//
+// Class-scoped invariant: for every operation in the bundled graph whose
+// `responseLeafPaths` contains a '409' entry, if a feature spec file was
+// emitted for that operation AND that spec contains a seedBinding(...) call,
+// then every seedBinding(...) call inside that spec must pass `{ unique: true }`.
+//
+// Why "every call in the spec" rather than "only the path-param identifier":
+// the planner stamps `declares409` per-step, so the emitter unique-tags ALL
+// client-minted bindings consumed by that step's request — including
+// non-identifier fields like `passwordVar` on createUser. That is intentional:
+// non-identifier fields tagged unique are harmless (they just become non-
+// snapshot-stable), and identifier-shape detection at the emitter would be
+// strictly more complex without an observable benefit.
+//
+// A spec with zero seedBinding(...) calls (e.g. one whose payload bindings
+// all come from earlier-step `extractInto` calls — no client-minted seeds)
+// trivially passes.
+// -----------------------------------------------------------------------------
+
+describe.skipIf(CONFIG_NAME !== ACTIVE_CONFIG)(
+  '#304: feature specs for ops declaring HTTP 409 use seedBinding({ unique: true }) for client-minted bindings',
+  () => {
+    it('every emitted feature spec for an op with `409` in responseLeafPaths flags ALL its seedBinding calls as { unique: true }', () => {
+      if (!existsSync(GRAPH_PATH)) {
+        throw new Error(
+          `Operation dependency graph not found at ${GRAPH_PATH}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      if (!existsSync(GENERATED_TESTS_DIR)) {
+        throw new Error(
+          `Generated tests directory not found at ${GENERATED_TESTS_DIR}. Run 'npm run testsuite:generate' first.`,
+        );
+      }
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as {
+        operations?: Record<string, { responseLeafPaths?: Record<string, unknown> }>;
+      };
+      const opsRecord = graph.operations ?? {};
+      const opsWith409: string[] = [];
+      for (const [opId, op] of Object.entries(opsRecord)) {
+        if (op?.responseLeafPaths && '409' in op.responseLeafPaths) {
+          opsWith409.push(opId);
+        }
+      }
+      // Sanity: the upstream spec must actually declare 409 on at least the
+      // canonical create-style ops. If this fires, either the spec pin
+      // regressed or the loader stopped propagating responseLeafPaths.
+      expect(opsWith409.length).toBeGreaterThan(0);
+
+      // seedBinding(' …  ') with an exact match of zero or one `, { unique: true }`
+      // arg. We accept either single or double quotes around the name to be
+      // resilient to Biome formatter choices in generated output.
+      const seedCallRe =
+        /\bseedBinding\(\s*(['"])([A-Za-z_$][\w$]*)\1\s*(,\s*\{\s*unique:\s*true\s*\})?\s*\)/g;
+
+      const violations: string[] = [];
+      for (const opId of opsWith409) {
+        const specPath = join(GENERATED_TESTS_DIR, `${opId}.feature.spec.ts`);
+        if (!existsSync(specPath)) continue;
+        const src = readFileSync(specPath, 'utf8');
+        const matches = [...src.matchAll(seedCallRe)];
+        for (const m of matches) {
+          const bindingName = m[2];
+          const hasUnique = m[3] !== undefined;
+          if (!hasUnique) {
+            violations.push(
+              `${opId}.feature.spec.ts: seedBinding('${bindingName}') missing { unique: true }`,
+            );
+          }
+        }
+      }
+      expect(violations).toEqual([]);
+    });
+
+    it('feature specs for ops that do NOT declare 409 keep seedBinding calls deterministic (no { unique: true })', () => {
+      // Companion to the previous invariant: confirms we did not blanket-
+      // apply unique tagging. A representative non-409 op feature spec must
+      // contain at least one bare seedBinding() call. broadcastSignal is a
+      // safe pick — it doesn't declare 409 and consistently emits a seeded
+      // signalNameVar binding.
+      //
+      // Previously this used createDeployment, but #342 made tenantIdVar
+      // omitWhenUnbound, so createDeployment now (correctly) has no
+      // seedBinding calls at all.
+      const specPath = join(GENERATED_TESTS_DIR, 'broadcastSignal.feature.spec.ts');
+      if (!existsSync(specPath)) {
+        return;
+      }
+      const src = readFileSync(specPath, 'utf8');
+      // At least one bare seedBinding('xxx') call (no `{ unique: true }`).
+      const bareCallRe = /\bseedBinding\(\s*['"][A-Za-z_$][\w$]*['"]\s*\)/;
+      expect(bareCallRe.test(src)).toBe(true);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Enum-typed request-body field seeding (#338)
+// ---------------------------------------------------------------------------
+//
+// The planner previously discarded enum constraints on required request-body
+// fields: even though the extractor captured them, `buildRequestBodyFromCanonical`
+// fell through to the seedBinding fallback and emitted `${fieldVar}` placeholders
+// the universal seed prologue rewrote to random short strings. Servers reject
+// those with HTTP 400 "Value <random> is not a valid <Enum>." Same for arrays
+// whose items are enums (e.g. `permissionTypes: array of PermissionTypeEnum`):
+// the synthesised element was a literal `"placeholder"` string the server
+// rejected.
+//
+// This invariant is class-scoped (all required enum-typed request-body fields
+// across the bundled spec — not just `ownerType` / `permissionTypes` from
+// `createAuthorization` that triggered the bug report) so the same category
+// of bug cannot recur in a sibling op.
+describeForThisConfig(
+  'bundled-spec invariants: enum-typed request-body field seeding (#338)',
+  () => {
+    it('every required enum-typed request-body field is seeded with a valid enum literal (no ${...} placeholder, no "placeholder" array element, no non-member literal)', () => {
+      if (!existsSync(FEATURE_SCENARIOS_DIR)) {
+        throw new Error(
+          `Feature output directory not found at ${FEATURE_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+        );
+      }
+      if (!existsSync(BUNDLED_SPEC_PATH)) {
+        throw new Error(
+          `Bundled spec not found at ${BUNDLED_SPEC_PATH}. Run 'npm run fetch-spec' first.`,
+        );
+      }
+
+      const spec = loadBundledSpec();
+
+      /**
+       * Walk a request-body schema and collect, for every required
+       * top-level field across the root branch and any `oneOf` variants,
+       * the enum values declared on the field's scalar schema
+       * (`fieldEnums`) and on its items' scalar schema when the field is
+       * an array (`itemEnums`).
+       *
+       * Uses the shared `mergeSchemaShape` / `resolveSpecNode` helpers
+       * so `allOf`-composed bodies (or oneOf variants composed via
+       * `allOf`) contribute their required+properties — otherwise the
+       * invariant would silently skip enum-typed required fields hidden
+       * behind `allOf` wrappers (review comment on #339).
+       */
+      function collectEnumFields(rootSchema: SpecNode | undefined): {
+        fieldEnums: Map<string, unknown[]>;
+        itemEnums: Map<string, unknown[]>;
+      } {
+        const fieldEnums = new Map<string, unknown[]>();
+        const itemEnums = new Map<string, unknown[]>();
+        const branches: SpecNode[] = [];
+        const rootResolved = resolveSpecNode(rootSchema, spec, new Set());
+        if (rootResolved) branches.push(rootResolved);
+        for (const variant of rootResolved?.oneOf ?? []) {
+          const v = resolveSpecNode(variant, spec, new Set());
+          if (v) branches.push(v);
+        }
+
+        for (const branch of branches) {
+          const { required, properties } = mergeSchemaShape(branch, spec, new Set());
+          for (const field of required) {
+            const sub = properties[field];
+            if (!sub) continue;
+            const fieldEnum = effectiveEnumFromSpec(sub, spec, new Set());
+            if (fieldEnum && fieldEnum.length > 0 && !fieldEnums.has(field)) {
+              fieldEnums.set(field, fieldEnum);
+            }
+            const resolvedSub = resolveSpecNode(sub, spec, new Set());
+            if (resolvedSub?.type === 'array' && resolvedSub.items) {
+              const itemEnum = effectiveEnumFromSpec(resolvedSub.items, spec, new Set());
+              if (itemEnum && itemEnum.length > 0 && !itemEnums.has(field)) {
+                itemEnums.set(field, itemEnum);
+              }
+            }
+          }
+        }
+        return { fieldEnums, itemEnums };
+      }
+
+      // Build per-op map: opId -> { fieldEnums, itemEnums }
+      const enumFieldsByOp = new Map<
+        string,
+        { fieldEnums: Map<string, unknown[]>; itemEnums: Map<string, unknown[]> }
+      >();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const op of Object.values(pathItem)) {
+          if (!op.operationId) continue;
+          const body = resolveSpecNode(op.requestBody, spec, new Set());
+          const jsonBody = body?.content?.['application/json']?.schema;
+          if (!jsonBody) continue;
+          const collected = collectEnumFields(jsonBody);
+          if (collected.fieldEnums.size > 0 || collected.itemEnums.size > 0) {
+            enumFieldsByOp.set(op.operationId, collected);
+          }
+        }
+      }
+
+      interface FeatureScenarioFile {
+        scenarios: {
+          id: string;
+          requestPlan?: { operationId: string; bodyTemplate?: Record<string, unknown> }[];
+        }[];
+      }
+
+      type OffenderReason = 'placeholder-var' | 'placeholder-literal' | 'non-enum-member';
+      const offenders: {
+        file: string;
+        scenario: string;
+        operationId: string;
+        field: string;
+        value: unknown;
+        expectedEnum: unknown[];
+        reason: OffenderReason;
+      }[] = [];
+      const placeholderPattern = /^\$\{[^}]+\}$/;
+
+      function classifyScalar(value: unknown, expectedEnum: unknown[]): OffenderReason | null {
+        if (typeof value === 'string' && placeholderPattern.test(value)) return 'placeholder-var';
+        if (!expectedEnum.includes(value)) return 'non-enum-member';
+        return null;
+      }
+
+      function classifyArrayElement(elem: unknown, expectedEnum: unknown[]): OffenderReason | null {
+        if (typeof elem === 'string' && placeholderPattern.test(elem)) return 'placeholder-var';
+        if (elem === 'placeholder') return 'placeholder-literal';
+        if (!expectedEnum.includes(elem)) return 'non-enum-member';
+        return null;
+      }
+
+      for (const dir of [FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
+        if (!existsSync(dir)) continue;
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('-scenarios.json')) continue;
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const file = JSON.parse(readFileSync(join(dir, f), 'utf8')) as FeatureScenarioFile;
+          for (const scenario of file.scenarios ?? []) {
+            for (const step of scenario.requestPlan ?? []) {
+              const enums = enumFieldsByOp.get(step.operationId);
+              if (!enums) continue;
+              for (const [field, value] of Object.entries(step.bodyTemplate ?? {})) {
+                const fieldEnum = enums.fieldEnums.get(field);
+                if (fieldEnum) {
+                  const reason = classifyScalar(value, fieldEnum);
+                  if (reason) {
+                    offenders.push({
+                      file: f,
+                      scenario: scenario.id,
+                      operationId: step.operationId,
+                      field,
+                      value,
+                      expectedEnum: fieldEnum,
+                      reason,
+                    });
+                    continue;
+                  }
+                }
+                const itemEnum = enums.itemEnums.get(field);
+                if (itemEnum && Array.isArray(value)) {
+                  for (const elem of value) {
+                    const reason = classifyArrayElement(elem, itemEnum);
+                    if (reason) {
+                      offenders.push({
+                        file: f,
+                        scenario: scenario.id,
+                        operationId: step.operationId,
+                        field,
+                        value: elem,
+                        expectedEnum: itemEnum,
+                        reason,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      expect(
+        offenders,
+        'A scenario bodyTemplate seeds an invalid value for a required enum-typed request-body field. ' +
+          'The planner must emit a literal that is a member of the declared enum (#338). ' +
+          'Servers reject ${var} placeholders, "placeholder" array elements, and non-member literals ' +
+          'with HTTP 400.',
+      ).toEqual([]);
+    });
+  },
+);
+
+// Operations are emitted per-SDK with these layouts (see the respective
+// emitters): JS  -> <opId>/<opId>.<mode>.test.ts, C# -> <opId>/<opId>.<mode>.Tests.cs,
+// Python (flat) -> test_<snake_op_id>.py. These helpers walk the real output
+// so the invariants assert against what the emitters actually produce.
+function collectFilesRecursive(dir: string, suffix: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true })
+    .map((entry) => String(entry))
+    .filter((rel) => rel.endsWith(suffix));
+}
+
+function pythonSnakeCase(operationId: string): string {
+  return operationId
+    .replace(/([A-Z])/g, '_$1')
+    .toLowerCase()
+    .replace(/^_/, '');
+}
+
+describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)', () => {
+  it('no emitted Python SDK test contains an unresolved ${...} placeholder (#133)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Python suites are emitted flat as test_<snake_op_id>.py.
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    const offenders: string[] = [];
+    let assertionsRun = 0;
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      assertionsRun++;
+      // The Python emitter resolves ${var} body-template placeholders to
+      // ctx.get('<snake_var>') at code-generation time. Any remaining ${...}
+      // literal indicates a missing binding and would break the test.
+      if (/\$\{[^}]+\}/.test(src)) {
+        offenders.push(file);
+      }
+    }
+    expect(assertionsRun).toBeGreaterThan(0);
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) contain unresolved ${...} placeholder strings.',
+    ).toEqual([]);
+  });
+
+  it('every planned scenario has a materialized Python SDK test file (#133)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Python SDK and JS SDK hard-fail on scenarios whose prereqs require multipart
+    // uploads (e.g. createDeployment). The emitters apply the same hard-fail logic,
+    // so the set of operations they CAN emit is identical. We use the JS SDK's
+    // emitted <opId>/<opId>.feature.test.ts files as the reference set: any
+    // operationId covered by the JS SDK must also have a Python SDK file.
+    const jsSdkEmitted = new Set(
+      collectFilesRecursive(JS_SDK_DIR, '.feature.test.ts').map((rel) =>
+        basename(rel).replace(/\.feature\.test\.ts$/, ''),
+      ),
+    );
+    if (jsSdkEmitted.size === 0) {
+      throw new Error('No JS SDK .feature.test.ts files found — run codegen:all first.');
+    }
+    const missing = planned
+      .filter((e) => jsSdkEmitted.has(e.operationId))
+      .map((e) => `test_${pythonSnakeCase(e.operationId)}.py`)
+      .filter((f) => !existsSync(join(PYTHON_SDK_DIR, f)));
+    expect(
+      missing,
+      'Planned scenarios exist but no Python SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted JS SDK suite (#131)', () => {
+  it('every URL placeholder in JS SDK suite is either seeded or extracted (mirrors Bug A)', () => {
+    // The JS SDK emitter resolves ${var} body-template placeholders to
+    // ctx["var"] at code-generation time. Any remaining ${...} literal in
+    // the emitted .test.ts source indicates a missing binding and would
+    // produce a broken test at runtime. Suites are emitted per-operation as
+    // <opId>/<opId>.<mode>.test.ts, so we walk recursively.
+    if (!existsSync(JS_SDK_DIR)) {
+      throw new Error(
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = collectFilesRecursive(JS_SDK_DIR, '.test.ts');
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const rel of files) {
+      const src = readFileSync(join(JS_SDK_DIR, rel), 'utf8');
+      // A resolved placeholder is rendered as a `${ctx[...]}` template-literal
+      // interpolation; `${RANDOM}` is an intentional runtime seed token emitted
+      // verbatim inside single-quoted seed strings (identical to the canonical
+      // Playwright emitter). An UNRESOLVED body-template placeholder is any other
+      // bare `${identifier}` the emitter failed to lower to a ctx read.
+      const placeholders = src.match(/\$\{[^}]*\}/g) ?? [];
+      if (placeholders.some((p) => !p.includes('ctx') && p !== '${RANDOM}')) {
+        offenders.push(rel);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted JS SDK test file(s) contain unresolved ${...} placeholder strings. ' +
+        'The emitter must resolve every body-template placeholder to ctx["<var>"] before emitting.',
+    ).toEqual([]);
+  });
+
+  it('every planned scenario has a materialized JS SDK test file (#131)', () => {
+    const INDEX_PATH = join(SCENARIOS_DIR, 'index.json');
+    if (!existsSync(INDEX_PATH)) {
+      throw new Error(
+        `Scenario index not found at ${INDEX_PATH}. Run 'npm run testsuite:generate' (or 'npm run pipeline') first.`,
+      );
+    }
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const index = JSON.parse(readFileSync(INDEX_PATH, 'utf8')) as {
+      endpoints: Array<{ operationId: string; scenarioCount: number }>;
+    };
+    const planned = index.endpoints.filter((e) => e.scenarioCount > 0);
+    if (planned.length === 0) {
+      return;
+    }
+    if (!existsSync(JS_SDK_DIR)) {
+      throw new Error(
+        `JS SDK output directory not found at ${JS_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // JS SDK and Python SDK emit the same set of operations (identical hard-fail
+    // logic for multipart prereqs). We use the Python SDK's emitted
+    // test_<snake_op_id>.py files as the reference set: any operationId covered
+    // by the Python SDK must also have a JS SDK file.
+    const pythonSdkSnakeNames = new Set(
+      readdirSync(PYTHON_SDK_DIR)
+        .filter((f) => f.startsWith('test_') && f.endsWith('.py'))
+        .map((f) => f.replace(/^test_/, '').replace(/\.py$/, '')),
+    );
+    if (pythonSdkSnakeNames.size === 0) {
+      throw new Error('No Python SDK test_*.py files found — run codegen:all first.');
+    }
+    const missing = planned
+      .filter((e) => pythonSdkSnakeNames.has(pythonSnakeCase(e.operationId)))
+      .map((e) => join(e.operationId, `${e.operationId}.feature.test.ts`))
+      .filter((rel) => !existsSync(join(JS_SDK_DIR, rel)));
+    expect(
+      missing,
+      'Planned scenarios exist but no JS SDK test file was materialized for these operationIds',
+    ).toEqual([]);
+  });
+});
+
+describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', () => {
+  it('every emitted C# file follows the <opId>/<opId>.<mode>.Tests.cs convention (#132)', () => {
+    if (!existsSync(CSHARP_SDK_DIR)) {
+      throw new Error(
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    // Only operation test files follow the naming convention; vendored support
+    // files (e.g. TestFixtureBase.cs) are emitted at the suite root and exempt.
+    const files = collectFilesRecursive(CSHARP_SDK_DIR, '.Tests.cs');
+    if (files.length === 0) {
+      return;
+    }
+    const badNames = files.filter(
+      (rel) =>
+        !/^[a-zA-Z][a-zA-Z0-9]+\.(feature|integration|variant)\.Tests\.cs$/.test(basename(rel)),
+    );
+    expect(
+      badNames,
+      'C# emitted files must follow <operationId>.<mode>.Tests.cs naming convention',
+    ).toEqual([]);
+  });
+
+  it('every emitted C# file declares the CamundaIntegrationTests namespace (#132)', () => {
+    if (!existsSync(CSHARP_SDK_DIR)) {
+      throw new Error(
+        `C# SDK output directory not found at ${CSHARP_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = collectFilesRecursive(CSHARP_SDK_DIR, '.cs');
+    if (files.length === 0) {
+      return;
+    }
+    const offenders: string[] = [];
+    for (const rel of files) {
+      const src = readFileSync(join(CSHARP_SDK_DIR, rel), 'utf8');
+      if (!src.includes('namespace CamundaIntegrationTests')) {
+        offenders.push(rel);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted C# file(s) are missing the CamundaIntegrationTests namespace declaration.',
+    ).toEqual([]);
+  });
+});

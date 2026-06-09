@@ -42,8 +42,15 @@ const SUITES: readonly Suite[] = [
     tsconfig: path.join(getPlaywrightSuiteDir(REPO_ROOT), 'tsconfig.json'),
   },
   {
-    label: 'request-validation',
-    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'tsconfig.json'),
+    // The request-validation suite is emitted as two parallel self-contained
+    // profiles (unsecured/ + secured/), each with its own tsconfig.json. Both
+    // must typecheck under strict mode.
+    label: 'request-validation (unsecured)',
+    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'unsecured', 'tsconfig.json'),
+  },
+  {
+    label: 'request-validation (secured)',
+    tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'secured', 'tsconfig.json'),
   },
 ];
 
@@ -58,7 +65,8 @@ describe.each(SUITES)('emitted $label suite typechecks under strict mode', ({
           `Run \`npm run testsuite:generate && npm run generate:request-validation\` to produce it before running this test.`,
       );
     }
-    const result = spawnSync('npx', ['--no-install', 'tsc', '--noEmit', '-p', tsconfig], {
+    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const result = spawnSync(npx, ['--no-install', 'tsc', '--noEmit', '-p', tsconfig], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
     });

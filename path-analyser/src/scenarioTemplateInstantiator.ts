@@ -317,7 +317,7 @@ function compileEdgeLifecycle(
 export interface TemplateInstantiationResult {
   templateName: string;
   subjectName: string;
-  subjectKind: 'Edge' | 'Entity';
+  subjectKind: 'Edge' | 'Entity' | 'RuntimeEntity';
   scenario: TemplateScenario;
 }
 
@@ -506,6 +506,477 @@ function compileEntityLifecycle(
 }
 
 /**
+ * #305 Phase 4 — Produce one {@link TemplateScenario} per
+ * (runtime-entity × mutator) pair. Parallel to
+ * {@link compileEntityLifecycle}, but tailored for runtime-emitted
+ * entities (no establisher/revoker, just mutate → re-fetch → assert
+ * the mutated field is visible on read-back).
+ *
+ * Returns one scenario per `kind.mutators[]` entry. Pairs that fail
+ * (missing canonical, empty field intersection, missing fetcher
+ * response leaves) are surfaced as `errors` so the caller can fail
+ * the whole instantiation loudly with the full list of broken pairs.
+ */
+function compileUpdatedFieldVisibleOnReadBack(
+  template: ScenarioTemplate,
+  kind: EntityKind,
+  graph: OperationGraph,
+  canonical: CanonicalScenarioMap,
+): {
+  scenarios: Array<{ mutatorOpId: string; scenario: TemplateScenario }>;
+  errors: string[];
+} {
+  const scenarios: Array<{ mutatorOpId: string; scenario: TemplateScenario }> = [];
+  const errors: string[] = [];
+
+  if (kind.shape !== 'runtime-entity') {
+    errors.push(
+      `${template.name} × ${kind.name}: appliesTo RuntimeEntity templates only apply to shape: "runtime-entity" kinds, got shape: "${kind.shape}"`,
+    );
+    return { scenarios, errors };
+  }
+  const fetcherOpId = kind.fetcher;
+  const mutatorOpIds = kind.mutators;
+  if (
+    typeof fetcherOpId !== 'string' ||
+    !Array.isArray(mutatorOpIds) ||
+    mutatorOpIds.length === 0
+  ) {
+    errors.push(
+      `${template.name} × ${kind.name}: missing fetcher and/or mutators[] on shape: "runtime-entity" kind (schema bug?)`,
+    );
+    return { scenarios, errors };
+  }
+
+  const fetcherScenario = canonical.get(fetcherOpId);
+  if (!fetcherScenario) {
+    errors.push(
+      `${template.name} × ${kind.name}: no canonical scenario for fetcher='${fetcherOpId}'`,
+    );
+    return { scenarios, errors };
+  }
+  const fetcherPlan = fetcherScenario.requestPlan;
+  if (!fetcherPlan?.length) {
+    errors.push(`${template.name} × ${kind.name}: fetcher scenario has no requestPlan`);
+    return { scenarios, errors };
+  }
+
+  // Collect every primitive leaf path of the fetcher's 200 response;
+  // fall back to the first 2xx if no exact 200 (rare for getters).
+  const fetcherOp = graph.operations[fetcherOpId];
+  const fetcherLeaves =
+    fetcherOp?.responseLeafPaths?.['200'] ??
+    Object.entries(fetcherOp?.responseLeafPaths ?? {}).find(([s]) => /^2\d\d$/.test(s))?.[1] ??
+    [];
+  if (fetcherLeaves.length === 0) {
+    errors.push(
+      `${template.name} × ${kind.name}: fetcher='${fetcherOpId}' has no responseLeafPaths for 2xx (extractor regression?)`,
+    );
+    return { scenarios, errors };
+  }
+  // Build last-segment → full-path index. A response leaf like
+  // `assignee` indexes under `'assignee'`; `items[].userTaskKey` under
+  // `'userTaskKey'`. Multiple paths sharing a last segment are
+  // preserved; matching prefers the shortest path (most likely the
+  // top-level field a UI would observe).
+  const responseByLeaf = new Map<string, string[][]>();
+  for (const path of fetcherLeaves) {
+    const segments = path.split('.');
+    const last = segments[segments.length - 1].replace(/\[\]$/, '');
+    const list = responseByLeaf.get(last) ?? [];
+    list.push(segments);
+    responseByLeaf.set(last, list);
+  }
+
+  for (const mutatorOpId of mutatorOpIds) {
+    const mutatorScenario = canonical.get(mutatorOpId);
+    if (!mutatorScenario) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${mutatorOpId}: no canonical scenario for mutator`,
+      );
+      continue;
+    }
+    const mutatorPlan = mutatorScenario.requestPlan;
+    if (!mutatorPlan?.length) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${mutatorOpId}: mutator scenario has no requestPlan`,
+      );
+      continue;
+    }
+    const mutatorOps = mutatorScenario.operations;
+    if (mutatorOps.length !== mutatorPlan.length) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${mutatorOpId}: mutator scenario operations.length (${mutatorOps.length}) ≠ requestPlan.length (${mutatorPlan.length}); duplicate invocation on a mutator is unsupported`,
+      );
+      continue;
+    }
+
+    const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
+    const mutatorStep = lastOf(mutatorPlan);
+    const bodyLeaves = collectBodyLeaves(mutatorStep.bodyTemplate);
+    const fields: Array<{
+      leafName: string;
+      requestBodyPath: string[];
+      responseBodyPath: string[];
+    }> = [];
+    for (const leaf of bodyLeaves) {
+      const last = leaf.path[leaf.path.length - 1];
+      const candidates = responseByLeaf.get(last);
+      if (!candidates || candidates.length === 0) continue;
+      // Prefer the shortest response path (top-level over nested).
+      const responsePath = candidates.slice().sort((a, b) => a.length - b.length)[0];
+      fields.push({
+        leafName: last,
+        requestBodyPath: leaf.path,
+        responseBodyPath: responsePath,
+      });
+    }
+    if (fields.length === 0) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${mutatorOpId}: empty field intersection — mutator emitted body has no leaf whose name matches any leaf in fetcher='${fetcherOpId}' 2xx response. Add the relevant leaves to configs/<config>/request-defaults.json for the mutator, or annotate them upstream.`,
+      );
+      continue;
+    }
+
+    const prereqOps: OperationRef[] = mutatorOps.slice(0, -1).map((o) => ({ ...o }));
+    const prereqPlan: RequestStep[] = mutatorPlan.slice(0, -1);
+
+    const bindings: Record<string, string> = {};
+    const aggregateBindingNames = new Set<string>([
+      ...Object.keys(mutatorScenario.bindings ?? {}),
+      ...(mutatorScenario.seedBindings ?? []),
+    ]);
+    for (const bindName of aggregateBindingNames) {
+      const sem = bindName.endsWith('Var')
+        ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
+        : bindName;
+      bindings[sem] = bindName;
+    }
+
+    const inputsFor = (opId: string): Record<string, string> => {
+      const op = graph.operations[opId];
+      const result: Record<string, string> = {};
+      for (const sem of op?.requires.required ?? []) {
+        result[sem] = bindingNameFor(sem);
+      }
+      return result;
+    };
+    const producesFor = (opId: string): Record<string, string> => {
+      const op = graph.operations[opId];
+      const result: Record<string, string> = {};
+      for (const leaf of op?.responseSemanticLeaves ?? []) {
+        if (!leaf.provider) continue;
+        result[leaf.semantic] = bindingNameFor(leaf.semantic);
+      }
+      return result;
+    };
+
+    const allOpIds = new Set<string>([
+      ...prereqOps.map((o) => o.operationId),
+      mutatorOpId,
+      fetcherOpId,
+    ]);
+    const eventuallyConsistentOps: string[] = [];
+    for (const opId of allOpIds) {
+      const op = graph.operations[opId];
+      if (op?.eventuallyConsistent) eventuallyConsistentOps.push(opId);
+    }
+    eventuallyConsistentOps.sort();
+
+    const steps: TemplateStep[] = [
+      {
+        kind: 'prereqChain',
+        targetOperationId: mutatorOpId,
+        operations: prereqOps,
+        bindings: { ...(mutatorScenario.bindings ?? {}) },
+        seedBindings: [...(mutatorScenario.seedBindings ?? [])],
+        requestPlan: prereqPlan,
+      },
+      {
+        kind: 'invoke',
+        operationId: mutatorOpId,
+        inputs: inputsFor(mutatorOpId),
+        produces: producesFor(mutatorOpId),
+        requestPlan: lastOf(mutatorPlan),
+      },
+      {
+        kind: 'observe',
+        operationId: fetcherOpId,
+        inputs: inputsFor(fetcherOpId),
+        requestPlan: lastOf(fetcherPlan),
+        assertion: {
+          kind: 'fieldEquals',
+          fields,
+        },
+      },
+    ];
+
+    scenarios.push({
+      mutatorOpId,
+      scenario: {
+        templateName: template.name,
+        subjectName: `${kind.name}.${mutatorOpId}`,
+        subjectKind: 'RuntimeEntity',
+        steps,
+        bindings,
+        eventuallyConsistentOps,
+      },
+    });
+  }
+
+  return { scenarios, errors };
+}
+
+/**
+ * #305 Phase 5d / #189 — Produce one {@link TemplateScenario} per
+ * (runtime-entity × transition) pair. Parallel to
+ * {@link compileUpdatedFieldVisibleOnReadBack}, but tailored for
+ * state-transition ops (e.g. `resolveIncident`) whose request body
+ * carries no per-field update — the post-state is implicit in the op
+ * semantics and asserted via a single equality on the fetcher's
+ * `<stateField>` response leaf.
+ *
+ * Differences from the readback compiler:
+ *   - The expected value is a string literal read from
+ *     `transition.to` in the ABox, not plucked from the mutator body.
+ *   - The state field is named explicitly by `kind.stateField` (not
+ *     inferred from the body / response intersection).
+ *   - The emitted assertion is `stateEquals`, not `fieldEquals`.
+ *
+ * Returns one scenario per `kind.transitions[]` entry. Pairs that fail
+ * (missing canonical, fetcher missing `stateField`, etc.) are surfaced
+ * as `errors` so the caller can fail the whole instantiation loudly
+ * with the full list of broken pairs.
+ */
+function compileStateTransitionVisibleAfterAction(
+  template: ScenarioTemplate,
+  kind: EntityKind,
+  graph: OperationGraph,
+  canonical: CanonicalScenarioMap,
+): {
+  scenarios: Array<{ transitionOp: string; scenario: TemplateScenario }>;
+  errors: string[];
+} {
+  const scenarios: Array<{ transitionOp: string; scenario: TemplateScenario }> = [];
+  const errors: string[] = [];
+
+  if (kind.shape !== 'runtime-entity') {
+    errors.push(
+      `${template.name} × ${kind.name}: appliesTo RuntimeEntity templates only apply to shape: "runtime-entity" kinds, got shape: "${kind.shape}"`,
+    );
+    return { scenarios, errors };
+  }
+  const fetcherOpId = kind.fetcher;
+  const transitions = kind.transitions;
+  const stateField = kind.stateField;
+  if (
+    typeof fetcherOpId !== 'string' ||
+    !Array.isArray(transitions) ||
+    transitions.length === 0 ||
+    typeof stateField !== 'string' ||
+    stateField.length === 0
+  ) {
+    errors.push(
+      `${template.name} × ${kind.name}: missing fetcher, transitions[], or stateField on shape: "runtime-entity" kind (schema bug?)`,
+    );
+    return { scenarios, errors };
+  }
+
+  const fetcherScenario = canonical.get(fetcherOpId);
+  if (!fetcherScenario) {
+    errors.push(
+      `${template.name} × ${kind.name}: no canonical scenario for fetcher='${fetcherOpId}'`,
+    );
+    return { scenarios, errors };
+  }
+  const fetcherPlan = fetcherScenario.requestPlan;
+  if (!fetcherPlan?.length) {
+    errors.push(`${template.name} × ${kind.name}: fetcher scenario has no requestPlan`);
+    return { scenarios, errors };
+  }
+
+  // Verify the named stateField is actually a live leaf in the
+  // fetcher's 2xx response. The L3 invariant repeats this guard
+  // against the on-disk graph; doing it here means a misconfigured
+  // ABox fails at planning time with a precise message rather than
+  // emitting a spec that asserts against a non-existent field.
+  const fetcherOp = graph.operations[fetcherOpId];
+  const fetcherLeaves =
+    fetcherOp?.responseLeafPaths?.['200'] ??
+    Object.entries(fetcherOp?.responseLeafPaths ?? {}).find(([s]) => /^2\d\d$/.test(s))?.[1] ??
+    [];
+  if (!fetcherLeaves.includes(stateField)) {
+    errors.push(
+      `${template.name} × ${kind.name}: stateField='${stateField}' is not a 2xx response leaf of fetcher='${fetcherOpId}' (available leaves: ${fetcherLeaves.join(', ') || '<none>'})`,
+    );
+    return { scenarios, errors };
+  }
+
+  // Split the (possibly dotted) stateField into segments for the
+  // emitter's array-based `pluckByPath`. responseLeafPaths stores
+  // dotted leaves (`metadata.state`, `process.status`, …), so a
+  // single-element wrapper would coerce the emitter into reading
+  // `body['metadata.state']` instead of `body.metadata.state`.
+  // Empty segments (leading dot, double dot, trailing dot) are
+  // never valid leaves — reject so the ABox author sees a clear
+  // error rather than a malformed assertion.
+  const stateFieldSegments = stateField.split('.');
+  if (stateFieldSegments.some((seg) => seg.length === 0)) {
+    errors.push(
+      `${template.name} × ${kind.name}: stateField='${stateField}' has empty path segments (leading, trailing, or double dot)`,
+    );
+    return { scenarios, errors };
+  }
+
+  const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
+
+  for (const transition of transitions) {
+    const transitionOpId = transition.op;
+    const transitionScenario = canonical.get(transitionOpId);
+    if (!transitionScenario) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${transitionOpId}: no canonical scenario for transition op`,
+      );
+      continue;
+    }
+    const transitionPlan = transitionScenario.requestPlan;
+    if (!transitionPlan?.length) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${transitionOpId}: transition scenario has no requestPlan`,
+      );
+      continue;
+    }
+    const transitionOps = transitionScenario.operations;
+    if (transitionOps.length !== transitionPlan.length) {
+      errors.push(
+        `${template.name} × ${kind.name} × ${transitionOpId}: transition scenario operations.length (${transitionOps.length}) ≠ requestPlan.length (${transitionPlan.length}); duplicate invocation on a transition is unsupported`,
+      );
+      continue;
+    }
+
+    const prereqOps: OperationRef[] = transitionOps.slice(0, -1).map((o) => ({ ...o }));
+    const prereqPlan: RequestStep[] = transitionPlan.slice(0, -1);
+
+    const bindings: Record<string, string> = {};
+    const aggregateBindingNames = new Set<string>([
+      ...Object.keys(transitionScenario.bindings ?? {}),
+      ...(transitionScenario.seedBindings ?? []),
+    ]);
+    for (const bindName of aggregateBindingNames) {
+      const sem = bindName.endsWith('Var')
+        ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
+        : bindName;
+      bindings[sem] = bindName;
+    }
+
+    const inputsFor = (opId: string): Record<string, string> => {
+      const op = graph.operations[opId];
+      const result: Record<string, string> = {};
+      for (const sem of op?.requires.required ?? []) {
+        result[sem] = bindingNameFor(sem);
+      }
+      return result;
+    };
+    const producesFor = (opId: string): Record<string, string> => {
+      const op = graph.operations[opId];
+      const result: Record<string, string> = {};
+      for (const leaf of op?.responseSemanticLeaves ?? []) {
+        if (!leaf.provider) continue;
+        result[leaf.semantic] = bindingNameFor(leaf.semantic);
+      }
+      return result;
+    };
+
+    const allOpIds = new Set<string>([
+      ...prereqOps.map((o) => o.operationId),
+      transitionOpId,
+      fetcherOpId,
+    ]);
+    const eventuallyConsistentOps: string[] = [];
+    for (const opId of allOpIds) {
+      const op = graph.operations[opId];
+      if (op?.eventuallyConsistent) eventuallyConsistentOps.push(opId);
+    }
+    eventuallyConsistentOps.sort();
+
+    const steps: TemplateStep[] = [
+      {
+        kind: 'prereqChain',
+        targetOperationId: transitionOpId,
+        operations: prereqOps,
+        bindings: { ...(transitionScenario.bindings ?? {}) },
+        seedBindings: [...(transitionScenario.seedBindings ?? [])],
+        requestPlan: prereqPlan,
+      },
+      {
+        kind: 'invoke',
+        operationId: transitionOpId,
+        inputs: inputsFor(transitionOpId),
+        produces: producesFor(transitionOpId),
+        requestPlan: lastOf(transitionPlan),
+      },
+      {
+        kind: 'observe',
+        operationId: fetcherOpId,
+        inputs: inputsFor(fetcherOpId),
+        requestPlan: lastOf(fetcherPlan),
+        assertion: {
+          kind: 'stateEquals',
+          responseBodyPath: stateFieldSegments,
+          expectedState: transition.to,
+          fromState: transition.from,
+          transitionOp: transitionOpId,
+        },
+      },
+    ];
+
+    scenarios.push({
+      transitionOp: transitionOpId,
+      scenario: {
+        templateName: template.name,
+        subjectName: `${kind.name}.${transitionOpId}`,
+        subjectKind: 'RuntimeEntity',
+        steps,
+        bindings,
+        eventuallyConsistentOps,
+      },
+    });
+  }
+
+  return { scenarios, errors };
+}
+
+/**
+ * Walk an emitted request body template (object/array/primitive),
+ * yielding every primitive (or array-of-primitive) leaf with its
+ * dotted path. Array indices are skipped — we only care about the
+ * structural property names that the planner emits.
+ */
+function collectBodyLeaves(body: unknown): Array<{ path: string[] }> {
+  const out: Array<{ path: string[] }> = [];
+  const walk = (node: unknown, path: string[]): void => {
+    if (node === null || node === undefined) return;
+    if (Array.isArray(node)) {
+      // Treat the whole array as a leaf — its contents are the
+      // mutation value (e.g. `candidateGroups: ['admins']`). Walking
+      // inside arrays would only matter for arrays of objects, which
+      // we don't currently support for read-back assertion.
+      if (path.length > 0) out.push({ path });
+      return;
+    }
+    if (typeof node === 'object') {
+      for (const [key, value] of Object.entries(node)) {
+        walk(value, [...path, key]);
+      }
+      return;
+    }
+    if (path.length > 0) out.push({ path });
+  };
+  walk(body, []);
+  return out;
+}
+
+/**
  * Compile every (template × applicable subject) pair declared by the
  * given ABoxes. Throws if any pair fails to compile — failures here
  * indicate a misconfiguration that the L3 invariants should have
@@ -584,10 +1055,65 @@ export function instantiateAllTemplates(
       }
       continue;
     }
+    if (tpl.appliesTo.kind === 'RuntimeEntity') {
+      // #305 Phase 4 — UpdatedFieldVisibleOnReadBack template.
+      // #305 Phase 5d / #189 — StateTransitionVisibleAfterAction template.
+      // Refuse-by-default for any other template name so unrecognised
+      // entries fail loudly rather than silently re-running an existing
+      // compiler against the wrong vocabulary.
+      if (
+        tpl.name !== 'UpdatedFieldVisibleOnReadBack' &&
+        tpl.name !== 'StateTransitionVisibleAfterAction'
+      ) {
+        throw new Error(
+          `No compiler registered for scenario template '${tpl.name}'. ` +
+            `RuntimeEntity-scoped templates currently shipped: ` +
+            `UpdatedFieldVisibleOnReadBack (#305 Phase 4), ` +
+            `StateTransitionVisibleAfterAction (#305 Phase 5d / #189). ` +
+            `Additional templates need their own dispatch in instantiateAllTemplates.`,
+        );
+      }
+      if (entityKinds === null) continue;
+      for (const kind of entityKinds.kinds) {
+        if (kind.shape !== 'runtime-entity') continue;
+        if (tpl.name === 'UpdatedFieldVisibleOnReadBack') {
+          // Skip rows that don't declare mutators — runtime-entity rows
+          // are now allowed to carry transitions[] only (Phase 5d
+          // schema relaxation). A row with no mutators is not an error
+          // for *this* template, just out of scope.
+          if (!Array.isArray(kind.mutators) || kind.mutators.length === 0) continue;
+          const compiled = compileUpdatedFieldVisibleOnReadBack(tpl, kind, graph, canonical);
+          for (const result of compiled.scenarios) {
+            out.push({
+              templateName: tpl.name,
+              subjectName: `${kind.name}.${result.mutatorOpId}`,
+              subjectKind: 'RuntimeEntity',
+              scenario: result.scenario,
+            });
+          }
+          for (const err of compiled.errors) errors.push(err);
+        } else {
+          // StateTransitionVisibleAfterAction. Skip rows with no
+          // transitions[] — same reasoning as above.
+          if (!Array.isArray(kind.transitions) || kind.transitions.length === 0) continue;
+          const compiled = compileStateTransitionVisibleAfterAction(tpl, kind, graph, canonical);
+          for (const result of compiled.scenarios) {
+            out.push({
+              templateName: tpl.name,
+              subjectName: `${kind.name}.${result.transitionOp}`,
+              subjectKind: 'RuntimeEntity',
+              scenario: result.scenario,
+            });
+          }
+          for (const err of compiled.errors) errors.push(err);
+        }
+      }
+      continue;
+    }
     // Exhaustiveness: a future appliesTo.kind value reaches here. The
-    // current union is `'Edge' | 'Entity'`, so this branch is unreachable
-    // today; the `never` annotation makes the TS compiler keep us honest
-    // when the enum grows.
+    // current union is `'Edge' | 'Entity' | 'RuntimeEntity'`, so this
+    // branch is unreachable today; the `never` annotation makes the
+    // TS compiler keep us honest when the enum grows.
     const exhaustive: never = tpl.appliesTo.kind;
     throw new Error(
       `No dispatch registered for scenario template appliesTo.kind='${String(exhaustive)}' (template '${tpl.name}'). Extend instantiateAllTemplates.`,

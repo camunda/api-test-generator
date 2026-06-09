@@ -31,6 +31,7 @@ interface JsonSchema {
   nullable?: boolean;
   discriminator?: { propertyName?: string; mapping?: Record<string, string> };
   'x-polymorphic-schema'?: boolean;
+  enum?: unknown[];
   [key: string]: unknown;
 }
 
@@ -269,9 +270,20 @@ function findOneOfGroups(
       const required = vs.required || [];
       const optional = Object.keys(props).filter((k) => !required.includes(k));
       const fieldTypes: Record<string, string> = {};
+      const fieldEnums: Record<string, unknown[]> = {};
+      const fieldItemEnums: Record<string, unknown[]> = {};
       for (const [fname, fsch] of Object.entries(props)) {
         const ft = effectiveType(fsch, components);
         if (ft && ft !== 'unknown') fieldTypes[fname] = ft;
+        const enumValues = effectiveEnum(fsch, components);
+        if (enumValues && enumValues.length > 0) fieldEnums[fname] = enumValues;
+        if (ft === 'array') {
+          const itemSchema = resolveSchema(fsch, components).items;
+          if (itemSchema) {
+            const itemEnum = effectiveEnum(itemSchema, components);
+            if (itemEnum && itemEnum.length > 0) fieldItemEnums[fname] = itemEnum;
+          }
+        }
       }
       let discriminator: { field: string; value: string } | undefined;
       if (resolved.discriminator?.propertyName) {
@@ -289,6 +301,8 @@ function findOneOfGroups(
         required,
         optional,
         fieldTypes,
+        fieldEnums: Object.keys(fieldEnums).length > 0 ? fieldEnums : undefined,
+        fieldItemEnums: Object.keys(fieldItemEnums).length > 0 ? fieldItemEnums : undefined,
         discriminator,
       };
     });
@@ -367,6 +381,38 @@ function effectiveType(schema: JsonSchema, components: Components): string {
   // If it references a known key format, default to string
   if (typeof s.format === 'string' && /Key$/.test(s.format)) return 'string';
   return 'unknown';
+}
+
+/**
+ * Walk a (possibly $ref- or allOf-wrapped) schema and return its `enum`
+ * array if one is declared. Used by `findOneOfGroups` (in this module)
+ * to populate per-variant `fieldEnums` / `fieldItemEnums` so the planner
+ * can emit a real enum literal instead of seeding a `${var}` placeholder
+ * (#338). The canonical-schema walker in `canonicalSchemas.ts` performs
+ * the same role for the non-oneOf path via its own resolver.
+ *
+ * Returns `undefined` when no enum is declared anywhere along the chain.
+ * The result is the raw `enum` array — callers pick the first value.
+ */
+function effectiveEnum(
+  schema: JsonSchema | undefined,
+  components: Components,
+  depth = 0,
+): unknown[] | undefined {
+  if (!schema || depth > 10) return undefined;
+  if (Array.isArray(schema.enum)) return schema.enum;
+  if (schema.$ref) {
+    const target = components[refName(schema.$ref)];
+    const e = effectiveEnum(target, components, depth + 1);
+    if (e) return e;
+  }
+  if (Array.isArray(schema.allOf)) {
+    for (const part of schema.allOf) {
+      const e = effectiveEnum(part, components, depth + 1);
+      if (e) return e;
+    }
+  }
+  return undefined;
 }
 
 function refName(ref: string): string {

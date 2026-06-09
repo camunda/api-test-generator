@@ -32,6 +32,7 @@ export type SemanticClassification =
   | 'modelDerived'
   | 'clientMintedAttribute'
   | 'serverEmergent'
+  | 'runtimeEmission'
   | 'producerBound'
   | 'clientMintedIdentifier'
   | 'externalBoundary'
@@ -41,6 +42,7 @@ export type BoundInput =
   | { classification: 'modelDerived'; varName: string; value?: string }
   | { classification: 'clientMintedAttribute'; varName: string; value: string }
   | { classification: 'serverEmergent'; varName: string; value: string }
+  | { classification: 'runtimeEmission'; varName: string }
   | { classification: 'producerBound'; varName: string }
   | { classification: 'clientMintedIdentifier'; varName: string }
   | { classification: 'externalBoundary'; varName: string }
@@ -90,6 +92,7 @@ export function classifySemantic(semantic: string, graph: OperationGraph): Seman
     return 'clientMintedAttribute';
   }
   if (decl?.kind === 'serverEmergent') return 'serverEmergent';
+  if (decl?.kind === 'runtimeEmission') return 'runtimeEmission';
   if (graph.producersByType?.[semantic]?.length) return 'producerBound';
   if (graph.establishersByType?.[semantic]?.length) return 'clientMintedIdentifier';
   if (graph.externalEntityIdentifiers?.has(semantic)) return 'externalBoundary';
@@ -157,6 +160,13 @@ export function bindSemanticInput(args: {
     case 'producerBound':
     case 'clientMintedIdentifier':
     case 'externalBoundary':
+    case 'runtimeEmission':
+      // `runtimeEmission` (#305 Phase 3) is treated as a producer-bound
+      // var at the bindings layer — the planner injects the discovery
+      // op (per the ABox `discoveredVia` declaration) and the
+      // discovery step's response extract binds `varName` server-side.
+      // From the bind-input dispatch's perspective, the value is
+      // owned by an upstream step exactly like `producerBound`.
       return { classification, varName };
     default:
       return { classification: 'unclassified' };

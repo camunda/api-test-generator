@@ -679,6 +679,25 @@ export function loadSemanticsAbox(repoRoot: string): SemanticsAbox | null {
         `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'attribute' but clientMinted is not true — attribute-shaped semantic types must declare clientMinted: true so the planner mints values rather than waiting for a producer`,
       );
     }
+    // Cross-property invariant: `kind: 'runtimeEmission'` ⇒ both
+    // `emittedBy` and `discoveredVia` present (#305 Phase 1). The whole
+    // point of `runtimeEmission` is to carry the planning information
+    // that distinguishes it from plain `serverEmergent`; without both
+    // sub-objects the planner has nothing to act on and the entry would
+    // silently behave like `serverEmergent` (a placeholder seedBinding),
+    // which is the bug #305 fixes.
+    if (t.kind === 'runtimeEmission') {
+      if (t.emittedBy === undefined) {
+        throw new Error(
+          `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'runtimeEmission' but no emittedBy — runtimeEmission types must declare the producing predecessor (and any capability guards) so the planner can plan the produce → discover → bind chain`,
+        );
+      }
+      if (t.discoveredVia === undefined) {
+        throw new Error(
+          `Semantics ABox at ${aboxPath} semanticTypes '${t.name}' has kind: 'runtimeEmission' but no discoveredVia — runtimeEmission types must declare the discovery operation (operationId, optional filterBy, extractKey, optional consistency) so the planner knows how to read the emitted key back from the system`,
+        );
+      }
+    }
   }
   return parsed;
 }
@@ -693,8 +712,19 @@ export interface SemanticsViews {
     string,
     {
       witnesses?: string;
-      kind?: 'modelDerived' | 'attribute' | 'serverEmergent';
+      kind?: 'modelDerived' | 'attribute' | 'serverEmergent' | 'runtimeEmission';
       clientMinted?: boolean;
+      modelElementTypes?: string[];
+      emittedBy?: {
+        predecessor: string;
+        guardedBy?: string[];
+      };
+      discoveredVia?: {
+        operationId: string;
+        filterBy?: string;
+        extractKey: string;
+        consistency?: 'eventual' | 'strong';
+      };
     }
   >;
   capabilities: Record<
@@ -727,6 +757,29 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
     if (t.witnesses !== undefined) entry.witnesses = t.witnesses;
     if (t.kind !== undefined) entry.kind = t.kind;
     if (t.clientMinted !== undefined) entry.clientMinted = t.clientMinted;
+    if (t.modelElementTypes !== undefined) entry.modelElementTypes = [...t.modelElementTypes];
+    if (t.emittedBy !== undefined) {
+      const eb: NonNullable<SemanticsViews['semanticTypes'][string]['emittedBy']> = {
+        predecessor: t.emittedBy.predecessor,
+      };
+      if (t.emittedBy.guardedBy !== undefined) eb.guardedBy = [...t.emittedBy.guardedBy];
+      entry.emittedBy = eb;
+    }
+    if (t.discoveredVia !== undefined) {
+      const dv: NonNullable<SemanticsViews['semanticTypes'][string]['discoveredVia']> = {
+        operationId: t.discoveredVia.operationId,
+        extractKey: t.discoveredVia.extractKey,
+        // Normalize the documented default here so every downstream
+        // consumer can rely on a concrete value rather than each
+        // re-implementing the fallback. Defaults to 'strong' — most
+        // Camunda read-after-write surfaces are strongly consistent;
+        // 'eventual' is the explicit exception that opts in to the
+        // poll-with-await helper (#305 Phase 1 review).
+        consistency: t.discoveredVia.consistency ?? 'strong',
+      };
+      if (t.discoveredVia.filterBy !== undefined) dv.filterBy = t.discoveredVia.filterBy;
+      entry.discoveredVia = dv;
+    }
     semanticTypes[t.name] = entry;
   }
   const capabilities: SemanticsViews['capabilities'] = {};
@@ -761,10 +814,8 @@ export function deriveSemanticsViews(repoRoot: string): SemanticsViews | null {
  *   the Playwright emitter prologue + `loadGlobalContextSeeds` in
  *   `codegen/index.ts` treat it as the empty list. There is no longer
  *   a legacy-sidecar fallback (Lift 8 retired it).
- * @throws if the file exists but does not validate against the TBox,
- *   if it contains duplicate `binding` or `fieldName` values, or if a
- *   cross-property invariant is violated (`stripFromMultipartWhenDefault`
- *   without `defaultSentinel`).
+ * @throws if the file exists but does not validate against the TBox
+ *   or if it contains duplicate `binding` or `fieldName` values.
  */
 export function loadGlobalContextSeedsAbox(repoRoot: string): GlobalContextSeedsAbox | null {
   let aboxPath: string;
@@ -811,16 +862,10 @@ export function loadGlobalContextSeedsAbox(repoRoot: string): GlobalContextSeeds
       `Global-context-seeds ABox at ${aboxPath} has duplicate fieldName(s): ${dupeFields.join(', ')}`,
     );
   }
-  // Cross-property invariant: stripFromMultipartWhenDefault === true
-  // requires a defaultSentinel to compare against. Mirrors the
-  // legacy `checkGlobalContextSeedsCoherent` rule.
-  for (const s of parsed.seeds) {
-    if (s.stripFromMultipartWhenDefault === true && s.defaultSentinel === undefined) {
-      throw new Error(
-        `Global-context-seeds ABox at ${aboxPath} entry for binding '${s.binding}' sets stripFromMultipartWhenDefault but has no defaultSentinel — the multipart-strip branch has no value to compare against`,
-      );
-    }
-  }
+  // (#342) The legacy `stripFromMultipartWhenDefault` / `defaultSentinel`
+  // cross-property invariant was retired with the omit-when-unbound
+  // redesign — there is no per-entry coherence check left to perform
+  // here; uniqueness above is the only post-TBox invariant.
   return parsed;
 }
 
@@ -838,8 +883,7 @@ export interface GlobalContextSeedsViews {
     binding: string;
     fieldName: string;
     seedRule: string;
-    defaultSentinel?: string;
-    stripFromMultipartWhenDefault?: boolean;
+    omitWhenUnbound?: boolean;
     rationale?: string;
   }>;
 }
@@ -853,10 +897,7 @@ export function deriveGlobalContextSeedsViews(repoRoot: string): GlobalContextSe
       fieldName: s.fieldName,
       seedRule: s.seedRule,
     };
-    if (s.defaultSentinel !== undefined) entry.defaultSentinel = s.defaultSentinel;
-    if (s.stripFromMultipartWhenDefault !== undefined) {
-      entry.stripFromMultipartWhenDefault = s.stripFromMultipartWhenDefault;
-    }
+    if (s.omitWhenUnbound !== undefined) entry.omitWhenUnbound = s.omitWhenUnbound;
     if (s.rationale !== undefined) entry.rationale = s.rationale;
     return entry;
   });
@@ -868,18 +909,18 @@ export function deriveGlobalContextSeedsViews(repoRoot: string): GlobalContextSe
  * accepted by the public Playwright emitter entry points
  * (`renderPlaywrightSuite`, `emitPlaywrightSuite`, `PlaywrightEmitter.emit`).
  *
- * The emitter interpolates `binding`, `fieldName`, `seedRule`, and
- * `defaultSentinel` directly into emitted TS source as identifiers and
- * single-quoted string literals (#87). The graph loader validates the
+ * The emitter interpolates `binding`, `fieldName`, and `seedRule`
+ * directly into emitted TS source as identifiers and single-quoted
+ * string literals (#87). The graph loader validates the
  * seeds when reading `global-context-seeds.json`, but the emitter
  * accepts a `globalContextSeeds` argument from any caller. This helper
  * re-validates at that boundary so a programmatic caller cannot bypass
  * the loader's safety net and produce broken or injection-vulnerable
  * generated suites.
  *
- * Throws on any structural issue (TBox shape) or any cross-seed
- * coherence violation (uniqueness, strip-requires-sentinel). Returns
- * silently on success.
+ * Throws on any structural issue (TBox shape) or on a uniqueness
+ * violation (duplicate `binding` or `fieldName`). Returns silently on
+ * success.
  */
 export function assertSafeGlobalContextSeeds(seeds: unknown): void {
   if (!Array.isArray(seeds)) {
@@ -904,13 +945,6 @@ export function assertSafeGlobalContextSeeds(seeds: unknown): void {
     throw new Error(
       `globalContextSeeds failed coherence validation:\n  - duplicate fieldName(s): ${dupeFields.join(', ')}`,
     );
-  }
-  for (const s of wrapper.seeds) {
-    if (s.stripFromMultipartWhenDefault === true && s.defaultSentinel === undefined) {
-      throw new Error(
-        `globalContextSeeds failed coherence validation:\n  - entry for binding '${s.binding}' sets stripFromMultipartWhenDefault but has no defaultSentinel`,
-      );
-    }
   }
 }
 

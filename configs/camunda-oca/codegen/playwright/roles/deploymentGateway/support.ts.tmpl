@@ -69,17 +69,6 @@ export interface DeployBody {
 }
 
 /**
- * A strip rule: skip `fieldName` from the multipart body when the field's
- * resolved value equals `sentinel`. Passed by the emitter via the `strips`
- * parameter so deploy() has no hard-coded domain knowledge about tenant sentinels
- * or any other config-specific defaults.
- */
-export interface DeployStripRule {
-  fieldName: string;
-  sentinel: string;
-}
-
-/**
  * A response-field extraction directive: navigate `segments` on the response
  * JSON and bind the value to `ctx[varName]` via `extractInto`.
  *
@@ -110,10 +99,11 @@ const EXTRACTS: DeployExtract[] = {{{extracts}}};
  * the response JSON.
  *
  * - Resolves `@@FILE:<path>` entries in `body.files` via resolveFixture().
- * - Strips fields whose resolved value equals the corresponding sentinel in
- *   `strips` (e.g. `{ fieldName: 'tenantId', sentinel: '<default>' }` for
- *   single-tenant deployments). Strips are derived by the emitter from
- *   `globalContextSeeds` so no domain-specific knowledge is hard-coded here.
+ * - Omits multipart fields whose resolved value is `undefined` or `null`,
+ *   so callers that leave a binding unbound (e.g. `ctx['tenantIdVar']`
+ *   when `omitWhenUnbound: true` and no per-scenario step seeded it) cause
+ *   the field to be dropped from the wire and the server to apply its
+ *   default (#342).
  * - Throws a descriptive Error on any non-200 response (includes the response
  *   body for diagnosis).
  * - Walks `EXTRACTS` against the parsed JSON and assigns each resolved value
@@ -127,12 +117,10 @@ export async function deploy(
   request: ApiRequestContextLike,
   body: DeployBody,
   url: string,
-  strips: DeployStripRule[],
 ): Promise<ApiResponseLike> {
   const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};
 
   for (const [k, v] of Object.entries(body.fields ?? {})) {
-    if (strips.some((s) => s.fieldName === k && String(v) === s.sentinel)) continue;
     if (v !== undefined && v !== null) multipart[k] = String(v);
   }
 

@@ -107,14 +107,25 @@ export interface InlineStepRenderInput {
   varName: string;
   urlExpr: string;
   method: string;
-  /**
-   * Per-multipart-field sentinel locals declared in the test prologue.
-   * Used to strip default-valued fields from emitted multipart bodies.
-   * Empty for template-scenario callers (no multipart steps today).
-   */
-  sentinelLocals?: Map<string, string>;
   /** Whether this step should be wrapped with `awaitEventually(...)`. */
   shouldAwaitEventually?: boolean;
+  /**
+   * Optional JS expression for the `predicate:` option of the
+   * `awaitEventually(...)` call. Must evaluate to a `(body: unknown)
+   * => boolean | Promise<boolean>` function. Only spliced in when
+   * {@link shouldAwaitEventually} is also true; ignored otherwise.
+   *
+   * Used by the EdgeLifecycle observe-membership step to drive
+   * polling toward the polarity of the membership assertion (present
+   * vs absent) instead of relying on the runtime's default
+   * `items.length > 0` heuristic, which is wrong for the absent case
+   * (an empty page is the success terminator, not a transient retry).
+   *
+   * The expression is interpolated verbatim into the emitted source —
+   * callers are responsible for producing a self-contained expression
+   * with balanced braces and any required type narrowing.
+   */
+  awaitEventuallyPredicate?: string;
 }
 
 /**
@@ -134,12 +145,11 @@ export function renderInlineStepLines({
   varName,
   urlExpr,
   method,
-  sentinelLocals,
   shouldAwaitEventually,
+  awaitEventuallyPredicate,
 }: InlineStepRenderInput): string[] {
   const lines: string[] = [];
   const bodyVar = `body${idx + 1}`;
-  const sentinels = sentinelLocals ?? new Map<string, string>();
   lines.push(`    const url = baseUrl + ${urlExpr};`);
   if (step.bodyKind === 'json' && step.bodyTemplate) {
     const json = JSON.stringify(step.bodyTemplate, null, 4).replace(
@@ -162,9 +172,6 @@ export function renderInlineStepLines({
       `    const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {};`,
     );
     lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.fields||{})) {`);
-    for (const [fieldName, local] of sentinels) {
-      lines.push(`      if (k === '${fieldName}' && ${local}) continue;`);
-    }
     lines.push(`      if (v !== undefined && v !== null) multipart[k] = String(v);`);
     lines.push(`    }`);
     lines.push(`    for (const [k,v] of Object.entries(${bodyVar}.files||{})) {
@@ -182,9 +189,17 @@ export function renderInlineStepLines({
   if (shouldAwaitEventually) {
     lines.push(`    const ${varName} = await awaitEventually(`);
     lines.push(`      async () => request.${method}(url, { ${opts.join(', ')} }),`);
-    lines.push(
-      `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
-    );
+    if (awaitEventuallyPredicate) {
+      lines.push(`      {`);
+      lines.push(`        method: '${step.method.toUpperCase()}',`);
+      lines.push(`        operationId: '${step.operationId}',`);
+      lines.push(`        predicate: ${awaitEventuallyPredicate},`);
+      lines.push(`      },`);
+    } else {
+      lines.push(
+        `      { method: '${step.method.toUpperCase()}', operationId: '${step.operationId}' },`,
+      );
+    }
     lines.push(`    );`);
   } else {
     lines.push(`    const ${varName} = await request.${method}(url, { ${opts.join(', ')} });`);
