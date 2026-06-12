@@ -85,6 +85,42 @@ Override the REST port with `CAMUNDA_REST_PORT`:
 CAMUNDA_REST_PORT=9080 docker compose up -d
 ```
 
+### Starting Camunda Hub (Web Modeler) — Self-Managed
+
+> First-time setup required — see `LOCAL_SETUP_NOTES.md` in the camunda-hub repo.
+> Expects `camunda-hub` to be cloned as a sibling directory alongside this repo.
+
+```bash
+# Start (Docker infrastructure + restapi + frontend)
+./docker/start-hub.sh
+
+# Stop
+./docker/start-hub.sh stop
+```
+
+The Hub UI will be available at `http://localhost:8088`. Log in with `demo` / `demo`.
+
+#### Generating and running Hub request-validation tests
+
+```bash
+# Generate hub request-validation tests
+CONFIG=camunda-hub npm run generate:request-validation
+
+# Get an OAuth token from Keycloak (hub uses Bearer auth, not Basic)
+TOKEN=$(curl -s -X POST http://localhost:18080/auth/realms/camunda-platform/protocol/openid-connect/token \
+  -d "client_id=c8-client&client_secret=c8-secret&grant_type=client_credentials" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+
+# Run the generated tests
+# Unset Basic auth vars — if set, they take precedence over BEARER_TOKEN and hub tests will fail
+unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD
+BEARER_TOKEN=$TOKEN \
+CORE_APPLICATION_URL=http://localhost:8088/api \
+CONFIG=camunda-hub npm run test:pw:request-validation
+```
+
+> The Hub server must be running with `CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED=true` — set this in `camunda-hub/restapi/config/config-common/src/main/resources/application-common-local.yml` before starting.
+
 ### Running the Test Generator
 
 ```bash
@@ -100,10 +136,15 @@ npm run pipeline
 # Generate the negative request-validation suite (HTTP 400 tests, all supported scenario kinds)
 npm run generate:request-validation
 
-# Run the generated tests (requires running Camunda server)
+# Run the generated tests against a local OCA instance
+# (omit CAMUNDA_BASIC_AUTH_* if your instance has no auth enabled)
+CORE_APPLICATION_URL=http://localhost:8080 \
+CAMUNDA_BASIC_AUTH_USER=demo \
+CAMUNDA_BASIC_AUTH_PASSWORD=demo \
+npm run test:pw:request-validation    # negative request-validation only
+
 npm run test:pw                       # both suites (path-analyser + request-validation)
 npm run test:pw:path-analyser         # positive scenarios only
-npm run test:pw:request-validation    # negative request-validation only
 ```
 
 ## Project Structure
