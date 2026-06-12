@@ -44,6 +44,8 @@ export const denyProbeCredentials: ProbeCredentials = {
   password: process.env.RBAC_DENY_PROBE_PASSWORD || 'rbac-deny-probe-pw',
 };
 
+let partialCredsWarned = false;
+
 function encode(value: string): string {
   return Buffer.from(value).toString('base64');
 }
@@ -74,7 +76,8 @@ export function denyProbeHeaders(): Record<string, string> {
 export function authHeaders(): Record<string, string> {
   const { username, password } = credentials;
   if (username && password) return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
-  if (username || password) {
+  if ((username || password) && !partialCredsWarned) {
+    partialCredsWarned = true;
     console.warn(
       '[auth] Only one of CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD is set — Basic auth requires both. Falling back.',
     );
