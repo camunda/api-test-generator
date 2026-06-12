@@ -134,23 +134,14 @@ npm run pipeline
 # Generate the negative request-validation suite (HTTP 400 tests, all supported scenario kinds)
 npm run generate:request-validation
 
-# Run the generated tests (requires running Camunda server)
-npm run test:pw                       # both suites (path-analyser + request-validation)
-npm run test:pw:path-analyser         # positive scenarios only
-npm run test:pw:request-validation    # negative request-validation only
-```
-
-#### Generating and running OCA request-validation tests
-
-```bash
-# Generate OCA request-validation tests (default config)
-npm run generate:request-validation
-
-# Run the generated tests against a local OCA instance
+# Run the generated tests against a local OCA instance (Basic auth, default port)
 CORE_APPLICATION_URL=http://localhost:8080 \
 CAMUNDA_BASIC_AUTH_USER=demo \
 CAMUNDA_BASIC_AUTH_PASSWORD=demo \
-npm run test:pw:request-validation
+npm run test:pw:request-validation    # negative request-validation only
+
+npm run test:pw                       # both suites (path-analyser + request-validation)
+npm run test:pw:path-analyser         # positive scenarios only
 ```
 
 ## Project Structure
