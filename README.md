@@ -92,10 +92,10 @@ CAMUNDA_REST_PORT=9080 docker compose up -d
 
 ```bash
 # Start (Docker infrastructure + restapi + frontend)
-./scripts/start-hub.sh
+./docker/start-hub.sh
 
 # Stop
-./scripts/start-hub.sh stop
+./docker/start-hub.sh stop
 ```
 
 The Hub UI will be available at `http://localhost:8088`. Log in with `demo` / `demo`.
