@@ -75,7 +75,7 @@ services:
 
   identity:
     container_name: identity
-    image: camunda/identity:8.8.0-alpha7@sha256:96308c370b684d180b998c622d72d0a9e7690cf0e6888c8e287f70534f706597
+    image: camunda/identity:SNAPSHOT
     pull_policy: always
     depends_on:
       identity-db:
