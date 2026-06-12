@@ -29,8 +29,8 @@ case "${1:-start}" in
     ;;
   stop)
     echo "Stopping Hub app..."
-    # pkill -f matches the full command line. Patterns are anchored with
-    # camunda-hub to reduce false matches; -u scopes to the current user only.
+    # pkill -f matches the full command line. Patterns include camunda-hub
+    # to reduce false matches; -u scopes to the current user only.
     pkill -u "$(whoami)" -f "camunda-hub.*local:self-managed" 2>/dev/null || true
     pkill -u "$(whoami)" -f "camunda-hub.*local:client" 2>/dev/null || true
     pkill -u "$(whoami)" -f "camunda-hub.*local:legacy" 2>/dev/null || true
