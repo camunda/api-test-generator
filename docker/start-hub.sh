@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Start or stop camunda-hub (Web Modeler) in Self-Managed mode.
 # Expects camunda-hub to be cloned as a sibling directory: ../camunda-hub
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -14,7 +14,7 @@ if [ ! -d "$HUB_REPO" ]; then
   exit 1
 fi
 
-if [ -z "$JAVA_HOME" ]; then
+if [ -z "${JAVA_HOME:-}" ]; then
   echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
   exit 1
 fi
@@ -29,12 +29,11 @@ case "${1:-start}" in
     ;;
   stop)
     echo "Stopping Hub app..."
-    # pkill -f matches against the full command line. The patterns below are
-    # specific to the npm scripts Hub's Makefile runs, but could theoretically
-    # match unrelated processes on a shared workstation.
-    pkill -f "camunda-hub.*local:self-managed" 2>/dev/null || true
-    pkill -f "camunda-hub.*local:client" 2>/dev/null || true
-    pkill -f "camunda-hub.*local:legacy" 2>/dev/null || true
+    # pkill -f matches the full command line. Patterns are anchored with
+    # camunda-hub to reduce false matches; -u scopes to the current user only.
+    pkill -u "$(whoami)" -f "camunda-hub.*local:self-managed" 2>/dev/null || true
+    pkill -u "$(whoami)" -f "camunda-hub.*local:client" 2>/dev/null || true
+    pkill -u "$(whoami)" -f "camunda-hub.*local:legacy" 2>/dev/null || true
     echo "Stopping Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" down
     ;;
