@@ -66,9 +66,10 @@ export function denyProbeHeaders(): Record<string, string> {
  *
  * Basic auth (CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD) takes
  * precedence when set. BEARER_TOKEN is used only when Basic creds are absent
- * (e.g. OAuth2 servers such as camunda-hub). Returns an empty object when no
- * credentials are supplied so the suite can run unauthenticated against dev
- * clusters without manual editing.
+ * AND RV_PROFILE is not 'rbac' — the rbac suite relies on Basic-only auth;
+ * a stray BEARER_TOKEN in the environment must not silently satisfy it.
+ * Returns an empty object when no credentials are supplied so the suite
+ * can run unauthenticated against dev clusters without manual editing.
  */
 export function authHeaders(): Record<string, string> {
   const { username, password } = credentials;
@@ -79,7 +80,7 @@ export function authHeaders(): Record<string, string> {
     );
   }
   const bearerToken = process.env.BEARER_TOKEN;
-  if (bearerToken) return { Authorization: `Bearer ${bearerToken}` };
+  if (bearerToken && process.env.RV_PROFILE !== 'rbac') return { Authorization: `Bearer ${bearerToken}` };
   return {};
 }
 
