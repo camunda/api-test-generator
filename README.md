@@ -140,6 +140,19 @@ npm run test:pw:path-analyser         # positive scenarios only
 npm run test:pw:request-validation    # negative request-validation only
 ```
 
+#### Generating and running OCA request-validation tests
+
+```bash
+# Generate OCA request-validation tests (default config)
+npm run generate:request-validation
+
+# Run the generated tests against a local OCA instance
+CORE_APPLICATION_URL=http://localhost:8080 \
+CAMUNDA_BASIC_AUTH_USER=demo \
+CAMUNDA_BASIC_AUTH_PASSWORD=demo \
+npm run test:pw:request-validation
+```
+
 ## Project Structure
 
 This is an **npm workspaces** monorepo with five packages:
