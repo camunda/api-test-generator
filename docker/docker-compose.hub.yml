@@ -9,7 +9,7 @@ services:
     container_name: modeler-db
     image: postgres:14.23-alpine@sha256:6765739f422606933bc2aece3a2288e40e491488fd7e7c14e3323dfeefb10e38
     ports:
-      - "5432:5432"
+      - "${MODELER_DB_PORT:-5432}:5432"
     healthcheck:
       test: pg_isready -d modeler-db -U modeler-db-user
       interval: 5s
@@ -75,7 +75,7 @@ services:
 
   identity:
     container_name: identity
-    image: camunda/identity:SNAPSHOT  # intentionally unpinned — always track latest SNAPSHOT
+    image: ${IDENTITY_IMAGE:-camunda/identity:SNAPSHOT}  # set IDENTITY_IMAGE to pin to a specific digest
     pull_policy: always
     depends_on:
       identity-db:
@@ -83,7 +83,7 @@ services:
       keycloak:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${IDENTITY_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/actuator/health"]
       interval: 5s
@@ -110,7 +110,7 @@ services:
 
   websockets:
     container_name: websockets
-    image: registry.camunda.cloud/team-hub/hub-websockets:SNAPSHOT  # intentionally unpinned — always track latest SNAPSHOT
+    image: ${WEBSOCKETS_IMAGE:-registry.camunda.cloud/team-hub/hub-websockets:SNAPSHOT}  # set WEBSOCKETS_IMAGE to pin to a specific digest
     pull_policy: always
     ports:
       - "8060:8060"
