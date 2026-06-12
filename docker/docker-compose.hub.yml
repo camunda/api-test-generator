@@ -1,5 +1,8 @@
 # Infrastructure services for running camunda-hub locally in Self-Managed mode.
 # The Hub app itself (restapi + frontend) is started separately via scripts/start-hub.sh.
+#
+# Derived from camunda-hub/docker-compose.sm.yml (identity-db, identity, websockets)
+# and camunda-hub/docker-compose.yml (mailpit). Keep image pins in sync with those files.
 
 services:
   modeler-db:
