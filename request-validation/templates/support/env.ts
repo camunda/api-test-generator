@@ -64,17 +64,18 @@ export function denyProbeHeaders(): Record<string, string> {
 /**
  * Build the Authorization header from configured credentials.
  *
- * Prefers BEARER_TOKEN when set (e.g. OAuth2 servers such as camunda-hub).
- * Falls back to Basic auth from CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD.
- * Returns an empty object when no credentials are supplied so the suite
- * can run unauthenticated against dev clusters without manual editing.
+ * Basic auth (CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD) takes
+ * precedence when set. BEARER_TOKEN is used only when Basic creds are absent
+ * (e.g. OAuth2 servers such as camunda-hub). Returns an empty object when no
+ * credentials are supplied so the suite can run unauthenticated against dev
+ * clusters without manual editing.
  */
 export function authHeaders(): Record<string, string> {
+  const { username, password } = credentials;
+  if (username && password) return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
   const bearerToken = process.env.BEARER_TOKEN;
   if (bearerToken) return { Authorization: `Bearer ${bearerToken}` };
-  const { username, password } = credentials;
-  if (!username || !password) return {};
-  return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+  return {};
 }
 
 export function jsonHeaders(): Record<string, string> {

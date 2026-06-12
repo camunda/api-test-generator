@@ -15,7 +15,8 @@ if [ ! -d "$HUB_REPO" ]; then
 fi
 
 if [ -z "$JAVA_HOME" ]; then
-  export JAVA_HOME="/Users/$(whoami)/.asdf/installs/java/openjdk-25.0.1"
+  echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
+  exit 1
 fi
 
 case "${1:-start}" in
@@ -28,7 +29,9 @@ case "${1:-start}" in
     ;;
   stop)
     echo "Stopping Hub app..."
-    pkill -f "local:self-managed|local:client|local:legacy" 2>/dev/null || true
+    pkill -f "local:self-managed" 2>/dev/null || true
+    pkill -f "local:client" 2>/dev/null || true
+    pkill -f "local:legacy" 2>/dev/null || true
     echo "Stopping Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" down
     ;;

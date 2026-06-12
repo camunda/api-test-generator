@@ -75,7 +75,7 @@ services:
 
   identity:
     container_name: identity
-    image: camunda/identity:SNAPSHOT
+    image: camunda/identity:SNAPSHOT  # intentionally unpinned — always track latest SNAPSHOT
     pull_policy: always
     depends_on:
       identity-db:
@@ -110,7 +110,7 @@ services:
 
   websockets:
     container_name: websockets
-    image: registry.camunda.cloud/team-hub/hub-websockets:SNAPSHOT
+    image: registry.camunda.cloud/team-hub/hub-websockets:SNAPSHOT  # intentionally unpinned — always track latest SNAPSHOT
     pull_policy: always
     ports:
       - "8060:8060"
