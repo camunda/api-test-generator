@@ -79,7 +79,7 @@ export function authHeaders(): Record<string, string> {
   if ((username || password) && !partialCredsWarned) {
     partialCredsWarned = true;
     console.warn(
-      '[auth] Only one of CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD is set — Basic auth requires both. Falling back.',
+      '[auth] Only one of CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD is set — Basic auth requires both. The partial credential is ignored.',
     );
   }
   const bearerToken = process.env.BEARER_TOKEN;

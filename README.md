@@ -136,7 +136,8 @@ npm run pipeline
 # Generate the negative request-validation suite (HTTP 400 tests, all supported scenario kinds)
 npm run generate:request-validation
 
-# Run the generated tests against a local OCA instance (Basic auth, default port)
+# Run the generated tests against a local OCA instance
+# (omit CAMUNDA_BASIC_AUTH_* if your instance has no auth enabled)
 CORE_APPLICATION_URL=http://localhost:8080 \
 CAMUNDA_BASIC_AUTH_USER=demo \
 CAMUNDA_BASIC_AUTH_PASSWORD=demo \
