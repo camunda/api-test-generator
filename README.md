@@ -85,6 +85,40 @@ Override the REST port with `CAMUNDA_REST_PORT`:
 CAMUNDA_REST_PORT=9080 docker compose up -d
 ```
 
+### Starting Camunda Hub (Web Modeler) — Self-Managed
+
+> First-time setup required — see [`camunda-hub/LOCAL_SETUP_NOTES.md`](../camunda-hub/LOCAL_SETUP_NOTES.md).
+> Expects `camunda-hub` to be cloned as a sibling directory alongside this repo.
+
+```bash
+# Start (Docker infrastructure + restapi + frontend)
+./scripts/start-hub.sh
+
+# Stop
+./scripts/start-hub.sh stop
+```
+
+The Hub UI will be available at `http://localhost:8088`. Log in with `demo` / `demo`.
+
+#### Generating and running Hub request-validation tests
+
+```bash
+# Generate hub request-validation tests
+CONFIG=camunda-hub npm run generate:request-validation
+
+# Get an OAuth token from Keycloak (hub uses Bearer auth, not Basic)
+TOKEN=$(curl -s -X POST http://localhost:18080/auth/realms/camunda-platform/protocol/openid-connect/token \
+  -d "client_id=c8-client&client_secret=c8-secret&grant_type=client_credentials" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+
+# Run the generated tests
+BEARER_TOKEN=$TOKEN \
+CORE_APPLICATION_URL=http://localhost:8088/api \
+CONFIG=camunda-hub npm run test:pw:request-validation
+```
+
+> The Hub server must be running with `CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED=true` — set this in `camunda-hub/restapi/config/config-common/src/main/resources/application-common-local.yml` before starting.
+
 ### Running the Test Generator
 
 ```bash
