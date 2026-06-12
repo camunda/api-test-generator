@@ -1,5 +1,5 @@
 # Infrastructure services for running camunda-hub locally in Self-Managed mode.
-# The Hub app itself (restapi + frontend) is started separately via scripts/start-hub.sh.
+# The Hub app itself (restapi + frontend) is started separately via docker/start-hub.sh.
 #
 # Derived from camunda-hub/docker-compose.sm.yml (identity-db, identity, websockets)
 # and camunda-hub/docker-compose.yml (mailpit). Keep image pins in sync with those files.
@@ -133,7 +133,7 @@ services:
       - "1025:1025"
       - "8025:8025"
     healthcheck:
-      test: /usr/bin/nc -v localhost 1025
+      test: /usr/bin/nc -z localhost 1025
       interval: 5s
       timeout: 1s
       retries: 10

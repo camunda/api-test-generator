@@ -5,9 +5,18 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HUB_REPO="$(cd "$REPO_ROOT/../camunda-hub" && pwd)"
+HUB_REPO="$REPO_ROOT/../camunda-hub"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.hub.yml"
-export JAVA_HOME="/Users/$(whoami)/.asdf/installs/java/openjdk-25.0.1"
+
+if [ ! -d "$HUB_REPO" ]; then
+  echo "Error: camunda-hub not found at $HUB_REPO"
+  echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
+  exit 1
+fi
+
+if [ -z "$JAVA_HOME" ]; then
+  export JAVA_HOME="/Users/$(whoami)/.asdf/installs/java/openjdk-25.0.1"
+fi
 
 case "${1:-start}" in
   start)
@@ -19,7 +28,7 @@ case "${1:-start}" in
     ;;
   stop)
     echo "Stopping Hub app..."
-    pkill -f "local:self-managed\|local:client\|local:legacy" 2>/dev/null || true
+    pkill -f "local:self-managed|local:client|local:legacy" 2>/dev/null || true
     echo "Stopping Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" down
     ;;

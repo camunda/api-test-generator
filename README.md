@@ -87,7 +87,7 @@ CAMUNDA_REST_PORT=9080 docker compose up -d
 
 ### Starting Camunda Hub (Web Modeler) — Self-Managed
 
-> First-time setup required — see [`camunda-hub/LOCAL_SETUP_NOTES.md`](../camunda-hub/LOCAL_SETUP_NOTES.md).
+> First-time setup required — see `LOCAL_SETUP_NOTES.md` in the camunda-hub repo.
 > Expects `camunda-hub` to be cloned as a sibling directory alongside this repo.
 
 ```bash
