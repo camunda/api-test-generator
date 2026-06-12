@@ -1,0 +1,16 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/global-context-seeds.schema.json",
+  "@context": {
+    "@vocab": "https://camunda.github.io/api-test-generator/ontology/global-context-seeds#"
+  },
+  "version": 1,
+  "seeds": [
+    {
+      "@type": "GlobalContextSeed",
+      "binding": "projectKeyVar",
+      "fieldName": "projectKey",
+      "seedRule": "projectKeyVar",
+      "rationale": "projectKey is required on every createFile/createFolder request but has NO producer operation in the Hub API — it references a project provisioned outside this API (analogous to OCA's tenantId, but NOT server-defaultable: the Hub rejects an unknown projectKey rather than substituting a default). omitWhenUnbound is therefore intentionally absent (false): the universal-seed prologue must always populate ctx['projectKeyVar'] so the field is sent on every create. PREREQUISITE (not satisfiable by this ABox alone): seed-rules.json must map the `projectKeyVar` rule to a real, pre-provisioned project key (a configured constant), not a freshly-minted random id — a random value would fail Hub project validation. See #360 (external-provisioning gap)."
+    }
+  ]
+}
