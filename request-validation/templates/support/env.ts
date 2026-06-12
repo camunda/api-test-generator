@@ -73,6 +73,11 @@ export function denyProbeHeaders(): Record<string, string> {
 export function authHeaders(): Record<string, string> {
   const { username, password } = credentials;
   if (username && password) return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+  if (username || password) {
+    console.warn(
+      '[auth] Only one of CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD is set — Basic auth requires both. Falling back.',
+    );
+  }
   const bearerToken = process.env.BEARER_TOKEN;
   if (bearerToken) return { Authorization: `Bearer ${bearerToken}` };
   return {};

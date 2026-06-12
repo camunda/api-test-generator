@@ -29,9 +29,12 @@ case "${1:-start}" in
     ;;
   stop)
     echo "Stopping Hub app..."
-    pkill -f "local:self-managed" 2>/dev/null || true
-    pkill -f "local:client" 2>/dev/null || true
-    pkill -f "local:legacy" 2>/dev/null || true
+    # pkill -f matches against the full command line. The patterns below are
+    # specific to the npm scripts Hub's Makefile runs, but could theoretically
+    # match unrelated processes on a shared workstation.
+    pkill -f "camunda-hub.*local:self-managed" 2>/dev/null || true
+    pkill -f "camunda-hub.*local:client" 2>/dev/null || true
+    pkill -f "camunda-hub.*local:legacy" 2>/dev/null || true
     echo "Stopping Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" down
     ;;
