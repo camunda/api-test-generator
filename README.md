@@ -112,6 +112,8 @@ TOKEN=$(curl -s -X POST http://localhost:18080/auth/realms/camunda-platform/prot
   | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
 
 # Run the generated tests
+# Unset Basic auth vars — if set, they take precedence over BEARER_TOKEN and hub tests will fail
+unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD
 BEARER_TOKEN=$TOKEN \
 CORE_APPLICATION_URL=http://localhost:8088/api \
 CONFIG=camunda-hub npm run test:pw:request-validation
