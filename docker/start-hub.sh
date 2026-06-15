@@ -13,6 +13,14 @@ LOG_FILE="$REPO_ROOT/test-results/.hub.log"
 # Preconditions for building/running the Hub app. Only `start` needs these;
 # `stop` just kills the PID and tears down Docker, so it must not require them.
 check_start_preconditions() {
+  local missing=()
+  for cmd in docker curl python3 lsof make; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "Error: required command(s) not found on PATH: ${missing[*]}"
+    exit 1
+  fi
   if [ ! -d "$HUB_REPO" ]; then
     echo "Error: camunda-hub not found at $HUB_REPO"
     echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
