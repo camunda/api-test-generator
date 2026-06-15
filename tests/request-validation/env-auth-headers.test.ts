@@ -38,6 +38,15 @@ describe('authHeaders() precedence', () => {
     expect(authHeaders()).toEqual({ Authorization: `Basic ${encoded}` });
   });
 
+  it('prefers Basic over BEARER_TOKEN when both Basic creds and a bearer token are set', async () => {
+    process.env.CAMUNDA_BASIC_AUTH_USER = 'alice';
+    process.env.CAMUNDA_BASIC_AUTH_PASSWORD = 'secret';
+    process.env.BEARER_TOKEN = 'tok123';
+    const authHeaders = await loadAuthHeaders();
+    const encoded = Buffer.from('alice:secret').toString('base64');
+    expect(authHeaders()).toEqual({ Authorization: `Basic ${encoded}` });
+  });
+
   it('returns Bearer when only BEARER_TOKEN is set and RV_PROFILE is not rbac', async () => {
     process.env.BEARER_TOKEN = 'tok123';
     const authHeaders = await loadAuthHeaders();

@@ -150,9 +150,23 @@ case "${1:-start}" in
     fix_keycloak
     echo "Starting Hub app (restapi + frontend)..."
     cd "$HUB_REPO"
+    # Launch make in its OWN process group (job-control mode) so the recorded PID
+    # is also the process-group ID. stop can then signal the whole subtree via
+    # `kill -- -PID` without any risk of hitting the caller's shell/terminal.
+    set -m
     make local-self-managed > "$LOG_FILE" 2>&1 &
-    echo $! > "$PID_FILE"
-    echo "Hub app started (PID $(cat "$PID_FILE")). Logs: $LOG_FILE"
+    MAKE_PID=$!
+    set +m
+    echo "$MAKE_PID" > "$PID_FILE"
+    # Detect an immediate failure (bad config, missing deps): make backgrounded with
+    # set -e won't surface it, so check the process is still alive after a moment.
+    sleep 2
+    if ! kill -0 "$MAKE_PID" 2>/dev/null; then
+      rm -f "$PID_FILE"
+      echo "Error: Hub app exited immediately. Check $LOG_FILE for details."
+      exit 1
+    fi
+    echo "Hub app started (PID $MAKE_PID). Logs: $LOG_FILE"
     echo "Run './docker/start-hub.sh stop' to stop."
     ;;
   stop)
@@ -161,13 +175,13 @@ case "${1:-start}" in
       if kill -0 "$MAKE_PID" 2>/dev/null; then
         if ps -p "$MAKE_PID" -o args= 2>/dev/null | grep -qE "local[-:]self-managed"; then
           echo "Stopping Hub app (PID $MAKE_PID)..."
-          # Kill the full process tree: make spawns npm/webpack/spring-boot as grandchildren
-          # that pkill -P misses. Kill by process group so the whole subtree is reaped.
-          MAKE_PGID=$(ps -p "$MAKE_PID" -o pgid= 2>/dev/null | tr -d ' ')
-          if [ -n "$MAKE_PGID" ] && [ "$MAKE_PGID" != "$$" ]; then
-            kill -- "-$MAKE_PGID" 2>/dev/null || true
+          # start launches make as its own process-group leader (set -m), so the
+          # recorded PID is also the PGID. `kill -- -PID` reaps the whole subtree
+          # (make + npm/webpack/spring-boot) and can never hit the caller's shell.
+          # Only fall back to a single-PID kill if this group is somehow gone.
+          if [ "$(ps -p "$MAKE_PID" -o pgid= 2>/dev/null | tr -d ' ')" = "$MAKE_PID" ]; then
+            kill -- "-$MAKE_PID" 2>/dev/null || true
           else
-            pkill -P "$MAKE_PID" 2>/dev/null || true
             kill "$MAKE_PID" 2>/dev/null || true
           fi
         else

@@ -7,7 +7,7 @@
 # All host ports are configurable via env vars — set them in a .env file or export them
 # before running docker compose to resolve conflicts with other local stacks.
 # Keycloak is pinned to match camunda-hub/docker-compose.sm-keycloak.yml.
-# Identity and WebSockets default to SNAPSHOT (pull_policy: always); set PULL_POLICY=if_not_present to skip pulls.
+# Identity and WebSockets default to SNAPSHOT (pull_policy: if_not_present); set PULL_POLICY=always to refresh.
 
 services:
   modeler-db:
@@ -82,7 +82,7 @@ services:
 
   identity:
     image: ${IDENTITY_IMAGE:-camunda/identity:SNAPSHOT}
-    pull_policy: ${PULL_POLICY:-always}
+    pull_policy: ${PULL_POLICY:-if_not_present}
     depends_on:
       identity-db:
         condition: service_healthy
