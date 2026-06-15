@@ -44,6 +44,8 @@ export const denyProbeCredentials: ProbeCredentials = {
   password: process.env.RBAC_DENY_PROBE_PASSWORD || 'rbac-deny-probe-pw',
 };
 
+let partialCredsWarned = false;
+
 function encode(value: string): string {
   return Buffer.from(value).toString('base64');
 }
@@ -64,13 +66,25 @@ export function denyProbeHeaders(): Record<string, string> {
 /**
  * Build the Authorization header from configured credentials.
  *
+ * Basic auth (CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD) takes
+ * precedence when set. BEARER_TOKEN is used only when Basic creds are absent
+ * AND RV_PROFILE is not 'rbac' — the rbac suite relies on Basic-only auth;
+ * a stray BEARER_TOKEN in the environment must not silently satisfy it.
  * Returns an empty object when no credentials are supplied so the suite
  * can run unauthenticated against dev clusters without manual editing.
  */
 export function authHeaders(): Record<string, string> {
   const { username, password } = credentials;
-  if (!username || !password) return {};
-  return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+  if (username && password) return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+  if ((username || password) && !partialCredsWarned) {
+    partialCredsWarned = true;
+    console.warn(
+      '[auth] Only one of CAMUNDA_BASIC_AUTH_USER / CAMUNDA_BASIC_AUTH_PASSWORD is set — Basic auth requires both. The partial credential is ignored.',
+    );
+  }
+  const bearerToken = process.env.BEARER_TOKEN;
+  if (bearerToken && process.env.RV_PROFILE !== 'rbac') return { Authorization: `Bearer ${bearerToken}` };
+  return {};
 }
 
 export function jsonHeaders(): Record<string, string> {

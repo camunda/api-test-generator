@@ -1,0 +1,161 @@
+# Infrastructure services for running camunda-hub locally in Self-Managed mode.
+# The Hub app itself (restapi + frontend) is started separately via docker/start-hub.sh.
+#
+# Derived from camunda-hub/docker-compose.sm.yml (identity-db, identity, websockets)
+# and camunda-hub/docker-compose.yml (mailpit). Keep image pins in sync with those files.
+#
+# All host ports are configurable via env vars — set them in a .env file or export them
+# before running docker compose to resolve conflicts with other local stacks.
+# Keycloak is pinned to match camunda-hub/docker-compose.sm-keycloak.yml.
+# Identity and WebSockets default to SNAPSHOT (pull_policy: if_not_present); set PULL_POLICY=always to refresh.
+
+services:
+  modeler-db:
+    image: postgres:14.23-alpine@sha256:6765739f422606933bc2aece3a2288e40e491488fd7e7c14e3323dfeefb10e38
+    ports:
+      - "${MODELER_DB_PORT:-5432}:5432"
+    volumes:
+      - modeler-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -d modeler-db -U modeler-db-user
+      interval: 5s
+      timeout: 1s
+      retries: 10
+    environment:
+      POSTGRES_DB: modeler-db
+      POSTGRES_USER: modeler-db-user
+      POSTGRES_PASSWORD: modeler-db-password
+
+  keycloak-db:
+    image: postgres:14.23-alpine@sha256:6765739f422606933bc2aece3a2288e40e491488fd7e7c14e3323dfeefb10e38
+    ports:
+      - "${KEYCLOAK_DB_PORT:-5433}:5432"
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -d keycloak-db -U keycloak-db-user
+      interval: 5s
+      timeout: 1s
+      retries: 10
+    environment:
+      POSTGRES_DB: keycloak-db
+      POSTGRES_USER: keycloak-db-user
+      POSTGRES_PASSWORD: keycloak-db-password
+
+  identity-db:
+    image: postgres:14.23-alpine@sha256:6765739f422606933bc2aece3a2288e40e491488fd7e7c14e3323dfeefb10e38
+    ports:
+      - "${IDENTITY_DB_PORT:-5434}:5432"
+    volumes:
+      - identity-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -d identity-db -U identity-db-user
+      interval: 5s
+      timeout: 1s
+      retries: 10
+    environment:
+      POSTGRES_DB: identity-db
+      POSTGRES_USER: identity-db-user
+      POSTGRES_PASSWORD: identity-db-password
+
+  keycloak:
+    image: camunda/keycloak:26.3.3@sha256:e2e87917eb90a42ea6f718b1d4edaf470bb36ab9a3867089d1b7ca1f8a430b8a
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - "${KEYCLOAK_PORT:-18080}:8080"
+    environment:
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak-db
+      KC_DB_USERNAME: keycloak-db-user
+      KC_DB_PASSWORD: keycloak-db-password
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HEALTH_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/auth/health/ready"]
+      interval: 5s
+      timeout: 1s
+      retries: 15
+      start_period: 15s
+
+  identity:
+    image: ${IDENTITY_IMAGE:-camunda/identity:SNAPSHOT}
+    pull_policy: ${PULL_POLICY:-if_not_present}
+    depends_on:
+      identity-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    ports:
+      - "${IDENTITY_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/actuator/health"]
+      interval: 5s
+      timeout: 1s
+      retries: 10
+    environment:
+      IDENTITY_DATABASE_HOST: identity-db
+      IDENTITY_DATABASE_NAME: identity-db
+      IDENTITY_DATABASE_PASSWORD: identity-db-password
+      IDENTITY_DATABASE_PORT: 5432
+      IDENTITY_DATABASE_USERNAME: identity-db-user
+      KEYCLOAK_URL: http://keycloak:8080/auth
+      IDENTITY_AUTH_PROVIDER_ISSUER_URL: http://localhost:${KEYCLOAK_PORT:-18080}/auth/realms/camunda-platform
+      IDENTITY_AUTH_PROVIDER_BACKEND_URL: http://keycloak:8080/auth/realms/camunda-platform
+      KEYCLOAK_INIT_WEBMODELER_ROOT_URL: http://localhost:${HUB_UI_PORT:-8088}
+      KEYCLOAK_USERS_0_FIRST_NAME: Demo
+      KEYCLOAK_USERS_0_LAST_NAME: User
+      KEYCLOAK_USERS_0_EMAIL: demo.user@example.com
+      KEYCLOAK_USERS_0_USERNAME: demo
+      KEYCLOAK_USERS_0_PASSWORD: demo
+      KEYCLOAK_USERS_0_ROLES_0: Identity
+      KEYCLOAK_USERS_0_ROLES_1: Web Modeler
+      KEYCLOAK_USERS_0_ROLES_2: Web Modeler Admin
+      # M2M client used by the Hub API tests (matches camunda-hub/docker-compose.sm-keycloak.yml)
+      KEYCLOAK_CLIENTS_0_NAME: c8-client
+      KEYCLOAK_CLIENTS_0_ID: c8-client
+      KEYCLOAK_CLIENTS_0_SECRET: c8-secret
+      KEYCLOAK_CLIENTS_0_TYPE: M2M
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_0_RESOURCE_SERVER_ID: web-modeler-public-api
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_0_DEFINITION: create:*
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_1_RESOURCE_SERVER_ID: web-modeler-public-api
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_1_DEFINITION: read:*
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_2_RESOURCE_SERVER_ID: web-modeler-public-api
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_2_DEFINITION: update:*
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_3_RESOURCE_SERVER_ID: web-modeler-public-api
+      KEYCLOAK_CLIENTS_0_PERMISSIONS_3_DEFINITION: delete:*
+
+  websockets:
+    image: ${WEBSOCKETS_IMAGE:-registry.camunda.cloud/team-hub/hub-websockets:SNAPSHOT}  # set WEBSOCKETS_IMAGE to pin to a specific digest
+    pull_policy: ${PULL_POLICY:-if_not_present}
+    ports:
+      - "${WEBSOCKETS_PORT:-8060}:8060"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8060/up"]
+      interval: 5s
+      timeout: 1s
+      retries: 10
+    environment:
+      APP_NAME: "Web Modeler Self-Managed WebSockets"
+      APP_DEBUG: "true"
+      PUSHER_APP_ID: "self-managed-pusher-app-id"
+      PUSHER_APP_KEY: "self-managed-pusher-key"
+      PUSHER_APP_SECRET: "self-managed-pusher-secret"
+
+  mailpit:
+    image: axllent/mailpit:v1.30.1@sha256:3bd7c2f2696deb35a4780d152b404dceec99cb041b942c0877b3b22384714f85
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_HTTP_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8025"]
+      interval: 5s
+      timeout: 1s
+      retries: 10
+
+volumes:
+  modeler-db-data:
+  keycloak-db-data:
+  identity-db-data:
