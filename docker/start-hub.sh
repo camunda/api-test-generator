@@ -64,9 +64,7 @@ fix_keycloak() {
     sleep 2
   done
 
-  local realm_url="${keycloak_url}/auth/admin/realms/camunda-platform"
-
-  # 1. Fix web-modeler audience mapper: Identity 8.8.0-alpha7 sets included.client.audience=web-modeler
+  # 1. Fix web-modeler audience mapper: Identity seeds included.client.audience=web-modeler
   #    but the restapi validates aud=web-modeler-api. Patch the mapper to point to web-modeler-api.
   local wm_client_uuid mapper_id
   wm_client_uuid=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
@@ -101,7 +99,7 @@ for m in json.load(sys.stdin):
   echo "Keycloak: fixed web-modeler audience mapper → web-modeler-api"
 
   # 2. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
-  #    Identity 8.8.0-alpha7 creates the roles but does not assign them to seeded users.
+  #    Identity creates the roles but does not assign them to seeded users.
   local demo_user_id
   demo_user_id=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
     "${realm_url}/users?username=demo" \
