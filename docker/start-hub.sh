@@ -10,16 +10,19 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.hub.yml"
 PID_FILE="$REPO_ROOT/test-results/.hub.pid"
 LOG_FILE="$REPO_ROOT/test-results/.hub.log"
 
-if [ ! -d "$HUB_REPO" ]; then
-  echo "Error: camunda-hub not found at $HUB_REPO"
-  echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
-  exit 1
-fi
-
-if [ -z "${JAVA_HOME:-}" ]; then
-  echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
-  exit 1
-fi
+# Preconditions for building/running the Hub app. Only `start` needs these;
+# `stop` just kills the PID and tears down Docker, so it must not require them.
+check_start_preconditions() {
+  if [ ! -d "$HUB_REPO" ]; then
+    echo "Error: camunda-hub not found at $HUB_REPO"
+    echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
+    exit 1
+  fi
+  if [ -z "${JAVA_HOME:-}" ]; then
+    echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
+    exit 1
+  fi
+}
 
 fix_keycloak() {
   local keycloak_port="${KEYCLOAK_PORT:-18080}"
@@ -123,6 +126,7 @@ import json as j; print(j.dumps(result))
 
 case "${1:-start}" in
   start)
+    check_start_preconditions
     if [ -f "$PID_FILE" ]; then
       EXISTING_PID=$(cat "$PID_FILE")
       if kill -0 "$EXISTING_PID" 2>/dev/null; then
