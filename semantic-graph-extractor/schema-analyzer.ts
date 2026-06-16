@@ -466,7 +466,7 @@ export class SchemaAnalyzer {
     const named = new Set(providerFields);
     const leafOf = (fieldPath: string): string => {
       const last = fieldPath.split('.').pop() ?? fieldPath;
-      return last.replace(/\[\]$/, '');
+      return last.replace(/(\[\])+$/, '');
     };
     for (const entries of Object.values(responseSemanticTypes)) {
       for (const entry of entries) {

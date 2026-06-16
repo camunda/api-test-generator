@@ -285,12 +285,13 @@ export function getActiveSpecSource(repoRoot: string): SpecSource {
   for (const key of SPEC_SOURCE_KEYS) {
     if (!Object.hasOwn(spec, key)) continue;
     const v = spec[key];
-    if (typeof v !== 'string' || v.length === 0) {
+    const trimmed = typeof v === 'string' ? v.trim() : undefined;
+    if (trimmed === undefined || trimmed.length === 0) {
       throw new Error(
         `Malformed configs.json: configs.${name}.spec.${key} must be a non-empty string when present.`,
       );
     }
-    out[key] = v;
+    out[key] = trimmed;
   }
   return out;
 }

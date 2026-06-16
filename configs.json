@@ -17,7 +17,7 @@
       }
     },
     "camunda-hub": {
-      "description": "Camunda Hub Public API V2 (spike — request-validation only)",
+      "description": "Camunda Hub Public API V2 (request-validation + positive Playwright suite)",
       "spec": {
         "source": "github:camunda/camunda-hub",
         "localSpecDir": "../camunda-hub/restapi/public-api/src/main/resources/openapi/v2",
@@ -25,7 +25,7 @@
         "$comment": "Local-bundle mode: the hub spec lives in the private camunda/camunda-hub repo at restapi/public-api/src/main/resources/openapi/v2/ — a non-default in-repo path the bundler's network-fetch CLI cannot target. fetch-spec instead passes --spec-dir <localSpecDir> (resolved relative to the repo root) and bundles from the sibling clone, matching docker/start-hub.sh's ../camunda-hub convention. SPEC_REF is ignored in this mode; check out the desired ref in the sibling clone before running fetch-spec. Pinned ref + expected hash live in configs/camunda-hub/spec-pin.json."
       },
       "planner": {
-        "$comment": "Same caps as camunda-oca; not load-bearing for request-validation, but kept consistent so a future positive-suite extension does not need a config edit.",
+        "$comment": "Same caps as camunda-oca; load-bearing for the positive (Playwright) suite's BFS chain planning.",
         "maxChainAlternatives": 20,
         "maxVariantsPerEndpoint": 20
       }

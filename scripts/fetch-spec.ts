@@ -30,12 +30,13 @@ function main(): void {
   const spec = getActiveSpecSource(REPO_ROOT);
   const localSpecDir = spec.localSpecDir;
   const useLocalSpecDir = localSpecDir !== undefined;
-  const ref = process.env.SPEC_REF;
+  const rawRef = process.env.SPEC_REF;
+  const ref = rawRef?.trim() ?? '';
 
   // SPEC_REF is only meaningful in network-fetch mode. In local-bundle mode
   // the spec directory is whatever the sibling clone has checked out, so a
   // ref is neither required nor used.
-  if (refRequired && !useLocalSpecDir && (!ref || ref.trim() === '')) {
+  if (refRequired && !useLocalSpecDir && ref === '') {
     console.error('fetch-spec:ref requires SPEC_REF=<sha-or-ref> to be set');
     process.exit(2);
   }
@@ -49,7 +50,7 @@ function main(): void {
     // configured (sibling-clone) spec directory.
     args.push('--spec-dir', resolve(REPO_ROOT, localSpecDir));
   } else {
-    if (ref && ref.trim() !== '') {
+    if (ref !== '') {
       args.push('--ref', ref);
     }
     if (spec.repoUrl) {
@@ -65,7 +66,7 @@ function main(): void {
 
   const sourceDesc = useLocalSpecDir
     ? `local spec-dir ${spec.localSpecDir}`
-    : `${spec.repoUrl ?? 'default repo'}${ref ? ` @ ${ref}` : ''}`;
+    : `${spec.repoUrl ?? 'default repo'}${ref !== '' ? ` @ ${ref}` : ''}`;
   console.error(`[fetch-spec] writing to ${bundleDir} (source: ${sourceDesc})`);
 
   const child = spawn('npx', ['camunda-schema-bundler', ...args], {

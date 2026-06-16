@@ -212,8 +212,19 @@ describe('configResolver: per-config spec source (config-driven fetch-spec)', ()
     expect(() => getActiveSpecSource(workdir)).toThrow(/spec must be an object/);
   });
 
+  it('trims surrounding whitespace from string fields', () => {
+    writeSpec({ repoUrl: '  https://x/y.git  ', localSpecDir: '\t../sibling/spec\n' });
+    expect(getActiveSpecSource(workdir)).toEqual({
+      repoUrl: 'https://x/y.git',
+      localSpecDir: '../sibling/spec',
+    });
+  });
+
   for (const key of ['repoUrl', 'entryFile', 'localSpecDir']) {
-    for (const bad of [0, null, true, '', {}]) {
+    // Whitespace-only is treated as empty (class-scoped: a config typo
+    // like `" "` must fail fast, not silently produce an invalid
+    // url/path passed verbatim to the bundler).
+    for (const bad of [0, null, true, '', '   ', '\t', {}]) {
       it(`throws when spec.${key} is ${JSON.stringify(bad)}`, () => {
         writeSpec({ [key]: bad });
         expect(() => getActiveSpecSource(workdir)).toThrow(/must be a non-empty string/);
