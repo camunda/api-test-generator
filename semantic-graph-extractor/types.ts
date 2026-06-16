@@ -65,6 +65,15 @@ export interface OperationObject {
   'x-operation-kind'?: OperationMetadata | OperationMetadata[];
   'x-conditional-idempotency'?: ConditionalIdempotencySpec;
   'x-semantic-establishes'?: EstablishesSpec;
+  // Operation-level provider declaration: an array of response leaf-field
+  // names whose semantic type this operation authoritatively produces. Used
+  // by the Camunda Hub Public API V2, which annotates providers on the
+  // operation rather than on the response object schema. The extractor maps
+  // each named field onto the matching response semantic entry and flags it
+  // `provider: true` — the operation-level counterpart of the schema-level
+  // array form (`Schema['x-semantic-provider']`; see #33). The boolean form
+  // is not meaningful at the operation level and is ignored.
+  'x-semantic-provider'?: string[];
 }
 
 // `x-semantic-establishes` declares that running this operation establishes a
