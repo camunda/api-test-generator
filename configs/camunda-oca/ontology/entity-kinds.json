@@ -188,6 +188,16 @@
         }
       ],
       "description": "#305 Phase 5d-4 / #189 — a process instance, identified by its server-minted processInstanceKey. NOTE on shape: ProcessInstance is the direct response of createProcessInstance, not strictly a side-effect 'runtime-emitted' entity in the strict #305 sense; we classify it as a runtime-entity here purely so it can participate in the StateTransitionVisibleAfterAction template (which requires fetcher+stateField+transitions). The cancelProcessInstance transition (ACTIVE → CANCELED) is verified by read-back through getProcessInstance. Selection of the deployment fixture is driven by `requires: [ModelHasCancellationBlocker]` on the cancelProcessInstance op, which forces the planner to choose bpmn/cancellable-blocked.bpmn (a service task wired to a unique job type that no other test activates) so the instance stays ACTIVE until the test cancels it explicitly. No mutators[]. See #281 for the orthogonal EntityLifecycle two-revoker design that may later relocate ProcessInstance into a richer shape; this row scopes ProcessInstance to the state-transition concern only."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "AgentInstanceIteration",
+      "shape": "immutable-entity",
+      "identifiers": [
+        "IterationId"
+      ],
+      "establishedBy": "createAgentInstanceHistoryItem",
+      "description": "#386 — a logical grouping of one LLM call, its tool dispatches, and their results within an agent instance's conversation history. Identified by a client-minted IterationId supplied in the createAgentInstanceHistoryItem body (so IterationId is a clientMintedIdentifier via the upstream x-semantic-establishes annotation, not a producer-chained key). Append-only: once written it is never updated or deleted, and it is read back only via searchAgentInstanceHistory (no canonical get-by-id), so it carries neither the CRUD triple nor a runtime fetcher — hence shape: immutable-entity."
     }
   ]
 }

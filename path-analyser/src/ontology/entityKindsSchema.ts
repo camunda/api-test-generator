@@ -82,7 +82,7 @@ export const entityKindsSchema = {
   $id: 'https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json',
   title: 'Entity-kinds ABox (api-test-generator ontology, v1)',
   description:
-    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of three shapes (`entity` for in-API-managed with full CRUD, `external-entity` for identifiers minted outside the API, `runtime-entity` for entities emitted by the runtime as a side-effect of other operations); and a list of semantic identifier-type names that identify it. `shape: "entity"` kinds carry an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/`revokedBy`) consumed by the EntityLifecycle scenario template (#280) — asymmetric subsets surface as ABox-load validation errors. `shape: "external-entity"` kinds (e.g. Client) must NOT carry the CRUD triple. `shape: "runtime-entity"` kinds (#305 Phase 4 / Phase 5d, e.g. UserTask, Incident) carry a `fetcher` plus at least one of `mutators[]` (consumed by `UpdatedFieldVisibleOnReadBack`) or `transitions[]` + `stateField` (consumed by `StateTransitionVisibleAfterAction`, #189); the if/then/else below enforces that runtime-entity kinds carry the required combination and that entity/external-entity kinds carry none of these. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, CRUD op methods being POST/GET/DELETE, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
+    'TBox JSON Schema for an ABox file describing the entity kinds (the domain nouns) of a single API. Each entry asserts: an entity kind exists; it has one of four shapes (`entity` for in-API-managed with full CRUD, `external-entity` for identifiers minted outside the API, `runtime-entity` for entities emitted by the runtime as a side-effect of other operations, `immutable-entity` for entities created in-API but never updated or deleted and observed only via search); and a list of semantic identifier-type names that identify it. `shape: "entity"` kinds carry an all-or-nothing CRUD triple (`establishedBy`/`observableVia`/`revokedBy`) consumed by the EntityLifecycle scenario template (#280) — asymmetric subsets surface as ABox-load validation errors. `shape: "external-entity"` kinds (e.g. Client) must NOT carry the CRUD triple. `shape: "runtime-entity"` kinds (#305 Phase 4 / Phase 5d, e.g. UserTask, Incident) carry a `fetcher` plus at least one of `mutators[]` (consumed by `UpdatedFieldVisibleOnReadBack`) or `transitions[]` + `stateField` (consumed by `StateTransitionVisibleAfterAction`, #189); `shape: "immutable-entity"` kinds (#386, e.g. AgentInstanceIteration) carry only `establishedBy` (client-minted identifier supplied at creation; no observe/revoke/mutate); the if/then/else below enforces that runtime-entity kinds carry the required combination and that entity/external-entity/immutable-entity kinds carry only their permitted fields. The schema is intentionally agnostic to which API ships the kinds — instance-data lives in the per-config ABox file (e.g. configs/camunda-oca/ontology/entity-kinds.json). The optional top-level `@context` and per-entry `@type` are JSON-LD metadata only; no runtime in this repo interprets them, but they are reserved so an external SPARQL/SHACL consumer can ingest the file unchanged. Cross-references against the bundled spec (kind names appearing in operation `produces[]`/`requires[]`, identifier types being live, CRUD op methods being POST/GET/DELETE, etc.) are enforced as L3 invariants in configs/<name>/regression-invariants.test.ts rather than being re-encoded here, because Draft-07 cannot express them.',
   type: 'object',
   additionalProperties: false,
   required: ['version', 'kinds'],
@@ -122,9 +122,9 @@ export const entityKindsSchema = {
         },
         shape: {
           type: 'string',
-          enum: ['entity', 'external-entity', 'runtime-entity'],
+          enum: ['entity', 'external-entity', 'runtime-entity', 'immutable-entity'],
           description:
-            '`entity`: in-API-managed (producer + consumer ops both inside the API). `external-entity`: identifier minted outside the API; planner treats `identifiers[]` as `externalBoundary` (client-mintable, no upstream producer required). `runtime-entity` (#305 Phase 4 / Phase 5d): entity emitted by the runtime as a side-effect of another operation (e.g. UserTask from a process instance, Incident from a failing process instance); discovered via runtimeEmission and re-read via `fetcher`. Carries `mutators[]` (consumed by `UpdatedFieldVisibleOnReadBack`) and/or `transitions[]`+`stateField` (consumed by `StateTransitionVisibleAfterAction`, #189).',
+            '`entity`: in-API-managed (producer + consumer ops both inside the API). `external-entity`: identifier minted outside the API; planner treats `identifiers[]` as `externalBoundary` (client-mintable, no upstream producer required). `runtime-entity` (#305 Phase 4 / Phase 5d): entity emitted by the runtime as a side-effect of another operation (e.g. UserTask from a process instance, Incident from a failing process instance); discovered via runtimeEmission and re-read via `fetcher`. Carries `mutators[]` (consumed by `UpdatedFieldVisibleOnReadBack`) and/or `transitions[]`+`stateField` (consumed by `StateTransitionVisibleAfterAction`, #189). `immutable-entity` (#386): created in-API (`establishedBy`) but never updated or deleted, and observed only via a search/list op rather than a canonical get-by-id (e.g. AgentInstanceIteration — an append-only conversation-history record identified by a client-minted IterationId). Carries `establishedBy` only; its identifier is supplied by the client at creation (classified as a clientMintedIdentifier via the upstream `x-semantic-establishes` annotation), so no CRUD triple, no mutators/transitions, and no fetcher apply.',
         },
         identifiers: {
           type: 'array',
@@ -244,6 +244,29 @@ export const entityKindsSchema = {
                 { required: ['establishedBy'] },
                 { required: ['observableVia'] },
                 { required: ['revokedBy'] },
+              ],
+            },
+          },
+        },
+        {
+          // #386 — `immutable-entity` carries only `establishedBy` (the create
+          // op). No CRUD triple (never observed by-id or revoked), no
+          // in-place mutators/transitions, no runtime fetcher. Its identifier
+          // is client-minted at creation and classified via the upstream
+          // `x-semantic-establishes` annotation, so the catalog entry is pure
+          // domain bookkeeping — no scenario template consumes it today.
+          if: { properties: { shape: { const: 'immutable-entity' } } },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema Draft-07 `then` keyword (paired with `if`), not a Promise-like.
+          then: {
+            required: ['establishedBy'],
+            not: {
+              anyOf: [
+                { required: ['observableVia'] },
+                { required: ['revokedBy'] },
+                { required: ['mutators'] },
+                { required: ['transitions'] },
+                { required: ['stateField'] },
+                { required: ['fetcher'] },
               ],
             },
           },

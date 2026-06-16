@@ -109,6 +109,9 @@ export async function buildCanonicalShapes(
             nodes,
             new Set(),
             components,
+            false,
+            0,
+            true, // descend oneOf/anyOf variants in the response shape
           );
           entry.response = nodes;
         }
@@ -152,13 +155,62 @@ function walkSchema(
   components: Record<string, SchemaObject>,
   required = false,
   depth = 0,
+  descendUnions = false,
 ) {
   if (!schema || depth > 25) return;
   if (schema.$ref) {
     const resolved = resolveSchema(schema, components);
     if (seen.has(resolved)) return; // prevent cycles
     seen.add(resolved);
-    return walkSchema(resolved, pointer, pathSoFar, acc, seen, components, required, depth + 1);
+    return walkSchema(
+      resolved,
+      pointer,
+      pathSoFar,
+      acc,
+      seen,
+      components,
+      required,
+      depth + 1,
+      descendUnions,
+    );
+  }
+  // Descend discriminated/union variants for the RESPONSE shape so semantic
+  // provider leaves nested inside a oneOf/anyOf branch (e.g. the DOCUMENT
+  // variant's `content[].documentReference.documentId` on
+  // AgentInstanceMessageContent) appear in the canonical response shape — the
+  // extractor lifts those leaves by walking every branch, so the shape must
+  // enumerate them too or the canonical-path validator reports a false
+  // extractor↔bundler divergence. NOT done for request shapes: merging
+  // mutually-exclusive variants would synthesise invalid request bodies.
+  //
+  // Done regardless of whether `type` is also declared: OpenAPI permits
+  // `type` alongside `oneOf`/`anyOf` (e.g. a `type: 'object'` base whose
+  // variants add fields), so gating on `!schema.type` would skip variant-
+  // nested provider leaves on such schemas. When a co-declared `type` is
+  // present we fall through after descending so the object/array branch
+  // below still walks the schema's own `properties`/`items`; for a pure
+  // union (no `type`) the variants ARE the whole shape, so we return.
+  if (descendUnions && (schema.oneOf || schema.anyOf)) {
+    const variants = [...(schema.oneOf ?? []), ...(schema.anyOf ?? [])];
+    for (const variant of variants) {
+      // Each variant is a sibling branch: give it an independent copy of the
+      // ancestry-visited set so a schema shared across variants (e.g. two
+      // variants both nesting the same DocumentReference) is walked in each,
+      // not skipped after the first. `seen` tracks cycles along one path, not
+      // a global "visited anywhere" set. See #389 review.
+      walkSchema(
+        variant,
+        pointer,
+        pathSoFar,
+        acc,
+        new Set(seen),
+        components,
+        required,
+        depth + 1,
+        true,
+      );
+    }
+    if (!schema.type) return;
   }
   const type =
     schema.type ||
@@ -168,7 +220,17 @@ function walkSchema(
     const resolved = resolveSchema(schema, components);
     if (resolved && resolved !== schema && !seen.has(resolved)) {
       seen.add(resolved);
-      return walkSchema(resolved, pointer, pathSoFar, acc, seen, components, required, depth + 1);
+      return walkSchema(
+        resolved,
+        pointer,
+        pathSoFar,
+        acc,
+        seen,
+        components,
+        required,
+        depth + 1,
+        descendUnions,
+      );
     }
   }
   if (type === 'object' && schema.properties) {
@@ -188,7 +250,22 @@ function walkSchema(
     for (const [k, v] of Object.entries(schema.properties)) {
       const childPath = pathSoFar ? `${pathSoFar}.${k}` : k;
       const childPointer = `${pointer}/properties/${escapeJsonPointer(k)}`;
-      walkSchema(v, childPointer, childPath, acc, seen, components, reqSet.has(k), depth + 1);
+      // Each property is a sibling branch: give it an independent copy of the
+      // ancestry-visited set. `seen` is for cycle detection along one path, not
+      // a global "visited anywhere" set — two properties referencing the same
+      // component schema must both be walked, else the second's paths go
+      // missing from the canonical shape (#389 review).
+      walkSchema(
+        v,
+        childPointer,
+        childPath,
+        acc,
+        new Set(seen),
+        components,
+        reqSet.has(k),
+        depth + 1,
+        descendUnions,
+      );
     }
     return;
   }
@@ -212,7 +289,17 @@ function walkSchema(
         : undefined,
       itemEnum,
     });
-    walkSchema(schema.items, childPointer, childPath, acc, seen, components, false, depth + 1);
+    walkSchema(
+      schema.items,
+      childPointer,
+      childPath,
+      acc,
+      seen,
+      components,
+      false,
+      depth + 1,
+      descendUnions,
+    );
     return;
   }
   if (pathSoFar) {
