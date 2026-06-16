@@ -163,6 +163,13 @@ export class SchemaAnalyzer {
     // Extract response semantic types
     const responseSemanticTypes = this.extractResponseSemanticTypes(operation.responses, spec);
 
+    // Operation-level x-semantic-provider (Camunda Hub style): the operation
+    // names the response leaf fields it authoritatively produces. Upgrade the
+    // matching response semantic entries to provider:true. This is the
+    // operation-level counterpart of the schema-level array form honoured in
+    // extractSemanticTypesFromSchemaReference (#33).
+    this.applyOperationLevelProviders(operation['x-semantic-provider'], responseSemanticTypes);
+
     // #305 Phase 4: collect every primitive response leaf path per
     // status code (regardless of `x-semantic-type`). Powers the
     // UpdatedFieldVisibleOnReadBack instantiator's name-based bridge
@@ -435,6 +442,37 @@ export class SchemaAnalyzer {
     }
 
     return semanticTypes;
+  }
+
+  /**
+   * Mark response semantic entries named by an operation-level
+   * `x-semantic-provider` array as authoritative providers.
+   *
+   * The Camunda Hub Public API V2 places the provider declaration on the
+   * operation (a sibling of `operationId`) rather than on the response
+   * object schema. Each array element is a response leaf-field name; any
+   * extracted response semantic whose `fieldPath` leaf segment matches is
+   * upgraded to `provider: true`. Leaf-segment matching (last `.`-segment,
+   * with any trailing `[]` stripped) mirrors how the schema-level array
+   * form names child properties, and is robust to nested response shapes
+   * (e.g. `result.projectKey`). Never downgrades an entry already flagged
+   * by a schema-level annotation.
+   */
+  private applyOperationLevelProviders(
+    providerFields: string[] | undefined,
+    responseSemanticTypes: Record<string, SemanticTypeReference[]>,
+  ): void {
+    if (!Array.isArray(providerFields) || providerFields.length === 0) return;
+    const named = new Set(providerFields);
+    const leafOf = (fieldPath: string): string => {
+      const last = fieldPath.split('.').pop() ?? fieldPath;
+      return last.replace(/(\[\])+$/, '');
+    };
+    for (const entries of Object.values(responseSemanticTypes)) {
+      for (const entry of entries) {
+        if (named.has(leafOf(entry.fieldPath))) entry.provider = true;
+      }
+    }
   }
 
   /**

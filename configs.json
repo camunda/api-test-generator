@@ -6,7 +6,9 @@
       "description": "Camunda 8 Orchestration Cluster API",
       "spec": {
         "source": "github:camunda/camunda",
-        "$comment": "Pinned ref + expected hash live in configs/camunda-oca/spec-pin.json (kept as a separate file to preserve the spec-pin bump procedure documented in tests/regression/spec-pin.setup.ts)."
+        "repoUrl": "https://github.com/camunda/camunda.git",
+        "entryFile": "rest-api.yaml",
+        "$comment": "Network-fetch mode: fetch-spec passes --ref $SPEC_REF and --repo-url to camunda-schema-bundler. The in-repo spec path (zeebe/gateway-protocol/src/main/proto/v2) is derived from the ref by the bundler itself and cannot be overridden via the CLI. Pinned ref + expected hash live in configs/camunda-oca/spec-pin.json (kept as a separate file to preserve the spec-pin bump procedure documented in tests/regression/spec-pin.setup.ts)."
       },
       "planner": {
         "$comment": "Per-config planner caps (#292). Field names mirror the internal option keys (`maxChainAlternatives`, `maxVariantsPerEndpoint`) so the config key === the option key — no translation layer. The two inner `maxChainAlternatives: 1` caps inside variant planning are NOT exposed here; they are load-bearing strategy constants (one producer chain per variant leaf) documented in path-analyser/src/scenarioGenerator.ts.",
@@ -15,13 +17,15 @@
       }
     },
     "camunda-hub": {
-      "description": "Camunda Hub Public API V2 (spike — request-validation only)",
+      "description": "Camunda Hub Public API V2 (request-validation + positive Playwright suite)",
       "spec": {
         "source": "github:camunda/camunda-hub",
-        "$comment": "Hub spec lives at restapi/public-api/src/main/resources/openapi/v2/ in the (private) camunda/camunda-hub repo. Pinned ref + expected hash live in configs/camunda-hub/spec-pin.json. This config currently exercises only the request-validation (negative) suite; positive-test ABox authoring is deferred — see the camunda-hub config README/issue."
+        "localSpecDir": "../camunda-hub/restapi/public-api/src/main/resources/openapi/v2",
+        "entryFile": "rest-api.yaml",
+        "$comment": "Local-bundle mode: the hub spec lives in the private camunda/camunda-hub repo at restapi/public-api/src/main/resources/openapi/v2/ — a non-default in-repo path the bundler's network-fetch CLI cannot target. fetch-spec instead passes --spec-dir <localSpecDir> (resolved relative to the repo root) and bundles from the sibling clone, matching docker/start-hub.sh's ../camunda-hub convention. SPEC_REF is ignored in this mode; check out the desired ref in the sibling clone before running fetch-spec. Pinned ref + expected hash live in configs/camunda-hub/spec-pin.json."
       },
       "planner": {
-        "$comment": "Same caps as camunda-oca; not load-bearing for request-validation, but kept consistent so a future positive-suite extension does not need a config edit.",
+        "$comment": "Same caps as camunda-oca; load-bearing for the positive (Playwright) suite's BFS chain planning.",
         "maxChainAlternatives": 20,
         "maxVariantsPerEndpoint": 20
       }

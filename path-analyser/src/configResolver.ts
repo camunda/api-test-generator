@@ -239,3 +239,59 @@ export function getActivePlannerConfig(repoRoot: string): PlannerConfig {
       PLANNER_DEFAULTS.maxVariantsPerEndpoint,
   };
 }
+
+/**
+ * Per-config spec source declaration (read from `configs.<name>.spec`).
+ *
+ * Two fetch modes, selected by which fields are present:
+ *
+ *   - **Network fetch** (`camunda-oca`): `repoUrl` + (optional) `entryFile`.
+ *     `fetch-spec` passes `--ref $SPEC_REF` and `--repo-url` to
+ *     `camunda-schema-bundler`, which sparse-clones the repo. NOTE: the
+ *     bundler CLI derives the *in-repo* spec subdirectory from the ref
+ *     (`zeebe/gateway-protocol/src/main/proto/v2` for `camunda/camunda`) and
+ *     exposes no flag to override it — so network fetch only works for repos
+ *     that ship the spec at that default path. A repo with a different
+ *     in-repo path must use `localSpecDir` instead (tracked as an upstream
+ *     bundler gap).
+ *
+ *   - **Local bundle** (`camunda-hub`): `localSpecDir` + (optional)
+ *     `entryFile`. `fetch-spec` passes `--spec-dir <localSpecDir>` (resolved
+ *     relative to the repo root) and skips the network entirely. Used when
+ *     the spec lives in a private repo and/or at a non-default in-repo path;
+ *     the spec directory is expected to be a sibling clone (e.g.
+ *     `../camunda-hub/restapi/public-api/src/main/resources/openapi/v2`,
+ *     matching `docker/start-hub.sh`'s `../camunda-hub` convention).
+ */
+export interface SpecSource {
+  repoUrl?: string;
+  entryFile?: string;
+  localSpecDir?: string;
+}
+
+const SPEC_SOURCE_KEYS = ['repoUrl', 'entryFile', 'localSpecDir'] as const;
+
+export function getActiveSpecSource(repoRoot: string): SpecSource {
+  const index = loadConfigsIndex(repoRoot);
+  const name = resolveActiveConfigName(index);
+  const entry = index.configs[name];
+  if (!isRecord(entry)) return {};
+  const spec = entry.spec;
+  if (spec === undefined) return {};
+  if (!isRecord(spec)) {
+    throw new Error(`Malformed configs.json: configs.${name}.spec must be an object when present.`);
+  }
+  const out: SpecSource = {};
+  for (const key of SPEC_SOURCE_KEYS) {
+    if (!Object.hasOwn(spec, key)) continue;
+    const v = spec[key];
+    const trimmed = typeof v === 'string' ? v.trim() : undefined;
+    if (trimmed === undefined || trimmed.length === 0) {
+      throw new Error(
+        `Malformed configs.json: configs.${name}.spec.${key} must be a non-empty string when present.`,
+      );
+    }
+    out[key] = trimmed;
+  }
+  return out;
+}

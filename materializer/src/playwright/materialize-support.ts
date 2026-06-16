@@ -466,6 +466,21 @@ export async function materializeFixtures(
   // the vendored copy across successive codegen runs.
   await fs.rm(destDir, { recursive: true, force: true });
 
+  // A config that ships no deployment artifacts (e.g. a file/folder
+  // management API like Camunda Hub) legitimately has no fixtures source
+  // directory. Treat a missing source as "no fixtures": create the empty
+  // destination so `@@FILE:` resolution still has a stable directory, and
+  // return without copying. Any other error (e.g. EACCES) still propagates.
+  try {
+    await fs.access(srcDir);
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      await fs.mkdir(destDir, { recursive: true });
+      return destDir;
+    }
+    throw err;
+  }
+
   async function copyDir(src: string, dest: string): Promise<void> {
     await fs.mkdir(dest, { recursive: true });
     for (const entry of await fs.readdir(src, { withFileTypes: true })) {

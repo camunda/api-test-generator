@@ -20,6 +20,7 @@ import {
   getActiveConfigDir,
   getActiveConfigName,
   getActivePlannerConfig,
+  getActiveSpecSource,
 } from '../../../path-analyser/src/configResolver.ts';
 
 let workdir: string;
@@ -162,4 +163,72 @@ describe('configResolver: per-config planner caps (#292)', () => {
     writeConfig({ maxVariantsPerEndpoint: 0 });
     expect(() => getActivePlannerConfig(workdir)).toThrow(/must be a positive integer/);
   });
+});
+
+describe('configResolver: per-config spec source (config-driven fetch-spec)', () => {
+  // fetch-spec reads the active config's `spec` block to decide between
+  // network fetch (repoUrl) and local bundling (localSpecDir). Class-scoped
+  // guards: (1) absent block yields an empty source (network fetch with
+  // defaults); (2) string fields pass through; (3) any non-string / empty
+  // field is rejected up front so a config typo can't silently spawn the
+  // bundler with a bogus path or url.
+  function writeSpec(spec: unknown): void {
+    writeFileSync(
+      join(workdir, 'configs.json'),
+      JSON.stringify({
+        default: 'camunda-oca',
+        configs: { 'camunda-oca': spec === undefined ? {} : { spec } },
+      }),
+    );
+  }
+
+  it('returns an empty source when no spec block is present', () => {
+    writeSpec(undefined);
+    expect(getActiveSpecSource(workdir)).toEqual({});
+  });
+
+  it('passes through repoUrl + entryFile (network-fetch mode)', () => {
+    writeSpec({
+      source: 'github:camunda/camunda',
+      repoUrl: 'https://x/y.git',
+      entryFile: 'r.yaml',
+    });
+    expect(getActiveSpecSource(workdir)).toEqual({
+      repoUrl: 'https://x/y.git',
+      entryFile: 'r.yaml',
+    });
+  });
+
+  it('passes through localSpecDir (local-bundle mode) and ignores unknown keys', () => {
+    writeSpec({ localSpecDir: '../sibling/spec', entryFile: 'r.yaml', source: 'github:o/r' });
+    expect(getActiveSpecSource(workdir)).toEqual({
+      localSpecDir: '../sibling/spec',
+      entryFile: 'r.yaml',
+    });
+  });
+
+  it('throws when spec is not an object', () => {
+    writeSpec(42);
+    expect(() => getActiveSpecSource(workdir)).toThrow(/spec must be an object/);
+  });
+
+  it('trims surrounding whitespace from string fields', () => {
+    writeSpec({ repoUrl: '  https://x/y.git  ', localSpecDir: '\t../sibling/spec\n' });
+    expect(getActiveSpecSource(workdir)).toEqual({
+      repoUrl: 'https://x/y.git',
+      localSpecDir: '../sibling/spec',
+    });
+  });
+
+  for (const key of ['repoUrl', 'entryFile', 'localSpecDir']) {
+    // Whitespace-only is treated as empty (class-scoped: a config typo
+    // like `" "` must fail fast, not silently produce an invalid
+    // url/path passed verbatim to the bundler).
+    for (const bad of [0, null, true, '', '   ', '\t', {}]) {
+      it(`throws when spec.${key} is ${JSON.stringify(bad)}`, () => {
+        writeSpec({ [key]: bad });
+        expect(() => getActiveSpecSource(workdir)).toThrow(/must be a non-empty string/);
+      });
+    }
+  }
 });

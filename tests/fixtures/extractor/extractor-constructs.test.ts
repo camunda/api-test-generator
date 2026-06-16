@@ -269,6 +269,103 @@ const fixtureProviderBooleanLeaf: OpenAPISpec = {
 };
 
 // ---------------------------------------------------------------------------
+// Fixture: operation-level array form of x-semantic-provider.
+//
+// The Camunda Hub Public API V2 annotates providers on the OPERATION
+// (`x-semantic-provider: ['projectKey']` as a sibling of `operationId`)
+// rather than on the response object schema. The named fields are response
+// leaves whose semantic type this operation authoritatively produces. The
+// extractor must honour this placement and flag the matching response
+// semantic entries `provider: true`, exactly as it does for the
+// schema-level array form (#33).
+// ---------------------------------------------------------------------------
+const fixtureProviderOperationLevel: OpenAPISpec = {
+  openapi: '3.0.3',
+  info: { title: 'fixture-provider-operation-level', version: '0.0.0' },
+  paths: {
+    '/projects': {
+      post: {
+        operationId: 'createProjectOpLevel',
+        // Operation-level provider declaration (Camunda Hub style).
+        'x-semantic-provider': ['projectKey'],
+        responses: {
+          '200': {
+            description: 'ok',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    projectKey: {
+                      // No schema-level provider flag here — the only
+                      // provider signal is the operation-level array.
+                      type: 'string',
+                      'x-semantic-type': 'ProjectKey',
+                    },
+                    workspaceKey: {
+                      // NOT listed in the operation-level array, so this
+                      // echoed foreign key must stay provider:false.
+                      type: 'string',
+                      'x-semantic-type': 'WorkspaceKey',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Fixture: operation-level provider naming a NESTED-array leaf.
+//
+// A response property that is an array-of-array of keys yields the field
+// path `keys[][]`. The operation-level array names the bare property
+// (`keys`), so leaf-segment matching must strip *all* trailing `[]`
+// groups, not just one — otherwise `keys[]` would never equal `keys` and
+// the provider flag would be silently dropped for nested array leaves.
+// ---------------------------------------------------------------------------
+const fixtureProviderOperationLevelNestedArray: OpenAPISpec = {
+  openapi: '3.0.3',
+  info: { title: 'fixture-provider-operation-level-nested-array', version: '0.0.0' },
+  paths: {
+    '/batches': {
+      post: {
+        operationId: 'createBatchOpLevel',
+        'x-semantic-provider': ['keys'],
+        responses: {
+          '200': {
+            description: 'ok',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    keys: {
+                      type: 'array',
+                      items: {
+                        type: 'array',
+                        items: {
+                          type: 'string',
+                          'x-semantic-type': 'ProjectKey',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
 
 describe('extractor construct fixtures', () => {
   describe('optional ancestor demotes leaf to optional (#31)', () => {
@@ -327,6 +424,32 @@ describe('extractor construct fixtures', () => {
     it('a leaf-level `x-semantic-provider: true` flags the entry as provider', () => {
       const refs = extractResponseFor(fixtureProviderBooleanLeaf, 'createThingBooleanProvider');
       const leaf = refs.find((r) => r.semanticType === 'ProcessDefinitionKey');
+      expect(leaf?.provider).toBe(true);
+    });
+  });
+
+  describe('operation-level array form of x-semantic-provider (Camunda Hub style)', () => {
+    it('a response leaf named in the operation-level array is flagged provider:true', () => {
+      const refs = extractResponseFor(fixtureProviderOperationLevel, 'createProjectOpLevel');
+      const key = refs.find((r) => r.semanticType === 'ProjectKey');
+      expect(key, 'expected projectKey to be extracted').toBeDefined();
+      expect(key?.provider).toBe(true);
+    });
+
+    it('a response leaf NOT named in the operation-level array stays provider:false', () => {
+      const refs = extractResponseFor(fixtureProviderOperationLevel, 'createProjectOpLevel');
+      const foreign = refs.find((r) => r.semanticType === 'WorkspaceKey');
+      expect(foreign, 'expected echoed workspaceKey to be extracted').toBeDefined();
+      expect(foreign?.provider).toBe(false);
+    });
+
+    it('a nested-array leaf (keys[][]) named by the bare property is flagged provider:true', () => {
+      const refs = extractResponseFor(
+        fixtureProviderOperationLevelNestedArray,
+        'createBatchOpLevel',
+      );
+      const leaf = refs.find((r) => r.fieldPath === 'keys[][]');
+      expect(leaf, 'expected nested-array leaf keys[][] to be extracted').toBeDefined();
       expect(leaf?.provider).toBe(true);
     });
   });
