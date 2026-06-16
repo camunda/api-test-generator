@@ -18,7 +18,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { getSpecBundleDir } from '../path-analyser/src/configResolver.ts';
+import { getActiveSpecSource, getSpecBundleDir } from '../path-analyser/src/configResolver.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), '..');
@@ -27,8 +27,15 @@ function main(): void {
   const argv = process.argv.slice(2);
   const refRequired = argv.includes('--ref-required');
 
+  const spec = getActiveSpecSource(REPO_ROOT);
+  const localSpecDir = spec.localSpecDir;
+  const useLocalSpecDir = localSpecDir !== undefined;
   const ref = process.env.SPEC_REF;
-  if (refRequired && (!ref || ref.trim() === '')) {
+
+  // SPEC_REF is only meaningful in network-fetch mode. In local-bundle mode
+  // the spec directory is whatever the sibling clone has checked out, so a
+  // ref is neither required nor used.
+  if (refRequired && !useLocalSpecDir && (!ref || ref.trim() === '')) {
     console.error('fetch-spec:ref requires SPEC_REF=<sha-or-ref> to be set');
     process.exit(2);
   }
@@ -37,14 +44,29 @@ function main(): void {
   mkdirSync(bundleDir, { recursive: true });
 
   const args: string[] = [];
-  if (ref && ref.trim() !== '') {
-    args.push('--ref', ref);
+  if (localSpecDir !== undefined) {
+    // Local bundle: skip the network fetch, bundle straight from the
+    // configured (sibling-clone) spec directory.
+    args.push('--spec-dir', resolve(REPO_ROOT, localSpecDir));
+  } else {
+    if (ref && ref.trim() !== '') {
+      args.push('--ref', ref);
+    }
+    if (spec.repoUrl) {
+      args.push('--repo-url', spec.repoUrl);
+    }
+  }
+  if (spec.entryFile) {
+    args.push('--entry-file', spec.entryFile);
   }
   args.push('--output-spec', join(bundleDir, 'rest-api.bundle.json'));
   args.push('--output-metadata', join(bundleDir, 'spec-metadata.json'));
   args.push('--output-semantic-kinds', join(bundleDir, 'semantic-kinds.json'));
 
-  console.error(`[fetch-spec] writing to ${bundleDir}${ref ? ` (ref ${ref})` : ''}`);
+  const sourceDesc = useLocalSpecDir
+    ? `local spec-dir ${spec.localSpecDir}`
+    : `${spec.repoUrl ?? 'default repo'}${ref ? ` @ ${ref}` : ''}`;
+  console.error(`[fetch-spec] writing to ${bundleDir} (source: ${sourceDesc})`);
 
   const child = spawn('npx', ['camunda-schema-bundler', ...args], {
     stdio: 'inherit',
