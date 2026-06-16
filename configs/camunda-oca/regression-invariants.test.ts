@@ -580,7 +580,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       semanticTypes?: Array<{
         name: string;
         kind?: string;
-        discoveredVia?: { operationId?: string };
+        discoveredVia?: { operationId?: string; filterBy?: string };
       }>;
     };
     const runtimeEmissionByName = new Map<string, string>();
@@ -694,12 +694,24 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       semanticTypes?: Array<{
         name: string;
         kind?: string;
-        discoveredVia?: { operationId?: string };
+        discoveredVia?: { operationId?: string; filterBy?: string };
       }>;
     };
+    // Phase A governs the filter-style discovery regime (searchUserTasks /
+    // searchIncidents): a forward-bound `{ filter: { [filterBy]: <bound> } }`
+    // body. Only emissions that declare `discoveredVia.filterBy` belong to
+    // that regime. Filterless discovery ops (#388 — e.g. `activateJobs`, whose
+    // jobType is bound by the runtime-state valueBinding, not a forward-bound
+    // filter) intentionally build their normal request body and extract keys
+    // via the producer auto-derive, so they are NOT subject to the filter
+    // wrapper guard below.
     const discoveryOpIds = new Set<string>();
     for (const t of semantics.semanticTypes ?? []) {
-      if (t.kind === 'runtimeEmission' && t.discoveredVia?.operationId) {
+      if (
+        t.kind === 'runtimeEmission' &&
+        t.discoveredVia?.operationId &&
+        t.discoveredVia.filterBy
+      ) {
         discoveryOpIds.add(t.discoveredVia.operationId);
       }
     }

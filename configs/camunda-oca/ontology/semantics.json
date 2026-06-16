@@ -25,7 +25,36 @@
     },
     {
       "name": "JobKey",
-      "witnesses": "JobAvailableForActivation"
+      "kind": "runtimeEmission",
+      "witnesses": "JobAvailableForActivation",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": [
+          "ModelHasServiceTaskType"
+        ]
+      },
+      "discoveredVia": {
+        "operationId": "activateJobs",
+        "extractKey": "jobKey",
+        "consistency": "eventual"
+      },
+      "$comment": "#388 — server-minted job key. Emitted after a deployment whose BPMN contains a service task of a known job type (ModelHasServiceTaskType) reaches that element during a process instance run. Discovered via activateJobs (the activated jobs[] carry jobKey + elementInstanceKey). Unlike searchUserTasks/searchIncidents, activateJobs filters by jobType (bound via the JobAvailableForActivation runtime-state valueBinding, request.jobType <- ModelHasServiceTaskType.jobType), not processInstanceKey — hence no discoveredVia.filterBy: the discovery step builds its normal activate body and the producer auto-derive extracts jobs[0].jobKey. Mirrors the #305 Phase 3 runtimeEmission pattern."
+    },
+    {
+      "name": "ElementInstanceKey",
+      "kind": "runtimeEmission",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": [
+          "ModelHasServiceTaskType"
+        ]
+      },
+      "discoveredVia": {
+        "operationId": "activateJobs",
+        "extractKey": "elementInstanceKey",
+        "consistency": "eventual"
+      },
+      "$comment": "#388 — server-minted key of the element instance (BPMN flow-node activation) a job belongs to. Co-emitted with JobKey: the same activateJobs call surfaces jobs[].elementInstanceKey alongside jobs[].jobKey, both extracted by the producer auto-derive. Required (with JobKey) in the agent-instance write bodies (updateAgentInstance, createAgentInstanceHistoryItem)."
     },
     {
       "name": "ElementId",
@@ -66,11 +95,6 @@
       "kind": "attribute",
       "clientMinted": true,
       "$comment": "Free-form correlation identifier attached to a process instance (createProcessInstance.businessId, searchProcessInstances.filter.businessId, etc.). Like Tag: client-minted, no producer endpoint, no first-order entity retrievable by it. The planner mints a deterministic value at the setter site; filter-consumer reuse is deferred (see #168)."
-    },
-    {
-      "name": "AgentInstanceKey",
-      "kind": "serverEmergent",
-      "$comment": "Server-minted lifecycle key for AI agent instances. No client API directly creates an AgentInstance with a returned key \u2014 instances emerge from agent runtime activity and are discoverable only via search/get. Used as a search-filter input; the planner mints a deterministic placeholder so the request validates and an empty result set is acceptable. See #162 PR 5."
     },
     {
       "name": "AuditLogKey",

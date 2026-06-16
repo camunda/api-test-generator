@@ -545,8 +545,39 @@ export function generateScenariosForEndpoint(
       continue;
     }
 
-    // Choose a semantic type to target next
-    const targetSemantic = remaining[0];
+    // Choose a semantic type to target next.
+    //
+    // #388 — prefer a target that can make immediate progress over the
+    // bare `remaining[0]`. The naive pick dead-ends when `remaining[0]`'s
+    // only producer has a required input that is ALSO still in `needed`:
+    // `deferForMissingPrereqs` then skips it without re-enqueueing (the
+    // deferred signature would equal the current one), and because the
+    // loop only ever targets `remaining[0]`, the unblocking prerequisite
+    // is never expanded. Example: `updateAgentInstance` needs
+    // `AgentInstanceKey` (producer `createAgentInstance`, which itself
+    // requires `ElementInstanceKey`) AND `ElementInstanceKey` (a
+    // runtimeEmission). Targeting `AgentInstanceKey` first dead-ends;
+    // targeting the runtimeEmission first builds the job context, after
+    // which `createAgentInstance` becomes chainable.
+    //
+    // A target is "actionable" when it is a runtimeEmission (always
+    // expandable via discovery) or has a producer/establisher whose
+    // required semantic inputs are already produced. This only reorders
+    // when `remaining[0]` is itself blocked, so endpoints whose first
+    // target is already actionable are unaffected.
+    const isActionableTarget = (st: string): boolean => {
+      const decl = graph.domain?.semanticTypes?.[st];
+      if (decl?.kind === 'runtimeEmission' && decl.discoveredVia && decl.emittedBy) return true;
+      const candidates = [
+        ...(graph.producersByType[st] ?? []),
+        ...(graph.establishersByType?.[st] ?? []),
+      ];
+      return candidates.some((opId) => {
+        const node = graph.operations[opId];
+        return !!node && hasSatisfiedRequiredInputs(node, state.produced);
+      });
+    };
+    const targetSemantic = remaining.find(isActionableTarget) ?? remaining[0];
 
     // #305 Phase 3 — `runtimeEmission` semantics declare a discovery
     // operation (ABox `discoveredVia.operationId`) that surfaces the
