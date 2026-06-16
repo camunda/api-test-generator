@@ -196,6 +196,18 @@ describe('materializeFixtures', () => {
     await expect(materializeFixtures(tmp)).resolves.toBe(path.join(tmp, FIXTURES_DIR_NAME));
   });
 
+  test('a missing fixtures source dir yields an empty fixtures/ dir, not an error', async () => {
+    // A config with no deployment artifacts (e.g. the Camunda Hub
+    // file/folder API) has no fixtures source directory. materializeFixtures
+    // must treat this as "no fixtures": create the empty destination and
+    // return it rather than throwing ENOENT.
+    const missingSrc = path.join(tmp, 'does-not-exist');
+    const destDir = await materializeFixtures(tmp, missingSrc);
+    expect(destDir).toBe(path.join(tmp, FIXTURES_DIR_NAME));
+    expect(existsSync(destDir), 'fixtures/ destination should exist').toBe(true);
+    expect(await fs.readdir(destDir), 'fixtures/ should be empty').toEqual([]);
+  });
+
   test('here-relative candidate path resolves to a materialized file when here is <outDir>/support/', async () => {
     // Guard against regressions to the fixture resolution path used by
     // support/fixtures.ts. That file calls:
