@@ -916,8 +916,46 @@ export class SchemaAnalyzer {
       return (spec.components?.requestBodies?.[requestBodyName] as T | undefined) ?? null;
     }
 
+    // Generic fallback: resolve any other local JSON Pointer (RFC 6901) by
+    // walking it against the document. This covers intra-document refs that
+    // schema bundlers emit when they DEDUPLICATE identical objects across the
+    // spec — e.g. a PATCH/DELETE operation whose `parameters` entry was replaced
+    // with `{ $ref: "#/paths/~1workspaces~1{workspaceKey}/get/parameters/0" }`
+    // because it was byte-identical to the GET operation's parameter. Without
+    // this, those parameters silently vanish, the operation loses its path-key
+    // requirement, and no producer chain is planned for it (#395).
+    if (ref.startsWith('#/')) {
+      const resolved = this.resolveJsonPointer(ref, spec);
+      if (resolved !== null) {
+        // biome-ignore lint/plugin: single boundary where untyped JSON is narrowed; caller declares expected schema type
+        return resolved as T;
+      }
+    }
+
     console.warn(`Unable to resolve reference: ${ref}`);
     return null;
+  }
+
+  /**
+   * Resolve a local JSON Pointer (RFC 6901) against the spec document, decoding
+   * the `~1` → `/` and `~0` → `~` escapes. Returns null if any segment is
+   * missing. Used as the generic fallback in {@link resolveReference} for refs
+   * the component-specific branches don't cover (notably bundler-deduplicated
+   * `#/paths/.../parameters/N` refs — #395).
+   */
+  private resolveJsonPointer(ref: string, spec: OpenAPISpec): unknown {
+    const tokens = ref
+      .slice(2) // drop the leading "#/"
+      .split('/')
+      .map((t) => t.replace(/~1/g, '/').replace(/~0/g, '~'));
+    let current: unknown = spec;
+    for (const token of tokens) {
+      if (current === null || typeof current !== 'object') return null;
+      // biome-ignore lint/plugin: single boundary where the untyped JSON document is indexed by a pointer segment
+      current = (current as Record<string, unknown>)[token];
+      if (current === undefined) return null;
+    }
+    return current ?? null;
   }
 
   /**

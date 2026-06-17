@@ -1304,10 +1304,11 @@ function buildRequestBodyFromCanonical(
             const values = chosenVariant.fieldEnums[name];
             template[name] = values[0];
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'object') {
-            // Object-typed required field with no binding: emit {} rather than seeding
-            // a string placeholder. An empty object is always a valid JSON value and
-            // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
-            template[name] = {};
+            // Object-typed required field: recursively fill its OWN required
+            // children rather than a bare {}, which drops required nested fields
+            // and triggers a server 400 (see the non-oneOf branch below). Yields
+            // {} unchanged when there are no required children.
+            template[name] = synthesizeObjectFromPrefix(`${name}.`, nodes);
           } else if ((declaredTypeByLeaf[name] ?? chosenVariant?.fieldTypes?.[name]) === 'array') {
             // #326 — emit a synthesised one-element array honouring the
             // item schema's own required set rather than `[]`, which
@@ -1335,6 +1336,13 @@ function buildRequestBodyFromCanonical(
       for (const f of requiredFields) {
         // Array nodes are recorded as 'field[]'; strip the suffix for the template key.
         const leaf = f.path.replace(/\[\]$/, '').split('.').pop() ?? '';
+        // A required NESTED field (path contains '.', e.g. `filter.workspaceKey`)
+        // is filled by its required parent object via synthesizeObjectFromPrefix
+        // (the `f.type === 'object'` branch below). Projecting its leaf here would
+        // both HOIST it to the body root and leave the parent as an empty `{}` —
+        // producing `{ filter: {}, workspaceKey: … }` and a server 400
+        // ("filter.workspaceKey must not be null"). Skip it; the parent owns it.
+        if (f.path.replace(/\[\]$/, '').includes('.')) continue;
         if (allowedFields && !allowedFields.has(leaf)) continue;
         const viaProvider = resolveProvider(opId, leaf, scenario);
         if (viaProvider !== undefined) {
@@ -1365,10 +1373,13 @@ function buildRequestBodyFromCanonical(
           // `${var}` placeholder that the server rejects with 400.
           template[leaf] = f.enum[0];
         } else if (f.type === 'object') {
-          // Object-typed required field with no binding: emit {} rather than seeding
-          // a string placeholder. An empty object is always a valid JSON value and
-          // avoids "Request property [X] cannot be parsed" broker errors (#174 sub-class 1).
-          template[leaf] = {};
+          // Object-typed required field: recursively fill its OWN required
+          // children (synthesizeObjectFromPrefix) rather than emitting a bare
+          // {}. A bare {} silently drops required NESTED fields — e.g. a search
+          // body's required `filter.workspaceKey` — which the server then
+          // rejects with 400 ("filter.workspaceKey must not be null"). When the
+          // object has no required children, this still yields {} (unchanged).
+          template[leaf] = synthesizeObjectFromPrefix(`${normalizedPath}.`, nodes);
         } else if (f.type === 'array') {
           // #326 — see synthesizeArrayElement docblock. `f.path` is
           // recorded as `<field>[]` for top-level arrays; strip the

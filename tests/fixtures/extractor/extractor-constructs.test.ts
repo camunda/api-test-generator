@@ -34,6 +34,13 @@ function extractResponseFor(spec: OpenAPISpec, opId: string): SemanticTypeRefere
   return out;
 }
 
+function extractParametersFor(spec: OpenAPISpec, opId: string) {
+  const ops = new SchemaAnalyzer().extractOperations(spec);
+  const op = ops.find((o) => o.operationId === opId);
+  if (!op) throw new Error(`fixture: operation ${opId} not present in extracted spec`);
+  return op.parameters;
+}
+
 // ---------------------------------------------------------------------------
 // Fixture #31 — optional ancestor demotes a leaf to optional.
 //
@@ -451,6 +458,64 @@ describe('extractor construct fixtures', () => {
       const leaf = refs.find((r) => r.fieldPath === 'keys[][]');
       expect(leaf, 'expected nested-array leaf keys[][] to be extracted').toBeDefined();
       expect(leaf?.provider).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fixture #395 — bundler-deduplicated parameter $ref (intra-document pointer).
+  //
+  // Schema bundlers replace a parameter that is byte-identical across
+  // operations with a JSON-pointer $ref into the FIRST occurrence, e.g. the
+  // PATCH op's `parameters[0]` becomes
+  //   { $ref: '#/paths/~1things~1{thingKey}/get/parameters/0' }
+  // The extractor must follow that pointer; otherwise the parameter (and its
+  // path-key requirement) vanishes, no producer chain is planned, and the
+  // emitted test calls the endpoint with an unbound `${thingKey}` → 404.
+  // -------------------------------------------------------------------------
+  describe('bundler-deduplicated parameter $ref into #/paths/.../parameters/N (#395)', () => {
+    const fixtureDedupedParamRef: OpenAPISpec = {
+      openapi: '3.0.3',
+      info: { title: 'fixture-deduped-param-ref', version: '0.0.0' },
+      paths: {
+        '/things/{thingKey}': {
+          get: {
+            operationId: 'getThing',
+            parameters: [
+              {
+                name: 'thingKey',
+                in: 'path',
+                required: true,
+                schema: { type: 'string', 'x-semantic-type': 'ThingKey' },
+              },
+            ],
+            responses: { '200': { description: 'ok' } },
+          },
+          patch: {
+            operationId: 'updateThing',
+            // The bundler collapsed this identical param to a pointer into GET.
+            parameters: [{ $ref: '#/paths/~1things~1{thingKey}/get/parameters/0' }],
+            requestBody: {
+              required: true,
+              content: { 'application/json': { schema: { type: 'object' } } },
+            },
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+    };
+
+    it('GET keeps its inline path param (control)', () => {
+      const params = extractParametersFor(fixtureDedupedParamRef, 'getThing');
+      expect(params.map((p) => [p.name, p.location, p.semanticType])).toEqual([
+        ['thingKey', 'path', 'ThingKey'],
+      ]);
+    });
+
+    it('PATCH resolves the deduped pointer ref to the same path param', () => {
+      const params = extractParametersFor(fixtureDedupedParamRef, 'updateThing');
+      expect(params.map((p) => [p.name, p.location, p.semanticType])).toEqual([
+        ['thingKey', 'path', 'ThingKey'],
+      ]);
     });
   });
 });
