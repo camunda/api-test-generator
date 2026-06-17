@@ -45,8 +45,17 @@ check_start_preconditions() {
 # not yet reflected in node_modules) from causing webpack compile failures.
 sync_frontend_deps() {
   echo "Syncing frontend dependencies (npm ci)..."
-  npm ci --workspace=apps/hub --prefix "$HUB_REPO/frontend" 2>&1 \
-    | grep -v "^npm warn\|^npm notice" || true
+  # Capture output so a genuine `npm ci` failure aborts (declare then assign —
+  # `local log=$(...)` would mask the command's exit status behind `local`'s).
+  # The previous `… | grep … || true` pipeline swallowed failures and still
+  # printed success, risking a start with broken frontend deps.
+  local log
+  if ! log="$(npm ci --workspace=apps/hub --prefix "$HUB_REPO/frontend" 2>&1)"; then
+    echo "$log" | grep -v "^npm warn\|^npm notice" || true
+    echo "Error: 'npm ci' failed for the Hub frontend (see output above)." >&2
+    return 1
+  fi
+  echo "$log" | grep -v "^npm warn\|^npm notice" || true
   echo "Frontend dependencies up to date."
 }
 

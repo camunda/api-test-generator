@@ -166,7 +166,15 @@ export async function materializeSupport(
   //
   // env.ts is rendered via Mustache so per-config options (e.g. defaultBaseUrl)
   // can be baked in at codegen time rather than threaded through every suite.
-  const envView = { defaultBaseUrl: 'http://localhost:8080/v2', ...templateView };
+  // Resolve defaultBaseUrl with `??` rather than spreading `templateView` over the
+  // fallback: callers pass `{ defaultBaseUrl: undefined }` when the config omits
+  // the field, and a plain spread would overwrite the fallback with `undefined` →
+  // Mustache renders `{{{defaultBaseUrl}}}` as '' → buildBaseUrl() returns '' when
+  // API_BASE_URL is unset.
+  const envView = {
+    ...templateView,
+    defaultBaseUrl: templateView?.defaultBaseUrl ?? 'http://localhost:8080/v2',
+  };
   for (const name of SUPPORT_TEMPLATE_FILES) {
     const dest = path.join(destDir, name);
     if (exclude.has(name)) {
