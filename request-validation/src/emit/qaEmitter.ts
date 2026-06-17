@@ -209,15 +209,23 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
     }
   }
   const headersExpr =
-    s.type === 'auth-deny'
-      ? // Read-side RBAC deny: authenticate as the zero-grant probe user,
-        // never the admin, so the authorizations-enabled server denies the request.
-        'denyProbeHeaders()'
-      : s.headersAuth
-        ? s.bodyEncoding === 'multipart'
-          ? 'authHeaders()'
-          : 'jsonHeaders()'
-        : '{}';
+    s.type === 'auth-invalid'
+      ? // Auth-invalid: a well-formed Authorization header carrying a garbage
+        // credential (`Bearer invalid-token`). Exercises the invalid/unknown-
+        // credential path — the server must reject a present-but-bad header,
+        // not just a missing one.
+        // For Bearer/JWT APIs this exercises token validation specifically; for
+        // other schemes it's just an invalid credential. No helper needed.
+        "{ Authorization: 'Bearer invalid-token' }"
+      : s.type === 'auth-deny'
+        ? // Read-side RBAC deny: authenticate as the zero-grant probe user,
+          // never the admin, so the authorizations-enabled server denies the request.
+          'denyProbeHeaders()'
+        : s.headersAuth
+          ? s.bodyEncoding === 'multipart'
+            ? 'authHeaders()'
+            : 'jsonHeaders()'
+          : '{}';
   const dataPart =
     s.bodyEncoding === 'multipart' && s.multipartForm
       ? ',\n      multipart: formData'
@@ -375,6 +383,8 @@ function buildBaseTitle(s: ValidationScenario): string {
       return `${s.operationId} - allOf conflict`;
     case 'auth-absent':
       return `${s.operationId} - Missing authentication`;
+    case 'auth-invalid':
+      return `${s.operationId} - Invalid authentication token`;
     case 'auth-deny':
       return `${s.operationId} - Denied (no permission)`;
     case 'not-found-fake-id':

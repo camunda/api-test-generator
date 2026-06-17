@@ -54,6 +54,20 @@ export interface OperationModel {
    */
   conditionalAuth?: boolean;
   /**
+   * True when the operation's effective `security` requirement (its own, the
+   * path item's, or the global `security`, by OpenAPI precedence) *mandates*
+   * authentication — i.e. it is a non-empty array in which EVERY alternative
+   * names at least one scheme, regardless of `x-enforcement`.
+   *
+   * The `security` array is an OR: an empty Security Requirement Object `{}`
+   * (or an empty array `[]`) permits anonymous access, so either makes this
+   * `false`. Distinct from `conditionalAuth`: this is the "does this op require
+   * auth at all" signal, used by BOTH 401 generators (auth-absent and
+   * auth-invalid) under `authAbsentMode: 'all-secured'` for APIs uniformly
+   * authenticated via a single global scheme (e.g. Hub).
+   */
+  secured?: boolean;
+  /**
    * Response status codes the operation declares in its OpenAPI `responses`
    * map (e.g. `['200','400','404','500']`). Used by the not-found-fake-id
    * generator to emit a 404 test only when the contract actually allows a
@@ -110,6 +124,7 @@ export type ScenarioKind =
   | 'allof-conflict'
   | 'not-found-fake-id'
   | 'auth-absent'
+  | 'auth-invalid'
   | 'auth-deny';
 
 export interface ValidationScenario {
@@ -125,10 +140,14 @@ export interface ValidationScenario {
   description: string;
   /**
    * Whether to send the configured *admin* credentials, i.e. authHeaders()
-   * (multipart) / jsonHeaders() (JSON). false → no headers ({}).
-   * NOTE: this flag does not govern `auth-deny` scenarios — those always
-   * authenticate as the zero-grant probe user via denyProbeHeaders() (a
-   * different principal) regardless of this value, which they leave false.
+   * (multipart) / jsonHeaders() (JSON). false → no admin credentials.
+   * NOTE: some scenario kinds render their own `Authorization` header
+   * regardless of this flag (which they leave `false`):
+   *   - `auth-deny` authenticates as the zero-grant probe user via
+   *     denyProbeHeaders() (a different principal);
+   *   - `auth-invalid` sends a well-formed header carrying an invalid/unknown
+   *     credential (`Bearer invalid-token`).
+   * For all other kinds, `false` → no headers (`{}`).
    */
   headersAuth: boolean;
   source?: 'body' | 'query' | 'path' | 'header' | 'cookie';

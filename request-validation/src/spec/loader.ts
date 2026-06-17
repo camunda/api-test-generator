@@ -94,6 +94,32 @@ function securityRequiresConditional(
   return false;
 }
 
+/**
+ * Evaluate whether a `security` requirement list *mandates* authentication.
+ *
+ * The OpenAPI `security` array is an OR of Security Requirement Objects. An
+ * empty object `{}` is the "anonymous access permitted" alternative, so its
+ * presence — like an empty array `[]` — means auth is NOT required even if a
+ * sibling alternative names a scheme. Authentication is mandatory only when
+ * EVERY alternative demands at least one scheme.
+ *
+ * - `true`      — non-empty list AND every alternative references ≥1 scheme.
+ * - `false`     — `security: []`, OR any `{}` (anonymous) alternative present.
+ * - `undefined` — no `security` declared at this level; the caller should fall
+ *                 back to the path-item / global `security`.
+ *
+ * Mirrors `securityRequiresConditional`'s precedence contract but is agnostic
+ * to `x-enforcement` — it drives the `authAbsentMode: 'all-secured'` 401
+ * surface for uniformly-authenticated APIs (e.g. Hub).
+ */
+function securityRequiresAuth(security: unknown): boolean | undefined {
+  if (!Array.isArray(security)) return undefined;
+  if (security.length === 0) return false;
+  return security.every(
+    (requirement) => isRecord(requirement) && Object.keys(requirement).length > 0,
+  );
+}
+
 function buildParameter(raw: unknown): ParameterModel | undefined {
   if (!isRecord(raw)) return undefined;
   const name = asString(raw.name);
@@ -214,6 +240,11 @@ export async function loadSpec(file: string): Promise<SpecModel> {
           securityRequiresConditional(op.security, conditionalSchemes) ??
           securityRequiresConditional(pathLevelSecurity, conditionalSchemes) ??
           securityRequiresConditional(globalSecurity, conditionalSchemes) ??
+          false,
+        secured:
+          securityRequiresAuth(op.security) ??
+          securityRequiresAuth(pathLevelSecurity) ??
+          securityRequiresAuth(globalSecurity) ??
           false,
       });
     }

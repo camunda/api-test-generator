@@ -28,10 +28,29 @@ export interface RequestValidationConfig {
    * camunda/camunda#52409).
    */
   enumCaseInsensitive: boolean;
+  /**
+   * Which operations the 401 generators — auth-absent (no credentials) and
+   * auth-invalid (invalid/unknown bearer credential) — target in the `secured` profile.
+   *
+   * - `'conditional'` (default) — only operations secured on the conditional
+   *   `auth` axis (a `security` requirement referencing an
+   *   `x-enforcement: conditional` scheme — camunda/camunda#53708). This is the
+   *   OCA model, where most of the API is unconditionally public and only a
+   *   subset is conditionally secured.
+   * - `'all-secured'` — every operation whose effective `security` *mandates*
+   *   authentication (`OperationModel.secured`: every OR-alternative names a
+   *   scheme; `false` for `security: []` and for any anonymous `{}` alternative
+   *   like `[{}, { bearerAuth: [] }]`, which permits unauthenticated access).
+   *   For an API uniformly authenticated via a single global scheme (e.g.
+   *   Camunda Hub's `security: [{ bearerAuth: [] }]`, which declares no
+   *   `x-enforcement`), this emits a no-credentials → 401 probe per secured op.
+   */
+  authAbsentMode: 'conditional' | 'all-secured';
 }
 
 const DEFAULTS: RequestValidationConfig = {
   enumCaseInsensitive: false,
+  authAbsentMode: 'conditional',
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -74,6 +93,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.enumCaseInsensitive = v;
+  }
+  if ('authAbsentMode' in parsed) {
+    const v = parsed.authAbsentMode;
+    if (v !== 'conditional' && v !== 'all-secured') {
+      throw new Error(
+        `Invalid ${configPath}: "authAbsentMode" must be "conditional" or "all-secured", got ${JSON.stringify(v)}.`,
+      );
+    }
+    merged.authAbsentMode = v;
   }
   return merged;
 }
