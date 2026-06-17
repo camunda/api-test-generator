@@ -21,7 +21,13 @@
 // the unsecured/secured suites are unaffected. All creates are idempotent — an
 // already-existing resource (HTTP 409) is treated as success.
 
-import { authHeaders, basicAuthHeaders, credentials, denyProbeCredentials } from './env';
+import {
+  authHeaders,
+  basicAuthHeaders,
+  credentials,
+  denyProbeBearerToken,
+  denyProbeCredentials,
+} from './env';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -79,6 +85,18 @@ const FIXTURES: ReadonlyArray<{ label: string; path: string; body: unknown }> = 
 
 async function globalSetup(): Promise<void> {
   if (process.env.RV_PROFILE !== 'rbac') return;
+
+  // Bearer-probe mode (authDenyMode: 'all-secured', e.g. Hub): the deny probe is
+  // a reduced-permission token minted out-of-band (Keycloak), and the target
+  // authorizes before any resource lookup — so there are no fixtures to create
+  // and no probe USER to provision. Nothing to set up here.
+  if (denyProbeBearerToken) {
+    console.log(
+      '[rbac global-setup] Bearer-probe mode (RBAC_DENY_PROBE_BEARER_TOKEN set) — ' +
+        'no fixtures/probe-user provisioning needed.',
+    );
+    return;
+  }
 
   const admin = authHeaders();
   if (!admin.Authorization) {

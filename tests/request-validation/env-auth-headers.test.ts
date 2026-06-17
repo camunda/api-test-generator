@@ -12,6 +12,9 @@ const ENV_KEYS = [
   'CAMUNDA_BASIC_AUTH_PASSWORD',
   'BEARER_TOKEN',
   'RV_PROFILE',
+  'RBAC_DENY_PROBE_BEARER_TOKEN',
+  'RBAC_DENY_PROBE_USER',
+  'RBAC_DENY_PROBE_PASSWORD',
 ] as const;
 
 beforeEach(() => {
@@ -27,6 +30,11 @@ afterEach(() => {
 async function loadAuthHeaders() {
   const mod = await import('../../request-validation/templates/support/env.js');
   return mod.authHeaders;
+}
+
+async function loadDenyProbeHeaders() {
+  const mod = await import('../../request-validation/templates/support/env.js');
+  return mod.denyProbeHeaders;
 }
 
 describe('authHeaders() precedence', () => {
@@ -68,5 +76,21 @@ describe('authHeaders() precedence', () => {
     expect(authHeaders()).toEqual({});
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0][0]).toContain('partial credential is ignored');
+  });
+});
+
+describe('denyProbeHeaders() scheme selection', () => {
+  it('returns Bearer from RBAC_DENY_PROBE_BEARER_TOKEN when set (all-secured / Hub mode)', async () => {
+    process.env.RBAC_DENY_PROBE_BEARER_TOKEN = 'deny-tok';
+    const denyProbeHeaders = await loadDenyProbeHeaders();
+    expect(denyProbeHeaders()).toEqual({ Authorization: 'Bearer deny-tok' });
+  });
+
+  it('falls back to the Basic zero-grant probe user when no bearer token is set (OCA slice mode)', async () => {
+    process.env.RBAC_DENY_PROBE_USER = 'probe';
+    process.env.RBAC_DENY_PROBE_PASSWORD = 'pw';
+    const denyProbeHeaders = await loadDenyProbeHeaders();
+    const encoded = Buffer.from('probe:pw').toString('base64');
+    expect(denyProbeHeaders()).toEqual({ Authorization: `Basic ${encoded}` });
   });
 });

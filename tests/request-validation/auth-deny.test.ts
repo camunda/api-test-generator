@@ -109,3 +109,101 @@ describe('request-validation: auth-deny emitter shape', () => {
     expect(rendered).toContain('assertResponseStatus(testInfo, res, 403');
   });
 });
+
+// All-secured mode (authDenyMode: 'all-secured', e.g. Hub): one 403 per secured
+// op with dummy keys, no SLICE, no fixtures. Targets the same `secured` field the
+// 401 generators use, so the 403 surface lines up with the 401 surface.
+const securedOps: OperationModel[] = [
+  // secured reads/writes across methods — all targeted.
+  {
+    operationId: 'getProject',
+    method: 'GET',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  {
+    operationId: 'searchProjects',
+    method: 'POST',
+    path: '/projects/search',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  {
+    operationId: 'createProject',
+    method: 'POST',
+    path: '/projects',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  {
+    operationId: 'updateProject',
+    method: 'PATCH',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  {
+    operationId: 'deleteProject',
+    method: 'DELETE',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  // public op (security: [] or anonymous {}) — secured:false → never a deny target.
+  {
+    operationId: 'getHealth',
+    method: 'GET',
+    path: '/health',
+    tags: [],
+    parameters: [],
+    secured: false,
+  },
+  // unannotated op (no `secured` field) — excluded (only `secured === true` qualifies).
+  { operationId: 'getMeta', method: 'GET', path: '/meta', tags: [], parameters: [] },
+];
+
+describe('request-validation: auth-deny all-secured mode', () => {
+  it('emits one 403 scenario per secured op (any method), excluding public/unannotated ops', () => {
+    const scenarios = generateAuthDeny(securedOps, { allSecured: true });
+    expect(scenarios.map((s) => s.operationId).sort()).toEqual(
+      ['createProject', 'deleteProject', 'getProject', 'searchProjects', 'updateProject'].sort(),
+    );
+  });
+
+  it('each scenario is a strict 403 deny with dummy keys and no admin auth', () => {
+    for (const s of generateAuthDeny(securedOps, { allSecured: true })) {
+      expect(s.type).toBe('auth-deny');
+      expect(s.expectedStatus).toBe(403);
+      expect(s.headersAuth).toBe(false);
+      // path tokens resolve to the fixed dummy value; tokenless paths get none.
+      for (const v of Object.values(s.params ?? {})) expect(v).toBe('x');
+    }
+  });
+
+  it('substitutes a dummy value for each path token; tokenless ops get no params', () => {
+    const byId = Object.fromEntries(
+      generateAuthDeny(securedOps, { allSecured: true }).map((s) => [s.operationId, s]),
+    );
+    expect(byId.getProject.params).toEqual({ projectKey: 'x' });
+    expect(byId.createProject.params).toBeUndefined();
+  });
+
+  it('honours the onlyOperations filter', () => {
+    const scenarios = generateAuthDeny(securedOps, {
+      allSecured: true,
+      onlyOperations: new Set(['deleteProject']),
+    });
+    expect(scenarios.map((s) => s.operationId)).toEqual(['deleteProject']);
+  });
+
+  it('does NOT use the OCA slice in all-secured mode (slice ops without `secured` are skipped)', () => {
+    // `ops` (the slice fixtures) carry no `secured` field, so all-secured emits nothing for them.
+    expect(generateAuthDeny(ops, { allSecured: true })).toHaveLength(0);
+  });
+});

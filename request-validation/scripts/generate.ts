@@ -137,6 +137,7 @@ async function main() {
   let rvConfig: RequestValidationConfig = {
     enumCaseInsensitive: false,
     authAbsentMode: 'conditional',
+    authDenyMode: 'slice',
   };
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
@@ -149,7 +150,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, authAbsentMode=${rvConfig.authAbsentMode})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -246,13 +247,16 @@ async function main() {
       }),
     );
   }
-  // auth-deny (HTTP 403) scenarios are read-side RBAC deny-tests (#359). Like
-  // auth-absent they depend only on the operation, not body/parameter shape, and
-  // are emitted exclusively into the `rbac` profile (see profile split below).
+  // auth-deny (HTTP 403) scenarios are RBAC deny-tests. In the default `slice`
+  // mode they are the OCA read-side allowlist (#359); under `authDenyMode:
+  // 'all-secured'` (Hub) they cover every secured op with a reduced-permission
+  // Bearer probe. Either way they depend only on the operation, not body/parameter
+  // shape, and are emitted exclusively into the `rbac` profile (see profile split).
   if (wantKind('auth-deny')) {
     scenarios.push(
       ...generateAuthDeny(model.operations, {
         onlyOperations: opts.onlyOperations,
+        allSecured: rvConfig.authDenyMode === 'all-secured',
       }),
     );
   }
