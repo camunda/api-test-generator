@@ -166,6 +166,11 @@ export const PlaywrightEmitter: EmitterStrategy = {
         description:
           'When true, every emitted scenario step appends a recordResponse({...}) call and the suite imports recordResponse/sanitizeBody from ./support/recorder. Defaults to false; recorder.ts is also vendored conditionally.',
       },
+      defaultBaseUrl: {
+        type: 'string',
+        description:
+          'Default base URL baked into support/env.ts at codegen time. Used as the fallback when API_BASE_URL is not set at runtime. Overrides the generic http://localhost:8080/v2 default for configs whose server is not at that address.',
+      },
     },
   },
   async scaffold(_ctx: EmitContext): Promise<EmittedFile[]> {

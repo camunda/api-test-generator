@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Start or stop camunda-hub (Web Modeler) in Self-Managed mode.
+# Start, stop, or check the status of camunda-hub (Web Modeler) in Self-Managed mode.
 # Expects camunda-hub to be cloned as a sibling directory: ../camunda-hub
+#
+# Usage:
+#   ./docker/start-hub.sh [start|stop|status]
+#
+# Environment variables (all optional):
+#   HUB_UI_PORT      Frontend port (default: 8088)
+#   KEYCLOAK_PORT    Keycloak port (default: 18080)
+#   JAVA_HOME        Must point to a JDK 21+ installation
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +22,7 @@ LOG_FILE="$REPO_ROOT/test-results/.hub.log"
 # `stop` just kills the PID and tears down Docker, so it must not require them.
 check_start_preconditions() {
   local missing=()
-  for cmd in docker curl python3 lsof make; do
+  for cmd in docker curl python3 lsof make npm; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
@@ -30,6 +38,33 @@ check_start_preconditions() {
     echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
     exit 1
   fi
+}
+
+# Sync frontend node_modules to the lockfile before starting the dev server.
+# This prevents stale installs (e.g. a package updated in package-lock.json but
+# not yet reflected in node_modules) from causing webpack compile failures.
+sync_frontend_deps() {
+  echo "Syncing frontend dependencies (npm ci)..."
+  npm ci --workspace=apps/hub --prefix "$HUB_REPO/frontend" 2>&1 \
+    | grep -v "^npm warn\|^npm notice" || true
+  echo "Frontend dependencies up to date."
+}
+
+# Poll until the Hub UI responds with HTTP 200.
+wait_for_ready() {
+  local hub_ui_port="${HUB_UI_PORT:-8088}"
+  local url="http://localhost:${hub_ui_port}/login"
+  local attempts=0
+  echo "Waiting for Hub UI at ${url}..."
+  until curl -sf -o /dev/null "$url"; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 90 ]; then
+      echo "Error: Hub UI did not become ready within 90 attempts (≈3 min). Check $LOG_FILE for details."
+      return 1
+    fi
+    sleep 2
+  done
+  echo "Hub UI is ready at http://localhost:${hub_ui_port}"
 }
 
 fix_keycloak() {
@@ -109,7 +144,45 @@ for m in json.load(sys.stdin):
     }" > /dev/null
   echo "Keycloak: fixed web-modeler audience mapper → web-modeler-api"
 
-  # 2. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
+  # 2a. Idempotently add web-modeler-api audience mapper to c8-client (M2M test client).
+  #     The API test suite authenticates as c8-client; its JWT must carry aud=web-modeler-api
+  #     so the restapi's resource-server security accepts it for /v2/* endpoints.
+  local c8_client_uuid
+  c8_client_uuid=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
+    "${realm_url}/clients?clientId=c8-client" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')")
+  if [ -n "$c8_client_uuid" ]; then
+    local already_has_mapper
+    already_has_mapper=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
+      "${realm_url}/clients/${c8_client_uuid}/protocol-mappers/models" \
+      | python3 -c "
+import sys,json
+for m in json.load(sys.stdin):
+    if m.get('config',{}).get('included.client.audience') == 'web-modeler-api':
+        print('yes'); break
+") || true
+    if [ "${already_has_mapper:-}" != "yes" ]; then
+      curl -sf -X POST \
+        -H "Authorization: Bearer ${admin_token}" \
+        -H "Content-Type: application/json" \
+        "${realm_url}/clients/${c8_client_uuid}/protocol-mappers/models" \
+        -d '{
+          "name": "web-modeler-api Audience Mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "web-modeler-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }' > /dev/null
+      echo "Keycloak: added web-modeler-api audience mapper to c8-client"
+    else
+      echo "Keycloak: c8-client already has web-modeler-api audience mapper (skipped)"
+    fi
+  fi
+
+  # 2b. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
   #    Identity creates the roles but does not assign them to seeded users.
   local demo_user_id
   demo_user_id=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
@@ -155,6 +228,7 @@ case "${1:-start}" in
     fi
     echo "Starting Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" up -d
+    sync_frontend_deps
     fix_keycloak
     echo "Starting Hub app (restapi + frontend)..."
     cd "$HUB_REPO"
@@ -174,7 +248,8 @@ case "${1:-start}" in
       echo "Error: Hub app exited immediately. Check $LOG_FILE for details."
       exit 1
     fi
-    echo "Hub app started (PID $MAKE_PID). Logs: $LOG_FILE"
+    echo "Hub app starting (PID $MAKE_PID). Logs: $LOG_FILE"
+    wait_for_ready
     echo "Run './docker/start-hub.sh stop' to stop."
     ;;
   stop)
@@ -205,8 +280,33 @@ case "${1:-start}" in
     echo "Stopping Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" down
     ;;
+  status)
+    hub_ui_port="${HUB_UI_PORT:-8088}"
+    echo "=== Hub status ==="
+    if [ -f "$PID_FILE" ]; then
+      MAKE_PID=$(cat "$PID_FILE")
+      if kill -0 "$MAKE_PID" 2>/dev/null; then
+        echo "App process : running (PID $MAKE_PID)"
+      else
+        echo "App process : stopped (stale PID file — run start)"
+      fi
+    else
+      echo "App process : no PID file (not started via this script)"
+    fi
+    if curl -sf -o /dev/null "http://localhost:${hub_ui_port}/login" 2>/dev/null; then
+      echo "Hub UI      : http://localhost:${hub_ui_port}  ✓ responding"
+    else
+      echo "Hub UI      : http://localhost:${hub_ui_port}  ✗ not responding"
+    fi
+    if curl -sf -o /dev/null "http://localhost:${KEYCLOAK_PORT:-18080}/auth/" 2>/dev/null; then
+      echo "Keycloak    : http://localhost:${KEYCLOAK_PORT:-18080}  ✓ responding"
+    else
+      echo "Keycloak    : http://localhost:${KEYCLOAK_PORT:-18080}  ✗ not responding"
+    fi
+    echo "Logs        : $LOG_FILE"
+    ;;
   *)
-    echo "Usage: ./docker/start-hub.sh [start|stop]"
+    echo "Usage: ./docker/start-hub.sh [start|stop|status]"
     exit 1
     ;;
 esac

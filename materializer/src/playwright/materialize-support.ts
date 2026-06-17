@@ -131,12 +131,19 @@ function defaultProjectTemplatesDir(): string {
  *                            is also removed, so re-running the materializer
  *                            over an existing suite cannot leave a stale
  *                            helper behind.
+ * @param templateView        Optional Mustache view applied when rendering
+ *                            `env.ts`. Supported keys:
+ *                            - `defaultBaseUrl`: overrides the fallback URL
+ *                              that `buildBaseUrl()` returns when `API_BASE_URL`
+ *                              is not set. When absent, falls back to
+ *                              `http://localhost:8080/v2`.
  * @returns                   Path to the support directory under `outDir`.
  */
 export async function materializeSupport(
   outDir: string,
   templatesDir?: string,
   excludeSupportFiles?: readonly string[],
+  templateView?: { defaultBaseUrl?: string },
 ): Promise<string> {
   const srcDir = templatesDir ?? defaultTemplatesDir();
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
@@ -156,13 +163,22 @@ export async function materializeSupport(
   // For excluded names, actively remove any pre-existing destination file
   // so a previous run with the helper enabled does not leave a stale copy
   // behind. `fs.rm({ force: true })` is a no-op when the file is absent.
+  //
+  // env.ts is rendered via Mustache so per-config options (e.g. defaultBaseUrl)
+  // can be baked in at codegen time rather than threaded through every suite.
+  const envView = { defaultBaseUrl: 'http://localhost:8080/v2', ...templateView };
   for (const name of SUPPORT_TEMPLATE_FILES) {
     const dest = path.join(destDir, name);
     if (exclude.has(name)) {
       await fs.rm(dest, { force: true });
       continue;
     }
-    await fs.copyFile(path.join(srcDir, name), dest);
+    if (name === 'env.ts') {
+      const src = await fs.readFile(path.join(srcDir, name), 'utf8');
+      await fs.writeFile(dest, Mustache.render(src, envView), 'utf8');
+    } else {
+      await fs.copyFile(path.join(srcDir, name), dest);
+    }
   }
 
   return destDir;
