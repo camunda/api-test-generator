@@ -11,7 +11,7 @@ import {
   generateUniqueItemsViolations,
 } from '../src/analysis/advancedSchema.js';
 import { generateAllOfConflicts, generateAllOfMissingRequired } from '../src/analysis/allOf.js';
-import { generateAuthAbsent } from '../src/analysis/authAbsent.js';
+import { generateAuthAbsent, generateAuthInvalid } from '../src/analysis/authAbsent.js';
 import { generateAuthDeny } from '../src/analysis/authDeny.js';
 import { generateBodyTopTypeMismatch, generateMissingBody } from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
@@ -38,7 +38,7 @@ import {
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
-import { loadRequestValidationConfig } from '../src/config.js';
+import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
@@ -134,7 +134,10 @@ async function main() {
   // workflow did not require repoRoot for anything.
   const repoRoot = findRepoRoot(process.cwd());
   let configName = '(unknown)';
-  let rvConfig = { enumCaseInsensitive: false };
+  let rvConfig: RequestValidationConfig = {
+    enumCaseInsensitive: false,
+    authAbsentMode: 'conditional',
+  };
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
     rvConfig = loadRequestValidationConfig(repoRoot, configName);
@@ -146,7 +149,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, authAbsentMode=${rvConfig.authAbsentMode})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -221,12 +224,25 @@ async function main() {
     );
   }
   // auth-absent (HTTP 401) scenarios are not "deep": they depend only on the
-  // operation's conditional-auth status, not on body/parameter shape. They are
-  // emitted exclusively into the `secured` profile (see profile split below).
+  // operation's auth status, not on body/parameter shape — `conditionalAuth`
+  // (default) or `secured` under `authAbsentMode: 'all-secured'`. Emitted
+  // exclusively into the `secured` profile (see profile split below).
   if (wantKind('auth-absent')) {
     scenarios.push(
       ...generateAuthAbsent(model.operations, {
         onlyOperations: opts.onlyOperations,
+        allSecured: rvConfig.authAbsentMode === 'all-secured',
+      }),
+    );
+  }
+  // auth-invalid (HTTP 401) scenarios send a well-formed Authorization header
+  // with an invalid/unknown credential (vs auth-absent's no-credentials). Same
+  // operation surface; also `secured`-only.
+  if (wantKind('auth-invalid')) {
+    scenarios.push(
+      ...generateAuthInvalid(model.operations, {
+        onlyOperations: opts.onlyOperations,
+        allSecured: rvConfig.authAbsentMode === 'all-secured',
       }),
     );
   }
@@ -642,9 +658,10 @@ async function main() {
 
   // ---- Profile split: parallel unsecured / secured / rbac suites ----
   // The negative-validation tests (400s) are deployment-mode-agnostic and run
-  // in both unsecured and secured. The auth-absent (401) tests only make sense
-  // against a server started in secured mode, so they go into `secured` only.
-  // The auth-deny (403) tests are read-side RBAC deny-tests (#359): they need an
+  // in both unsecured and secured. The 401 tests — auth-absent (no credentials)
+  // and auth-invalid (invalid/unknown credential) — only make sense against a server
+  // started in secured mode, so both go into `secured` only. The auth-deny
+  // (403) tests are read-side RBAC deny-tests (#359): they need an
   // authorizations-enabled broker + a provisioned zero-grant probe user, so they
   // live in their own `rbac` profile and are excluded from unsecured/secured.
   //
@@ -653,13 +670,17 @@ async function main() {
   //   generated/<config>/request-validation/rbac/         — 403 deny tests only
   //
   // Each subdir is a self-contained standalone suite (own scaffolding +
-  // support). When the bundled spec carries no `x-enforcement: conditional`
-  // annotations (no conditionally-secured ops), the auth-absent set is empty
-  // and the unsecured/secured suites are byte-identical.
+  // support). The 401 surface is empty — making the unsecured/secured suites
+  // byte-identical — only when no operation is targeted in the active
+  // `authAbsentMode`: in `'conditional'` (default) that means no
+  // `x-enforcement: conditional` op; in `'all-secured'` it means no op mandates
+  // auth (e.g. an entirely public API).
   const PROFILES = [
     {
       name: 'unsecured',
-      scenarios: deduped.filter((s) => s.type !== 'auth-absent' && s.type !== 'auth-deny'),
+      scenarios: deduped.filter(
+        (s) => s.type !== 'auth-absent' && s.type !== 'auth-invalid' && s.type !== 'auth-deny',
+      ),
     },
     { name: 'secured', scenarios: deduped.filter((s) => s.type !== 'auth-deny') },
     { name: 'rbac', scenarios: deduped.filter((s) => s.type === 'auth-deny') },
