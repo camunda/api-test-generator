@@ -59,7 +59,9 @@ sync_frontend_deps() {
   echo "Frontend dependencies up to date."
 }
 
-# Poll until the Hub UI responds with HTTP 200.
+# Poll until the Hub UI responds successfully. `curl -sf` treats any 2xx/3xx as
+# success and only fails on HTTP >= 400 (or connection errors), so this waits for
+# the login page to be served (a redirect counts as ready).
 wait_for_ready() {
   local hub_ui_port="${HUB_UI_PORT:-8088}"
   local url="http://localhost:${hub_ui_port}/login"
@@ -237,8 +239,14 @@ case "${1:-start}" in
     fi
     echo "Starting Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" up -d
-    sync_frontend_deps
-    fix_keycloak
+    # The stack is up now; if frontend-dep sync or Keycloak setup fails, tear it
+    # back down so a failed start doesn't leave a half-started environment
+    # (ports bound, containers running) behind.
+    if ! sync_frontend_deps || ! fix_keycloak; then
+      echo "Error: Hub setup failed — tearing down infrastructure." >&2
+      docker compose -f "$COMPOSE_FILE" down || true
+      exit 1
+    fi
     echo "Starting Hub app (restapi + frontend)..."
     cd "$HUB_REPO"
     # Launch make in its OWN process group (job-control mode) so the recorded PID
