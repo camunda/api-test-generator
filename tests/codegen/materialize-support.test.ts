@@ -124,6 +124,44 @@ describe('materializeSupport', () => {
       await fs.rm(fakeSrc, { recursive: true, force: true });
     }
   });
+
+  // The env.ts template interpolates defaultBaseUrl via Mustache; these guard the
+  // rendered output (PR #398 review): no unresolved marker, correct fallback,
+  // and injection-safe escaping inside the single-quoted TS literal.
+  const readEnv = async () => fs.readFile(path.join(tmp, SUPPORT_DIR_NAME, 'env.ts'), 'utf8');
+
+  test('env.ts renders the built-in fallback URL when no defaultBaseUrl is given', async () => {
+    await materializeSupport(tmp);
+    const env = await readEnv();
+    expect(env).not.toContain('{{{'); // no unresolved Mustache marker
+    expect(env).toContain("'http://localhost:8080/v2'");
+  });
+
+  test('env.ts falls back when templateView passes defaultBaseUrl: undefined', async () => {
+    await materializeSupport(tmp, undefined, undefined, { defaultBaseUrl: undefined });
+    const env = await readEnv();
+    expect(env).not.toContain('{{{');
+    expect(env).toContain("'http://localhost:8080/v2'");
+  });
+
+  test('env.ts bakes in a provided per-config defaultBaseUrl', async () => {
+    await materializeSupport(tmp, undefined, undefined, {
+      defaultBaseUrl: 'http://localhost:8088/api/v2',
+    });
+    const env = await readEnv();
+    expect(env).not.toContain('{{{');
+    expect(env).toContain("'http://localhost:8088/api/v2'");
+  });
+
+  test("env.ts escapes a defaultBaseUrl containing a single quote (can't break the TS literal)", async () => {
+    await materializeSupport(tmp, undefined, undefined, {
+      defaultBaseUrl: "http://x/v2'; throw new Error('x'); //",
+    });
+    const env = await readEnv();
+    // the single quote is escaped, so the string literal stays intact
+    expect(env).toContain("\\'");
+    expect(env).not.toContain("'http://x/v2'; throw"); // no un-escaped break-out
+  });
 });
 
 describe('loadProjectScaffoldingFiles (#233 Step 7)', () => {

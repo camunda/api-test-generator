@@ -166,15 +166,23 @@ export async function materializeSupport(
   //
   // env.ts is rendered via Mustache so per-config options (e.g. defaultBaseUrl)
   // can be baked in at codegen time rather than threaded through every suite.
-  // Resolve defaultBaseUrl with `??` rather than spreading `templateView` over the
-  // fallback: callers pass `{ defaultBaseUrl: undefined }` when the config omits
-  // the field, and a plain spread would overwrite the fallback with `undefined` →
-  // Mustache renders `{{{defaultBaseUrl}}}` as '' → buildBaseUrl() returns '' when
-  // API_BASE_URL is unset.
-  const envView = {
-    ...templateView,
-    defaultBaseUrl: templateView?.defaultBaseUrl ?? 'http://localhost:8080/v2',
-  };
+  //
+  // Resolve with `??` (a plain spread would let `{ defaultBaseUrl: undefined }`
+  // from the omitted-config path overwrite the fallback → '' → buildBaseUrl()
+  // returns '' when API_BASE_URL is unset).
+  //
+  // env.ts interpolates the value INSIDE a single-quoted TS string literal
+  // (`'{{{defaultBaseUrl}}}'`); the quotes stay because the template is itself
+  // typechecked by the materializer build, so we can't drop to a bare
+  // JSON literal. Escape for that single-quoted context so a value containing a
+  // quote / backslash / newline can't emit invalid TS or inject code.
+  const rawBaseUrl = templateView?.defaultBaseUrl ?? 'http://localhost:8080/v2';
+  const defaultBaseUrl = rawBaseUrl
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+  const envView = { ...templateView, defaultBaseUrl };
   for (const name of SUPPORT_TEMPLATE_FILES) {
     const dest = path.join(destDir, name);
     if (exclude.has(name)) {
