@@ -55,13 +55,14 @@ export interface RequestValidationConfig {
    *   zero-grant probe USER that the suite global-setup provisions, against
    *   fixtures it also creates (so the rejection is an authorization decision,
    *   not a 404-not-found).
-   * - `'all-secured'` — keyless, no-required-body `secured` operations,
-   *   authenticated as a reduced-permission Bearer probe TOKEN
-   *   (`RBAC_DENY_PROBE_BEARER_TOKEN`), no fixtures. By-key ops (path contains
-   *   `{param}`) and required-body ops (`bodyRequired: true`) are excluded
-   *   because Hub checks body-validation (400) and resource-existence (404)
-   *   before the authority check, so those categories cannot yield a clean 403
-   *   without real fixtures. The surviving surface is search/list/info endpoints.
+   * - `'all-secured'` — keyless, no-required-body, no-required-non-path-param
+   *   `secured` operations, authenticated as a reduced-permission Bearer probe
+   *   TOKEN (`RBAC_DENY_PROBE_BEARER_TOKEN`), no fixtures. Three categories are
+   *   excluded because Hub checks body-validation (400) and resource-existence
+   *   (404) before the authority check (@PreAuthorize, 403): by-key ops (path
+   *   contains `{param}`), required-body ops (`bodyRequired: true`), and ops
+   *   with required non-path parameters (query/header/cookie — missing param →
+   *   400 before authz). The surviving surface is search/list/info endpoints.
    */
   authDenyMode: 'slice' | 'all-secured';
 }
