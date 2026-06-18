@@ -91,9 +91,9 @@ async function globalSetup(): Promise<void> {
   // no-required-body ops are targeted, so no real resource keys are needed and
   // no probe USER needs provisioning. Nothing to set up here.
   if (denyProbeBearerToken) {
-    console.log(
+    process.stderr.write(
       '[rbac global-setup] Bearer-probe mode (RBAC_DENY_PROBE_BEARER_TOKEN set) — ' +
-        'no fixtures/probe-user provisioning needed.',
+        'no fixtures/probe-user provisioning needed.\n',
     );
     return;
   }
