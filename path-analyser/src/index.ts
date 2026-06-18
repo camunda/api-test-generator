@@ -1053,7 +1053,14 @@ function camelCase(name: string) {
 type CanonicalShape = {
   requestByMediaType?: Record<
     string,
-    { path: string; type: string; required: boolean; enum?: unknown[]; itemEnum?: unknown[] }[]
+    {
+      path: string;
+      type: string;
+      required: boolean;
+      enum?: unknown[];
+      itemEnum?: unknown[];
+      format?: string;
+    }[]
   >;
 };
 
@@ -1111,7 +1118,31 @@ type CanonicalNode = {
   required: boolean;
   enum?: unknown[];
   itemEnum?: unknown[];
+  format?: string;
 };
+
+/**
+ * Map OpenAPI `format` keywords to format-valid seed literals (#397).
+ * Returns `undefined` for formats that don't need a special literal (they
+ * can safely fall through to the generic `${varName}` seed).
+ */
+function formatSeedLiteral(format: string): string | undefined {
+  switch (format) {
+    case 'email':
+      return 'seed@example.com';
+    case 'uuid':
+      return '00000000-0000-4000-8000-000000000001';
+    case 'date-time':
+      return '2024-01-01T00:00:00.000Z';
+    case 'date':
+      return '2024-01-01';
+    case 'uri':
+    case 'url':
+      return 'https://example.com';
+    default:
+      return undefined;
+  }
+}
 
 function synthesizeObjectFromPrefix(
   prefix: string,
@@ -1140,7 +1171,9 @@ function synthesizeObjectFromPrefix(
       // schema-honest.
       obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
     } else {
-      obj[inner] = 'placeholder';
+      // #397 — for format-constrained scalars, emit a format-valid literal
+      // instead of 'placeholder' which fails server-side format validation.
+      obj[inner] = (n.format && formatSeedLiteral(n.format)) ?? 'placeholder';
     }
   }
   return obj;
@@ -1396,10 +1429,18 @@ function buildRequestBodyFromCanonical(
             template[leaf] = [synthesizeArrayElement(basePath, nodes)];
           }
         } else {
-          scenario.bindings ||= {};
-          if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
-          template[leaf] = `${'${'}${varName}}`;
-          if (!bindingMap[normalizedPath]) missing.push(normalizedPath);
+          // #397 — for format-constrained scalars, embed a format-valid
+          // literal (e.g. format:email → "seed@example.com") so the body
+          // passes server-side format validation. No runtime binding needed.
+          const fmtLiteral = f.format ? formatSeedLiteral(f.format) : undefined;
+          if (fmtLiteral !== undefined) {
+            template[leaf] = fmtLiteral;
+          } else {
+            scenario.bindings ||= {};
+            if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
+            template[leaf] = `${'${'}${varName}}`;
+            if (!bindingMap[normalizedPath]) missing.push(normalizedPath);
+          }
         }
       }
       // For search-like empty-negative scenarios, allow provider-injected optional filters to drive an empty result

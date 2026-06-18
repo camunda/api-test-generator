@@ -25,6 +25,13 @@ export interface CanonicalNodeMeta {
    * `['placeholder']` element (#338).
    */
   itemEnum?: unknown[];
+  /**
+   * The OpenAPI `format` keyword for this scalar leaf node (e.g. `'email'`,
+   * `'uuid'`, `'date-time'`, `'uri'`). Captured so `buildRequestBodyFromCanonical`
+   * can emit a format-valid literal instead of a generic variable seed that
+   * fails server-side format validation (#397).
+   */
+  format?: string;
 }
 
 export interface OperationCanonicalShapes {
@@ -311,6 +318,10 @@ function walkSchema(
     // of seeding a `${var}` placeholder (#338). `schema` at this point
     // is already $ref/allOf-resolved by the recursive descent above.
     const enumValues = Array.isArray(schema.enum) ? schema.enum : undefined;
+    // Capture format (e.g. `email`, `uuid`, `date-time`) so the body
+    // builder can emit a format-valid literal instead of a generic seed
+    // that fails server-side format validation (#397).
+    const format = typeof schema.format === 'string' ? schema.format : undefined;
     acc.push({
       path: pathSoFar,
       pointer,
@@ -318,6 +329,7 @@ function walkSchema(
       required,
       semanticProvider: semantic,
       enum: enumValues,
+      format,
     });
   }
 }
