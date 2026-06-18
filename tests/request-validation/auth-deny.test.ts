@@ -160,6 +160,15 @@ const securedOps: OperationModel[] = [
     secured: true,
     bodyRequired: true,
   },
+  // required query param → param-validation (400) fires before @PreAuthorize → excluded.
+  {
+    operationId: 'searchProjectsByOrg',
+    method: 'GET',
+    path: '/projects',
+    tags: [],
+    parameters: [{ name: 'orgId', in: 'query', required: true }],
+    secured: true,
+  },
   // public op (security: [] or anonymous {}) — secured:false → never a deny target.
   {
     operationId: 'getHealth',
@@ -189,6 +198,11 @@ describe('request-validation: auth-deny all-secured mode', () => {
   it('excludes required-body ops (body validation → 400 before authz)', () => {
     const ids = generateAuthDeny(securedOps, { allSecured: true }).map((s) => s.operationId);
     expect(ids).not.toContain('createProject');
+  });
+
+  it('excludes ops with required non-path params (param validation → 400 before authz)', () => {
+    const ids = generateAuthDeny(securedOps, { allSecured: true }).map((s) => s.operationId);
+    expect(ids).not.toContain('searchProjectsByOrg');
   });
 
   it('each scenario is a strict 403 deny with no params and no admin auth', () => {
