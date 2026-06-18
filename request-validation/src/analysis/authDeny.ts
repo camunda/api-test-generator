@@ -95,27 +95,38 @@ export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationS
 }
 
 /**
- * `all-secured` deny generator (Hub): one 403 scenario per `secured` operation,
- * with dummy path keys and no request body. The reduced-permission Bearer probe
- * lacks the operation's required authority, so a target that checks authority
- * before any resource lookup denies it with 403 regardless of the key.
+ * `all-secured` deny generator (Hub): one 403 scenario per keyless, no-required-body
+ * `secured` operation. The reduced-permission Bearer probe lacks the operation's
+ * required authority.
  *
- * Mirrors the `secured` targeting of the 401 generators (auth-absent/auth-invalid)
- * so the 403 surface lines up with the 401 surface. `security: []` / anonymous
- * `{}` operations are excluded (they carry no auth requirement and would not 403).
+ * Hub's check order is body-validation (400) → resource-existence (404) →
+ * authority (@PreAuthorize, 403). Two op categories are therefore excluded to
+ * guarantee a clean 403:
+ *
+ * - **By-key ops** (path contains `{param}`) — the resource lookup fires before
+ *   `@PreAuthorize`, so a dummy key yields 404 even with a valid deny token.
+ * - **Required-body ops** (`bodyRequired: true`) — `@RequestBody` deserialization
+ *   and bean-validation run before `@PreAuthorize`, so an absent/empty body
+ *   yields 400.
+ *
+ * The surviving surface is keyless + optional-or-no-body ops (search/list/info
+ * endpoints). `security: []` / anonymous `{}` operations are excluded (they
+ * carry no auth requirement and would not 403).
  */
 function generateAuthDenyAllSecured(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (op.secured !== true) continue;
+    if (op.path.includes('{')) continue; // by-key ops → 404 before authz
+    if (op.bodyRequired === true) continue; // required body → 400 before authz
     out.push({
       id: makeId([op.operationId, 'auth-deny']),
       operationId: op.operationId,
       method: op.method,
       path: op.path,
       type: 'auth-deny',
-      params: buildDummyParams(op.path),
+      params: undefined,
       expectedStatus: DENY_STATUS,
       description:
         'Request by a principal lacking the required permission is denied with 403 (rbac mode)',
@@ -125,16 +136,4 @@ function generateAuthDenyAllSecured(ops: OperationModel[], opts: Opts): Validati
     });
   }
   return out;
-}
-
-// Path params get a fixed dummy value: in all-secured mode the authority check
-// short-circuits before any resource lookup, so the key is never dereferenced.
-function buildDummyParams(path: string): Record<string, string> | undefined {
-  const m = path.match(/\{([^}]+)}/g);
-  if (!m) return undefined;
-  const params: Record<string, string> = {};
-  for (const token of m) {
-    params[token.slice(1, -1)] = 'x';
-  }
-  return params;
 }
