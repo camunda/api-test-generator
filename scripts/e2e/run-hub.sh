@@ -103,9 +103,9 @@ run_rv() { # profile
 for p in $RV_PROFILES; do
   echo "── request-validation: $p ───────────────"
   if step run; then
-    # The rbac Playwright suite uses the Basic deny probe (no Bearer support yet),
-    # so without a deny token it can only fail noisily — skip it. curl-compare
-    # still covers rbac deny scenarios when DENY_HEADER is set (else it skips them).
+    # Without a deny token the rbac Playwright suite has nothing to authenticate
+    # with — skip it. curl-compare still covers rbac deny scenarios when
+    # DENY_HEADER is set (else it skips them too).
     if [ "$p" = "rbac" ] && [ -z "$DENY_TOK" ]; then
       echo "  ⏭  skipping rbac Playwright run (no c8-client-deny token)"
     else
