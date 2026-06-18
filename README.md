@@ -129,7 +129,9 @@ CONFIG=camunda-hub npm run test:pw:request-validation
 
 # 403 — auth-deny. Mint a token from the reduced-permission deny client and pass it
 # as RBAC_DENY_PROBE_BEARER_TOKEN. It authenticates (audience mapper added by
-# start-hub.sh) but holds no public-api authority, so every secured op returns 403.
+# start-hub.sh) but holds no public-api authority, so keyless, no-required-body
+# secured ops return 403 (by-key and required-body ops are excluded — Hub checks
+# 400/404 before the authority gate).
 DENY_TOKEN=$(curl -s -X POST "http://localhost:${KEYCLOAK_PORT:-18080}/auth/realms/camunda-platform/protocol/openid-connect/token" \
   -d "client_id=c8-client-deny&client_secret=c8-deny-secret&grant_type=client_credentials" \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")

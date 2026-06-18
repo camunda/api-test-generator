@@ -249,9 +249,10 @@ async function main() {
   }
   // auth-deny (HTTP 403) scenarios are RBAC deny-tests. In the default `slice`
   // mode they are the OCA read-side allowlist (#359); under `authDenyMode:
-  // 'all-secured'` (Hub) they cover every secured op with a reduced-permission
-  // Bearer probe. Either way they depend only on the operation, not body/parameter
-  // shape, and are emitted exclusively into the `rbac` profile (see profile split).
+  // 'all-secured'` (Hub) they cover keyless, no-required-body secured ops with a
+  // reduced-permission Bearer probe (by-key and required-body ops are excluded
+  // because Hub checks 400/404 before the authority gate). Emitted exclusively
+  // into the `rbac` profile (see profile split).
   if (wantKind('auth-deny')) {
     scenarios.push(
       ...generateAuthDeny(model.operations, {

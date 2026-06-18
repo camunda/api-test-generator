@@ -158,9 +158,8 @@ for m in json.load(sys.stdin):
     "${realm_url}/clients?clientId=c8-client-deny" \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')")
   if [ -n "$deny_client_uuid" ]; then
-    # POST is idempotent enough for our purposes: a 409 (mapper already exists from
-    # a prior run) is fine, anything else is surfaced by the next token check.
-    curl -s -o /dev/null -X POST \
+    local deny_mapper_status
+    deny_mapper_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
       -H "Authorization: Bearer ${admin_token}" \
       -H "Content-Type: application/json" \
       "${realm_url}/clients/${deny_client_uuid}/protocol-mappers/models" \
@@ -176,8 +175,12 @@ for m in json.load(sys.stdin):
           "introspection.token.claim": "true",
           "userinfo.token.claim": "false"
         }
-      }'
-    echo "Keycloak: added web-modeler-api audience mapper to c8-client-deny"
+      }')
+    case "$deny_mapper_status" in
+      201) echo "Keycloak: added web-modeler-api audience mapper to c8-client-deny" ;;
+      409) echo "Keycloak: c8-client-deny already has web-modeler-api audience mapper (skipped)" ;;
+      *)   echo "Keycloak: failed to add audience mapper to c8-client-deny (HTTP $deny_mapper_status)" >&2; return 1 ;;
+    esac
   else
     echo "Warning: c8-client-deny not found — rbac (403) deny tests will not authenticate."
   fi

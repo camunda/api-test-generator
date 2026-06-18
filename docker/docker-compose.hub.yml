@@ -128,11 +128,12 @@ services:
       KEYCLOAK_CLIENTS_0_PERMISSIONS_3_DEFINITION: delete:*
       # Reduced-permission M2M client used by the rbac (403 auth-deny) profile.
       # It is granted NO web-modeler-public-api authorities, so it authenticates
-      # but is denied on every secured op (403). Identity derives a token's
-      # audience from its granted permissions, so a zero-permission client would
-      # not carry aud=web-modeler-api and would 401 instead — start-hub.sh adds an
-      # explicit web-modeler-api audience mapper to this client so its token
-      # passes authentication and reaches the authorization (403) gate.
+      # but is denied 403 on keyless, no-required-body secured ops (by-key and
+      # required-body ops reach 404/400 before the authority gate). Identity
+      # derives a token's audience from its granted permissions, so a
+      # zero-permission client would not carry aud=web-modeler-api and would 401
+      # instead — start-hub.sh adds an explicit web-modeler-api audience mapper so
+      # its token passes authentication and reaches the authorization gate.
       KEYCLOAK_CLIENTS_1_NAME: c8-client-deny
       KEYCLOAK_CLIENTS_1_ID: c8-client-deny
       KEYCLOAK_CLIENTS_1_SECRET: c8-deny-secret

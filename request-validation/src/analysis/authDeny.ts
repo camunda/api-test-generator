@@ -4,16 +4,16 @@ import { makeId } from './common.js';
 interface Opts {
   onlyOperations?: Set<string>;
   /**
-   * When `true` (config `authDenyMode: 'all-secured'`), target every operation
-   * whose effective `security` mandates auth (`OperationModel.secured`) with
-   * dummy path keys, instead of the hardcoded read-side {@link SLICE}. The deny
-   * probe is a reduced-permission Bearer token (the emitter still renders
-   * `denyProbeHeaders()`, which switches to Bearer when
+   * When `true` (config `authDenyMode: 'all-secured'`), target `secured`
+   * operations that can reach the authority check without real fixtures: keyless
+   * paths (no `{param}` tokens) with no required request body. By-key ops are
+   * excluded because a resource-existence check fires before `@PreAuthorize`
+   * (dummy key → 404); required-body ops are excluded because body validation
+   * fires before `@PreAuthorize` (missing body → 400). The surviving surface
+   * is search/list/info endpoints. The deny probe is a reduced-permission Bearer
+   * token (`denyProbeHeaders()` switches to Bearer when
    * `RBAC_DENY_PROBE_BEARER_TOKEN` is set — see the support `env.ts`), and no
-   * fixtures are provisioned. For an API whose authority check short-circuits
-   * before any resource lookup (e.g. Camunda Hub), a principal lacking the
-   * operation's permission is denied with 403 regardless of the (dummy) key.
-   * Default `false` preserves the OCA read-side slice behaviour.
+   * fixtures are provisioned. Default `false` preserves the OCA read-side slice.
    */
   allSecured?: boolean;
 }
@@ -32,10 +32,11 @@ interface Opts {
  *   a genuine authorization deny (admin would see it at 200) rather than a
  *   404-not-found that any caller would get.
  *
- * - **all-secured** (Hub) — one deny-test per `secured` operation with dummy path
- *   keys, authenticated as a reduced-permission Bearer probe token. Relies on the
- *   target authorizing before any resource lookup, so a dummy key still yields a
- *   clean 403 with no fixtures. See {@link generateAuthDenyAllSecured}.
+ * - **all-secured** (Hub) — one deny-test per keyless, no-required-body `secured`
+ *   operation, authenticated as a reduced-permission Bearer probe token. By-key
+ *   and required-body ops are excluded because Hub checks body-validation (400)
+ *   and resource-existence (404) before the authority (`@PreAuthorize`, 403).
+ *   See {@link generateAuthDenyAllSecured}.
  *
  * "Generic" = we assert the endpoint is permission-gated without naming the
  * exact permission. Precise per-permission deny/allow pairs, and search/list
