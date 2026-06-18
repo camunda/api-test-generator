@@ -266,7 +266,13 @@ case "${1:-start}" in
       exit 1
     fi
     echo "Hub app starting (PID $MAKE_PID). Logs: $LOG_FILE"
-    wait_for_ready
+    # If the UI never comes up, don't leave the app process + docker stack running
+    # with a stale PID file — reuse the stop path to tear everything down.
+    if ! wait_for_ready; then
+      echo "Error: Hub UI did not become ready — tearing down. Check $LOG_FILE." >&2
+      "$0" stop || true
+      exit 1
+    fi
     echo "Run './docker/start-hub.sh stop' to stop."
     ;;
   stop)

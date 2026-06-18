@@ -164,6 +164,30 @@ describe('materializeSupport', () => {
   });
 });
 
+describe('positive-suite support env.ts authHeaders() (#398)', () => {
+  const KEY = 'BEARER_TOKEN';
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env[KEY];
+    delete process.env[KEY];
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  test('returns a Bearer header when BEARER_TOKEN is set', async () => {
+    process.env[KEY] = 'tok-123';
+    const { authHeaders } = await import('../../materializer/src/playwright/support/env.ts');
+    expect(await authHeaders()).toEqual({ Authorization: 'Bearer tok-123' });
+  });
+
+  test('returns no auth header when BEARER_TOKEN is unset', async () => {
+    const { authHeaders } = await import('../../materializer/src/playwright/support/env.ts');
+    expect(await authHeaders()).toEqual({});
+  });
+});
+
 describe('loadProjectScaffoldingFiles (#233 Step 7)', () => {
   test('returns all PROJECT_TEMPLATE_FILES as in-memory EmittedFiles in declaration order', async () => {
     const files = await loadProjectScaffoldingFiles();
