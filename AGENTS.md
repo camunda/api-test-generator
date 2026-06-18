@@ -55,6 +55,7 @@ npm workspaces monorepo. Node `>=22`.
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
 | `dist/`, `**/generated/` | Gitignored generator output (built each CI run) |
+| `scripts/e2e/` | End-to-end driver scripts: `run-hub.sh` / `run-oca.sh` (generate → run → curl-compare) and `curl_compare.py` (independent curl oracle). See README §End-to-end validation scripts. |
 | `plugins/no-unsafe-type-assertion.grit` | Custom Biome lint banning `as T` |
 | `.github/workflows/ci.yml` | Single CI workflow (lint, typecheck, pipeline, tests) |
 
