@@ -34,11 +34,12 @@ interface Opts {
  *   a genuine authorization deny (admin would see it at 200) rather than a
  *   404-not-found that any caller would get.
  *
- * - **all-secured** (Hub) — one deny-test per keyless, no-required-body `secured`
- *   operation, authenticated as a reduced-permission Bearer probe token. By-key
- *   and required-body ops are excluded because Hub checks body-validation (400)
- *   and resource-existence (404) before the authority (`@PreAuthorize`, 403).
- *   See {@link generateAuthDenyAllSecured}.
+ * - **all-secured** (Hub) — one deny-test per keyless, no-required-body,
+ *   no-required-non-path-param `secured` operation, authenticated as a
+ *   reduced-permission Bearer probe token. By-key ops, required-body ops, and
+ *   ops with required non-path parameters are excluded because Hub checks
+ *   body-validation (400) and resource-existence (404) before the authority
+ *   (`@PreAuthorize`, 403). See {@link generateAuthDenyAllSecured}.
  *
  * "Generic" = we assert the endpoint is permission-gated without naming the
  * exact permission. Precise per-permission deny/allow pairs, and search/list
@@ -103,8 +104,8 @@ export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationS
  * required authority.
  *
  * Hub's check order is body-validation (400) → resource-existence (404) →
- * authority (@PreAuthorize, 403). Two op categories are therefore excluded to
- * guarantee a clean 403:
+ * authority (@PreAuthorize, 403). Three op categories are therefore excluded
+ * to guarantee a clean 403:
  *
  * - **By-key ops** (path contains `{param}`) — the resource lookup fires before
  *   `@PreAuthorize`, so a dummy key yields 404 even with a valid deny token.
