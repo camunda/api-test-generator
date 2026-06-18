@@ -1357,10 +1357,17 @@ function buildRequestBodyFromCanonical(
               template[name] = [synthesizeArrayElement(name, nodes)];
             }
           } else {
-            scenario.bindings ||= {};
-            if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
-            template[name] = `${'${'}${varName}}`;
-            if (!bindingMap[mappedName]) missing.push(name);
+            // #397 — check canonical node format before falling back to seed.
+            const nodeFormat = nodes.find((n) => n.path === name)?.format;
+            const fmtLiteral = nodeFormat ? formatSeedLiteral(nodeFormat) : undefined;
+            if (fmtLiteral !== undefined) {
+              template[name] = fmtLiteral;
+            } else {
+              scenario.bindings ||= {};
+              if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
+              template[name] = `${'${'}${varName}}`;
+              if (!bindingMap[mappedName]) missing.push(name);
+            }
           }
         }
       }
