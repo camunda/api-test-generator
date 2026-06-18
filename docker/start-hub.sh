@@ -65,12 +65,15 @@ sync_frontend_deps() {
 wait_for_ready() {
   local hub_ui_port="${HUB_UI_PORT:-8088}"
   local url="http://localhost:${hub_ui_port}/login"
+  # A cold restapi (Spring Boot) + frontend (webpack) build can take well over
+  # 3 min, so default to ~8 min; override with HUB_READY_ATTEMPTS (×2s each).
+  local max="${HUB_READY_ATTEMPTS:-240}"
   local attempts=0
-  echo "Waiting for Hub UI at ${url}..."
+  echo "Waiting for Hub UI at ${url} (up to $((max * 2))s)..."
   until curl -sf -o /dev/null "$url"; do
     attempts=$((attempts + 1))
-    if [ "$attempts" -ge 90 ]; then
-      echo "Error: Hub UI did not become ready within 90 attempts (≈3 min). Check $LOG_FILE for details."
+    if [ "$attempts" -ge "$max" ]; then
+      echo "Error: Hub UI did not become ready within ${max} attempts (≈$((max * 2))s). Check $LOG_FILE for details."
       return 1
     fi
     sleep 2
@@ -270,7 +273,9 @@ case "${1:-start}" in
     # with a stale PID file — reuse the stop path to tear everything down.
     if ! wait_for_ready; then
       echo "Error: Hub UI did not become ready — tearing down. Check $LOG_FILE." >&2
-      "$0" stop || true
+      # Absolute path: by here we've `cd`'d into $HUB_REPO, so a relative $0
+      # ("./docker/start-hub.sh") would no longer resolve.
+      "$SCRIPT_DIR/start-hub.sh" stop || true
       exit 1
     fi
     echo "Run './docker/start-hub.sh stop' to stop."
