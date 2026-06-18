@@ -131,12 +131,19 @@ function defaultProjectTemplatesDir(): string {
  *                            is also removed, so re-running the materializer
  *                            over an existing suite cannot leave a stale
  *                            helper behind.
+ * @param templateView        Optional Mustache view applied when rendering
+ *                            `env.ts`. Supported keys:
+ *                            - `defaultBaseUrl`: overrides the fallback URL
+ *                              that `buildBaseUrl()` returns when `API_BASE_URL`
+ *                              is not set. When absent, falls back to
+ *                              `http://localhost:8080/v2`.
  * @returns                   Path to the support directory under `outDir`.
  */
 export async function materializeSupport(
   outDir: string,
   templatesDir?: string,
   excludeSupportFiles?: readonly string[],
+  templateView?: { defaultBaseUrl?: string },
 ): Promise<string> {
   const srcDir = templatesDir ?? defaultTemplatesDir();
   const destDir = path.join(outDir, SUPPORT_DIR_NAME);
@@ -156,13 +163,42 @@ export async function materializeSupport(
   // For excluded names, actively remove any pre-existing destination file
   // so a previous run with the helper enabled does not leave a stale copy
   // behind. `fs.rm({ force: true })` is a no-op when the file is absent.
+  //
+  // env.ts is rendered via Mustache so per-config options (e.g. defaultBaseUrl)
+  // can be baked in at codegen time rather than threaded through every suite.
+  //
+  // Resolve with `??` (a plain spread would let `{ defaultBaseUrl: undefined }`
+  // from the omitted-config path overwrite the fallback → '' → buildBaseUrl()
+  // returns '' when API_BASE_URL is unset).
+  //
+  // env.ts interpolates the value INSIDE a single-quoted TS string literal
+  // (`'{{{defaultBaseUrl}}}'`); the quotes stay because the template is itself
+  // typechecked by the materializer build, so we can't drop to a bare
+  // JSON literal. Escape for that single-quoted context so a value containing a
+  // quote / backslash / newline can't emit invalid TS or inject code.
+  const rawBaseUrl = templateView?.defaultBaseUrl ?? 'http://localhost:8080/v2';
+  const defaultBaseUrl = rawBaseUrl
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    // U+2028/U+2029 are JS/TS line terminators too — escape them so they can't
+    // break the single-quoted string literal even though \r/\n are handled.
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  const envView = { ...templateView, defaultBaseUrl };
   for (const name of SUPPORT_TEMPLATE_FILES) {
     const dest = path.join(destDir, name);
     if (exclude.has(name)) {
       await fs.rm(dest, { force: true });
       continue;
     }
-    await fs.copyFile(path.join(srcDir, name), dest);
+    if (name === 'env.ts') {
+      const src = await fs.readFile(path.join(srcDir, name), 'utf8');
+      await fs.writeFile(dest, Mustache.render(src, envView), 'utf8');
+    } else {
+      await fs.copyFile(path.join(srcDir, name), dest);
+    }
   }
 
   return destDir;

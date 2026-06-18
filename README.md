@@ -91,11 +91,14 @@ CAMUNDA_REST_PORT=9080 docker compose up -d
 > Expects `camunda-hub` to be cloned as a sibling directory alongside this repo.
 
 ```bash
-# Start (Docker infrastructure + restapi + frontend)
+# Start (Docker infrastructure + restapi + frontend); waits until the UI is ready
 ./docker/start-hub.sh
 
 # Stop
 ./docker/start-hub.sh stop
+
+# Status (infra + app process)
+./docker/start-hub.sh status
 ```
 
 The Hub UI will be available at `http://localhost:${HUB_UI_PORT:-8088}`. Log in with `demo` / `demo`.

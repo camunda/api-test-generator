@@ -521,7 +521,9 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
     const recordResponses =
       typeof emitterConfig.recordResponses === 'boolean' ? emitterConfig.recordResponses : false;
     const excludeSupportFiles = recordResponses ? undefined : ['recorder.ts'];
-    await materializeSupport(outDir, undefined, excludeSupportFiles);
+    const defaultBaseUrl =
+      typeof emitterConfig.defaultBaseUrl === 'string' ? emitterConfig.defaultBaseUrl : undefined;
+    await materializeSupport(outDir, undefined, excludeSupportFiles, { defaultBaseUrl });
     // Lift 12 / #231: load per-role bundles. Vendoring the role helper
     // files into <outDir>/support/ is deferred until after the role-hook
     // loop below populates `roleExtras` — templated helpers

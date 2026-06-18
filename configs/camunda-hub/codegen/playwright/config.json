@@ -1,3 +1,4 @@
 {
-  "recordResponses": false
+  "recordResponses": false,
+  "defaultBaseUrl": "http://localhost:8088/api/v2"
 }
