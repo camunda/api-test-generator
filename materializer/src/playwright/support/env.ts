@@ -3,7 +3,8 @@ export function buildBaseUrl(): string {
 }
 
 export async function authHeaders(): Promise<Record<string, string>> {
-  // Local server requires empty headers (no Authorization)
   // Do not set Content-Type here; request options (data vs multipart) will determine it.
+  const bearer = process.env.BEARER_TOKEN;
+  if (bearer) return { Authorization: `Bearer ${bearer}` };
   return {};
 }
