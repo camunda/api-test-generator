@@ -119,6 +119,34 @@ CORE_APPLICATION_URL=http://localhost:${HUB_UI_PORT:-8088}/api \
 CONFIG=camunda-hub npm run test:pw:request-validation
 ```
 
+The default profile runs the 400s. To run the 401 (`secured`) or 403 (`rbac`) negatives, set `RV_PROFILE`:
+
+```bash
+# 401 — auth-absent / auth-invalid. The secured profile also includes 400
+# body-validation scenarios, which require admin auth to get past authentication.
+# BEARER_TOKEN is therefore still needed; the auth-absent/invalid tests send
+# no credentials / a bad one on their own.
+BEARER_TOKEN=$TOKEN \
+RV_PROFILE=secured \
+CORE_APPLICATION_URL=http://localhost:${HUB_UI_PORT:-8088}/api \
+CONFIG=camunda-hub npm run test:pw:request-validation
+
+# 403 — auth-deny. Mint a token from the reduced-permission deny client and pass it
+# as RBAC_DENY_PROBE_BEARER_TOKEN. It authenticates (audience mapper added by
+# start-hub.sh) but holds no public-api authority, so keyless, no-required-body,
+# no-required-non-path-param secured ops return 403 (by-key, required-body, and
+# required-query/header/cookie ops are excluded — Hub checks 400/404 before the
+# authority gate).
+DENY_TOKEN=$(curl -s -X POST "http://localhost:${KEYCLOAK_PORT:-18080}/auth/realms/camunda-platform/protocol/openid-connect/token" \
+  -d "client_id=c8-client-deny&client_secret=c8-deny-secret&grant_type=client_credentials" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+
+RV_PROFILE=rbac \
+RBAC_DENY_PROBE_BEARER_TOKEN=$DENY_TOKEN \
+CORE_APPLICATION_URL=http://localhost:${HUB_UI_PORT:-8088}/api \
+CONFIG=camunda-hub npm run test:pw:request-validation
+```
+
 > The Hub server must be running with `CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED=true` — set this in `camunda-hub/restapi/config/config-common/src/main/resources/application-common-local.yml` before starting.
 
 #### End-to-end drivers (generate → run → curl-compare)

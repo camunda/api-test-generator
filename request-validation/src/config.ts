@@ -46,11 +46,31 @@ export interface RequestValidationConfig {
    *   `x-enforcement`), this emits a no-credentials → 401 probe per secured op.
    */
   authAbsentMode: 'conditional' | 'all-secured';
+  /**
+   * Which operations the 403 generator (auth-deny) targets, and how the deny
+   * probe authenticates, in the `rbac` profile.
+   *
+   * - `'slice'` (default) — the OCA read-side model: a hardcoded allowlist of
+   *   get-by-key reads (`authDeny.ts`'s `SLICE`), authenticated as a Basic-auth
+   *   zero-grant probe USER that the suite global-setup provisions, against
+   *   fixtures it also creates (so the rejection is an authorization decision,
+   *   not a 404-not-found).
+   * - `'all-secured'` — keyless, no-required-body, no-required-non-path-param
+   *   `secured` operations, authenticated as a reduced-permission Bearer probe
+   *   TOKEN (`RBAC_DENY_PROBE_BEARER_TOKEN`), no fixtures. Three categories are
+   *   excluded because Hub checks body-validation (400) and resource-existence
+   *   (404) before the authority check (@PreAuthorize, 403): by-key ops (path
+   *   contains `{param}`), required-body ops (`bodyRequired: true`), and ops
+   *   with required non-path parameters (query/header/cookie — missing param →
+   *   400 before authz). The surviving surface is search/list/info endpoints.
+   */
+  authDenyMode: 'slice' | 'all-secured';
 }
 
 const DEFAULTS: RequestValidationConfig = {
   enumCaseInsensitive: false,
   authAbsentMode: 'conditional',
+  authDenyMode: 'slice',
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -102,6 +122,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.authAbsentMode = v;
+  }
+  if ('authDenyMode' in parsed) {
+    const v = parsed.authDenyMode;
+    if (v !== 'slice' && v !== 'all-secured') {
+      throw new Error(
+        `Invalid ${configPath}: "authDenyMode" must be "slice" or "all-secured", got ${JSON.stringify(v)}.`,
+      );
+    }
+    merged.authDenyMode = v;
   }
   return merged;
 }

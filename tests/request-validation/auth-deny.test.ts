@@ -109,3 +109,121 @@ describe('request-validation: auth-deny emitter shape', () => {
     expect(rendered).toContain('assertResponseStatus(testInfo, res, 403');
   });
 });
+
+// All-secured mode (authDenyMode: 'all-secured', e.g. Hub): 403 per keyless,
+// no-required-body secured op. Hub's check order is 400 → 404 → 403, so:
+//   - by-key ops (path has {param}) → 404 with dummy key → excluded
+//   - required-body ops (bodyRequired: true) → 400 before @PreAuthorize → excluded
+// Only search/list/info ops (keyless + optional body) can yield a clean 403.
+const securedOps: OperationModel[] = [
+  // keyless, no required body — the only category that reaches authz → included.
+  {
+    operationId: 'searchProjects',
+    method: 'POST',
+    path: '/projects/search',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  // by-key op (path param) → resource lookup fires before @PreAuthorize → excluded.
+  {
+    operationId: 'getProject',
+    method: 'GET',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  {
+    operationId: 'updateProject',
+    method: 'PATCH',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  {
+    operationId: 'deleteProject',
+    method: 'DELETE',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [],
+    secured: true,
+  },
+  // required body → body-validation (400) fires before @PreAuthorize → excluded.
+  {
+    operationId: 'createProject',
+    method: 'POST',
+    path: '/projects',
+    tags: [],
+    parameters: [],
+    secured: true,
+    bodyRequired: true,
+  },
+  // required query param → param-validation (400) fires before @PreAuthorize → excluded.
+  {
+    operationId: 'searchProjectsByOrg',
+    method: 'GET',
+    path: '/projects',
+    tags: [],
+    parameters: [{ name: 'orgId', in: 'query', required: true }],
+    secured: true,
+  },
+  // public op (security: [] or anonymous {}) — secured:false → never a deny target.
+  {
+    operationId: 'getHealth',
+    method: 'GET',
+    path: '/health',
+    tags: [],
+    parameters: [],
+    secured: false,
+  },
+  // unannotated op (no `secured` field) — excluded (only `secured === true` qualifies).
+  { operationId: 'getMeta', method: 'GET', path: '/meta', tags: [], parameters: [] },
+];
+
+describe('request-validation: auth-deny all-secured mode', () => {
+  it('emits one 403 scenario per keyless no-required-body secured op', () => {
+    const scenarios = generateAuthDeny(securedOps, { allSecured: true });
+    expect(scenarios.map((s) => s.operationId)).toEqual(['searchProjects']);
+  });
+
+  it('excludes by-key ops (path param → 404 before authz)', () => {
+    const ids = generateAuthDeny(securedOps, { allSecured: true }).map((s) => s.operationId);
+    expect(ids).not.toContain('getProject');
+    expect(ids).not.toContain('updateProject');
+    expect(ids).not.toContain('deleteProject');
+  });
+
+  it('excludes required-body ops (body validation → 400 before authz)', () => {
+    const ids = generateAuthDeny(securedOps, { allSecured: true }).map((s) => s.operationId);
+    expect(ids).not.toContain('createProject');
+  });
+
+  it('excludes ops with required non-path params (param validation → 400 before authz)', () => {
+    const ids = generateAuthDeny(securedOps, { allSecured: true }).map((s) => s.operationId);
+    expect(ids).not.toContain('searchProjectsByOrg');
+  });
+
+  it('each scenario is a strict 403 deny with no params and no admin auth', () => {
+    for (const s of generateAuthDeny(securedOps, { allSecured: true })) {
+      expect(s.type).toBe('auth-deny');
+      expect(s.expectedStatus).toBe(403);
+      expect(s.headersAuth).toBe(false);
+      expect(s.params).toBeUndefined();
+    }
+  });
+
+  it('honours the onlyOperations filter', () => {
+    const scenarios = generateAuthDeny(securedOps, {
+      allSecured: true,
+      onlyOperations: new Set(['searchProjects']),
+    });
+    expect(scenarios.map((s) => s.operationId)).toEqual(['searchProjects']);
+  });
+
+  it('does NOT use the OCA slice in all-secured mode (slice ops without `secured` are skipped)', () => {
+    // `ops` (the slice fixtures) carry no `secured` field, so all-secured emits nothing for them.
+    expect(generateAuthDeny(ops, { allSecured: true })).toHaveLength(0);
+  });
+});

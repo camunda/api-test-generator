@@ -44,6 +44,17 @@ export const denyProbeCredentials: ProbeCredentials = {
   password: process.env.RBAC_DENY_PROBE_PASSWORD || 'rbac-deny-probe-pw',
 };
 
+/**
+ * Reduced-permission Bearer token for the deny probe in `authDenyMode:
+ * 'all-secured'` (e.g. Camunda Hub): a token that authenticates (valid signature
+ * + audience, so it passes the 401 gate) but lacks the operation's required
+ * permission, so the server denies it with 403. Minted from a Keycloak client
+ * scoped without the public-api authorities — see docker/start-hub.sh. When
+ * unset, deny-tests fall back to the Basic-auth zero-grant probe user (OCA).
+ */
+export const denyProbeBearerToken: string | undefined =
+  process.env.RBAC_DENY_PROBE_BEARER_TOKEN || undefined;
+
 let partialCredsWarned = false;
 
 function encode(value: string): string {
@@ -56,10 +67,16 @@ export function basicAuthHeaders(username: string, password: string): Record<str
 }
 
 /**
- * Authorization header for the zero-grant RBAC deny-test probe user (#359).
- * Never the admin — the whole point is that this principal lacks permissions.
+ * Authorization header for the RBAC deny-test probe — a principal that lacks the
+ * operation's permission so an authorizations-enabled server denies it with 403.
+ * Never the admin.
+ *
+ * Bearer when `RBAC_DENY_PROBE_BEARER_TOKEN` is set (the `all-secured` mode, e.g.
+ * Hub — a reduced-permission token minted from Keycloak); otherwise the Basic-auth
+ * zero-grant probe user the suite global-setup provisions (the OCA read-side slice).
  */
 export function denyProbeHeaders(): Record<string, string> {
+  if (denyProbeBearerToken) return { Authorization: `Bearer ${denyProbeBearerToken}` };
   return basicAuthHeaders(denyProbeCredentials.username, denyProbeCredentials.password);
 }
 

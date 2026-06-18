@@ -109,7 +109,83 @@ for m in json.load(sys.stdin):
     }" > /dev/null
   echo "Keycloak: fixed web-modeler audience mapper → web-modeler-api"
 
-  # 2. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
+  # 2a. Idempotently add web-modeler-api audience mapper to c8-client (M2M test client).
+  #     The API test suite authenticates as c8-client; its JWT must carry aud=web-modeler-api
+  #     so the restapi's resource-server security accepts it for /v2/* endpoints.
+  local c8_client_uuid
+  c8_client_uuid=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
+    "${realm_url}/clients?clientId=c8-client" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')")
+  if [ -n "$c8_client_uuid" ]; then
+    local already_has_mapper
+    already_has_mapper=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
+      "${realm_url}/clients/${c8_client_uuid}/protocol-mappers/models" \
+      | python3 -c "
+import sys,json
+for m in json.load(sys.stdin):
+    if m.get('config',{}).get('included.client.audience') == 'web-modeler-api':
+        print('yes'); break
+") || true
+    if [ "${already_has_mapper:-}" != "yes" ]; then
+      curl -sf -X POST \
+        -H "Authorization: Bearer ${admin_token}" \
+        -H "Content-Type: application/json" \
+        "${realm_url}/clients/${c8_client_uuid}/protocol-mappers/models" \
+        -d '{
+          "name": "web-modeler-api Audience Mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "web-modeler-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }' > /dev/null
+      echo "Keycloak: added web-modeler-api audience mapper to c8-client"
+    else
+      echo "Keycloak: c8-client already has web-modeler-api audience mapper (skipped)"
+    fi
+  fi
+
+  # 2b. Give the reduced-permission deny client (c8-client-deny) a web-modeler-api
+  #     audience. Identity derives a token's audience from its granted public-api
+  #     permissions; this client has none (so it is denied 403), which would also
+  #     leave its token without aud=web-modeler-api and make the restapi reject it
+  #     with 401. Adding the audience mapper explicitly lets the token authenticate
+  #     and reach the authorization (403) gate — the whole point of the rbac probe.
+  local deny_client_uuid
+  deny_client_uuid=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
+    "${realm_url}/clients?clientId=c8-client-deny" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')")
+  if [ -n "$deny_client_uuid" ]; then
+    local deny_mapper_status
+    deny_mapper_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+      -H "Authorization: Bearer ${admin_token}" \
+      -H "Content-Type: application/json" \
+      "${realm_url}/clients/${deny_client_uuid}/protocol-mappers/models" \
+      -d '{
+        "name": "web-modeler-api audience (deny client)",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": false,
+        "config": {
+          "included.client.audience": "web-modeler-api",
+          "id.token.claim": "false",
+          "access.token.claim": "true",
+          "introspection.token.claim": "true",
+          "userinfo.token.claim": "false"
+        }
+      }')
+    case "$deny_mapper_status" in
+      201) echo "Keycloak: added web-modeler-api audience mapper to c8-client-deny" ;;
+      409) echo "Keycloak: c8-client-deny already has web-modeler-api audience mapper (skipped)" ;;
+      *)   echo "Keycloak: failed to add audience mapper to c8-client-deny (HTTP $deny_mapper_status)" >&2; return 1 ;;
+    esac
+  else
+    echo "Warning: c8-client-deny not found — rbac (403) deny tests will not authenticate."
+  fi
+
+  # 2c. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
   #    Identity creates the roles but does not assign them to seeded users.
   local demo_user_id
   demo_user_id=$(curl -sf -H "Authorization: Bearer ${admin_token}" \

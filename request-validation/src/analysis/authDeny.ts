@@ -3,18 +3,43 @@ import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /**
+   * When `true` (config `authDenyMode: 'all-secured'`), target `secured`
+   * operations that can reach the authority check without real fixtures: keyless
+   * paths (no `{param}` tokens), no required request body, and no required
+   * non-path parameters (query/header/cookie). By-key ops are excluded because
+   * a resource-existence check fires before `@PreAuthorize` (dummy key → 404);
+   * required-body ops are excluded because body validation fires before
+   * `@PreAuthorize` (missing body → 400); required non-path-param ops are
+   * excluded for the same reason (missing param → 400 before authz). The
+   * surviving surface is search/list/info endpoints. The deny probe is a
+   * reduced-permission Bearer token (`denyProbeHeaders()` switches to Bearer
+   * when `RBAC_DENY_PROBE_BEARER_TOKEN` is set — see the support `env.ts`),
+   * and no fixtures are provisioned. Default `false` preserves the OCA slice.
+   */
+  allSecured?: boolean;
 }
 
 /**
  * Generate auth-deny (HTTP 403) scenarios for the `rbac` profile.
  *
- * Read-side RBAC deny-tests: for a get-by-key read endpoint, issue the request
- * AS A FRESHLY-PROVISIONED NON-ADMIN USER WITH ZERO GRANTS (rendered as
- * `denyProbeHeaders()` by the emitter, NOT the admin `authHeaders()`), and expect
- * an authorizations-enabled server to deny it. The probe user and the target
- * resources are created by the suite global-setup; the key references a
- * KNOWN-EXISTING resource so the response is a genuine authorization deny (admin
- * would see it at 200) rather than a 404-not-found that any caller would get.
+ * Two modes, selected by {@link Opts.allSecured}:
+ *
+ * - **slice** (default, OCA) — read-side RBAC deny-tests: for a get-by-key read
+ *   endpoint in {@link SLICE}, issue the request AS A FRESHLY-PROVISIONED
+ *   NON-ADMIN USER WITH ZERO GRANTS (rendered as `denyProbeHeaders()`, NOT the
+ *   admin `authHeaders()`), and expect an authorizations-enabled server to deny
+ *   it. The probe user and the target resources are created by the suite
+ *   global-setup; the key references a KNOWN-EXISTING resource so the response is
+ *   a genuine authorization deny (admin would see it at 200) rather than a
+ *   404-not-found that any caller would get.
+ *
+ * - **all-secured** (Hub) — one deny-test per keyless, no-required-body,
+ *   no-required-non-path-param `secured` operation, authenticated as a
+ *   reduced-permission Bearer probe token. By-key ops, required-body ops, and
+ *   ops with required non-path parameters are excluded because Hub checks
+ *   body-validation (400) and resource-existence (404) before the authority
+ *   (`@PreAuthorize`, 403). See {@link generateAuthDenyAllSecured}.
  *
  * "Generic" = we assert the endpoint is permission-gated without naming the
  * exact permission. Precise per-permission deny/allow pairs, and search/list
@@ -51,6 +76,7 @@ const SLICE: Record<string, Record<string, string>> = {
 const DENY_STATUS = 403;
 
 export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationScenario[] {
+  if (opts.allSecured) return generateAuthDenyAllSecured(ops, opts);
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
@@ -66,6 +92,54 @@ export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationS
       expectedStatus: DENY_STATUS,
       description: 'Request as a non-admin user with no grants is denied (authorizations enabled)',
       // Not admin auth — the emitter renders denyProbeHeaders() for auth-deny.
+      headersAuth: false,
+    });
+  }
+  return out;
+}
+
+/**
+ * `all-secured` deny generator (Hub): one 403 scenario per keyless, no-required-body
+ * `secured` operation. The reduced-permission Bearer probe lacks the operation's
+ * required authority.
+ *
+ * Hub's check order is body-validation (400) → resource-existence (404) →
+ * authority (@PreAuthorize, 403). Three op categories are therefore excluded
+ * to guarantee a clean 403:
+ *
+ * - **By-key ops** (path contains `{param}`) — the resource lookup fires before
+ *   `@PreAuthorize`, so a dummy key yields 404 even with a valid deny token.
+ * - **Required-body ops** (`bodyRequired: true`) — `@RequestBody` deserialization
+ *   and bean-validation run before `@PreAuthorize`, so an absent/empty body
+ *   yields 400.
+ * - **Required non-path-param ops** (any `parameters` entry with `required: true`
+ *   and `in` ≠ `'path'`) — a missing required query/header/cookie param triggers
+ *   parameter validation before `@PreAuthorize`, so an omitted param yields 400.
+ *
+ * The surviving surface is keyless, no-required-body, no-required-non-path-param
+ * ops (search/list/info endpoints). `security: []` / anonymous `{}` operations
+ * are excluded (they carry no auth requirement and would not 403).
+ */
+function generateAuthDenyAllSecured(ops: OperationModel[], opts: Opts): ValidationScenario[] {
+  const out: ValidationScenario[] = [];
+  for (const op of ops) {
+    if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
+    if (op.secured !== true) continue;
+    if (op.path.includes('{')) continue; // by-key ops → 404 before authz
+    if (op.bodyRequired === true) continue; // required body → 400 before authz
+    if (op.parameters.some((p) => p.required && p.in !== 'path')) continue; // required query/header/cookie → 400 before authz
+    out.push({
+      id: makeId([op.operationId, 'auth-deny']),
+      operationId: op.operationId,
+      method: op.method,
+      path: op.path,
+      type: 'auth-deny',
+      params: undefined,
+      expectedStatus: DENY_STATUS,
+      description:
+        'Request by a principal lacking the required permission is denied with 403 (rbac mode)',
+      // Not admin auth — the emitter renders denyProbeHeaders(), which uses the
+      // reduced-permission Bearer probe token in this mode.
       headersAuth: false,
     });
   }
