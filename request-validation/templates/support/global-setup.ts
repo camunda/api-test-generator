@@ -87,9 +87,9 @@ async function globalSetup(): Promise<void> {
   if (process.env.RV_PROFILE !== 'rbac') return;
 
   // Bearer-probe mode (authDenyMode: 'all-secured', e.g. Hub): the deny probe is
-  // a reduced-permission token minted out-of-band (Keycloak), and the target
-  // authorizes before any resource lookup — so there are no fixtures to create
-  // and no probe USER to provision. Nothing to set up here.
+  // a reduced-permission token minted out-of-band (Keycloak). Only keyless,
+  // no-required-body ops are targeted, so no real resource keys are needed and
+  // no probe USER needs provisioning. Nothing to set up here.
   if (denyProbeBearerToken) {
     console.log(
       '[rbac global-setup] Bearer-probe mode (RBAC_DENY_PROBE_BEARER_TOKEN set) — ' +
