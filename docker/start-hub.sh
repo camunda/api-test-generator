@@ -8,7 +8,8 @@
 # Environment variables (all optional):
 #   HUB_UI_PORT      Frontend port (default: 8088)
 #   KEYCLOAK_PORT    Keycloak port (default: 18080)
-#   JAVA_HOME        Must point to a JDK 21+ installation
+#   JAVA_HOME        JDK matching camunda-hub/.tool-versions (currently Java 25).
+#                    Auto-selected from ~/.asdf if unset; validated before build.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -34,8 +35,38 @@ check_start_preconditions() {
     echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
     exit 1
   fi
+  ensure_jdk
+}
+
+# The Hub restapi build targets a specific JDK (maven.compiler.release). Rather
+# than hardcode it, read camunda-hub's asdf pin (.tool-versions) so this never
+# drifts, auto-select that JDK from ~/.asdf when JAVA_HOME is unset, and fail
+# fast on a version mismatch — instead of a cryptic Maven "release version N not
+# supported" several minutes into the build.
+ensure_jdk() {
+  local tv="$HUB_REPO/.tool-versions"
+  local pin="" required=21
+  if [ -f "$tv" ]; then
+    pin="$(awk '$1=="java"{print $2}' "$tv")"          # e.g. openjdk-25.0.1
+    local m; m="$(printf '%s' "$pin" | grep -oE '[0-9]+' | head -1)"
+    [ -n "$m" ] && required="$m"
+  fi
+  # Auto-select the asdf-pinned JDK if JAVA_HOME isn't already set.
+  if [ -z "${JAVA_HOME:-}" ] && [ -n "$pin" ] && [ -d "$HOME/.asdf/installs/java/$pin" ]; then
+    export JAVA_HOME="$HOME/.asdf/installs/java/$pin"
+    echo "JAVA_HOME not set — using camunda-hub's pinned JDK: $JAVA_HOME"
+  fi
   if [ -z "${JAVA_HOME:-}" ]; then
-    echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
+    echo "Error: JAVA_HOME is not set and the pinned JDK was not found."
+    echo "  The restapi build needs JDK ${required} (camunda-hub/.tool-versions: java ${pin:-openjdk-${required}.x})."
+    [ -n "$pin" ] && echo "  e.g. export JAVA_HOME=\"\$HOME/.asdf/installs/java/${pin}\""
+    exit 1
+  fi
+  local actual; actual="$("$JAVA_HOME/bin/java" -version 2>&1 | head -1 | grep -oE '[0-9]+' | head -1)"
+  if [ -z "$actual" ] || [ "$actual" -lt "$required" ]; then
+    echo "Error: JAVA_HOME points to Java ${actual:-?}, but the Hub restapi build needs Java ${required}+"
+    echo "  (maven.compiler.release=${required}; camunda-hub/.tool-versions pins java ${pin:-openjdk-${required}.x})."
+    [ -n "$pin" ] && echo "  export JAVA_HOME=\"\$HOME/.asdf/installs/java/${pin}\""
     exit 1
   fi
 }
