@@ -181,7 +181,11 @@ export async function materializeSupport(
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n');
+    .replace(/\n/g, '\\n')
+    // U+2028/U+2029 are JS/TS line terminators too — escape them so they can't
+    // break the single-quoted string literal even though \r/\n are handled.
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
   const envView = { ...templateView, defaultBaseUrl };
   for (const name of SUPPORT_TEMPLATE_FILES) {
     const dest = path.join(destDir, name);

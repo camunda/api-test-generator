@@ -4,7 +4,10 @@ export function buildBaseUrl(): string {
 
 export async function authHeaders(): Promise<Record<string, string>> {
   // Do not set Content-Type here; request options (data vs multipart) will determine it.
-  const token = process.env.BEARER_TOKEN;
+  // Trim: a BEARER_TOKEN pasted from a .env file or terminal often carries a
+  // trailing newline / surrounding whitespace, which would otherwise emit an
+  // invalid `Authorization: Bearer <token>\n` header.
+  const token = process.env.BEARER_TOKEN?.trim();
   if (token) {
     return { Authorization: `Bearer ${token}` };
   }

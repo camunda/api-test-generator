@@ -162,6 +162,17 @@ describe('materializeSupport', () => {
     expect(env).toContain("\\'");
     expect(env).not.toContain("'http://x/v2'; throw"); // no un-escaped break-out
   });
+
+  test('env.ts escapes U+2028/U+2029 line separators (no raw terminator in the literal)', async () => {
+    await materializeSupport(tmp, undefined, undefined, {
+      defaultBaseUrl: 'http://x/v2\u2028\u2029',
+    });
+    const env = await readEnv();
+    expect(env).toContain('\\u2028');
+    expect(env).toContain('\\u2029');
+    expect(env).not.toContain('\u2028'); // not emitted raw
+    expect(env).not.toContain('\u2029');
+  });
 });
 
 describe('positive-suite support env.ts authHeaders() (#398)', () => {
@@ -183,6 +194,18 @@ describe('positive-suite support env.ts authHeaders() (#398)', () => {
   });
 
   test('returns no auth header when BEARER_TOKEN is unset', async () => {
+    const { authHeaders } = await import('../../materializer/src/playwright/support/env.ts');
+    expect(await authHeaders()).toEqual({});
+  });
+
+  test('trims surrounding whitespace/newlines from BEARER_TOKEN', async () => {
+    process.env[KEY] = '  tok-123\n';
+    const { authHeaders } = await import('../../materializer/src/playwright/support/env.ts');
+    expect(await authHeaders()).toEqual({ Authorization: 'Bearer tok-123' });
+  });
+
+  test('treats a whitespace-only BEARER_TOKEN as unset', async () => {
+    process.env[KEY] = '   \n';
     const { authHeaders } = await import('../../materializer/src/playwright/support/env.ts');
     expect(await authHeaders()).toEqual({});
   });
