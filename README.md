@@ -91,14 +91,11 @@ CAMUNDA_REST_PORT=9080 docker compose up -d
 > Expects `camunda-hub` to be cloned as a sibling directory alongside this repo.
 
 ```bash
-# Start (Docker infrastructure + restapi + frontend); waits until the UI is ready
+# Start (Docker infrastructure + restapi + frontend)
 ./docker/start-hub.sh
 
 # Stop
 ./docker/start-hub.sh stop
-
-# Status (infra + app process)
-./docker/start-hub.sh status
 ```
 
 The Hub UI will be available at `http://localhost:${HUB_UI_PORT:-8088}`. Log in with `demo` / `demo`.
@@ -123,6 +120,32 @@ CONFIG=camunda-hub npm run test:pw:request-validation
 ```
 
 > The Hub server must be running with `CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED=true` — set this in `camunda-hub/restapi/config/config-common/src/main/resources/application-common-local.yml` before starting.
+
+#### End-to-end drivers (generate → run → curl-compare)
+
+`scripts/e2e/` wraps the whole flow into one command per config — generate both
+suites, run them with Playwright, then re-issue each request-validation test with
+an independent **curl oracle** that compares `expected` vs Playwright vs curl
+status (printing the curl response body on a mismatch):
+
+```bash
+./scripts/e2e/run-hub.sh    # Hub: mints Keycloak Bearer tokens; base http://localhost:8088/api
+./scripts/e2e/run-oca.sh    # OCA: HTTP Basic (demo/demo); base http://localhost:8080
+```
+
+Both are env-configurable (no edits needed):
+
+- `STEPS="generate run curl"` — pick which steps to run (e.g. `STEPS=curl` to re-curl only).
+- `RV_PROFILES="secured rbac"` (Hub) / `"unsecured"` (OCA) — which request-validation profiles.
+- `SKIP_POSITIVE=1` — skip the positive lifecycle suite (default for Hub until [camunda-hub#25146](https://github.com/camunda/camunda-hub/pull/25146) merges; set `SKIP_POSITIVE=0` to re-enable).
+- `E2E_SOFT=1` — don't exit non-zero when the oracle finds mismatches.
+
+Output lands in `test-results/e2e-<config>/`: the Playwright report (`pw-<profile>.json`)
+and the curl-compare report as both text (`curl-compare-<profile>.txt`) and a
+self-contained, color-coded **HTML** view (`curl-compare-<profile>.html`, with a
+"show only mismatches" toggle and expandable request/response detail). The positive
+suite's base URL is baked in per config (`configs/<config>/codegen/playwright/config.json`),
+so `API_BASE_URL` only needs setting to override it.
 
 ### Running the Test Generator
 

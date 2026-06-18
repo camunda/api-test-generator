@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
-# Start, stop, or check the status of camunda-hub (Web Modeler) in Self-Managed mode.
+# Start or stop camunda-hub (Web Modeler) in Self-Managed mode.
 # Expects camunda-hub to be cloned as a sibling directory: ../camunda-hub
-#
-# Usage:
-#   ./docker/start-hub.sh [start|stop|status]
-#
-# Environment variables (all optional):
-#   HUB_UI_PORT      Frontend port (default: 8088)
-#   KEYCLOAK_PORT    Keycloak port (default: 18080)
-#   JAVA_HOME        JDK matching camunda-hub/.tool-versions (currently Java 25).
-#                    Auto-selected from ~/.asdf if unset; validated before build.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,7 +14,7 @@ LOG_FILE="$REPO_ROOT/test-results/.hub.log"
 # `stop` just kills the PID and tears down Docker, so it must not require them.
 check_start_preconditions() {
   local missing=()
-  for cmd in docker curl python3 lsof make npm; do
+  for cmd in docker curl python3 lsof make; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
@@ -35,81 +26,10 @@ check_start_preconditions() {
     echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
     exit 1
   fi
-  ensure_jdk
-}
-
-# The Hub restapi build targets a specific JDK (maven.compiler.release). Rather
-# than hardcode it, read camunda-hub's asdf pin (.tool-versions) so this never
-# drifts, auto-select that JDK from ~/.asdf when JAVA_HOME is unset, and fail
-# fast on a version mismatch — instead of a cryptic Maven "release version N not
-# supported" several minutes into the build.
-ensure_jdk() {
-  local tv="$HUB_REPO/.tool-versions"
-  local pin="" required=21
-  if [ -f "$tv" ]; then
-    pin="$(awk '$1=="java"{print $2}' "$tv")"          # e.g. openjdk-25.0.1
-    local m; m="$(printf '%s' "$pin" | grep -oE '[0-9]+' | head -1)"
-    [ -n "$m" ] && required="$m"
-  fi
-  # Auto-select the asdf-pinned JDK if JAVA_HOME isn't already set.
-  if [ -z "${JAVA_HOME:-}" ] && [ -n "$pin" ] && [ -d "$HOME/.asdf/installs/java/$pin" ]; then
-    export JAVA_HOME="$HOME/.asdf/installs/java/$pin"
-    echo "JAVA_HOME not set — using camunda-hub's pinned JDK: $JAVA_HOME"
-  fi
   if [ -z "${JAVA_HOME:-}" ]; then
-    echo "Error: JAVA_HOME is not set and the pinned JDK was not found."
-    echo "  The restapi build needs JDK ${required} (camunda-hub/.tool-versions: java ${pin:-openjdk-${required}.x})."
-    [ -n "$pin" ] && echo "  e.g. export JAVA_HOME=\"\$HOME/.asdf/installs/java/${pin}\""
+    echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
     exit 1
   fi
-  local actual; actual="$("$JAVA_HOME/bin/java" -version 2>&1 | head -1 | grep -oE '[0-9]+' | head -1)"
-  if [ -z "$actual" ] || [ "$actual" -lt "$required" ]; then
-    echo "Error: JAVA_HOME points to Java ${actual:-?}, but the Hub restapi build needs Java ${required}+"
-    echo "  (maven.compiler.release=${required}; camunda-hub/.tool-versions pins java ${pin:-openjdk-${required}.x})."
-    [ -n "$pin" ] && echo "  export JAVA_HOME=\"\$HOME/.asdf/installs/java/${pin}\""
-    exit 1
-  fi
-}
-
-# Sync frontend node_modules to the lockfile before starting the dev server.
-# This prevents stale installs (e.g. a package updated in package-lock.json but
-# not yet reflected in node_modules) from causing webpack compile failures.
-sync_frontend_deps() {
-  echo "Syncing frontend dependencies (npm ci)..."
-  # Capture output so a genuine `npm ci` failure aborts (declare then assign —
-  # `local log=$(...)` would mask the command's exit status behind `local`'s).
-  # The previous `… | grep … || true` pipeline swallowed failures and still
-  # printed success, risking a start with broken frontend deps.
-  local log
-  if ! log="$(npm ci --workspace=apps/hub --prefix "$HUB_REPO/frontend" 2>&1)"; then
-    echo "$log" | grep -v "^npm warn\|^npm notice" || true
-    echo "Error: 'npm ci' failed for the Hub frontend (see output above)." >&2
-    return 1
-  fi
-  echo "$log" | grep -v "^npm warn\|^npm notice" || true
-  echo "Frontend dependencies up to date."
-}
-
-# Poll until the Hub UI responds successfully. `curl -sf` treats any 2xx/3xx as
-# success and only fails on HTTP >= 400 (or connection errors), so this waits for
-# the login page to be served (a redirect counts as ready).
-wait_for_ready() {
-  local hub_ui_port="${HUB_UI_PORT:-8088}"
-  local url="http://localhost:${hub_ui_port}/login"
-  # A cold restapi (Spring Boot) + frontend (webpack) build can take well over
-  # 3 min, so default to ~8 min; override with HUB_READY_ATTEMPTS (×2s each).
-  local max="${HUB_READY_ATTEMPTS:-240}"
-  local attempts=0
-  echo "Waiting for Hub UI at ${url} (up to $((max * 2))s)..."
-  until curl -sf -o /dev/null "$url"; do
-    attempts=$((attempts + 1))
-    if [ "$attempts" -ge "$max" ]; then
-      echo "Error: Hub UI did not become ready within ${max} attempts (≈$((max * 2))s). Check $LOG_FILE for details."
-      return 1
-    fi
-    sleep 2
-  done
-  echo "Hub UI is ready at http://localhost:${hub_ui_port}"
 }
 
 fix_keycloak() {
@@ -189,45 +109,7 @@ for m in json.load(sys.stdin):
     }" > /dev/null
   echo "Keycloak: fixed web-modeler audience mapper → web-modeler-api"
 
-  # 2a. Idempotently add web-modeler-api audience mapper to c8-client (M2M test client).
-  #     The API test suite authenticates as c8-client; its JWT must carry aud=web-modeler-api
-  #     so the restapi's resource-server security accepts it for /v2/* endpoints.
-  local c8_client_uuid
-  c8_client_uuid=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
-    "${realm_url}/clients?clientId=c8-client" \
-    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else '')")
-  if [ -n "$c8_client_uuid" ]; then
-    local already_has_mapper
-    already_has_mapper=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
-      "${realm_url}/clients/${c8_client_uuid}/protocol-mappers/models" \
-      | python3 -c "
-import sys,json
-for m in json.load(sys.stdin):
-    if m.get('config',{}).get('included.client.audience') == 'web-modeler-api':
-        print('yes'); break
-") || true
-    if [ "${already_has_mapper:-}" != "yes" ]; then
-      curl -sf -X POST \
-        -H "Authorization: Bearer ${admin_token}" \
-        -H "Content-Type: application/json" \
-        "${realm_url}/clients/${c8_client_uuid}/protocol-mappers/models" \
-        -d '{
-          "name": "web-modeler-api Audience Mapper",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.client.audience": "web-modeler-api",
-            "access.token.claim": "true",
-            "id.token.claim": "false"
-          }
-        }' > /dev/null
-      echo "Keycloak: added web-modeler-api audience mapper to c8-client"
-    else
-      echo "Keycloak: c8-client already has web-modeler-api audience mapper (skipped)"
-    fi
-  fi
-
-  # 2b. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
+  # 2. Assign Web Modeler / Web Modeler Admin / Identity roles to the demo user.
   #    Identity creates the roles but does not assign them to seeded users.
   local demo_user_id
   demo_user_id=$(curl -sf -H "Authorization: Bearer ${admin_token}" \
@@ -273,14 +155,7 @@ case "${1:-start}" in
     fi
     echo "Starting Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" up -d
-    # The stack is up now; if frontend-dep sync or Keycloak setup fails, tear it
-    # back down so a failed start doesn't leave a half-started environment
-    # (ports bound, containers running) behind.
-    if ! sync_frontend_deps || ! fix_keycloak; then
-      echo "Error: Hub setup failed — tearing down infrastructure." >&2
-      docker compose -f "$COMPOSE_FILE" down || true
-      exit 1
-    fi
+    fix_keycloak
     echo "Starting Hub app (restapi + frontend)..."
     cd "$HUB_REPO"
     # Launch make in its OWN process group (job-control mode) so the recorded PID
@@ -299,16 +174,7 @@ case "${1:-start}" in
       echo "Error: Hub app exited immediately. Check $LOG_FILE for details."
       exit 1
     fi
-    echo "Hub app starting (PID $MAKE_PID). Logs: $LOG_FILE"
-    # If the UI never comes up, don't leave the app process + docker stack running
-    # with a stale PID file — reuse the stop path to tear everything down.
-    if ! wait_for_ready; then
-      echo "Error: Hub UI did not become ready — tearing down. Check $LOG_FILE." >&2
-      # Absolute path: by here we've `cd`'d into $HUB_REPO, so a relative $0
-      # ("./docker/start-hub.sh") would no longer resolve.
-      "$SCRIPT_DIR/start-hub.sh" stop || true
-      exit 1
-    fi
+    echo "Hub app started (PID $MAKE_PID). Logs: $LOG_FILE"
     echo "Run './docker/start-hub.sh stop' to stop."
     ;;
   stop)
@@ -339,33 +205,8 @@ case "${1:-start}" in
     echo "Stopping Hub infrastructure..."
     docker compose -f "$COMPOSE_FILE" down
     ;;
-  status)
-    hub_ui_port="${HUB_UI_PORT:-8088}"
-    echo "=== Hub status ==="
-    if [ -f "$PID_FILE" ]; then
-      MAKE_PID=$(cat "$PID_FILE")
-      if kill -0 "$MAKE_PID" 2>/dev/null; then
-        echo "App process : running (PID $MAKE_PID)"
-      else
-        echo "App process : stopped (stale PID file — run start)"
-      fi
-    else
-      echo "App process : no PID file (not started via this script)"
-    fi
-    if curl -sf -o /dev/null "http://localhost:${hub_ui_port}/login" 2>/dev/null; then
-      echo "Hub UI      : http://localhost:${hub_ui_port}  ✓ responding"
-    else
-      echo "Hub UI      : http://localhost:${hub_ui_port}  ✗ not responding"
-    fi
-    if curl -sf -o /dev/null "http://localhost:${KEYCLOAK_PORT:-18080}/auth/" 2>/dev/null; then
-      echo "Keycloak    : http://localhost:${KEYCLOAK_PORT:-18080}  ✓ responding"
-    else
-      echo "Keycloak    : http://localhost:${KEYCLOAK_PORT:-18080}  ✗ not responding"
-    fi
-    echo "Logs        : $LOG_FILE"
-    ;;
   *)
-    echo "Usage: ./docker/start-hub.sh [start|stop|status]"
+    echo "Usage: ./docker/start-hub.sh [start|stop]"
     exit 1
     ;;
 esac
