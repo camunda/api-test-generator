@@ -96,13 +96,27 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   fi
 fi
 
-# Playwright JSON report per request-validation profile (consumed by curl-compare)
+# Playwright JSON (consumed by curl-compare) + HTML report per profile.
+# The generated playwright.config.ts already declares both `json` and `html`
+# reporters; we redirect their outputs via env vars instead of `--reporter=json`
+# (which would override the config's list and suppress the HTML report).
+# Paths must be ABSOLUTE: Playwright resolves these reporter env vars relative to
+# the config dir (the generated profile dir), not cwd, so a relative path would
+# land the reports under generated/<config>/... instead of $OUT.
 run_rv() { # profile
   local p="$1" cfg="$RV_DIR/$1/playwright.config.ts"
   [ -f "$cfg" ] || { echo "  ⚠ profile '$p' not generated — skipping"; return; }
+  local abs_out; abs_out="$(cd "$OUT" && pwd)"
   BEARER_TOKEN="$ADMIN_TOK" RBAC_DENY_PROBE_BEARER_TOKEN="$DENY_TOK" \
     CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
-    npx playwright test -c "$cfg" --reporter=json > "$OUT/pw-$p.json" 2>/dev/null || true
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$abs_out/pw-$p.json" \
+    PLAYWRIGHT_HTML_OUTPUT_DIR="$abs_out/pw-$p" \
+    npx playwright test -c "$cfg" 2>/dev/null || true
+  if [ -f "$OUT/pw-$p/index.html" ]; then
+    echo "  ✓ Playwright report: $OUT/pw-$p/index.html (json: $OUT/pw-$p.json)"
+  else
+    echo "  ⚠ Playwright HTML report not generated for '$p' (run may have failed)"
+  fi
 }
 
 # ================== 2+3. RUN + CURL-COMPARE (per profile) ============
