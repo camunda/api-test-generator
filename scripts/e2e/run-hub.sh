@@ -89,7 +89,11 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
     npx playwright test -c path-analyser/playwright.config.ts || true
-  echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
+  if [ -f "$OUT/pw-positive/index.html" ]; then
+    echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
+  else
+    echo "  ⚠ positive suite report not generated (Playwright run may have failed)"
+  fi
 fi
 
 # Playwright JSON report per request-validation profile (consumed by curl-compare)

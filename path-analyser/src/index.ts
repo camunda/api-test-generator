@@ -1357,9 +1357,12 @@ function buildRequestBodyFromCanonical(
               template[name] = [synthesizeArrayElement(name, nodes)];
             }
           } else {
-            // #397 — check canonical node format before falling back to seed.
+            // #397 — for format-constrained scalars, emit a format-valid literal
+            // rather than a generic ${varName} seed that would fail server validation.
+            // Exception: email uses runtime seeding (seed rule: seed-<salt>@example.com)
+            // so values vary per call and unique-binding constraints can apply.
             const nodeFormat = nodes.find((n) => n.path === name)?.format;
-            const fmtLiteral = nodeFormat ? formatSeedLiteral(nodeFormat) : undefined;
+            const fmtLiteral = (nodeFormat && nodeFormat !== 'email') ? formatSeedLiteral(nodeFormat) : undefined;
             if (fmtLiteral !== undefined) {
               template[name] = fmtLiteral;
             } else {
@@ -1436,10 +1439,11 @@ function buildRequestBodyFromCanonical(
             template[leaf] = [synthesizeArrayElement(basePath, nodes)];
           }
         } else {
-          // #397 — for format-constrained scalars, embed a format-valid
-          // literal (e.g. format:email → "seed@example.com") so the body
-          // passes server-side format validation. No runtime binding needed.
-          const fmtLiteral = f.format ? formatSeedLiteral(f.format) : undefined;
+          // #397 — for format-constrained scalars, embed a format-valid literal
+          // so the body passes server-side format validation.
+          // Exception: email uses runtime seeding (seed rule: seed-<salt>@example.com)
+          // so values vary per call and unique-binding constraints can apply.
+          const fmtLiteral = (f.format && f.format !== 'email') ? formatSeedLiteral(f.format) : undefined;
           if (fmtLiteral !== undefined) {
             template[leaf] = fmtLiteral;
           } else {
