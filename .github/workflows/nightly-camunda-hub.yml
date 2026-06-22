@@ -154,6 +154,26 @@ jobs:
       - name: Start Hub (SNAPSHOT)
         run: ./docker/start-hub.sh start
 
+      # start-hub.sh backgrounds `make local-self-managed` and returns immediately
+      # (it only waits to catch an instant crash) — the build + boot then takes
+      # many minutes. Without this gate the test step hits a not-yet-listening Hub
+      # and every request is "connection refused". Poll the v2 surface until it
+      # answers (401 = up, auth required); dump the Hub log on timeout.
+      - name: Wait for Hub to be ready
+        run: |
+          echo "Waiting for Hub on :${HUB_UI_PORT}/api/v2 (build + boot, up to 35m)..."
+          deadline=$(( SECONDS + 2100 ))
+          until code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://localhost:${HUB_UI_PORT}/api/v2/" 2>/dev/null) && [ "$code" != "000" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Hub did not become ready within 35m (last code: ${code:-none})"
+              echo "----- tail of test-results/.hub.log -----"
+              tail -n 150 test-results/.hub.log 2>/dev/null || echo "(no hub log)"
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "Hub is up (HTTP $code)."
+
       # --- 2,3,5,6. Skip positive, regenerate, run, build reports --------------
       # run-hub.sh STEPS="generate run curl":
       #   generate → regenerate request-validation suite (positive skipped via SKIP_POSITIVE=1)
