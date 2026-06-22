@@ -73,7 +73,7 @@ describe('canonicalSchemas: format keyword captured on leaf nodes (#397)', () =>
     });
 
     const shapes = await buildCanonicalShapes(scratch.root);
-    const shape = shapes['addCollaborator'];
+    const shape = shapes.addCollaborator;
     expect(shape, 'addCollaborator must be present in canonical shapes').toBeTruthy();
 
     const nodes = shape?.requestByMediaType?.['application/json'] ?? [];
@@ -112,7 +112,7 @@ describe('canonicalSchemas: format keyword captured on leaf nodes (#397)', () =>
     });
 
     const shapes = await buildCanonicalShapes(scratch.root);
-    const nodes = shapes['createItem']?.requestByMediaType?.['application/json'] ?? [];
+    const nodes = shapes.createItem?.requestByMediaType?.['application/json'] ?? [];
     const node = nodes.find((n) => n.path === 'correlationKey');
     expect(node?.format).toBe('uuid');
   });
@@ -146,7 +146,7 @@ describe('canonicalSchemas: format keyword captured on leaf nodes (#397)', () =>
     });
 
     const shapes = await buildCanonicalShapes(scratch.root);
-    const nodes = shapes['createItem']?.requestByMediaType?.['application/json'] ?? [];
+    const nodes = shapes.createItem?.requestByMediaType?.['application/json'] ?? [];
     const node = nodes.find((n) => n.path === 'name');
     expect(node?.format).toBeUndefined();
   });

@@ -1365,7 +1365,8 @@ function buildRequestBodyFromCanonical(
             // so values vary per call and unique-binding constraints can apply.
             const nodeFormat =
               nodes.find((n) => n.path === name)?.format ?? chosenVariant?.fieldFormats?.[name];
-            const fmtLiteral = (nodeFormat && nodeFormat !== 'email') ? formatSeedLiteral(nodeFormat) : undefined;
+            const fmtLiteral =
+              nodeFormat && nodeFormat !== 'email' ? formatSeedLiteral(nodeFormat) : undefined;
             if (fmtLiteral !== undefined) {
               template[name] = fmtLiteral;
             } else {
@@ -1446,7 +1447,8 @@ function buildRequestBodyFromCanonical(
           // so the body passes server-side format validation.
           // Exception: email uses runtime seeding (seed rule: seed-<salt>@example.com)
           // so values vary per call and unique-binding constraints can apply.
-          const fmtLiteral = (f.format && f.format !== 'email') ? formatSeedLiteral(f.format) : undefined;
+          const fmtLiteral =
+            f.format && f.format !== 'email' ? formatSeedLiteral(f.format) : undefined;
           if (fmtLiteral !== undefined) {
             template[leaf] = fmtLiteral;
           } else {
