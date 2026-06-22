@@ -58,12 +58,17 @@ fix_keycloak() {
   echo "Waiting for Identity to initialise the camunda-platform realm..."
   local realm_url="${keycloak_url}/auth/admin/realms/camunda-platform"
   attempts=0
+  # Wait for c8-client-deny — the LAST test client Identity provisions (web-modeler
+  # and c8-client come before it). Waiting on web-modeler alone let the script race
+  # ahead before c8-client-deny existed → "deny client not found" + a downstream
+  # IndexError that crashed start-hub. Gating on c8-client-deny ensures all three
+  # (web-modeler, c8-client, c8-client-deny) are present before we touch them.
   until curl -sf -H "Authorization: Bearer ${admin_token}" \
-      "${realm_url}/clients?clientId=web-modeler" \
+      "${realm_url}/clients?clientId=c8-client-deny" \
       | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d else 1)" 2>/dev/null; do
     attempts=$((attempts + 1))
     if [ "$attempts" -ge 60 ]; then
-      echo "Error: camunda-platform realm / web-modeler client not ready within 60 attempts."
+      echo "Error: camunda-platform realm / c8-client-deny not ready within 60 attempts."
       return 1
     fi
     # Admin token expires after 60 s — refresh it periodically
