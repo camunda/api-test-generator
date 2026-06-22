@@ -57,6 +57,12 @@ jobs:
     # Camunda container-registry credentials are required.
     env:
       HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
+      # TestRail publish (mirrors camunda/camunda). Set TESTRAIL_USERNAME +
+      # TESTRAIL_KEY repo secrets (or Vault TESTRAIL_QA_EMAIL/PSW once onboarded)
+      # to enable the publish step; when unset it is skipped. Results go to the
+      # suite below regardless via the run summary + artifact.
+      TESTRAIL_USERNAME: ${{ secrets.TESTRAIL_USERNAME }}
+      TESTRAIL_KEY: ${{ secrets.TESTRAIL_KEY }}
 
     steps:
       - name: Checkout api-test-generator
@@ -229,6 +235,37 @@ jobs:
             echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
             echo "_~102 secured failures are known generator-gap false-positives (#352/#363/#372)._"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
+      # Ingests each profile's Playwright JUnit XML into TestRail suite 101098 via
+      # the TestRail CLI. Gated on TESTRAIL_USERNAME/TESTRAIL_KEY (see job env) so
+      # it's dormant until creds are set. Runs always() to publish failures too.
+      # TODO: set TESTRAIL_PROJECT to the project that owns suite 101098.
+      - name: Publish results to TestRail
+        if: ${{ always() && env.TESTRAIL_USERNAME != '' && env.TESTRAIL_KEY != '' }}
+        env:
+          TESTRAIL_HOST: 'https://camunda.testrail.com/'
+          TESTRAIL_PROJECT: 'Web Modeler'  # TODO: confirm the project name for suite 101098
+          TESTRAIL_SUITE_ID: '101098'
+        run: |
+          pip install --quiet trcli==1.14.1
+          out="test-results/e2e-camunda-hub"
+          for p in secured rbac; do
+            f="$out/pw-$p.junit.xml"
+            if [ ! -f "$f" ]; then
+              echo "skip $p — no JUnit at $f"; continue
+            fi
+            echo "Publishing $p → TestRail suite ${TESTRAIL_SUITE_ID}…"
+            trcli -y -h "$TESTRAIL_HOST" \
+              --project "$TESTRAIL_PROJECT" \
+              --username "$TESTRAIL_USERNAME" \
+              --key "$TESTRAIL_KEY" \
+              --batch-size 500 \
+              parse_junit --suite-id "$TESTRAIL_SUITE_ID" \
+              --title "Nightly camunda-hub negative — ${p} — $(date '+%Y-%m-%d %H:%M:%S')" \
+              --close-run \
+              -f "$f" || echo "::warning::TestRail publish failed for profile '$p'"
+          done
 
       # TEMP: Slack notification disabled for now. To re-enable: add a SLACK_BOT_TOKEN
       # repo secret (or Vault SLACK_CORE_DOMAIN_BOT_TOKEN), map it into the job env,

@@ -18,11 +18,14 @@ export default defineConfig({
   // `list` for an immediately-readable inline summary; `json` so
   // `npm run summarize` can produce a grouped failure breakdown;
   // `html` so `npx playwright show-report` opens the full failure detail
-  // (request.json / response.json attachments, expected vs. actual status).
+  // (request.json / response.json attachments, expected vs. actual status);
+  // `junit` for TestRail ingestion (trcli parse_junit). Each reporter's output
+  // path is overridable at runtime via PLAYWRIGHT_<NAME>_OUTPUT_FILE/_DIR.
   reporter: [
     ['list'],
     ['json', { outputFile: 'test-results.json' }],
     ['html', { open: 'never', outputFolder: 'playwright-report' }],
+    ['junit', { outputFile: 'junit-report.xml' }],
   ],
   use: {
     trace: 'off',
