@@ -48,10 +48,16 @@ jobs:
     # Hub builds restapi + frontend from source (~10-20 min) on top of generate/run.
     timeout-minutes: 60
 
-    # Map the temp PAT secret into a job env: the `secrets` context is NOT allowed
-    # in a step `if:`, but `env` is. Empty when the secret is unset.
+    # Map secrets into job env: the `secrets` context is NOT allowed in a step
+    # `if:`, but `env` is. Empty when a secret is unset.
+    # TEMP workaround secrets (until Vault onboarding):
+    #   HUB_REPO_TOKEN — PAT to clone camunda-hub
+    #   CAMUNDA_CONTAINER_REGISTRY_USER/PASSWORD — registry.camunda.cloud login
+    #     (needed to pull the private hub-websockets image in docker-compose).
     env:
       HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
+      CAMUNDA_CONTAINER_REGISTRY_USER: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_USER }}
+      CAMUNDA_CONTAINER_REGISTRY_PASSWORD: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_PASSWORD }}
 
     steps:
       - name: Checkout api-test-generator
@@ -131,6 +137,16 @@ jobs:
       # at latest main. No SPEC_REF, no pin enforcement (unpinned by design).
       - name: Bundle latest camunda-hub spec
         run: CONFIG=camunda-hub npm run fetch-spec
+
+      # --- Log in to registry.camunda.cloud (private Hub infra images) ---------
+      # docker-compose.hub.yml pulls registry.camunda.cloud/team-hub/hub-websockets
+      # (private). Runs when registry creds are present (temp repo secrets, or
+      # later from Vault). Mirrors camunda-hub's own docker-login.
+      - name: Log in to registry.camunda.cloud
+        if: ${{ env.CAMUNDA_CONTAINER_REGISTRY_USER != '' }}
+        run: |
+          echo "$CAMUNDA_CONTAINER_REGISTRY_PASSWORD" \
+            | docker login registry.camunda.cloud -u "$CAMUNDA_CONTAINER_REGISTRY_USER" --password-stdin
 
       # --- 4. Start camunda-hub (SNAPSHOT) -------------------------------------
       # docker/start-hub.sh: docker compose up (Keycloak/Identity/Postgres) +
