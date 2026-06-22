@@ -230,6 +230,21 @@ case "${1:-start}" in
       echo "$stale_pids" | xargs kill 2>/dev/null || true
     fi
     echo "Starting Hub infrastructure..."
+    # HUB_MODE=prebuilt: run the published camunda/hub image (compose `prebuilt`
+    # profile) instead of building from source — fast, no JDK/source-build deps.
+    # The container is managed by docker compose, so there's no make PID to track;
+    # `stop` tears it down via `docker compose down`.
+    if [ "${HUB_MODE:-source}" = "prebuilt" ]; then
+      # Bring up only the hub + its deps (NOT websockets — it's a private image
+      # the suite doesn't need; excluding it keeps the prebuilt path free of any
+      # Camunda registry credentials since camunda/hub itself is public).
+      docker compose -f "$COMPOSE_FILE" --profile prebuilt up -d \
+        modeler-db keycloak-db identity-db keycloak identity mailpit hub
+      fix_keycloak
+      echo "Hub app: prebuilt image camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} (container 'hub')."
+      echo "Run './docker/start-hub.sh stop' to stop."
+      exit 0
+    fi
     docker compose -f "$COMPOSE_FILE" up -d
     fix_keycloak
     echo "Starting Hub app (restapi + frontend)..."
