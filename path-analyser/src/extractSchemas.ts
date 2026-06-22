@@ -272,13 +272,16 @@ function findOneOfGroups(
       const fieldTypes: Record<string, string> = {};
       const fieldEnums: Record<string, unknown[]> = {};
       const fieldItemEnums: Record<string, unknown[]> = {};
+      const fieldFormats: Record<string, string> = {};
       for (const [fname, fsch] of Object.entries(props)) {
+        const rs = resolveSchema(fsch, components);
         const ft = effectiveType(fsch, components);
         if (ft && ft !== 'unknown') fieldTypes[fname] = ft;
         const enumValues = effectiveEnum(fsch, components);
         if (enumValues && enumValues.length > 0) fieldEnums[fname] = enumValues;
+        if (rs.format) fieldFormats[fname] = rs.format;
         if (ft === 'array') {
-          const itemSchema = resolveSchema(fsch, components).items;
+          const itemSchema = rs.items;
           if (itemSchema) {
             const itemEnum = effectiveEnum(itemSchema, components);
             if (itemEnum && itemEnum.length > 0) fieldItemEnums[fname] = itemEnum;
@@ -303,6 +306,7 @@ function findOneOfGroups(
         fieldTypes,
         fieldEnums: Object.keys(fieldEnums).length > 0 ? fieldEnums : undefined,
         fieldItemEnums: Object.keys(fieldItemEnums).length > 0 ? fieldItemEnums : undefined,
+        fieldFormats: Object.keys(fieldFormats).length > 0 ? fieldFormats : undefined,
         discriminator,
       };
     });

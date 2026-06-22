@@ -1359,9 +1359,12 @@ function buildRequestBodyFromCanonical(
           } else {
             // #397 — for format-constrained scalars, emit a format-valid literal
             // rather than a generic ${varName} seed that would fail server validation.
+            // Canonical nodes don't descend oneOf variants, so fall back to the
+            // variant's own fieldFormats when the canonical lookup returns nothing.
             // Exception: email uses runtime seeding (seed rule: seed-<salt>@example.com)
             // so values vary per call and unique-binding constraints can apply.
-            const nodeFormat = nodes.find((n) => n.path === name)?.format;
+            const nodeFormat =
+              nodes.find((n) => n.path === name)?.format ?? chosenVariant?.fieldFormats?.[name];
             const fmtLiteral = (nodeFormat && nodeFormat !== 'email') ? formatSeedLiteral(nodeFormat) : undefined;
             if (fmtLiteral !== undefined) {
               template[name] = fmtLiteral;
