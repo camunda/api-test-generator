@@ -1320,7 +1320,6 @@ function buildRequestBodyFromCanonical(
   // Build template
   if (chosenCt === 'application/json') {
     const template: Record<string, unknown> = {};
-    const missing: string[] = [];
     if (requestGroups.length) {
       // oneOf-aware synthesis
       if (chosenVariantRequired?.length) {
@@ -1386,7 +1385,6 @@ function buildRequestBodyFromCanonical(
               scenario.bindings ||= {};
               if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
               template[name] = `${'${'}${varName}}`;
-              if (!bindingMap[mappedName]) missing.push(name);
             }
           }
         }
@@ -1468,7 +1466,6 @@ function buildRequestBodyFromCanonical(
             scenario.bindings ||= {};
             if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
             template[leaf] = `${'${'}${varName}}`;
-            if (!bindingMap[normalizedPath]) missing.push(normalizedPath);
           }
         }
       }
