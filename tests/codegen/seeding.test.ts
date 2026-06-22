@@ -111,3 +111,29 @@ describe('seeding: per-process runNonce for { unique: true } bindings (#304)', (
     expect(det).not.toBe(uniq);
   });
 });
+
+describe('seeding: format-aware seed rules (#397)', () => {
+  afterEach(() => {
+    initSpecSalt('');
+  });
+
+  test('emailVar seed is a syntactically valid email address', () => {
+    initSpecSalt('addCollaborator');
+    const val = seedBinding('emailVar');
+    expect(val).toMatch(/.+@.+\..+/);
+  });
+
+  test('email seed does not contain the literal string "emailVar"', () => {
+    initSpecSalt('addCollaborator');
+    const val = seedBinding('emailVar');
+    expect(val).not.toContain('emailVar');
+  });
+
+  test('different spec salts produce different email seeds', () => {
+    initSpecSalt('specA');
+    const valA = seedBinding('emailVar');
+    initSpecSalt('specB');
+    const valB = seedBinding('emailVar');
+    expect(valA).not.toBe(valB);
+  });
+});

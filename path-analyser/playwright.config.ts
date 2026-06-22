@@ -9,6 +9,10 @@ const __dirname = dirname(__filename);
 // generated/<config>/playwright at the repo root.
 const repoRoot = resolve(__dirname, '..');
 
+// outputFolder honours PLAYWRIGHT_HTML_REPORT so callers (e.g. scripts/e2e/run-hub.sh)
+// can redirect the report to a per-config location; defaults to playwright-report/.
+const htmlOutputFolder = process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwright-report';
+
 export default defineConfig({
   testDir: getPlaywrightSuiteDir(repoRoot),
   timeout: 60_000,
@@ -16,5 +20,5 @@ export default defineConfig({
     // Base APIRequestContext is provided by Playwright's test fixture
     extraHTTPHeaders: {},
   },
-  reporter: [['list']],
+  reporter: [['list'], ['html', { open: 'never', outputFolder: htmlOutputFolder }]],
 });

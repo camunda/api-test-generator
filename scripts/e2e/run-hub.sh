@@ -87,7 +87,13 @@ unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD 2>/dev/null || true
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
   BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
-    npx playwright test -c path-analyser/playwright.config.ts --reporter=list || true
+    PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
+    npx playwright test -c path-analyser/playwright.config.ts || true
+  if [ -f "$OUT/pw-positive/index.html" ]; then
+    echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
+  else
+    echo "  ⚠ positive suite report not generated (Playwright run may have failed)"
+  fi
 fi
 
 # Playwright JSON report per request-validation profile (consumed by curl-compare)

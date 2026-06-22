@@ -1053,7 +1053,14 @@ function camelCase(name: string) {
 type CanonicalShape = {
   requestByMediaType?: Record<
     string,
-    { path: string; type: string; required: boolean; enum?: unknown[]; itemEnum?: unknown[] }[]
+    {
+      path: string;
+      type: string;
+      required: boolean;
+      enum?: unknown[];
+      itemEnum?: unknown[];
+      format?: string;
+    }[]
   >;
 };
 
@@ -1111,7 +1118,37 @@ type CanonicalNode = {
   required: boolean;
   enum?: unknown[];
   itemEnum?: unknown[];
+  format?: string;
 };
+
+/**
+ * Map OpenAPI `format` keywords to format-valid seed literals (#397).
+ * Returns `undefined` for formats that don't need a special literal (they
+ * can safely fall through to the generic `${varName}` seed).
+ *
+ * Note on `email`: this returns a literal, but the top-level request-body
+ * branches deliberately do NOT call it for email — they route email through
+ * runtime seeding (the `seed-rules.json` rule) so addresses vary per call and
+ * `{ unique: true }` bindings still apply. The email literal here is used only
+ * by `synthesizeObjectFromPrefix`, where there is no binding context.
+ */
+function formatSeedLiteral(format: string): string | undefined {
+  switch (format) {
+    case 'email':
+      return 'seed@example.com';
+    case 'uuid':
+      return '00000000-0000-4000-8000-000000000001';
+    case 'date-time':
+      return '2024-01-01T00:00:00.000Z';
+    case 'date':
+      return '2024-01-01';
+    case 'uri':
+    case 'url':
+      return 'https://example.com';
+    default:
+      return undefined;
+  }
+}
 
 function synthesizeObjectFromPrefix(
   prefix: string,
@@ -1140,7 +1177,16 @@ function synthesizeObjectFromPrefix(
       // schema-honest.
       obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
     } else {
-      obj[inner] = 'placeholder';
+      // #397 — for format-constrained scalars, emit a format-valid literal
+      // instead of 'placeholder' which fails server-side format validation.
+      // Unlike the top-level body branches, nested-object synthesis has no
+      // scenario.bindings context here, so it cannot route through runtime
+      // seeding — email therefore gets the fixed `seed@example.com` literal
+      // rather than the per-call `${emailVar}` seed. A nested required-and-
+      // unique email field could collide; no such field exists in the current
+      // specs, and the fixed literal is still strictly better than the old
+      // invalid 'placeholder'.
+      obj[inner] = (n.format && formatSeedLiteral(n.format)) ?? 'placeholder';
     }
   }
   return obj;
@@ -1274,7 +1320,6 @@ function buildRequestBodyFromCanonical(
   // Build template
   if (chosenCt === 'application/json') {
     const template: Record<string, unknown> = {};
-    const missing: string[] = [];
     if (requestGroups.length) {
       // oneOf-aware synthesis
       if (chosenVariantRequired?.length) {
@@ -1324,10 +1369,23 @@ function buildRequestBodyFromCanonical(
               template[name] = [synthesizeArrayElement(name, nodes)];
             }
           } else {
-            scenario.bindings ||= {};
-            if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
-            template[name] = `${'${'}${varName}}`;
-            if (!bindingMap[mappedName]) missing.push(name);
+            // #397 — for format-constrained scalars, emit a format-valid literal
+            // rather than a generic ${varName} seed that would fail server validation.
+            // Canonical nodes don't descend oneOf variants, so fall back to the
+            // variant's own fieldFormats when the canonical lookup returns nothing.
+            // Exception: email uses runtime seeding (seed rule: seed-<salt>@example.com)
+            // so values vary per call and unique-binding constraints can apply.
+            const nodeFormat =
+              nodes.find((n) => n.path === name)?.format ?? chosenVariant?.fieldFormats?.[name];
+            const fmtLiteral =
+              nodeFormat && nodeFormat !== 'email' ? formatSeedLiteral(nodeFormat) : undefined;
+            if (fmtLiteral !== undefined) {
+              template[name] = fmtLiteral;
+            } else {
+              scenario.bindings ||= {};
+              if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
+              template[name] = `${'${'}${varName}}`;
+            }
           }
         }
       }
@@ -1396,10 +1454,19 @@ function buildRequestBodyFromCanonical(
             template[leaf] = [synthesizeArrayElement(basePath, nodes)];
           }
         } else {
-          scenario.bindings ||= {};
-          if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
-          template[leaf] = `${'${'}${varName}}`;
-          if (!bindingMap[normalizedPath]) missing.push(normalizedPath);
+          // #397 — for format-constrained scalars, embed a format-valid literal
+          // so the body passes server-side format validation.
+          // Exception: email uses runtime seeding (seed rule: seed-<salt>@example.com)
+          // so values vary per call and unique-binding constraints can apply.
+          const fmtLiteral =
+            f.format && f.format !== 'email' ? formatSeedLiteral(f.format) : undefined;
+          if (fmtLiteral !== undefined) {
+            template[leaf] = fmtLiteral;
+          } else {
+            scenario.bindings ||= {};
+            if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
+            template[leaf] = `${'${'}${varName}}`;
+          }
         }
       }
       // For search-like empty-negative scenarios, allow provider-injected optional filters to drive an empty result

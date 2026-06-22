@@ -454,6 +454,15 @@ export interface RequestOneOfVariant {
    */
   fieldEnums?: Record<string, unknown[]>;
   /**
+   * OpenAPI `format` for scalar fields in this variant (e.g. `'email'`,
+   * `'uuid'`, `'date-time'`). Used by `buildRequestBodyFromCanonical` to
+   * emit a format-valid value for variant-only required fields whose format
+   * cannot be found in the top-level canonical nodes (#397): an inline literal
+   * for most formats, or runtime seeding for `email` (so addresses vary per
+   * call — see `formatSeedLiteral`).
+   */
+  fieldFormats?: Record<string, string>;
+  /**
    * For `array` fields, enum values declared on the item schema (e.g.
    * `permissionTypes: { type: 'array', items: { enum: […] } }`). Used to
    * synthesise a one-element array containing an enum literal instead of
