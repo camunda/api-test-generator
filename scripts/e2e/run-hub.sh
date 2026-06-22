@@ -114,6 +114,7 @@ run_rv() { # profile
     CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$abs_out/pw-$p.json" \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$abs_out/pw-$p" \
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$abs_out/pw-$p.junit.xml" \
     npx playwright test -c "$cfg" 2>/dev/null; then
     echo "  ✓ Playwright passed: $p"
   else
