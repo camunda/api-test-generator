@@ -3,8 +3,11 @@
  *
  * `path-analyser/src/canonicalSchemas.ts:walkSchema` captures the OpenAPI
  * `format` keyword on leaf scalar nodes so that `buildRequestBodyFromCanonical`
- * can emit format-valid literals (e.g. `"seed@example.com"` for `format: email`)
- * instead of generic `${varName}` seeds that fail server-side format validation.
+ * can emit format-valid literals (e.g. `"00000000-0000-4000-8000-000000000001"`
+ * for `format: uuid`) instead of generic `${varName}` seeds that fail
+ * server-side format validation. `format: email` is the one exception: it is
+ * routed through the `seed-rules.json` runtime rule (`seed-${rand:6}@example.com`)
+ * so addresses vary per call and `{ unique: true }` bindings still apply.
  *
  * Class-scoped invariant guarded here: a required scalar field with `format`
  * declared in the OpenAPI spec must carry that format string on its

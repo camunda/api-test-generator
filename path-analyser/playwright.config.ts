@@ -16,5 +16,10 @@ export default defineConfig({
     // Base APIRequestContext is provided by Playwright's test fixture
     extraHTTPHeaders: {},
   },
-  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
+  reporter: [
+    ['list'],
+    // outputFolder honours PLAYWRIGHT_HTML_REPORT so callers (e.g. scripts/e2e/run-hub.sh)
+    // can redirect the report to a per-config location; defaults to playwright-report/.
+    ['html', { open: 'never', outputFolder: process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwright-report' }],
+  ],
 });

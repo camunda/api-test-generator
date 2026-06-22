@@ -1173,6 +1173,13 @@ function synthesizeObjectFromPrefix(
     } else {
       // #397 — for format-constrained scalars, emit a format-valid literal
       // instead of 'placeholder' which fails server-side format validation.
+      // Unlike the top-level body branches, nested-object synthesis has no
+      // scenario.bindings context here, so it cannot route through runtime
+      // seeding — email therefore gets the fixed `seed@example.com` literal
+      // rather than the per-call `${emailVar}` seed. A nested required-and-
+      // unique email field could collide; no such field exists in the current
+      // specs, and the fixed literal is still strictly better than the old
+      // invalid 'placeholder'.
       obj[inner] = (n.format && formatSeedLiteral(n.format)) ?? 'placeholder';
     }
   }
