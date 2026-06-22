@@ -272,8 +272,19 @@ case "${1:-start}" in
       # Bring up only the hub + its deps (NOT websockets — it's a private image
       # the suite doesn't need; excluding it keeps the prebuilt path free of any
       # Camunda registry credentials since camunda/hub itself is public).
-      docker compose -f "$COMPOSE_FILE" --profile prebuilt up -d \
-        modeler-db keycloak-db identity-db keycloak identity mailpit hub
+      # Retry to absorb transient Docker Hub pull errors ("Get …/manifests/…:
+      # unknown"); `docker compose up -d` is idempotent, so a retry just resumes.
+      compose_attempts=0
+      until docker compose -f "$COMPOSE_FILE" --profile prebuilt up -d \
+            modeler-db keycloak-db identity-db keycloak identity mailpit hub; do
+        compose_attempts=$((compose_attempts + 1))
+        if [ "$compose_attempts" -ge 3 ]; then
+          echo "Error: docker compose up failed after ${compose_attempts} attempts." >&2
+          exit 1
+        fi
+        echo "compose up failed (likely a transient registry pull error) — retry ${compose_attempts}/3 in 15s..."
+        sleep 15
+      done
       fix_keycloak
       echo "Hub app: prebuilt image camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} (container 'hub')."
       echo "Run './docker/start-hub.sh stop' to stop."
