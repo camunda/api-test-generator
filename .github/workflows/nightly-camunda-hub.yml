@@ -63,8 +63,14 @@ jobs:
       # secrets VAULT_ADDR / VAULT_ROLE_ID / VAULT_SECRET_ID, and its Vault role
       # must be granted read on secret/data/products/web-modeler/ci/common. The
       # app must have Contents:Read on camunda/camunda-hub.
+      #
+      # TEMP workaround: while Vault onboarding is pending, set a repo secret
+      # HUB_REPO_TOKEN (a PAT with Contents:Read on camunda-hub). When present it
+      # is used for the clone and this Vault step is skipped. Remove HUB_REPO_TOKEN
+      # (and this `if:`) once Vault is live.
       - name: Generate camunda-hub clone token
         id: hub-token
+        if: ${{ secrets.HUB_REPO_TOKEN == '' }}
         uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@main
         with:
           github-app-id-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_ID
@@ -81,10 +87,15 @@ jobs:
       # --- Clone camunda-hub @ latest main as a sibling (../camunda-hub) -------
       # start-hub.sh and the local-bundle spec source both expect ../camunda-hub.
       # We always take latest main → "always on latest" (spec pin NOT enforced).
+      # Token: HUB_REPO_TOKEN (temp PAT) if set, else the Vault-minted App token.
       - name: Clone camunda-hub (latest main)
         env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ secrets.HUB_REPO_TOKEN != '' && secrets.HUB_REPO_TOKEN || steps.hub-token.outputs.token }}
         run: |
+          if [ -z "$HUB_TOKEN" ]; then
+            echo "::error::No clone token available — set HUB_REPO_TOKEN, or complete Vault onboarding (VAULT_ADDR/VAULT_ROLE_ID/VAULT_SECRET_ID)."
+            exit 1
+          fi
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
           git clone --depth 1 https://github.com/camunda/camunda-hub.git "${GITHUB_WORKSPACE}/../camunda-hub"
           echo "camunda-hub at: $(cd "${GITHUB_WORKSPACE}/../camunda-hub" && git rev-parse HEAD)"
