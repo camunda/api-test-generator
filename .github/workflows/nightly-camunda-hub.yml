@@ -45,19 +45,17 @@ jobs:
   nightly-hub:
     name: Generate → run → report (negative suite)
     runs-on: ubuntu-latest
-    # Hub builds restapi + frontend from source (~10-20 min) on top of generate/run.
-    timeout-minutes: 60
+    # Prebuilt image (pull + boot) + generate + run — no source build.
+    timeout-minutes: 25
 
     # Map secrets into job env: the `secrets` context is NOT allowed in a step
     # `if:`, but `env` is. Empty when a secret is unset.
-    # TEMP workaround secrets (until Vault onboarding):
-    #   HUB_REPO_TOKEN — PAT to clone camunda-hub
-    #   CAMUNDA_CONTAINER_REGISTRY_USER/PASSWORD — registry.camunda.cloud login
-    #     (needed to pull the private hub-websockets image in docker-compose).
+    # HUB_REPO_TOKEN (TEMP, until Vault onboarding): PAT to clone camunda-hub —
+    # still needed because the OpenAPI spec is bundled from the (private) source
+    # clone. The Hub itself runs from the PUBLIC camunda/hub:SNAPSHOT image, so no
+    # Camunda container-registry credentials are required.
     env:
       HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
-      CAMUNDA_CONTAINER_REGISTRY_USER: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_USER }}
-      CAMUNDA_CONTAINER_REGISTRY_PASSWORD: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_PASSWORD }}
 
     steps:
       - name: Checkout api-test-generator
@@ -118,11 +116,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Setup JDK 25 (Hub restapi build)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '25'
+      # No JDK needed: Hub runs from the prebuilt image, not built from source.
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -138,39 +132,27 @@ jobs:
       - name: Bundle latest camunda-hub spec
         run: CONFIG=camunda-hub npm run fetch-spec
 
-      # --- Log in to registry.camunda.cloud (private Hub infra images) ---------
-      # docker-compose.hub.yml pulls registry.camunda.cloud/team-hub/hub-websockets
-      # (private). Runs when registry creds are present (temp repo secrets, or
-      # later from Vault). Mirrors camunda-hub's own docker-login.
-      - name: Log in to registry.camunda.cloud
-        if: ${{ env.CAMUNDA_CONTAINER_REGISTRY_USER != '' }}
-        run: |
-          echo "$CAMUNDA_CONTAINER_REGISTRY_PASSWORD" \
-            | docker login registry.camunda.cloud -u "$CAMUNDA_CONTAINER_REGISTRY_USER" --password-stdin
-
-      # --- 4. Start camunda-hub (SNAPSHOT) -------------------------------------
-      # docker/start-hub.sh: docker compose up (Keycloak/Identity/Postgres) +
-      # `make local-self-managed` (builds & runs restapi + frontend from source).
-      - name: Start Hub (SNAPSHOT)
+      # --- 4. Start camunda-hub (SNAPSHOT, prebuilt image) ---------------------
+      # HUB_MODE=prebuilt: docker compose brings up the public camunda/hub:SNAPSHOT
+      # image + keycloak/identity/db (no source build, no JDK, no registry creds).
+      # ~2-3 min vs ~25 min for the from-source path.
+      - name: Start Hub (prebuilt SNAPSHOT image)
+        env:
+          HUB_MODE: prebuilt
         run: ./docker/start-hub.sh start
 
-      # start-hub.sh backgrounds `make local-self-managed` and returns immediately
-      # (it only waits to catch an instant crash) — the build + boot then takes
-      # many minutes. Without this gate the test step hits a not-yet-listening Hub
-      # and every request is "connection refused".
-      #
-      # Continuously poll the v2 surface and only proceed once it returns 401
-      # (auth required = security layer wired = app actually serving) for several
-      # CONSECUTIVE checks. A bare "any response" check is unreliable: during
-      # Spring Boot startup the port accepts connections and can return 404/502/503
-      # before the app is ready, which would let the test step race ahead. The
-      # consecutive-401 streak debounces that startup flapping. Dump the Hub log
-      # on timeout.
+      # The hub container boots asynchronously (~1-2 min for the prebuilt image),
+      # so gate the test step until the API actually serves. Continuously poll the
+      # v2 surface and only proceed once it returns 401 (auth required = security
+      # layer wired = app serving) for several CONSECUTIVE checks. A bare "any
+      # response" check is unreliable: during Spring Boot startup the port accepts
+      # connections and can return 404/502/503 before the app is ready. The
+      # consecutive-401 streak debounces that flapping. Dump the Hub log on timeout.
       - name: Wait for Hub to be ready
         run: |
           url="http://localhost:${HUB_UI_PORT}/api/v2/"
-          echo "Waiting for Hub at $url (build + boot, up to 35m)..."
-          deadline=$(( SECONDS + 2100 )); streak=0; need=3; last=""
+          echo "Waiting for Hub at $url (image pull + boot, up to 10m)..."
+          deadline=$(( SECONDS + 600 )); streak=0; need=3; last=""
           while :; do
             code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo 000)
             if [ "$code" = "401" ]; then
@@ -185,9 +167,9 @@ jobs:
               break
             fi
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Hub did not become ready within 35m (last code: $code)"
-              echo "----- tail of test-results/.hub.log -----"
-              tail -n 150 test-results/.hub.log 2>/dev/null || echo "(no hub log)"
+              echo "::error::Hub did not become ready within 10m (last code: $code)"
+              echo "----- docker logs hub (tail) -----"
+              docker logs --tail 150 hub 2>&1 || echo "(no hub container log)"
               exit 1
             fi
             sleep 5
