@@ -32,9 +32,9 @@ env:
   CONFIG: camunda-hub
   HUB_UI_PORT: '8088'
   KEYCLOAK_PORT: '18080'
-  # Channel to publish results to. TODO: replace with the channel the Hub team
-  # picks (see the kickoff Slack message). Can be a channel ID (Cxxxx) or #name.
-  SLACK_CHANNEL: 'C0XXXXXXXXX'
+  # Channel to publish results to. The Slack bot must be invited to this channel
+  # for chat.postMessage to succeed (`/invite @<bot>` in #prj-qa-sandbox).
+  SLACK_CHANNEL: '#prj-qa-sandbox'
 
 jobs:
   nightly-hub:
