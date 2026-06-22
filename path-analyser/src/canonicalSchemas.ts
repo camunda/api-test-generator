@@ -28,7 +28,8 @@ export interface CanonicalNodeMeta {
   /**
    * The OpenAPI `format` keyword for this scalar leaf node (e.g. `'email'`,
    * `'uuid'`, `'date-time'`, `'uri'`). Captured so `buildRequestBodyFromCanonical`
-   * can emit a format-valid literal instead of a generic variable seed that
+   * can emit a format-valid value — an inline literal for most formats, or
+   * runtime seeding for `email` — instead of a generic variable seed that
    * fails server-side format validation (#397).
    */
   format?: string;

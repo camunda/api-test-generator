@@ -456,8 +456,10 @@ export interface RequestOneOfVariant {
   /**
    * OpenAPI `format` for scalar fields in this variant (e.g. `'email'`,
    * `'uuid'`, `'date-time'`). Used by `buildRequestBodyFromCanonical` to
-   * emit a format-valid literal for variant-only required fields whose
-   * format cannot be found in the top-level canonical nodes (#397).
+   * emit a format-valid value for variant-only required fields whose format
+   * cannot be found in the top-level canonical nodes (#397): an inline literal
+   * for most formats, or runtime seeding for `email` (so addresses vary per
+   * call — see `formatSeedLiteral`).
    */
   fieldFormats?: Record<string, string>;
   /**

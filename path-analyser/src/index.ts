@@ -1125,6 +1125,12 @@ type CanonicalNode = {
  * Map OpenAPI `format` keywords to format-valid seed literals (#397).
  * Returns `undefined` for formats that don't need a special literal (they
  * can safely fall through to the generic `${varName}` seed).
+ *
+ * Note on `email`: this returns a literal, but the top-level request-body
+ * branches deliberately do NOT call it for email — they route email through
+ * runtime seeding (the `seed-rules.json` rule) so addresses vary per call and
+ * `{ unique: true }` bindings still apply. The email literal here is used only
+ * by `synthesizeObjectFromPrefix`, where there is no binding context.
  */
 function formatSeedLiteral(format: string): string | undefined {
   switch (format) {
