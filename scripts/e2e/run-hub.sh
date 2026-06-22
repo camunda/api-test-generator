@@ -22,7 +22,7 @@
 #   HUB_UI_PORT=8088  KEYCLOAK_PORT=18080  CONFIG=camunda-hub
 #   RV_PROFILES="secured rbac"   STEPS="generate run curl"
 #   SKIP_POSITIVE=1   (skip the positive suite)
-#   E2E_SOFT=1        (don't exit non-zero when the curl oracle finds mismatches)
+#   E2E_SOFT=1        (don't exit non-zero when Playwright tests fail — monitoring-only)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -149,11 +149,19 @@ run_rv() { # profile
   local p="$1" cfg="$RV_DIR/$1/playwright.config.ts"
   [ -f "$cfg" ] || { echo "  ⚠ profile '$p' not generated — skipping"; return; }
   local abs_out; abs_out="$(cd "$OUT" && pwd)"
-  BEARER_TOKEN="$ADMIN_TOK" RBAC_DENY_PROBE_BEARER_TOKEN="$DENY_TOK" \
+  # Playwright is the GATE: a non-zero exit (any spec assertion failed) sets
+  # PW_FAIL, which fails the run at the end. (curl-compare below is diagnostic
+  # only — it never affects pass/fail.)
+  if BEARER_TOKEN="$ADMIN_TOK" RBAC_DENY_PROBE_BEARER_TOKEN="$DENY_TOK" \
     CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$abs_out/pw-$p.json" \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$abs_out/pw-$p" \
-    npx playwright test -c "$cfg" 2>/dev/null || true
+    npx playwright test -c "$cfg" 2>/dev/null; then
+    echo "  ✓ Playwright passed: $p"
+  else
+    PW_FAIL=1
+    echo "  ✗ Playwright reported test failures in profile '$p'"
+  fi
   if [ -f "$OUT/pw-$p/index.html" ]; then
     echo "  ✓ Playwright report: $OUT/pw-$p/index.html (json: $OUT/pw-$p.json)"
   else
@@ -175,18 +183,21 @@ for p in $RV_PROFILES; do
     fi
   fi
   if step curl; then
-    # Tee the report to a file as well as the terminal. pipefail makes the
-    # pipeline's status the oracle's (not tee's), so a mismatch still records
-    # RV_FAIL; continue the loop, then fail at the end unless E2E_SOFT=1.
+    # DIAGNOSTIC ONLY — the independent curl oracle (an "is the generator
+    # faithful?" cross-check + response-body dump on mismatch). It never gates
+    # the run: `|| true` so a mismatch is reported but does not change pass/fail.
+    # Tee to a file as well as the terminal.
     python3 scripts/e2e/curl_compare.py \
       --spec-dir "$RV_DIR/$p" --base-url "$CORE_URL" --api-version v2 \
       --admin-header "Authorization: Bearer $ADMIN_TOK" \
       --deny-header "$DENY_HEADER" \
       --pw-json "$OUT/pw-$p.json" --show-body --html "$OUT/curl-compare-$p.html" \
-      2>&1 | tee "$OUT/curl-compare-$p.txt" || RV_FAIL=1
+      2>&1 | tee "$OUT/curl-compare-$p.txt" || true
   fi
 done
 echo "▶ done. Playwright reports + curl-compare output under $OUT/"
-if [ -n "${RV_FAIL:-}" ] && [ -z "${E2E_SOFT:-}" ]; then
-  echo "✗ curl/expected mismatches detected (set E2E_SOFT=1 to treat as non-fatal)"; exit 1
+# Gate on Playwright (the test suite), not curl-compare. E2E_SOFT=1 keeps the
+# run green even on Playwright failures (monitoring-only mode).
+if [ -n "${PW_FAIL:-}" ] && [ -z "${E2E_SOFT:-}" ]; then
+  echo "✗ Playwright test failures detected (set E2E_SOFT=1 to treat as non-fatal)"; exit 1
 fi
