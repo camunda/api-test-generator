@@ -2,9 +2,10 @@
 #              Clones camunda-hub @ latest main, bundles its OpenAPI spec, starts
 #              a Hub SNAPSHOT, regenerates the negative test suite, runs it, and
 #              posts a results summary to Slack. Positive (lifecycle) tests are
-#              skipped until camunda/camunda-hub#25146 lands. Non-blocking: the run
-#              never fails on test mismatches (E2E_SOFT=1) — it is a monitoring/
-#              feedback signal, not a gate, until a baseline exists.
+#              skipped until camunda/camunda-hub#25146 lands. The run FAILS if any
+#              test's actual status != expected (strict). NOTE: ~102 secured
+#              mismatches are currently known generator-gap false-positives
+#              (#352/#363/#372), so the run will be red until those are fixed.
 # type: CI
 # owner: @camunda/<your-team>
 ---
@@ -15,11 +16,6 @@ on:
     # 02:00 UTC nightly. workflow_dispatch lets you trigger an ad-hoc run.
     - cron: '0 2 * * *'
   workflow_dispatch: {}
-  # TEMP: run on every push to this branch while we validate the workflow in CI.
-  # Remove this `push:` block before merging — the nightly should be schedule-only.
-  push:
-    branches:
-      - feat/nightly-camunda-hub
 
 defaults:
   run:
@@ -56,6 +52,12 @@ jobs:
     # Camunda container-registry credentials are required.
     env:
       HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
+      # Slack bot token for the results post. Set the SLACK_BOT_TOKEN repo secret
+      # (a bot token with chat:write, invited to #prj-qa-sandbox) to enable the
+      # Slack step; when unset it is skipped and results still appear in the run
+      # summary + artifact. (Org-standard source is Vault SLACK_CORE_DOMAIN_BOT_TOKEN
+      # — switch to that once Vault onboarding lands.)
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
 
     steps:
       - name: Checkout api-test-generator
@@ -180,11 +182,12 @@ jobs:
       #   generate → regenerate request-validation suite (positive skipped via SKIP_POSITIVE=1)
       #   run      → Playwright per profile (JSON + HTML reports)
       #   curl     → independent curl oracle + curl-compare HTML report
-      # E2E_SOFT=1 → mismatches don't fail the job (monitoring signal, not a gate).
+      # No E2E_SOFT: run-hub.sh exits non-zero when the curl oracle finds any
+      # expected-vs-actual mismatch, so this step (and the run) FAILS on failing
+      # tests. The always() steps below still capture reports + post to Slack.
       - name: Generate + run negative suite
         env:
           SKIP_POSITIVE: '1'
-          E2E_SOFT: '1'
           RV_PROFILES: 'secured rbac'
         run: ./scripts/e2e/run-hub.sh
 
@@ -201,42 +204,49 @@ jobs:
           path: test-results/e2e-camunda-hub/
           retention-days: 14
 
-      # --- 7. Results summary --------------------------------------------------
-      # While Slack is disabled, write the per-profile match/mismatch summary to
-      # the GitHub Actions run summary (visible in the run UI) so results are
-      # surfaced without Slack. Full reports are in the uploaded artifact.
+      # --- 7. Results summary (run summary + Slack outputs) --------------------
+      # Write the per-profile match/mismatch summary to the GitHub Actions run
+      # summary (always visible in the run UI), and expose the two lines as step
+      # outputs for the Slack step. Full reports are in the uploaded artifact.
       - name: Write results to run summary
+        id: summary
         if: always()
         run: |
           out="test-results/e2e-camunda-hub"
           summarize() { # profile
             local f="$out/curl-compare-$1.txt"
             if [ -f "$f" ]; then
-              grep -E "curl vs expected:" "$f" | tail -1 | sed "s/^/- **$1**: /"
+              grep -E "curl vs expected:" "$f" | tail -1 | sed "s/^/$1: /"
             else
-              echo "- **$1**: (no report — run may have failed before this profile)"
+              echo "$1: (no report — run may have failed before this profile)"
             fi
           }
+          secured_line="$(summarize secured)"
+          rbac_line="$(summarize rbac)"
           {
             echo "## Nightly — camunda-hub negative tests"
-            summarize secured
-            summarize rbac
+            echo "- **${secured_line}**"
+            echo "- **${rbac_line}**"
             echo ""
             echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
-            echo "_Mismatches are mostly known generator precondition gaps (#352/#363/#372) — monitoring, not a gate._"
+            echo "_~102 secured mismatches are known generator-gap false-positives (#352/#363/#372)._"
           } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "secured=${secured_line}"
+            echo "rbac=${rbac_line}"
+          } >> "$GITHUB_OUTPUT"
 
-      # TEMP: Slack notification disabled for now. To re-enable: add a Vault step
-      # (hashicorp/vault-action) that reads SLACK_CORE_DOMAIN_BOT_TOKEN, invite the
-      # bot to #prj-qa-sandbox, and uncomment this step (point token: at it).
-      # - name: Notify Slack
-      #   if: always()
-      #   uses: slackapi/slack-github-action@v2
-      #   with:
-      #     method: chat.postMessage
-      #     token: ${{ steps.slack-secrets.outputs.SLACK_CORE_DOMAIN_BOT_TOKEN }}
-      #     payload: |
-      #       {
-      #         "channel": "${{ env.SLACK_CHANNEL }}",
-      #         "text": "*Nightly — camunda-hub negative tests* — ${{ job.status }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>"
-      #       }
+      # Post results to Slack. Gated on SLACK_BOT_TOKEN being set (see job env);
+      # runs on always() so it reports failures too. Reflects job.status so a red
+      # run is visibly red in the channel.
+      - name: Notify Slack
+        if: ${{ always() && env.SLACK_BOT_TOKEN != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ env.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "*Nightly — camunda-hub negative tests* — ${{ job.status == 'success' && '✅ passed' || '❌ failed' }}\n• ${{ steps.summary.outputs.secured }}\n• ${{ steps.summary.outputs.rbac }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>\n_~102 secured mismatches are known generator gaps (#352/#363/#372); positive tests skipped (camunda-hub#25146)._"
+            }
