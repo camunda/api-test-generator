@@ -1,0 +1,170 @@
+# description: Nightly request-validation (negative) test run for camunda-hub.
+#              Clones camunda-hub @ latest main, bundles its OpenAPI spec, starts
+#              a Hub SNAPSHOT, regenerates the negative test suite, runs it, and
+#              posts a results summary to Slack. Positive (lifecycle) tests are
+#              skipped until camunda/camunda-hub#25146 lands. Non-blocking: the run
+#              never fails on test mismatches (E2E_SOFT=1) — it is a monitoring/
+#              feedback signal, not a gate, until a baseline exists.
+# type: CI
+# owner: @camunda/<your-team>
+---
+name: Nightly — camunda-hub negative tests
+
+on:
+  schedule:
+    # 02:00 UTC nightly. workflow_dispatch lets you trigger an ad-hoc run.
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+# Don't pile up overlapping nightly runs.
+concurrency:
+  group: nightly-camunda-hub
+  cancel-in-progress: true
+
+env:
+  CONFIG: camunda-hub
+  HUB_UI_PORT: '8088'
+  KEYCLOAK_PORT: '18080'
+  # Channel to publish results to. TODO: replace with the channel the Hub team
+  # picks (see the kickoff Slack message). Can be a channel ID (Cxxxx) or #name.
+  SLACK_CHANNEL: 'C0XXXXXXXXX'
+
+jobs:
+  nightly-hub:
+    name: Generate → run → report (negative suite)
+    runs-on: ubuntu-latest
+    # Hub builds restapi + frontend from source (~10-20 min) on top of generate/run.
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          # Short-lived GITHUB_TOKEN must not linger in .git/config — we configure
+          # our own Vault-issued token below for the private camunda-hub clone.
+          persist-credentials: false
+
+      # --- Secrets (org convention: HashiCorp Vault via AppRole) ---------------
+      # Requires VAULT_ADDR / VAULT_ROLE_ID / VAULT_SECRET_ID configured on this
+      # repo (or org), and the AppRole policy to grant read on the paths below.
+      - name: Import Vault secrets
+        id: secrets
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          exportEnv: false
+          secrets: |
+            secret/data/products/qa/ci/common GH_TOKEN ;
+            secret/data/products/camunda/ci/github-actions SLACK_CORE_DOMAIN_BOT_TOKEN ;
+
+      # --- Clone camunda-hub @ latest main as a sibling (../camunda-hub) -------
+      # start-hub.sh and the local-bundle spec source both expect ../camunda-hub.
+      # We always take latest main → "always on latest" (spec pin NOT enforced).
+      - name: Clone camunda-hub (latest main)
+        env:
+          GH_TOKEN: ${{ steps.secrets.outputs.GH_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git clone --depth 1 https://github.com/camunda/camunda-hub.git "${GITHUB_WORKSPACE}/../camunda-hub"
+          echo "camunda-hub at: $(cd "${GITHUB_WORKSPACE}/../camunda-hub" && git rev-parse HEAD)"
+
+      # --- Toolchain -----------------------------------------------------------
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup JDK 25 (Hub restapi build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # --- 1. Update the OpenAPI spec to latest --------------------------------
+      # Local-bundle mode: bundles straight from the sibling clone we just took
+      # at latest main. No SPEC_REF, no pin enforcement (unpinned by design).
+      - name: Bundle latest camunda-hub spec
+        run: CONFIG=camunda-hub npm run fetch-spec
+
+      # --- 4. Start camunda-hub (SNAPSHOT) -------------------------------------
+      # docker/start-hub.sh: docker compose up (Keycloak/Identity/Postgres) +
+      # `make local-self-managed` (builds & runs restapi + frontend from source).
+      - name: Start Hub (SNAPSHOT)
+        run: ./docker/start-hub.sh start
+
+      # --- 2,3,5,6. Skip positive, regenerate, run, build reports --------------
+      # run-hub.sh STEPS="generate run curl":
+      #   generate → regenerate request-validation suite (positive skipped via SKIP_POSITIVE=1)
+      #   run      → Playwright per profile (JSON + HTML reports)
+      #   curl     → independent curl oracle + curl-compare HTML report
+      # E2E_SOFT=1 → mismatches don't fail the job (monitoring signal, not a gate).
+      - name: Generate + run negative suite
+        env:
+          SKIP_POSITIVE: '1'
+          E2E_SOFT: '1'
+          RV_PROFILES: 'secured rbac'
+        run: ./scripts/e2e/run-hub.sh
+
+      # --- Always stop Hub + collect artifacts ---------------------------------
+      - name: Stop Hub
+        if: always()
+        run: ./docker/start-hub.sh stop || true
+
+      - name: Upload reports (Playwright + curl-compare)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: camunda-hub-nightly-reports
+          path: test-results/e2e-camunda-hub/
+          retention-days: 14
+
+      # --- 7. Post results summary to Slack ------------------------------------
+      - name: Build Slack summary
+        if: always()
+        id: summary
+        run: |
+          out="test-results/e2e-camunda-hub"
+          # Pull the "curl vs expected: X/Y match, Z mismatch" line from each profile.
+          summarize() { # profile
+            local f="$out/curl-compare-$1.txt"
+            if [ -f "$f" ]; then
+              grep -E "curl vs expected:" "$f" | tail -1 | sed "s/^/$1: /"
+            else
+              echo "$1: (no report — run may have failed before this profile)"
+            fi
+          }
+          {
+            echo "secured=$(summarize secured)"
+            echo "rbac=$(summarize rbac)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.secrets.outputs.SLACK_CORE_DOMAIN_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "*Nightly — camunda-hub negative tests* — ${{ job.status }}\n• ${{ steps.summary.outputs.secured }}\n• ${{ steps.summary.outputs.rbac }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>\n_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146. Mismatches are mostly known generator precondition gaps (#352/#363/#372) — monitoring, not a gate._"
+            }
