@@ -65,6 +65,26 @@ export interface RequestValidationConfig {
    *   400 before authz). The surviving surface is search/list/info endpoints.
    */
   authDenyMode: 'slice' | 'all-secured';
+  /**
+   * Maps request-body field names to environment-variable names that supply
+   * real fixture values at test runtime.
+   *
+   * Some APIs check resource accessibility (403) before performing request-body
+   * validation (400). For operations whose body contains a reference to an
+   * existing resource (e.g. `projectKey` for a `createFile` call), a dummy
+   * placeholder value like `'x'` triggers an authorization failure before the
+   * validator ever runs, making it impossible to exercise 400 scenarios.
+   *
+   * For each entry `"fieldName": "ENV_VAR"`, the generator emits
+   * `process.env['ENV_VAR'] ?? 'x'` instead of the static `'x'` placeholder
+   * **only when the placeholder value in the scenario body is `'x'`** — i.e.
+   * the field is a bystander required field, not the one under test. Mutated
+   * values (wrong type, invalid enum, etc.) are always emitted as-is.
+   *
+   * The caller (e.g. `run-hub.sh`) must create the referenced resources before
+   * running tests and export the env vars accordingly.
+   */
+  bodyFixtures?: Record<string, string>;
 }
 
 const DEFAULTS: RequestValidationConfig = {
@@ -131,6 +151,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.authDenyMode = v;
+  }
+  if ('bodyFixtures' in parsed) {
+    const v = parsed.bodyFixtures;
+    if (!isPlainObject(v) || Object.values(v).some((x) => typeof x !== 'string')) {
+      throw new Error(
+        `Invalid ${configPath}: "bodyFixtures" must be a Record<string, string>.`,
+      );
+    }
+    merged.bodyFixtures = v as Record<string, string>;
   }
   return merged;
 }

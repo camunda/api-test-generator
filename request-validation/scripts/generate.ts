@@ -706,6 +706,7 @@ async function main() {
       standalone: opts.standalone,
       specCommit,
       generationTimestamp,
+      bodyFixtures: rvConfig.bodyFixtures,
     });
   }
   console.log('[generate] Summary:', {

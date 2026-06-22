@@ -1,6 +1,11 @@
 {
-  "$comment": "Per-config request-validation settings for camunda-hub. enumCaseInsensitive: hub does not (yet) declare a position on enum case-insensitivity; default `false` emits case-only mutations as 400-expecting tests (conservative). authAbsentMode: 'all-secured' — the Hub Public API v2 is uniformly Bearer-authenticated via a single global `security: [{ bearerAuth: [] }]` requirement and declares no `x-enforcement: conditional` schemes, so the 401 auth-absent surface is every secured op. authDenyMode: 'all-secured' — Hub checks body-validation (400) and resource-existence (404) before the authority gate (@PreAuthorize, 403), so only keyless, no-required-body, no-required-non-path-param secured ops are targeted: a reduced-permission Bearer probe is denied 403 without fixtures (camunda/camunda-hub#25264).",
+  "$comment": "Per-config request-validation settings for camunda-hub. enumCaseInsensitive: hub does not (yet) declare a position on enum case-insensitivity; default `false` emits case-only mutations as 400-expecting tests (conservative). authAbsentMode: 'all-secured' — the Hub Public API v2 is uniformly Bearer-authenticated via a single global `security: [{ bearerAuth: [] }]` requirement and declares no `x-enforcement: conditional` schemes, so the 401 auth-absent surface is every secured op. authDenyMode: 'all-secured' — Hub checks body-validation (400) and resource-existence (404) before the authority gate (@PreAuthorize, 403), so only keyless, no-required-body, no-required-non-path-param secured ops are targeted: a reduced-permission Bearer probe is denied 403 without fixtures (camunda/camunda-hub#25264). bodyFixtures: Hub's createFile and createFolder have a @PreAuthorize that calls hasAccessToOrganization(projectKey) — the server returns 403 before reaching body validation when projectKey is a dummy 'x'. The RV_FIXTURE_PROJECT_KEY env var carries a real project key created by run-hub.sh before tests run.",
   "enumCaseInsensitive": false,
   "authAbsentMode": "all-secured",
-  "authDenyMode": "all-secured"
+  "authDenyMode": "all-secured",
+  "bodyFixtures": {
+    "projectKey": "RV_FIXTURE_PROJECT_KEY",
+    "folderKey": "RV_FIXTURE_FOLDER_KEY",
+    "parentFolderKey": "RV_FIXTURE_FOLDER_KEY"
+  }
 }

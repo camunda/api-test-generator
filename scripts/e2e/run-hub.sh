@@ -64,6 +64,42 @@ DENY_TOK="$(mint c8-client-deny c8-deny-secret || true)"
 DENY_HEADER=""; [ -n "$DENY_TOK" ] && DENY_HEADER="Authorization: Bearer $DENY_TOK"
 [ -n "$DENY_TOK" ] || echo "⚠ no c8-client-deny token (rbac/403 deny scenarios will be skipped by the oracle)"
 
+# ====================== 0. BODY-VALIDATION FIXTURES ==================
+# createFile and createFolder have a @PreAuthorize that calls
+# hasAccessToOrganization(projectKey, Project) and hasAccessToOrganization(folderKey, Folder)
+# before body validation runs. Dummy placeholder values return 403.
+#
+# We must use the V1 project API (POST /api/v1/projects) because the auth check
+# uses the Project entity (projects table, has organization_id). V2 projects live
+# in process_applications and don't satisfy the Project converter lookup.
+RV_FIXTURE_PROJECT_KEY=""
+RV_FIXTURE_FOLDER_KEY=""
+if step run; then
+  echo "── fixtures ──────────────────────────────"
+  V1_BASE="http://localhost:${HUB_UI_PORT}/api/v1"
+  _proj_resp=$(curl -s -X POST "$V1_BASE/projects" \
+    -H "Authorization: Bearer $ADMIN_TOK" \
+    -H "Content-Type: application/json" \
+    -d '{"name":"rv-fixture-proj"}')
+  RV_FIXTURE_PROJECT_KEY=$(echo "$_proj_resp" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+  if [ -n "$RV_FIXTURE_PROJECT_KEY" ]; then
+    echo "  ✓ fixture project: $RV_FIXTURE_PROJECT_KEY"
+    # Create a folder inside the V1 project for folderKey/parentFolderKey fixtures.
+    _folder_resp=$(curl -s -X POST "$POS_URL/folders" \
+      -H "Authorization: Bearer $ADMIN_TOK" \
+      -H "Content-Type: application/json" \
+      -d "{\"name\":\"rv-fixture-folder\",\"projectKey\":\"$RV_FIXTURE_PROJECT_KEY\"}")
+    RV_FIXTURE_FOLDER_KEY=$(echo "$_folder_resp" | python3 -c "import json,sys; print(json.load(sys.stdin).get('folderKey',''))" 2>/dev/null || true)
+    if [ -n "$RV_FIXTURE_FOLDER_KEY" ]; then
+      echo "  ✓ fixture folder:  $RV_FIXTURE_FOLDER_KEY"
+    else
+      echo "  ⚠ folder fixture failed — folderKey/parentFolderKey tests may see 403 instead of 400"
+    fi
+  else
+    echo "  ⚠ fixture project creation failed — body-validation tests may see 403 instead of 400"
+  fi
+fi
+
 # ============================ 1. GENERATE ============================
 if step generate; then
   echo "── generate ─────────────────────────────"
@@ -90,13 +126,21 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
     npx playwright test -c path-analyser/playwright.config.ts --reporter=list || true
 fi
 
-# Playwright JSON report per request-validation profile (consumed by curl-compare)
+# Playwright JSON + HTML reports per request-validation profile.
+# PLAYWRIGHT_JSON_OUTPUT_NAME overrides the json reporter's outputFile from the config.
+# PLAYWRIGHT_HTML_REPORT overrides the html reporter's outputFolder.
+# Both reporters are already declared in the generated playwright.config.ts.
 run_rv() { # profile
   local p="$1" cfg="$RV_DIR/$1/playwright.config.ts"
   [ -f "$cfg" ] || { echo "  ⚠ profile '$p' not generated — skipping"; return; }
   BEARER_TOKEN="$ADMIN_TOK" RBAC_DENY_PROBE_BEARER_TOKEN="$DENY_TOK" \
     CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
-    npx playwright test -c "$cfg" --reporter=json > "$OUT/pw-$p.json" 2>/dev/null || true
+    PLAYWRIGHT_JSON_OUTPUT_NAME="$OUT/pw-$p.json" \
+    PLAYWRIGHT_HTML_REPORT="$OUT/pw-$p" \
+    RV_FIXTURE_PROJECT_KEY="$RV_FIXTURE_PROJECT_KEY" \
+    RV_FIXTURE_FOLDER_KEY="$RV_FIXTURE_FOLDER_KEY" \
+    npx playwright test -c "$cfg" 2>/dev/null || true
+  echo "  ✓ Playwright report: $OUT/pw-$p/index.html"
 }
 
 # ================== 2+3. RUN + CURL-COMPARE (per profile) ============

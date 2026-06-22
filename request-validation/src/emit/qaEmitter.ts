@@ -17,6 +17,14 @@ interface EmitOpts {
   standalone?: boolean;
   specCommit?: string;
   generationTimestamp?: string;
+  /**
+   * Maps request-body field names to env-var names that supply real fixture
+   * values at runtime. When a field value is the placeholder `'x'` and the
+   * field name is in this map, the emitter writes
+   * `process.env['ENV_VAR'] ?? 'x'` instead of the static string `'x'`.
+   * See `RequestValidationConfig.bodyFixtures` for full semantics.
+   */
+  bodyFixtures?: Record<string, string>;
 }
 
 export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
@@ -61,6 +69,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       opts.specCommit,
       opts.generationTimestamp,
       opts.standalone !== false,
+      opts.bodyFixtures ?? {},
     );
     let formatted: string;
     try {
@@ -85,6 +94,7 @@ function buildFile(
   specCommit?: string,
   ts?: string,
   standalone: boolean = true,
+  bodyFixtures: Record<string, string> = {},
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
@@ -158,7 +168,7 @@ function buildFile(
       occurrence.set(base, n);
       finalTitle = `${base} (#${n})`;
     }
-    lines.push(renderScenario(s, finalTitle, standalone));
+    lines.push(renderScenario(s, finalTitle, standalone, bodyFixtures));
   }
   lines.push('});');
   lines.push('');
@@ -172,10 +182,49 @@ function buildFile(
  * without spinning up the full file-emission pipeline.
  */
 export function renderScenarioForTest(s: ValidationScenario, title: string): string {
-  return renderScenario(s, title, true);
+  return renderScenario(s, title, true, {});
 }
 
-function renderScenario(s: ValidationScenario, title: string, standalone: boolean): string {
+/**
+ * Serialize a request-body value to a TypeScript source expression.
+ *
+ * For each top-level field whose value is the placeholder `'x'` and whose
+ * name appears in `fixtureMap`, emit `process.env['ENV_VAR'] ?? 'x'` instead
+ * of the static string literal. This allows the test runner to supply real
+ * resource keys at runtime (e.g. a freshly-created project) so that
+ * server-side auth checks on those fields do not prevent body validation from
+ * running and returning the expected 400.
+ *
+ * Only `'x'` placeholders are substituted — intentionally mutated values
+ * (wrong types, invalid enums, etc.) are always emitted as-is regardless of
+ * the field name.
+ */
+function bodyToTs(value: unknown, fieldName: string | null, fixtureMap: Record<string, string>): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') {
+    if (value === 'x' && fieldName !== null && fixtureMap[fieldName]) {
+      return `(process.env['${fixtureMap[fieldName]}'] ?? 'x')`;
+    }
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    const items = value.map((v) => bodyToTs(v, null, {}));
+    return `[${items.join(', ')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).map(([k, v]) => {
+      const key = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k) ? k : JSON.stringify(k);
+      return `${key}: ${bodyToTs(v, k, fixtureMap)}`;
+    });
+    return `{${entries.join(', ')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function renderScenario(s: ValidationScenario, title: string, standalone: boolean, bodyFixtures: Record<string, string> = {}): string {
   const lines: string[] = [];
   const fixtureArg = standalone ? '({request}, testInfo)' : '({request})';
   lines.push(`  test(${JSON.stringify(title)}, async ${fixtureArg} => {`);
@@ -201,11 +250,16 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
     lines.push(`    const multipartFields: Record<string,string> = ${formLit};`);
     lines.push(`    for (const [k,v] of Object.entries(multipartFields)) formData.append(k, v);`);
   } else if (s.requestBody) {
-    const body = JSON.stringify(s.requestBody, null, 2);
-    if (body === '[]') {
-      lines.push(`    const requestBody: string[] = ${body};`);
+    const hasFixtures = Object.keys(bodyFixtures).length > 0;
+    if (hasFixtures && typeof s.requestBody === 'object' && !Array.isArray(s.requestBody) && s.requestBody !== null) {
+      lines.push(`    const requestBody = ${bodyToTs(s.requestBody, null, bodyFixtures)};`);
     } else {
-      lines.push(`    const requestBody = ${body};`);
+      const body = JSON.stringify(s.requestBody, null, 2);
+      if (body === '[]') {
+        lines.push(`    const requestBody: string[] = ${body};`);
+      } else {
+        lines.push(`    const requestBody = ${body};`);
+      }
     }
   }
   const headersExpr =
