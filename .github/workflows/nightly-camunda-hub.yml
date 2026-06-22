@@ -157,22 +157,41 @@ jobs:
       # start-hub.sh backgrounds `make local-self-managed` and returns immediately
       # (it only waits to catch an instant crash) — the build + boot then takes
       # many minutes. Without this gate the test step hits a not-yet-listening Hub
-      # and every request is "connection refused". Poll the v2 surface until it
-      # answers (401 = up, auth required); dump the Hub log on timeout.
+      # and every request is "connection refused".
+      #
+      # Continuously poll the v2 surface and only proceed once it returns 401
+      # (auth required = security layer wired = app actually serving) for several
+      # CONSECUTIVE checks. A bare "any response" check is unreliable: during
+      # Spring Boot startup the port accepts connections and can return 404/502/503
+      # before the app is ready, which would let the test step race ahead. The
+      # consecutive-401 streak debounces that startup flapping. Dump the Hub log
+      # on timeout.
       - name: Wait for Hub to be ready
         run: |
-          echo "Waiting for Hub on :${HUB_UI_PORT}/api/v2 (build + boot, up to 35m)..."
-          deadline=$(( SECONDS + 2100 ))
-          until code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://localhost:${HUB_UI_PORT}/api/v2/" 2>/dev/null) && [ "$code" != "000" ]; do
+          url="http://localhost:${HUB_UI_PORT}/api/v2/"
+          echo "Waiting for Hub at $url (build + boot, up to 35m)..."
+          deadline=$(( SECONDS + 2100 )); streak=0; need=3; last=""
+          while :; do
+            code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo 000)
+            if [ "$code" = "401" ]; then
+              streak=$(( streak + 1 ))
+            else
+              [ "$code" != "$last" ] && echo "  …not ready yet (HTTP $code)"
+              streak=0
+            fi
+            last="$code"
+            if [ "$streak" -ge "$need" ]; then
+              echo "Hub ready (HTTP 401 x$need consecutive after ${SECONDS}s)."
+              break
+            fi
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Hub did not become ready within 35m (last code: ${code:-none})"
+              echo "::error::Hub did not become ready within 35m (last code: $code)"
               echo "----- tail of test-results/.hub.log -----"
               tail -n 150 test-results/.hub.log 2>/dev/null || echo "(no hub log)"
               exit 1
             fi
-            sleep 15
+            sleep 5
           done
-          echo "Hub is up (HTTP $code)."
 
       # --- 2,3,5,6. Skip positive, regenerate, run, build reports --------------
       # run-hub.sh STEPS="generate run curl":
