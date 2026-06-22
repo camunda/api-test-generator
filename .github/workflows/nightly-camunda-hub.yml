@@ -48,6 +48,11 @@ jobs:
     # Hub builds restapi + frontend from source (~10-20 min) on top of generate/run.
     timeout-minutes: 60
 
+    # Map the temp PAT secret into a job env: the `secrets` context is NOT allowed
+    # in a step `if:`, but `env` is. Empty when the secret is unset.
+    env:
+      HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
+
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -70,7 +75,7 @@ jobs:
       # (and this `if:`) once Vault is live.
       - name: Generate camunda-hub clone token
         id: hub-token
-        if: ${{ secrets.HUB_REPO_TOKEN == '' }}
+        if: ${{ env.HUB_REPO_TOKEN == '' }}
         uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@main
         with:
           github-app-id-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_ID
@@ -90,7 +95,7 @@ jobs:
       # Token: HUB_REPO_TOKEN (temp PAT) if set, else the Vault-minted App token.
       - name: Clone camunda-hub (latest main)
         env:
-          HUB_TOKEN: ${{ secrets.HUB_REPO_TOKEN != '' && secrets.HUB_REPO_TOKEN || steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ env.HUB_REPO_TOKEN != '' && env.HUB_REPO_TOKEN || steps.hub-token.outputs.token }}
         run: |
           if [ -z "$HUB_TOKEN" ]; then
             echo "::error::No clone token available — set HUB_REPO_TOKEN, or complete Vault onboarding (VAULT_ADDR/VAULT_ROLE_ID/VAULT_SECRET_ID)."
