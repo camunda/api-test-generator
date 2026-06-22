@@ -15,6 +15,11 @@ on:
     # 02:00 UTC nightly. workflow_dispatch lets you trigger an ad-hoc run.
     - cron: '0 2 * * *'
   workflow_dispatch: {}
+  # TEMP: run on every push to this branch while we validate the workflow in CI.
+  # Remove this `push:` block before merging — the nightly should be schedule-only.
+  push:
+    branches:
+      - feat/nightly-camunda-hub
 
 defaults:
   run:
@@ -65,7 +70,8 @@ jobs:
           exportEnv: false
           secrets: |
             secret/data/products/qa/ci/common GH_TOKEN ;
-            secret/data/products/camunda/ci/github-actions SLACK_CORE_DOMAIN_BOT_TOKEN ;
+            # TEMP: Slack disabled — re-add when enabling the Slack notify step:
+            # secret/data/products/camunda/ci/github-actions SLACK_CORE_DOMAIN_BOT_TOKEN ;
 
       # --- Clone camunda-hub @ latest main as a sibling (../camunda-hub) -------
       # start-hub.sh and the local-bundle spec source both expect ../camunda-hub.
@@ -137,34 +143,42 @@ jobs:
           path: test-results/e2e-camunda-hub/
           retention-days: 14
 
-      # --- 7. Post results summary to Slack ------------------------------------
-      - name: Build Slack summary
+      # --- 7. Results summary --------------------------------------------------
+      # While Slack is disabled, write the per-profile match/mismatch summary to
+      # the GitHub Actions run summary (visible in the run UI) so results are
+      # surfaced without Slack. Full reports are in the uploaded artifact.
+      - name: Write results to run summary
         if: always()
-        id: summary
         run: |
           out="test-results/e2e-camunda-hub"
-          # Pull the "curl vs expected: X/Y match, Z mismatch" line from each profile.
           summarize() { # profile
             local f="$out/curl-compare-$1.txt"
             if [ -f "$f" ]; then
-              grep -E "curl vs expected:" "$f" | tail -1 | sed "s/^/$1: /"
+              grep -E "curl vs expected:" "$f" | tail -1 | sed "s/^/- **$1**: /"
             else
-              echo "$1: (no report — run may have failed before this profile)"
+              echo "- **$1**: (no report — run may have failed before this profile)"
             fi
           }
           {
-            echo "secured=$(summarize secured)"
-            echo "rbac=$(summarize rbac)"
-          } >> "$GITHUB_OUTPUT"
+            echo "## Nightly — camunda-hub negative tests"
+            summarize secured
+            summarize rbac
+            echo ""
+            echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
+            echo "_Mismatches are mostly known generator precondition gaps (#352/#363/#372) — monitoring, not a gate._"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Notify Slack
-        if: always()
-        uses: slackapi/slack-github-action@v2
-        with:
-          method: chat.postMessage
-          token: ${{ steps.secrets.outputs.SLACK_CORE_DOMAIN_BOT_TOKEN }}
-          payload: |
-            {
-              "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "*Nightly — camunda-hub negative tests* — ${{ job.status }}\n• ${{ steps.summary.outputs.secured }}\n• ${{ steps.summary.outputs.rbac }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>\n_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146. Mismatches are mostly known generator precondition gaps (#352/#363/#372) — monitoring, not a gate._"
-            }
+      # TEMP: Slack notification disabled for now. To re-enable: restore the
+      # SLACK_CORE_DOMAIN_BOT_TOKEN secret in the Vault step above, invite the
+      # bot to #prj-qa-sandbox, and uncomment this step.
+      # - name: Notify Slack
+      #   if: always()
+      #   uses: slackapi/slack-github-action@v2
+      #   with:
+      #     method: chat.postMessage
+      #     token: ${{ steps.secrets.outputs.SLACK_CORE_DOMAIN_BOT_TOKEN }}
+      #     payload: |
+      #       {
+      #         "channel": "${{ env.SLACK_CHANNEL }}",
+      #         "text": "*Nightly — camunda-hub negative tests* — ${{ job.status }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>"
+      #       }
