@@ -167,6 +167,60 @@ services:
       timeout: 1s
       retries: 10
 
+  # Prebuilt Hub (Camunda Web Modeler) image — the CI/nightly alternative to
+  # building from source via `make local-self-managed`. Only started with
+  # `--profile prebuilt` (HUB_MODE=prebuilt ./docker/start-hub.sh start). Uses the
+  # public camunda/hub:SNAPSHOT image, wired to the same keycloak/identity/db this
+  # compose already provisions (incl. the c8-client tokens the suite uses).
+  hub:
+    profiles: ["prebuilt"]
+    image: camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}
+    pull_policy: ${PULL_POLICY:-always}
+    container_name: hub
+    depends_on:
+      - modeler-db
+      - mailpit
+      - identity
+    ports:
+      # Host HUB_UI_PORT → container 8081 (the app / public-API port).
+      - "${HUB_UI_PORT:-8088}:8081"
+    environment:
+      JAVA_OPTIONS: -Xmx1024m
+      SPRING_DATASOURCE_URL: jdbc:postgresql://modeler-db:5432/modeler-db
+      SPRING_DATASOURCE_USERNAME: modeler-db-user
+      SPRING_DATASOURCE_PASSWORD: modeler-db-password
+      CAMUNDA_IDENTITY_BASEURL: http://identity:8080/
+      # The token's `iss` is minted against the host-facing keycloak URL, so the
+      # issuer string must match that; JWKS is fetched in-network via the backend URL.
+      RESTAPI_OAUTH2_TOKEN_ISSUER: http://localhost:${KEYCLOAK_PORT:-18080}/auth/realms/camunda-platform
+      RESTAPI_OAUTH2_TOKEN_ISSUER_BACKEND_URL: http://keycloak:8080/auth/realms/camunda-platform
+      RESTAPI_SERVER_URL: http://localhost:${HUB_UI_PORT:-8088}
+      RESTAPI_MAIL_HOST: mailpit
+      RESTAPI_MAIL_PORT: 1025
+      RESTAPI_MAIL_ENABLE_TLS: "false"
+      RESTAPI_MAIL_FROM_ADDRESS: noreply@example.com
+      RESTAPI_PUSHER_HOST: websockets
+      RESTAPI_PUSHER_PORT: 8060
+      RESTAPI_PUSHER_APP_ID: self-managed-pusher-app-id
+      RESTAPI_PUSHER_KEY: self-managed-pusher-key
+      RESTAPI_PUSHER_SECRET: self-managed-pusher-secret
+      # Client-side (browser) pusher config — required (must not be blank) even
+      # though the request-validation suite never opens a websocket.
+      CLIENT_PUSHER_HOST: localhost
+      CLIENT_PUSHER_PORT: 8060
+      CLIENT_PUSHER_FORCE_TLS: "false"
+      CAMUNDA_MODELER_SECURITY_JWT_AUDIENCE_INTERNAL_API: web-modeler-api
+      SERVER_HTTPS_ONLY: "false"
+      OAUTH2_CLIENT_ID: web-modeler
+      # Feature flags: the public API v2 is OFF by default in the image, so
+      # /api/v2 returns 404 until enabled. Mirror the local (make) config so the
+      # full surface the suite covers (workspaces, catalog) is reachable.
+      CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED: "true"
+      FEATURE_WORKSPACES_ENABLED: "true"
+      FEATURE_CATALOG_ENABLED: "true"
+      CAMUNDA_MODELER_FEATURE_CONSOLE_ENABLED: "true"
+      FEATURE_GLOBAL_NAVIGATION_V2_ENABLED: "true"
+
 volumes:
   modeler-db-data:
   keycloak-db-data:
