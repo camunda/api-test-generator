@@ -181,6 +181,35 @@ for m in json.load(sys.stdin):
       409) echo "Keycloak: c8-client-deny already has web-modeler-api audience mapper (skipped)" ;;
       *)   echo "Keycloak: failed to add audience mapper to c8-client-deny (HTTP $deny_mapper_status)" >&2; return 1 ;;
     esac
+    # The PUBLIC API (/api/v2) validates aud=web-modeler-public-api specifically.
+    # The admin client gets it from its granted permissions; the deny client has
+    # none, so without an explicit mapper its token lacks that audience and the
+    # public API rejects it 401 (not the 403 the rbac probe expects). Identity may
+    # add a realm-wide mapper eventually, but that is async — a fast CI run mints
+    # the deny token before it lands. Add it explicitly so 403 is deterministic.
+    local deny_pub_mapper_status
+    deny_pub_mapper_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+      -H "Authorization: Bearer ${admin_token}" \
+      -H "Content-Type: application/json" \
+      "${realm_url}/clients/${deny_client_uuid}/protocol-mappers/models" \
+      -d '{
+        "name": "web-modeler-public-api audience (deny client)",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": false,
+        "config": {
+          "included.client.audience": "web-modeler-public-api",
+          "id.token.claim": "false",
+          "access.token.claim": "true",
+          "introspection.token.claim": "true",
+          "userinfo.token.claim": "false"
+        }
+      }')
+    case "$deny_pub_mapper_status" in
+      201) echo "Keycloak: added web-modeler-public-api audience mapper to c8-client-deny" ;;
+      409) echo "Keycloak: c8-client-deny already has web-modeler-public-api audience mapper (skipped)" ;;
+      *)   echo "Keycloak: failed to add public-api audience mapper to c8-client-deny (HTTP $deny_pub_mapper_status)" >&2; return 1 ;;
+    esac
   else
     echo "Warning: c8-client-deny not found — rbac (403) deny tests will not authenticate."
   fi
