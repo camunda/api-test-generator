@@ -177,16 +177,18 @@ jobs:
           done
 
       # --- 2,3,5,6. Skip positive, regenerate, run, build reports --------------
-      # run-hub.sh STEPS="generate run curl":
-      #   generate → regenerate request-validation suite (positive skipped via SKIP_POSITIVE=1)
-      #   run      → Playwright per profile (JSON + HTML reports)
-      #   curl     → independent curl oracle + curl-compare HTML report
-      # No E2E_SOFT: run-hub.sh exits non-zero when the curl oracle finds any
-      # expected-vs-actual mismatch, so this step (and the run) FAILS on failing
-      # tests. The always() steps below still capture reports + post to Slack.
+      # STEPS="generate run" (NO curl): the Playwright suite is the gate and its
+      # HTML report is the single source of truth. The curl oracle is a generator-
+      # faithfulness cross-check whose home is the generator's dev/CI loop, not an
+      # unattended Hub-regression nightly — running it here only adds a noisy log
+      # dump + doubled Hub requests for no kept artifact. (Run it in dev with
+      # STEPS="… curl".) No E2E_SOFT: run-hub.sh exits non-zero on any Playwright
+      # test failure, so this step (and the run) FAILS on failing tests. The
+      # always() steps below still capture the report + write the summary.
       - name: Generate + run negative suite
         env:
           SKIP_POSITIVE: '1'
+          STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
         run: ./scripts/e2e/run-hub.sh
 
@@ -195,7 +197,7 @@ jobs:
         if: always()
         run: ./docker/start-hub.sh stop || true
 
-      - name: Upload reports (Playwright + curl-compare)
+      - name: Upload Playwright reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -204,17 +206,17 @@ jobs:
           retention-days: 14
 
       # --- 7. Results summary --------------------------------------------------
-      # While Slack is disabled, write the per-profile match/mismatch summary to
-      # the GitHub Actions run summary (visible in the run UI) so results are
-      # surfaced without Slack. Full reports are in the uploaded artifact.
+      # Write per-profile Playwright pass/fail (from the JSON reporter stats) to
+      # the GitHub Actions run summary. The Playwright HTML report (in the artifact)
+      # has the full per-test detail + request/response attachments.
       - name: Write results to run summary
         if: always()
         run: |
           out="test-results/e2e-camunda-hub"
           summarize() { # profile
-            local f="$out/curl-compare-$1.txt"
+            local f="$out/pw-$1.json"
             if [ -f "$f" ]; then
-              grep -E "curl vs expected:" "$f" | tail -1 | sed "s/^/- **$1**: /"
+              python3 -c "import json; s=json.load(open('$f')).get('stats',{}); print(f\"- **$1**: {s.get('expected',0)} passed, {s.get('unexpected',0)} failed, {s.get('skipped',0)} skipped\")"
             else
               echo "- **$1**: (no report — run may have failed before this profile)"
             fi
@@ -225,7 +227,7 @@ jobs:
             summarize rbac
             echo ""
             echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
-            echo "_~102 secured mismatches are known generator-gap false-positives (#352/#363/#372)._"
+            echo "_~102 secured failures are known generator-gap false-positives (#352/#363/#372)._"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # TEMP: Slack notification disabled for now. To re-enable: add a SLACK_BOT_TOKEN
