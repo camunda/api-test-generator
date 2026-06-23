@@ -274,17 +274,33 @@ jobs:
               -f "$f" || echo "::warning::TestRail publish failed for profile '$p'"
           done
 
-      # TEMP: Slack notification disabled for now. To re-enable: add a SLACK_BOT_TOKEN
-      # repo secret (or Vault SLACK_CORE_DOMAIN_BOT_TOKEN), map it into the job env,
-      # invite the bot to #prj-qa-sandbox, and uncomment this step (point token: at it).
-      # - name: Notify Slack
-      #   if: ${{ always() && env.SLACK_BOT_TOKEN != '' }}
-      #   uses: slackapi/slack-github-action@v2
-      #   with:
-      #     method: chat.postMessage
-      #     token: ${{ env.SLACK_BOT_TOKEN }}
-      #     payload: |
-      #       {
-      #         "channel": "${{ env.SLACK_CHANNEL }}",
-      #         "text": "*Nightly — camunda-hub negative tests* — ${{ job.status == 'success' && '✅ passed' || '❌ failed' }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>"
-      #       }
+      # --- Slack notification --------------------------------------------------
+      # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
+      # for the clone token (no token stored as a repo secret). Lives at
+      # secret/data/products/qa/ci/common, key SLACK_BOT_USER_OAUTH_TOKEN — the
+      # bound Vault role must be granted read on that path. always() so a failed
+      # run still notifies. The bot must be invited to #prj-qa-sandbox.
+      - name: Fetch Slack bot token from Vault
+        id: slack-secrets
+        if: always()
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
+
+      - name: Notify Slack
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "*Nightly — camunda-hub negative tests* — ${{ job.status == 'success' && '✅ passed' || '❌ failed' }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>"
+            }
