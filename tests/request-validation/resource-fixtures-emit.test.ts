@@ -45,9 +45,9 @@ describe('request-validation: resource-fixture emit (#352)', () => {
       FIX,
     );
     // path param
-    expect(out).toContain('process.env["RV_FIXTURE_FILE_KEY"] ?? "x"');
+    expect(out).toContain('process.env["RV_FIXTURE_FILE_KEY"] || "x"');
     // body field
-    expect(out).toContain('process.env["RV_FIXTURE_PROJECT_KEY"] ?? "x"');
+    expect(out).toContain('process.env["RV_FIXTURE_PROJECT_KEY"] || "x"');
   });
 
   it('does NOT substitute a deliberately-malformed value on a fixture field', () => {
@@ -63,7 +63,7 @@ describe('request-validation: resource-fixture emit (#352)', () => {
 
   it("substitutes the '1' filler (constraintViolations/parameters) too", () => {
     const out = renderScenarioForTest(scenario({ params: { fileKey: '1' } }), 'probe', FIX);
-    expect(out).toContain('process.env["RV_FIXTURE_FILE_KEY"] ?? "1"');
+    expect(out).toContain('process.env["RV_FIXTURE_FILE_KEY"] || "1"');
   });
 
   it('applies pathResourceFixtures override to the PATH param only, not the body', () => {
@@ -81,7 +81,7 @@ describe('request-validation: resource-fixture emit (#352)', () => {
     expect(out).toMatch(/buildUrl\([^)]*RV_FIXTURE_V2_PROJECT_KEY/s);
     // ...the body still uses the base env.
     expect(out).toContain(
-      'const requestBody = {projectKey: process.env["RV_FIXTURE_PROJECT_KEY"] ?? "x"}',
+      'const requestBody = {projectKey: process.env["RV_FIXTURE_PROJECT_KEY"] || "x"}',
     );
   });
 });

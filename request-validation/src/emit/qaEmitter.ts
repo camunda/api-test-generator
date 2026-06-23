@@ -19,9 +19,9 @@ interface EmitOpts {
   generationTimestamp?: string;
   /**
    * resource-key name → env var holding a REAL key (see RequestValidationConfig).
-   * A path param or body field whose name is a key here and whose value is the
-   * filler placeholder `'x'` is emitted as `process.env['<ENV>'] ?? 'x'` so the
-   * malformed-field test rides on a valid envelope (#352).
+   * A path param or body field whose name is a key here and whose value is a
+   * filler placeholder (`'x'` or `'1'`) is emitted as `process.env['<ENV>'] || '<filler>'`
+   * so the malformed-field test rides on a valid envelope (#352).
    */
   resourceFixtures?: Record<string, string>;
   /** Path-param-only overrides merged over resourceFixtures (see config). */
@@ -206,7 +206,10 @@ function valueToTs(value: unknown, fixtures: Record<string, string>, key?: strin
     // constraintViolations/parameters) — a deliberately-malformed value (wrong
     // type, constraint violation) on a fixture field keeps its malformation.
     if (key !== undefined && (value === 'x' || value === '1') && fixtures[key]) {
-      return `process.env[${JSON.stringify(fixtures[key])}] ?? ${JSON.stringify(value)}`;
+      // `||` (not `??`) so an UNSET *or* EMPTY env var falls back to the filler:
+      // if a fixture create failed, RV_FIXTURE_* is '' (still defined), and `??`
+      // would keep the empty string → a collapsed URL / empty body field.
+      return `process.env[${JSON.stringify(fixtures[key])}] || ${JSON.stringify(value)}`;
     }
     return JSON.stringify(value);
   }

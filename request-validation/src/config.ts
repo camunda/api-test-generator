@@ -68,9 +68,10 @@ export interface RequestValidationConfig {
   /**
    * Maps resource-key names (path params AND body fields, e.g. `fileKey`,
    * `projectKey`, `workspaceKey`) to the env var holding a REAL key created by
-   * the runner before tests run. Wherever the generator would otherwise emit the
-   * placeholder `'x'` for one of these names, it instead emits
-   * `process.env['<ENV>'] ?? 'x'`.
+   * the runner before tests run. Wherever the generator would otherwise emit a
+   * filler placeholder (`'x'`, or `'1'` from constraintViolations/parameters) for
+   * one of these names, it instead emits `process.env['<ENV>'] || '<filler>'`
+   * (`||` so an unset OR empty env var falls back to the filler).
    *
    * This makes a malformed-field negative test ride on an otherwise-valid
    * envelope: the path param / referenced body resource exists, so the request
