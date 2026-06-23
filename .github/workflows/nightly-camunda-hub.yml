@@ -52,9 +52,14 @@ jobs:
     # Prebuilt image (pull + boot) + generate + run — no source build.
     timeout-minutes: 25
 
-    # Map secrets into job env (the `secrets` context is NOT allowed in a step
-    # `if:`, but `env` is; empty when a secret is unset).
+    # Map secrets into job env: the `secrets` context is NOT allowed in a step
+    # `if:`, but `env` is. Empty when a secret is unset.
+    # HUB_REPO_TOKEN (TEMP, until Vault onboarding): PAT to clone camunda-hub —
+    # still needed because the OpenAPI spec is bundled from the (private) source
+    # clone. The Hub itself runs from the PUBLIC camunda/hub:SNAPSHOT image, so no
+    # Camunda container-registry credentials are required.
     env:
+      HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
       # TestRail publish (mirrors camunda/camunda). Set TESTRAIL_USERNAME +
       # TESTRAIL_KEY repo secrets (or Vault TESTRAIL_QA_EMAIL/PSW once onboarded)
       # to enable the publish step; when unset it is skipped. Results go to the
@@ -80,8 +85,14 @@ jobs:
       # with repo secrets VAULT_ADDR / VAULT_JWT_PATH / VAULT_JWT_ROLE / VAULT_JWT_AUDIENCE,
       # the bound Vault role granted read on secret/data/products/web-modeler/ci/common,
       # and the App granted Contents:Read on camunda/camunda-hub.
+      #
+      # TEMP workaround: while Vault onboarding is pending, set a repo secret
+      # HUB_REPO_TOKEN (a PAT with Contents:Read on camunda-hub). When present it
+      # is used for the clone and this Vault step is skipped. Remove HUB_REPO_TOKEN
+      # (and this `if:`) once Vault is live.
       - name: Generate camunda-hub clone token
         id: hub-token
+        if: ${{ env.HUB_REPO_TOKEN == '' }}
         uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@main
         with:
           github-app-id-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_ID
@@ -99,13 +110,13 @@ jobs:
       # --- Clone camunda-hub @ latest main as a sibling (../camunda-hub) -------
       # start-hub.sh and the local-bundle spec source both expect ../camunda-hub.
       # We always take latest main → "always on latest" (spec pin NOT enforced).
-      # Token: the short-lived Vault-minted GitHub App token from the step above.
+      # Token: HUB_REPO_TOKEN (temp PAT) if set, else the Vault-minted App token.
       - name: Clone camunda-hub (latest main)
         env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          HUB_TOKEN: ${{ env.HUB_REPO_TOKEN != '' && env.HUB_REPO_TOKEN || steps.hub-token.outputs.token }}
         run: |
           if [ -z "$HUB_TOKEN" ]; then
-            echo "::error::No clone token — Vault auth failed (check VAULT_ADDR/VAULT_JWT_PATH/VAULT_JWT_ROLE/VAULT_JWT_AUDIENCE and the role's read access to secret/data/products/web-modeler/ci/common)."
+            echo "::error::No clone token available — set HUB_REPO_TOKEN, or complete Vault onboarding (VAULT_ADDR/VAULT_JWT_PATH/VAULT_JWT_ROLE/VAULT_JWT_AUDIENCE)."
             exit 1
           fi
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
