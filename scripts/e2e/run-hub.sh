@@ -68,8 +68,9 @@ DENY_HEADER=""; [ -n "$DENY_TOK" ] && DENY_HEADER="Authorization: Bearer $DENY_T
 # Create REAL resources so a malformed-field negative test rides on an otherwise
 # valid envelope (the path key / referenced project|folder exists) and reaches
 # body validation (400) instead of being short-circuited by a resource lookup
-# (404) or access check (403) on the 'x' placeholder. The generator emits
-# `process.env.RV_FIXTURE_* ?? 'x'` for these (see configs/.../request-validation.json
+# (404) or access check (403) on a filler placeholder ('x' or '1'). The generator
+# emits `process.env.RV_FIXTURE_* || '<filler>'` for these (`||` so an unset OR
+# empty env var falls back; see configs/.../request-validation.json
 # resourceFixtures + pathResourceFixtures). NOTE the project split: createFile/
 # createFolder BODY auth resolves the V1 Project (projects table), but
 # PATCH /projects/{projectKey} resolves a V2 ProcessApplication — so we make both.
