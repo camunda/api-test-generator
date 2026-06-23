@@ -8,10 +8,11 @@ import type { ValidationScenario } from '../../request-validation/src/model/type
  * A malformed-field negative test must ride on an otherwise-valid envelope: the
  * path key and any referenced body resource (project/folder) must EXIST, so the
  * request reaches the body-validation layer (400) instead of being short-
- * circuited by a resource lookup (404) or access check (403) on the `'x'`
- * placeholder. The emitter substitutes `process.env.<ENV> ?? '<filler>'` for any
- * path param / body field whose name is in the fixture map and whose value is a
- * FILLER placeholder (`'x'` or `'1'`) — never for a deliberately-malformed value.
+ * circuited by a resource lookup (404) or access check (403) on a filler
+ * placeholder. The emitter substitutes `process.env.<ENV> || '<filler>'` (`||` so
+ * an unset OR empty env var falls back) for any path param / body field whose
+ * name is in the fixture map and whose value is a FILLER placeholder (`'x'` or
+ * `'1'`) — never for a deliberately-malformed value.
  *
  * Guards locked in here:
  *   1. path param filler → env lookup (using the path-override map);

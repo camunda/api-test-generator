@@ -195,8 +195,9 @@ export function renderScenarioForTest(
 
 /**
  * Render a JS value as a TS expression, substituting a resource-fixture env
- * lookup for any string field/param whose key is in `fixtures` and whose value
- * is the filler placeholder `'x'` (#352). Only the placeholder is substituted —
+ * lookup (`process.env[<ENV>] || '<filler>'`) for any string field/param whose
+ * key is in `fixtures` and whose value is a filler placeholder (`'x'`, or `'1'`
+ * from constraintViolations/parameters) (#352). Only the filler is substituted —
  * a deliberately-malformed value (wrong type, constraint violation) on a fixture
  * field is left intact so that test still exercises the validator.
  */
@@ -252,9 +253,9 @@ function renderScenario(
   const pathLit = JSON.stringify(s.path.replace(/\{([^}]+)}/g, '{$1}'));
   const { pathParams, queryParams } = splitParamsBySlot(s.path, s.params);
   // #352: substitute a real-resource env lookup for fixture path params whose
-  // value is the `'x'` placeholder, so a by-key/update op's path resolves to an
-  // existing resource and the request reaches body validation (400) instead of a
-  // 404 resource-lookup on `'x'`.
+  // value is a filler placeholder (`'x'` or `'1'`), so a by-key/update op's path
+  // resolves to an existing resource and the request reaches body validation
+  // (400) instead of a 404 resource-lookup on the filler.
   const pathArg = pathParams
     ? hasPathFixtures
       ? valueToTs(pathParams, pathFixtures)
@@ -275,8 +276,9 @@ function renderScenario(
     lines.push(`    for (const [k,v] of Object.entries(multipartFields)) formData.append(k, v);`);
   } else if (s.requestBody) {
     // #352: substitute real-resource env lookups for fixture body fields (e.g.
-    // createFile.projectKey) whose value is the `'x'` placeholder, so the access
-    // check passes and the request reaches body validation (400) rather than 403.
+    // createFile.projectKey) whose value is a filler placeholder (`'x'` or `'1'`),
+    // so the access check passes and the request reaches body validation (400)
+    // rather than 403.
     const isObjectBody =
       typeof s.requestBody === 'object' && s.requestBody !== null && !Array.isArray(s.requestBody);
     if (hasFixtures && isObjectBody) {

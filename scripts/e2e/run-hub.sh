@@ -74,7 +74,13 @@ DENY_HEADER=""; [ -n "$DENY_TOK" ] && DENY_HEADER="Authorization: Bearer $DENY_T
 # createFolder BODY auth resolves the V1 Project (projects table), but
 # PATCH /projects/{projectKey} resolves a V2 ProcessApplication — so we make both.
 V1_URL="http://localhost:${HUB_UI_PORT}/api/v1"
-_jget() { python3 -c "import json,sys; print(json.load(sys.stdin).get('$1',''))" 2>/dev/null; }
+# Always exits 0 (prints '' on non-JSON / missing field) so a bad response can't
+# abort make_fixtures under `set -euo pipefail` before the empty-key warnings run.
+_jget() { python3 -c "
+import json,sys
+try: print(json.load(sys.stdin).get('$1',''))
+except Exception: pass
+" 2>/dev/null || true; }
 make_fixtures() {
   local h=(-H "Authorization: Bearer $ADMIN_TOK" -H "Content-Type: application/json")
   # content must be valid BPMN XML — createFile rejects a non-parseable body (400).
