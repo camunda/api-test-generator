@@ -17,6 +17,15 @@ interface EmitOpts {
   standalone?: boolean;
   specCommit?: string;
   generationTimestamp?: string;
+  /**
+   * resource-key name → env var holding a REAL key (see RequestValidationConfig).
+   * A path param or body field whose name is a key here and whose value is the
+   * filler placeholder `'x'` is emitted as `process.env['<ENV>'] ?? 'x'` so the
+   * malformed-field test rides on a valid envelope (#352).
+   */
+  resourceFixtures?: Record<string, string>;
+  /** Path-param-only overrides merged over resourceFixtures (see config). */
+  pathResourceFixtures?: Record<string, string>;
 }
 
 export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
@@ -61,6 +70,8 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       opts.specCommit,
       opts.generationTimestamp,
       opts.standalone !== false,
+      opts.resourceFixtures,
+      opts.pathResourceFixtures,
     );
     let formatted: string;
     try {
@@ -85,6 +96,8 @@ function buildFile(
   specCommit?: string,
   ts?: string,
   standalone: boolean = true,
+  resourceFixtures?: Record<string, string>,
+  pathResourceFixtures?: Record<string, string>,
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
@@ -158,7 +171,7 @@ function buildFile(
       occurrence.set(base, n);
       finalTitle = `${base} (#${n})`;
     }
-    lines.push(renderScenario(s, finalTitle, standalone));
+    lines.push(renderScenario(s, finalTitle, standalone, resourceFixtures, pathResourceFixtures));
   }
   lines.push('});');
   lines.push('');
@@ -171,11 +184,60 @@ function buildFile(
  * issue #127) that need to assert on the emitted `buildUrl(...)` shape
  * without spinning up the full file-emission pipeline.
  */
-export function renderScenarioForTest(s: ValidationScenario, title: string): string {
-  return renderScenario(s, title, true);
+export function renderScenarioForTest(
+  s: ValidationScenario,
+  title: string,
+  resourceFixtures?: Record<string, string>,
+  pathResourceFixtures?: Record<string, string>,
+): string {
+  return renderScenario(s, title, true, resourceFixtures, pathResourceFixtures);
 }
 
-function renderScenario(s: ValidationScenario, title: string, standalone: boolean): string {
+/**
+ * Render a JS value as a TS expression, substituting a resource-fixture env
+ * lookup for any string field/param whose key is in `fixtures` and whose value
+ * is the filler placeholder `'x'` (#352). Only the placeholder is substituted —
+ * a deliberately-malformed value (wrong type, constraint violation) on a fixture
+ * field is left intact so that test still exercises the validator.
+ */
+function valueToTs(value: unknown, fixtures: Record<string, string>, key?: string): string {
+  if (typeof value === 'string') {
+    // Substitute only the FILLER placeholders ('x' from most analyses, '1' from
+    // constraintViolations/parameters) — a deliberately-malformed value (wrong
+    // type, constraint violation) on a fixture field keeps its malformation.
+    if (key !== undefined && (value === 'x' || value === '1') && fixtures[key]) {
+      return `process.env[${JSON.stringify(fixtures[key])}] ?? ${JSON.stringify(value)}`;
+    }
+    return JSON.stringify(value);
+  }
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => valueToTs(v, fixtures)).join(', ')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value).map(([k, v]) => {
+      const keyTok = /^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k);
+      return `${keyTok}: ${valueToTs(v, fixtures, k)}`;
+    });
+    return `{${entries.join(', ')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function renderScenario(
+  s: ValidationScenario,
+  title: string,
+  standalone: boolean,
+  resourceFixtures?: Record<string, string>,
+  pathResourceFixtures?: Record<string, string>,
+): string {
+  const fixtures = resourceFixtures ?? {};
+  // Path params use the base map with path-only overrides merged on top.
+  const pathFixtures = { ...fixtures, ...(pathResourceFixtures ?? {}) };
+  const hasFixtures = Object.keys(fixtures).length > 0;
+  const hasPathFixtures = Object.keys(pathFixtures).length > 0;
   const lines: string[] = [];
   const fixtureArg = standalone ? '({request}, testInfo)' : '({request})';
   lines.push(`  test(${JSON.stringify(title)}, async ${fixtureArg} => {`);
@@ -186,7 +248,15 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
   // query string. See issue #127.
   const pathLit = JSON.stringify(s.path.replace(/\{([^}]+)}/g, '{$1}'));
   const { pathParams, queryParams } = splitParamsBySlot(s.path, s.params);
-  const pathArg = pathParams ? JSON.stringify(pathParams) : 'undefined';
+  // #352: substitute a real-resource env lookup for fixture path params whose
+  // value is the `'x'` placeholder, so a by-key/update op's path resolves to an
+  // existing resource and the request reaches body validation (400) instead of a
+  // 404 resource-lookup on `'x'`.
+  const pathArg = pathParams
+    ? hasPathFixtures
+      ? valueToTs(pathParams, pathFixtures)
+      : JSON.stringify(pathParams)
+    : 'undefined';
   const queryArg = queryParams ? JSON.stringify(queryParams) : undefined;
   const urlCall =
     queryArg !== undefined
@@ -201,11 +271,20 @@ function renderScenario(s: ValidationScenario, title: string, standalone: boolea
     lines.push(`    const multipartFields: Record<string,string> = ${formLit};`);
     lines.push(`    for (const [k,v] of Object.entries(multipartFields)) formData.append(k, v);`);
   } else if (s.requestBody) {
-    const body = JSON.stringify(s.requestBody, null, 2);
-    if (body === '[]') {
-      lines.push(`    const requestBody: string[] = ${body};`);
+    // #352: substitute real-resource env lookups for fixture body fields (e.g.
+    // createFile.projectKey) whose value is the `'x'` placeholder, so the access
+    // check passes and the request reaches body validation (400) rather than 403.
+    const isObjectBody =
+      typeof s.requestBody === 'object' && s.requestBody !== null && !Array.isArray(s.requestBody);
+    if (hasFixtures && isObjectBody) {
+      lines.push(`    const requestBody = ${valueToTs(s.requestBody, fixtures)};`);
     } else {
-      lines.push(`    const requestBody = ${body};`);
+      const body = JSON.stringify(s.requestBody, null, 2);
+      if (body === '[]') {
+        lines.push(`    const requestBody: string[] = ${body};`);
+      } else {
+        lines.push(`    const requestBody = ${body};`);
+      }
     }
   }
   const headersExpr =
