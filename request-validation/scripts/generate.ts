@@ -706,6 +706,8 @@ async function main() {
       standalone: opts.standalone,
       specCommit,
       generationTimestamp,
+      resourceFixtures: rvConfig.resourceFixtures,
+      pathResourceFixtures: rvConfig.pathResourceFixtures,
     });
   }
   console.log('[generate] Summary:', {
