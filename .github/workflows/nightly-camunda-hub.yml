@@ -28,6 +28,9 @@ defaults:
 
 permissions:
   contents: read
+  # Mint a GitHub OIDC token so Vault can authenticate this job via JWT (no
+  # long-lived role-id/secret-id stored as repo secrets — smaller blast radius).
+  id-token: write
 
 # Don't pile up overlapping nightly runs.
 concurrency:
@@ -73,12 +76,15 @@ jobs:
           persist-credentials: false
 
       # --- GitHub App token to clone the private camunda-hub -------------------
-      # Mirrors camunda-hub's own preview-env workflows: mint a short-lived
-      # GitHub App token from App credentials stored in Vault (AppRole auth).
-      # Prereq (infra/infraex): camunda/api-test-generator must have the Vault
-      # secrets VAULT_ADDR / VAULT_ROLE_ID / VAULT_SECRET_ID, and its Vault role
-      # must be granted read on secret/data/products/web-modeler/ci/common. The
-      # app must have Contents:Read on camunda/camunda-hub.
+      # Mint a short-lived GitHub App token from App credentials stored in Vault,
+      # authenticating to Vault via GitHub OIDC/JWT — no long-lived role-id/secret-id
+      # held as repo secrets (smaller blast radius if a secret leaks). GitHub mints
+      # a per-run OIDC token (see `id-token: write` above); Vault's JWT auth backend
+      # validates it against a role bound to this repo and issues a scoped Vault token.
+      # Prereq (infra/infraex): camunda/api-test-generator onboarded to Vault JWT auth
+      # with repo secrets VAULT_ADDR / VAULT_JWT_PATH / VAULT_JWT_ROLE / VAULT_JWT_AUDIENCE,
+      # the bound Vault role granted read on secret/data/products/web-modeler/ci/common,
+      # and the App granted Contents:Read on camunda/camunda-hub.
       #
       # TEMP workaround: while Vault onboarding is pending, set a repo secret
       # HUB_REPO_TOKEN (a PAT with Contents:Read on camunda-hub). When present it
@@ -93,9 +99,10 @@ jobs:
           github-app-id-vault-path: secret/data/products/web-modeler/ci/common
           github-app-private-key-vault-key: GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY
           github-app-private-key-vault-path: secret/data/products/web-modeler/ci/common
-          vault-auth-method: approle
-          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
-          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-auth-method: jwt
+          vault-auth-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-auth-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-auth-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           vault-url: ${{ secrets.VAULT_ADDR }}
           owner: camunda
           repositories: camunda-hub
@@ -109,7 +116,7 @@ jobs:
           HUB_TOKEN: ${{ env.HUB_REPO_TOKEN != '' && env.HUB_REPO_TOKEN || steps.hub-token.outputs.token }}
         run: |
           if [ -z "$HUB_TOKEN" ]; then
-            echo "::error::No clone token available — set HUB_REPO_TOKEN, or complete Vault onboarding (VAULT_ADDR/VAULT_ROLE_ID/VAULT_SECRET_ID)."
+            echo "::error::No clone token available — set HUB_REPO_TOKEN, or complete Vault onboarding (VAULT_ADDR/VAULT_JWT_PATH/VAULT_JWT_ROLE/VAULT_JWT_AUDIENCE)."
             exit 1
           fi
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
