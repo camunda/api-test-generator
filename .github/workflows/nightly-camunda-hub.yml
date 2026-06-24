@@ -100,8 +100,10 @@ jobs:
             echo "::error::No clone token — App installation token was empty (check Vault OIDC auth + role read on web-modeler/ci/preview-envs, and that the App is installed on camunda/camunda-hub with Contents: Read)."
             exit 1
           fi
-          git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-          git clone --depth 1 https://github.com/camunda/camunda-hub.git "${GITHUB_WORKSPACE}/../camunda-hub"
+          # Scope the token rewrite to this single clone (via `git -c`) rather than
+          # persisting it in ~/.gitconfig — nothing with the token is left on disk.
+          git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+            clone --depth 1 https://github.com/camunda/camunda-hub.git "${GITHUB_WORKSPACE}/../camunda-hub"
           echo "camunda-hub at: $(cd "${GITHUB_WORKSPACE}/../camunda-hub" && git rev-parse HEAD)"
 
       # --- Toolchain -----------------------------------------------------------
@@ -310,6 +312,10 @@ jobs:
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
         if: always()
+        # Notification infra must not fail an otherwise-complete run — if the
+        # Vault fetch fails (path/permission not ready), the Notify Slack step
+        # below simply skips on the empty token output (matches the TestRail step).
+        continue-on-error: true
         uses: hashicorp/vault-action@v3
         with:
           url: ${{ secrets.VAULT_ADDR }}

@@ -96,9 +96,10 @@ make_fixtures() {
   echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v1proj=$RV_FIXTURE_PROJECT_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY"
   # Surface any failed create: an empty key means the tests fall back to the 'x'
   # filler for that resource (via `|| 'x'`) and will 404/403 as if unfixtured.
-  local k
+  local k var
   for k in WORKSPACE_KEY PROJECT_KEY V2_PROJECT_KEY FOLDER_KEY FILE_KEY VERSION_KEY; do
-    eval "[ -n \"\$RV_FIXTURE_${k}\" ]" || echo "  ⚠ RV_FIXTURE_${k} is empty — its create call failed; affected tests will see 404/403"
+    var="RV_FIXTURE_${k}"
+    [ -n "${!var-}" ] || echo "  ⚠ RV_FIXTURE_${k} is empty — its create call failed; affected tests will see 404/403"
   done
 }
 if step run; then
