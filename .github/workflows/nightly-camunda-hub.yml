@@ -52,16 +52,6 @@ jobs:
     # Prebuilt image (pull + boot) + generate + run — no source build.
     timeout-minutes: 25
 
-    # Map secrets into job env (the `secrets` context is NOT allowed in a step
-    # `if:`, but `env` is; empty when a secret is unset).
-    env:
-      # TestRail publish (mirrors camunda/camunda). Set TESTRAIL_USERNAME +
-      # TESTRAIL_KEY repo secrets (or Vault TESTRAIL_QA_EMAIL/PSW once onboarded)
-      # to enable the publish step; when unset it is skipped. Results go to the
-      # suite below regardless via the run summary + artifact.
-      TESTRAIL_USERNAME: ${{ secrets.TESTRAIL_USERNAME }}
-      TESTRAIL_KEY: ${{ secrets.TESTRAIL_KEY }}
-
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -242,15 +232,36 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
+      # Fetch the TestRail creds from Vault via the same GitHub OIDC/JWT auth used
+      # for the clone + Slack tokens (no token stored as a repo secret). Lives at
+      # secret/data/products/qa/ci/common, keys TESTRAIL_QA_EMAIL/TESTRAIL_QA_PSW.
+      # continue-on-error so the nightly stays green if the creds aren't in Vault
+      # yet — the publish step below then skips on the empty output.
+      - name: Fetch TestRail creds from Vault
+        id: testrail-secrets
+        if: always()
+        continue-on-error: true
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common TESTRAIL_QA_EMAIL | TESTRAIL_USERNAME ;
+            secret/data/products/qa/ci/common TESTRAIL_QA_PSW | TESTRAIL_KEY ;
+
       # Ingests each profile's Playwright JUnit XML into TestRail suite 101098 via
-      # the TestRail CLI. Gated on TESTRAIL_USERNAME/TESTRAIL_KEY (see job env) so
-      # it's dormant until creds are set. Runs always() to publish failures too.
-      # TODO: set TESTRAIL_PROJECT to the project that owns suite 101098.
+      # the TestRail CLI. Gated on the Vault-fetched creds above so it's dormant
+      # until they exist. Runs always() to publish failures too.
       - name: Publish results to TestRail
-        if: ${{ always() && env.TESTRAIL_USERNAME != '' && env.TESTRAIL_KEY != '' }}
+        if: ${{ always() && steps.testrail-secrets.outputs.TESTRAIL_USERNAME != '' && steps.testrail-secrets.outputs.TESTRAIL_KEY != '' }}
         env:
+          TESTRAIL_USERNAME: ${{ steps.testrail-secrets.outputs.TESTRAIL_USERNAME }}
+          TESTRAIL_KEY: ${{ steps.testrail-secrets.outputs.TESTRAIL_KEY }}
           TESTRAIL_HOST: 'https://camunda.testrail.com/'
-          TESTRAIL_PROJECT: 'Web Modeler'  # TODO: confirm the project name for suite 101098
+          TESTRAIL_PROJECT: 'Camunda-Hub'
           TESTRAIL_SUITE_ID: '101098'
         run: |
           pip install --quiet trcli==1.14.1
