@@ -153,16 +153,24 @@ run_rv() { # profile
   # Playwright is the GATE: a non-zero exit (any spec assertion failed) sets
   # PW_FAIL, which fails the run at the end. (curl-compare below is diagnostic
   # only — it never affects pass/fail.)
+  # Capture stderr to a per-profile log (kept in the uploaded artifact) rather
+  # than discarding it — per-test failures go to stdout via the `list` reporter,
+  # but a crash before reporting (config/runtime error) only surfaces on stderr.
+  local pw_err="$abs_out/pw-$p.stderr.log"
   if BEARER_TOKEN="$ADMIN_TOK" RBAC_DENY_PROBE_BEARER_TOKEN="$DENY_TOK" \
     CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$abs_out/pw-$p.json" \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$abs_out/pw-$p" \
     PLAYWRIGHT_JUNIT_OUTPUT_FILE="$abs_out/pw-$p.junit.xml" \
-    npx playwright test -c "$cfg" 2>/dev/null; then
+    npx playwright test -c "$cfg" 2>"$pw_err"; then
     echo "  ✓ Playwright passed: $p"
   else
     PW_FAIL=1
     echo "  ✗ Playwright reported test failures in profile '$p'"
+    if [ -s "$pw_err" ]; then
+      echo "  ── playwright stderr (tail) ──────────────"
+      tail -n 30 "$pw_err" | sed 's/^/    /'
+    fi
   fi
   if [ -f "$OUT/pw-$p/index.html" ]; then
     echo "  ✓ Playwright report: $OUT/pw-$p/index.html (json: $OUT/pw-$p.json)"
