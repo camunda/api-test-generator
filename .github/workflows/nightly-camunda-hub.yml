@@ -3,11 +3,9 @@
 #              a Hub SNAPSHOT, regenerates the negative test suite, runs it, and
 #              posts a results summary to Slack. Positive (lifecycle) tests are
 #              skipped until camunda/camunda-hub#25146 lands. The run FAILS if any
-#              test's actual status != expected (strict). NOTE: ~102 secured
-#              mismatches are currently known generator-gap false-positives
-#              (#352/#363/#372), so the run will be red until those are fixed.
+#              test's actual status != expected (strict).
 # type: CI
-# owner: @camunda/<your-team>
+# owner: @camunda/qa
 ---
 name: Nightly — camunda-hub negative tests
 
