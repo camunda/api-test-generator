@@ -5,7 +5,7 @@
 #              skipped until camunda/camunda-hub#25146 lands. The run FAILS if any
 #              test's actual status != expected (strict).
 # type: CI
-# owner: @camunda/qa
+# owner: @camunda/test-automation-team
 ---
 name: Nightly — camunda-hub negative tests
 
