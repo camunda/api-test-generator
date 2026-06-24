@@ -71,13 +71,20 @@ jobs:
           persist-credentials: false
 
       # --- Clone token for the private camunda-hub -----------------------------
-      # Fetch a GitHub token from Vault via GitHub OIDC/JWT (no token stored as a
-      # repo secret — GitHub mints a per-run OIDC token, see `id-token: write`
-      # above, which Vault's JWT backend validates against a role bound to this
-      # repo). Reads GH_TOKEN from secret/data/products/qa/ci/common — the path
-      # this role already has read access to (same one the Slack token uses).
-      - name: Fetch camunda-hub clone token from Vault
-        id: hub-token
+      # The private camunda-hub clone uses a short-lived GitHub App installation
+      # token (not a personal PAT). We fetch the App credentials from Vault via
+      # GitHub OIDC/JWT (no long-lived secret stored — GitHub mints a per-run OIDC
+      # token, see `id-token: write` above, which Vault's JWT backend validates
+      # against a role bound to this repo), then mint an installation token scoped
+      # to camunda/camunda-hub from them.
+      #
+      # Requires (both on the Vault side, granted to this repo's JWT role):
+      #   - read on secret/data/products/web-modeler/ci/preview-envs, holding
+      #     GITHUB_PREVIEW_ENVIRONMENTS_APP_ID + _APP_PRIVATE_KEY
+      # And on the GitHub side: that App installed on camunda/camunda-hub with
+      # Contents: Read (without it, token minting below 403s).
+      - name: Fetch camunda-hub GitHub App creds from Vault
+        id: app-creds
         uses: hashicorp/vault-action@v3
         with:
           url: ${{ secrets.VAULT_ADDR }}
@@ -86,18 +93,28 @@ jobs:
           role: ${{ secrets.VAULT_JWT_ROLE }}
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           secrets: |
-            secret/data/products/qa/ci/common GH_TOKEN | HUB_CLONE_TOKEN ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
+
+      - name: Mint camunda-hub clone token from the GitHub App
+        id: hub-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ steps.app-creds.outputs.APP_ID }}
+          private-key: ${{ steps.app-creds.outputs.APP_PRIVATE_KEY }}
+          owner: camunda
+          repositories: camunda-hub
 
       # --- Clone camunda-hub @ latest main as a sibling (../camunda-hub) -------
       # start-hub.sh and the local-bundle spec source both expect ../camunda-hub.
       # We always take latest main → "always on latest" (spec pin NOT enforced).
-      # Token: the GH_TOKEN fetched from Vault in the step above.
+      # Token: the App installation token minted in the step above.
       - name: Clone camunda-hub (latest main)
         env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.HUB_CLONE_TOKEN }}
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
         run: |
           if [ -z "$HUB_TOKEN" ]; then
-            echo "::error::No clone token — Vault fetch of GH_TOKEN from secret/data/products/qa/ci/common returned empty (check OIDC auth + role read access)."
+            echo "::error::No clone token — App installation token was empty (check Vault OIDC auth + role read on web-modeler/ci/preview-envs, and that the App is installed on camunda/camunda-hub with Contents: Read)."
             exit 1
           fi
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
