@@ -261,7 +261,7 @@ jobs:
           TESTRAIL_USERNAME: ${{ steps.testrail-secrets.outputs.TESTRAIL_USERNAME }}
           TESTRAIL_KEY: ${{ steps.testrail-secrets.outputs.TESTRAIL_KEY }}
           TESTRAIL_HOST: 'https://camunda.testrail.com/'
-          TESTRAIL_PROJECT: 'Camunda-Hub'
+          TESTRAIL_PROJECT: 'C8'
           TESTRAIL_SUITE_ID: '101098'
         run: |
           pip install --quiet trcli==1.14.1
