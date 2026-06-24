@@ -227,7 +227,11 @@ function valueToTs(value: unknown, fixtures: Record<string, string>, key?: strin
     });
     return `{${entries.join(', ')}}`;
   }
-  return JSON.stringify(value);
+  // Unreachable for spec-derived JSON data — string/number/boolean/null/array/
+  // object are all handled above. The only remaining types (undefined, function,
+  // symbol) would make JSON.stringify return a non-string and emit a broken TS
+  // expression, so fail fast instead of silently producing `undefined`.
+  throw new Error(`valueToTs: cannot serialize value of type ${typeof value}`);
 }
 
 function renderScenario(

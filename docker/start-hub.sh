@@ -13,22 +13,34 @@ LOG_FILE="$REPO_ROOT/test-results/.hub.log"
 # Preconditions for building/running the Hub app. Only `start` needs these;
 # `stop` just kills the PID and tears down Docker, so it must not require them.
 check_start_preconditions() {
+  # The prebuilt path runs the published camunda/hub image via docker compose, so
+  # it needs none of the source-build deps (make, the ../camunda-hub clone, a JDK).
+  local prebuilt=false
+  [ "${HUB_MODE:-source}" = "prebuilt" ] && prebuilt=true
+
+  local required=(docker curl python3 lsof)
+  [ "$prebuilt" = true ] || required+=(make)
+
   local missing=()
-  for cmd in docker curl python3 lsof make; do
+  for cmd in "${required[@]}"; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "Error: required command(s) not found on PATH: ${missing[*]}"
     exit 1
   fi
-  if [ ! -d "$HUB_REPO" ]; then
-    echo "Error: camunda-hub not found at $HUB_REPO"
-    echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
-    exit 1
-  fi
-  if [ -z "${JAVA_HOME:-}" ]; then
-    echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
-    exit 1
+
+  # Source build only: needs the camunda-hub repo checked out + a JDK.
+  if [ "$prebuilt" = false ]; then
+    if [ ! -d "$HUB_REPO" ]; then
+      echo "Error: camunda-hub not found at $HUB_REPO"
+      echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
+      exit 1
+    fi
+    if [ -z "${JAVA_HOME:-}" ]; then
+      echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
+      exit 1
+    fi
   fi
 }
 
@@ -58,12 +70,17 @@ fix_keycloak() {
   echo "Waiting for Identity to initialise the camunda-platform realm..."
   local realm_url="${keycloak_url}/auth/admin/realms/camunda-platform"
   attempts=0
+  # Wait for c8-client-deny — the LAST test client Identity provisions (web-modeler
+  # and c8-client come before it). Waiting on web-modeler alone let the script race
+  # ahead before c8-client-deny existed → "deny client not found" + a downstream
+  # IndexError that crashed start-hub. Gating on c8-client-deny ensures all three
+  # (web-modeler, c8-client, c8-client-deny) are present before we touch them.
   until curl -sf -H "Authorization: Bearer ${admin_token}" \
-      "${realm_url}/clients?clientId=web-modeler" \
+      "${realm_url}/clients?clientId=c8-client-deny" \
       | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d else 1)" 2>/dev/null; do
     attempts=$((attempts + 1))
     if [ "$attempts" -ge 60 ]; then
-      echo "Error: camunda-platform realm / web-modeler client not ready within 60 attempts."
+      echo "Error: camunda-platform realm / c8-client-deny not ready within 60 attempts."
       return 1
     fi
     # Admin token expires after 60 s — refresh it periodically
@@ -181,6 +198,35 @@ for m in json.load(sys.stdin):
       409) echo "Keycloak: c8-client-deny already has web-modeler-api audience mapper (skipped)" ;;
       *)   echo "Keycloak: failed to add audience mapper to c8-client-deny (HTTP $deny_mapper_status)" >&2; return 1 ;;
     esac
+    # The PUBLIC API (/api/v2) validates aud=web-modeler-public-api specifically.
+    # The admin client gets it from its granted permissions; the deny client has
+    # none, so without an explicit mapper its token lacks that audience and the
+    # public API rejects it 401 (not the 403 the rbac probe expects). Identity may
+    # add a realm-wide mapper eventually, but that is async — a fast CI run mints
+    # the deny token before it lands. Add it explicitly so 403 is deterministic.
+    local deny_pub_mapper_status
+    deny_pub_mapper_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+      -H "Authorization: Bearer ${admin_token}" \
+      -H "Content-Type: application/json" \
+      "${realm_url}/clients/${deny_client_uuid}/protocol-mappers/models" \
+      -d '{
+        "name": "web-modeler-public-api audience (deny client)",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": false,
+        "config": {
+          "included.client.audience": "web-modeler-public-api",
+          "id.token.claim": "false",
+          "access.token.claim": "true",
+          "introspection.token.claim": "true",
+          "userinfo.token.claim": "false"
+        }
+      }')
+    case "$deny_pub_mapper_status" in
+      201) echo "Keycloak: added web-modeler-public-api audience mapper to c8-client-deny" ;;
+      409) echo "Keycloak: c8-client-deny already has web-modeler-public-api audience mapper (skipped)" ;;
+      *)   echo "Keycloak: failed to add public-api audience mapper to c8-client-deny (HTTP $deny_pub_mapper_status)" >&2; return 1 ;;
+    esac
   else
     echo "Warning: c8-client-deny not found — rbac (403) deny tests will not authenticate."
   fi
@@ -230,6 +276,32 @@ case "${1:-start}" in
       echo "$stale_pids" | xargs kill 2>/dev/null || true
     fi
     echo "Starting Hub infrastructure..."
+    # HUB_MODE=prebuilt: run the published camunda/hub image (compose `prebuilt`
+    # profile) instead of building from source — fast, no JDK/source-build deps.
+    # The container is managed by docker compose, so there's no make PID to track;
+    # `stop` tears it down via `docker compose down`.
+    if [ "${HUB_MODE:-source}" = "prebuilt" ]; then
+      # Bring up only the hub + its deps (NOT websockets — it's a private image
+      # the suite doesn't need; excluding it keeps the prebuilt path free of any
+      # Camunda registry credentials since camunda/hub itself is public).
+      # Retry to absorb transient Docker Hub pull errors ("Get …/manifests/…:
+      # unknown"); `docker compose up -d` is idempotent, so a retry just resumes.
+      compose_attempts=0
+      until docker compose -f "$COMPOSE_FILE" --profile prebuilt up -d \
+            modeler-db keycloak-db identity-db keycloak identity mailpit hub; do
+        compose_attempts=$((compose_attempts + 1))
+        if [ "$compose_attempts" -ge 3 ]; then
+          echo "Error: docker compose up failed after ${compose_attempts} attempts." >&2
+          exit 1
+        fi
+        echo "compose up failed (likely a transient registry pull error) — retry ${compose_attempts}/3 in 15s..."
+        sleep 15
+      done
+      fix_keycloak
+      echo "Hub app: prebuilt image camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} (container 'hub')."
+      echo "Run './docker/start-hub.sh stop' to stop."
+      exit 0
+    fi
     docker compose -f "$COMPOSE_FILE" up -d
     fix_keycloak
     echo "Starting Hub app (restapi + frontend)..."
