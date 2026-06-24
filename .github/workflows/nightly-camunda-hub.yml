@@ -234,7 +234,7 @@ jobs:
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
       # Fetch the TestRail creds from Vault via the same GitHub OIDC/JWT auth used
       # for the clone + Slack tokens (no token stored as a repo secret). Lives at
-      # secret/data/products/qa/ci/common, keys TESTRAIL_QA_EMAIL/TESTRAIL_QA_PSW.
+      # secret/data/products/qa/ci/common, keys TESTRAIL_QA_EMAIL/TESTRAIL_QA_KEY.
       # continue-on-error so the nightly stays green if the creds aren't in Vault
       # yet — the publish step below then skips on the empty output.
       - name: Fetch TestRail creds from Vault
@@ -250,7 +250,7 @@ jobs:
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           secrets: |
             secret/data/products/qa/ci/common TESTRAIL_QA_EMAIL | TESTRAIL_USERNAME ;
-            secret/data/products/qa/ci/common TESTRAIL_QA_PSW | TESTRAIL_KEY ;
+            secret/data/products/qa/ci/common TESTRAIL_QA_KEY | TESTRAIL_KEY ;
 
       # Ingests each profile's Playwright JUnit XML into TestRail suite 101098 via
       # the TestRail CLI. Gated on the Vault-fetched creds above so it's dormant
