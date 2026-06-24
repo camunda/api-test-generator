@@ -214,6 +214,14 @@ jobs:
         if: always()
         run: |
           out="test-results/e2e-camunda-hub"
+          failed_count() { # profile -> unexpected count (0 if no report)
+            local f="$out/pw-$1.json"
+            if [ -f "$f" ]; then
+              python3 -c "import json; print(json.load(open('$f')).get('stats',{}).get('unexpected',0))"
+            else
+              echo 0
+            fi
+          }
           summarize() { # profile
             local f="$out/pw-$1.json"
             if [ -f "$f" ]; then
@@ -222,13 +230,14 @@ jobs:
               echo "- **$1**: (no report — run may have failed before this profile)"
             fi
           }
+          secured_failed="$(failed_count secured)"
           {
             echo "## Nightly — camunda-hub negative tests"
             summarize secured
             summarize rbac
             echo ""
             echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
-            echo "_~102 secured failures are known generator-gap false-positives (#352/#363/#372)._"
+            echo "_${secured_failed} secured failures are known generator-gap false-positives (#352/#363/#372)._"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
