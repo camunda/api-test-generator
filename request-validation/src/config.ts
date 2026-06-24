@@ -101,8 +101,16 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function isStringRecord(v: unknown): v is Record<string, string> {
-  return isPlainObject(v) && Object.values(v).every((x) => typeof x === 'string');
+// Resource-fixture maps are name → env-var-name. Reject empty keys/values: an
+// empty env var name would silently disable substitution (and emit a confusing
+// `process.env[""]` lookup) rather than failing fast on an invalid config.
+function isEnvVarNameRecord(v: unknown): v is Record<string, string> {
+  return (
+    isPlainObject(v) &&
+    Object.entries(v).every(
+      ([k, x]) => typeof x === 'string' && k.length > 0 && x.length > 0,
+    )
+  );
 }
 
 /**
@@ -162,18 +170,18 @@ export function loadRequestValidationConfig(
   }
   if ('resourceFixtures' in parsed) {
     const v = parsed.resourceFixtures;
-    if (!isStringRecord(v)) {
+    if (!isEnvVarNameRecord(v)) {
       throw new Error(
-        `Invalid ${configPath}: "resourceFixtures" must be a Record<string, string> (name → env var).`,
+        `Invalid ${configPath}: "resourceFixtures" must be a Record<string, string> mapping non-empty names to non-empty env var names.`,
       );
     }
     merged.resourceFixtures = v;
   }
   if ('pathResourceFixtures' in parsed) {
     const v = parsed.pathResourceFixtures;
-    if (!isStringRecord(v)) {
+    if (!isEnvVarNameRecord(v)) {
       throw new Error(
-        `Invalid ${configPath}: "pathResourceFixtures" must be a Record<string, string> (name → env var).`,
+        `Invalid ${configPath}: "pathResourceFixtures" must be a Record<string, string> mapping non-empty names to non-empty env var names.`,
       );
     }
     merged.pathResourceFixtures = v;
