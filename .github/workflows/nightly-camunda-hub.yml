@@ -337,5 +337,5 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *Playwright Results*\n✅ ${{ steps.pw-totals.outputs.passed }} | ❌ ${{ steps.pw-totals.outputs.failed }} | 🟡 ${{ steps.pw-totals.outputs.flaky }} | ⏩ ${{ steps.pw-totals.outputs.skipped }}\nTest Results for camunda-hub negative suite (SNAPSHOT) : <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊>"
+              "text": "🎭 *Playwright Results*\n✅ ${{ steps.pw-totals.outputs.passed }} | ❌ ${{ steps.pw-totals.outputs.failed }} | 🟡 ${{ steps.pw-totals.outputs.flaky }} | ⏩ ${{ steps.pw-totals.outputs.skipped }}\nTest Results for camunda-hub negative suite (SNAPSHOT) : <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
             }
