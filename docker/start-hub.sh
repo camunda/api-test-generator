@@ -13,22 +13,34 @@ LOG_FILE="$REPO_ROOT/test-results/.hub.log"
 # Preconditions for building/running the Hub app. Only `start` needs these;
 # `stop` just kills the PID and tears down Docker, so it must not require them.
 check_start_preconditions() {
+  # The prebuilt path runs the published camunda/hub image via docker compose, so
+  # it needs none of the source-build deps (make, the ../camunda-hub clone, a JDK).
+  local prebuilt=false
+  [ "${HUB_MODE:-source}" = "prebuilt" ] && prebuilt=true
+
+  local required=(docker curl python3 lsof)
+  [ "$prebuilt" = true ] || required+=(make)
+
   local missing=()
-  for cmd in docker curl python3 lsof make; do
+  for cmd in "${required[@]}"; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "Error: required command(s) not found on PATH: ${missing[*]}"
     exit 1
   fi
-  if [ ! -d "$HUB_REPO" ]; then
-    echo "Error: camunda-hub not found at $HUB_REPO"
-    echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
-    exit 1
-  fi
-  if [ -z "${JAVA_HOME:-}" ]; then
-    echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
-    exit 1
+
+  # Source build only: needs the camunda-hub repo checked out + a JDK.
+  if [ "$prebuilt" = false ]; then
+    if [ ! -d "$HUB_REPO" ]; then
+      echo "Error: camunda-hub not found at $HUB_REPO"
+      echo "Clone it as a sibling directory: git clone git@github.com:camunda/camunda-hub.git ../camunda-hub"
+      exit 1
+    fi
+    if [ -z "${JAVA_HOME:-}" ]; then
+      echo "Error: JAVA_HOME is not set. Set it to a JDK 21+ installation before running this script."
+      exit 1
+    fi
   fi
 }
 
