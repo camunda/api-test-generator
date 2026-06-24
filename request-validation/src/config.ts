@@ -107,9 +107,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function isEnvVarNameRecord(v: unknown): v is Record<string, string> {
   return (
     isPlainObject(v) &&
-    Object.entries(v).every(
-      ([k, x]) => typeof x === 'string' && k.length > 0 && x.length > 0,
-    )
+    Object.entries(v).every(([k, x]) => typeof x === 'string' && k.length > 0 && x.length > 0)
   );
 }
 
