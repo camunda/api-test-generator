@@ -177,10 +177,16 @@ services:
     image: camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}
     pull_policy: ${PULL_POLICY:-always}
     container_name: hub
+    # Long-form depends_on so hub waits for its deps to be HEALTHY (not merely
+    # started), matching the deterministic gating the rest of this file uses.
+    # Otherwise hub can boot before modeler-db/identity are ready and exit.
     depends_on:
-      - modeler-db
-      - mailpit
-      - identity
+      modeler-db:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
     ports:
       # Host HUB_UI_PORT → container 8081 (the app / public-API port).
       - "${HUB_UI_PORT:-8088}:8081"
