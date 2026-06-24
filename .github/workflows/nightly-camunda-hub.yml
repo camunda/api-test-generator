@@ -16,11 +16,6 @@ on:
     # 02:00 UTC nightly. workflow_dispatch lets you trigger an ad-hoc run.
     - cron: '0 2 * * *'
   workflow_dispatch: {}
-  # TEMP: run on every push to this branch while we validate the workflow in CI.
-  # Remove this `push:` block before merging — the nightly should be schedule-only.
-  push:
-    branches:
-      - feat/nightly-camunda-hub
 
 defaults:
   run:
