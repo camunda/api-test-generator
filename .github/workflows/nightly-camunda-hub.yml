@@ -42,8 +42,8 @@ env:
   HUB_UI_PORT: '8088'
   KEYCLOAK_PORT: '18080'
   # Channel to publish results to. The Slack bot must be invited to this channel
-  # for chat.postMessage to succeed (`/invite @<bot>` in #prj-qa-sandbox).
-  SLACK_CHANNEL: '#prj-qa-sandbox'
+  # for chat.postMessage to succeed (`/invite @<bot>` in #camunda-hub-api-test-results).
+  SLACK_CHANNEL: '#camunda-hub-api-test-results'
 
 jobs:
   nightly-hub:
@@ -313,7 +313,7 @@ jobs:
       # for the clone token (no token stored as a repo secret). Lives at
       # secret/data/products/qa/ci/common, key SLACK_BOT_USER_OAUTH_TOKEN — the
       # bound Vault role must be granted read on that path. always() so a failed
-      # run still notifies. The bot must be invited to #prj-qa-sandbox.
+      # run still notifies. The bot must be invited to #camunda-hub-api-test-results.
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
         if: always()
