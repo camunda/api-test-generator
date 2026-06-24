@@ -10,11 +10,12 @@
 #   - admin: c8-client       → BEARER_TOKEN (admin auth for 400/401 + positive)
 #   - deny:  c8-client-deny   → the reduced-permission 403 probe.
 #
-# NOTE: on the current codebase the deny token is consumed ONLY by curl-compare
-# (passed as --deny-header). The request-validation `rbac` Playwright suite's
-# denyProbeHeaders() is Basic-auth only and does not read a Bearer token yet
-# (that support is in the unmerged 403/auth-deny work), so the rbac Playwright
-# run is skipped here when no deny token is available.
+# The deny token is consumed both by curl-compare (--deny-header) and by the
+# request-validation `rbac` Playwright suite: denyProbeHeaders() emits a Bearer
+# header when RBAC_DENY_PROBE_BEARER_TOKEN is set (Hub's all-secured deny mode),
+# else falls back to the Basic-auth zero-grant probe user (the OCA model). Hub
+# provisions no such Basic user, so the rbac Playwright run is skipped here when
+# no deny token is available.
 #
 # Prereqs: Hub running (./docker/start-hub.sh) on HUB_UI_PORT, Keycloak on KEYCLOAK_PORT.
 #
