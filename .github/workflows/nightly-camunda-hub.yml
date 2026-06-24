@@ -284,6 +284,32 @@ jobs:
           done
 
       # --- Slack notification --------------------------------------------------
+      # Aggregate the Playwright JSON stats across profiles into pass/fail/flaky/
+      # skipped totals for the Slack message (✅ | ❌ | 🟡 | ⏩ format).
+      - name: Compute Playwright totals
+        id: pw-totals
+        if: always()
+        run: |
+          out="test-results/e2e-camunda-hub"
+          python3 - "$out" <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json, os, sys
+          out = sys.argv[1]
+          passed = failed = flaky = skipped = 0
+          for f in glob.glob(os.path.join(out, "pw-*.json")):
+              try:
+                  s = json.load(open(f)).get("stats", {})
+              except Exception:
+                  continue
+              passed  += s.get("expected", 0)
+              failed  += s.get("unexpected", 0)
+              flaky   += s.get("flaky", 0)
+              skipped += s.get("skipped", 0)
+          print(f"passed={passed}")
+          print(f"failed={failed}")
+          print(f"flaky={flaky}")
+          print(f"skipped={skipped}")
+          PY
+
       # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
       # for the clone token (no token stored as a repo secret). Lives at
       # secret/data/products/qa/ci/common, key SLACK_BOT_USER_OAUTH_TOKEN — the
@@ -311,5 +337,5 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "*Nightly — camunda-hub negative tests* — ${{ job.status == 'success' && '✅ passed' || '❌ failed' }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Run log + report artifact>"
+              "text": "🎭 *Playwright Results*\n✅ ${{ steps.pw-totals.outputs.passed }} | ❌ ${{ steps.pw-totals.outputs.failed }} | 🟡 ${{ steps.pw-totals.outputs.flaky }} | ⏩ ${{ steps.pw-totals.outputs.skipped }}\nTest Results for camunda-hub negative suite (SNAPSHOT) : <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊>"
             }
