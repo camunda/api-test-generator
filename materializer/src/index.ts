@@ -209,6 +209,41 @@ function loadEmitterConfig(configDir: string, emitter: EmitterStrategy): Record<
 }
 
 /**
+ * Load the per-config positive-suite suppression list from
+ * `configs/<config>/positive-suppress.json` (optional). Each `{ operationId,
+ * reason }` entry removes that operation's feature/variant spec from the
+ * positive suite — for operations the planner CANNOT generate a passing test
+ * for and which no scenario-template covers. The canonical case is an op whose
+ * required path key has no in-API producer and whose value carries no
+ * `x-semantic-type` (so the planner doesn't even flag it `unsatisfied`) — e.g.
+ * Hub's `deleteCatalogAsset`, whose `assetKey` is never minted by any v2 op.
+ * Returns `[]` when the file is absent.
+ */
+function loadPositiveSuppressions(configDir: string): { operationId: string; reason: string }[] {
+  const p = path.join(configDir, 'positive-suppress.json');
+  if (!fsSync.existsSync(p)) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fsSync.readFileSync(p, 'utf8'));
+  } catch (err) {
+    throw new Error(`Failed to read ${p}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (typeof raw !== 'object' || raw === null) return [];
+  const list = Reflect.get(raw, 'suppress');
+  if (!Array.isArray(list)) return [];
+  const out: { operationId: string; reason: string }[] = [];
+  for (const e of list) {
+    if (typeof e !== 'object' || e === null) continue;
+    const opId = Reflect.get(e, 'operationId');
+    const reason = Reflect.get(e, 'reason');
+    if (typeof opId === 'string' && opId.length > 0) {
+      out.push({ operationId: opId, reason: typeof reason === 'string' ? reason : '' });
+    }
+  }
+  return out;
+}
+
+/**
  * Minimal JSON-Schema validator covering only the constructs used by
  * built-in emitter configSchemas (object, additionalProperties=false,
  * top-level `properties` map with leaf `type` values from the subset
@@ -657,6 +692,13 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
         templatesAboxPath: path.join(configDir, 'ontology', 'scenario-templates.json'),
         templateNames,
       });
+      // Union explicit per-config suppressions (ops with no satisfiable
+      // positive test and no template coverage) on top of the template-derived
+      // set. Logged with their reason so a dropped op is never silent.
+      for (const s of loadPositiveSuppressions(configDir)) {
+        coverage.suppressedOpIds.add(s.operationId);
+        console.log(`  ⏭  positive-suppress: ${s.operationId} — ${s.reason}`);
+      }
     }
     let count = 0;
     let suppressedCount = 0;

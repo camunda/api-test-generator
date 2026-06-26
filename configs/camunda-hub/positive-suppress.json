@@ -1,0 +1,9 @@
+{
+  "$comment": "Per-config positive-suite suppression list. Each entry removes an operation's feature/variant spec from the generated positive suite because the planner cannot produce a passing test for it AND no scenario-template covers it. Use sparingly and document the reason + the upstream tracking issue; revisit when the gap is closed.",
+  "suppress": [
+    {
+      "operationId": "deleteCatalogAsset",
+      "reason": "No in-API producer for assetKey: ingestCatalogAssets returns 204 with no body, and the v2 API exposes no catalog list/get/search. A positive (204) delete test therefore cannot obtain a real assetKey — the planner emits an unresolved ${assetKey} placeholder that 404s. Tracked upstream in camunda/camunda-hub#25576 (expose asset keys from ingest, or add a catalog list/get)."
+    }
+  ]
+}

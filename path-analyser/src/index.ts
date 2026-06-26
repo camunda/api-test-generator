@@ -1688,6 +1688,30 @@ function buildRequestBodyFromCanonical(
       }
       template.files.resources = fileRef;
     }
+    // Generic binary multipart parts (#413): beyond the OCA deployment
+    // `resources[]` convention handled above (registry-backed), any
+    // `format: binary` array part resolves to a fixture declared per-operation
+    // in request-defaults.json under `multipartFiles` ({ <partName>:
+    // "<fixture-rel-path>" }). This covers configs whose multipart upload is
+    // not a deployment — e.g. Hub catalog ingest's `readme[]` + `template[]`.
+    // The emitted part filename is the fixture basename, so a fixture whose
+    // name is referenced cross-part (Hub's README frontmatter names the
+    // template file) just needs matching content. Skips parts the deployment
+    // block already filled, so the OCA path is untouched.
+    const multipartFiles = getRequestDefaultsForOperation(opId)?.multipartFiles;
+    if (isPlainRecord(multipartFiles)) {
+      const binaryParts = new Set(
+        nodes
+          .filter((n) => n.format === 'binary')
+          .map((n) => (n.path.endsWith('[]') ? n.path.slice(0, -2) : n.path))
+          .filter((name) => name.length > 0 && !name.includes('.') && !name.includes('[]')),
+      );
+      for (const [part, rel] of Object.entries(multipartFiles)) {
+        if (typeof rel !== 'string' || !binaryParts.has(part)) continue;
+        if (template.files[part] !== undefined) continue; // never override the deployment registry
+        template.files[part] = rel.startsWith('@@FILE:') ? rel : `@@FILE:${rel}`;
+      }
+    }
     // Wire global context seeds (e.g. tenantIdVar) into multipart fields by
     // matching the seed's `fieldName` against the canonical schema nodes.
     // Each match seeds the planner binding with `__PENDING__` (resolved at

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/@camunda/element-templates-json-schema@0.12.0/resources/schema.json",
+  "name": "Generated Test Asset",
+  "id": "com.camunda.hub.apitest.asset",
+  "version": 1,
+  "description": "Element template fixture for the generated positive suite (ingestCatalogAssets).",
+  "appliesTo": ["bpmn:Task"],
+  "elementType": {
+    "value": "bpmn:ServiceTask"
+  },
+  "properties": [
+    {
+      "label": "Implementation",
+      "type": "Hidden",
+      "value": "=apitest",
+      "binding": {
+        "type": "zeebe:taskDefinition:type"
+      }
+    }
+  ]
+}

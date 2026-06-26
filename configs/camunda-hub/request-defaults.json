@@ -1,0 +1,11 @@
+{
+  "$comment": "Per-config request defaults for camunda-hub. operations.<opId>.multipartFiles maps a multipart/form-data binary part name (a `format: binary` array field in the request schema) to a fixture under configs/camunda-hub/fixtures/, emitted as @@FILE:<rel> and resolved at runtime. ingestCatalogAssets requires named parts `readme` + `template` (catalog.yaml): the README's YAML frontmatter `template:` must reference the element-template file BY NAME, and the emitted multipart part filename is the fixture basename — so README.md frontmatter `template: element-template.json` matches the template part's filename.",
+  "operations": {
+    "ingestCatalogAssets": {
+      "multipartFiles": {
+        "readme": "catalog/README.md",
+        "template": "catalog/element-template.json"
+      }
+    }
+  }
+}
