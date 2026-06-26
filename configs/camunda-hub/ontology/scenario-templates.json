@@ -1,0 +1,58 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/scenario-template.schema.json",
+  "@context": {
+    "@vocab": "https://camunda.github.io/api-test-generator/ns/v1/",
+    "templates": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/templates",
+      "@container": "@set"
+    },
+    "appliesTo": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/appliesTo"
+    },
+    "steps": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/steps",
+      "@container": "@list"
+    },
+    "kind": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/kind"
+    },
+    "op": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/op"
+    },
+    "for": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/for"
+    },
+    "expect": {
+      "@id": "https://camunda.github.io/api-test-generator/ns/v1/expect"
+    }
+  },
+  "version": 1,
+  "templates": [
+    {
+      "@type": "ScenarioTemplate",
+      "name": "EntityLifecycle",
+      "appliesTo": { "kind": "Entity" },
+      "description": "Establish an entity instance (create), verify it is visible by GET-by-id (status 200), revoke it (delete), verify it is no longer visible by GET-by-id (status 404). Applies to every shape: 'entity' kind in the entity-kinds ABox; consumes establishedBy, observableVia, revokedBy.",
+      "steps": [
+        { "kind": "PrereqChain", "for": "establishedBy" },
+        { "kind": "Invoke", "op": "establishedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "present" },
+        { "kind": "Invoke", "op": "revokedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "absent" }
+      ]
+    },
+    {
+      "@type": "ScenarioTemplate",
+      "name": "EdgeLifecycle",
+      "appliesTo": { "kind": "Edge" },
+      "description": "Establish an edge instance, verify it is observable via the edge's observableVia operation, revoke the edge instance, verify it is no longer observable. Applies to every edge in the edges ABox; consumes establishedBy, revokedBy, and observableVia.",
+      "steps": [
+        { "kind": "PrereqChain", "for": "establishedBy" },
+        { "kind": "Invoke", "op": "establishedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "present" },
+        { "kind": "Invoke", "op": "revokedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "absent" }
+      ]
+    }
+  ]
+}

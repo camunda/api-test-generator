@@ -1,0 +1,64 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "kinds": [
+    {
+      "@type": "EntityKind",
+      "name": "Workspace",
+      "shape": "entity",
+      "identifiers": ["WorkspaceKey"],
+      "establishedBy": "createWorkspace",
+      "observableVia": "getWorkspace",
+      "revokedBy": "deleteWorkspace",
+      "description": "A workspace entity, identified by its server-minted workspaceKey."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Project",
+      "shape": "entity",
+      "identifiers": ["ProjectKey"],
+      "establishedBy": "createProject",
+      "observableVia": "getProject",
+      "revokedBy": "deleteProject",
+      "description": "A project (process application) entity, identified by its server-minted projectKey."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Folder",
+      "shape": "entity",
+      "identifiers": ["FolderKey"],
+      "establishedBy": "createFolder",
+      "observableVia": "getFolder",
+      "revokedBy": "deleteFolder",
+      "description": "A folder entity, identified by its server-minted folderKey."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "File",
+      "shape": "entity",
+      "identifiers": ["FileKey"],
+      "establishedBy": "createFile",
+      "observableVia": "getFile",
+      "revokedBy": "deleteFile",
+      "description": "A file entity, identified by its server-minted fileKey."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Version",
+      "shape": "entity",
+      "identifiers": ["VersionKey"],
+      "establishedBy": "createVersion",
+      "observableVia": "getVersion",
+      "revokedBy": "deleteVersion",
+      "description": "A file version entity, identified by its server-minted versionKey."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Member",
+      "shape": "external-entity",
+      "identifiers": ["MemberEmail"],
+      "description": "A workspace member, identified by their client-supplied email address (minted outside the Hub API). Endpoint of the WorkspaceMemberMembership edge; has no in-API create/get/delete of its own."
+    }
+  ]
+}

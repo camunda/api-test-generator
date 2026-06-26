@@ -93,6 +93,7 @@ function compileEdgeLifecycle(
   edge: Edge,
   graph: OperationGraph,
   canonical: CanonicalScenarioMap,
+  entityKinds: EntityKindsAbox | null,
 ): { scenario: TemplateScenario } | { error: string } {
   const establishScenario = canonical.get(edge.establishedBy);
   const revokeScenario = canonical.get(edge.revokedBy);
@@ -208,7 +209,13 @@ function compileEdgeLifecycle(
   // to keep the instantiator drop-in for future configs whose
   // edges might not yet satisfy the precondition.
   const observeOp = graph.operations[edge.observableVia];
-  const locator = findMembershipArrayPath(observeOp, edge.identifiedBy);
+  // Prefer the `to`-endpoint identifier as the membership key — the entity
+  // added to the container. When the observe response also echoes the
+  // container/`from` key (e.g. Hub's searchMembers items carry workspaceKey
+  // AND email), this asserts membership on the member (email), not the
+  // container (workspaceKey).
+  const toKind = entityKinds?.kinds.find((k) => k.name === edge.endpoints.to);
+  const locator = findMembershipArrayPath(observeOp, edge.identifiedBy, toKind?.identifiers ?? []);
   if (!locator) {
     return {
       error: `${template.name} × ${edge.name}: findMembershipArrayPath returned null for observableVia='${edge.observableVia}'; an edge with no array-nested identifiedBy semantic on its observation op cannot be observed via present/absent membership`,
@@ -1011,7 +1018,7 @@ export function instantiateAllTemplates(
         );
       }
       for (const edge of edges.edges) {
-        const compiled = compileEdgeLifecycle(tpl, edge, graph, canonical);
+        const compiled = compileEdgeLifecycle(tpl, edge, graph, canonical, entityKinds);
         if ('error' in compiled) {
           errors.push(compiled.error);
           continue;
