@@ -183,6 +183,10 @@ jobs:
       # always() steps below still capture the report + write the summary.
       - name: Generate + run negative suite
         env:
+          # run-hub.sh runs the positive suite by default (local/dev). The
+          # nightly pins it OFF: the File/Folder/Version family 403s on the
+          # unfixed camunda/camunda-hub#25302, which would red the nightly on a
+          # known upstream bug. Drop this once #25302/#25146 land.
           SKIP_POSITIVE: '1'
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'

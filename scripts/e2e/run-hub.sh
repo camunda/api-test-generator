@@ -34,8 +34,11 @@ HUB_UI_PORT="${HUB_UI_PORT:-8088}"
 KEYCLOAK_PORT="${KEYCLOAK_PORT:-18080}"
 RV_PROFILES="${RV_PROFILES:-secured rbac}"
 STEPS="${STEPS:-generate run curl}"
-# TODO: remove once camunda/camunda-hub#25146 is merged
-SKIP_POSITIVE="${SKIP_POSITIVE:-1}"
+# Positive suite runs by default for local/manual e2e. The nightly still
+# pins SKIP_POSITIVE=1 explicitly (see nightly-camunda-hub.yml) because the
+# File/Folder/Version family 403s on the unfixed camunda/camunda-hub#25302 —
+# drop that pin once #25302/#25146 land and the positive suite is green.
+SKIP_POSITIVE="${SKIP_POSITIVE:-}"
 KC="http://localhost:${KEYCLOAK_PORT}/auth/realms/camunda-platform/protocol/openid-connect/token"
 CORE_URL="http://localhost:${HUB_UI_PORT}/api"        # request-validation base (buildUrl adds /v2)
 POS_URL="http://localhost:${HUB_UI_PORT}/api/v2"       # positive suite base
@@ -111,7 +114,8 @@ fi
 # ============================ 1. GENERATE ============================
 if step generate; then
   echo "── generate ─────────────────────────────"
-  # Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
+  # Positive suite generated unless SKIP_POSITIVE is set (nightly pins it; see
+  # the SKIP_POSITIVE default above).
   if [ -z "${SKIP_POSITIVE:-}" ]; then
     CONFIG="$CONFIG" npm run extract-graph >/dev/null
     CONFIG="$CONFIG" npm run generate:scenarios >/dev/null
@@ -127,16 +131,34 @@ fi
 
 # ====================== 2. RUN (Playwright) ==========================
 unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD 2>/dev/null || true
-# Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
+# Positive suite + its curl-compare run unless SKIP_POSITIVE is set (nightly
+# pins it until #25302/#25146 land; see the SKIP_POSITIVE default above).
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
+  pos_abs="$(cd "$OUT" && pwd)"
+  # JSON path must be absolute: Playwright resolves reporter outputs relative
+  # to the config dir, not cwd (same reason as run_rv below).
   BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
-    PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
+    PLAYWRIGHT_HTML_REPORT="$pos_abs/pw-positive" \
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs/pw-positive.json" \
     npx playwright test -c path-analyser/playwright.config.ts || true
   if [ -f "$OUT/pw-positive/index.html" ]; then
     echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
   else
     echo "  ⚠ positive suite report not generated (Playwright run may have failed)"
+  fi
+  # Independent curl oracle for the positive multi-step chains — replays each
+  # lifecycle/feature/variant chain with curl (threading server-minted ids)
+  # and tabulates expected vs Playwright vs curl status, same as the negative
+  # report. DIAGNOSTIC ONLY: `|| true` so a mismatch never gates the run.
+  if step curl; then
+    python3 scripts/e2e/curl_compare.py --mode positive \
+      --spec-dir "generated/${CONFIG}/playwright" --base-url "$POS_URL" \
+      --admin-header "Authorization: Bearer $ADMIN_TOK" \
+      --pw-json "$pos_abs/pw-positive.json" --show-body \
+      --html "$pos_abs/curl-positive.html" --label "$CONFIG positive" \
+      2>&1 | tee "$pos_abs/curl-positive.txt" || true
+    [ -f "$pos_abs/curl-positive.html" ] && echo "  ✓ positive curl-compare: $OUT/curl-positive.html"
   fi
 fi
 

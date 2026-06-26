@@ -169,8 +169,17 @@ def run_curl(method, url, headers, body_json, multipart):
     for h in headers:
         cmd += ["-H", h]
     if multipart is not None:
-        for k, v in multipart.items():
-            cmd += ["-F", f"{k}={v}"]
+        if multipart:
+            for k, v in multipart.items():
+                cmd += ["-F", f"{k}={v}"]
+        else:
+            # Empty multipart: still emit a multipart/form-data body (with a
+            # closing boundary) so the server runs part-validation — matching
+            # Playwright's `request.put(url, { multipart: {} })`, which yields
+            # 400 "required part missing" rather than a bodyless 415.
+            boundary = "----curlcompareEMPTY"
+            cmd += ["-H", f"Content-Type: multipart/form-data; boundary={boundary}",
+                    "--data-binary", f"--{boundary}--\r\n"]
     elif body_json is not None:
         cmd += ["--data-binary", body_json]
     try:
@@ -268,8 +277,217 @@ def write_html(path, rows, meta, max_body=1000):
     Path(path).write_text("".join(out), encoding="utf-8")
 
 
+# ======================================================================
+# POSITIVE suite (lifecycle / feature / variant) — multi-step chain replay
+# ----------------------------------------------------------------------
+# Negative specs are one request per test; positive specs are ORDERED
+# `test.step(...)` chains that thread server-minted ids forward via
+# `extractInto(ctx, 'fooVar', json?.foo)`. To curl them faithfully we:
+#   1. evaluate the spec's seed bindings through the suite's OWN
+#      `seedBinding` (via tsx) so client-minted values match;
+#   2. for each step: resolve the `url` template + `body` literal through
+#      node with the live `ctx` in scope, curl it, compare status to the
+#      step's `expect(...).toBe(N)`, and on a 2xx apply the step's
+#      `extractInto` calls so the next step sees the real ids.
+# A test PASSES (curl) when every step's status matches; the first
+# mismatching step is recorded as the failure (the suite stops there too).
+# Observe steps' membership body-assertion (toContain) is NOT re-checked —
+# this oracle compares STATUS, the same axis as the negative report.
+# ======================================================================
+POS_TEST_RE = re.compile(r"\btest\(\s*(['\"])(?P<title>.*?)\1\s*,\s*async", re.S)
+POS_STEP_RE = re.compile(r"test\.step\(\s*(['\"])(?P<name>.*?)\1\s*,\s*async", re.S)
+SALT_RE = re.compile(r"initSpecSalt\(\s*['\"]([^'\"]+)['\"]\s*\)")
+SEED_RE = re.compile(
+    r"ctx\.\w+\s*=\s*ctx\.\w+\s*\?\?\s*seedBinding\(\s*['\"](?P<name>\w+)['\"]\s*"
+    r"(?:,\s*(?P<opts>\{[^}]*\}))?\s*\)"
+)
+URL_RE = re.compile(r"const\s+url\s*=\s*(?P<expr>.+?);\s*\n", re.S)
+REQ_RE = re.compile(r"request\.(?P<m>get|post|put|patch|delete)\(")
+BODY_RE = re.compile(r"const\s+body\d*\s*=\s*(?P<expr>\{.*?\});\s*\n", re.S)
+EXPECT_RE = re.compile(r"expect\(\s*resp\w*\.status\(\)\s*\)\.toBe\(\s*(\d{3})\s*\)")
+EXTRACT_RE = re.compile(r"extractInto\(\s*ctx,\s*['\"](?P<var>\w+)['\"]\s*,\s*\w+\?\.(?P<field>\w+)")
+MULTIPART_RE = re.compile(r"multipart:\s*multipart")
+
+# Evaluate a JS expression (url template or body object literal) with the
+# live `baseUrl` + `ctx` in scope. A string result (url) is emitted raw; an
+# object (body) is JSON-stringified — exactly what curl needs for each.
+EVAL_JS = r"""
+const baseUrl = process.argv[1];
+const ctx = JSON.parse(process.argv[2]);
+const __v = (__EXPR__);
+process.stdout.write(typeof __v === "string" ? __v : JSON.stringify(__v));
+"""
+
+# tsx harness: import the suite's real seeding module by file URL and resolve
+# every seed binding under the spec's own salt, so values match the suite.
+SEED_TS = r"""
+const mod = await import(process.argv[2]);
+mod.initSpecSalt(process.argv[3]);
+const specs = JSON.parse(process.argv[4]);
+const out = {};
+for (const s of specs) out[s.name] = mod.seedBinding(s.name, s.opts);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def eval_js(expr, base, ctx):
+    return node(EVAL_JS.replace("__EXPR__", expr), base, json.dumps(ctx))
+
+
+def eval_seeds(seeding_path, salt, seeds):
+    """Resolve seed bindings via the suite's own seedBinding (tsx)."""
+    if not seeds:
+        return {}
+    url = Path(seeding_path).resolve().as_uri()
+    specs = [{"name": n, "opts": ({"unique": True} if o and "unique" in o and "true" in o else {})}
+             for n, o in seeds]
+    tmp = Path(seeding_path).parent / ".curl_seed_eval.mts"
+    try:
+        tmp.write_text(SEED_TS, encoding="utf-8")
+        out = subprocess.run(["npx", "tsx", str(tmp), url, salt, json.dumps(specs)],
+                             capture_output=True, text=True, timeout=60)
+        if out.returncode != 0:
+            return {}
+        return json.loads(out.stdout)
+    except Exception:
+        return {}
+    finally:
+        try: tmp.unlink()
+        except Exception: pass
+
+
+def parse_positive_steps(test_body):
+    """Yield ordered step dicts from a test() body."""
+    starts = [(m.start(), m.group("name")) for m in POS_STEP_RE.finditer(test_body)]
+    for i, (pos, name) in enumerate(starts):
+        end = starts[i + 1][0] if i + 1 < len(starts) else len(test_body)
+        blk = test_body[pos:end]
+        um = URL_RE.search(blk)
+        if not um:
+            continue
+        rm = REQ_RE.search(blk)
+        em = EXPECT_RE.search(blk)
+        bm = BODY_RE.search(blk)
+        yield {
+            "name": name,
+            "url_expr": um.group("expr").strip(),
+            "method": (rm.group("m").upper() if rm else "GET"),
+            "expected": int(em.group(1)) if em else None,
+            "body_expr": bm.group("expr") if bm else None,
+            "multipart": bool(MULTIPART_RE.search(blk)),
+            "extracts": EXTRACT_RE.findall(blk),  # list of (var, field)
+        }
+
+
+def replay_positive_test(title, test_body, salt, seeding_path, base, admin_header):
+    seeds = SEED_RE.findall(test_body)  # list of (name, opts)
+    ctx = eval_seeds(seeding_path, salt, seeds)
+    headers = [admin_header] if admin_header else []
+    steps = list(parse_positive_steps(test_body))
+    last = None
+    for st in steps:
+        url = eval_js(st["url_expr"], base, ctx)
+        if url is None:
+            return {"title": title, "ok": False, "fail": st["name"], "expected": st["expected"],
+                    "curl": None, "method": st["method"], "url": "<url-eval-failed>", "body": ""}
+        body_json, multipart = None, None
+        if st["multipart"]:
+            # Reconstruct the multipart body the same way the emitted suite does:
+            # the body literal is `{ fields: {...}, files: {...} }` where each
+            # file value is an `@@FILE:<rel>` marker. Resolve fields to plain
+            # form values and files to `@<abs fixture path>` so curl attaches the
+            # real bytes (basename = part filename, matching e.g. the README's
+            # template reference). Empty → falls through to run_curl's empty-
+            # multipart boundary so the server still runs part-validation.
+            multipart = {}
+            mp = json.loads(eval_js(st["body_expr"], base, ctx)) if st["body_expr"] else {}
+            fixtures_dir = Path(seeding_path).resolve().parent.parent / "fixtures"
+            for k, v in (mp.get("fields") or {}).items():
+                if v is not None:
+                    multipart[k] = str(v)
+            for k, v in (mp.get("files") or {}).items():
+                if isinstance(v, str) and v.startswith("@@FILE:"):
+                    multipart[k] = "@" + str((fixtures_dir / v[len("@@FILE:"):]).resolve())
+                elif v is not None:
+                    multipart[k] = str(v)
+        elif st["body_expr"] is not None:
+            body_json = eval_js(st["body_expr"], base, ctx)
+        jhdr = headers + (["Content-Type: application/json"] if body_json is not None else [])
+        code, rbody = run_curl(st["method"], url, jhdr, body_json, multipart)
+        last = {"title": title, "expected": st["expected"], "curl": code, "method": st["method"],
+                "url": url, "body": rbody, "fail": st["name"]}
+        if code != st["expected"]:
+            return {**last, "ok": False}
+        # success → thread extracted ids forward for subsequent steps
+        if rbody and 200 <= (code or 0) < 300:
+            try:
+                j = json.loads(rbody)
+                for var, field in st["extracts"]:
+                    if isinstance(j, dict) and j.get(field) is not None:
+                        ctx[var] = j[field]
+            except Exception:
+                pass
+    return {**(last or {"title": title, "expected": None, "curl": None, "method": "", "url": "",
+                        "body": ""}), "ok": True, "fail": "all-pass"}
+
+
+def main_positive(args):
+    pw = load_pw(args.pw_json)
+    specdir = Path(args.spec_dir)
+    seeding = specdir / "support" / "seeding.ts"
+    specs = sorted(p for p in specdir.rglob("*.spec.ts")
+                   if not p.name.endswith("-validation-api-tests.spec.ts"))
+    rows = []
+    for spec in specs:
+        src = spec.read_text(encoding="utf-8")
+        sm = SALT_RE.search(src)
+        salt = sm.group(1) if sm else spec.stem
+        tm = [(m.start(), m.group("title")) for m in POS_TEST_RE.finditer(src)]
+        for i, (pos, title) in enumerate(tm):
+            end = tm[i + 1][0] if i + 1 < len(tm) else len(src)
+            r = replay_positive_test(title, src[pos:end], salt, str(seeding),
+                                     args.base_url, args.admin_header)
+            pw_rec = pw.get(title, {})
+            pw_status = ("pass" if pw_rec.get("ok") else f"FAIL({pw_rec.get('received')})") if pw_rec else "—"
+            rows.append({
+                "title": title, "expected": r["expected"], "pw": pw_status, "curl": r["curl"],
+                "match": r["ok"], "method": r["method"], "url": r["url"],
+                "kind": r["fail"], "body": r["body"],
+            })
+
+    total = len(rows)
+    ok = sum(1 for r in rows if r["match"])
+    label = args.label or "positive"
+    print(f"\n### {label} — curl chain replay vs Playwright ###")
+    print(f"\n{'TEST':<52} {'STEP':<22} {'EXP':>4} {'PW':>10} {'CURL':>5}  OK")
+    print("-" * 100)
+    for r in rows:
+        print(f"{r['title'][:52]:<52} {r['kind'][:22]:<22} {str(r['expected']):>4} "
+              f"{r['pw']:>10} {str(r['curl']):>5}  {'✓' if r['match'] else '✗'}")
+    print("-" * 100)
+    print(f"curl chain vs suite: {ok}/{total} pass, {total - ok} fail")
+
+    if args.show_body:
+        for r in rows:
+            if not r["match"] and r["body"]:
+                print(f"\n• {r['title']}  [fails at {r['kind']}]\n  {r['method']} {r['url']}\n"
+                      f"  expected {r['expected']}, curl {r['curl']}\n  body: {r['body'].strip()[:args.max_body]}")
+
+    if args.html:
+        write_html(args.html, rows, {"label": label, "spec_dir": args.spec_dir,
+                                     "base_url": args.base_url, "total": total, "ok": ok,
+                                     "skipped": 0, "specs": [s.name for s in specs]})
+        print(f"HTML report: {args.html}")
+    if total == 0:
+        print(f"✗ no positive tests parsed under {args.spec_dir}", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(1 if (total - ok) else 0)
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["negative", "positive"], default="negative",
+                    help="negative: one-request RV specs (default). positive: multi-step chains.")
     ap.add_argument("--spec-dir", required=True)
     ap.add_argument("--base-url", required=True)
     ap.add_argument("--api-version", default="v2")
@@ -281,6 +499,8 @@ def main():
     ap.add_argument("--html", default="", help="also write a self-contained HTML report here")
     ap.add_argument("--label", default="", help="human label for the run (config/profile/suite)")
     args = ap.parse_args()
+    if args.mode == "positive":
+        return main_positive(args)
     label = args.label or args.spec_dir
 
     pw = load_pw(args.pw_json)

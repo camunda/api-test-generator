@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import type { ReporterDescription } from '@playwright/test';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { getPlaywrightSuiteDir } from './src/configResolver.js';
@@ -13,6 +14,18 @@ const repoRoot = resolve(__dirname, '..');
 // can redirect the report to a per-config location; defaults to playwright-report/.
 const htmlOutputFolder = process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwright-report';
 
+// Mirror the request-validation config: emit a machine-readable JSON report
+// when PLAYWRIGHT_JSON_OUTPUT_FILE is set, so callers (scripts/e2e/run-hub.sh)
+// can feed per-test results to the positive curl-compare oracle. Unset (the
+// default, e.g. `test:pw:path-analyser`) → list + html only, unchanged.
+const reporter: ReporterDescription[] = [
+  ['list'],
+  ['html', { open: 'never', outputFolder: htmlOutputFolder }],
+];
+if (process.env.PLAYWRIGHT_JSON_OUTPUT_FILE) {
+  reporter.push(['json', { outputFile: process.env.PLAYWRIGHT_JSON_OUTPUT_FILE }]);
+}
+
 export default defineConfig({
   testDir: getPlaywrightSuiteDir(repoRoot),
   timeout: 60_000,
@@ -20,5 +33,5 @@ export default defineConfig({
     // Base APIRequestContext is provided by Playwright's test fixture
     extraHTTPHeaders: {},
   },
-  reporter: [['list'], ['html', { open: 'never', outputFolder: htmlOutputFolder }]],
+  reporter,
 });
