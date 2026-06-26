@@ -63,6 +63,16 @@ export function findMembershipArrayPath(
   // this the helper would match the FIRST in iteration order and could assert
   // on the container key rather than the member. Empty preserves the prior
   // iteration-order behaviour (e.g. OCA RoleUserMembership → username).
+  //
+  // Selection rule:
+  //   Pass 1 — return the first response entry whose semantic is BOTH in
+  //            `preferred` AND in `identifiedBy` and is array-nested.
+  //   Pass 2 — only if pass 1 finds nothing (empty `preferred`, or no
+  //            preferred semantic is array-nested): return the first
+  //            array-nested `identifiedBy` entry in iteration order.
+  // So `preferred` overrides iteration order only when it actually resolves
+  // to an array-nested, identifiedBy-declared field; otherwise the legacy
+  // behaviour is unchanged.
   preferred: readonly string[] = [],
 ): MembershipArrayPath | null {
   if (!op) return null;
