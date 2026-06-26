@@ -157,34 +157,63 @@ function compileEdgeLifecycle(
   // identifiedBy entries are present, not that the table is
   // minimal — keeping it inclusive matches the EndpointScenario
   // contract.
+  // Binding names for the edge's identifiers follow the request-body /
+  // URL-emitter convention — keyed on the establisher's FIELD/PARAM
+  // `name`, NOT on the semantic type. For most identifiers
+  // `camelCase(name) === camelCase(semantic)` so `bindingNameFor` agrees,
+  // but where they diverge the field name wins: Hub's `email` body field
+  // carries semantic `MemberEmail`, so the request-body builder seeds
+  // `emailVar` (not `memberEmailVar`). Every step and the binding table
+  // must use the field-derived name to stay consistent with the canonical
+  // establish scenario, otherwise the emitter can't resolve the membership
+  // semantic back to a binding. Derive both directions from the
+  // establisher's `establishes.identifiedBy` (which carries name +
+  // semanticType per identifier).
+  const establishOp = graph.operations[edge.establishedBy];
+  const bindingNameBySemantic = new Map<string, string>();
+  const semanticByBindingName = new Map<string, string>();
+  for (const id of establishOp?.establishes?.identifiedBy ?? []) {
+    const bindName = `${camelCase(id.name)}Var`;
+    bindingNameBySemantic.set(id.semanticType, bindName);
+    semanticByBindingName.set(bindName, id.semanticType);
+  }
+  const bindingNameForEdge = (semantic: string): string =>
+    bindingNameBySemantic.get(semantic) ?? bindingNameFor(semantic);
+
   const bindings: Record<string, string> = {};
   const aggregateBindingNames = new Set<string>([
     ...Object.keys(establishScenario.bindings ?? {}),
     ...(establishScenario.seedBindings ?? []),
   ]);
   for (const bindName of aggregateBindingNames) {
-    // Recover the semantic type by stripping the trailing 'Var' and
-    // upper-casing the first letter. This matches the inverse of
-    // `bindingNameFor`. A binding name that doesn't end in 'Var'
-    // (none exist today) would be passed through as-is so the
-    // emitter still sees a stable round-trip key.
-    const sem = bindName.endsWith('Var')
-      ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
-      : bindName;
+    // Prefer the establisher's authoritative semantic for any
+    // field-derived identifier binding (so `emailVar → MemberEmail`, not
+    // the lossy `Email` the reverse-engineering below would produce).
+    // Otherwise recover the semantic type by stripping the trailing 'Var'
+    // and upper-casing the first letter — the inverse of `bindingNameFor`
+    // — for seeded extras (e.g. `roleVar → Role`) with no identifiedBy
+    // entry. A binding name that doesn't end in 'Var' (none exist today)
+    // is passed through as-is so the emitter still sees a stable key.
+    const sem =
+      semanticByBindingName.get(bindName) ??
+      (bindName.endsWith('Var')
+        ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
+        : bindName);
     bindings[sem] = bindName;
   }
 
   // Helper: map an op's required semantics to {semanticType: bindingName}.
   // Used by Invoke and Observe alike. We consult the graph for the
-  // op's `requires.required`; the bindingName follows the camelCase
-  // convention so callers don't need to inspect the canonical scenario
-  // bindings (the union table built above is the source of truth at
-  // emit time; this map is the per-step view onto it).
+  // op's `requires.required`; the bindingName follows the establisher's
+  // field-derived convention (`bindingNameForEdge`) so callers don't need
+  // to inspect the canonical scenario bindings (the union table built
+  // above is the source of truth at emit time; this map is the per-step
+  // view onto it).
   const inputsFor = (opId: string): Record<string, string> => {
     const op = graph.operations[opId];
     const result: Record<string, string> = {};
     for (const sem of op?.requires.required ?? []) {
-      result[sem] = bindingNameFor(sem);
+      result[sem] = bindingNameForEdge(sem);
     }
     return result;
   };
@@ -233,7 +262,7 @@ function compileEdgeLifecycle(
   for (const sem of edge.identifiedBy) {
     if (sem === locator.membershipSemanticType) continue;
     if (!observeRequired.has(sem)) continue;
-    observeInputs[sem] = bindingNameFor(sem);
+    observeInputs[sem] = bindingNameForEdge(sem);
   }
 
   const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
