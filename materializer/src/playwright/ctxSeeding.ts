@@ -196,7 +196,7 @@ export interface EmitCtxSeedingOptions {
    * the negative suite's `RV_FIXTURE_*`). For a binding `k` in this map the
    * emitted line becomes
    *
-   *   ctx['k'] = ctx['k'] ?? process.env[<ENV>] ?? <seed>;
+   *   ctx['k'] = ctx['k'] ?? (process.env[<ENV>] || <seed>);
    *
    * for seeded bindings (common case for `acceptsExternal` components), or
    *
@@ -283,7 +283,7 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
       const envVar = fixtureEnvByBinding?.[name];
       lines.push(
         envVar
-          ? `${indent}ctx['${name}'] = ctx['${name}'] ?? process.env[${JSON.stringify(envVar)}] ?? ${seedCall(name, unique.has(name))};`
+          ? `${indent}ctx['${name}'] = ctx['${name}'] ?? (process.env[${JSON.stringify(envVar)}] || ${seedCall(name, unique.has(name))});`
           : `${indent}ctx['${name}'] = ctx['${name}'] ?? ${seedCall(name, unique.has(name))};`,
       );
     }
