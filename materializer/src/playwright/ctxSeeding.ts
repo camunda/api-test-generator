@@ -191,16 +191,16 @@ export interface EmitCtxSeedingOptions {
    */
   uniqueBindings?: ReadonlySet<string>;
   /**
-   * Maps a literal binding name to an environment-variable name that
-   * overrides its seeded value at runtime (the positive-suite analogue of
+   * Maps a binding name (scenario literal or seeded) to an environment-variable
+   * name that overrides its value at runtime (the positive-suite analogue of
    * the negative suite's `RV_FIXTURE_*`). For a binding `k` in this map the
    * emitted line becomes
    *
-   *   ctx['k'] = ctx['k'] ?? process.env['<ENV>'] ?? <seed>;
+   *   ctx['k'] = ctx['k'] ?? process.env[<ENV>] ?? <seed>;
    *
    * for seeded bindings (common case for `acceptsExternal` components), or
    *
-   *   ctx['k'] = process.env['<ENV>'] || <literal>;
+   *   ctx['k'] = process.env[<ENV>] || <literal>;
    *
    * for literal bindings (e.g. model-derived literals that are always emitted).
    * In both cases an unset or empty env var falls back to the deterministic
@@ -208,6 +208,8 @@ export interface EmitCtxSeedingOptions {
    * (e.g. scripts/e2e/run-hub.sh) sets the env var to supply a real,
    * server-known value for a client-minted input that has no producer (e.g.
    * a workspace member's email, which must be an existing Hub user).
+   * `globalContextSeeds` (universal per-spec prologue seeds) are not affected
+   * by this map — they always use plain seed calls.
    */
   fixtureEnvByBinding?: Readonly<Record<string, string>>;
 }
@@ -273,7 +275,7 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
       const envVar = fixtureEnvByBinding?.[k];
       lines.push(
         envVar
-          ? `${indent}ctx['${k}'] = process.env['${envVar}'] || ${JSON.stringify(v)};`
+          ? `${indent}ctx['${k}'] = process.env[${JSON.stringify(envVar)}] || ${JSON.stringify(v)};`
           : `${indent}ctx['${k}'] = ${JSON.stringify(v)};`,
       );
     }
@@ -281,7 +283,7 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
       const envVar = fixtureEnvByBinding?.[name];
       lines.push(
         envVar
-          ? `${indent}ctx['${name}'] = ctx['${name}'] ?? process.env['${envVar}'] ?? ${seedCall(name, unique.has(name))};`
+          ? `${indent}ctx['${name}'] = ctx['${name}'] ?? process.env[${JSON.stringify(envVar)}] ?? ${seedCall(name, unique.has(name))};`
           : `${indent}ctx['${name}'] = ctx['${name}'] ?? ${seedCall(name, unique.has(name))};`,
       );
     }
