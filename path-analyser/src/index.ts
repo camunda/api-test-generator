@@ -1172,6 +1172,8 @@ function scalarSeedLiteral(node: CanonicalNode): unknown {
     case 'integer':
     case 'number':
       return 1;
+    case 'null':
+      return null;
     default:
       return 'placeholder';
   }

@@ -60,7 +60,7 @@ interface EmitOptions {
   /** See {@link EmitContext.roleExtras}. */
   roleExtras?: Map<string, Record<string, unknown>>;
   /**
-   * Per-config map of literal binding name → runtime env-var override
+   * Per-config map of binding name → runtime env-var override
    * (`configs/<config>/codegen/playwright/config.json` → `clientMintedFixtures`).
    * Forwarded to {@link emitCtxSeeding} as `fixtureEnvByBinding`. See that
    * option for the emitted form and rationale.
