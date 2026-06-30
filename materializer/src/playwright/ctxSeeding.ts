@@ -196,14 +196,18 @@ export interface EmitCtxSeedingOptions {
    * the negative suite's `RV_FIXTURE_*`). For a binding `k` in this map the
    * emitted line becomes
    *
+   *   ctx['k'] = ctx['k'] ?? process.env['<ENV>'] ?? <seed>;
+   *
+   * for seeded bindings (common case for `acceptsExternal` components), or
+   *
    *   ctx['k'] = process.env['<ENV>'] || <literal>;
    *
-   * so an e2e driver (e.g. scripts/e2e/run-hub.sh) can substitute a real,
+   * for literal bindings (e.g. model-derived literals that are always emitted).
+   * In both cases an unset or empty env var falls back to the deterministic
+   * seed/literal — keeping offline/snapshot runs reproducible. An e2e driver
+   * (e.g. scripts/e2e/run-hub.sh) sets the env var to supply a real,
    * server-known value for a client-minted input that has no producer (e.g.
-   * a workspace member's email, which must be an existing user). `||` (not
-   * `??`) so an unset OR empty env var falls back to the deterministic
-   * literal — keeping offline/snapshot runs reproducible. Only literal
-   * bindings are overridden; seeded/global bindings are unaffected.
+   * a workspace member's email, which must be an existing Hub user).
    */
   fixtureEnvByBinding?: Readonly<Record<string, string>>;
 }
@@ -277,7 +281,7 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
       const envVar = fixtureEnvByBinding?.[name];
       lines.push(
         envVar
-          ? `${indent}ctx['${name}'] = process.env['${envVar}'] || ${seedCall(name, unique.has(name))};`
+          ? `${indent}ctx['${name}'] = ctx['${name}'] ?? process.env['${envVar}'] ?? ${seedCall(name, unique.has(name))};`
           : `${indent}ctx['${name}'] = ctx['${name}'] ?? ${seedCall(name, unique.has(name))};`,
       );
     }

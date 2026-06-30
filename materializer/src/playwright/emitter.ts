@@ -195,8 +195,9 @@ export const PlaywrightEmitter: EmitterStrategy = {
       },
       clientMintedFixtures: {
         type: 'object',
+        additionalProperties: { type: 'string' },
         description:
-          'Maps a literal binding name (e.g. emailVar) to a runtime env-var name. The emitted seed becomes `ctx[binding] = process.env[ENV] || <literal>`, letting an e2e driver substitute a real, server-known value for a client-minted input with no producer (the positive-suite analogue of request-validation RV_FIXTURE_*).',
+          'Maps a binding name (e.g. emailVar) to a runtime env-var name. The emitted seed becomes `ctx[binding] = ctx[binding] ?? process.env[ENV] ?? seedBinding(binding)`, letting an e2e driver substitute a real, server-known value for a client-minted input with no producer (the positive-suite analogue of request-validation RV_FIXTURE_*).',
       },
     },
   },
