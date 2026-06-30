@@ -190,6 +190,22 @@ export interface EmitCtxSeedingOptions {
    * seed, while the `unique` flag toggles which PRNG env is used.
    */
   uniqueBindings?: ReadonlySet<string>;
+  /**
+   * Maps a literal binding name to an environment-variable name that
+   * overrides its seeded value at runtime (the positive-suite analogue of
+   * the negative suite's `RV_FIXTURE_*`). For a binding `k` in this map the
+   * emitted line becomes
+   *
+   *   ctx['k'] = process.env['<ENV>'] || <literal>;
+   *
+   * so an e2e driver (e.g. scripts/e2e/run-hub.sh) can substitute a real,
+   * server-known value for a client-minted input that has no producer (e.g.
+   * a workspace member's email, which must be an existing user). `||` (not
+   * `??`) so an unset OR empty env var falls back to the deterministic
+   * literal — keeping offline/snapshot runs reproducible. Only literal
+   * bindings are overridden; seeded/global bindings are unaffected.
+   */
+  fixtureEnvByBinding?: Readonly<Record<string, string>>;
 }
 
 function seedCall(name: string, unique: boolean): string {
@@ -197,7 +213,14 @@ function seedCall(name: string, unique: boolean): string {
 }
 
 export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
-  const { indent, bindings, seedBindings, globalContextSeeds, uniqueBindings } = opts;
+  const {
+    indent,
+    bindings,
+    seedBindings,
+    globalContextSeeds,
+    uniqueBindings,
+    fixtureEnvByBinding,
+  } = opts;
   const unique = uniqueBindings ?? new Set<string>();
   const lines: string[] = [];
   // `omitWhenUnbound` seeds are excluded from the universal prologue
@@ -243,11 +266,19 @@ export function emitCtxSeeding(opts: EmitCtxSeedingOptions): string[] {
   if (literalEntries.length > 0 || seedNames.length > 0) {
     lines.push(`${indent}// Seed scenario bindings`);
     for (const [k, v] of literalEntries) {
-      lines.push(`${indent}ctx['${k}'] = ${JSON.stringify(v)};`);
+      const envVar = fixtureEnvByBinding?.[k];
+      lines.push(
+        envVar
+          ? `${indent}ctx['${k}'] = process.env['${envVar}'] || ${JSON.stringify(v)};`
+          : `${indent}ctx['${k}'] = ${JSON.stringify(v)};`,
+      );
     }
     for (const name of seedNames) {
+      const envVar = fixtureEnvByBinding?.[name];
       lines.push(
-        `${indent}ctx['${name}'] = ctx['${name}'] ?? ${seedCall(name, unique.has(name))};`,
+        envVar
+          ? `${indent}ctx['${name}'] = process.env['${envVar}'] || ${seedCall(name, unique.has(name))};`
+          : `${indent}ctx['${name}'] = ctx['${name}'] ?? ${seedCall(name, unique.has(name))};`,
       );
     }
   }

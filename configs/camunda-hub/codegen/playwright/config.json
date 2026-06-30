@@ -1,3 +1,6 @@
 {
-  "recordResponses": false
+  "recordResponses": false,
+  "clientMintedFixtures": {
+    "emailVar": "POS_FIXTURE_MEMBER_EMAIL"
+  }
 }
