@@ -62,6 +62,15 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
         synthesisedFromEstablishes.add(id.semanticType);
       }
     }
+    // Edge establishers: body-located `acceptsExternal: true` components are
+    // client-minted by the edge op itself. Mirror graphLoader: they belong in
+    // `establishersByType`, not `producersByType`. Path-located acceptsExternal
+    // components remain in `requires` and are chained from upstream producers.
+    if (node.establishes && node.establishes.shape === 'edge') {
+      for (const id of node.establishes.identifiedBy) {
+        if (id.acceptsExternal && id.in === 'body') synthesisedFromEstablishes.add(id.semanticType);
+      }
+    }
     for (const sem of node.produces) {
       if (synthesisedFromEstablishes.has(sem)) continue;
       const list = producersByType[sem] ?? [];
@@ -70,6 +79,18 @@ function makeGraph(nodes: OperationNode[]): OperationGraph {
     }
     if (node.establishes && node.establishes.shape !== 'edge') {
       for (const id of node.establishes.identifiedBy) {
+        const list = establishersByType[id.semanticType] ?? [];
+        if (!list.includes(node.operationId)) list.push(node.operationId);
+        establishersByType[id.semanticType] = list;
+      }
+    }
+    // Edge establisher body `acceptsExternal` components: register in
+    // establishersByType so the planner can chain this op as a satisfier.
+    // Path `acceptsExternal` components are handled via upstream producers or
+    // the planner's own externalEntitySites fallback and do not need an entry.
+    if (node.establishes && node.establishes.shape === 'edge') {
+      for (const id of node.establishes.identifiedBy) {
+        if (!id.acceptsExternal || id.in !== 'body') continue;
         const list = establishersByType[id.semanticType] ?? [];
         if (!list.includes(node.operationId)) list.push(node.operationId);
         establishersByType[id.semanticType] = list;
@@ -745,5 +766,77 @@ describe('planner contracts: x-semantic-establishes (#104)', () => {
       expect(afterUsername).toEqual(beforeUsername);
       expect(afterUsername).not.toContain('createUser');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edge-establisher chaining: acceptsExternal component (#removeMember class)
+// ---------------------------------------------------------------------------
+//
+// An edge establisher (addMember) creates a relationship whose composite
+// identity is (WorkspaceKey, MemberEmail). The WorkspaceKey is a
+// pre-existing foreign-key constraint; MemberEmail carries
+// `acceptsExternal: true` — it is client-minted by addMember itself, not
+// a pre-existing prerequisite. A consumer (removeMember) that requires
+// both WorkspaceKey and MemberEmail must chain:
+//   createWorkspace → addMember → removeMember
+//
+// Class-scoped invariant: any consumer whose required semantic type is
+// exclusively satisfiable through an edge establisher's `acceptsExternal`
+// component MUST produce a satisfied chain that includes the edge
+// establisher. No `unsatisfied` scenario may be emitted when the edge
+// establisher is the only reachable source for the semantic.
+describe('edge-establisher acceptsExternal chaining', () => {
+  // addMember is the edge establisher: it accepts a client-minted email and
+  // associates it with an existing workspace. Its produces list carries
+  // MemberEmail (the acceptsExternal component) so BFS marks it satisfied
+  // once addMember is scheduled.
+  const fixtureEdgeEstablisherChain: OperationGraph = makeGraph([
+    makeOp('createWorkspace', 'POST', '/workspaces', {
+      produces: ['WorkspaceKey'],
+      providerMap: { WorkspaceKey: true },
+    }),
+    makeOp('addMember', 'POST', '/workspaces/{workspaceKey}/members', {
+      // Mirrors normalizeOp after the edge-establisher fix:
+      // acceptsExternal component in produces, foreign-key stays in required.
+      required: ['WorkspaceKey'],
+      produces: ['MemberEmail'],
+      establishes: {
+        kind: 'WorkspaceMemberMembership',
+        shape: 'edge',
+        identifiedBy: [
+          { in: 'path', name: 'workspaceKey', semanticType: 'WorkspaceKey' },
+          { in: 'body', name: 'email', semanticType: 'MemberEmail', acceptsExternal: true },
+        ],
+      },
+    }),
+    makeOp('removeMember', 'DELETE', '/workspaces/{workspaceKey}/members/{email}', {
+      required: ['WorkspaceKey', 'MemberEmail'],
+    }),
+  ]);
+
+  it('emits a satisfied chain createWorkspace → addMember → removeMember', () => {
+    const result = generateScenariosForEndpoint(fixtureEdgeEstablisherChain, 'removeMember', {
+      maxChainAlternatives: 10,
+    });
+    expect(result.unsatisfied).toBeFalsy();
+    const scenario = result.scenarios[0];
+    expect(opIdsOf(scenario)).toEqual(['createWorkspace', 'addMember', 'removeMember']);
+  });
+
+  it('does not emit an unsatisfied scenario when the edge establisher is the only source', () => {
+    const result = generateScenariosForEndpoint(fixtureEdgeEstablisherChain, 'removeMember', {
+      maxChainAlternatives: 10,
+    });
+    expect(result.scenarios.every((s) => s.id !== 'unsatisfied')).toBe(true);
+  });
+
+  it('does not add the edge establisher to producersByType for its acceptsExternal component', () => {
+    // Guard: the MemberEmail slot must remain in establishersByType only.
+    // If it leaked into producersByType the authoritative-producer contract
+    // would be violated and other diagnostics (variant planning, missing-
+    // producer signals) would silently break.
+    expect(fixtureEdgeEstablisherChain.producersByType.MemberEmail).toBeUndefined();
+    expect(fixtureEdgeEstablisherChain.establishersByType?.MemberEmail).toContain('addMember');
   });
 });

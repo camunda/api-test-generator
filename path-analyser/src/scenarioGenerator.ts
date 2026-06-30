@@ -151,10 +151,16 @@ export function generateScenariosForEndpoint(
   // gate would short-circuit endpoints whose required semantic is only mintable via an establisher
   // (e.g. getUser/getTenant after the spec is annotated), and the BFS augmentation downstream
   // would never run.
+  //
+  // Edge-establisher note: an edge op that has `acceptsExternal: true` components is registered in
+  // `establishersByType` for those components. When the edge op IS the endpoint being planned, the
+  // endpoint cannot self-satisfy — only a DIFFERENT establisher op can chain-produce the semantic.
+  // Exclude the endpoint itself from the hasEstablisher check so the `externalEntitySites` fallback
+  // (lines below) still fires for the endpoint's own bimodal acceptsExternal components.
   const missing: string[] = [];
   for (const st of initialNeeded) {
     const hasProducer = graph.producersByType[st]?.length;
-    const hasEstablisher = graph.establishersByType?.[st]?.length;
+    const hasEstablisher = graph.establishersByType?.[st]?.some((opId) => opId !== endpointOpId);
     // #305 Phase 3: `runtimeEmission` semantics have no graph-indexed
     // producer (their discovery op is declared in the ABox via
     // `discoveredVia`, not via response provider annotations). They
@@ -570,7 +576,9 @@ export function generateScenariosForEndpoint(
       if (decl?.kind === 'runtimeEmission' && decl.discoveredVia && decl.emittedBy) return true;
       const candidates = [
         ...(graph.producersByType[st] ?? []),
-        ...(graph.establishersByType?.[st] ?? []),
+        // Exclude the endpoint itself: an edge op cannot self-satisfy its own
+        // acceptsExternal components via a preceding call to itself.
+        ...(graph.establishersByType?.[st] ?? []).filter((id) => id !== endpointOpId),
       ];
       return candidates.some((opId) => {
         const node = graph.operations[opId];

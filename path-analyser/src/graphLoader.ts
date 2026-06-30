@@ -270,6 +270,22 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         synthesisedFromEstablishes.add(id.semanticType);
       }
     }
+    // Edge-establisher acceptsExternal components are client-minted by the
+    // edge op itself (not pre-existing prerequisites). They land in
+    // `establishes.identifiedBy[*].acceptsExternal === true` and are pushed
+    // into `op.produces` by `normalizeOp` so BFS produced-set propagation
+    // marks them satisfied once the edge op is scheduled. Mark them
+    // synthesised here so they are excluded from `producersByType` —
+    // the authoritative-producer contract must not include edge establishers.
+    // Only BODY-located components are self-minted by the edge op itself;
+    // path-located acceptsExternal components are consumed from the URL
+    // and must be chained from upstream (or fall through to the
+    // externalEntitySites fallback when no producer exists).
+    if (op.establishes && op.establishes.shape === 'edge') {
+      for (const id of op.establishes.identifiedBy) {
+        if (id.acceptsExternal && id.in === 'body') synthesisedFromEstablishes.add(id.semanticType);
+      }
+    }
     for (const st of op.produces) {
       // #288 Phase 2: an op that establishes type T AND authoritatively
       // returns T in a 2xx response (provider:true) is legitimately a
@@ -299,6 +315,23 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
         // ops that genuinely mint a Tenant identifier (`createTenant`),
         // not ops that scope under one.
         if (kindIdentifiers && !kindIdentifiers.has(id.semanticType)) continue;
+        const list = establishersByType[id.semanticType] ?? [];
+        if (!list.includes(op.operationId)) list.push(op.operationId);
+        establishersByType[id.semanticType] = list;
+      }
+    }
+    // Edge-establisher acceptsExternal components: register the edge op as
+    // the satisfier for the client-minted component of the edge. The foreign-
+    // key components (no `acceptsExternal`) legitimately remain in `requires`
+    // and are satisfied by their own upstream chain; only the truly
+    // client-minted body components belong in this index.
+    // Path-located acceptsExternal components are handled by the planner's
+    // own externalEntitySites fallback and do not need a graph index entry —
+    // they are always consumed from an upstream chain (e.g. createGroup for
+    // GroupId) or minted externally if no producer exists.
+    if (op.establishes && op.establishes.shape === 'edge') {
+      for (const id of op.establishes.identifiedBy) {
+        if (!id.acceptsExternal || id.in !== 'body') continue;
         const list = establishersByType[id.semanticType] ?? [];
         if (!list.includes(op.operationId)) list.push(op.operationId);
         establishersByType[id.semanticType] = list;
@@ -814,12 +847,15 @@ function normalizeOp(
   // the provider-preference filter in scenarioGenerator still reaches
   // for true producers first when both kinds exist.
   //
-  // Edge establishers (`shape: 'edge'`) are the membership operations
-  // — their `identifiedBy` entries enumerate the *components* of the
-  // composite identifier (e.g. {GroupId, Username}), which are
-  // *consumed* prerequisites, not values established by this op. The
-  // edge itself has no semantic type the planner can chain on, so we
-  // don't touch `produces` for edges.
+  // Edge establishers (`shape: 'edge'`) enumerate the composite-key
+  // components of a relationship in `identifiedBy`. Foreign-key
+  // components (no `acceptsExternal`) are pre-existing prerequisites —
+  // they stay in `requires` and are NOT added to `produces`. Components
+  // marked `acceptsExternal: true` are client-minted by this edge op
+  // itself (e.g. `MemberEmail` on `addMember`) — they are pushed to
+  // `produces` and excluded from `requires` just like non-edge
+  // establisher identifiers, so the planner can chain this op as the
+  // satisfier without a circular prerequisite loop.
   const establishes = normalizeEstablishes(op.establishes, opId, edgeEstablishers);
   const establishedSemantics = new Set<string>();
   if (establishes && establishes.shape !== 'edge') {
@@ -841,6 +877,28 @@ function normalizeOp(
       establishedSemantics.add(id.semanticType);
     }
   }
+  // Edge-establisher acceptsExternal: the component with `acceptsExternal:
+  // true` in `identifiedBy` (e.g. `MemberEmail` on `addMember`) is
+  // client-minted by the edge op itself rather than being a pre-existing
+  // prerequisite. Treat it the same way non-edge establishes treats its
+  // owned identifiers: push to `produces` so BFS produced-set propagation
+  // marks it satisfied once this op is scheduled, and add to
+  // `establishedSemantics` so it is removed from `requires` (avoiding a
+  // circular dependency where the planner would chase an upstream producer
+  // for a value the op is about to mint itself).
+  // Only BODY-located components qualify: path-located `acceptsExternal`
+  // components (e.g. `groupId` on `assignRoleToGroup`) are consumed from
+  // the URL and must still be chained from upstream (an ordinary producer
+  // like `createGroup` satisfies them). Path `acceptsExternal` is handled
+  // by the planner's own `externalEntitySites` fallback when no producer
+  // is available.
+  if (establishes && establishes.shape === 'edge') {
+    for (const id of establishes.identifiedBy) {
+      if (!id.acceptsExternal || id.in !== 'body') continue;
+      produces.push(id.semanticType);
+      establishedSemantics.add(id.semanticType);
+    }
+  }
 
   return {
     operationId: op.operationId ?? op.id ?? op.name ?? opId,
@@ -851,9 +909,9 @@ function normalizeOp(
     // it mints, so drop the established semantic types from `requires`
     // — otherwise BFS would chase a producer for a value the endpoint
     // itself is going to mint and write into its own request body.
-    // Edge establishers don't enter this branch (no entries in
-    // `establishedSemantics`) because their `identifiedBy` components
-    // are pre-existing inputs that legitimately need a chain.
+    // For edge establishers, only `acceptsExternal: true` components
+    // are in `establishedSemantics`; foreign-key components remain
+    // in `requires` so their upstream chain is still planned.
     requires: {
       required: required.filter((s) => !establishedSemantics.has(s)),
       optional: optional.filter((s) => !establishedSemantics.has(s)),

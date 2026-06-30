@@ -1151,9 +1151,14 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
           // missing inputs: the planner treats these as produced by the
           // op (they originate from the identifier inputs the op itself
           // requires — establisher self-satisfaction).
-          if (opNode.establishes && opNode.establishes.shape !== 'edge') {
+          // For edge establishers, body-located `acceptsExternal: true`
+          // components are self-minted by the op; path-located components
+          // are pre-existing prerequisites satisfied by an earlier chain.
+          if (opNode.establishes) {
             for (const id of opNode.establishes.identifiedBy ?? []) {
-              produced.add(id.semanticType);
+              if (opNode.establishes.shape !== 'edge' || (id.acceptsExternal && id.in === 'body')) {
+                produced.add(id.semanticType);
+              }
             }
           }
           const req = (opNode.requestBodySemanticTypes ?? [])
