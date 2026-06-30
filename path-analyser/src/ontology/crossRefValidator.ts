@@ -4,6 +4,7 @@ import type { DomainSemantics, OperationGraph } from '../types.js';
 import { ARTIFACT_KINDS_CROSS_REF } from './crossRef/artifactKindsCrossRef.js';
 import { EDGES_CROSS_REF } from './crossRef/edgeCrossRef.js';
 import { ENTITY_KINDS_CROSS_REF } from './crossRef/entityKindsCrossRef.js';
+import { FILE_FIXTURES_CROSS_REF } from './crossRef/fileFixturesCrossRef.js';
 import {
   checkGlobalContextSeedsCoherent,
   GLOBAL_CONTEXT_SEEDS_CROSS_REF,
@@ -62,6 +63,7 @@ export const CROSS_REF_MODULES: readonly SliceCrossRefModule[] = [
   RUNTIME_STATES_CROSS_REF,
   SEMANTICS_CROSS_REF,
   GLOBAL_CONTEXT_SEEDS_CROSS_REF,
+  FILE_FIXTURES_CROSS_REF,
   SCENARIO_TEMPLATE_CROSS_REF,
 ];
 

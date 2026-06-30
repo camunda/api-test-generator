@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json",
+  "name": "Test Catalog Asset",
+  "id": "io.camunda.test.catalog-asset-fixture",
+  "appliesTo": ["bpmn:Task"],
+  "properties": [],
+  "version": 1,
+  "description": "Minimal element template fixture for integration testing of the catalog ingestion and deletion APIs."
+}

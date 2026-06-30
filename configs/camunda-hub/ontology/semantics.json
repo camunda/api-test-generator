@@ -8,6 +8,12 @@
       "kind": "attribute",
       "clientMinted": true,
       "$comment": "Client-supplied email address that identifies a workspace member. Minted by the caller when invoking addMember (body.email); planner generates a deterministic value at that site. The WorkspaceMemberMembership edge binding on removeMember resolves the path-param email from the same minted value."
+    },
+    {
+      "name": "CatalogAssetKey",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Key identifying an ingested catalog asset. Derived from the element template's `id` field in the fixture file. Client-minted because ingestCatalogAssets returns 204 (no response body). Override at runtime via POS_FIXTURE_CATALOG_ASSET_KEY."
     }
   ]
 }

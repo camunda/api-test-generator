@@ -6,6 +6,7 @@ import { getActiveConfigDir } from '../configResolver.js';
 import { artifactKindsSchema } from './artifactKindsSchema.js';
 import { edgeSchema } from './edgeSchema.js';
 import { entityKindsSchema } from './entityKindsSchema.js';
+import { fileFixturesSchema } from './fileFixturesSchema.js';
 import { globalContextSeedsSchema } from './globalContextSeedsSchema.js';
 import { runtimeStatesSchema } from './runtimeStatesSchema.js';
 import { scenarioTemplateSchema } from './scenarioTemplateSchema.js';
@@ -62,6 +63,8 @@ export type IdentifierEntry = NonNullable<SemanticsAbox['identifiers']>[number];
 export type GlobalContextSeedsAbox = FromSchema<typeof globalContextSeedsSchema>;
 export type GlobalContextSeedEntry = GlobalContextSeedsAbox['seeds'][number];
 
+export type FileFixturesAbox = FromSchema<typeof fileFixturesSchema>;
+
 export type ScenarioTemplatesAbox = FromSchema<typeof scenarioTemplateSchema>;
 export type ScenarioTemplate = ScenarioTemplatesAbox['templates'][number];
 export type ScenarioTemplateStep = ScenarioTemplate['steps'][number];
@@ -77,6 +80,7 @@ const validateRuntimeStatesAbox = ajv.compile<RuntimeStatesAbox>(runtimeStatesSc
 const validateSemanticsAbox = ajv.compile<SemanticsAbox>(semanticsSchema);
 const validateGlobalContextSeedsAbox =
   ajv.compile<GlobalContextSeedsAbox>(globalContextSeedsSchema);
+const validateFileFixturesAbox = ajv.compile<FileFixturesAbox>(fileFixturesSchema);
 const validateScenarioTemplatesAbox = ajv.compile<ScenarioTemplatesAbox>(scenarioTemplateSchema);
 
 function formatErrors(errors: ErrorObject[] | null | undefined): string {
@@ -1003,4 +1007,66 @@ export function loadScenarioTemplatesAbox(repoRoot: string): ScenarioTemplatesAb
     );
   }
   return parsed;
+}
+
+/**
+ * Load and structurally validate the per-config file-fixtures ABox at
+ * `configs/<active>/ontology/file-fixtures.json`.
+ *
+ * @returns the parsed ABox, or `null` if no file exists for the active
+ *   config. A missing file is non-fatal — configs without non-deployment
+ *   multipart operations simply omit this file.
+ * @throws if the file exists but fails JSON parsing or TBox validation.
+ */
+export function loadFileFixturesAbox(repoRoot: string): FileFixturesAbox | null {
+  let aboxPath: string;
+  try {
+    aboxPath = path.join(getActiveConfigDir(repoRoot), 'ontology', 'file-fixtures.json');
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(aboxPath, 'utf8');
+  } catch (err) {
+    if (err !== null && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse file-fixtures ABox at ${aboxPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!validateFileFixturesAbox(parsed)) {
+    throw new Error(
+      `File-fixtures ABox at ${aboxPath} failed TBox validation:\n${formatErrors(validateFileFixturesAbox.errors)}`,
+    );
+  }
+  return parsed;
+}
+
+export interface FileFixturesViews {
+  operationFileFixtures: Record<string, Record<string, string>>;
+}
+
+/**
+ * Derive the record-shaped view of the file-fixtures ABox consumed by
+ * `buildRequestBodyFromCanonical` in `path-analyser/src/index.ts`.
+ *
+ * @returns the view, or `null` if no `file-fixtures.json` ships for
+ *   the active config.
+ */
+export function deriveFileFixturesViews(repoRoot: string): FileFixturesViews | null {
+  const abox = loadFileFixturesAbox(repoRoot);
+  if (abox === null) return null;
+  const operationFileFixtures: Record<string, Record<string, string>> = {};
+  for (const [opId, fields] of Object.entries(abox.fixtures)) {
+    operationFileFixtures[opId] = { ...fields };
+  }
+  return { operationFileFixtures };
 }

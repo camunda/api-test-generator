@@ -1,0 +1,10 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/file-fixtures.schema.json",
+  "version": 1,
+  "fixtures": {
+    "ingestCatalogAssets": {
+      "readme": "catalog/readme.md",
+      "template": "catalog/test-catalog-asset.json"
+    }
+  }
+}

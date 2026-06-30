@@ -581,6 +581,8 @@ export interface DomainSemantics {
   // logic so the codegen layer carries no hard-coded bind names or sentinel
   // values.
   globalContextSeeds?: GlobalContextSeed[];
+  /** Per-operation multipart field-to-fixture-path mappings for non-deployment-gateway ops. */
+  operationFileFixtures?: Record<string, Record<string, string>>;
 }
 
 /**

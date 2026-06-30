@@ -9,6 +9,7 @@ import {
 } from './ontology/crossRefValidator.js';
 import {
   deriveArtifactKindsViews,
+  deriveFileFixturesViews,
   deriveGlobalContextSeedsViews,
   deriveRuntimeStatesViews,
   deriveSemanticsViews,
@@ -379,11 +380,13 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
   const runtimeStatesViews = deriveRuntimeStatesViews(repoRoot);
   const semanticsViews = deriveSemanticsViews(repoRoot);
   const globalContextSeedsViews = deriveGlobalContextSeedsViews(repoRoot);
+  const fileFixturesViews = deriveFileFixturesViews(repoRoot);
   const postOverlayReValidationNeeded =
     artifactViews !== null ||
     runtimeStatesViews !== null ||
     semanticsViews !== null ||
-    globalContextSeedsViews !== null;
+    globalContextSeedsViews !== null ||
+    fileFixturesViews !== null;
 
   if (postOverlayReValidationNeeded) {
     domain = { version: 1 };
@@ -413,6 +416,12 @@ export async function loadGraph(baseDir: string): Promise<OperationGraph> {
     }
     if (globalContextSeedsViews !== null) {
       domain = { ...domain, globalContextSeeds: globalContextSeedsViews.globalContextSeeds };
+    }
+    if (fileFixturesViews !== null) {
+      domain = {
+        ...domain,
+        operationFileFixtures: fileFixturesViews.operationFileFixtures,
+      };
     }
   }
 
