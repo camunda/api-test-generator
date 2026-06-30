@@ -1112,7 +1112,7 @@ type RequestBodyPlan =
  * remains enum-unaware for deeper nested arrays — those still seed a
  * `'placeholder'` element, tracked separately.
  */
-type CanonicalNode = {
+export type CanonicalNode = {
   path: string;
   type: string;
   required: boolean;
@@ -1150,7 +1150,36 @@ function formatSeedLiteral(format: string): string | undefined {
   }
 }
 
-function synthesizeObjectFromPrefix(
+/**
+ * Type-aware scalar seed for nested-object leaves. Nested-object synthesis has
+ * no `scenario.bindings` context, so it must emit a concrete literal rather
+ * than a `${var}` seed. That literal MUST match the field's declared JSON type
+ * or the server rejects the whole body: a `boolean` field seeded with the
+ * string `'placeholder'` produced `400 "Request body is not readable"` for
+ * `createCluster`'s `license.validLicense` (Gap B). Resolution order:
+ *   1. format-valid literal (#397) — e.g. a `uuid`/`date-time` string;
+ *   2. type-correct literal — `boolean` → `true`, `integer`/`number` → `1`;
+ *   3. generic `'placeholder'` string fallback for plain strings / unknown.
+ */
+function scalarSeedLiteral(node: CanonicalNode): unknown {
+  if (node.format) {
+    const lit = formatSeedLiteral(node.format);
+    if (lit !== undefined) return lit;
+  }
+  switch (node.type) {
+    case 'boolean':
+      return true;
+    case 'integer':
+    case 'number':
+      return 1;
+    case 'null':
+      return null;
+    default:
+      return 'placeholder';
+  }
+}
+
+export function synthesizeObjectFromPrefix(
   prefix: string,
   nodes: CanonicalNode[],
 ): Record<string, unknown> {
@@ -1177,16 +1206,16 @@ function synthesizeObjectFromPrefix(
       // schema-honest.
       obj[inner] = [synthesizeArrayElement(`${prefix}${inner}`, nodes)];
     } else {
-      // #397 — for format-constrained scalars, emit a format-valid literal
-      // instead of 'placeholder' which fails server-side format validation.
-      // Unlike the top-level body branches, nested-object synthesis has no
-      // scenario.bindings context here, so it cannot route through runtime
-      // seeding — email therefore gets the fixed `seed@example.com` literal
-      // rather than the per-call `${emailVar}` seed. A nested required-and-
-      // unique email field could collide; no such field exists in the current
-      // specs, and the fixed literal is still strictly better than the old
-      // invalid 'placeholder'.
-      obj[inner] = (n.format && formatSeedLiteral(n.format)) ?? 'placeholder';
+      // Type-aware scalar seed (#397 for format, Gap B for boolean/number).
+      // Nested-object synthesis has no scenario.bindings context here, so it
+      // cannot route through runtime seeding — email therefore gets the fixed
+      // `seed@example.com` literal rather than the per-call `${emailVar}` seed.
+      // A nested required-and-unique email field could collide; no such field
+      // exists in the current specs, and the fixed literal is still strictly
+      // better than the old invalid 'placeholder'. `scalarSeedLiteral` also
+      // honours the declared type so a boolean/integer field is not seeded
+      // with a type-invalid string.
+      obj[inner] = scalarSeedLiteral(n);
     }
   }
   return obj;

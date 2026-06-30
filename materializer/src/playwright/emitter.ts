@@ -59,6 +59,31 @@ interface EmitOptions {
   roleBundles?: Map<string, LoadedRoleBundle>;
   /** See {@link EmitContext.roleExtras}. */
   roleExtras?: Map<string, Record<string, unknown>>;
+  /**
+   * Per-config map of binding name → runtime env-var override
+   * (`configs/<config>/codegen/playwright/config.json` → `clientMintedFixtures`).
+   * Forwarded to {@link emitCtxSeeding} as `fixtureEnvByBinding`. See that
+   * option for the emitted form and rationale.
+   */
+  clientMintedFixtures?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Read `clientMintedFixtures` out of the raw emitter config
+ * (`Record<string, unknown>`), keeping only string-valued entries. Returns
+ * `undefined` when absent or empty so the emitter falls through to plain
+ * literal seeding.
+ */
+function readClientMintedFixtures(
+  cfg: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  const raw = cfg?.clientMintedFixtures;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -87,6 +112,7 @@ export function renderPlaywrightSuite(
     getRoleForOperation?: (opId: string) => string | undefined;
     roleBundles?: Map<string, LoadedRoleBundle>;
     roleExtras?: Map<string, Record<string, unknown>>;
+    clientMintedFixtures?: Readonly<Record<string, string>>;
   },
 ): string {
   return buildSuiteSource(collection, {
@@ -98,6 +124,7 @@ export function renderPlaywrightSuite(
     getRoleForOperation: opts.getRoleForOperation,
     roleBundles: opts.roleBundles,
     roleExtras: opts.roleExtras,
+    clientMintedFixtures: opts.clientMintedFixtures,
   });
 }
 
@@ -166,6 +193,12 @@ export const PlaywrightEmitter: EmitterStrategy = {
         description:
           'When true, every emitted scenario step appends a recordResponse({...}) call and the suite imports recordResponse/sanitizeBody from ./support/recorder. Defaults to false; recorder.ts is also vendored conditionally.',
       },
+      clientMintedFixtures: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+        description:
+          'Maps a binding name (e.g. emailVar) to a runtime env-var name. For seeded bindings the emitted form is `ctx[binding] = ctx[binding] ?? (process.env[ENV] || seedBinding(binding))`; for literal bindings it is `ctx[binding] = process.env[ENV] || <literal>`. In both cases an unset or empty env var falls back to the deterministic seed/literal. Lets an e2e driver substitute a real, server-known value for a client-minted input with no producer (the positive-suite analogue of request-validation RV_FIXTURE_*). globalContextSeeds are not affected.',
+      },
     },
   },
   async scaffold(_ctx: EmitContext): Promise<EmittedFile[]> {
@@ -192,6 +225,7 @@ export const PlaywrightEmitter: EmitterStrategy = {
       getRoleForOperation: ctx.getRoleForOperation,
       roleBundles: ctx.roleBundles,
       roleExtras: ctx.roleExtras,
+      clientMintedFixtures: readClientMintedFixtures(ctx.emitterConfig),
     });
     return [
       {
@@ -385,7 +419,14 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
     lines.push(
-      renderScenarioTest(scenario, seeds, recordResponses, findRoleForStep, opts.roleExtras),
+      renderScenarioTest(
+        scenario,
+        seeds,
+        recordResponses,
+        findRoleForStep,
+        opts.roleExtras,
+        opts.clientMintedFixtures,
+      ),
     );
   }
   lines.push('});');
@@ -398,6 +439,7 @@ function renderScenarioTest(
   recordResponses: boolean,
   findRoleForStep: (step: RequestStep) => { roleName: string; bundle: LoadedRoleBundle } | null,
   roleExtras: Map<string, Record<string, unknown>> | undefined,
+  clientMintedFixtures: Readonly<Record<string, string>> | undefined,
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
@@ -458,6 +500,7 @@ function renderScenarioTest(
       seedBindings: s.seedBindings,
       globalContextSeeds,
       uniqueBindings: computeUniqueBindings(s.requestPlan, s.modelDerivedLiteralBindings),
+      fixtureEnvByBinding: clientMintedFixtures,
     }),
   );
   if (!s.requestPlan) {
