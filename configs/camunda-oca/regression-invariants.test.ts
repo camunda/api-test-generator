@@ -271,7 +271,7 @@ interface OperationNode {
   responseSemanticTypes?: Record<string, SemanticTypeEntry[]>;
   establishes?: {
     shape?: string;
-    identifiedBy?: { semanticType: string; in?: string }[];
+    identifiedBy?: { semanticType: string; in?: string; acceptsExternal?: boolean }[];
   };
 }
 interface GraphEdge {
