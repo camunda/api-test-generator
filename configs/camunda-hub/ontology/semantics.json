@@ -1,0 +1,13 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/semantics.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "semanticTypes": [
+    {
+      "name": "MemberEmail",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Client-supplied email address that identifies a workspace member. Minted by the caller when invoking addMember (body.email); planner generates a deterministic value at that site. The WorkspaceMemberMembership edge binding on removeMember resolves the path-param email from the same minted value."
+    }
+  ]
+}
