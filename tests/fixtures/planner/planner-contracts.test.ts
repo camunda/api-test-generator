@@ -1193,7 +1193,9 @@ describe('planner contracts: self-referential optional leaf is skipped (#updateF
     const variants = generateOptionalSubShapeVariants(fixtureSelfRefVariant, 'updateThing', {
       maxVariantsPerEndpoint: 10,
     });
-    const leafSemantics = variants.scenarios.flatMap((s) => s.populatesSubShape?.leafSemantics ?? []);
+    const leafSemantics = variants.scenarios.flatMap(
+      (s) => s.populatesSubShape?.leafSemantics ?? [],
+    );
     // The self-referential ThingKey leaf is skipped (it would bind the entity to itself).
     expect(leafSemantics).not.toContain('ThingKey');
     // A leaf of a different semantic type is still emitted — the guard is scoped.
