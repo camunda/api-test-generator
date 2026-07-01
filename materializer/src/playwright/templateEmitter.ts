@@ -62,6 +62,14 @@ export interface EmitTemplateSuitesOptions {
    * referencing an obsolete binding name.
    */
   globalContextSeeds: readonly TemplateGlobalContextSeed[];
+  /**
+   * Per-config binding → runtime env-var overrides (config.json →
+   * `clientMintedFixtures`). Forwarded to `emitCtxSeeding` as
+   * `fixtureEnvByBinding` so lifecycle suites honour the same fixtures as the
+   * per-endpoint emitter (e.g. `contentVar` → a valid BPMN document for
+   * createFile). Undefined for configs that ship none.
+   */
+  clientMintedFixtures?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -113,7 +121,7 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
   for (const f of jsonFiles) {
     const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
     const parsed = parseTemplateScenarioFile(raw, f);
-    const source = renderLifecycleSuite(parsed, opts.globalContextSeeds);
+    const source = renderLifecycleSuite(parsed, opts.globalContextSeeds, opts.clientMintedFixtures);
     const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
     await fs.writeFile(outPath, source, 'utf8');
     written.push(outPath);
@@ -150,6 +158,7 @@ function parseTemplateScenarioFile(raw: string, fileName: string): TemplateScena
 function renderLifecycleSuite(
   file: TemplateScenarioFile,
   globalContextSeeds: readonly TemplateGlobalContextSeed[],
+  clientMintedFixtures?: Readonly<Record<string, string>>,
 ): string {
   const scenario = file.scenario;
   const steps = scenario.steps;
@@ -176,10 +185,10 @@ function renderLifecycleSuite(
       );
     }
     if (observe.assertion.kind === 'fieldEquals') {
-      return renderReadBackSuite(file, globalContextSeeds);
+      return renderReadBackSuite(file, globalContextSeeds, clientMintedFixtures);
     }
     if (observe.assertion.kind === 'stateEquals') {
-      return renderStateTransitionSuite(file, globalContextSeeds);
+      return renderStateTransitionSuite(file, globalContextSeeds, clientMintedFixtures);
     }
     throw new Error(
       `RuntimeEntity template ${file.subjectName} observe.assertion.kind must be 'fieldEquals' or 'stateEquals' (got '${observe.assertion.kind}').`,
@@ -308,6 +317,7 @@ function renderLifecycleSuite(
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
       uniqueBindings: computeUniqueBindings(allRequestSteps),
+      fixtureEnvByBinding: clientMintedFixtures,
     }),
   );
 
@@ -698,6 +708,7 @@ function buildMembershipPredicateExpr(opts: {
 function renderReadBackSuite(
   file: TemplateScenarioFile,
   globalContextSeeds: readonly TemplateGlobalContextSeed[],
+  clientMintedFixtures?: Readonly<Record<string, string>>,
 ): string {
   const scenario = file.scenario;
   const steps = scenario.steps;
@@ -762,6 +773,7 @@ function renderReadBackSuite(
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
       uniqueBindings: computeUniqueBindings(allRequestSteps),
+      fixtureEnvByBinding: clientMintedFixtures,
     }),
   );
 
@@ -885,6 +897,7 @@ function appendObserveFieldEqualsStep(
 function renderStateTransitionSuite(
   file: TemplateScenarioFile,
   globalContextSeeds: readonly TemplateGlobalContextSeed[],
+  clientMintedFixtures?: Readonly<Record<string, string>>,
 ): string {
   const scenario = file.scenario;
   const steps = scenario.steps;
@@ -950,6 +963,7 @@ function renderStateTransitionSuite(
       seedBindings: prereq.seedBindings,
       globalContextSeeds,
       uniqueBindings: computeUniqueBindings(allRequestSteps),
+      fixtureEnvByBinding: clientMintedFixtures,
     }),
   );
 

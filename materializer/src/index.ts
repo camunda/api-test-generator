@@ -39,7 +39,7 @@ import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
-import { PlaywrightEmitter } from './playwright/emitter.js';
+import { PlaywrightEmitter, readClientMintedFixtures } from './playwright/emitter.js';
 import {
   materializeFixtures,
   materializeResponseSchemas,
@@ -746,6 +746,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
           scenariosDir: getTemplateScenariosDir(repoRoot, templateName),
           outDir: templateOutDir,
           globalContextSeeds: seedsArg,
+          clientMintedFixtures: readClientMintedFixtures(emitterConfig),
         });
         lifecycleCount += written.length;
       }

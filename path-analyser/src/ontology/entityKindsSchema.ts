@@ -88,6 +88,11 @@ export const entityKindsSchema = {
   required: ['version', 'kinds'],
   properties: {
     $schema: { type: 'string' },
+    $comment: {
+      description:
+        'Optional free-text note (standard JSON Schema keyword). Ignored by the loader; use it to record why a kind is present or intentionally omitted (e.g. an entity whose CRUD triple is blocked upstream).',
+      type: 'string',
+    },
     '@context': {
       description:
         'Optional JSON-LD context. Ignored by the loader; preserved verbatim so external RDF tooling can resolve term IRIs without modification.',

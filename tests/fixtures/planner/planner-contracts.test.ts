@@ -1159,3 +1159,46 @@ describe('planner contracts: modelDerived variant leaf records a fulfillment mar
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Self-referential optional leaf guard.
+//
+// An optional sub-shape leaf whose semantic type the endpoint already REQUIRES
+// (its target entity) must NOT emit a variant: variant planning chains a single
+// producer instance per semantic, so it would bind the entity's own key as a
+// reference to itself — e.g. updateFolder's optional `parentFolderKey`
+// (FolderKey) on PATCH /folders/{folderKey} (requires FolderKey), which the
+// server rejects ("a folder cannot be its own parent"). A leaf of a DIFFERENT
+// semantic type is unaffected (the guard is scoped).
+// ---------------------------------------------------------------------------
+const fixtureSelfRefVariant: OperationGraph = makeGraph([
+  makeOp('createThing', { produces: ['ThingKey'], providerMap: { ThingKey: true } }),
+  makeOp('createSibling', { produces: ['SiblingKey'], providerMap: { SiblingKey: true } }),
+  makeOp('updateThing', {
+    required: ['ThingKey'],
+    optionalSubShapes: [
+      {
+        rootPath: 'refs[]',
+        leaves: [
+          { fieldPath: 'refs[].parentKey', semantic: 'ThingKey' },
+          { fieldPath: 'refs[].siblingKey', semantic: 'SiblingKey' },
+        ],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: self-referential optional leaf is skipped (#updateFolder parentFolderKey)', () => {
+  it('does not emit a variant for an optional leaf whose semantic the endpoint requires', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureSelfRefVariant, 'updateThing', {
+      maxVariantsPerEndpoint: 10,
+    });
+    const leafSemantics = variants.scenarios.flatMap(
+      (s) => s.populatesSubShape?.leafSemantics ?? [],
+    );
+    // The self-referential ThingKey leaf is skipped (it would bind the entity to itself).
+    expect(leafSemantics).not.toContain('ThingKey');
+    // A leaf of a different semantic type is still emitted — the guard is scoped.
+    expect(leafSemantics).toContain('SiblingKey');
+  });
+});

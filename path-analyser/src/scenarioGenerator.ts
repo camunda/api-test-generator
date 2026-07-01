@@ -2067,6 +2067,18 @@ export function generateOptionalSubShapeVariants(
     for (const leaf of subShape.leaves) {
       if (collectionScenarios.length >= maxVariants) break outer;
 
+      // Skip a self-referential optional leaf — one whose semantic type the
+      // endpoint already REQUIRES as its target-entity input. Example:
+      // updateFolder's optional `parentFolderKey` (FolderKey) on
+      // PATCH /folders/{folderKey}, which requires FolderKey. Variant planning
+      // chains a single producer instance per semantic type, so binding the
+      // optional field reuses the SAME instance the path parameter resolves to
+      // — the entity would reference itself (server: "a folder cannot be its
+      // own parent"). Until variant planning can supply a DISTINCT sibling
+      // instance, skip rather than emit a structurally self-referential
+      // (always-failing) variant.
+      if (endpoint.requires.required.includes(leaf.semantic)) continue;
+
       // Skip duplicates BEFORE any planning work: `requestBodySemanticTypes`
       // can repeat the exact same (rootPath, fieldPath, semantic) triple
       // for true duplicates, and the producer-chain BFS below is the most

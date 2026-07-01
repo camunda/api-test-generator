@@ -2,6 +2,7 @@
   "recordResponses": false,
   "clientMintedFixtures": {
     "emailVar": "POS_FIXTURE_MEMBER_EMAIL",
-    "assetKeyVar": "POS_FIXTURE_CATALOG_ASSET_KEY"
+    "assetKeyVar": "POS_FIXTURE_CATALOG_ASSET_KEY",
+    "contentVar": "POS_FIXTURE_FILE_CONTENT"
   }
 }
