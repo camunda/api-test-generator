@@ -154,9 +154,18 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
       echo "  ⚠ catalog asset ingest failed — deleteCatalogAsset may 404"
     fi
   fi
+  # POS_FIXTURE_FILE_CONTENT: createFile validates that `content` is parseable
+  # for its `type` (bpmn) — the seeded placeholder is rejected 400
+  # (SAXException: Content is not allowed in prolog). Provide a minimal valid
+  # BPMN document; the emitted suite reads `process.env.POS_FIXTURE_FILE_CONTENT
+  # || <seed>` for contentVar (configs/.../config.json → clientMintedFixtures).
+  if [ -z "${POS_FIXTURE_FILE_CONTENT:-}" ]; then
+    POS_FIXTURE_FILE_CONTENT='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
+  fi
   BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
     POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
     POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
+    POS_FIXTURE_FILE_CONTENT="$POS_FIXTURE_FILE_CONTENT" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
     npx playwright test -c path-analyser/playwright.config.ts || true
   if [ -f "$OUT/pw-positive/index.html" ]; then

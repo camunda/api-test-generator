@@ -22,16 +22,6 @@
       "observableVia": "getFolder",
       "revokedBy": "deleteFolder",
       "description": "A folder entity, identified by its server-minted folderKey. Established via createFolder (POST /folders), observed via getFolder, revoked via deleteFolder."
-    },
-    {
-      "@type": "EntityKind",
-      "name": "Version",
-      "shape": "entity",
-      "identifiers": ["VersionKey"],
-      "establishedBy": "createVersion",
-      "observableVia": "getVersion",
-      "revokedBy": "deleteVersion",
-      "description": "A version entity, identified by its server-minted versionKey. Established via createVersion (POST /versions), observed via getVersion, revoked via deleteVersion."
     }
   ]
 }

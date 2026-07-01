@@ -74,7 +74,7 @@ interface EmitOptions {
  * `undefined` when absent or empty so the emitter falls through to plain
  * literal seeding.
  */
-function readClientMintedFixtures(
+export function readClientMintedFixtures(
   cfg: Record<string, unknown> | undefined,
 ): Record<string, string> | undefined {
   const raw = cfg?.clientMintedFixtures;
