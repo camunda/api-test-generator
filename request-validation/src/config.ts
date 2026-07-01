@@ -29,6 +29,25 @@ export interface RequestValidationConfig {
    */
   enumCaseInsensitive: boolean;
   /**
+   * String `format`s (OpenAPI `format:` values, e.g. `date-time`, `uri`) that
+   * the server does NOT enforce at the request-validation layer, so a
+   * syntactically-malformed-but-type-valid value passes schema validation
+   * rather than being rejected with 400. The format-invalid generator skips
+   * emitting a 400-expecting test for a field whose format is listed here.
+   *
+   * This is the format analogue of `enumCaseInsensitive`: it suppresses tests
+   * whose 400 premise a given server does not honour. Example: Camunda Hub
+   * binds `license.expiresAt` (`format: date-time`) to a plain String and does
+   * not parse/validate it, so `'not-a-datetime'` is accepted at the validation
+   * layer and the request proceeds to the authority gate (403 for the
+   * entitlement-gated createCluster) — never the expected 400. `email` IS
+   * enforced (addMember rejects a malformed address with 400), so only the
+   * unenforced formats are listed, not all of them.
+   *
+   * Default: `[]` — every recognised format is treated as enforced.
+   */
+  unenforcedStringFormats: string[];
+  /**
    * Which operations the 401 generators — auth-absent (no credentials) and
    * auth-invalid (invalid/unknown bearer credential) — target in the `secured` profile.
    *
@@ -93,6 +112,7 @@ export interface RequestValidationConfig {
 
 const DEFAULTS: RequestValidationConfig = {
   enumCaseInsensitive: false,
+  unenforcedStringFormats: [],
   authAbsentMode: 'conditional',
   authDenyMode: 'slice',
 };
@@ -147,6 +167,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.enumCaseInsensitive = v;
+  }
+  if ('unenforcedStringFormats' in parsed) {
+    const v = parsed.unenforcedStringFormats;
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.length > 0)) {
+      throw new Error(
+        `Invalid ${configPath}: "unenforcedStringFormats" must be an array of non-empty strings.`,
+      );
+    }
+    merged.unenforcedStringFormats = v;
   }
   if ('authAbsentMode' in parsed) {
     const v = parsed.authAbsentMode;
