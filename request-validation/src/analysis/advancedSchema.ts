@@ -6,6 +6,12 @@ import { makeId, setAtPath } from './common.js';
 interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
+  /**
+   * String `format`s the server does not enforce — `generateFormatInvalid`
+   * skips these (a malformed value passes schema validation, so a 400 is not
+   * the outcome). See `RequestValidationConfig.unenforcedStringFormats`.
+   */
+  unenforcedStringFormats?: string[];
 }
 
 type JsonObject = Record<string, unknown>;
@@ -159,6 +165,7 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
     email: 'not-an-email',
     uri: 'not a uri',
   };
+  const unenforced = new Set(opts.unenforcedStringFormats ?? []);
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     const walk = buildWalk(op);
@@ -172,7 +179,8 @@ export function generateFormatInvalid(ops: OperationModel[], opts: Opts): Valida
         node.type === 'string' &&
         raw &&
         typeof raw.format === 'string' &&
-        invalidByFormat[raw.format]
+        invalidByFormat[raw.format] &&
+        !unenforced.has(raw.format)
       ) {
         const path = findPath(root, node);
         if (!path) continue;

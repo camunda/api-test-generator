@@ -136,6 +136,7 @@ async function main() {
   let configName = '(unknown)';
   let rvConfig: RequestValidationConfig = {
     enumCaseInsensitive: false,
+    unenforcedStringFormats: [],
     authAbsentMode: 'conditional',
     authDenyMode: 'slice',
   };
@@ -150,7 +151,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -394,6 +395,7 @@ async function main() {
         ...generateFormatInvalid(model.operations, {
           capPerOperation: 20,
           onlyOperations: opts.onlyOperations,
+          unenforcedStringFormats: rvConfig.unenforcedStringFormats,
         }),
       );
     }
