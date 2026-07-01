@@ -6,6 +6,26 @@
   "kinds": [
     {
       "@type": "EntityKind",
+      "name": "Workspace",
+      "shape": "entity",
+      "identifiers": ["WorkspaceKey"],
+      "establishedBy": "createWorkspace",
+      "observableVia": "getWorkspace",
+      "revokedBy": "deleteWorkspace",
+      "description": "A workspace entity, identified by its server-minted workspaceKey. Established via createWorkspace (POST /workspaces), observed via getWorkspace, revoked via deleteWorkspace."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Project",
+      "shape": "entity",
+      "identifiers": ["ProjectKey"],
+      "establishedBy": "createProject",
+      "observableVia": "getProject",
+      "revokedBy": "deleteProject",
+      "description": "A project (process application) entity, identified by its server-minted projectKey. Established via createProject (POST /projects), observed via getProject, revoked via deleteProject."
+    },
+    {
+      "@type": "EntityKind",
       "name": "File",
       "shape": "entity",
       "identifiers": ["FileKey"],
