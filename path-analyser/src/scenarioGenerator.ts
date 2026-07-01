@@ -2149,9 +2149,27 @@ export function generateOptionalSubShapeVariants(
       // searchElementInstances → ElementId).
       const authoritative = graph.producersByType[leaf.semantic] ?? [];
       const inclusive = graph.responseProducersByType?.[leaf.semantic] ?? [];
-      const producerCandidates = unique(
+      const externalCandidates = unique(
         authoritative.length > 0 ? authoritative : inclusive,
       ).filter((id) => id !== endpointOpId);
+      // #416 follow-up — self-referential OPTIONAL leaf. When the endpoint op
+      // is the ONLY producer of this semantic (e.g. createFolder's optional
+      // `parentFolderKey`, a FolderKey that only createFolder mints), allow a
+      // DISTINCT prior instance of the endpoint op as the parent producer so
+      // the body references a real sibling entity instead of a seeded fake
+      // (which the server rejects — 403/404, "folder not found"). The chain
+      // becomes createFolder(parent, at root) → createFolder(child,
+      // parentFolderKey=parent). `generateScenariosForEndpoint` gates the
+      // self-instance behind `allowEndpointAsProducer` (set by
+      // tryProducerChainVariant) and caps the repeat at one via cycle
+      // detection; the #416 prereq-scope guard keeps the warm-up producer from
+      // itself carrying `parentFolderKey`. The self-referential REQUIRED case
+      // (the path-param target entity, e.g. updateFolder) is already skipped
+      // by the requires.required guard above.
+      const endpointIsSoleProducer =
+        externalCandidates.length === 0 &&
+        (authoritative.includes(endpointOpId) || inclusive.includes(endpointOpId));
+      const producerCandidates = endpointIsSoleProducer ? [endpointOpId] : externalCandidates;
 
       // #162 PR 4 (suite-partition cut): Try to build a producer-chain
       // variant first (the canonical "warm-up + search + final" pattern
