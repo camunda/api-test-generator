@@ -72,10 +72,10 @@ DENY_HEADER=""; [ -n "$DENY_TOK" ] && DENY_HEADER="Authorization: Bearer $DENY_T
 # (404) or access check (403) on a filler placeholder ('x' or '1'). The generator
 # emits `process.env.RV_FIXTURE_* || '<filler>'` for these (`||` so an unset OR
 # empty env var falls back; see configs/.../request-validation.json
-# resourceFixtures + pathResourceFixtures). NOTE the project split: createFile/
-# createFolder BODY auth resolves the V1 Project (projects table), but
-# PATCH /projects/{projectKey} resolves a V2 ProcessApplication — so we make both.
-V1_URL="http://localhost:${HUB_UI_PORT}/api/v1"
+# resourceFixtures + pathResourceFixtures). v2 createFile/createFolder/updateFile/
+# updateFolder resolve the projectKey as a ProcessApplication, so the folder/file
+# fixtures AND the body `projectKey` all use RV_FIXTURE_V2_PROJECT_KEY (a valid
+# body 403s against a V1 projects-table id).
 # Always exits 0 (prints '' on non-JSON / missing field) so a bad response can't
 # abort make_fixtures under `set -euo pipefail` before the empty-key warnings run.
 _jget() { python3 -c "
@@ -88,17 +88,22 @@ make_fixtures() {
   # content must be valid BPMN XML — createFile rejects a non-parseable body (400).
   local bpmn='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
   export RV_FIXTURE_WORKSPACE_KEY; RV_FIXTURE_WORKSPACE_KEY="$(curl -s -X POST "$POS_URL/workspaces" "${h[@]}" -d '{"name":"rv-fixture-ws"}' | _jget workspaceKey)"
-  export RV_FIXTURE_PROJECT_KEY;   RV_FIXTURE_PROJECT_KEY="$(curl -s -X POST "$V1_URL/projects" "${h[@]}" -d '{"name":"rv-fixture-proj-v1"}' | _jget id)"
   export RV_FIXTURE_V2_PROJECT_KEY; RV_FIXTURE_V2_PROJECT_KEY="$(curl -s -X POST "$POS_URL/projects" "${h[@]}" -d "$(printf '{"name":"rv-fixture-proj-v2","workspaceKey":"%s"}' "$RV_FIXTURE_WORKSPACE_KEY")" | _jget projectKey)"
-  export RV_FIXTURE_FOLDER_KEY;    RV_FIXTURE_FOLDER_KEY="$(curl -s -X POST "$POS_URL/folders" "${h[@]}" -d "$(printf '{"name":"rv-fixture-folder","projectKey":"%s"}' "$RV_FIXTURE_PROJECT_KEY")" | _jget folderKey)"
-  local file_body; file_body="$(BPMN="$bpmn" PK="$RV_FIXTURE_PROJECT_KEY" python3 -c 'import json,os; print(json.dumps({"name":"rv-fixture-file","projectKey":os.environ["PK"],"content":os.environ["BPMN"],"type":"BPMN"}))')"
+  export RV_FIXTURE_FOLDER_KEY;    RV_FIXTURE_FOLDER_KEY="$(curl -s -X POST "$POS_URL/folders" "${h[@]}" -d "$(printf '{"name":"rv-fixture-folder","projectKey":"%s"}' "$RV_FIXTURE_V2_PROJECT_KEY")" | _jget folderKey)"
+  local file_body; file_body="$(BPMN="$bpmn" PK="$RV_FIXTURE_V2_PROJECT_KEY" python3 -c 'import json,os; print(json.dumps({"name":"rv-fixture-file","projectKey":os.environ["PK"],"content":os.environ["BPMN"],"type":"BPMN"}))')"
   export RV_FIXTURE_FILE_KEY;      RV_FIXTURE_FILE_KEY="$(curl -s -X POST "$POS_URL/files" "${h[@]}" -d "$file_body" | _jget fileKey)"
+  # VERSION_KEY is blocked on camunda/camunda-hub#25801: a file created via the
+  # v2 API now lives inside a ProcessApplication (V2) project, and createVersion
+  # rejects that ("Cannot create a version for file ... located inside a process
+  # application", 400). There is no project that is both v2-file-creatable AND
+  # versionable, so this stays empty until #25801 — restore/updateVersion path
+  # tests will 404 (tracked, same block as the dropped positive Version suite).
   export RV_FIXTURE_VERSION_KEY;   RV_FIXTURE_VERSION_KEY="$(curl -s -X POST "$POS_URL/versions" "${h[@]}" -d "$(printf '{"fileKey":"%s","name":"rv-fixture-version"}' "$RV_FIXTURE_FILE_KEY")" | _jget versionKey)"
-  echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v1proj=$RV_FIXTURE_PROJECT_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY"
+  echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY"
   # Surface any failed create: an empty key means the tests fall back to the 'x'
   # filler for that resource (via `|| 'x'`) and will 404/403 as if unfixtured.
   local k var
-  for k in WORKSPACE_KEY PROJECT_KEY V2_PROJECT_KEY FOLDER_KEY FILE_KEY VERSION_KEY; do
+  for k in WORKSPACE_KEY V2_PROJECT_KEY FOLDER_KEY FILE_KEY VERSION_KEY; do
     var="RV_FIXTURE_${k}"
     [ -n "${!var-}" ] || echo "  ⚠ RV_FIXTURE_${k} is empty — its create call failed; affected tests will see 404/403"
   done
