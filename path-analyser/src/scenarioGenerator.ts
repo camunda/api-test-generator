@@ -609,7 +609,28 @@ export function generateScenariosForEndpoint(
         return !!node && hasSatisfiedRequiredInputs(node, state.produced);
       });
     };
-    const targetSemantic = remaining.find(isActionableTarget) ?? remaining[0];
+    // #388 follow-up: when NO target is immediately actionable, prefer one
+    // whose authoritative producer's defer will make PROGRESS — i.e. it has a
+    // missing required input that is NOT already in `needed`, so
+    // `deferForMissingPrereqs` front-loads that new prereq (rather than
+    // skipping because "every missing prereq is already in needed"). Without
+    // this, a deep diamond dead-ends: e.g. updateFile's folderKey variant needs
+    // {FileKey, FileRevision, ProjectKey, FolderKey}; from the initial state
+    // none is actionable, so remaining[0] (FileKey→createFile) is targeted, but
+    // its only missing prereq (ProjectKey) is in `needed` → skipped without
+    // enqueue, and ProjectKey→createProject (whose defer would front-load the
+    // NOT-in-needed WorkspaceKey and unblock everything) is never targeted.
+    const canDeferProgress = (st: string): boolean => {
+      const candidates = graph.producersByType[st] ?? [];
+      return candidates.some((opId) => {
+        const node = graph.operations[opId];
+        if (!node || node.providerMap?.[st] !== true) return false;
+        const missing = node.requires.required.filter((s) => !state.produced.has(s));
+        return missing.length > 0 && missing.some((s) => !state.needed.has(s));
+      });
+    };
+    const targetSemantic =
+      remaining.find(isActionableTarget) ?? remaining.find(canDeferProgress) ?? remaining[0];
 
     // #305 Phase 3 — `runtimeEmission` semantics declare a discovery
     // operation (ABox `discoveredVia.operationId`) that surfaces the
