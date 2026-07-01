@@ -231,6 +231,61 @@ const fixtureTransitivePrereq: OperationGraph = makeGraph([
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Fixture F2: deep diamond — target selection must prefer a producer whose
+// defer makes progress (#388 follow-up, updateFile.variant-2)
+// ---------------------------------------------------------------------------
+//
+// Endpoint requires [A, B] (A is remaining[0]). Both siblings are blocked:
+//   - produceA requires B — but B is already in `needed` (endpoint requires
+//     it), so `deferForMissingPrereqs` would skip produceA WITHOUT enqueuing
+//     anything (every missing prereq already tracked) → no progress.
+//   - produceB requires C — C is NOT in `needed`, so deferring produceB
+//     front-loads produceC → progress.
+// If target selection always falls back to remaining[0] (=A), the state
+// drains without ever front-loading C, and B/A are seeded with fakes. The
+// planner must instead target B (whose defer progresses), yielding the full
+// transitive chain [produceC, produceB, produceA, endpoint]. This mirrors
+// updateFile's folderKey variant: {FileKey, ProjectKey, FolderKey} are all in
+// `needed`, createFile/createFolder defer without progress (need ProjectKey ∈
+// needed), only createProject's defer front-loads WorkspaceKey.
+const fixtureDeepDiamond: OperationGraph = makeGraph([
+  makeOp('produceC', {
+    produces: ['C'],
+    providerMap: { C: true },
+  }),
+  makeOp('produceB', {
+    produces: ['B'],
+    required: ['C'],
+    providerMap: { B: true },
+  }),
+  makeOp('produceA', {
+    produces: ['A'],
+    required: ['B'],
+    providerMap: { A: true },
+  }),
+  makeOp('endpointRequiringAB', {
+    required: ['A', 'B'],
+  }),
+]);
+
+describe('planner contracts: deep-diamond target selection (#388 follow-up)', () => {
+  it('assembles the full transitive chain rather than draining to fake seeds', () => {
+    const collection = plan(fixtureDeepDiamond, 'endpointRequiringAB');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const ops = opIdsOf(collection.scenarios[0]);
+    // Every prereq producer present, none dropped/seeded.
+    expect(ops).toContain('produceC');
+    expect(ops).toContain('produceB');
+    expect(ops).toContain('produceA');
+    // Ordering: each producer after its prereq producer.
+    expect(ops.indexOf('produceC')).toBeLessThan(ops.indexOf('produceB'));
+    expect(ops.indexOf('produceB')).toBeLessThan(ops.indexOf('produceA'));
+    expect(ops[ops.length - 1]).toBe('endpointRequiringAB');
+  });
+});
+
 describe('planner contracts: provider preference', () => {
   it('first scenario uses the authoritative provider (#34)', () => {
     // The planner explores both authoritative and incidental producers
@@ -451,6 +506,60 @@ describe('planner contracts: optional sub-shape variants (#37)', () => {
       expect(opIdsOf(s)).not.toContain('searchProducts');
     }
     expect(opIdsOf(base.scenarios[0])).toEqual(['mintOrderId', 'createOrder']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture H2: self-referential OPTIONAL leaf chains a distinct instance (#416)
+// ---------------------------------------------------------------------------
+//
+// `createFolder` produces `FolderKey` authoritatively AND has an optional
+// `parentFolderKey` (also a `FolderKey`). It is the ONLY producer of
+// `FolderKey`. Populating the optional leaf therefore needs a DISTINCT prior
+// `createFolder` instance to mint a real parent — otherwise the variant seeds
+// a fake key the server rejects (403/404). The endpoint is NOT a required
+// consumer of `FolderKey` (that's the path-param case, skipped elsewhere), so
+// the self-instance is legal. Expected chain:
+//   [createWorkspace, createProject, createFolder (parent), createFolder (child)]
+const fixtureSelfRefOptionalLeaf: OperationGraph = makeGraph([
+  makeOp('createWorkspace', {
+    produces: ['WorkspaceKey'],
+    providerMap: { WorkspaceKey: true },
+  }),
+  makeOp('createProject', {
+    required: ['WorkspaceKey'],
+    produces: ['ProjectKey'],
+    providerMap: { ProjectKey: true },
+  }),
+  makeOp('createFolder', {
+    required: ['ProjectKey'],
+    optional: ['FolderKey'],
+    produces: ['FolderKey'],
+    providerMap: { FolderKey: true },
+    optionalSubShapes: [
+      {
+        rootPath: '',
+        leaves: [{ fieldPath: 'parentFolderKey', semantic: 'FolderKey' }],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: self-referential optional leaf (#416)', () => {
+  it('chains a distinct endpoint instance as the parent producer, not a seed', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureSelfRefOptionalLeaf, 'createFolder', {
+      maxVariantsPerEndpoint: 10,
+    });
+    expect(variants.scenarios.length).toBeGreaterThan(0);
+    const variant = variants.scenarios[0];
+    const ops = opIdsOf(variant);
+    // Two createFolder instances: warm-up parent (at root) + endpoint child.
+    expect(ops.filter((o) => o === 'createFolder')).toHaveLength(2);
+    expect(ops).toEqual(['createWorkspace', 'createProject', 'createFolder', 'createFolder']);
+    // The leaf binding is CHAINED (__PENDING__, resolved from the warm-up's
+    // response extract), NOT a seeded fake literal.
+    expect(variant.bindings?.folderKeyVar).toBe('__PENDING__');
+    expect(variant.populatesSubShape?.leafPaths).toEqual(['parentFolderKey']);
   });
 });
 
@@ -1200,5 +1309,53 @@ describe('planner contracts: self-referential optional leaf is skipped (#updateF
     expect(leafSemantics).not.toContain('ThingKey');
     // A leaf of a different semantic type is still emitted — the guard is scoped.
     expect(leafSemantics).toContain('SiblingKey');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Required request-body semantic is chained from its producer (#415).
+//
+// A REQUIRED request-body field carrying a semantic type with a producer must
+// be chained (extracted from the producer) rather than seeded — e.g.
+// updateFile's optimistic-lock `revision` (FileRevision) produced by createFile.
+// The endpoint MUST NOT chain a producer for a semantic it mints itself (e.g.
+// createTenant supplies + returns its own client-minted TenantId) — that would
+// make it depend on its own output.
+// ---------------------------------------------------------------------------
+const fixtureRequiredBodySemanticChained: OperationGraph = makeGraph([
+  makeOp('createThing', { produces: ['ThingKey'], providerMap: { ThingKey: true } }),
+  makeOp('readThingRevision', {
+    produces: ['ThingRevision'],
+    providerMap: { ThingRevision: true },
+  }),
+  makeOp('updateThing', {
+    required: ['ThingKey'],
+    requestBodySemantics: [{ semantic: 'ThingRevision', fieldPath: 'revision', required: true }],
+  }),
+]);
+
+const fixtureSelfMintedBodySemantic: OperationGraph = makeGraph([
+  makeOp('createTenantLike', {
+    produces: ['TenantIdLike'],
+    providerMap: { TenantIdLike: true },
+    requestBodySemantics: [{ semantic: 'TenantIdLike', fieldPath: 'tenantId', required: true }],
+  }),
+]);
+
+describe('planner contracts: required request-body semantic chained from producer (#415)', () => {
+  it('promotes a required body semantic (with an external producer) into the chain', () => {
+    const scenario = plan(fixtureRequiredBodySemanticChained, 'updateThing').scenarios[0];
+    const ops = opIdsOf(scenario);
+    // The producer of the required body semantic (ThingRevision) is chained —
+    // NOT just the path-key producer (createThing).
+    expect(ops).toContain('readThingRevision');
+    expect(ops).toContain('createThing');
+  });
+
+  it('does NOT chain a producer for a body semantic the endpoint mints itself', () => {
+    const coll = plan(fixtureSelfMintedBodySemantic, 'createTenantLike');
+    // Satisfiable as a single-op scenario — no attempt to source its own output.
+    expect(coll.unsatisfied).toBe(false);
+    expect(opIdsOf(coll.scenarios[0])).toEqual(['createTenantLike']);
   });
 });

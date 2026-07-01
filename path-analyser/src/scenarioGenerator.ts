@@ -109,6 +109,30 @@ export function generateScenariosForEndpoint(
   const required = [...endpoint.requires.required];
   const optional = [...endpoint.requires.optional];
 
+  // #415: a REQUIRED request-body field carrying a semantic type that has a
+  // producer must be CHAINED (extracted from the producer) rather than seeded.
+  // Example: updateFile's `revision` (FileRevision) — the file's current
+  // optimistic-lock revision, produced by createFile; seeding a placeholder
+  // fails ("Cannot coerce String to Integer" / stale revision). Promote such
+  // semantics into the required set so the BFS chains a producer and the body
+  // binds the extracted value. Guarded on `required` + a live producer that is
+  // NOT this endpoint itself — optional body semantics (variant leaves),
+  // producer-less client-minted fields, and identifiers the endpoint MINTS
+  // (e.g. createTenant supplies AND returns its own TenantId; promoting it would
+  // make the op chain a producer for its own output) are all untouched.
+  // Already-required semantics dedup below.
+  for (const rb of endpoint.requestBodySemantics ?? []) {
+    const producers = graph.producersByType[rb.semantic];
+    if (
+      rb.required &&
+      producers?.length &&
+      !producers.includes(endpointOpId) &&
+      !required.includes(rb.semantic)
+    ) {
+      required.push(rb.semantic);
+    }
+  }
+
   // Domain requirements flattening (for initial endpoint) - treat all domainRequiresAll as required states for ranking only (not gating existing logic yet)
   const domainRequiredStates = endpoint.domainRequiresAll ? [...endpoint.domainRequiresAll] : [];
   const domainDisjunctions = endpoint.domainDisjunctions ? [...endpoint.domainDisjunctions] : [];
@@ -585,7 +609,28 @@ export function generateScenariosForEndpoint(
         return !!node && hasSatisfiedRequiredInputs(node, state.produced);
       });
     };
-    const targetSemantic = remaining.find(isActionableTarget) ?? remaining[0];
+    // #388 follow-up: when NO target is immediately actionable, prefer one
+    // whose authoritative producer's defer will make PROGRESS — i.e. it has a
+    // missing required input that is NOT already in `needed`, so
+    // `deferForMissingPrereqs` front-loads that new prereq (rather than
+    // skipping because "every missing prereq is already in needed"). Without
+    // this, a deep diamond dead-ends: e.g. updateFile's folderKey variant needs
+    // {FileKey, FileRevision, ProjectKey, FolderKey}; from the initial state
+    // none is actionable, so remaining[0] (FileKey→createFile) is targeted, but
+    // its only missing prereq (ProjectKey) is in `needed` → skipped without
+    // enqueue, and ProjectKey→createProject (whose defer would front-load the
+    // NOT-in-needed WorkspaceKey and unblock everything) is never targeted.
+    const canDeferProgress = (st: string): boolean => {
+      const candidates = graph.producersByType[st] ?? [];
+      return candidates.some((opId) => {
+        const node = graph.operations[opId];
+        if (!node || node.providerMap?.[st] !== true) return false;
+        const missing = node.requires.required.filter((s) => !state.produced.has(s));
+        return missing.length > 0 && missing.some((s) => !state.needed.has(s));
+      });
+    };
+    const targetSemantic =
+      remaining.find(isActionableTarget) ?? remaining.find(canDeferProgress) ?? remaining[0];
 
     // #305 Phase 3 — `runtimeEmission` semantics declare a discovery
     // operation (ABox `discoveredVia.operationId`) that surfaces the
@@ -2104,9 +2149,27 @@ export function generateOptionalSubShapeVariants(
       // searchElementInstances → ElementId).
       const authoritative = graph.producersByType[leaf.semantic] ?? [];
       const inclusive = graph.responseProducersByType?.[leaf.semantic] ?? [];
-      const producerCandidates = unique(
+      const externalCandidates = unique(
         authoritative.length > 0 ? authoritative : inclusive,
       ).filter((id) => id !== endpointOpId);
+      // #416 follow-up — self-referential OPTIONAL leaf. When the endpoint op
+      // is the ONLY producer of this semantic (e.g. createFolder's optional
+      // `parentFolderKey`, a FolderKey that only createFolder mints), allow a
+      // DISTINCT prior instance of the endpoint op as the parent producer so
+      // the body references a real sibling entity instead of a seeded fake
+      // (which the server rejects — 403/404, "folder not found"). The chain
+      // becomes createFolder(parent, at root) → createFolder(child,
+      // parentFolderKey=parent). `generateScenariosForEndpoint` gates the
+      // self-instance behind `allowEndpointAsProducer` (set by
+      // tryProducerChainVariant) and caps the repeat at one via cycle
+      // detection; the #416 prereq-scope guard keeps the warm-up producer from
+      // itself carrying `parentFolderKey`. The self-referential REQUIRED case
+      // (the path-param target entity, e.g. updateFolder) is already skipped
+      // by the requires.required guard above.
+      const endpointIsSoleProducer =
+        externalCandidates.length === 0 &&
+        (authoritative.includes(endpointOpId) || inclusive.includes(endpointOpId));
+      const producerCandidates = endpointIsSoleProducer ? [endpointOpId] : externalCandidates;
 
       // #162 PR 4 (suite-partition cut): Try to build a producer-chain
       // variant first (the canonical "warm-up + search + final" pattern
