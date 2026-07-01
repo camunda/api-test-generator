@@ -136,8 +136,27 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # playwright/config.json → clientMintedFixtures). Default to the seeded
   # `camunda@example.com` user Identity provisions; override for other setups.
   POS_FIXTURE_MEMBER_EMAIL="${POS_FIXTURE_MEMBER_EMAIL:-camunda@example.com}"
+  # POS_FIXTURE_CATALOG_ASSET_KEY: deleteCatalogAsset targets a client-minted
+  # assetKey (an element-template id) that must reference a REAL ingested asset,
+  # else 404. Ingest the shipped fixture — a multipart upload with named parts
+  # `readme` + `template` (ingestCatalogAssets is an orphan op with no producer
+  # chain, so the suite can't self-create it) — and point the fixture var at the
+  # template's own id. `|| echo` keeps a failed ingest non-fatal under set -e;
+  # the test would then 404 and report itself.
+  CATALOG_FIX_DIR="configs/${CONFIG}/fixtures/catalog"
+  POS_FIXTURE_CATALOG_ASSET_KEY="${POS_FIXTURE_CATALOG_ASSET_KEY:-$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)}"
+  if [ -n "$POS_FIXTURE_CATALOG_ASSET_KEY" ]; then
+    if curl -sf -X PUT "$POS_URL/catalog/assets/ingestion" -H "Authorization: Bearer $ADMIN_TOK" \
+      -F "readme=@${CATALOG_FIX_DIR}/readme.md;type=text/markdown" \
+      -F "template=@${CATALOG_FIX_DIR}/test-catalog-asset.json;type=application/json" >/dev/null 2>&1; then
+      echo "  ✓ catalog asset ingested ($POS_FIXTURE_CATALOG_ASSET_KEY)"
+    else
+      echo "  ⚠ catalog asset ingest failed — deleteCatalogAsset may 404"
+    fi
+  fi
   BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
     POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
+    POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
     npx playwright test -c path-analyser/playwright.config.ts || true
   if [ -f "$OUT/pw-positive/index.html" ]; then
