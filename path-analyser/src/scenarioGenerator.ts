@@ -109,6 +109,30 @@ export function generateScenariosForEndpoint(
   const required = [...endpoint.requires.required];
   const optional = [...endpoint.requires.optional];
 
+  // #415: a REQUIRED request-body field carrying a semantic type that has a
+  // producer must be CHAINED (extracted from the producer) rather than seeded.
+  // Example: updateFile's `revision` (FileRevision) — the file's current
+  // optimistic-lock revision, produced by createFile; seeding a placeholder
+  // fails ("Cannot coerce String to Integer" / stale revision). Promote such
+  // semantics into the required set so the BFS chains a producer and the body
+  // binds the extracted value. Guarded on `required` + a live producer that is
+  // NOT this endpoint itself — optional body semantics (variant leaves),
+  // producer-less client-minted fields, and identifiers the endpoint MINTS
+  // (e.g. createTenant supplies AND returns its own TenantId; promoting it would
+  // make the op chain a producer for its own output) are all untouched.
+  // Already-required semantics dedup below.
+  for (const rb of endpoint.requestBodySemantics ?? []) {
+    const producers = graph.producersByType[rb.semantic];
+    if (
+      rb.required &&
+      producers?.length &&
+      !producers.includes(endpointOpId) &&
+      !required.includes(rb.semantic)
+    ) {
+      required.push(rb.semantic);
+    }
+  }
+
   // Domain requirements flattening (for initial endpoint) - treat all domainRequiresAll as required states for ranking only (not gating existing logic yet)
   const domainRequiredStates = endpoint.domainRequiresAll ? [...endpoint.domainRequiresAll] : [];
   const domainDisjunctions = endpoint.domainDisjunctions ? [...endpoint.domainDisjunctions] : [];

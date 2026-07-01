@@ -1202,3 +1202,51 @@ describe('planner contracts: self-referential optional leaf is skipped (#updateF
     expect(leafSemantics).toContain('SiblingKey');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Required request-body semantic is chained from its producer (#415).
+//
+// A REQUIRED request-body field carrying a semantic type with a producer must
+// be chained (extracted from the producer) rather than seeded — e.g.
+// updateFile's optimistic-lock `revision` (FileRevision) produced by createFile.
+// The endpoint MUST NOT chain a producer for a semantic it mints itself (e.g.
+// createTenant supplies + returns its own client-minted TenantId) — that would
+// make it depend on its own output.
+// ---------------------------------------------------------------------------
+const fixtureRequiredBodySemanticChained: OperationGraph = makeGraph([
+  makeOp('createThing', { produces: ['ThingKey'], providerMap: { ThingKey: true } }),
+  makeOp('readThingRevision', {
+    produces: ['ThingRevision'],
+    providerMap: { ThingRevision: true },
+  }),
+  makeOp('updateThing', {
+    required: ['ThingKey'],
+    requestBodySemantics: [{ semantic: 'ThingRevision', fieldPath: 'revision', required: true }],
+  }),
+]);
+
+const fixtureSelfMintedBodySemantic: OperationGraph = makeGraph([
+  makeOp('createTenantLike', {
+    produces: ['TenantIdLike'],
+    providerMap: { TenantIdLike: true },
+    requestBodySemantics: [{ semantic: 'TenantIdLike', fieldPath: 'tenantId', required: true }],
+  }),
+]);
+
+describe('planner contracts: required request-body semantic chained from producer (#415)', () => {
+  it('promotes a required body semantic (with an external producer) into the chain', () => {
+    const scenario = plan(fixtureRequiredBodySemanticChained, 'updateThing').scenarios[0];
+    const ops = opIdsOf(scenario);
+    // The producer of the required body semantic (ThingRevision) is chained —
+    // NOT just the path-key producer (createThing).
+    expect(ops).toContain('readThingRevision');
+    expect(ops).toContain('createThing');
+  });
+
+  it('does NOT chain a producer for a body semantic the endpoint mints itself', () => {
+    const coll = plan(fixtureSelfMintedBodySemantic, 'createTenantLike');
+    // Satisfiable as a single-op scenario — no attempt to source its own output.
+    expect(coll.unsatisfied).toBe(false);
+    expect(opIdsOf(coll.scenarios[0])).toEqual(['createTenantLike']);
+  });
+});
