@@ -1071,7 +1071,7 @@ function camelCase(name: string) {
   return name.charAt(0).toLowerCase() + name.slice(1);
 }
 
-type CanonicalShape = {
+export type CanonicalShape = {
   requestByMediaType?: Record<
     string,
     {
@@ -1254,7 +1254,7 @@ function synthesizeArrayElement(basePath: string, nodes: CanonicalNode[]): unkno
   return synthesizeObjectFromPrefix(prefix, nodes);
 }
 
-function buildRequestBodyFromCanonical(
+export function buildRequestBodyFromCanonical(
   opId: string,
   scenario: EndpointScenario,
   graph: OperationGraph,
@@ -1544,11 +1544,28 @@ function buildRequestBodyFromCanonical(
     // the leaf name (e.g. `nameVar`). The server then rejects the request
     // with 400 "Request property [name] cannot be parsed". This is the
     // same defect class as #174 sub-class 1.
+    // #416 — a sub-shape variant exercises its leaf ONLY on the endpoint
+    // under test (injected by mergePopulatesSubShapeIntoFinalBody). A
+    // prerequisite step must NOT opportunistically fill an optional field of
+    // the same leaf from the variant's binding: the binding is __PENDING__
+    // (or resolved only by a later producer step), so the prereq would send a
+    // not-yet-created key. e.g. updateFile's folderKey variant chains
+    // createFile → createFolder → updateFile; without this guard createFile
+    // sends the seeded folderKey before createFolder runs → 403.
+    const variantLeafNames =
+      !isEndpoint && scenario.populatesSubShape
+        ? new Set(
+            (scenario.populatesSubShape.leafPaths ?? []).map(
+              (p) => p.replace(/\[\]$/, '').split('.').pop() ?? '',
+            ),
+          )
+        : undefined;
     for (const f of nodes.filter(
       (n) => !n.required && !n.path.includes('[]') && !n.path.includes('.'),
     )) {
       const leaf = f.path.split('.').pop() ?? '';
       if (allowedFields && !allowedFields.has(leaf)) continue;
+      if (variantLeafNames?.has(leaf)) continue;
       const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
       if (!template[leaf]) {
         if (scenario.bindings?.[varBase]) {
