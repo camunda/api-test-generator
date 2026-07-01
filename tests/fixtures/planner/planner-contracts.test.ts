@@ -510,6 +510,60 @@ describe('planner contracts: optional sub-shape variants (#37)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Fixture H2: self-referential OPTIONAL leaf chains a distinct instance (#416)
+// ---------------------------------------------------------------------------
+//
+// `createFolder` produces `FolderKey` authoritatively AND has an optional
+// `parentFolderKey` (also a `FolderKey`). It is the ONLY producer of
+// `FolderKey`. Populating the optional leaf therefore needs a DISTINCT prior
+// `createFolder` instance to mint a real parent — otherwise the variant seeds
+// a fake key the server rejects (403/404). The endpoint is NOT a required
+// consumer of `FolderKey` (that's the path-param case, skipped elsewhere), so
+// the self-instance is legal. Expected chain:
+//   [createWorkspace, createProject, createFolder (parent), createFolder (child)]
+const fixtureSelfRefOptionalLeaf: OperationGraph = makeGraph([
+  makeOp('createWorkspace', {
+    produces: ['WorkspaceKey'],
+    providerMap: { WorkspaceKey: true },
+  }),
+  makeOp('createProject', {
+    required: ['WorkspaceKey'],
+    produces: ['ProjectKey'],
+    providerMap: { ProjectKey: true },
+  }),
+  makeOp('createFolder', {
+    required: ['ProjectKey'],
+    optional: ['FolderKey'],
+    produces: ['FolderKey'],
+    providerMap: { FolderKey: true },
+    optionalSubShapes: [
+      {
+        rootPath: '',
+        leaves: [{ fieldPath: 'parentFolderKey', semantic: 'FolderKey' }],
+      },
+    ],
+  }),
+]);
+
+describe('planner contracts: self-referential optional leaf (#416)', () => {
+  it('chains a distinct endpoint instance as the parent producer, not a seed', () => {
+    const variants = generateOptionalSubShapeVariants(fixtureSelfRefOptionalLeaf, 'createFolder', {
+      maxVariantsPerEndpoint: 10,
+    });
+    expect(variants.scenarios.length).toBeGreaterThan(0);
+    const variant = variants.scenarios[0];
+    const ops = opIdsOf(variant);
+    // Two createFolder instances: warm-up parent (at root) + endpoint child.
+    expect(ops.filter((o) => o === 'createFolder')).toHaveLength(2);
+    expect(ops).toEqual(['createWorkspace', 'createProject', 'createFolder', 'createFolder']);
+    // The leaf binding is CHAINED (__PENDING__, resolved from the warm-up's
+    // response extract), NOT a seeded fake literal.
+    expect(variant.bindings?.folderKeyVar).toBe('__PENDING__');
+    expect(variant.populatesSubShape?.leafPaths).toEqual(['parentFolderKey']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fixture I: variant planner ignores producers whose only response leaf
 // is in a 4xx/5xx response (#37)
 // ---------------------------------------------------------------------------
