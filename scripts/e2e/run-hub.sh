@@ -141,8 +141,9 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # else 404. Ingest the shipped fixture — a multipart upload with named parts
   # `readme` + `template` (ingestCatalogAssets is an orphan op with no producer
   # chain, so the suite can't self-create it) — and point the fixture var at the
-  # template's own id. `|| echo` keeps a failed ingest non-fatal under set -e;
-  # the test would then 404 and report itself.
+  # template's own id. A failed ingest is non-fatal (the if/else below only
+  # warns, so `set -e` doesn't abort the run); the test would then 404 and
+  # report itself.
   CATALOG_FIX_DIR="configs/${CONFIG}/fixtures/catalog"
   POS_FIXTURE_CATALOG_ASSET_KEY="${POS_FIXTURE_CATALOG_ASSET_KEY:-$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)}"
   if [ -n "$POS_FIXTURE_CATALOG_ASSET_KEY" ]; then

@@ -591,7 +591,7 @@ async function main() {
   const entityKindsAboxForTemplates = entityKindsAbox;
   // `instantiateAllTemplates` iterates `edges.edges`, so pass an empty edges
   // ABox when the config ships none (entity-only configs still instantiate
-  // EntityLifecycle — see shouldInstantiateScenarioTemplates).
+  // EntityLifecycle — see hasScenarioTemplateSubjectSource).
   if (templatesAbox && hasScenarioTemplateSubjectSource(edgesAbox, entityKindsAboxForTemplates)) {
     const results = instantiateAllTemplates(
       graph,
