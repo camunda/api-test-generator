@@ -1,5 +1,6 @@
 {
   "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
+  "$comment": "A Version entity-kind (createVersion/getVersion/deleteVersion) is intentionally omitted. createVersion is unsatisfiable via the public API: the only files it can create live inside a project (process application), and those cannot be versioned (400 'Cannot create a version for file … as it is located inside a process application'). Blocked on https://github.com/camunda/camunda-hub/issues/25801 — re-add Version once resolved.",
   "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
   "version": 1,
   "kinds": [
