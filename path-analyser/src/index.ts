@@ -1717,6 +1717,17 @@ function buildRequestBodyFromCanonical(
       }
       template.files.resources = fileRef;
     }
+    // Inject per-operation file fixtures from the domain sidecar for
+    // non-deployment-gateway multipart operations (e.g. ingestCatalogAssets
+    // with `readme[]` and `template[]` binary file arrays). Each entry maps
+    // a multipart field name to an `@@FILE:<path>` reference resolved by the
+    // Playwright emitter's `resolveFixture` helper at runtime.
+    const fileFixturesForOp = graph.domain?.operationFileFixtures?.[opId];
+    if (fileFixturesForOp) {
+      for (const [fieldName, fixturePath] of Object.entries(fileFixturesForOp)) {
+        template.files[fieldName] = `@@FILE:${fixturePath}`;
+      }
+    }
     // Wire global context seeds (e.g. tenantIdVar) into multipart fields by
     // matching the seed's `fieldName` against the canonical schema nodes.
     // Each match seeds the planner binding with `__PENDING__` (resolved at

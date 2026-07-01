@@ -130,7 +130,14 @@ unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD 2>/dev/null || true
 # Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
+  # POS_FIXTURE_MEMBER_EMAIL: the member email for addMember/removeMember is
+  # client-minted and must be an EXISTING Hub user, so the emitted suite reads
+  # `process.env.POS_FIXTURE_MEMBER_EMAIL || <seed>` (configs/camunda-hub/codegen/
+  # playwright/config.json → clientMintedFixtures). Default to the seeded
+  # `camunda@example.com` user Identity provisions; override for other setups.
+  POS_FIXTURE_MEMBER_EMAIL="${POS_FIXTURE_MEMBER_EMAIL:-camunda@example.com}"
   BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
+    POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
     npx playwright test -c path-analyser/playwright.config.ts || true
   if [ -f "$OUT/pw-positive/index.html" ]; then

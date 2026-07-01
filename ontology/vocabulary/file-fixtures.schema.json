@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://camunda.github.io/api-test-generator/ns/v1/file-fixtures.schema.json",
+  "title": "FileFixturesAbox",
+  "description": "TBox JSON Schema for an ABox file mapping multipart form-data field names to fixture file paths for non-deployment-gateway operations. Keys in `fixtures` are OpenAPI operationIds; values are objects mapping multipart field names to fixture paths relative to the active config's fixtures/ directory. The planner injects @@FILE:<path> references for each entry so the Playwright emitter can stream the fixture bytes. The schema is intentionally agnostic to which API ships the fixtures — instance-data lives in the per-config ABox file (e.g. configs/camunda-hub/ontology/file-fixtures.json).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "fixtures"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "@context": {
+      "description": "Optional JSON-LD context. Ignored by the loader; preserved verbatim so external RDF tooling can resolve term IRIs without modification.",
+      "type": [
+        "object",
+        "string",
+        "array"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version of this ABox file. Bumped only when the TBox shape changes incompatibly."
+    },
+    "fixtures": {
+      "type": "object",
+      "description": "Map from OpenAPI operationId to per-field fixture path mappings. Each value object maps a multipart field name to a fixture file path relative to the active config's fixtures/ directory.",
+      "additionalProperties": {
+        "type": "object",
+        "description": "Map from multipart field name to fixture file path (relative to fixtures/).",
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.\\-/]+$"
+        }
+      }
+    }
+  }
+}

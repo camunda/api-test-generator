@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { artifactKindsSchema } from '../path-analyser/src/ontology/artifactKindsSchema.ts';
 import { edgeSchema } from '../path-analyser/src/ontology/edgeSchema.ts';
 import { entityKindsSchema } from '../path-analyser/src/ontology/entityKindsSchema.ts';
+import { fileFixturesSchema } from '../path-analyser/src/ontology/fileFixturesSchema.ts';
 import { globalContextSeedsSchema } from '../path-analyser/src/ontology/globalContextSeedsSchema.ts';
 import { runtimeStatesSchema } from '../path-analyser/src/ontology/runtimeStatesSchema.ts';
 import { scenarioTemplateSchema } from '../path-analyser/src/ontology/scenarioTemplateSchema.ts';
@@ -54,6 +55,10 @@ const ARTIFACTS: OntologyArtifact[] = [
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'global-context-seeds.schema.json'),
     schema: globalContextSeedsSchema,
+  },
+  {
+    jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'file-fixtures.schema.json'),
+    schema: fileFixturesSchema,
   },
   {
     jsonPath: join(REPO_ROOT, 'ontology', 'vocabulary', 'scenario-template.schema.json'),
