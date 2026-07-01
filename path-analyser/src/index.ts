@@ -47,6 +47,24 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * Whether the config ships a subject source for scenario-template
+ * instantiation: an edges ABox (drives `EdgeLifecycle`) and/or an entity-kinds
+ * ABox (drives `EntityLifecycle`). Presence-only.
+ *
+ * The pre-fix instantiation guard was `templatesAbox && edgesAbox`, treating an
+ * edges ABox as the *only* subject source — so an entity-only config (e.g.
+ * camunda-hub: File/Folder/Version entity-kinds, no edges) got zero lifecycle
+ * suites. Recognising an entity-kinds ABox as an independent subject source
+ * fixes that without affecting configs that ship both (e.g. camunda-oca).
+ */
+export function hasScenarioTemplateSubjectSource(
+  edgesAbox: object | null,
+  entityKindsAbox: object | null,
+): boolean {
+  return Boolean(edgesAbox || entityKindsAbox);
+}
+
 async function main() {
   // Robust base directory detection: if the current working directory already IS the
   // path-analyser package, use it directly; otherwise append the relative path.
@@ -571,11 +589,14 @@ async function main() {
   const templatesAbox = loadScenarioTemplatesAbox(repoRoot);
   const edgesAbox = loadEdgesAbox(repoRoot);
   const entityKindsAboxForTemplates = entityKindsAbox;
-  if (templatesAbox && edgesAbox) {
+  // `instantiateAllTemplates` iterates `edges.edges`, so pass an empty edges
+  // ABox when the config ships none (entity-only configs still instantiate
+  // EntityLifecycle — see shouldInstantiateScenarioTemplates).
+  if (templatesAbox && hasScenarioTemplateSubjectSource(edgesAbox, entityKindsAboxForTemplates)) {
     const results = instantiateAllTemplates(
       graph,
       templatesAbox,
-      edgesAbox,
+      edgesAbox ?? { version: 1, edges: [] },
       canonicalByEndpoint,
       entityKindsAboxForTemplates,
     );
