@@ -231,6 +231,61 @@ const fixtureTransitivePrereq: OperationGraph = makeGraph([
   }),
 ]);
 
+// ---------------------------------------------------------------------------
+// Fixture F2: deep diamond — target selection must prefer a producer whose
+// defer makes progress (#388 follow-up, updateFile.variant-2)
+// ---------------------------------------------------------------------------
+//
+// Endpoint requires [A, B] (A is remaining[0]). Both siblings are blocked:
+//   - produceA requires B — but B is already in `needed` (endpoint requires
+//     it), so `deferForMissingPrereqs` would skip produceA WITHOUT enqueuing
+//     anything (every missing prereq already tracked) → no progress.
+//   - produceB requires C — C is NOT in `needed`, so deferring produceB
+//     front-loads produceC → progress.
+// If target selection always falls back to remaining[0] (=A), the state
+// drains without ever front-loading C, and B/A are seeded with fakes. The
+// planner must instead target B (whose defer progresses), yielding the full
+// transitive chain [produceC, produceB, produceA, endpoint]. This mirrors
+// updateFile's folderKey variant: {FileKey, ProjectKey, FolderKey} are all in
+// `needed`, createFile/createFolder defer without progress (need ProjectKey ∈
+// needed), only createProject's defer front-loads WorkspaceKey.
+const fixtureDeepDiamond: OperationGraph = makeGraph([
+  makeOp('produceC', {
+    produces: ['C'],
+    providerMap: { C: true },
+  }),
+  makeOp('produceB', {
+    produces: ['B'],
+    required: ['C'],
+    providerMap: { B: true },
+  }),
+  makeOp('produceA', {
+    produces: ['A'],
+    required: ['B'],
+    providerMap: { A: true },
+  }),
+  makeOp('endpointRequiringAB', {
+    required: ['A', 'B'],
+  }),
+]);
+
+describe('planner contracts: deep-diamond target selection (#388 follow-up)', () => {
+  it('assembles the full transitive chain rather than draining to fake seeds', () => {
+    const collection = plan(fixtureDeepDiamond, 'endpointRequiringAB');
+    expect(collection.unsatisfied).not.toBe(true);
+    expect(collection.scenarios.length).toBeGreaterThan(0);
+    const ops = opIdsOf(collection.scenarios[0]);
+    // Every prereq producer present, none dropped/seeded.
+    expect(ops).toContain('produceC');
+    expect(ops).toContain('produceB');
+    expect(ops).toContain('produceA');
+    // Ordering: each producer after its prereq producer.
+    expect(ops.indexOf('produceC')).toBeLessThan(ops.indexOf('produceB'));
+    expect(ops.indexOf('produceB')).toBeLessThan(ops.indexOf('produceA'));
+    expect(ops[ops.length - 1]).toBe('endpointRequiringAB');
+  });
+});
+
 describe('planner contracts: provider preference', () => {
   it('first scenario uses the authoritative provider (#34)', () => {
     // The planner explores both authoritative and incidental producers
