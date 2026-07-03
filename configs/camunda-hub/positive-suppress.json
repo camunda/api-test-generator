@@ -1,13 +1,21 @@
 {
-  "$comment": "Per-config positive-suite suppression list. Each entry removes an operation's feature/variant spec from the generated positive suite because the planner cannot produce a passing test for it AND no scenario template covers it. Use sparingly, document the reason + upstream tracking issue, and revisit when the gap closes.",
+  "$comment": "Per-config positive-suite suppression list. Each entry removes an operation's feature/variant spec from the generated positive suite because the planner cannot produce a passing test for it AND no scenario template covers it. Use sparingly, document the reason + tracking issue, and revisit when the gap closes.",
   "suppress": [
     {
+      "operationId": "createCluster",
+      "reason": "The v2 /clusters surface is dynamic cluster management — an opt-in operator feature (DYNAMIC_CLUSTER_MANAGEMENT_ENABLED, off by default; clusters self-register via discovery) that is orthogonal to this suite's content-API model (clusterId is not a content entity and doesn't chain). Dropped from the default content-API nightly (#423). createCluster is the only cluster op that passes, and only with the flag on."
+    },
+    {
+      "operationId": "getClusters",
+      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also currently broken: GET /clusters returns 500 even with the flag on (camunda/camunda-hub#25908)."
+    },
+    {
       "operationId": "deleteCluster",
-      "reason": "DELETE /clusters/{clusterId} needs a real clusterId, but clusterId is not modelled as a semantic type, so the planner cannot chain createCluster -> deleteCluster and seeds a filler that 404s (verified: deleteCluster returns 204 when given a real clusterId). Full fix: model clusterId as a client-minted identifier upstream (camunda/camunda-hub#25907), then un-suppress (#425). Parent: #423."
+      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also needs a chainable clusterId to test: clusterId isn't modelled as a semantic type, so createCluster -> deleteCluster can't chain (camunda/camunda-hub#25907)."
     },
     {
       "operationId": "getClusterUsageMetrics",
-      "reason": "GET /clusters/usage-metrics has a required `id` query param (the clusterId) plus `start`/`end`; without a chainable clusterId the request omits `id` and 400s ('Required parameter id is not present'). Same clusterId gap as deleteCluster — unblocked by the same upstream modelling (camunda/camunda-hub#25907), then un-suppress (#425). createCluster still passes on the DYNAMIC_CLUSTER_MANAGEMENT_ENABLED flag alone. Parent: #423."
+      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also needs a chainable clusterId: GET /clusters/usage-metrics has a required `id` (clusterId) query param that can't be sourced (camunda/camunda-hub#25907)."
     }
   ]
 }
