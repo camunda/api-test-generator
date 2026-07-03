@@ -1,5 +1,5 @@
 {
-  "$comment": "Per-config positive-suite suppression list. Each entry removes an operation's feature/variant spec from the generated positive suite because the planner cannot produce a passing test for it AND no scenario template covers it. Use sparingly, document the reason + tracking issue, and revisit when the gap closes.",
+  "$comment": "Per-config positive-suite suppression list. Each entry removes an operation's feature/variant spec from the generated positive suite. Use it — sparingly, always with a documented reason + tracking issue — for operations that either (a) the planner cannot produce a passing test for and no scenario template covers, or (b) are intentionally out of scope for the suite (e.g. an opt-in / feature-flagged operator surface the default run shouldn't exercise). Revisit when the gap closes or scope changes.",
   "suppress": [
     {
       "operationId": "createCluster",
