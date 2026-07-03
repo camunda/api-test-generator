@@ -15,6 +15,12 @@ on:
     # 02:00 UTC nightly. workflow_dispatch lets you trigger an ad-hoc run.
     - cron: '0 2 * * *'
   workflow_dispatch: {}
+  # TEMPORARY (testing): trigger on push to the positive-nightly branch so the
+  # end-to-end run + Slack publish can be exercised on demand. REMOVE before
+  # merging to main — the nightly should only run on schedule/dispatch.
+  push:
+    branches:
+      - feat/hub-positive-nightly
 
 defaults:
   run:
@@ -36,8 +42,10 @@ env:
   HUB_UI_PORT: '8088'
   KEYCLOAK_PORT: '18080'
   # Channel to publish results to. The Slack bot must be invited to this channel
-  # for chat.postMessage to succeed (`/invite @<bot>` in #camunda-hub-api-test-results).
-  SLACK_CHANNEL: '#camunda-hub-api-test-results'
+  # for chat.postMessage to succeed (`/invite @<bot>`).
+  # TEMPORARY (testing): pointed at #prj-qa-sandbox. Restore
+  # #camunda-hub-api-test-results before merging to main.
+  SLACK_CHANNEL: '#prj-qa-sandbox'
 
 jobs:
   nightly-hub:
