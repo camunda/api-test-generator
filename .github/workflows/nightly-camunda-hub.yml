@@ -382,6 +382,7 @@ jobs:
             secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
 
       - name: Notify Slack (positive suite)
+        id: slack-positive
         if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
         uses: slackapi/slack-github-action@v2
         with:
@@ -393,7 +394,24 @@ jobs:
               "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 positive>', steps.testrail.outputs.positive_url) || '' }}${{ steps.pw-totals.outputs.stale_suppress != '' && format('\n⚠️ config drift: positive-suppress lists `{0}` not in the current spec — update it.', steps.pw-totals.outputs.stale_suppress) || '' }}"
             }
 
+      # Threaded reply listing the known issues that cause positive ops to be
+      # suppressed (configs/camunda-hub/positive-suppress.json). Keep in sync
+      # with that file when suppressions change.
+      - name: Notify Slack (positive — known issues)
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "thread_ts": "${{ steps.slack-positive.outputs.ts }}",
+              "text": "ℹ️ Some operations are skipped in the positive suite due to known issues:\n• Versions can't be created via the public API — <https://github.com/camunda/camunda-hub/issues/25801|camunda-hub#25801>\n• `deleteCatalogAsset` — no obtainable assetKey — <https://github.com/camunda/camunda-hub/issues/25576|camunda-hub#25576>\n• Cluster registration is opt-in / out of scope — <https://github.com/camunda/api-test-generator/issues/423|#423>"
+            }
+
       - name: Notify Slack (negative suite)
+        id: slack-negative
         if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
         uses: slackapi/slack-github-action@v2
         with:
@@ -403,4 +421,19 @@ jobs:
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
               "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.negative_passed }} passed · ❌ ${{ steps.pw-totals.outputs.negative_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.negative_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.secured_url != '' && format(' · <{0}|📋 secured>', steps.testrail.outputs.secured_url) || '' }}${{ steps.testrail.outputs.rbac_url != '' && format(' · <{0}|📋 rbac>', steps.testrail.outputs.rbac_url) || '' }}"
+            }
+
+      # Threaded reply listing the known issues that cause negative ops to be
+      # excluded (configs/camunda-hub/request-validation.json → excludeOperations).
+      - name: Notify Slack (negative — known issues)
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-negative.outputs.ts != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "thread_ts": "${{ steps.slack-negative.outputs.ts }}",
+              "text": "ℹ️ Some operations are skipped in the negative suite due to known issues:\n• `updateVersion` / `restoreVersion` — versioning blocked, no version fixture can exist — <https://github.com/camunda/camunda-hub/issues/25801|camunda-hub#25801> (tracked via <https://github.com/camunda/api-test-generator/issues/419|#419>)"
             }

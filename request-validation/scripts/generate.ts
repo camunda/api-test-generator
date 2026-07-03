@@ -156,6 +156,20 @@ async function main() {
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
+  // #419 — drop config-excluded operations up front so every generator skips
+  // them (blocked-upstream ops whose negative tests can't reach their target,
+  // e.g. Hub updateVersion/restoreVersion per camunda-hub#25801). One filter
+  // here beats threading an exclude set through every generate*() call.
+  const excludeOps = new Set((rvConfig.excludeOperations ?? []).map((e) => e.operationId));
+  if (excludeOps.size > 0) {
+    const before = model.operations.length;
+    model.operations = model.operations.filter((op) => !excludeOps.has(op.operationId));
+    const dropped = before - model.operations.length;
+    for (const e of rvConfig.excludeOperations ?? []) {
+      console.log(`  ⏭  exclude-operations: ${e.operationId} — ${e.reason}`);
+    }
+    console.log(`[generate] excluded ${dropped} operation(s) from the negative suite (#419)`);
+  }
   const specCommit: string | undefined = specProvenance;
   // When TEST_SEED is set (or left at the default), use a stable placeholder
   // so generator output is byte-reproducible. Set TEST_SEED=random to opt in

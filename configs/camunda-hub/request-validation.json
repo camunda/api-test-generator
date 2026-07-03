@@ -14,5 +14,15 @@
   },
   "pathResourceFixtures": {
     "projectKey": "RV_FIXTURE_V2_PROJECT_KEY"
-  }
+  },
+  "excludeOperations": [
+    {
+      "operationId": "updateVersion",
+      "reason": "Blocked on camunda/camunda-hub#25801 (tracked via #419): a version can't be created via the public API (every v2-creatable file lives inside a process application, which can't be versioned), so RV_FIXTURE_VERSION_KEY is empty and updateVersion's negative tests 404 on the missing version instead of reaching body validation (400). Excluded from the negative suite until versioning is unblocked."
+    },
+    {
+      "operationId": "restoreVersion",
+      "reason": "Blocked on camunda/camunda-hub#25801 (tracked via #419): same as updateVersion — no version can exist, so restoreVersion's negative tests 404 instead of 400. Excluded until versioning is unblocked."
+    }
+  ]
 }

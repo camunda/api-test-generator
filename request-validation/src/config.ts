@@ -108,6 +108,16 @@ export interface RequestValidationConfig {
    * needs a V2 project key while the body needs a V1 one (#352).
    */
   pathResourceFixtures?: Record<string, string>;
+  /**
+   * Operations to exclude from negative-suite generation entirely, with a
+   * documented reason. Use for ops that are blocked upstream so their negative
+   * tests can't reach the validation path they target (e.g. Hub version ops —
+   * updateVersion/restoreVersion — whose fixture can't exist per
+   * camunda/camunda-hub#25801, so they 404 instead of 400; tracked via #419).
+   * The whole op is dropped (all its negative cases), so the nightly stays green
+   * on known blockers instead of perpetually red. Re-enable when unblocked.
+   */
+  excludeOperations?: { operationId: string; reason: string }[];
 }
 
 const DEFAULTS: RequestValidationConfig = {
@@ -212,6 +222,25 @@ export function loadRequestValidationConfig(
       );
     }
     merged.pathResourceFixtures = v;
+  }
+  if ('excludeOperations' in parsed) {
+    const v = parsed.excludeOperations;
+    if (
+      !Array.isArray(v) ||
+      !v.every(
+        (e) =>
+          isPlainObject(e) &&
+          typeof e.operationId === 'string' &&
+          e.operationId.trim().length > 0 &&
+          typeof e.reason === 'string' &&
+          e.reason.trim().length > 0,
+      )
+    ) {
+      throw new Error(
+        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, reason } objects with non-empty strings.`,
+      );
+    }
+    merged.excludeOperations = v as { operationId: string; reason: string }[];
   }
   return merged;
 }
