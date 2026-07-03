@@ -141,6 +141,20 @@ function isEnvVarNameRecord(v: unknown): v is Record<string, string> {
   );
 }
 
+function isExcludeOperations(v: unknown): v is { operationId: string; reason: string }[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (e) =>
+        isPlainObject(e) &&
+        typeof e.operationId === 'string' &&
+        e.operationId.trim().length > 0 &&
+        typeof e.reason === 'string' &&
+        e.reason.trim().length > 0,
+    )
+  );
+}
+
 /**
  * Load `configs/<config>/request-validation.json` and merge with defaults.
  * `repoRoot` must be the directory containing `configs.json`.
@@ -225,22 +239,12 @@ export function loadRequestValidationConfig(
   }
   if ('excludeOperations' in parsed) {
     const v = parsed.excludeOperations;
-    if (
-      !Array.isArray(v) ||
-      !v.every(
-        (e) =>
-          isPlainObject(e) &&
-          typeof e.operationId === 'string' &&
-          e.operationId.trim().length > 0 &&
-          typeof e.reason === 'string' &&
-          e.reason.trim().length > 0,
-      )
-    ) {
+    if (!isExcludeOperations(v)) {
       throw new Error(
         `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, reason } objects with non-empty strings.`,
       );
     }
-    merged.excludeOperations = v as { operationId: string; reason: string }[];
+    merged.excludeOperations = v;
   }
   return merged;
 }

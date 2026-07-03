@@ -391,7 +391,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 positive>', steps.testrail.outputs.positive_url) || '' }}${{ steps.pw-totals.outputs.stale_suppress != '' && format('\n⚠️ config drift: positive-suppress lists `{0}` not in the current spec — update it.', steps.pw-totals.outputs.stale_suppress) || '' }}"
+              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 positive>', steps.testrail.outputs.positive_url) || '' }}${{ steps.pw-totals.outputs.stale_suppress != '' && format('\n⚠️ config drift: positive-suppress lists `{0}` not in the current spec — update it.', steps.pw-totals.outputs.stale_suppress) || '' }}"
             }
 
       # Threaded reply listing the known issues that cause positive ops to be
@@ -420,7 +420,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.negative_passed }} passed · ❌ ${{ steps.pw-totals.outputs.negative_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.negative_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.secured_url != '' && format(' · <{0}|📋 secured>', steps.testrail.outputs.secured_url) || '' }}${{ steps.testrail.outputs.rbac_url != '' && format(' · <{0}|📋 rbac>', steps.testrail.outputs.rbac_url) || '' }}"
+              "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.negative_passed }} passed · ❌ ${{ steps.pw-totals.outputs.negative_failed }} failed\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.secured_url != '' && format(' · <{0}|📋 secured>', steps.testrail.outputs.secured_url) || '' }}${{ steps.testrail.outputs.rbac_url != '' && format(' · <{0}|📋 rbac>', steps.testrail.outputs.rbac_url) || '' }}"
             }
 
       # Threaded reply listing the known issues that cause negative ops to be
