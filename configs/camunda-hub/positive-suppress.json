@@ -3,7 +3,11 @@
   "suppress": [
     {
       "operationId": "deleteCluster",
-      "reason": "DELETE /clusters/{clusterId} needs a real clusterId, but clusterId is not modelled as a semantic type, so the planner cannot chain createCluster -> deleteCluster and seeds a filler that 404s. createCluster + getClusterUsageMetrics pass once DYNAMIC_CLUSTER_MANAGEMENT_ENABLED is set (see docker/docker-compose.hub.yml). Full fix: model clusterId as a client-minted identifier upstream (camunda/camunda-hub#25907), then un-suppress (#425). Parent: #423."
+      "reason": "DELETE /clusters/{clusterId} needs a real clusterId, but clusterId is not modelled as a semantic type, so the planner cannot chain createCluster -> deleteCluster and seeds a filler that 404s (verified: deleteCluster returns 204 when given a real clusterId). Full fix: model clusterId as a client-minted identifier upstream (camunda/camunda-hub#25907), then un-suppress (#425). Parent: #423."
+    },
+    {
+      "operationId": "getClusterUsageMetrics",
+      "reason": "GET /clusters/usage-metrics has a required `id` query param (the clusterId) plus `start`/`end`; without a chainable clusterId the request omits `id` and 400s ('Required parameter id is not present'). Same clusterId gap as deleteCluster — unblocked by the same upstream modelling (camunda/camunda-hub#25907), then un-suppress (#425). createCluster still passes on the DYNAMIC_CLUSTER_MANAGEMENT_ENABLED flag alone. Parent: #423."
     }
   ]
 }
