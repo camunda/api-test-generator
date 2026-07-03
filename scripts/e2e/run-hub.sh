@@ -170,6 +170,7 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
     POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
     POS_FIXTURE_FILE_CONTENT="$POS_FIXTURE_FILE_CONTENT" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$OUT/pw-positive.json" \
     npx playwright test -c path-analyser/playwright.config.ts || true
   if [ -f "$OUT/pw-positive/index.html" ]; then
     echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
