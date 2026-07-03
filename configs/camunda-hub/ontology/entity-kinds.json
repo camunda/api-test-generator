@@ -39,7 +39,8 @@
       "establishedBy": "createFile",
       "observableVia": "getFile",
       "revokedBy": "deleteFile",
-      "description": "A file entity, identified by its server-minted fileKey. Established via createFile (POST /files), observed via getFile, revoked via deleteFile."
+      "restorableVia": "restoreFile",
+      "description": "A file entity, identified by its server-minted fileKey. Established via createFile (POST /files), observed via getFile, revoked via deleteFile (a soft-delete). restoreFile (POST /files/{fileKey}/restoration) restores a soft-deleted file — the RestoreLifecycle template (#426) drives create → soft-delete → restore so restore is exercised against a recently-deleted file rather than a live one (which 404s)."
     },
     {
       "@type": "EntityKind",

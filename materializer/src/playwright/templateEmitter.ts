@@ -162,6 +162,14 @@ function renderLifecycleSuite(
 ): string {
   const scenario = file.scenario;
   const steps = scenario.steps;
+  // #426 — RestoreLifecycle is a 7-step Entity-subject template
+  // (create → present → soft-delete → absent → restore → present). It
+  // shares the statusOnly observe assertion and the per-step helpers with
+  // EntityLifecycle but has its own step sequence, so it renders through a
+  // dedicated path rather than the fixed 5-step lifecycle below.
+  if (file.templateName === 'RestoreLifecycle') {
+    return renderRestoreLifecycleSuite(file, globalContextSeeds, clientMintedFixtures);
+  }
   // Validate template shape before emit. The L3 invariants already
   // guarantee this on `npm test`, but the emitter is its own entry point
   // (materializer CLI, future per-suite invocations) and must not produce
@@ -359,6 +367,178 @@ function renderLifecycleSuite(
   // (7) observe absent
   lines.push('');
   appendObserveStep(lines, observeAbsent, scenario.bindings, stepIdx, 'observe (absent)', ecOps);
+
+  lines.push('  });');
+  lines.push('});');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * #426 — RestoreLifecycle suite emitter.
+ *
+ * Renders the 7-step soft-delete-restore lifecycle:
+ *   prereqChain → invoke(create) → observe(present, 200)
+ *     → invoke(soft-delete) → observe(absent, 404)
+ *     → invoke(restore) → observe(present, 200)
+ *
+ * Reuses the same per-step helpers and import-detection logic as
+ * `renderLifecycleSuite`; only the step sequence and the test title differ.
+ */
+function renderRestoreLifecycleSuite(
+  file: TemplateScenarioFile,
+  globalContextSeeds: readonly TemplateGlobalContextSeed[],
+  clientMintedFixtures?: Readonly<Record<string, string>>,
+): string {
+  const scenario = file.scenario;
+  const steps = scenario.steps;
+  if (steps.length !== 7) {
+    throw new Error(
+      `RestoreLifecycle template ${file.subjectName} must have exactly 7 steps; got ${steps.length}.`,
+    );
+  }
+  const [prereq, establish, observePresent1, revoke, observeAbsent, restore, observePresent2] =
+    steps;
+  if (prereq.kind !== 'prereqChain') {
+    throw new Error(`Step 0 of ${file.subjectName} must be a prereqChain step.`);
+  }
+  if (establish.kind !== 'invoke') {
+    throw new Error(`Step 1 of ${file.subjectName} must be an invoke step (create).`);
+  }
+  if (revoke.kind !== 'invoke') {
+    throw new Error(`Step 3 of ${file.subjectName} must be an invoke step (soft-delete).`);
+  }
+  if (restore.kind !== 'invoke') {
+    throw new Error(`Step 5 of ${file.subjectName} must be an invoke step (restore).`);
+  }
+  for (const [i, s] of [
+    [2, observePresent1],
+    [6, observePresent2],
+  ] as const) {
+    if (
+      s.kind !== 'observe' ||
+      s.assertion.kind !== 'statusOnly' ||
+      s.assertion.expect !== 'present'
+    ) {
+      throw new Error(`Step ${i} of ${file.subjectName} must be a present-observe step.`);
+    }
+  }
+  if (
+    observeAbsent.kind !== 'observe' ||
+    observeAbsent.assertion.kind !== 'statusOnly' ||
+    observeAbsent.assertion.expect !== 'absent'
+  ) {
+    throw new Error(`Step 4 of ${file.subjectName} must be an absent-observe step.`);
+  }
+  // Narrow the present-observe steps for the render calls below.
+  if (observePresent1.kind !== 'observe' || observePresent2.kind !== 'observe') {
+    throw new Error(`RestoreLifecycle ${file.subjectName}: present steps must be observe steps.`);
+  }
+
+  const allRequestSteps: RequestStep[] = [
+    ...prereq.requestPlan,
+    establish.requestPlan,
+    observePresent1.requestPlan,
+    revoke.requestPlan,
+    observeAbsent.requestPlan,
+    restore.requestPlan,
+    observePresent2.requestPlan,
+  ];
+  const ecOps = new Set<string>(scenario.eventuallyConsistentOps ?? []);
+  const observeOpIds = [
+    observePresent1.operationId,
+    observeAbsent.operationId,
+    observePresent2.operationId,
+  ];
+  const needsExtractInto = allRequestSteps.some((rp) => (rp.extract?.length ?? 0) > 0);
+  const needsAwaitEventually =
+    allRequestSteps.some((rp) => (rp.eventualWaitsAfter?.length ?? 0) > 0) ||
+    allRequestSteps.some((rp) => stepNeedsAwaitForOp(rp, ecOps)) ||
+    observeOpIds.some((opId) => ecOps.has(opId));
+  const needsResolveFixture = allRequestSteps.some(
+    (rp) => rp.bodyKind === 'multipart' && !!rp.multipartTemplate,
+  );
+
+  const lines: string[] = [];
+  lines.push("import { expect, test } from '@playwright/test';");
+  lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  const seedingImports = ['initSpecSalt', 'seedBinding'];
+  if (needsExtractInto) seedingImports.push('extractInto');
+  lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
+  if (needsAwaitEventually) {
+    lines.push("import { awaitEventually } from '../../support/await-eventually';");
+  }
+  if (needsResolveFixture) {
+    lines.push("import { resolveFixture } from '../../support/fixtures';");
+  }
+  lines.push('');
+  lines.push(`initSpecSalt('${file.subjectName}.restore-lifecycle');`);
+  lines.push('');
+  lines.push(`test.describe('${file.subjectName} restore lifecycle', () => {`);
+  lines.push(
+    `  test('establish ${file.subjectName}, soft-delete, restore, observe present', async ({ request }) => {`,
+  );
+  lines.push('    const baseUrl = buildBaseUrl();');
+  lines.push('    const ctx: Record<string, unknown> = {};');
+  lines.push(
+    ...emitCtxSeeding({
+      indent: '    ',
+      bindings: prereq.bindings,
+      seedBindings: prereq.seedBindings,
+      globalContextSeeds,
+      uniqueBindings: computeUniqueBindings(allRequestSteps),
+      fixtureEnvByBinding: clientMintedFixtures,
+    }),
+  );
+
+  let stepIdx = 0;
+  for (const rp of prereq.requestPlan) {
+    lines.push('');
+    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    stepIdx++;
+  }
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    establish.requestPlan,
+    stepIdx,
+    `invoke (establish): ${establish.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+  lines.push('');
+  appendObserveStep(lines, observePresent1, scenario.bindings, stepIdx, 'observe (present)', ecOps);
+  stepIdx++;
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    revoke.requestPlan,
+    stepIdx,
+    `invoke (soft-delete): ${revoke.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+  lines.push('');
+  appendObserveStep(lines, observeAbsent, scenario.bindings, stepIdx, 'observe (absent)', ecOps);
+  stepIdx++;
+  lines.push('');
+  appendInlineRequestStep(
+    lines,
+    restore.requestPlan,
+    stepIdx,
+    `invoke (restore): ${restore.operationId}`,
+    ecOps,
+  );
+  stepIdx++;
+  lines.push('');
+  appendObserveStep(
+    lines,
+    observePresent2,
+    scenario.bindings,
+    stepIdx,
+    'observe (present, restored)',
+    ecOps,
+  );
 
   lines.push('  });');
   lines.push('});');

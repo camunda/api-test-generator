@@ -582,6 +582,204 @@ function compileEntityLifecycle(
 }
 
 /**
+ * #426 — RestoreLifecycle compiler.
+ *
+ * A soft-delete restore op (e.g. `restoreFile`, `POST
+ * /files/{fileKey}/restoration`) only succeeds when its target instance
+ * is actually in the recently-deleted state. The plain requires-chain
+ * (`x-semantic-requires: File` → chain `createFile`) invokes restore on a
+ * *live* instance and gets 404. This template instead drives the instance
+ * through the full transition so restore is exercised meaningfully:
+ *
+ *   create → observe present (200) → soft-delete (`revokedBy`)
+ *     → observe absent (404) → restore (`restorableVia`) → observe present (200)
+ *
+ * Applies to `shape: "entity"` kinds that declare `restorableVia`; the
+ * dispatcher skips entity kinds without it (not every entity has a
+ * restore op). Structurally an extension of `compileEntityLifecycle`
+ * (same prereq/bindings/observe machinery), so it reuses the same helpers
+ * and the existing `statusOnly` observe assertion.
+ */
+function compileRestoreLifecycle(
+  template: ScenarioTemplate,
+  kind: EntityKind,
+  graph: OperationGraph,
+  canonical: CanonicalScenarioMap,
+): { scenario: TemplateScenario } | { error: string } {
+  if (kind.shape !== 'entity') {
+    return {
+      error: `${template.name} × ${kind.name}: appliesTo Entity templates only apply to shape: "entity" kinds, got shape: "${kind.shape}"`,
+    };
+  }
+  const establishOpId = kind.establishedBy;
+  const observeOpId = kind.observableVia;
+  const revokeOpId = kind.revokedBy;
+  const restoreOpId = kind.restorableVia;
+  if (
+    typeof establishOpId !== 'string' ||
+    typeof observeOpId !== 'string' ||
+    typeof revokeOpId !== 'string'
+  ) {
+    return {
+      error: `${template.name} × ${kind.name}: missing one of establishedBy/observableVia/revokedBy on shape: "entity" kind (schema bug?)`,
+    };
+  }
+  if (typeof restoreOpId !== 'string') {
+    // The dispatcher only compiles RestoreLifecycle for kinds that declare
+    // restorableVia, so reaching here means a schema/dispatch mismatch.
+    return {
+      error: `${template.name} × ${kind.name}: missing restorableVia on shape: "entity" kind (dispatch bug — RestoreLifecycle should only run on kinds that declare it)`,
+    };
+  }
+
+  const establishScenario = canonical.get(establishOpId);
+  const revokeScenario = canonical.get(revokeOpId);
+  const observeScenario = canonical.get(observeOpId);
+  const restoreScenario = canonical.get(restoreOpId);
+  if (!establishScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no canonical scenario for establishedBy='${establishOpId}'`,
+    };
+  if (!revokeScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no canonical scenario for revokedBy='${revokeOpId}'`,
+    };
+  if (!observeScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no canonical scenario for observableVia='${observeOpId}'`,
+    };
+  if (!restoreScenario)
+    return {
+      error: `${template.name} × ${kind.name}: no canonical scenario for restorableVia='${restoreOpId}'`,
+    };
+
+  const establishPlan = establishScenario.requestPlan;
+  const revokePlan = revokeScenario.requestPlan;
+  const observePlan = observeScenario.requestPlan;
+  const restorePlan = restoreScenario.requestPlan;
+  if (!establishPlan?.length || !revokePlan?.length || !observePlan?.length || !restorePlan?.length)
+    return {
+      error: `${template.name} × ${kind.name}: one of the referenced scenarios is missing a requestPlan`,
+    };
+
+  const establishOps = establishScenario.operations;
+  if (establishOps.length !== establishPlan.length) {
+    return {
+      error: `${template.name} × ${kind.name}: establishedBy scenario operations.length (${establishOps.length}) ≠ requestPlan.length (${establishPlan.length}); duplicate invocation on an establisher is unsupported`,
+    };
+  }
+  const prereqOps: OperationRef[] = establishOps.slice(0, -1).map((o) => ({ ...o }));
+  const prereqPlan: RequestStep[] = establishPlan.slice(0, -1);
+
+  const bindings: Record<string, string> = {};
+  const aggregateBindingNames = new Set<string>([
+    ...Object.keys(establishScenario.bindings ?? {}),
+    ...(establishScenario.seedBindings ?? []),
+  ]);
+  for (const bindName of aggregateBindingNames) {
+    const sem = bindName.endsWith('Var')
+      ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
+      : bindName;
+    bindings[sem] = bindName;
+  }
+
+  const inputsFor = (opId: string): Record<string, string> => {
+    const op = graph.operations[opId];
+    const result: Record<string, string> = {};
+    for (const sem of op?.requires.required ?? []) {
+      result[sem] = bindingNameFor(sem);
+    }
+    return result;
+  };
+  const producesFor = (opId: string): Record<string, string> => {
+    const op = graph.operations[opId];
+    const result: Record<string, string> = {};
+    for (const leaf of op?.responseSemanticLeaves ?? []) {
+      if (!leaf.provider) continue;
+      result[leaf.semantic] = bindingNameFor(leaf.semantic);
+    }
+    return result;
+  };
+
+  const observeInputs = inputsFor(observeOpId);
+  const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
+
+  const allOpIds = new Set<string>([
+    ...prereqOps.map((o) => o.operationId),
+    establishOpId,
+    observeOpId,
+    revokeOpId,
+    restoreOpId,
+  ]);
+  const eventuallyConsistentOps: string[] = [];
+  for (const opId of allOpIds) {
+    const op = graph.operations[opId];
+    if (op?.eventuallyConsistent) eventuallyConsistentOps.push(opId);
+  }
+  eventuallyConsistentOps.sort();
+
+  const observePresent = (): TemplateStep => ({
+    kind: 'observe',
+    operationId: observeOpId,
+    inputs: observeInputs,
+    requestPlan: lastOf(observePlan),
+    assertion: { kind: 'statusOnly', expect: 'present', expectedStatus: 200 },
+  });
+
+  const steps: TemplateStep[] = [
+    {
+      kind: 'prereqChain',
+      targetOperationId: establishOpId,
+      operations: prereqOps,
+      bindings: { ...(establishScenario.bindings ?? {}) },
+      seedBindings: [...(establishScenario.seedBindings ?? [])],
+      requestPlan: prereqPlan,
+    },
+    {
+      kind: 'invoke',
+      operationId: establishOpId,
+      inputs: inputsFor(establishOpId),
+      produces: producesFor(establishOpId),
+      requestPlan: lastOf(establishPlan),
+    },
+    observePresent(),
+    {
+      kind: 'invoke',
+      operationId: revokeOpId,
+      inputs: inputsFor(revokeOpId),
+      produces: producesFor(revokeOpId),
+      requestPlan: lastOf(revokePlan),
+    },
+    {
+      kind: 'observe',
+      operationId: observeOpId,
+      inputs: observeInputs,
+      requestPlan: lastOf(observePlan),
+      assertion: { kind: 'statusOnly', expect: 'absent', expectedStatus: 404 },
+    },
+    {
+      kind: 'invoke',
+      operationId: restoreOpId,
+      inputs: inputsFor(restoreOpId),
+      produces: producesFor(restoreOpId),
+      requestPlan: lastOf(restorePlan),
+    },
+    observePresent(),
+  ];
+
+  return {
+    scenario: {
+      templateName: template.name,
+      subjectName: kind.name,
+      subjectKind: 'Entity',
+      steps,
+      bindings,
+      eventuallyConsistentOps,
+    },
+  };
+}
+
+/**
  * #305 Phase 4 — Produce one {@link TemplateScenario} per
  * (runtime-entity × mutator) pair. Parallel to
  * {@link compileEntityLifecycle}, but tailored for runtime-emitted
@@ -1102,11 +1300,17 @@ export function instantiateAllTemplates(
       continue;
     }
     if (tpl.appliesTo.kind === 'Entity') {
-      if (tpl.name !== 'EntityLifecycle') {
+      // Two Entity-scoped compilers ship today: EntityLifecycle (#280,
+      // create/observe/delete) and RestoreLifecycle (#426,
+      // create/delete/restore). Refuse-by-default for any other name so an
+      // unrecognised entry fails loudly rather than silently re-running the
+      // wrong compiler.
+      if (tpl.name !== 'EntityLifecycle' && tpl.name !== 'RestoreLifecycle') {
         throw new Error(
           `No compiler registered for scenario template '${tpl.name}'. ` +
-            `#280 only ships the EntityLifecycle compiler; additional ` +
-            `Entity-scoped templates need their own dispatch in instantiateAllTemplates.`,
+            `Entity-scoped templates currently shipped: EntityLifecycle (#280), ` +
+            `RestoreLifecycle (#426). Additional templates need their own ` +
+            `dispatch in instantiateAllTemplates.`,
         );
       }
       if (entityKinds === null) continue;
@@ -1117,7 +1321,15 @@ export function instantiateAllTemplates(
         // here (not an error) because the template applies to the
         // whole ABox and the schema already classified them out.
         if (kind.shape !== 'entity') continue;
-        const compiled = compileEntityLifecycle(tpl, kind, graph, canonical);
+        // RestoreLifecycle only applies to entity kinds whose delete is a
+        // soft-delete with a restore op (declared via restorableVia). Silent
+        // skip for the rest — the template applies to the whole ABox but the
+        // restore transition is opt-in per kind, not a schema error.
+        if (tpl.name === 'RestoreLifecycle' && typeof kind.restorableVia !== 'string') continue;
+        const compiled =
+          tpl.name === 'RestoreLifecycle'
+            ? compileRestoreLifecycle(tpl, kind, graph, canonical)
+            : compileEntityLifecycle(tpl, kind, graph, canonical);
         if ('error' in compiled) {
           errors.push(compiled.error);
           continue;

@@ -123,6 +123,46 @@ describe('loadEntityKindsAbox: documented branches', () => {
     expect(abox?.kinds).toHaveLength(1);
     expect(abox?.kinds[0]?.name).toBe('Role');
   });
+
+  it('accepts an optional restorableVia on a shape: "entity" kind (#426)', () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        kinds: [
+          {
+            name: 'File',
+            shape: 'entity',
+            identifiers: ['FileKey'],
+            establishedBy: 'createFile',
+            observableVia: 'getFile',
+            revokedBy: 'deleteFile',
+            restorableVia: 'restoreFile',
+            description: 'A file with a soft-delete/restore transition.',
+          },
+        ],
+      }),
+    );
+    const abox = loadEntityKindsAbox(workdir);
+    expect(abox?.kinds[0]?.restorableVia).toBe('restoreFile');
+  });
+
+  it('rejects restorableVia on a non-entity shape (#426 — restore is entity-only)', () => {
+    writeAbox(
+      JSON.stringify({
+        version: 1,
+        kinds: [
+          {
+            name: 'Member',
+            shape: 'external-entity',
+            identifiers: ['MemberEmail'],
+            restorableVia: 'restoreMember',
+            description: 'External entity may not declare restorableVia.',
+          },
+        ],
+      }),
+    );
+    expect(() => loadEntityKindsAbox(workdir)).toThrow(/failed TBox validation/);
+  });
 });
 
 describe('loadExternalEntityIdentifiers: ABox-derived externalBoundary set', () => {
