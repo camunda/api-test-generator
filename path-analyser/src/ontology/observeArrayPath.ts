@@ -56,27 +56,51 @@ export function findMembershipArrayPath(
     | { responseSemanticTypes?: Record<string, { semanticType: string; fieldPath: string }[]> }
     | undefined,
   identifiedBy: readonly string[],
+  // Membership identifier(s) to prefer — typically the edge's `to`-endpoint
+  // identifier (the entity added to the container). When the observation
+  // response echoes more than one identifiedBy semantic array-nested (e.g.
+  // Hub's searchMembers items carry both `workspaceKey` and `email`), without
+  // this the helper matches the FIRST in iteration order and could assert on
+  // the container key rather than the member. Empty preserves the prior
+  // iteration-order behaviour (e.g. OCA RoleUserMembership → username).
+  preferred: readonly string[] = [],
 ): MembershipArrayPath | null {
   if (!op) return null;
   const responses = op.responseSemanticTypes?.['200'] ?? [];
   const identifiedSet = new Set(identifiedBy);
-  for (const entry of responses) {
-    if (!identifiedSet.has(entry.semanticType)) continue;
-    if (!entry.fieldPath.includes('[]')) continue;
+
+  const toLocator = (entry: {
+    semanticType: string;
+    fieldPath: string;
+  }): MembershipArrayPath | null => {
+    if (!entry.fieldPath.includes('[]')) return null;
     const idx = entry.fieldPath.indexOf('[]');
     const before = entry.fieldPath.slice(0, idx);
     const after = entry.fieldPath.slice(idx + 2);
     // Strip a leading '.' from the post-`[]` remainder so a path like
     // `items[].username` yields elementField='username' not '.username'.
     const elementField = after.startsWith('.') ? after.slice(1) : after;
-    if (!elementField) continue;
+    if (!elementField) return null;
     const arrayPath = before.split('.').filter((s) => s.length > 0);
-    if (arrayPath.length === 0) continue;
-    return {
-      arrayPath,
-      elementField,
-      membershipSemanticType: entry.semanticType,
-    };
+    if (arrayPath.length === 0) return null;
+    return { arrayPath, elementField, membershipSemanticType: entry.semanticType };
+  };
+
+  // Pass 1: prefer the `to`-endpoint membership identifier(s).
+  const preferredSet = new Set(preferred);
+  if (preferredSet.size > 0) {
+    for (const entry of responses) {
+      if (!preferredSet.has(entry.semanticType)) continue;
+      if (!identifiedSet.has(entry.semanticType)) continue;
+      const loc = toLocator(entry);
+      if (loc) return loc;
+    }
+  }
+  // Pass 2: any identifiedBy semantic, in iteration order (legacy behaviour).
+  for (const entry of responses) {
+    if (!identifiedSet.has(entry.semanticType)) continue;
+    const loc = toLocator(entry);
+    if (loc) return loc;
   }
   return null;
 }

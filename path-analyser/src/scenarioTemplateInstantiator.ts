@@ -56,6 +56,10 @@ import type {
  * without consulting the scenario binding table at every site.
  */
 
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function camelCase(name: string): string {
   return name.length > 0 ? name.charAt(0).toLowerCase() + name.slice(1) : name;
 }
@@ -93,6 +97,7 @@ function compileEdgeLifecycle(
   edge: Edge,
   graph: OperationGraph,
   canonical: CanonicalScenarioMap,
+  entityKinds: EntityKindsAbox | null,
 ): { scenario: TemplateScenario } | { error: string } {
   const establishScenario = canonical.get(edge.establishedBy);
   const revokeScenario = canonical.get(edge.revokedBy);
@@ -156,34 +161,59 @@ function compileEdgeLifecycle(
   // identifiedBy entries are present, not that the table is
   // minimal — keeping it inclusive matches the EndpointScenario
   // contract.
+  // Binding names for the edge's identifiers follow the request-body / URL
+  // emitter convention — keyed on the establisher's FIELD/PARAM `name`, NOT the
+  // semantic type. For most identifiers `camelCase(name) === camelCase(semantic)`
+  // so `bindingNameFor` agrees, but where they diverge the field name wins:
+  // Hub's `email` body field carries semantic `MemberEmail`, so the request-body
+  // builder seeds `emailVar` (not `memberEmailVar`). Every step and the binding
+  // table must use the field-derived name to stay consistent with the canonical
+  // establish scenario, else the emitter can't resolve the membership semantic
+  // back to a binding. Derived from the establisher's `establishes.identifiedBy`
+  // (name + semanticType per identifier).
+  const establishOp = graph.operations[edge.establishedBy];
+  const bindingNameBySemantic = new Map<string, string>();
+  const semanticByBindingName = new Map<string, string>();
+  for (const id of establishOp?.establishes?.identifiedBy ?? []) {
+    const bindName = `${camelCase(id.name)}Var`;
+    bindingNameBySemantic.set(id.semanticType, bindName);
+    semanticByBindingName.set(bindName, id.semanticType);
+  }
+  const bindingNameForEdge = (semantic: string): string =>
+    bindingNameBySemantic.get(semantic) ?? bindingNameFor(semantic);
+
   const bindings: Record<string, string> = {};
   const aggregateBindingNames = new Set<string>([
     ...Object.keys(establishScenario.bindings ?? {}),
     ...(establishScenario.seedBindings ?? []),
   ]);
   for (const bindName of aggregateBindingNames) {
-    // Recover the semantic type by stripping the trailing 'Var' and
-    // upper-casing the first letter. This matches the inverse of
-    // `bindingNameFor`. A binding name that doesn't end in 'Var'
-    // (none exist today) would be passed through as-is so the
-    // emitter still sees a stable round-trip key.
-    const sem = bindName.endsWith('Var')
-      ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
-      : bindName;
+    // Prefer the establisher's authoritative semantic for any field-derived
+    // identifier binding (so `emailVar → MemberEmail`, not the lossy `Email`
+    // the reverse-engineering below would produce). Otherwise recover the
+    // semantic by stripping the trailing 'Var' and upper-casing — the inverse
+    // of `bindingNameFor` — for seeded extras (e.g. `roleVar → Role`) with no
+    // identifiedBy entry. A binding name that doesn't end in 'Var' (none exist
+    // today) is passed through so the emitter still sees a stable key.
+    const sem =
+      semanticByBindingName.get(bindName) ??
+      (bindName.endsWith('Var')
+        ? bindName.slice(0, -3).charAt(0).toUpperCase() + bindName.slice(0, -3).slice(1)
+        : bindName);
     bindings[sem] = bindName;
   }
 
   // Helper: map an op's required semantics to {semanticType: bindingName}.
-  // Used by Invoke and Observe alike. We consult the graph for the
-  // op's `requires.required`; the bindingName follows the camelCase
-  // convention so callers don't need to inspect the canonical scenario
-  // bindings (the union table built above is the source of truth at
-  // emit time; this map is the per-step view onto it).
+  // Used by Invoke and Observe alike. We consult the graph for the op's
+  // `requires.required`; the bindingName follows the establisher's field-derived
+  // convention (`bindingNameForEdge`) so callers don't need to inspect the
+  // canonical scenario bindings (the union table built above is the source of
+  // truth at emit time; this map is the per-step view onto it).
   const inputsFor = (opId: string): Record<string, string> => {
     const op = graph.operations[opId];
     const result: Record<string, string> = {};
     for (const sem of op?.requires.required ?? []) {
-      result[sem] = bindingNameFor(sem);
+      result[sem] = bindingNameForEdge(sem);
     }
     return result;
   };
@@ -208,28 +238,74 @@ function compileEdgeLifecycle(
   // to keep the instantiator drop-in for future configs whose
   // edges might not yet satisfy the precondition.
   const observeOp = graph.operations[edge.observableVia];
-  const locator = findMembershipArrayPath(observeOp, edge.identifiedBy);
+  // Prefer the `to`-endpoint identifier as the membership key — the entity
+  // added to the container. When the observe response also echoes the
+  // container/`from` key (e.g. Hub's searchMembers items carry workspaceKey AND
+  // email), this asserts membership on the member (email), not the container.
+  const toKind = entityKinds?.kinds.find((k) => k.name === edge.endpoints.to);
+  const locator = findMembershipArrayPath(observeOp, edge.identifiedBy, toKind?.identifiers ?? []);
   if (!locator) {
     return {
       error: `${template.name} × ${edge.name}: findMembershipArrayPath returned null for observableVia='${edge.observableVia}'; an edge with no array-nested identifiedBy semantic on its observation op cannot be observed via present/absent membership`,
     };
   }
 
-  // Observe `inputs` are the SCOPING identifiers — identifiedBy
-  // members the op consumes (path or filter params), minus the
-  // membership identifier (which is asserted on the response, not
-  // submitted). The scoping inputs come from the union
-  // `identifiedBy ∩ op.requires.required`; the membership
-  // identifier is whatever locator.membershipSemanticType says.
+  // Observe `inputs` are the SCOPING identifiers — identifiedBy members the op
+  // consumes to scope the search, minus the membership identifier (asserted on
+  // the response, not submitted). They arrive two ways:
+  //   - as path/query params (`op.requires.required`) — the URL/inputs carry them;
+  //   - as filter BODY fields (`op.requestBodySemantics`, fieldPath `filter.*`) —
+  //     e.g. searchMembers scopes by `filter.workspaceKey`. These are NOT in
+  //     `requires.required`, and `buildRequestBodyFromCanonical` leaves filter
+  //     fields as a placeholder (#168), so they are bound into the observe body
+  //     directly below (`scopingFilterBindings`).
   const observeRequired = new Set(observeOp?.requires.required ?? []);
+  const filterFieldBySemantic = new Map<string, string>();
+  for (const entry of observeOp?.requestBodySemantics ?? []) {
+    if (entry.fieldPath.startsWith('filter.') && !entry.fieldPath.slice(7).includes('.')) {
+      filterFieldBySemantic.set(entry.semantic, entry.fieldPath.slice('filter.'.length));
+    }
+  }
   const observeInputs: Record<string, string> = {};
+  const scopingFilterBindings: { field: string; varName: string }[] = [];
   for (const sem of edge.identifiedBy) {
     if (sem === locator.membershipSemanticType) continue;
-    if (!observeRequired.has(sem)) continue;
-    observeInputs[sem] = bindingNameFor(sem);
+    const varName = bindingNameForEdge(sem);
+    const filterField = filterFieldBySemantic.get(sem);
+    // Check the filter-body case FIRST: a required filter field is also promoted
+    // into `requires.required` by the graph loader, so testing `observeRequired`
+    // first would wrongly treat it as a path/query param and skip binding the
+    // filter value.
+    if (filterField !== undefined) {
+      observeInputs[sem] = varName;
+      scopingFilterBindings.push({ field: filterField, varName });
+    } else if (observeRequired.has(sem)) {
+      observeInputs[sem] = varName;
+    }
   }
 
   const lastOf = (plan: RequestStep[]): RequestStep => plan[plan.length - 1];
+
+  // The observe search's scoping filter fields (e.g. filter.workspaceKey) are
+  // left as placeholders by the canonical request-body builder (#168 defers
+  // filter-path binding). Bind them here to the scoping identifiers' vars so
+  // the search is actually scoped to the container under test. Clone the
+  // canonical step so the shared searchMembers scenario (its feature spec) is
+  // untouched.
+  const observeStepPlan: RequestStep = (() => {
+    const base = lastOf(observePlan);
+    if (scopingFilterBindings.length === 0) return base;
+    const cloned: RequestStep = structuredClone(base);
+    const body = isPlainRecord(cloned.bodyTemplate) ? cloned.bodyTemplate : {};
+    const filter = isPlainRecord(body.filter) ? body.filter : {};
+    for (const { field, varName } of scopingFilterBindings) {
+      filter[field] = `\${${varName}}`;
+    }
+    body.filter = filter;
+    cloned.bodyTemplate = body;
+    cloned.bodyKind = 'json';
+    return cloned;
+  })();
 
   // Aggregate the set of operationIds across all five steps whose source
   // OperationSpec carries `eventuallyConsistent: true`. Threaded onto the
@@ -271,7 +347,7 @@ function compileEdgeLifecycle(
       kind: 'observe',
       operationId: edge.observableVia,
       inputs: observeInputs,
-      requestPlan: lastOf(observePlan),
+      requestPlan: observeStepPlan,
       assertion: {
         kind: 'membership',
         expect: 'present',
@@ -291,7 +367,7 @@ function compileEdgeLifecycle(
       kind: 'observe',
       operationId: edge.observableVia,
       inputs: observeInputs,
-      requestPlan: lastOf(observePlan),
+      requestPlan: observeStepPlan,
       assertion: {
         kind: 'membership',
         expect: 'absent',
@@ -1011,7 +1087,7 @@ export function instantiateAllTemplates(
         );
       }
       for (const edge of edges.edges) {
-        const compiled = compileEdgeLifecycle(tpl, edge, graph, canonical);
+        const compiled = compileEdgeLifecycle(tpl, edge, graph, canonical, entityKinds);
         if ('error' in compiled) {
           errors.push(compiled.error);
           continue;
