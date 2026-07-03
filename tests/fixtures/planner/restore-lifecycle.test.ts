@@ -63,7 +63,9 @@ describe('RestoreLifecycle compiler — Layer 2 contract', () => {
         method: 'POST',
         path: '/things',
         requires: { required: [], optional: [] },
-        responseSemanticLeaves: [{ semantic: 'ThingKey', path: 'thingKey', provider: true }],
+        responseSemanticLeaves: [
+          { semantic: 'ThingKey', fieldPath: 'thingKey', status: '200', provider: true },
+        ],
       }),
       getThing: makeOp('getThing', {
         method: 'GET',
@@ -86,7 +88,10 @@ describe('RestoreLifecycle compiler — Layer 2 contract', () => {
   };
 
   const canonical = new Map<string, EndpointScenario>([
-    ['createThing', makeScenario('createThing', [makeStep('createThing', { path: '/things' })])],
+    [
+      'createThing',
+      makeScenario('createThing', [makeStep('createThing', { pathTemplate: '/things' })]),
+    ],
     [
       'getThing',
       makeScenario('getThing', [
