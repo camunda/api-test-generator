@@ -7,7 +7,11 @@
     },
     {
       "operationId": "getClusterRegistrations",
-      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also currently broken: GET /clusters returns 500 even with the flag on (camunda/camunda-hub#25908). (Renamed from getClusters upstream, camunda/camunda-hub#25876.)"
+      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also currently broken: GET /clusters returns 500 even with the flag on (camunda/camunda-hub#25908). (Renamed from getClusters upstream, camunda/camunda-hub#25876.)",
+      "knownIssue": {
+        "summary": "GET /clusters returns 500 for every request",
+        "url": "https://github.com/camunda/camunda-hub/issues/25908"
+      }
     },
     {
       "operationId": "removeClusterRegistration",

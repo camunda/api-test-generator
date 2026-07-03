@@ -36,5 +36,11 @@
         "tracker": "https://github.com/camunda/api-test-generator/issues/419"
       }
     }
+  ],
+  "knownIssues": [
+    {
+      "summary": "Wrong-type tests on resource-key body fields (projectKey, folderKey, …) are skipped — Hub 403s/500s on a malformed key instead of 400",
+      "url": "https://github.com/camunda/camunda-hub/issues/25926"
+    }
   ]
 }

@@ -370,28 +370,34 @@ jobs:
           def ref(url):
               num = url.rstrip("/").split("/")[-1]
               return ("camunda-hub#" if "/camunda-hub/" in url else "#") + num
-          def bullets(entries):
+          def bullets(known_issues):
               seen, lines = set(), []
-              for e in entries:
-                  ki = e.get("knownIssue")
-                  if not ki or ki.get("url") in seen:
+              for ki in known_issues:
+                  url = ki.get("url")
+                  if not url or url in seen:
                       continue
-                  seen.add(ki["url"])
-                  line = f"• {ki['summary']} — <{ki['url']}|{ref(ki['url'])}>"
+                  seen.add(url)
+                  line = f"• {ki['summary']} — <{url}|{ref(url)}>"
                   tr = ki.get("tracker")
                   if tr:
                       line += f" (tracked via <{tr}|{ref(tr)}>)"
                   lines.append(line)
               return "\\n".join(lines)
-          def load(p, key):
+          def cfg(p):
               try:
-                  return json.load(open(p)).get(key, [])
+                  return json.load(open(p))
               except Exception:
-                  return []
-          pos = bullets(load("configs/camunda-hub/positive-suppress.json", "suppress"))
-          neg = bullets(load("configs/camunda-hub/request-validation.json", "excludeOperations"))
-          print(f"positive_known_issues={pos}")
-          print(f"negative_known_issues={neg}")
+                  return {}
+          # Per-op knownIssue (from suppress/exclude entries) + suite-wide
+          # top-level knownIssues[] (skips not tied to a single op, e.g. the
+          # generator-level wrong-type-key skip).
+          def known(c, entries_key):
+              perop = [e["knownIssue"] for e in c.get(entries_key, []) if e.get("knownIssue")]
+              return perop + c.get("knownIssues", [])
+          pos = cfg("configs/camunda-hub/positive-suppress.json")
+          neg = cfg("configs/camunda-hub/request-validation.json")
+          print(f"positive_known_issues={bullets(known(pos, 'suppress'))}")
+          print(f"negative_known_issues={bullets(known(neg, 'excludeOperations'))}")
           PY
 
       # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
