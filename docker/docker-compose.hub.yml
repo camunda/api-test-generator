@@ -226,6 +226,12 @@ services:
       FEATURE_CATALOG_ENABLED: "true"
       CAMUNDA_MODELER_FEATURE_CONSOLE_ENABLED: "true"
       FEATURE_GLOBAL_NAVIGATION_V2_ENABLED: "true"
+      # Dynamic cluster management is OFF by default in the image, so the v2
+      # /clusters endpoints 403 ("requires dynamic cluster management to be
+      # enabled"). Enable it so createCluster + getClusterUsageMetrics are
+      # exercisable in the positive suite (#423). deleteCluster still needs a
+      # real clusterId it can't chain yet, so it's positive-suppressed.
+      DYNAMIC_CLUSTER_MANAGEMENT_ENABLED: "true"
 
 volumes:
   modeler-db-data:
