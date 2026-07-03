@@ -264,6 +264,7 @@ jobs:
       # (request-validation) profile. Gated on the Vault-fetched creds above so
       # it's dormant until they exist. Runs always() to publish failures too.
       - name: Publish results to TestRail
+        id: testrail
         if: ${{ always() && steps.testrail-secrets.outputs.TESTRAIL_USERNAME != '' && steps.testrail-secrets.outputs.TESTRAIL_KEY != '' }}
         env:
           TESTRAIL_USERNAME: ${{ steps.testrail-secrets.outputs.TESTRAIL_USERNAME }}
@@ -275,12 +276,16 @@ jobs:
           pip install --quiet trcli==1.14.1
           out="test-results/e2e-camunda-hub"
           ts="$(date '+%Y-%m-%d %H:%M:%S')"
-          publish() { # junit_file  run_title
-            local f="$1" title="$2"
+          # Publish one run per suite and capture its TestRail run URL into a
+          # step output (<key>_url), so the run summary + Slack can link straight
+          # to each run instead of the URLs being buried in this log.
+          publish() { # key  junit_file  run_title
+            local key="$1" f="$2" title="$3"
             if [ ! -f "$f" ]; then
-              echo "skip — no JUnit at $f"; return
+              echo "skip $key — no JUnit at $f"; return
             fi
             echo "Publishing '$title' → TestRail suite ${TESTRAIL_SUITE_ID}…"
+            local log; log="$(mktemp)"
             trcli -y -h "$TESTRAIL_HOST" \
               --project "$TESTRAIL_PROJECT" \
               --username "$TESTRAIL_USERNAME" \
@@ -289,12 +294,18 @@ jobs:
               parse_junit --suite-id "$TESTRAIL_SUITE_ID" \
               --title "$title" \
               --close-run \
-              -f "$f" || echo "::warning::TestRail publish failed for '$title'"
+              -f "$f" > "$log" 2>&1 || echo "::warning::TestRail publish failed for '$title'"
+            cat "$log"
+            local url; url="$(grep -oE 'https://[^[:space:]]+/runs/view/[0-9]+' "$log" | head -1 || true)"
+            if [ -n "$url" ]; then
+              echo "${key}_url=${url}" >> "$GITHUB_OUTPUT"
+              echo "- **${key}**: [${title}](${url})" >> "$GITHUB_STEP_SUMMARY"
+            fi
           }
-          publish "$out/pw-positive.junit.xml" "Nightly camunda-hub positive — $ts"
-          for p in secured rbac; do
-            publish "$out/pw-$p.junit.xml" "Nightly camunda-hub negative — ${p} — $ts"
-          done
+          { echo ""; echo "### TestRail runs"; } >> "$GITHUB_STEP_SUMMARY"
+          publish positive "$out/pw-positive.junit.xml" "Nightly camunda-hub positive — $ts"
+          publish secured  "$out/pw-secured.junit.xml"  "Nightly camunda-hub negative — secured — $ts"
+          publish rbac     "$out/pw-rbac.junit.xml"     "Nightly camunda-hub negative — rbac — $ts"
 
       # --- Slack notification --------------------------------------------------
       # Aggregate the Playwright JSON stats into PER-SUITE pass/fail/flaky/skipped
@@ -363,7 +374,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 TestRail>', steps.testrail.outputs.positive_url) || '' }}"
             }
 
       - name: Notify Slack (negative suite)
@@ -375,5 +386,5 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.negative_passed }} passed · ❌ ${{ steps.pw-totals.outputs.negative_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.negative_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+              "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.negative_passed }} passed · ❌ ${{ steps.pw-totals.outputs.negative_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.negative_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.secured_url != '' && format(' · <{0}|📋 secured>', steps.testrail.outputs.secured_url) || '' }}${{ steps.testrail.outputs.rbac_url != '' && format(' · <{0}|📋 rbac>', steps.testrail.outputs.rbac_url) || '' }}"
             }
