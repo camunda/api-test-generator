@@ -184,10 +184,9 @@ jobs:
       # always() steps below still capture the report + write the summary.
       - name: Generate + run positive + negative suites
         env:
-          # camunda/camunda-hub#25146 merged — the positive (lifecycle) suite
-          # now runs alongside the negative (request-validation) suite. Blocked
-          # ops with no achievable green (versions #25801, catalog #25576) are
-          # positive-suppressed in configs/camunda-hub/positive-suppress.json.
+          # Runs the positive (lifecycle) + negative (request-validation) suites.
+          # Blocked ops with no achievable green (versions #25801, catalog #25576)
+          # are positive-suppressed in configs/camunda-hub/positive-suppress.json.
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
         run: ./scripts/e2e/run-hub.sh
@@ -222,11 +221,13 @@ jobs:
             fi
           }
           {
-            echo "## Nightly — camunda-hub negative tests"
+            echo "## Nightly — camunda-hub API tests"
+            echo "### Negative (request-validation)"
             summarize secured
             summarize rbac
             echo ""
-            echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
+            echo "### Positive (lifecycle)"
+            echo "_See the \`pw-positive\` Playwright report in the run artifacts for per-test detail._"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
