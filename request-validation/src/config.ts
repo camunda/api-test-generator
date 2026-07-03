@@ -116,8 +116,30 @@ export interface RequestValidationConfig {
    * camunda/camunda-hub#25801, so they 404 instead of 400; tracked via #419).
    * The whole op is dropped (all its negative cases), so the nightly stays green
    * on known blockers instead of perpetually red. Re-enable when unblocked.
+   * The optional `knownIssue` feeds the nightly's "skipped due to known issues"
+   * Slack thread (see the workflow's derive step).
    */
-  excludeOperations?: { operationId: string; reason: string }[];
+  excludeOperations?: { operationId: string; reason: string; knownIssue?: KnownIssue }[];
+  /**
+   * Suite-wide known issues NOT tied to a single excluded op (e.g. the
+   * generator-level wrong-type-key skip for camunda/camunda-hub#25926). Surfaced
+   * in the nightly's "skipped due to known issues" Slack thread alongside the
+   * per-entry `knownIssue`s.
+   */
+  knownIssues?: KnownIssue[];
+}
+
+/**
+ * A reference to an upstream issue that explains why some coverage is skipped.
+ * Consumed by the nightly workflow to build the per-suite "known issues" Slack
+ * thread (single source of truth: the config that causes the skip also carries
+ * its issue link).
+ */
+interface KnownIssue {
+  summary: string;
+  url: string;
+  /** Optional in-repo tracking issue (e.g. #419 for the version exclusion). */
+  tracker?: string;
 }
 
 const DEFAULTS: RequestValidationConfig = {
@@ -141,7 +163,20 @@ function isEnvVarNameRecord(v: unknown): v is Record<string, string> {
   );
 }
 
-function isExcludeOperations(v: unknown): v is { operationId: string; reason: string }[] {
+function isKnownIssue(v: unknown): v is KnownIssue {
+  return (
+    isPlainObject(v) &&
+    typeof v.summary === 'string' &&
+    v.summary.trim().length > 0 &&
+    typeof v.url === 'string' &&
+    v.url.trim().length > 0 &&
+    (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0))
+  );
+}
+
+function isExcludeOperations(
+  v: unknown,
+): v is { operationId: string; reason: string; knownIssue?: KnownIssue }[] {
   return (
     Array.isArray(v) &&
     v.every(
@@ -150,7 +185,8 @@ function isExcludeOperations(v: unknown): v is { operationId: string; reason: st
         typeof e.operationId === 'string' &&
         e.operationId.trim().length > 0 &&
         typeof e.reason === 'string' &&
-        e.reason.trim().length > 0,
+        e.reason.trim().length > 0 &&
+        (e.knownIssue === undefined || isKnownIssue(e.knownIssue)),
     )
   );
 }
@@ -245,6 +281,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.excludeOperations = v;
+  }
+  if ('knownIssues' in parsed) {
+    const v = parsed.knownIssues;
+    if (!Array.isArray(v) || !v.every(isKnownIssue)) {
+      throw new Error(
+        `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker? } objects with non-empty strings.`,
+      );
+    }
+    merged.knownIssues = v;
   }
   return merged;
 }
