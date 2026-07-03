@@ -357,7 +357,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub positive (lifecycle) suite* (SNAPSHOT)\n✅ ${{ steps.pw-totals.outputs.positive_passed }} | ❌ ${{ steps.pw-totals.outputs.positive_failed }} | 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} | ⏩ ${{ steps.pw-totals.outputs.positive_skipped }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
             }
 
       - name: Notify Slack (negative suite)
@@ -369,5 +369,5 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub negative (request-validation) suite* (SNAPSHOT)\n✅ ${{ steps.pw-totals.outputs.negative_passed }} | ❌ ${{ steps.pw-totals.outputs.negative_failed }} | 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} | ⏩ ${{ steps.pw-totals.outputs.negative_skipped }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+              "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.negative_passed }} passed · ❌ ${{ steps.pw-totals.outputs.negative_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.negative_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
             }
