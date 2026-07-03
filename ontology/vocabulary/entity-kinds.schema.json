@@ -92,6 +92,11 @@
           "minLength": 1,
           "description": "#280 — operationId of the canonical delete operation for this entity kind (e.g. `deleteUser` for `User`). Conventionally a `DELETE` returning 204. Required on `shape: \"entity\"`; forbidden on `shape: \"external-entity\"` and `shape: \"runtime-entity\"`. ProcessInstance (cancel/delete divergence) is intentionally excluded here — see follow-up #281."
         },
+        "restorableVia": {
+          "type": "string",
+          "minLength": 1,
+          "description": "#426 — operationId of the operation that restores a soft-deleted instance of this entity kind (e.g. `restoreFile` for `File`, `POST /files/{fileKey}/restoration`). When present, the `RestoreLifecycle` template emits a create → observe-present → soft-delete (`revokedBy`) → observe-absent → restore → observe-present scenario, so the restore is exercised against an instance that is actually in the recently-deleted state (a plain requires-chain would invoke restore on a live instance and get 404). OPTIONAL on `shape: \"entity\"` (only kinds whose delete is a soft-delete with a restore op carry it); forbidden on every other shape. Not part of the `entity` all-or-nothing triple — an entity without a restore op simply omits it."
+        },
         "mutators": {
           "type": "array",
           "minItems": 1,
@@ -193,6 +198,11 @@
                 },
                 {
                   "required": [
+                    "restorableVia"
+                  ]
+                },
+                {
+                  "required": [
                     "mutators"
                   ]
                 },
@@ -255,6 +265,11 @@
                   "required": [
                     "revokedBy"
                   ]
+                },
+                {
+                  "required": [
+                    "restorableVia"
+                  ]
                 }
               ]
             }
@@ -282,6 +297,11 @@
                 {
                   "required": [
                     "revokedBy"
+                  ]
+                },
+                {
+                  "required": [
+                    "restorableVia"
                   ]
                 },
                 {

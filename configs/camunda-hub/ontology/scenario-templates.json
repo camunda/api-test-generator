@@ -75,6 +75,21 @@
         { "kind": "Invoke", "op": "transition" },
         { "kind": "Observe", "op": "fetcher", "expect": "stateEquals" }
       ]
+    },
+    {
+      "@type": "ScenarioTemplate",
+      "name": "RestoreLifecycle",
+      "appliesTo": { "kind": "Entity" },
+      "description": "#426 — for every shape: 'entity' kind whose delete is a soft-delete with a restore op (declared via `restorableVia`, e.g. File → restoreFile), drive the instance through the full soft-delete/restore transition: (1) establish the prerequisite chain and create the instance (establishedBy), (2) observe it is present (observableVia, status 200), (3) soft-delete it (revokedBy), (4) observe it is absent (observableVia, status 404), (5) restore it (restorableVia), (6) observe it is present again (observableVia, status 200). This exercises restore against an instance that is actually in the recently-deleted state — the plain requires-chain (restorableVia requires the entity, so it chains a create) would invoke restore on a live instance and get 404. Entity kinds without `restorableVia` are skipped (restore is opt-in per kind). Reuses EntityLifecycle's status-only observe assertion; consumes establishedBy/observableVia/revokedBy/restorableVia so restore is removed from the plain feature suite.",
+      "steps": [
+        { "kind": "PrereqChain", "for": "establishedBy" },
+        { "kind": "Invoke", "op": "establishedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "present" },
+        { "kind": "Invoke", "op": "revokedBy" },
+        { "kind": "Observe", "op": "observableVia", "expect": "absent" },
+        { "kind": "Invoke", "op": "restorableVia" },
+        { "kind": "Observe", "op": "observableVia", "expect": "present" }
+      ]
     }
   ]
 }
