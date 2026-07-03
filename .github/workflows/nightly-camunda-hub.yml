@@ -355,6 +355,45 @@ jobs:
           print(f"stale_suppress={', '.join(stale)}")
           PY
 
+      # Derive the "skipped due to known issues" bullet lists straight from the
+      # suppress/exclude configs (single source of truth — no hand-maintained
+      # duplicate). Each relevant entry carries a `knownIssue { summary, url,
+      # tracker? }`; entries without one (e.g. the out-of-scope cluster ops) are
+      # omitted. Bullets are deduped by issue url (all 5 version ops → one
+      # #25801 line). Emitted with literal `\n` so they slot into the Slack JSON.
+      - name: Derive known-issue bullets
+        id: known-issues
+        if: always()
+        run: |
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          def ref(url):
+              num = url.rstrip("/").split("/")[-1]
+              return ("camunda-hub#" if "/camunda-hub/" in url else "#") + num
+          def bullets(entries):
+              seen, lines = set(), []
+              for e in entries:
+                  ki = e.get("knownIssue")
+                  if not ki or ki.get("url") in seen:
+                      continue
+                  seen.add(ki["url"])
+                  line = f"• {ki['summary']} — <{ki['url']}|{ref(ki['url'])}>"
+                  tr = ki.get("tracker")
+                  if tr:
+                      line += f" (tracked via <{tr}|{ref(tr)}>)"
+                  lines.append(line)
+              return "\\n".join(lines)
+          def load(p, key):
+              try:
+                  return json.load(open(p)).get(key, [])
+              except Exception:
+                  return []
+          pos = bullets(load("configs/camunda-hub/positive-suppress.json", "suppress"))
+          neg = bullets(load("configs/camunda-hub/request-validation.json", "excludeOperations"))
+          print(f"positive_known_issues={pos}")
+          print(f"negative_known_issues={neg}")
+          PY
+
       # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
       # for the clone token (no token stored as a repo secret). Lives at
       # secret/data/products/qa/ci/common, key SLACK_BOT_USER_OAUTH_TOKEN — the
@@ -394,7 +433,7 @@ jobs:
       # suppressed (configs/camunda-hub/positive-suppress.json). Keep in sync
       # with that file when suppressions change.
       - name: Notify Slack (positive — known issues)
-        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' }}
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' && steps.known-issues.outputs.positive_known_issues != '' }}
         uses: slackapi/slack-github-action@v2
         with:
           method: chat.postMessage
@@ -403,7 +442,7 @@ jobs:
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
               "thread_ts": "${{ steps.slack-positive.outputs.ts }}",
-              "text": "ℹ️ Some operations are skipped in the positive suite due to known issues:\n• Versions can't be created via the public API — <https://github.com/camunda/camunda-hub/issues/25801|camunda-hub#25801>\n• `deleteCatalogAsset` — no obtainable assetKey — <https://github.com/camunda/camunda-hub/issues/25576|camunda-hub#25576>"
+              "text": "ℹ️ Some operations are skipped in the positive suite due to known issues:\n${{ steps.known-issues.outputs.positive_known_issues }}"
             }
 
       - name: Notify Slack (negative suite)
@@ -422,7 +461,7 @@ jobs:
       # Threaded reply listing the known issues that cause negative ops to be
       # excluded (configs/camunda-hub/request-validation.json → excludeOperations).
       - name: Notify Slack (negative — known issues)
-        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-negative.outputs.ts != '' }}
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-negative.outputs.ts != '' && steps.known-issues.outputs.negative_known_issues != '' }}
         uses: slackapi/slack-github-action@v2
         with:
           method: chat.postMessage
@@ -431,5 +470,5 @@ jobs:
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
               "thread_ts": "${{ steps.slack-negative.outputs.ts }}",
-              "text": "ℹ️ Some operations are skipped in the negative suite due to known issues:\n• `updateVersion` / `restoreVersion` — versioning blocked, no version fixture can exist — <https://github.com/camunda/camunda-hub/issues/25801|camunda-hub#25801> (tracked via <https://github.com/camunda/api-test-generator/issues/419|#419>)"
+              "text": "ℹ️ Some operations are skipped in the negative suite due to known issues:\n${{ steps.known-issues.outputs.negative_known_issues }}"
             }
