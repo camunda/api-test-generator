@@ -94,5 +94,57 @@ describe('request-validation: unenforcedStringFormats', () => {
         /unenforcedStringFormats/,
       );
     });
+
+    it('parses excludeOperations with an optional knownIssue', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'updateVersion',
+              reason: 'blocked upstream',
+              knownIssue: {
+                summary: 'versioning blocked',
+                url: 'https://github.com/camunda/camunda-hub/issues/25801',
+                tracker: 'https://github.com/camunda/api-test-generator/issues/419',
+              },
+            },
+          ],
+        }),
+      );
+      const cfg = loadRequestValidationConfig(tmpRoot, 'probe');
+      expect(cfg.excludeOperations?.[0]?.knownIssue?.url).toBe(
+        'https://github.com/camunda/camunda-hub/issues/25801',
+      );
+    });
+
+    it('rejects a malformed knownIssue on an excludeOperations entry', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        // knownIssue missing the required `url`
+        JSON.stringify({
+          excludeOperations: [
+            { operationId: 'updateVersion', reason: 'x', knownIssue: { summary: 'no url' } },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
+    it('parses a suite-wide knownIssues array and rejects a malformed one', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          knownIssues: [{ summary: 'wrong-type key fields skipped', url: 'https://x/25926' }],
+        }),
+      );
+      expect(loadRequestValidationConfig(tmpRoot, 'probe').knownIssues?.[0]?.url).toBe('https://x/25926');
+
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({ knownIssues: [{ summary: 'no url' }] }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/knownIssues/);
+    });
   });
 });
