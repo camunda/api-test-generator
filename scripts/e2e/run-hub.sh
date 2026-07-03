@@ -165,13 +165,22 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   if [ -z "${POS_FIXTURE_FILE_CONTENT:-}" ]; then
     POS_FIXTURE_FILE_CONTENT='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
   fi
-  BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
+  # Playwright is the GATE (same as run_rv): a non-zero exit (any spec failed)
+  # sets PW_FAIL, which fails the run at the end unless E2E_SOFT=1. The html/json
+  # reporters still write their output on failure, so the report is captured
+  # either way.
+  if BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
     POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
     POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
     POS_FIXTURE_FILE_CONTENT="$POS_FIXTURE_FILE_CONTENT" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$OUT/pw-positive.json" \
-    npx playwright test -c path-analyser/playwright.config.ts || true
+    npx playwright test -c path-analyser/playwright.config.ts; then
+    echo "  ✓ Playwright passed: positive"
+  else
+    PW_FAIL=1
+    echo "  ✗ Playwright reported test failures in the positive suite"
+  fi
   if [ -f "$OUT/pw-positive/index.html" ]; then
     echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
   else
