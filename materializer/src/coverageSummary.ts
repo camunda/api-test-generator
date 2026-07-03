@@ -34,6 +34,9 @@ export interface CoverageSummary {
   totalSpecOperations: number;
   emittedFeatureSpecs: number;
   suppressedByTemplate: number;
+  /** Ops dropped by an explicit per-config `positive-suppress.json` entry
+   *  (distinct from `suppressedByTemplate`, which is scenario-template-derived). */
+  suppressedExplicit: number;
   variantSpecs: number;
   lifecycleSpecs: number;
   unmappedOperations: string[];
@@ -43,7 +46,11 @@ export interface CoverageSummary {
 export interface BuildCoverageSummaryInput {
   allSpecOpIds: readonly string[];
   emittedFeatureOpIds: ReadonlySet<string>;
+  /** Template-derived suppressions (ops covered by a scenario-template suite). */
   suppressedOpIds: ReadonlySet<string>;
+  /** Explicit per-config suppressions (`positive-suppress.json`). Optional;
+   *  defaults to empty so existing callers/tests are unaffected. */
+  explicitlySuppressedOpIds?: ReadonlySet<string>;
   entries: readonly CoverageEntry[];
   variantSpecs: number;
   lifecycleSpecs: number;
@@ -96,7 +103,12 @@ export async function loadSpecOperationIds(specBundleDir: string): Promise<strin
 }
 
 export function buildCoverageSummary(input: BuildCoverageSummaryInput): CoverageSummary {
-  const accountedFor = new Set<string>([...input.emittedFeatureOpIds, ...input.suppressedOpIds]);
+  const explicitlySuppressedOpIds = input.explicitlySuppressedOpIds ?? new Set<string>();
+  const accountedFor = new Set<string>([
+    ...input.emittedFeatureOpIds,
+    ...input.suppressedOpIds,
+    ...explicitlySuppressedOpIds,
+  ]);
   const unmappedOperations = input.allSpecOpIds.filter((id) => !accountedFor.has(id)).sort();
 
   const perTemplateAgg = new Map<
@@ -130,6 +142,7 @@ export function buildCoverageSummary(input: BuildCoverageSummaryInput): Coverage
     totalSpecOperations: input.allSpecOpIds.length,
     emittedFeatureSpecs: input.emittedFeatureOpIds.size,
     suppressedByTemplate: input.suppressedOpIds.size,
+    suppressedExplicit: explicitlySuppressedOpIds.size,
     variantSpecs: input.variantSpecs,
     lifecycleSpecs: input.lifecycleSpecs,
     unmappedOperations,

@@ -209,6 +209,60 @@ function loadEmitterConfig(configDir: string, emitter: EmitterStrategy): Record<
 }
 
 /**
+ * Load the per-config positive-suite suppression list from
+ * `configs/<config>/positive-suppress.json` (optional). Each
+ * `{ operationId, reason }` entry removes that operation's feature/variant spec
+ * from the positive suite. Use it — sparingly, always with a documented reason
+ * + tracking issue — for operations that either:
+ *   - the planner cannot produce a passing test for and no scenario template
+ *     covers (so template-coverage suppression (#331) does not reach them), or
+ *   - are intentionally out of scope for the suite (e.g. an opt-in /
+ *     feature-flagged operator surface the default run shouldn't exercise).
+ *
+ * Returns `[]` when the file is absent. When the file EXISTS it must be
+ * well-formed — a JSON object with a `suppress` array of
+ * `{ operationId, reason }` objects (both non-empty strings) — otherwise this
+ * throws, so a broken suppression config fails loud rather than silently
+ * behaving like "file absent" and re-introducing failing ops. Mirrors
+ * `loadEmitterConfig`'s fail-fast contract.
+ */
+function loadPositiveSuppressions(configDir: string): { operationId: string; reason: string }[] {
+  const p = path.join(configDir, 'positive-suppress.json');
+  if (!fsSync.existsSync(p)) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fsSync.readFileSync(p, 'utf8'));
+  } catch (err) {
+    throw new Error(
+      `Failed to read/parse ${p}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${p}: expected a JSON object with a "suppress" array.`);
+  }
+  const list = Reflect.get(raw, 'suppress');
+  if (!Array.isArray(list)) {
+    throw new Error(`${p}: "suppress" must be an array of { operationId, reason } objects.`);
+  }
+  const out: { operationId: string; reason: string }[] = [];
+  for (const e of list) {
+    if (typeof e !== 'object' || e === null || Array.isArray(e)) {
+      throw new Error(`${p}: each "suppress" entry must be an object.`);
+    }
+    const opId = Reflect.get(e, 'operationId');
+    const reason = Reflect.get(e, 'reason');
+    if (typeof opId !== 'string' || opId.length === 0) {
+      throw new Error(`${p}: each "suppress" entry needs a non-empty string "operationId".`);
+    }
+    if (typeof reason !== 'string' || reason.length === 0) {
+      throw new Error(`${p}: "suppress" entry "${opId}" needs a non-empty string "reason".`);
+    }
+    out.push({ operationId: opId, reason });
+  }
+  return out;
+}
+
+/**
  * Minimal JSON-Schema validator covering only the constructs used by
  * built-in emitter configSchemas (object, additionalProperties=false,
  * top-level `properties` map with leaf `type` values from the subset
@@ -651,12 +705,32 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
     // Suppression only applies to emitters that ship the
     // corresponding template suites; for now that is Playwright.
     let coverage: CoverageResult = { suppressedOpIds: new Set(), entries: [] };
+    // Explicit per-config positive suppressions, tracked SEPARATELY from the
+    // template-derived `coverage.suppressedOpIds` so the coverage summary can
+    // report template-vs-explicit distinctly (they are only unioned for the
+    // feature-emission skip below).
+    const explicitSuppressedOpIds = new Set<string>();
     if (emitter.id === PlaywrightEmitter.id) {
       coverage = await buildCoverage({
         templateScenariosRootDir: getTemplateScenariosRootDir(repoRoot),
         templatesAboxPath: path.join(configDir, 'ontology', 'scenario-templates.json'),
         templateNames,
       });
+      // Explicit per-config suppressions: ops with no satisfiable positive test
+      // and no scenario-template coverage, or ops intentionally out of scope.
+      // Logged with their reason so a dropped op is never silent. An op already
+      // suppressed by template coverage is skipped here so the two buckets stay
+      // disjoint (no double-count in the coverage summary).
+      for (const s of loadPositiveSuppressions(configDir)) {
+        if (coverage.suppressedOpIds.has(s.operationId)) {
+          console.log(
+            `  ⏭  positive-suppress: ${s.operationId} already covered by a scenario template — entry is redundant`,
+          );
+          continue;
+        }
+        explicitSuppressedOpIds.add(s.operationId);
+        console.log(`  ⏭  positive-suppress: ${s.operationId} — ${s.reason}`);
+      }
     }
     let count = 0;
     let suppressedCount = 0;
@@ -671,7 +745,10 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
         const content = await fs.readFile(path.join(featureDir, f), 'utf8');
         const parsed = parseScenarioCollection(content);
         if (!parsed.endpoint?.operationId) continue;
-        if (coverage.suppressedOpIds.has(parsed.endpoint.operationId)) {
+        if (
+          coverage.suppressedOpIds.has(parsed.endpoint.operationId) ||
+          explicitSuppressedOpIds.has(parsed.endpoint.operationId)
+        ) {
           suppressedCount++;
           continue;
         }
@@ -704,6 +781,11 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
         const content = await fs.readFile(path.join(variantDir, f), 'utf8');
         const parsed = parseScenarioCollection(content);
         if (!parsed.endpoint?.operationId) continue;
+        // Explicit positive-suppress removes the op's feature AND variant specs
+        // (a suppressed op is out of scope / can't pass). Template-derived
+        // suppression is NOT applied here: template-covered ops (e.g. createFile
+        // covered by File.lifecycle) intentionally keep their variant suites.
+        if (explicitSuppressedOpIds.has(parsed.endpoint.operationId)) continue;
         if (!parsed.scenarios?.length) continue;
         await writeEmitted(emitter, parsed, buildCtx(parsed.endpoint.operationId, 'variant'));
         variantCount++;
@@ -760,10 +842,25 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
     // `npm run coverage:report` script see the same shape regardless
     // of which target the materializer was invoked for.
     const allSpecOpIds = await loadSpecOperationIds(getSpecBundleDir(repoRoot));
+    // Fail fast on stale/typo positive-suppress entries: an explicit
+    // suppression naming an operationId that no longer exists in the bundled
+    // spec silently does nothing (the op isn't emitted anyway), so config drift
+    // would go unnoticed. Since positive-suppress is intentional config, an
+    // unknown opId is an error.
+    if (explicitSuppressedOpIds.size > 0) {
+      const specOpIdSet = new Set(allSpecOpIds);
+      const unknown = [...explicitSuppressedOpIds].filter((op) => !specOpIdSet.has(op)).sort();
+      if (unknown.length > 0) {
+        throw new Error(
+          `configs/${configName}/positive-suppress.json lists operationId(s) not present in the bundled spec (stale or typo): ${unknown.join(', ')}`,
+        );
+      }
+    }
     const summary = buildCoverageSummary({
       allSpecOpIds,
       emittedFeatureOpIds,
       suppressedOpIds: coverage.suppressedOpIds,
+      explicitlySuppressedOpIds: explicitSuppressedOpIds,
       entries: coverage.entries,
       variantSpecs: variantCount,
       lifecycleSpecs: lifecycleCount,
@@ -782,6 +879,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
           emitter: emitter.id,
           summary,
           suppressedOpIds: [...coverage.suppressedOpIds].sort(),
+          explicitlySuppressedOpIds: [...explicitSuppressedOpIds].sort(),
           entries: [...coverage.entries].sort((a, b) =>
             a.operationId === b.operationId
               ? a.template === b.template
@@ -796,7 +894,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
       'utf8',
     );
     console.log(
-      `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites, -${suppressedCount} suppressed by scenario-template coverage) in ${outDir} (target: ${emitter.id})`,
+      `Generated test suites for ${count} endpoints (+${variantCount} variant suites, +${lifecycleCount} lifecycle suites, -${suppressedCount} suppressed by scenario-template coverage or positive-suppress) in ${outDir} (target: ${emitter.id})`,
     );
     return;
   }

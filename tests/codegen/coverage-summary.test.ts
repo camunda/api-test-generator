@@ -78,6 +78,35 @@ describe('buildCoverageSummary (#335)', () => {
     ]);
   });
 
+  test('explicit suppressions are counted separately from template ones and are accounted-for', () => {
+    const summary = buildCoverageSummary({
+      allSpecOpIds: ['createGroup', 'getGroup', 'deleteGroup', 'listClusters'],
+      emittedFeatureOpIds: new Set(['getGroup']),
+      suppressedOpIds: new Set(['createGroup', 'deleteGroup']), // template-derived
+      explicitlySuppressedOpIds: new Set(['listClusters']), // explicit positive-suppress
+      entries: [],
+      variantSpecs: 0,
+      lifecycleSpecs: 0,
+    });
+    // Template count must NOT absorb the explicit suppression.
+    expect(summary.suppressedByTemplate).toBe(2);
+    expect(summary.suppressedExplicit).toBe(1);
+    // The explicitly-suppressed op is accounted for, not flagged as unmapped drift.
+    expect(summary.unmappedOperations).toEqual([]);
+  });
+
+  test('explicitlySuppressedOpIds defaults to empty when omitted', () => {
+    const summary = buildCoverageSummary({
+      allSpecOpIds: ['a'],
+      emittedFeatureOpIds: new Set(['a']),
+      suppressedOpIds: new Set(),
+      entries: [],
+      variantSpecs: 0,
+      lifecycleSpecs: 0,
+    });
+    expect(summary.suppressedExplicit).toBe(0);
+  });
+
   test('per-template aggregates are sorted by name', () => {
     const summary = buildCoverageSummary({
       allSpecOpIds: [],
@@ -199,12 +228,38 @@ describe('renderMarkdown (#335)', () => {
     expect(md).toContain('- Spec operations: **190**');
     expect(md).toContain('- Emitted feature specs: **117**');
     expect(md).toContain('- Suppressed by scenario-template coverage: **73**');
-    expect(md).toContain('- Operation coverage: **190 / 190 (100.0%)**');
+    expect(md).toContain('- Operation coverage: **190 / 190 in-scope ops (100.0%)**');
     expect(md).toContain('| `EdgeLifecycle` | 14 | 28 | 56 | 28 | 28 |');
     expect(md).toContain('| `EntityLifecycle` | 8 | 32 | 40 | 24 | 16 |');
     expect(md).toContain(
       '_None — every spec operation is covered by a feature or lifecycle suite._',
     );
+  });
+
+  test('explicit suppressions are excluded from the coverage denominator and shown in the reconciliation', () => {
+    const md = renderMarkdown({
+      version: 2,
+      config: 'camunda-hub',
+      emitter: 'playwright',
+      summary: {
+        totalSpecOperations: 41,
+        emittedFeatureSpecs: 25,
+        suppressedByTemplate: 12,
+        suppressedExplicit: 4,
+        variantSpecs: 7,
+        lifecycleSpecs: 4,
+        unmappedOperations: [],
+        perTemplate: [],
+      },
+    });
+    // Coverage % is over in-scope ops (41 − 4), not dragged down by the 4
+    // intentional exclusions.
+    expect(md).toContain(
+      '- Operation coverage: **37 / 37 in-scope ops (100.0%)** — 4 explicitly suppressed, excluded from scope',
+    );
+    // Reconciliation still adds up: 25 + 12 + 4 + 0 = 41.
+    expect(md).toContain('+ suppressed (explicit):     4  (out of scope / positive-suppress)');
+    expect(md).toContain('= total covered + gaps:     41');
   });
 
   test('renders the unmapped-operations list when non-empty', () => {

@@ -44,6 +44,7 @@ interface CoverageSummary {
   totalSpecOperations: number;
   emittedFeatureSpecs: number;
   suppressedByTemplate: number;
+  suppressedExplicit?: number;
   variantSpecs: number;
   lifecycleSpecs: number;
   unmappedOperations: string[];
@@ -118,8 +119,13 @@ export function renderMarkdown(artefact: CoverageArtefact): string {
   const total = summary.totalSpecOperations;
   const emitted = summary.emittedFeatureSpecs;
   const suppressed = summary.suppressedByTemplate;
+  const explicit = summary.suppressedExplicit ?? 0;
   const covered = emitted + suppressed;
-  const pct = total > 0 ? ((covered / total) * 100).toFixed(1) : '0.0';
+  // Explicitly-suppressed ops are intentionally out of scope (not tested and
+  // not a gap), so coverage % is measured over the IN-SCOPE surface
+  // (total − explicit) rather than dragged down by deliberate exclusions.
+  const inScope = total - explicit;
+  const pct = inScope > 0 ? ((covered / inScope) * 100).toFixed(1) : '0.0';
 
   const lines: string[] = [];
   lines.push(`# Coverage report — ${config}`);
@@ -128,9 +134,13 @@ export function renderMarkdown(artefact: CoverageArtefact): string {
   lines.push(`- Spec operations: **${total}**`);
   lines.push(`- Emitted feature specs: **${emitted}**`);
   lines.push(`- Suppressed by scenario-template coverage: **${suppressed}**`);
+  lines.push(`- Suppressed explicitly (out of scope / positive-suppress): **${explicit}**`);
   lines.push(`- Variant specs: **${summary.variantSpecs}**`);
   lines.push(`- Lifecycle (template) specs: **${summary.lifecycleSpecs}**`);
-  lines.push(`- Operation coverage: **${covered} / ${total} (${pct}%)**`);
+  lines.push(
+    `- Operation coverage: **${covered} / ${inScope} in-scope ops (${pct}%)**` +
+      (explicit > 0 ? ` — ${explicit} explicitly suppressed, excluded from scope` : ''),
+  );
   lines.push(`- Unmapped operations: **${summary.unmappedOperations.length}**`);
   lines.push('');
 
@@ -142,9 +152,12 @@ export function renderMarkdown(artefact: CoverageArtefact): string {
   lines.push(
     `+ suppressed by template: ${String(suppressed).padStart(4)}  (covered by ${summary.lifecycleSpecs} lifecycle specs)`,
   );
+  lines.push(
+    `+ suppressed (explicit):  ${String(explicit).padStart(4)}  (out of scope / positive-suppress)`,
+  );
   lines.push(`+ unmapped:               ${String(summary.unmappedOperations.length).padStart(4)}`);
   lines.push(
-    `= total covered + gaps:   ${String(emitted + suppressed + summary.unmappedOperations.length).padStart(4)}`,
+    `= total covered + gaps:   ${String(emitted + suppressed + explicit + summary.unmappedOperations.length).padStart(4)}`,
   );
   lines.push('```');
   lines.push('');
