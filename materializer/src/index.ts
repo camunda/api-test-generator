@@ -233,7 +233,9 @@ function loadPositiveSuppressions(configDir: string): { operationId: string; rea
   try {
     raw = JSON.parse(fsSync.readFileSync(p, 'utf8'));
   } catch (err) {
-    throw new Error(`Failed to parse ${p}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Failed to read/parse ${p}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error(`${p}: expected a JSON object with a "suppress" array.`);
@@ -716,8 +718,16 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
       });
       // Explicit per-config suppressions: ops with no satisfiable positive test
       // and no scenario-template coverage, or ops intentionally out of scope.
-      // Logged with their reason so a dropped op is never silent.
+      // Logged with their reason so a dropped op is never silent. An op already
+      // suppressed by template coverage is skipped here so the two buckets stay
+      // disjoint (no double-count in the coverage summary).
       for (const s of loadPositiveSuppressions(configDir)) {
+        if (coverage.suppressedOpIds.has(s.operationId)) {
+          console.log(
+            `  ⏭  positive-suppress: ${s.operationId} already covered by a scenario template — entry is redundant`,
+          );
+          continue;
+        }
         explicitSuppressedOpIds.add(s.operationId);
         console.log(`  ⏭  positive-suppress: ${s.operationId} — ${s.reason}`);
       }
@@ -771,6 +781,11 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
         const content = await fs.readFile(path.join(variantDir, f), 'utf8');
         const parsed = parseScenarioCollection(content);
         if (!parsed.endpoint?.operationId) continue;
+        // Explicit positive-suppress removes the op's feature AND variant specs
+        // (a suppressed op is out of scope / can't pass). Template-derived
+        // suppression is NOT applied here: template-covered ops (e.g. createFile
+        // covered by File.lifecycle) intentionally keep their variant suites.
+        if (explicitSuppressedOpIds.has(parsed.endpoint.operationId)) continue;
         if (!parsed.scenarios?.length) continue;
         await writeEmitted(emitter, parsed, buildCtx(parsed.endpoint.operationId, 'variant'));
         variantCount++;
