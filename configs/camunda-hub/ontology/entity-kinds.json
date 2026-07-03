@@ -6,6 +6,13 @@
   "kinds": [
     {
       "@type": "EntityKind",
+      "name": "Member",
+      "shape": "external-entity",
+      "identifiers": ["MemberEmail"],
+      "description": "A workspace member, identified by a client-supplied email address (MemberEmail, x-semantic-client-minted). Minted outside this API — the member's user account exists in the IdP; the API only references the email to grant/revoke workspace membership. Never created, fetched, or deleted as a standalone entity; participates only in the WorkspaceMemberMembership edge (addMember / searchMembers / removeMember)."
+    },
+    {
+      "@type": "EntityKind",
       "name": "Workspace",
       "shape": "entity",
       "identifiers": ["WorkspaceKey"],

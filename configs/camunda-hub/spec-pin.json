@@ -1,5 +1,5 @@
 {
   "$comment": "Spec pin for the camunda-hub config. Mirrors the camunda-oca contract: specRef MUST be a 40-char commit SHA on camunda/camunda-hub, expectedSpecHash is the specHash printed in spec/camunda-hub/bundled/spec-metadata.json after bundling. The hub spec lives at restapi/public-api/src/main/resources/openapi/v2/ inside camunda/camunda-hub (private repo).",
-  "specRef": "fcbd0b94d8bff5ccbf208124a1b6f47d6982f49f",
-  "expectedSpecHash": "sha256:c7fd8b89853c1308069cbbea24c10385a6f9d7eaee08f398f727f70b07c5e76f"
+  "specRef": "35c76d6994ce8f87342f28d791525937cf8e4125",
+  "expectedSpecHash": "sha256:701f889bcdec0475e1d331c44b89f10d14aed9a8d05efc95ca9df3d5bec1879a"
 }

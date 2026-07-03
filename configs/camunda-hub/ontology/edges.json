@@ -1,0 +1,20 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/edge.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "edges": [
+    {
+      "@type": "Edge",
+      "name": "WorkspaceMemberMembership",
+      "endpoints": {
+        "from": "Workspace",
+        "to": "Member"
+      },
+      "identifiedBy": ["WorkspaceKey", "MemberEmail"],
+      "establishedBy": "addMember",
+      "revokedBy": "removeMember",
+      "observableVia": "searchMembers",
+      "description": "Membership edge between a Workspace and a Member, identified by the (workspaceKey, email) tuple. Established by addMember, observable via searchMembers (the workspace-scoped member search), revoked by removeMember."
+    }
+  ]
+}
