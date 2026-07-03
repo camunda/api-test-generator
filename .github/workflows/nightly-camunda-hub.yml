@@ -374,7 +374,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 TestRail>', steps.testrail.outputs.positive_url) || '' }}"
+              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n✅ ${{ steps.pw-totals.outputs.positive_passed }} passed · ❌ ${{ steps.pw-totals.outputs.positive_failed }} failed · 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} flaky · ⏩ ${{ steps.pw-totals.outputs.positive_skipped }} skipped\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 positive>', steps.testrail.outputs.positive_url) || '' }}"
             }
 
       - name: Notify Slack (negative suite)
