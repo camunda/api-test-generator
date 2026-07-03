@@ -165,7 +165,7 @@ Both are env-configurable (no edits needed):
 
 - `STEPS="generate run curl"` — pick which steps to run (e.g. `STEPS=curl` to re-curl only).
 - `RV_PROFILES="secured rbac"` (Hub) / `"unsecured"` (OCA) — which request-validation profiles.
-- `SKIP_POSITIVE=1` — skip the positive lifecycle suite (default for Hub until [camunda-hub#25146](https://github.com/camunda/camunda-hub/pull/25146) merges; set `SKIP_POSITIVE=0` to re-enable).
+- `SKIP_POSITIVE=1` — skip the positive lifecycle suite (runs by default now that [camunda-hub#25146](https://github.com/camunda/camunda-hub/pull/25146) has merged).
 - `E2E_SOFT=1` — don't exit non-zero when the oracle finds mismatches.
 
 Output lands in `test-results/e2e-<config>/`: the Playwright report (`pw-<profile>.json`)

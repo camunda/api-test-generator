@@ -34,8 +34,9 @@ HUB_UI_PORT="${HUB_UI_PORT:-8088}"
 KEYCLOAK_PORT="${KEYCLOAK_PORT:-18080}"
 RV_PROFILES="${RV_PROFILES:-secured rbac}"
 STEPS="${STEPS:-generate run curl}"
-# TODO: remove once camunda/camunda-hub#25146 is merged
-SKIP_POSITIVE="${SKIP_POSITIVE:-1}"
+# camunda/camunda-hub#25146 merged — the positive (lifecycle) suite runs by
+# default. Set SKIP_POSITIVE=1 to skip it (e.g. a negative-only run).
+SKIP_POSITIVE="${SKIP_POSITIVE:-}"
 KC="http://localhost:${KEYCLOAK_PORT}/auth/realms/camunda-platform/protocol/openid-connect/token"
 CORE_URL="http://localhost:${HUB_UI_PORT}/api"        # request-validation base (buildUrl adds /v2)
 POS_URL="http://localhost:${HUB_UI_PORT}/api/v2"       # positive suite base
@@ -116,7 +117,7 @@ fi
 # ============================ 1. GENERATE ============================
 if step generate; then
   echo "── generate ─────────────────────────────"
-  # Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
+  # Positive (lifecycle) suite runs unless SKIP_POSITIVE is set (#25146 merged).
   if [ -z "${SKIP_POSITIVE:-}" ]; then
     CONFIG="$CONFIG" npm run extract-graph >/dev/null
     CONFIG="$CONFIG" npm run generate:scenarios >/dev/null
@@ -132,7 +133,7 @@ fi
 
 # ====================== 2. RUN (Playwright) ==========================
 unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD 2>/dev/null || true
-# Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
+# Positive (lifecycle) suite runs unless SKIP_POSITIVE is set (#25146 merged).
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
   # POS_FIXTURE_MEMBER_EMAIL: the member email for addMember/removeMember is

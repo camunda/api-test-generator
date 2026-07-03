@@ -1,13 +1,14 @@
-# description: Nightly request-validation (negative) test run for camunda-hub.
-#              Clones camunda-hub @ latest main, bundles its OpenAPI spec, starts
-#              a Hub SNAPSHOT, regenerates the negative test suite, runs it, and
-#              posts a results summary to Slack. Positive (lifecycle) tests are
-#              skipped until camunda/camunda-hub#25146 lands. The run FAILS if any
-#              test's actual status != expected (strict).
+# description: Nightly API test run for camunda-hub — positive (lifecycle) +
+#              negative (request-validation) suites. Clones camunda-hub @ latest
+#              main, bundles its OpenAPI spec, starts a Hub SNAPSHOT, regenerates
+#              both suites, runs them, and posts a results summary to Slack. The
+#              run FAILS if any test's actual status != expected (strict); ops
+#              with no achievable green are positive-suppressed
+#              (configs/camunda-hub/positive-suppress.json) with tracking issues.
 # type: CI
 # owner: @camunda/test-automation-team
 ---
-name: Nightly — camunda-hub negative tests
+name: Nightly — camunda-hub API tests
 
 on:
   schedule:
@@ -181,9 +182,12 @@ jobs:
       # STEPS="… curl".) No E2E_SOFT: run-hub.sh exits non-zero on any Playwright
       # test failure, so this step (and the run) FAILS on failing tests. The
       # always() steps below still capture the report + write the summary.
-      - name: Generate + run negative suite
+      - name: Generate + run positive + negative suites
         env:
-          SKIP_POSITIVE: '1'
+          # camunda/camunda-hub#25146 merged — the positive (lifecycle) suite
+          # now runs alongside the negative (request-validation) suite. Blocked
+          # ops with no achievable green (versions #25801, catalog #25576) are
+          # positive-suppressed in configs/camunda-hub/positive-suppress.json.
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
         run: ./scripts/e2e/run-hub.sh

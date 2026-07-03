@@ -16,6 +16,30 @@
     {
       "operationId": "getClusterUsageMetrics",
       "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also needs a chainable clusterId: GET /clusters/usage-metrics has a required `id` (clusterId) query param that can't be sourced (camunda/camunda-hub#25907)."
+    },
+    {
+      "operationId": "createVersion",
+      "reason": "Versions are unobtainable via the public API: every file it can create lives inside a project (process application), and those cannot be versioned (400 'Cannot create a version for file … as it is located inside a process application'). Blocked on camunda/camunda-hub#25801; tracked here via #419. Re-enable once versioning is unblocked."
+    },
+    {
+      "operationId": "getVersion",
+      "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419)."
+    },
+    {
+      "operationId": "updateVersion",
+      "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419)."
+    },
+    {
+      "operationId": "deleteVersion",
+      "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419)."
+    },
+    {
+      "operationId": "restoreVersion",
+      "reason": "Depends on a soft-deleted version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419)."
+    },
+    {
+      "operationId": "deleteCatalogAsset",
+      "reason": "No way to obtain a deletable catalog assetKey via the public API: ingestCatalogAssets succeeds but deleteCatalogAsset then 404s on the ingested asset's id (the ingested element-template isn't resolvable as a deletable asset by that key). Blocked on camunda/camunda-hub#25576. Re-enable once a real assetKey can be sourced."
     }
   ]
 }
