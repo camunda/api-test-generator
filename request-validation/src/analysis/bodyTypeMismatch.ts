@@ -7,6 +7,23 @@ interface Opts {
   onlyOperations?: Set<string>;
   capPerOperation?: number;
   maxPerField?: number;
+  /**
+   * #427 — leaf names of body fields the server's authorization layer
+   * resolves *before* body type-validation (the resource-key fields, i.e.
+   * the keys of `resourceFixtures`: projectKey, folderKey, parentFolderKey,
+   * workspaceKey, …). A wrong-type value on one of these never reaches
+   * body validation: the @PreAuthorize gate resolves the malformed key
+   * first, so a scalar wrong-type (`123`, `true`) short-circuits to 403
+   * and a structural one (`{}`, `[]`) currently 500s (a Hub bug —
+   * unhandled non-scalar key). Neither is the expected 400, so emitting a
+   * body-type-mismatch on an authz-resolved key field is a guaranteed
+   * false-positive. Verified live 2026-07-03: a non-key string field with
+   * the same mutations correctly returns 400, confirming the bypass is
+   * specific to authz-resolved keys. Skipped here rather than
+   * re-expected-as-403 so the suite keeps asserting strict body-validation
+   * (400) everywhere it actually runs. Analogous to `unenforcedStringFormats`.
+   */
+  resourceKeyFields?: ReadonlySet<string>;
 }
 
 const TYPE_MISMATCH_TABLE: Record<string, unknown[]> = {
@@ -31,6 +48,10 @@ export function generateBodyTypeMismatch(ops: OperationModel[], opts: Opts): Val
     for (const f of fields) {
       const t = Array.isArray(f.type) ? f.type[0] : f.type;
       if (!t || !TYPE_MISMATCH_TABLE[t]) continue;
+      // #427 — skip authz-resolved resource-key fields: the server resolves
+      // them before body validation, so a wrong-type value yields 403/500,
+      // never the expected 400.
+      if (opts.resourceKeyFields?.has(f.path[f.path.length - 1])) continue;
       let perField = 0;
       for (const wrong of TYPE_MISMATCH_TABLE[t]) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;

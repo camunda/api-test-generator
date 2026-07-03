@@ -45,8 +45,9 @@ export interface EmitTemplateSuitesOptions {
   /**
    * Absolute path to a template's scenarios directory, i.e.
    * `generated/<config>/scenarios/templates/<TemplateName>/`
-   * (e.g. `EdgeLifecycle`, `EntityLifecycle`). Each `.json` underneath
-   * is read and rendered to one `<Subject>.lifecycle.spec.ts`.
+   * (e.g. `EdgeLifecycle`, `EntityLifecycle`, `RestoreLifecycle`). Each
+   * `.json` underneath is read and rendered to one
+   * `<Subject>.lifecycle.spec.ts`.
    */
   scenariosDir: string;
   /**
@@ -74,12 +75,16 @@ export interface EmitTemplateSuitesOptions {
 
 /**
  * Read every lifecycle template scenario JSON from `scenariosDir` and
- * write one Playwright suite per subject to `outDir`. Handles both
- * EdgeLifecycle (membership-search observe) and EntityLifecycle
- * (#280 — get-by-id status observe); dispatch is by
- * `TemplateScenarioFile.subjectKind` ('Edge' vs 'Entity').
+ * write one Playwright suite per subject to `outDir`. `renderLifecycleSuite`
+ * dispatches by template:
+ *   - **EdgeLifecycle** (membership-search observe) and **EntityLifecycle**
+ *     (#280 — get-by-id status observe) share the fixed 5-step shape below,
+ *     routed by `TemplateScenarioFile.subjectKind` ('Edge' vs 'Entity').
+ *   - **RestoreLifecycle** (#426) has its own 7-step shape and a dedicated
+ *     render path (`renderRestoreLifecycleSuite`), routed by `templateName`;
+ *     see that function for its step sequence.
  *
- * Suite shape (both templates share steps 1–4, differ on 5/7):
+ * The 5-step Edge/Entity shape (both share steps 1–4, differ on 5/7):
  *   1. universal-seed prologue (one `ctx.<binding> ??= seedBinding(...)`
  *      per configured GlobalContextSeed),
  *   2. one `seedBinding('<name>')` per `PrereqChainStep.seedBindings`

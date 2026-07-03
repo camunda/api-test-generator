@@ -214,6 +214,10 @@ async function main() {
           capPerOperation: opts.maxTypeMismatch,
           onlyOperations: opts.onlyOperations,
           maxPerField: 2,
+          // #427 — the resource-key fields (keys of resourceFixtures) are
+          // authz-resolved before body validation, so wrong-type mutations on
+          // them yield 403/500 not 400; skip them.
+          resourceKeyFields: new Set(Object.keys(rvConfig.resourceFixtures ?? {})),
         }),
       );
     }
