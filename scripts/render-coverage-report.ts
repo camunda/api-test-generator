@@ -121,7 +121,11 @@ export function renderMarkdown(artefact: CoverageArtefact): string {
   const suppressed = summary.suppressedByTemplate;
   const explicit = summary.suppressedExplicit ?? 0;
   const covered = emitted + suppressed;
-  const pct = total > 0 ? ((covered / total) * 100).toFixed(1) : '0.0';
+  // Explicitly-suppressed ops are intentionally out of scope (not tested and
+  // not a gap), so coverage % is measured over the IN-SCOPE surface
+  // (total − explicit) rather than dragged down by deliberate exclusions.
+  const inScope = total - explicit;
+  const pct = inScope > 0 ? ((covered / inScope) * 100).toFixed(1) : '0.0';
 
   const lines: string[] = [];
   lines.push(`# Coverage report — ${config}`);
@@ -133,7 +137,10 @@ export function renderMarkdown(artefact: CoverageArtefact): string {
   lines.push(`- Suppressed explicitly (out of scope / positive-suppress): **${explicit}**`);
   lines.push(`- Variant specs: **${summary.variantSpecs}**`);
   lines.push(`- Lifecycle (template) specs: **${summary.lifecycleSpecs}**`);
-  lines.push(`- Operation coverage: **${covered} / ${total} (${pct}%)**`);
+  lines.push(
+    `- Operation coverage: **${covered} / ${inScope} in-scope ops (${pct}%)**` +
+      (explicit > 0 ? ` — ${explicit} explicitly suppressed, excluded from scope` : ''),
+  );
   lines.push(`- Unmapped operations: **${summary.unmappedOperations.length}**`);
   lines.push('');
 

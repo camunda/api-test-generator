@@ -842,6 +842,20 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
     // `npm run coverage:report` script see the same shape regardless
     // of which target the materializer was invoked for.
     const allSpecOpIds = await loadSpecOperationIds(getSpecBundleDir(repoRoot));
+    // Fail fast on stale/typo positive-suppress entries: an explicit
+    // suppression naming an operationId that no longer exists in the bundled
+    // spec silently does nothing (the op isn't emitted anyway), so config drift
+    // would go unnoticed. Since positive-suppress is intentional config, an
+    // unknown opId is an error.
+    if (explicitSuppressedOpIds.size > 0) {
+      const specOpIdSet = new Set(allSpecOpIds);
+      const unknown = [...explicitSuppressedOpIds].filter((op) => !specOpIdSet.has(op)).sort();
+      if (unknown.length > 0) {
+        throw new Error(
+          `configs/${configName}/positive-suppress.json lists operationId(s) not present in the bundled spec (stale or typo): ${unknown.join(', ')}`,
+        );
+      }
+    }
     const summary = buildCoverageSummary({
       allSpecOpIds,
       emittedFeatureOpIds,
