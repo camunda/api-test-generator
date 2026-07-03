@@ -291,8 +291,10 @@ jobs:
           done
 
       # --- Slack notification --------------------------------------------------
-      # Aggregate the Playwright JSON stats across profiles into pass/fail/flaky/
-      # skipped totals for the Slack message (✅ | ❌ | 🟡 | ⏩ format).
+      # Aggregate the Playwright JSON stats into PER-SUITE pass/fail/flaky/skipped
+      # totals so the positive (lifecycle) and negative (request-validation)
+      # suites each get their own Slack message. positive = pw-positive.json;
+      # negative = every other pw-*.json (secured, rbac, …).
       - name: Compute Playwright totals
         id: pw-totals
         if: always()
@@ -301,20 +303,27 @@ jobs:
           python3 - "$out" <<'PY' >> "$GITHUB_OUTPUT"
           import glob, json, os, sys
           out = sys.argv[1]
-          passed = failed = flaky = skipped = 0
-          for f in glob.glob(os.path.join(out, "pw-*.json")):
-              try:
-                  s = json.load(open(f)).get("stats", {})
-              except Exception:
-                  continue
-              passed  += s.get("expected", 0)
-              failed  += s.get("unexpected", 0)
-              flaky   += s.get("flaky", 0)
-              skipped += s.get("skipped", 0)
-          print(f"passed={passed}")
-          print(f"failed={failed}")
-          print(f"flaky={flaky}")
-          print(f"skipped={skipped}")
+          def agg(files):
+              p = f = fl = sk = 0
+              for fn in files:
+                  try:
+                      s = json.load(open(fn)).get("stats", {})
+                  except Exception:
+                      continue
+                  p  += s.get("expected", 0)
+                  f  += s.get("unexpected", 0)
+                  fl += s.get("flaky", 0)
+                  sk += s.get("skipped", 0)
+              return p, f, fl, sk
+          allf = glob.glob(os.path.join(out, "pw-*.json"))
+          pos = [x for x in allf if os.path.basename(x) == "pw-positive.json"]
+          neg = [x for x in allf if os.path.basename(x) != "pw-positive.json"]
+          for prefix, files in (("positive", pos), ("negative", neg)):
+              p, f, fl, sk = agg(files)
+              print(f"{prefix}_passed={p}")
+              print(f"{prefix}_failed={f}")
+              print(f"{prefix}_flaky={fl}")
+              print(f"{prefix}_skipped={sk}")
           PY
 
       # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
@@ -339,7 +348,7 @@ jobs:
           secrets: |
             secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
 
-      - name: Notify Slack
+      - name: Notify Slack (positive suite)
         if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
         uses: slackapi/slack-github-action@v2
         with:
@@ -348,5 +357,17 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *Playwright Results*\n✅ ${{ steps.pw-totals.outputs.passed }} | ❌ ${{ steps.pw-totals.outputs.failed }} | 🟡 ${{ steps.pw-totals.outputs.flaky }} | ⏩ ${{ steps.pw-totals.outputs.skipped }}\n*Test Results for camunda-hub API tests — positive + negative (SNAPSHOT) :* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+              "text": "🎭 *camunda-hub positive (lifecycle) suite* (SNAPSHOT)\n✅ ${{ steps.pw-totals.outputs.positive_passed }} | ❌ ${{ steps.pw-totals.outputs.positive_failed }} | 🟡 ${{ steps.pw-totals.outputs.positive_flaky }} | ⏩ ${{ steps.pw-totals.outputs.positive_skipped }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+            }
+
+      - name: Notify Slack (negative suite)
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "🎭 *camunda-hub negative (request-validation) suite* (SNAPSHOT)\n✅ ${{ steps.pw-totals.outputs.negative_passed }} | ❌ ${{ steps.pw-totals.outputs.negative_failed }} | 🟡 ${{ steps.pw-totals.outputs.negative_flaky }} | ⏩ ${{ steps.pw-totals.outputs.negative_skipped }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
             }
