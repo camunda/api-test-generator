@@ -165,6 +165,10 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   if [ -z "${POS_FIXTURE_FILE_CONTENT:-}" ]; then
     POS_FIXTURE_FILE_CONTENT='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
   fi
+  # Absolute output paths (mirrors run_rv): Playwright can resolve relative
+  # reporter paths against the config dir rather than cwd, which would land the
+  # report outside $OUT and dodge the artifact upload + Slack/summary aggregation.
+  pos_abs_out="$(cd "$OUT" && pwd)"
   # Playwright is the GATE (same as run_rv): a non-zero exit (any spec failed)
   # sets PW_FAIL, which fails the run at the end unless E2E_SOFT=1. The html/json
   # reporters still write their output on failure, so the report is captured
@@ -173,9 +177,9 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
     POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
     POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
     POS_FIXTURE_FILE_CONTENT="$POS_FIXTURE_FILE_CONTENT" \
-    PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
-    PLAYWRIGHT_JSON_OUTPUT_FILE="$OUT/pw-positive.json" \
-    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$OUT/pw-positive.junit.xml" \
+    PLAYWRIGHT_HTML_REPORT="$pos_abs_out/pw-positive" \
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs_out/pw-positive.json" \
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$pos_abs_out/pw-positive.junit.xml" \
     npx playwright test -c path-analyser/playwright.config.ts; then
     echo "  ✓ Playwright passed: positive"
   else
