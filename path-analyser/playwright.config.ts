@@ -13,16 +13,20 @@ const repoRoot = resolve(__dirname, '..');
 // can redirect the report to a per-config location; defaults to playwright-report/.
 const htmlOutputFolder = process.env.PLAYWRIGHT_HTML_REPORT ?? 'playwright-report';
 
-// A JSON reporter is added only when PLAYWRIGHT_JSON_OUTPUT_FILE is set, so
-// callers (e.g. scripts/e2e/run-hub.sh) can capture pass/fail stats for the
-// nightly summary + Slack aggregation without changing the default local
-// `list` + `html` output. Mirrors the request-validation suite's reporting.
+// JSON + JUnit reporters are added only when their PLAYWRIGHT_*_OUTPUT_FILE env
+// vars are set, so callers (e.g. scripts/e2e/run-hub.sh) can capture pass/fail
+// stats for the nightly summary + Slack aggregation (json) and publish results
+// to TestRail (junit) without changing the default local `list` + `html`
+// output. Mirrors the request-validation suite's reporting.
 const reporter: ReporterDescription[] = [
   ['list'],
   ['html', { open: 'never', outputFolder: htmlOutputFolder }],
 ];
 if (process.env.PLAYWRIGHT_JSON_OUTPUT_FILE) {
   reporter.push(['json', { outputFile: process.env.PLAYWRIGHT_JSON_OUTPUT_FILE }]);
+}
+if (process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE) {
+  reporter.push(['junit', { outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE }]);
 }
 
 export default defineConfig({

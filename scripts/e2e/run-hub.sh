@@ -175,6 +175,7 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
     POS_FIXTURE_FILE_CONTENT="$POS_FIXTURE_FILE_CONTENT" \
     PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$OUT/pw-positive.json" \
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$OUT/pw-positive.junit.xml" \
     npx playwright test -c path-analyser/playwright.config.ts; then
     echo "  ✓ Playwright passed: positive"
   else

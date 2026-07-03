@@ -259,9 +259,10 @@ jobs:
             secret/data/products/qa/ci/common TESTRAIL_QA_EMAIL | TESTRAIL_USERNAME ;
             secret/data/products/qa/ci/common TESTRAIL_QA_KEY | TESTRAIL_KEY ;
 
-      # Ingests each profile's Playwright JUnit XML into TestRail suite 101098 via
-      # the TestRail CLI. Gated on the Vault-fetched creds above so it's dormant
-      # until they exist. Runs always() to publish failures too.
+      # Ingests each suite's Playwright JUnit XML into TestRail suite 101098 via
+      # the TestRail CLI — one run per suite: positive (lifecycle) + each negative
+      # (request-validation) profile. Gated on the Vault-fetched creds above so
+      # it's dormant until they exist. Runs always() to publish failures too.
       - name: Publish results to TestRail
         if: ${{ always() && steps.testrail-secrets.outputs.TESTRAIL_USERNAME != '' && steps.testrail-secrets.outputs.TESTRAIL_KEY != '' }}
         env:
@@ -273,21 +274,26 @@ jobs:
         run: |
           pip install --quiet trcli==1.14.1
           out="test-results/e2e-camunda-hub"
-          for p in secured rbac; do
-            f="$out/pw-$p.junit.xml"
+          ts="$(date '+%Y-%m-%d %H:%M:%S')"
+          publish() { # junit_file  run_title
+            local f="$1" title="$2"
             if [ ! -f "$f" ]; then
-              echo "skip $p — no JUnit at $f"; continue
+              echo "skip — no JUnit at $f"; return
             fi
-            echo "Publishing $p → TestRail suite ${TESTRAIL_SUITE_ID}…"
+            echo "Publishing '$title' → TestRail suite ${TESTRAIL_SUITE_ID}…"
             trcli -y -h "$TESTRAIL_HOST" \
               --project "$TESTRAIL_PROJECT" \
               --username "$TESTRAIL_USERNAME" \
               --key "$TESTRAIL_KEY" \
               --batch-size 500 \
               parse_junit --suite-id "$TESTRAIL_SUITE_ID" \
-              --title "Nightly camunda-hub negative — ${p} — $(date '+%Y-%m-%d %H:%M:%S')" \
+              --title "$title" \
               --close-run \
-              -f "$f" || echo "::warning::TestRail publish failed for profile '$p'"
+              -f "$f" || echo "::warning::TestRail publish failed for '$title'"
+          }
+          publish "$out/pw-positive.junit.xml" "Nightly camunda-hub positive — $ts"
+          for p in secured rbac; do
+            publish "$out/pw-$p.junit.xml" "Nightly camunda-hub negative — ${p} — $ts"
           done
 
       # --- Slack notification --------------------------------------------------
