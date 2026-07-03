@@ -138,7 +138,9 @@ describe('request-validation: unenforcedStringFormats', () => {
           knownIssues: [{ summary: 'wrong-type key fields skipped', url: 'https://x/25926' }],
         }),
       );
-      expect(loadRequestValidationConfig(tmpRoot, 'probe').knownIssues?.[0]?.url).toBe('https://x/25926');
+      expect(loadRequestValidationConfig(tmpRoot, 'probe').knownIssues?.[0]?.url).toBe(
+        'https://x/25926',
+      );
 
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),
