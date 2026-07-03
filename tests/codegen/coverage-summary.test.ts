@@ -78,6 +78,35 @@ describe('buildCoverageSummary (#335)', () => {
     ]);
   });
 
+  test('explicit suppressions are counted separately from template ones and are accounted-for', () => {
+    const summary = buildCoverageSummary({
+      allSpecOpIds: ['createGroup', 'getGroup', 'deleteGroup', 'listClusters'],
+      emittedFeatureOpIds: new Set(['getGroup']),
+      suppressedOpIds: new Set(['createGroup', 'deleteGroup']), // template-derived
+      explicitlySuppressedOpIds: new Set(['listClusters']), // explicit positive-suppress
+      entries: [],
+      variantSpecs: 0,
+      lifecycleSpecs: 0,
+    });
+    // Template count must NOT absorb the explicit suppression.
+    expect(summary.suppressedByTemplate).toBe(2);
+    expect(summary.suppressedExplicit).toBe(1);
+    // The explicitly-suppressed op is accounted for, not flagged as unmapped drift.
+    expect(summary.unmappedOperations).toEqual([]);
+  });
+
+  test('explicitlySuppressedOpIds defaults to empty when omitted', () => {
+    const summary = buildCoverageSummary({
+      allSpecOpIds: ['a'],
+      emittedFeatureOpIds: new Set(['a']),
+      suppressedOpIds: new Set(),
+      entries: [],
+      variantSpecs: 0,
+      lifecycleSpecs: 0,
+    });
+    expect(summary.suppressedExplicit).toBe(0);
+  });
+
   test('per-template aggregates are sorted by name', () => {
     const summary = buildCoverageSummary({
       allSpecOpIds: [],
