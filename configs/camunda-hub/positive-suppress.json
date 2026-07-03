@@ -3,7 +3,7 @@
   "suppress": [
     {
       "operationId": "deleteCluster",
-      "reason": "DELETE /clusters/{clusterId} needs a real clusterId, but clusterId is not modelled as a semantic type, so the planner cannot chain createCluster -> deleteCluster and seeds a filler that 404s. createCluster + getClusterUsageMetrics pass once DYNAMIC_CLUSTER_MANAGEMENT_ENABLED is set (see docker/docker-compose.hub.yml); deleteCluster needs clusterId modelled as a client-minted identifier upstream. Tracked in #423 (and its full-fix follow-ups)."
+      "reason": "DELETE /clusters/{clusterId} needs a real clusterId, but clusterId is not modelled as a semantic type, so the planner cannot chain createCluster -> deleteCluster and seeds a filler that 404s. createCluster + getClusterUsageMetrics pass once DYNAMIC_CLUSTER_MANAGEMENT_ENABLED is set (see docker/docker-compose.hub.yml). Full fix: model clusterId as a client-minted identifier upstream (camunda/camunda-hub#25907), then un-suppress (#425). Parent: #423."
     }
   ]
 }
