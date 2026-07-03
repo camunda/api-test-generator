@@ -162,6 +162,7 @@ async function main() {
   // here beats threading an exclude set through every generate*() call.
   const excludeOps = new Set((rvConfig.excludeOperations ?? []).map((e) => e.operationId));
   if (excludeOps.size > 0) {
+    const specOpIds = new Set(model.operations.map((op) => op.operationId));
     const before = model.operations.length;
     model.operations = model.operations.filter((op) => !excludeOps.has(op.operationId));
     const dropped = before - model.operations.length;
@@ -169,6 +170,21 @@ async function main() {
       console.log(`  ⏭  exclude-operations: ${e.operationId} — ${e.reason}`);
     }
     console.log(`[generate] excluded ${dropped} operation(s) from the negative suite (#419)`);
+    // Surface stale/typo excludeOperations entries: an excluded opId not in the
+    // bundled spec drops nothing, so an upstream rename would silently stop
+    // excluding the op and re-red the nightly with no signal. Warn + emit a
+    // GitHub annotation (mirrors the positive-suppress drift check) so the drift
+    // is explicit; the op then simply isn't excluded (visible), not a silent no-op.
+    const staleExcludes = [...excludeOps].filter((id) => !specOpIds.has(id)).sort();
+    if (staleExcludes.length > 0) {
+      const list = staleExcludes.join(', ');
+      console.warn(
+        `⚠ configs/${configName}/request-validation.json "excludeOperations" lists operationId(s) not present in the bundled spec (renamed/removed upstream, or a typo): ${list}. Update the list.`,
+      );
+      console.log(
+        `::warning title=Stale excludeOperations entries::${configName}: ${list} not present in the bundled spec`,
+      );
+    }
   }
   const specCommit: string | undefined = specProvenance;
   // When TEST_SEED is set (or left at the default), use a stable placeholder
