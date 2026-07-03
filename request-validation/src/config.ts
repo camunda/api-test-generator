@@ -135,7 +135,7 @@ export interface RequestValidationConfig {
  * thread (single source of truth: the config that causes the skip also carries
  * its issue link).
  */
-interface KnownIssue {
+export interface KnownIssue {
   summary: string;
   url: string;
   /** Optional in-repo tracking issue (e.g. #419 for the version exclusion). */
