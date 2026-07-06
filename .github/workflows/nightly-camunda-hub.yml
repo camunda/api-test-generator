@@ -366,10 +366,14 @@ jobs:
               seen, lines = set(), []
               for ki in known_issues:
                   url = ki.get("url")
-                  if not url or url in seen:
+                  summary = ki.get("summary")
+                  # Skip malformed entries (missing summary/url) rather than
+                  # KeyError-ing the nightly — positive-suppress.json is not
+                  # schema-validated for knownIssue.
+                  if not url or not summary or url in seen:
                       continue
                   seen.add(url)
-                  line = f"• {ki['summary']} — <{url}|{ref(url)}>"
+                  line = f"• {summary} — <{url}|{ref(url)}>"
                   tr = ki.get("tracker")
                   if tr:
                       line += f" (tracked via <{tr}|{ref(tr)}>)"
@@ -428,8 +432,9 @@ jobs:
             }
 
       # Threaded reply listing the known issues that cause positive ops to be
-      # suppressed (configs/camunda-hub/positive-suppress.json). Keep in sync
-      # with that file when suppressions change.
+      # suppressed. Auto-derived from the `knownIssue` fields in
+      # configs/camunda-hub/positive-suppress.json by the "Derive known-issue
+      # bullets" step above — no manual sync needed.
       - name: Notify Slack (positive — known issues)
         if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' && steps.known-issues.outputs.positive_known_issues != '' }}
         uses: slackapi/slack-github-action@v2
@@ -457,7 +462,9 @@ jobs:
             }
 
       # Threaded reply listing the known issues that cause negative ops to be
-      # excluded (configs/camunda-hub/request-validation.json → excludeOperations).
+      # excluded. Auto-derived from the `knownIssue`/`knownIssues` fields in
+      # configs/camunda-hub/request-validation.json by the "Derive known-issue
+      # bullets" step above — no manual sync needed.
       - name: Notify Slack (negative — known issues)
         if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-negative.outputs.ts != '' && steps.known-issues.outputs.negative_known_issues != '' }}
         uses: slackapi/slack-github-action@v2
