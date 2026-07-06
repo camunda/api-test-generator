@@ -852,29 +852,33 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
     // (and the nightly can flag it in Slack) without aborting the run. A typo
     // degrades to "the op simply isn't suppressed" — it generates, and any
     // failure is visible — rather than a silent no-op.
-    let staleSuppressedOpIds: string[] = [];
-    if (explicitSuppressedOpIds.size > 0) {
-      const specOpIdSet = new Set(allSpecOpIds);
-      staleSuppressedOpIds = [...explicitSuppressedOpIds]
-        .filter((op) => !specOpIdSet.has(op))
-        .sort();
-      if (staleSuppressedOpIds.length > 0) {
-        const list = staleSuppressedOpIds.join(', ');
-        console.warn(
-          `⚠ configs/${configName}/positive-suppress.json lists operationId(s) not present in the bundled spec (renamed/removed upstream, or a typo): ${list}. Ignoring — update the suppress list.`,
-        );
-        // GitHub Actions annotation (harmless prefix locally) so the drift is
-        // visible on the run page, not just buried in the log.
-        console.log(
-          `::warning title=Stale positive-suppress entries::${configName}: ${list} not present in the bundled spec`,
-        );
-      }
+    const specOpIdSet = new Set(allSpecOpIds);
+    const staleSuppressedOpIds = [...explicitSuppressedOpIds]
+      .filter((op) => !specOpIdSet.has(op))
+      .sort();
+    // Effective explicit suppressions = only those actually present in the
+    // bundled spec. A stale entry suppresses nothing (the op isn't emitted
+    // anyway), so it must not inflate the reported/summarised suppression set;
+    // it's surfaced separately via staleSuppressedOpIds below.
+    const effectiveExplicitSuppressedOpIds = new Set(
+      [...explicitSuppressedOpIds].filter((op) => specOpIdSet.has(op)),
+    );
+    if (staleSuppressedOpIds.length > 0) {
+      const list = staleSuppressedOpIds.join(', ');
+      console.warn(
+        `⚠ configs/${configName}/positive-suppress.json lists operationId(s) not present in the bundled spec (renamed/removed upstream, or a typo): ${list}. Ignoring — update the suppress list.`,
+      );
+      // GitHub Actions annotation (harmless prefix locally) so the drift is
+      // visible on the run page, not just buried in the log.
+      console.log(
+        `::warning title=Stale positive-suppress entries::${configName}: ${list} not present in the bundled spec`,
+      );
     }
     const summary = buildCoverageSummary({
       allSpecOpIds,
       emittedFeatureOpIds,
       suppressedOpIds: coverage.suppressedOpIds,
-      explicitlySuppressedOpIds: explicitSuppressedOpIds,
+      explicitlySuppressedOpIds: effectiveExplicitSuppressedOpIds,
       entries: coverage.entries,
       variantSpecs: variantCount,
       lifecycleSpecs: lifecycleCount,
@@ -893,7 +897,9 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
           emitter: emitter.id,
           summary,
           suppressedOpIds: [...coverage.suppressedOpIds].sort(),
-          explicitlySuppressedOpIds: [...explicitSuppressedOpIds].sort(),
+          // Effective explicit suppressions only (stale entries excluded so the
+          // list reflects what's actually suppressed; drift is in staleSuppressedOpIds).
+          explicitlySuppressedOpIds: [...effectiveExplicitSuppressedOpIds].sort(),
           // Explicit suppress entries whose opId is no longer in the bundled
           // spec (config drift). Empty on a healthy config; the nightly reads
           // this to flag drift in Slack + the run summary.
