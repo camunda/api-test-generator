@@ -1653,8 +1653,12 @@ export function buildRequestBodyFromCanonical(
       // runtime), while an optional filter stays unbound (preserving #168). The
       // feature-suite scenario object doesn't carry `producedSemanticTypes`, so
       // the producer index — not the scenario's produced set — is the reliable
-      // signal here.
-      if (!requiredBodyPaths.has(fieldPath)) continue;
+      // signal here. Normalise the trailing `[]` off the semantic fieldPath to
+      // match `requiredBodyPaths` (built from canonical node paths the same way)
+      // so a required ARRAY filter field (`filter.tags[]`) can match too; the
+      // original `fieldPath` (with `[]`) is still passed to setLeafPlaceholder,
+      // which handles the array segment.
+      if (!requiredBodyPaths.has(fieldPath.replace(/\[\]$/, ''))) continue;
       const hasProducer =
         !!graph.producersByType[entry.semantic]?.length ||
         !!graph.establishersByType?.[entry.semantic]?.length;

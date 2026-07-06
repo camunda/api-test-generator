@@ -97,4 +97,46 @@ describe('nested filter-scope binding (#408 / #168)', () => {
     // Optional filters are not force-scoped; only required scope fields bind.
     expect(fileKeyValue({ producer: true, required: false })).not.toBe('${fileKeyVar}');
   });
+
+  it('binds a required ARRAY filter field (filter.tags[]) despite the [] suffix', () => {
+    // requiredBodyPaths strips the trailing `[]` from the canonical node; the
+    // membership check must normalise the semantic fieldPath the same way so an
+    // array filter field still matches (else the [] mismatch skips the bind).
+    const canonical: Record<string, CanonicalShape> = {
+      searchThings: {
+        requestByMediaType: {
+          'application/json': [
+            { path: 'filter', type: 'object', required: true },
+            { path: 'filter.tags[]', type: 'string', required: true },
+          ],
+        },
+      },
+    };
+    const graph: OperationGraph = {
+      operations: {
+        searchThings: {
+          operationId: 'searchThings',
+          method: 'POST',
+          path: '/things/search',
+          requires: { required: [], optional: [] },
+          produces: [],
+          requestBodySemantics: [{ semantic: 'Tag', fieldPath: 'filter.tags[]', required: true }],
+        },
+      },
+      producersByType: { Tag: ['createTag'] },
+      producersByState: {},
+      responseProducersByType: {},
+    };
+    const plan = buildRequestBodyFromCanonical(
+      'searchThings',
+      scenario(),
+      graph,
+      canonical,
+      {},
+      /* isEndpoint */ true,
+    );
+    const template = plan?.kind === 'json' ? plan.template : {};
+    const filter = template.filter;
+    expect(isRecord(filter) ? filter.tags : undefined).toEqual(['${tagVar}']);
+  });
 });
