@@ -56,7 +56,8 @@ function configNames(): string[] {
   return fs
     .readdirSync(configsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
-    .map((d) => d.name);
+    .map((d) => d.name)
+    .sort(); // stable order — readdir order varies across platforms/filesystems
 }
 
 describe('knownIssue summary consistency (#425)', () => {
