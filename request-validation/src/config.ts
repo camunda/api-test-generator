@@ -134,6 +134,13 @@ export interface RequestValidationConfig {
  * Consumed by the nightly workflow to build the per-suite "known issues" Slack
  * thread (single source of truth: the config that causes the skip also carries
  * its issue link).
+ *
+ * CONVENTION: the nightly dedupes bullets by `url`, so within a single config
+ * file every entry that points at the same `url` MUST use the same `summary`
+ * (otherwise the rendered bullet depends on entry order). Enforced by
+ * tests/codegen/known-issue-summary-consistency.test.ts. (The same url may
+ * carry a different summary in a *different* config/suite — the check is
+ * per-file.)
  */
 export interface KnownIssue {
   summary: string;

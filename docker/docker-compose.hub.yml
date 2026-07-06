@@ -226,11 +226,13 @@ services:
       FEATURE_CATALOG_ENABLED: "true"
       CAMUNDA_MODELER_FEATURE_CONSOLE_ENABLED: "true"
       FEATURE_GLOBAL_NAVIGATION_V2_ENABLED: "true"
-      # NOTE: dynamic cluster management (DYNAMIC_CLUSTER_MANAGEMENT_ENABLED) is
-      # intentionally left OFF. The v2 /clusters surface is an opt-in operator
-      # feature orthogonal to this suite's content-API model, so it's out of
-      # scope for the default nightly and its positive ops are suppressed (see
-      # configs/camunda-hub/positive-suppress.json and #423).
+      # Dynamic cluster management: exposes the v2 /clusters surface. ON so the
+      # nightly covers createClusterRegistration (the only cluster op that
+      # passes). The other cluster ops stay suppressed with known-issue links —
+      # getClusterRegistrations (#25908, GET /clusters 500),
+      # removeClusterRegistration + getClusterUsageMetrics (#25907, need a
+      # chainable clusterId) — see configs/camunda-hub/positive-suppress.json.
+      DYNAMIC_CLUSTER_MANAGEMENT_ENABLED: "true"
 
 volumes:
   modeler-db-data:
