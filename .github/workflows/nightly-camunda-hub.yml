@@ -369,6 +369,13 @@ jobs:
           def ref(url):
               num = url.rstrip("/").split("/")[-1]
               return ("camunda-hub#" if "/camunda-hub/" in url else "#") + num
+          def esc(s):
+              # Each bullet is interpolated into the Slack payload JSON string, so
+              # escape JSON-sensitive chars (backslash, double-quote) — a summary
+              # like `C:\path` or one containing `"` must not break the JSON. The
+              # literal `\n` line separator is added by join() *after* escaping,
+              # so it survives as a valid JSON newline.
+              return s.replace("\\", "\\\\").replace('"', '\\"')
           # Fully defensive: positive-suppress.json isn't schema-validated for
           # knownIssue, so tolerate any malformed shape (non-dict entry, missing
           # or non-string summary/url) by skipping it — never throw and break the
@@ -389,7 +396,7 @@ jobs:
                   tr = ki.get("tracker")
                   if isinstance(tr, str) and tr:
                       line += f" (tracked via <{tr}|{ref(tr)}>)"
-                  lines.append(line)
+                  lines.append(esc(line))
               return "\\n".join(lines)
           def cfg(p):
               try:

@@ -277,7 +277,7 @@ export function loadRequestValidationConfig(
     const v = parsed.excludeOperations;
     if (!isExcludeOperations(v)) {
       throw new Error(
-        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, reason } objects with non-empty strings.`,
+        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, reason, knownIssue? } objects — operationId/reason are non-empty strings, and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
       );
     }
     merged.excludeOperations = v;
