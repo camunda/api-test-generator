@@ -48,26 +48,42 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+// Mirror the OCA file's actionable-missing-output pattern: fail with a clear
+// "not generated — run this" message instead of a low-signal ENOENT, so a
+// suite that hasn't been generated (the common local-repro slip) is obvious.
+const GEN_HINT =
+  "check out the pinned specRef in ../camunda-hub, then run 'CONFIG=camunda-hub npm run fetch-spec && CONFIG=camunda-hub npm run testsuite:generate'";
+function readRequired(path: string): string {
+  if (!existsSync(path)) {
+    throw new Error(`Hub pipeline output not found at ${path}. To reproduce: ${GEN_HINT}.`);
+  }
+  return readFileSync(path, 'utf8');
+}
+
+let _bundleOpIdsCache: Set<string> | undefined;
 function bundleOperationIds(): Set<string> {
-  const raw: unknown = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8'));
+  if (_bundleOpIdsCache) return _bundleOpIdsCache;
+  const raw: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
   const ids = new Set<string>();
-  if (!isRecord(raw) || !isRecord(raw.paths)) return ids;
-  for (const item of Object.values(raw.paths)) {
-    if (!isRecord(item)) continue;
-    for (const [method, op] of Object.entries(item)) {
-      if (!HTTP_METHODS.has(method.toLowerCase())) continue;
-      if (isRecord(op) && typeof op.operationId === 'string') ids.add(op.operationId);
+  if (isRecord(raw) && isRecord(raw.paths)) {
+    for (const item of Object.values(raw.paths)) {
+      if (!isRecord(item)) continue;
+      for (const [method, op] of Object.entries(item)) {
+        if (!HTTP_METHODS.has(method.toLowerCase())) continue;
+        if (isRecord(op) && typeof op.operationId === 'string') ids.add(op.operationId);
+      }
     }
   }
+  _bundleOpIdsCache = ids;
   return ids;
 }
 
 function readGeneratedSpec(relPath: string): string {
-  return readFileSync(join(SUITE_DIR, relPath), 'utf8');
+  return readRequired(join(SUITE_DIR, relPath));
 }
 
 function explicitlySuppressedOpIds(): string[] {
-  const raw: unknown = JSON.parse(readFileSync(COVERAGE_PATH, 'utf8'));
+  const raw: unknown = JSON.parse(readRequired(COVERAGE_PATH));
   if (isRecord(raw) && Array.isArray(raw.explicitlySuppressedOpIds)) {
     return raw.explicitlySuppressedOpIds.filter((x): x is string => typeof x === 'string');
   }
