@@ -73,7 +73,11 @@ function inspectKnownIssues(
       });
     }
     const suiteWide = cfg.knownIssues;
-    if (Array.isArray(suiteWide)) suiteWide.forEach((ki, i) => consider(ki, `knownIssues[${i}]`));
+    if (Array.isArray(suiteWide)) {
+      suiteWide.forEach((ki, i) => {
+        consider(ki, `knownIssues[${i}]`);
+      });
+    }
   }
   return { issues, malformed };
 }
