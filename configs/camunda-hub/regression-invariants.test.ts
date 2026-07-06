@@ -22,10 +22,15 @@ import {
  * (camunda-oca) no-ops here and a camunda-hub CI leg runs it against the
  * regenerated hub output.
  *
- * Prerequisites: the hub pipeline must have been generated for the pinned spec:
- *   CONFIG=camunda-hub npm run fetch-spec && CONFIG=camunda-hub npm run testsuite:generate
- * The spec-pin gate (tests/regression/spec-pin.setup.ts) aborts on drift from
- * configs/camunda-hub/spec-pin.json before these assertions load.
+ * Prerequisites: the hub pipeline must have been generated for the PINNED spec.
+ * Hub bundles in local mode from the ../camunda-hub sibling clone (SPEC_REF is
+ * ignored — fetch-spec bundles whatever ref that clone has checked out), so
+ * check out the pin *there* first, then bundle + generate:
+ *   git -C ../camunda-hub checkout <specRef from configs/camunda-hub/spec-pin.json>
+ *   CONFIG=camunda-hub npm run fetch-spec
+ *   CONFIG=camunda-hub npm run testsuite:generate
+ * The spec-pin gate (tests/regression/spec-pin.setup.ts) then aborts on drift
+ * from configs/camunda-hub/spec-pin.json before these assertions load.
  */
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
