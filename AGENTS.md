@@ -115,6 +115,10 @@ env var; default `camunda-oca`). A vitest `globalSetup`
 (`tests/regression/spec-pin.setup.ts`) aborts the entire run if the bundled
 spec content drifts.
 
+> **This callout applies to `camunda-oca` (network-fetch mode). `camunda-hub`
+> pins to `camunda/camunda-hub` in local-bundle mode — see the subsection below,
+> where `git ls-remote camunda/camunda` does NOT apply.**
+>
 > **`specRef` is a commit SHA on the upstream `camunda/camunda` repo — NOT
 > on this repo (`camunda/api-test-generator`).** `camunda-schema-bundler`
 > shallow-clones `camunda/camunda` and runs `git fetch --depth 1 origin
