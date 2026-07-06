@@ -34,13 +34,6 @@
 name: Spec-bump dry-run (camunda-oca)
 
 on:
-  # TEMP(test): run on PRs to main (i.e. #434) to exercise the full flow
-  # (fetch → diff → generate → invariants → qa-processes token → PR/issue).
-  # REVERT this pull_request block before merging — the workflow is
-  # schedule + dispatch only by design (must never run on pull_request).
-  pull_request:
-    branches:
-      - main
   schedule:
     # Mondays 06:00 UTC — a weekly heads-up, well clear of the 02:00 hub nightly.
     - cron: '0 6 * * 1'
