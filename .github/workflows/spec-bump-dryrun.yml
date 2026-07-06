@@ -1,0 +1,190 @@
+# Scheduled, non-blocking dry-run of the camunda-oca spec bump (#387).
+#
+# A spec-pin bump isn't always mechanical: latest upstream main can pull in a
+# whole new domain the generator doesn't yet model (this bit us bumping
+# camunda-oca to the agent-instance domain — see #386). Today that only shows
+# up when someone manually attempts the bump. This turns "surprise at bump
+# time" into a recurring, signal-only heads-up.
+#
+# It fetches camunda/camunda@main (instead of the pinned SHA), runs the full
+# generate pipeline + regression invariants against it, and diffs the operation
+# surface vs the pin. On any drift it opens/updates ONE rolling tracking issue;
+# when latest flows through cleanly again it closes it.
+#
+# NON-BLOCKING BY DESIGN: schedule + manual dispatch only, never pull_request —
+# it can never fail anyone's PR. camunda-hub is intentionally NOT covered here:
+# nightly-camunda-hub.yml already clones camunda-hub@main and bundles it
+# unpinned every night, so the hub already gets a latest-main dry-run daily
+# (with the Vault/GitHub-App auth that private repo needs).
+name: Spec-bump dry-run (camunda-oca)
+
+on:
+  schedule:
+    # Mondays 06:00 UTC — a weekly heads-up, well clear of the 02:00 hub nightly.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: spec-bump-dryrun
+  cancel-in-progress: false
+
+env:
+  CONFIG: camunda-oca
+  UPSTREAM_REPO: camunda/camunda
+  UPSTREAM_BRANCH: main
+  # Rolling tracking issue is found by this exact title (single issue, no spam).
+  ISSUE_TITLE: 'Spec-bump dry-run: camunda-oca drifted from the pin'
+  DRIFT_LABEL: spec-drift
+
+jobs:
+  dryrun:
+    name: Dry-run camunda-oca against upstream main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Resolve pinned + latest upstream SHA
+        id: refs
+        run: |
+          pinned=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
+          latest=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          if [ -z "$latest" ]; then
+            echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH} via git ls-remote"
+            exit 1
+          fi
+          echo "pinned=${pinned}" >> "$GITHUB_OUTPUT"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "Pinned: ${pinned}"
+          echo "Latest: ${latest}"
+          if [ "$pinned" = "$latest" ]; then
+            echo "drifted=false" >> "$GITHUB_OUTPUT"
+            echo "Pin is already at latest main — nothing to dry-run."
+          else
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Capture pinned operation surface
+        if: steps.refs.outputs.drifted == 'true'
+        env:
+          SPEC_REF: ${{ steps.refs.outputs.pinned }}
+        run: |
+          npm run fetch-spec:ref
+          npm run -s spec-operations > /tmp/pinned-ops.txt
+          echo "Pinned operations: $(wc -l < /tmp/pinned-ops.txt)"
+
+      # Fetch latest LAST so the latest bundle is what generate + invariants see.
+      - name: Fetch latest upstream spec
+        if: steps.refs.outputs.drifted == 'true'
+        env:
+          SPEC_REF: ${{ steps.refs.outputs.latest }}
+        run: |
+          npm run fetch-spec:ref
+          npm run -s spec-operations > /tmp/latest-ops.txt
+          echo "Latest operations: $(wc -l < /tmp/latest-ops.txt)"
+
+      - name: Diff operation surface
+        id: opdiff
+        if: steps.refs.outputs.drifted == 'true'
+        run: |
+          added=$(comm -13 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          removed=$(comm -23 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          {
+            echo 'added<<EOF'
+            echo "$added"
+            echo 'EOF'
+            echo 'removed<<EOF'
+            echo "$removed"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          n_added=$([ -z "$added" ] && echo 0 || echo "$added" | grep -c .)
+          n_removed=$([ -z "$removed" ] && echo 0 || echo "$removed" | grep -c .)
+          echo "n_added=${n_added}" >> "$GITHUB_OUTPUT"
+          echo "n_removed=${n_removed}" >> "$GITHUB_OUTPUT"
+          echo "Added: ${n_added}, Removed: ${n_removed}"
+
+      - name: Generate pipeline against latest
+        id: generate
+        if: steps.refs.outputs.drifted == 'true'
+        continue-on-error: true
+        env:
+          TEST_SEED: snapshot-baseline
+        run: |
+          npm run testsuite:generate
+          npm run generate:request-validation
+
+      - name: Regression invariants against latest
+        id: invariants
+        # Only meaningful if generation produced outputs.
+        if: steps.refs.outputs.drifted == 'true' && steps.generate.outcome == 'success'
+        continue-on-error: true
+        env:
+          ALLOW_SPEC_DRIFT: '1'
+          TEST_SEED: snapshot-baseline
+        run: npm test
+
+      - name: Classify drift signal
+        id: classify
+        if: always() && steps.refs.outputs.drifted == 'true'
+        run: |
+          # A "signal" (worth a tracking issue) is: generation broke, invariants
+          # broke, or the operation surface changed. A bare SHA difference with a
+          # clean generate + invariants and an unchanged surface is NOT a signal.
+          signal=false
+          [ "${{ steps.generate.outcome }}" != "success" ] && signal=true
+          [ "${{ steps.invariants.outcome }}" != "success" ] && signal=true
+          [ "${{ steps.opdiff.outputs.n_added }}" != "0" ] && signal=true
+          [ "${{ steps.opdiff.outputs.n_removed }}" != "0" ] && signal=true
+          echo "signal=${signal}" >> "$GITHUB_OUTPUT"
+          echo "Drift signal: ${signal}"
+
+      - name: Report drift to the rolling tracking issue
+        if: always() && steps.classify.outputs.signal == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ steps.refs.outputs.pinned }}
+          LATEST: ${{ steps.refs.outputs.latest }}
+          N_ADDED: ${{ steps.opdiff.outputs.n_added }}
+          N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+          ADDED: ${{ steps.opdiff.outputs.added }}
+          REMOVED: ${{ steps.opdiff.outputs.removed }}
+          GEN_OUTCOME: ${{ steps.generate.outcome }}
+          INV_OUTCOME: ${{ steps.invariants.outcome }}
+        run: bash .github/scripts/spec-bump-report.sh
+
+      - name: Close the tracking issue when latest is clean
+        # Latest flows through cleanly (generate + invariants pass, surface
+        # unchanged): close the rolling issue if it's open.
+        if: always() && steps.classify.outputs.signal == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/spec-bump-resolve.sh
+
+      - name: Upload generated outputs
+        if: steps.refs.outputs.drifted == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: spec-bump-dryrun-outputs
+          path: |
+            generated
+            spec
+            /tmp/pinned-ops.txt
+            /tmp/latest-ops.txt
+          if-no-files-found: warn
+          retention-days: 14
