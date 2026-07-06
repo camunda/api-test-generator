@@ -260,7 +260,7 @@ fixtures and named invariants point directly at the broken property.
 |---|---|---|
 | 1 — extractor constructs | `tests/fixtures/extractor/extractor-constructs.test.ts` | One OpenAPI construct → one extractor property (`required`, `provider`, `fieldPath`, …) |
 | 2 — planner contracts | `tests/fixtures/planner/planner-contracts.test.ts` | Hand-built minimal `OperationGraph` → chain-shape assertion on `generateScenariosForEndpoint` |
-| 3 — bundled-spec invariants | `configs/<config>/regression-invariants.test.ts` (e.g. `configs/camunda-oca/regression-invariants.test.ts`) | Per-config (#128 PR 3) named, human-readable invariants over real pipeline output (requires `npm run pipeline` first). Each file `describe.skipIf`-guards itself to its own CONFIG so the CI matrix only runs the active config's invariants. |
+| 3 — bundled-spec invariants | `configs/<config>/regression-invariants.test.ts` (e.g. `configs/camunda-oca/regression-invariants.test.ts`) | Per-config (#128 PR 3) named, human-readable invariants over real pipeline output (requires `npm run pipeline` first). Each file `describe.skipIf`-guards itself to its own CONFIG, so a run only executes the active config's invariants — the default (`camunda-oca`) run skips hub's, and a future per-config CI leg (#128, still pending) would run only its own. |
 
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
@@ -410,8 +410,9 @@ fix: address review comments — …
 
 ## Continuous integration
 
-Single workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml). Runs
-on every PR to `main` and every push to `main`.
+PR/branch workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml). Runs
+on every PR to `main` and every push to `main`. **It exercises `camunda-oca`
+only** — steps 2 and 5 below are OCA-specific.
 
 Steps (in order — match these locally before pushing):
 
@@ -424,6 +425,14 @@ Steps (in order — match these locally before pushing):
 7. `npm test`
 
 On failure, the `pipeline-outputs` artifact is uploaded for inspection.
+
+**`camunda-hub` is not in PR CI yet.** It runs via a separate scheduled
+workflow, [.github/workflows/nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml),
+which clones `camunda-hub@main` (unpinned), generates, and runs the positive +
+negative suites against a live Hub. The per-config PR-CI matrix leg envisaged in
+#128 (fetch the pinned hub spec → generate → run
+`configs/camunda-hub/regression-invariants.test.ts`) is still pending; it needs
+the private `camunda-hub` clone auth wired into `ci.yml`.
 
 ## Pre-push checklist
 
