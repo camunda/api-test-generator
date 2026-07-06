@@ -16,7 +16,7 @@ existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
 if [ -n "$existing" ]; then
   echo "Closing tracking issue #${existing} — latest now flows through cleanly."
   gh issue close "$existing" \
-    --comment "✅ Latest \`${LATEST}\` now flows through generate + invariants cleanly with no operation-surface change — closing. [Run](${run_url})" >/dev/null
+    --comment "✅ camunda-oca is clean against latest \`${LATEST}\` (the pin is at latest, or latest flows through generate + invariants with no operation-surface change) — closing. [Run](${run_url})" >/dev/null
 else
   echo "No open tracking issue — nothing to close."
 fi

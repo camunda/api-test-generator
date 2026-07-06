@@ -169,11 +169,16 @@ jobs:
         run: bash .github/scripts/spec-bump-report.sh
 
       - name: Close the tracking issue when latest is clean
-        # Latest flows through cleanly (generate + invariants pass, surface
-        # unchanged): close the rolling issue if it's open.
-        if: always() && steps.classify.outputs.signal == 'false'
+        # Close the rolling issue if it's open when there's no drift signal —
+        # either the pin is already at latest (drifted == false, so classify was
+        # skipped) OR latest flowed through cleanly (signal == false). Both must
+        # pass LATEST for the resolve script's close comment.
+        if: >-
+          always() &&
+          (steps.refs.outputs.drifted == 'false' || steps.classify.outputs.signal == 'false')
         env:
           GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.refs.outputs.latest }}
         run: bash .github/scripts/spec-bump-resolve.sh
 
       - name: Upload generated outputs
