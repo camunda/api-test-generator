@@ -26,23 +26,56 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-// Collect every knownIssue in a config object: per-entry `knownIssue` on the
-// given entry arrays, plus a top-level `knownIssues[]`.
-function collectKnownIssues(cfg: unknown, entryKeys: string[]): Record<string, unknown>[] {
-  if (!isRecord(cfg)) return [];
-  const out: Record<string, unknown>[] = [];
-  for (const key of entryKeys) {
-    const arr = cfg[key];
-    if (!Array.isArray(arr)) continue;
-    for (const e of arr) {
-      if (isRecord(e) && isRecord(e.knownIssue)) out.push(e.knownIssue);
+function nonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+// Inspect every knownIssue in a config: per-entry `knownIssue` on the given
+// entry arrays, plus a top-level `knownIssues[]`. Returns the well-formed ones
+// (for the dedup check) AND a list of malformed ones — a `knownIssue` that is
+// *present* but isn't an object with non-empty string `summary`/`url` (or has a
+// non-string `tracker`). positive-suppress.json isn't schema-validated for
+// knownIssue, so a typo like `{ summray: … }` would otherwise silently drop the
+// Slack bullet; failing here catches it early.
+function inspectKnownIssues(
+  cfg: unknown,
+  entryKeys: string[],
+): { issues: { url: string; summary: string }[]; malformed: string[] } {
+  const issues: { url: string; summary: string }[] = [];
+  const malformed: string[] = [];
+  const consider = (ki: unknown, where: string): void => {
+    if (!isRecord(ki)) {
+      malformed.push(`${where}: knownIssue is not an object (${JSON.stringify(ki)})`);
+      return;
     }
+    const bad: string[] = [];
+    if (!nonEmptyString(ki.summary)) bad.push('summary');
+    if (!nonEmptyString(ki.url)) bad.push('url');
+    if (ki.tracker !== undefined && !nonEmptyString(ki.tracker)) bad.push('tracker');
+    if (bad.length > 0) {
+      malformed.push(`${where}: knownIssue has invalid ${bad.join('/')} (${JSON.stringify(ki)})`);
+      return;
+    }
+    // Narrowed by the nonEmptyString checks above.
+    if (nonEmptyString(ki.url) && nonEmptyString(ki.summary)) {
+      issues.push({ url: ki.url, summary: ki.summary });
+    }
+  };
+  if (isRecord(cfg)) {
+    for (const key of entryKeys) {
+      const arr = cfg[key];
+      if (!Array.isArray(arr)) continue;
+      arr.forEach((e, i) => {
+        if (isRecord(e) && 'knownIssue' in e) {
+          const op = nonEmptyString(e.operationId) ? e.operationId : '?';
+          consider(e.knownIssue, `${key}[${i}] (${op})`);
+        }
+      });
+    }
+    const suiteWide = cfg.knownIssues;
+    if (Array.isArray(suiteWide)) suiteWide.forEach((ki, i) => consider(ki, `knownIssues[${i}]`));
   }
-  const suiteWide = cfg.knownIssues;
-  if (Array.isArray(suiteWide)) {
-    for (const ki of suiteWide) if (isRecord(ki)) out.push(ki);
-  }
-  return out;
+  return { issues, malformed };
 }
 
 // (config-file relative path, entry-array keys carrying per-entry knownIssue).
@@ -82,10 +115,13 @@ describe('knownIssue summary consistency (#425)', () => {
     entryKeys,
   }) => {
     const cfg = JSON.parse(fs.readFileSync(path.join(configsDir, config, file), 'utf8'));
+    const { issues, malformed } = inspectKnownIssues(cfg, entryKeys);
+    // (1) a present knownIssue must be well-formed (catches silent-drop typos
+    //     like `{ summray: … }` — positive-suppress.json isn't schema-validated).
+    expect(malformed).toEqual([]);
+    // (2) entries sharing a url must share a summary (bullets are deduped by url).
     const byUrl = new Map<string, Set<string>>();
-    for (const ki of collectKnownIssues(cfg, entryKeys)) {
-      const { url, summary } = ki;
-      if (typeof url !== 'string' || typeof summary !== 'string') continue;
+    for (const { url, summary } of issues) {
       if (!byUrl.has(url)) byUrl.set(url, new Set());
       byUrl.get(url)?.add(summary);
     }
