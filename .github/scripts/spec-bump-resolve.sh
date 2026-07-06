@@ -7,6 +7,7 @@
 # Required env: GH_TOKEN, LATEST. GitHub provides GITHUB_* automatically.
 set -euo pipefail
 
+: "${GH_TOKEN:?GH_TOKEN required for gh auth}"
 : "${ISSUE_TITLE:?}" "${LATEST:?}"
 run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 

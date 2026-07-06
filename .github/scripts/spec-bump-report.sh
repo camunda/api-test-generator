@@ -9,6 +9,7 @@
 # GEN_OUTCOME, INV_OUTCOME. GitHub provides GITHUB_* automatically.
 set -euo pipefail
 
+: "${GH_TOKEN:?GH_TOKEN required for gh auth}"
 : "${ISSUE_TITLE:?}" "${DRIFT_LABEL:?}" "${UPSTREAM_REPO:?}" "${UPSTREAM_BRANCH:?}"
 : "${PINNED:?}" "${LATEST:?}"
 N_ADDED="${N_ADDED:-0}"
