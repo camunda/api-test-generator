@@ -51,6 +51,8 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/camunda-oca/spec-pin.json` | Pinned upstream `specRef` + `expectedSpecHash` for the camunda-oca config |
 | `configs/camunda-oca/{domain-semantics,filter-providers,request-defaults}.json` | Domain rules, value providers, and request-body defaults for camunda-oca |
 | `configs/camunda-oca/fixtures/` | Deployment-artifact fixture registry + BPMN/DMN/Form files for camunda-oca (#221 / Lift 11) |
+| `configs/camunda-hub/spec-pin.json` | Pinned `specRef` (a `camunda/camunda-hub` SHA) + `expectedSpecHash` for camunda-hub. **Local-bundle mode — see Spec pin.** |
+| `configs/camunda-hub/positive-suppress.json` | Per-op positive-suite suppressions for camunda-hub (upstream-blocked / opt-in ops), each with an optional `knownIssue { summary, url }` surfaced in the nightly |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
@@ -141,6 +143,34 @@ To bump:
      and never this repo's own SHA — see the callout above)
    - `expectedSpecHash`: the `specHash` printed in `spec/<config>/bundled/spec-metadata.json`
 5. Update any invariants whose values legitimately changed; commit together.
+
+The procedure above (and the `git ls-remote camunda/camunda` callout) is
+**network-fetch mode**, used by `camunda-oca`. `camunda-hub` differs:
+
+### camunda-hub: local-bundle mode
+
+Hub's spec lives at `restapi/public-api/src/main/resources/openapi/v2/` inside
+the **private** `camunda/camunda-hub` repo — a non-default path the bundler's
+network-fetch CLI can't target. So `fetch-spec` bundles from a **sibling clone**
+(`../camunda-hub`) instead, and **`SPEC_REF` is ignored** — it bundles whatever
+ref that clone currently has checked out. Implications:
+
+- `configs/camunda-hub/spec-pin.json`'s `specRef` is a SHA on
+  **`camunda/camunda-hub`** (not `camunda/camunda`), so the `git ls-remote
+  camunda/camunda` check above does **not** apply.
+- To reproduce a hub invariant failure or bump the pin, check the ref out **in
+  the sibling clone first**, then bundle + generate:
+  ```bash
+  git -C ../camunda-hub checkout <specRef>   # or latest main to bump
+  CONFIG=camunda-hub npm run fetch-spec       # NOT fetch-spec:ref — SPEC_REF is ignored here
+  CONFIG=camunda-hub npm run testsuite:generate && CONFIG=camunda-hub npm run generate:request-validation
+  ```
+  Then update `configs/camunda-hub/spec-pin.json` (`specRef` = the checked-out
+  `camunda/camunda-hub` SHA, `expectedSpecHash` = the `specHash` in
+  `spec/camunda-hub/bundled/spec-metadata.json`), as in steps 4–5 above.
+- The nightly (`.github/workflows/nightly-camunda-hub.yml`) runs hub **unpinned**
+  (clones `camunda-hub@main`, bundles latest) — the pin governs only the
+  Layer-3 invariants in `configs/camunda-hub/regression-invariants.test.ts`.
 
 ## Code style & lint (Biome)
 
