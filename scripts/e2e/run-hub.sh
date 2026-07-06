@@ -34,8 +34,7 @@ HUB_UI_PORT="${HUB_UI_PORT:-8088}"
 KEYCLOAK_PORT="${KEYCLOAK_PORT:-18080}"
 RV_PROFILES="${RV_PROFILES:-secured rbac}"
 STEPS="${STEPS:-generate run curl}"
-# TODO: remove once camunda/camunda-hub#25146 is merged
-SKIP_POSITIVE="${SKIP_POSITIVE:-1}"
+SKIP_POSITIVE="${SKIP_POSITIVE:-}"
 KC="http://localhost:${KEYCLOAK_PORT}/auth/realms/camunda-platform/protocol/openid-connect/token"
 CORE_URL="http://localhost:${HUB_UI_PORT}/api"        # request-validation base (buildUrl adds /v2)
 POS_URL="http://localhost:${HUB_UI_PORT}/api/v2"       # positive suite base
@@ -116,7 +115,6 @@ fi
 # ============================ 1. GENERATE ============================
 if step generate; then
   echo "── generate ─────────────────────────────"
-  # Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
   if [ -z "${SKIP_POSITIVE:-}" ]; then
     CONFIG="$CONFIG" npm run extract-graph >/dev/null
     CONFIG="$CONFIG" npm run generate:scenarios >/dev/null
@@ -132,7 +130,6 @@ fi
 
 # ====================== 2. RUN (Playwright) ==========================
 unset CAMUNDA_BASIC_AUTH_USER CAMUNDA_BASIC_AUTH_PASSWORD 2>/dev/null || true
-# Positive tests are skipped for Hub until camunda/camunda-hub#25146 is merged.
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
   # POS_FIXTURE_MEMBER_EMAIL: the member email for addMember/removeMember is
@@ -168,12 +165,27 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   if [ -z "${POS_FIXTURE_FILE_CONTENT:-}" ]; then
     POS_FIXTURE_FILE_CONTENT='<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="false"/></bpmn:definitions>'
   fi
-  BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
+  # Absolute output paths (mirrors run_rv): Playwright can resolve relative
+  # reporter paths against the config dir rather than cwd, which would land the
+  # report outside $OUT and dodge the artifact upload + Slack/summary aggregation.
+  pos_abs_out="$(cd "$OUT" && pwd)"
+  # Playwright is the GATE (same as run_rv): a non-zero exit (any spec failed)
+  # sets PW_FAIL, which fails the run at the end unless E2E_SOFT=1. The html/json
+  # reporters still write their output on failure, so the report is captured
+  # either way.
+  if BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
     POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
     POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
     POS_FIXTURE_FILE_CONTENT="$POS_FIXTURE_FILE_CONTENT" \
-    PLAYWRIGHT_HTML_REPORT="$OUT/pw-positive" \
-    npx playwright test -c path-analyser/playwright.config.ts || true
+    PLAYWRIGHT_HTML_REPORT="$pos_abs_out/pw-positive" \
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs_out/pw-positive.json" \
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$pos_abs_out/pw-positive.junit.xml" \
+    npx playwright test -c path-analyser/playwright.config.ts; then
+    echo "  ✓ Playwright passed: positive"
+  else
+    PW_FAIL=1
+    echo "  ✗ Playwright reported test failures in the positive suite"
+  fi
   if [ -f "$OUT/pw-positive/index.html" ]; then
     echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
   else

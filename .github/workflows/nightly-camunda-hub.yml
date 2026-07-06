@@ -1,13 +1,14 @@
-# description: Nightly request-validation (negative) test run for camunda-hub.
-#              Clones camunda-hub @ latest main, bundles its OpenAPI spec, starts
-#              a Hub SNAPSHOT, regenerates the negative test suite, runs it, and
-#              posts a results summary to Slack. Positive (lifecycle) tests are
-#              skipped until camunda/camunda-hub#25146 lands. The run FAILS if any
-#              test's actual status != expected (strict).
+# description: Nightly API test run for camunda-hub — positive (lifecycle) +
+#              negative (request-validation) suites. Clones camunda-hub @ latest
+#              main, bundles its OpenAPI spec, starts a Hub SNAPSHOT, regenerates
+#              both suites, runs them, and posts a results summary to Slack. The
+#              run FAILS if any test's actual status != expected (strict); ops
+#              with no achievable green are positive-suppressed
+#              (configs/camunda-hub/positive-suppress.json) with tracking issues.
 # type: CI
 # owner: @camunda/test-automation-team
 ---
-name: Nightly — camunda-hub negative tests
+name: Nightly — camunda-hub API tests
 
 on:
   schedule:
@@ -40,7 +41,7 @@ env:
 
 jobs:
   nightly-hub:
-    name: Generate → run → report (negative suite)
+    name: Generate → run → report (positive + negative suites)
     runs-on: ubuntu-latest
     # Prebuilt image (pull + boot) + generate + run — no source build.
     timeout-minutes: 25
@@ -172,7 +173,7 @@ jobs:
             sleep 5
           done
 
-      # --- 2,3,5,6. Skip positive, regenerate, run, build reports --------------
+      # --- 2,3,5,6. Regenerate, run (positive + negative), build reports -------
       # STEPS="generate run" (NO curl): the Playwright suite is the gate and its
       # HTML report is the single source of truth. The curl oracle is a generator-
       # faithfulness cross-check whose home is the generator's dev/CI loop, not an
@@ -181,9 +182,11 @@ jobs:
       # STEPS="… curl".) No E2E_SOFT: run-hub.sh exits non-zero on any Playwright
       # test failure, so this step (and the run) FAILS on failing tests. The
       # always() steps below still capture the report + write the summary.
-      - name: Generate + run negative suite
+      - name: Generate + run positive + negative suites
         env:
-          SKIP_POSITIVE: '1'
+          # Runs the positive (lifecycle) + negative (request-validation) suites.
+          # Blocked ops with no achievable green (versions #25801, catalog #25576)
+          # are positive-suppressed in configs/camunda-hub/positive-suppress.json.
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
         run: ./scripts/e2e/run-hub.sh
@@ -212,17 +215,27 @@ jobs:
           summarize() { # profile
             local f="$out/pw-$1.json"
             if [ -f "$f" ]; then
-              python3 -c "import json; s=json.load(open('$f')).get('stats',{}); print(f\"- **$1**: {s.get('expected',0)} passed, {s.get('unexpected',0)} failed, {s.get('skipped',0)} skipped\")"
+              python3 -c "import json; s=json.load(open('$f')).get('stats',{}); print(f\"- **$1**: {s.get('expected',0)} passed, {s.get('unexpected',0)} failed\")"
             else
               echo "- **$1**: (no report — run may have failed before this profile)"
             fi
           }
+          # Config drift: positive-suppress entries no longer in the bundled
+          # spec (materializer records these on coverage.json rather than
+          # failing generate — e.g. an upstream op rename/removal).
+          stale="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('staleSuppressedOpIds',[])))" 2>/dev/null || true)"
           {
-            echo "## Nightly — camunda-hub negative tests"
+            echo "## Nightly — camunda-hub API tests"
+            if [ -n "$stale" ]; then
+              echo "> ⚠️ **Config drift:** \`positive-suppress.json\` lists \`${stale}\` no longer in the spec (renamed/removed upstream?) — update the suppress list."
+              echo ""
+            fi
+            echo "### Positive (lifecycle)"
+            summarize positive
+            echo ""
+            echo "### Negative (request-validation)"
             summarize secured
             summarize rbac
-            echo ""
-            echo "_Positive (lifecycle) tests skipped until camunda/camunda-hub#25146._"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
@@ -246,10 +259,12 @@ jobs:
             secret/data/products/qa/ci/common TESTRAIL_QA_EMAIL | TESTRAIL_USERNAME ;
             secret/data/products/qa/ci/common TESTRAIL_QA_KEY | TESTRAIL_KEY ;
 
-      # Ingests each profile's Playwright JUnit XML into TestRail suite 101098 via
-      # the TestRail CLI. Gated on the Vault-fetched creds above so it's dormant
-      # until they exist. Runs always() to publish failures too.
+      # Ingests each suite's Playwright JUnit XML into TestRail suite 101098 via
+      # the TestRail CLI — one run per suite: positive (lifecycle) + each negative
+      # (request-validation) profile. Gated on the Vault-fetched creds above so
+      # it's dormant until they exist. Runs always() to publish failures too.
       - name: Publish results to TestRail
+        id: testrail
         if: ${{ always() && steps.testrail-secrets.outputs.TESTRAIL_USERNAME != '' && steps.testrail-secrets.outputs.TESTRAIL_KEY != '' }}
         env:
           TESTRAIL_USERNAME: ${{ steps.testrail-secrets.outputs.TESTRAIL_USERNAME }}
@@ -260,26 +275,43 @@ jobs:
         run: |
           pip install --quiet trcli==1.14.1
           out="test-results/e2e-camunda-hub"
-          for p in secured rbac; do
-            f="$out/pw-$p.junit.xml"
+          ts="$(date '+%Y-%m-%d %H:%M:%S')"
+          # Publish one run per suite and capture its TestRail run URL into a
+          # step output (<key>_url), so the run summary + Slack can link straight
+          # to each run instead of the URLs being buried in this log.
+          publish() { # key  junit_file  run_title
+            local key="$1" f="$2" title="$3"
             if [ ! -f "$f" ]; then
-              echo "skip $p — no JUnit at $f"; continue
+              echo "skip $key — no JUnit at $f"; return
             fi
-            echo "Publishing $p → TestRail suite ${TESTRAIL_SUITE_ID}…"
+            echo "Publishing '$title' → TestRail suite ${TESTRAIL_SUITE_ID}…"
+            local log; log="$(mktemp)"
             trcli -y -h "$TESTRAIL_HOST" \
               --project "$TESTRAIL_PROJECT" \
               --username "$TESTRAIL_USERNAME" \
               --key "$TESTRAIL_KEY" \
               --batch-size 500 \
               parse_junit --suite-id "$TESTRAIL_SUITE_ID" \
-              --title "Nightly camunda-hub negative — ${p} — $(date '+%Y-%m-%d %H:%M:%S')" \
+              --title "$title" \
               --close-run \
-              -f "$f" || echo "::warning::TestRail publish failed for profile '$p'"
-          done
+              -f "$f" > "$log" 2>&1 || echo "::warning::TestRail publish failed for '$title'"
+            cat "$log"
+            local url; url="$(grep -oE 'https://[^[:space:]]+/runs/view/[0-9]+' "$log" | head -1 || true)"
+            if [ -n "$url" ]; then
+              echo "${key}_url=${url}" >> "$GITHUB_OUTPUT"
+              echo "- **${key}**: [${title}](${url})" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          { echo ""; echo "### TestRail runs"; } >> "$GITHUB_STEP_SUMMARY"
+          publish positive "$out/pw-positive.junit.xml" "Nightly camunda-hub positive — $ts"
+          publish secured  "$out/pw-secured.junit.xml"  "Nightly camunda-hub negative — secured — $ts"
+          publish rbac     "$out/pw-rbac.junit.xml"     "Nightly camunda-hub negative — rbac — $ts"
 
       # --- Slack notification --------------------------------------------------
-      # Aggregate the Playwright JSON stats across profiles into pass/fail/flaky/
-      # skipped totals for the Slack message (✅ | ❌ | 🟡 | ⏩ format).
+      # Aggregate the Playwright JSON stats into PER-SUITE pass/fail totals so the
+      # positive (lifecycle) and negative (request-validation) suites each get
+      # their own Slack message. positive = pw-positive.json; negative = every
+      # other pw-*.json (secured, rbac, …).
       - name: Compute Playwright totals
         id: pw-totals
         if: always()
@@ -288,20 +320,107 @@ jobs:
           python3 - "$out" <<'PY' >> "$GITHUB_OUTPUT"
           import glob, json, os, sys
           out = sys.argv[1]
-          passed = failed = flaky = skipped = 0
-          for f in glob.glob(os.path.join(out, "pw-*.json")):
+          def agg(files):
+              p = f = 0
+              for fn in files:
+                  try:
+                      s = json.load(open(fn)).get("stats", {})
+                  except Exception:
+                      continue
+                  p += s.get("expected", 0)
+                  f += s.get("unexpected", 0)
+              return p, f
+          # glob returns only existing files, so an empty list means the suite
+          # wrote no report (e.g. crashed before the reporters ran). Emit a "no
+          # report" sentinel instead of a misleading "0 passed / 0 failed" that
+          # would look green — matches the run-summary step's handling.
+          def summary(files):
+              if not files:
+                  return "⚠️ no report — the suite may have crashed before writing results"
+              p, f = agg(files)
+              return f"✅ {p} passed · ❌ {f} failed"
+          allf = glob.glob(os.path.join(out, "pw-*.json"))
+          pos = [x for x in allf if os.path.basename(x) == "pw-positive.json"]
+          neg = [x for x in allf if os.path.basename(x) != "pw-positive.json"]
+          print(f"positive_summary={summary(pos)}")
+          print(f"negative_summary={summary(neg)}")
+          # Config drift: positive-suppress entries no longer in the bundled
+          # spec (materializer records these instead of failing generate).
+          stale = []
+          try:
+              stale = json.load(open("generated/camunda-hub/playwright/coverage.json")).get("staleSuppressedOpIds", [])
+          except Exception:
+              pass
+          print(f"stale_suppress={', '.join(stale)}")
+          PY
+
+      # Derive the "skipped due to known issues" bullet lists straight from the
+      # suppress/exclude configs (single source of truth — no hand-maintained
+      # duplicate). Each relevant entry carries a `knownIssue { summary, url,
+      # tracker? }`; entries without one (e.g. the out-of-scope cluster ops) are
+      # omitted. Bullets are deduped by issue url (all 5 version ops → one
+      # #25801 line). Emitted with literal `\n` so they slot into the Slack JSON.
+      - name: Derive known-issue bullets
+        id: known-issues
+        if: always()
+        run: |
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          def ref(url):
+              num = url.rstrip("/").split("/")[-1]
+              return ("camunda-hub#" if "/camunda-hub/" in url else "#") + num
+          def esc(s):
+              # Each bullet is interpolated into the Slack payload JSON string, so
+              # escape JSON-sensitive chars (backslash, double-quote) — a summary
+              # like `C:\path` or one containing `"` must not break the JSON. The
+              # literal `\n` line separator is added by join() *after* escaping,
+              # so it survives as a valid JSON newline.
+              return s.replace("\\", "\\\\").replace('"', '\\"')
+          # Fully defensive: positive-suppress.json isn't schema-validated for
+          # knownIssue, so tolerate any malformed shape (non-dict entry, missing
+          # or non-string summary/url) by skipping it — never throw and break the
+          # nightly reporting.
+          def bullets(known_issues):
+              seen, lines = set(), []
+              for ki in known_issues:
+                  if not isinstance(ki, dict):
+                      continue
+                  url = ki.get("url")
+                  summary = ki.get("summary")
+                  if not isinstance(url, str) or not url or url in seen:
+                      continue
+                  if not isinstance(summary, str) or not summary:
+                      continue
+                  seen.add(url)
+                  line = f"• {summary} — <{url}|{ref(url)}>"
+                  tr = ki.get("tracker")
+                  if isinstance(tr, str) and tr:
+                      line += f" (tracked via <{tr}|{ref(tr)}>)"
+                  lines.append(esc(line))
+              return "\\n".join(lines)
+          def cfg(p):
               try:
-                  s = json.load(open(f)).get("stats", {})
+                  d = json.load(open(p))
+                  return d if isinstance(d, dict) else {}
               except Exception:
-                  continue
-              passed  += s.get("expected", 0)
-              failed  += s.get("unexpected", 0)
-              flaky   += s.get("flaky", 0)
-              skipped += s.get("skipped", 0)
-          print(f"passed={passed}")
-          print(f"failed={failed}")
-          print(f"flaky={flaky}")
-          print(f"skipped={skipped}")
+                  return {}
+          def as_list(v):
+              return v if isinstance(v, list) else []
+          # Per-op knownIssue (from suppress/exclude entries) + suite-wide
+          # top-level knownIssues[] (skips not tied to a single op, e.g. the
+          # generator-level wrong-type-key skip). Guards for list/dict shapes so
+          # a wrong JSON shape can't throw here.
+          def known(c, entries_key):
+              perop = [
+                  e["knownIssue"]
+                  for e in as_list(c.get(entries_key))
+                  if isinstance(e, dict) and e.get("knownIssue")
+              ]
+              return perop + as_list(c.get("knownIssues"))
+          pos = cfg("configs/camunda-hub/positive-suppress.json")
+          neg = cfg("configs/camunda-hub/request-validation.json")
+          print(f"positive_known_issues={bullets(known(pos, 'suppress'))}")
+          print(f"negative_known_issues={bullets(known(neg, 'excludeOperations'))}")
           PY
 
       # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
@@ -326,7 +445,8 @@ jobs:
           secrets: |
             secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
 
-      - name: Notify Slack
+      - name: Notify Slack (positive suite)
+        id: slack-positive
         if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
         uses: slackapi/slack-github-action@v2
         with:
@@ -335,5 +455,52 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "🎭 *Playwright Results*\n✅ ${{ steps.pw-totals.outputs.passed }} | ❌ ${{ steps.pw-totals.outputs.failed }} | 🟡 ${{ steps.pw-totals.outputs.flaky }} | ⏩ ${{ steps.pw-totals.outputs.skipped }}\n*Test Results for camunda-hub negative suite (SNAPSHOT) :* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>"
+              "text": "🎭 *camunda-hub positive (lifecycle) suite (SNAPSHOT)*\n${{ steps.pw-totals.outputs.positive_summary }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.positive_url != '' && format(' · <{0}|📋 positive>', steps.testrail.outputs.positive_url) || '' }}${{ steps.pw-totals.outputs.stale_suppress != '' && format('\n⚠️ config drift: positive-suppress lists `{0}` not in the current spec — update it.', steps.pw-totals.outputs.stale_suppress) || '' }}"
+            }
+
+      # Threaded reply listing the known issues that cause positive ops to be
+      # suppressed. Auto-derived from the `knownIssue` fields in
+      # configs/camunda-hub/positive-suppress.json by the "Derive known-issue
+      # bullets" step above — no manual sync needed.
+      - name: Notify Slack (positive — known issues)
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' && steps.known-issues.outputs.positive_known_issues != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "thread_ts": "${{ steps.slack-positive.outputs.ts }}",
+              "text": "ℹ️ Some operations are skipped in the positive suite due to known issues:\n${{ steps.known-issues.outputs.positive_known_issues }}"
+            }
+
+      - name: Notify Slack (negative suite)
+        id: slack-negative
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "🎭 *camunda-hub negative (request-validation) suite (SNAPSHOT)*\n${{ steps.pw-totals.outputs.negative_summary }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|📊 View run>${{ steps.testrail.outputs.secured_url != '' && format(' · <{0}|📋 secured>', steps.testrail.outputs.secured_url) || '' }}${{ steps.testrail.outputs.rbac_url != '' && format(' · <{0}|📋 rbac>', steps.testrail.outputs.rbac_url) || '' }}"
+            }
+
+      # Threaded reply listing the known issues that cause negative ops to be
+      # excluded. Auto-derived from the `knownIssue`/`knownIssues` fields in
+      # configs/camunda-hub/request-validation.json by the "Derive known-issue
+      # bullets" step above — no manual sync needed.
+      - name: Notify Slack (negative — known issues)
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-negative.outputs.ts != '' && steps.known-issues.outputs.negative_known_issues != '' }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "thread_ts": "${{ steps.slack-negative.outputs.ts }}",
+              "text": "ℹ️ Some operations are skipped in the negative suite due to known issues:\n${{ steps.known-issues.outputs.negative_known_issues }}"
             }

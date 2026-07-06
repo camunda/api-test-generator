@@ -108,6 +108,38 @@ export interface RequestValidationConfig {
    * needs a V2 project key while the body needs a V1 one (#352).
    */
   pathResourceFixtures?: Record<string, string>;
+  /**
+   * Operations to exclude from negative-suite generation entirely, with a
+   * documented reason. Use for ops that are blocked upstream so their negative
+   * tests can't reach the validation path they target (e.g. Hub version ops —
+   * updateVersion/restoreVersion — whose fixture can't exist per
+   * camunda/camunda-hub#25801, so they 404 instead of 400; tracked via #419).
+   * The whole op is dropped (all its negative cases), so the nightly stays green
+   * on known blockers instead of perpetually red. Re-enable when unblocked.
+   * The optional `knownIssue` feeds the nightly's "skipped due to known issues"
+   * Slack thread (see the workflow's derive step).
+   */
+  excludeOperations?: { operationId: string; reason: string; knownIssue?: KnownIssue }[];
+  /**
+   * Suite-wide known issues NOT tied to a single excluded op (e.g. the
+   * generator-level wrong-type-key skip for camunda/camunda-hub#25926). Surfaced
+   * in the nightly's "skipped due to known issues" Slack thread alongside the
+   * per-entry `knownIssue`s.
+   */
+  knownIssues?: KnownIssue[];
+}
+
+/**
+ * A reference to an upstream issue that explains why some coverage is skipped.
+ * Consumed by the nightly workflow to build the per-suite "known issues" Slack
+ * thread (single source of truth: the config that causes the skip also carries
+ * its issue link).
+ */
+export interface KnownIssue {
+  summary: string;
+  url: string;
+  /** Optional in-repo tracking issue (e.g. #419 for the version exclusion). */
+  tracker?: string;
 }
 
 const DEFAULTS: RequestValidationConfig = {
@@ -128,6 +160,34 @@ function isEnvVarNameRecord(v: unknown): v is Record<string, string> {
   return (
     isPlainObject(v) &&
     Object.entries(v).every(([k, x]) => typeof x === 'string' && k.length > 0 && x.length > 0)
+  );
+}
+
+function isKnownIssue(v: unknown): v is KnownIssue {
+  return (
+    isPlainObject(v) &&
+    typeof v.summary === 'string' &&
+    v.summary.trim().length > 0 &&
+    typeof v.url === 'string' &&
+    v.url.trim().length > 0 &&
+    (v.tracker === undefined || (typeof v.tracker === 'string' && v.tracker.trim().length > 0))
+  );
+}
+
+function isExcludeOperations(
+  v: unknown,
+): v is { operationId: string; reason: string; knownIssue?: KnownIssue }[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (e) =>
+        isPlainObject(e) &&
+        typeof e.operationId === 'string' &&
+        e.operationId.trim().length > 0 &&
+        typeof e.reason === 'string' &&
+        e.reason.trim().length > 0 &&
+        (e.knownIssue === undefined || isKnownIssue(e.knownIssue)),
+    )
   );
 }
 
@@ -212,6 +272,24 @@ export function loadRequestValidationConfig(
       );
     }
     merged.pathResourceFixtures = v;
+  }
+  if ('excludeOperations' in parsed) {
+    const v = parsed.excludeOperations;
+    if (!isExcludeOperations(v)) {
+      throw new Error(
+        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, reason, knownIssue? } objects — operationId/reason are non-empty strings, and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
+      );
+    }
+    merged.excludeOperations = v;
+  }
+  if ('knownIssues' in parsed) {
+    const v = parsed.knownIssues;
+    if (!Array.isArray(v) || !v.every(isKnownIssue)) {
+      throw new Error(
+        `Invalid ${configPath}: "knownIssues" must be an array of { summary, url, tracker? } objects with non-empty strings.`,
+      );
+    }
+    merged.knownIssues = v;
   }
   return merged;
 }

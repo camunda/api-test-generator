@@ -2,20 +2,72 @@
   "$comment": "Per-config positive-suite suppression list. Each entry removes an operation's feature/variant spec from the generated positive suite. Use it — sparingly, always with a documented reason + tracking issue — for operations that either (a) the planner cannot produce a passing test for and no scenario template covers, or (b) are intentionally out of scope for the suite (e.g. an opt-in / feature-flagged operator surface the default run shouldn't exercise). Revisit when the gap closes or scope changes.",
   "suppress": [
     {
-      "operationId": "createCluster",
-      "reason": "The v2 /clusters surface is dynamic cluster management — an opt-in operator feature (DYNAMIC_CLUSTER_MANAGEMENT_ENABLED, off by default; clusters self-register via discovery) that is orthogonal to this suite's content-API model (clusterId is not a content entity and doesn't chain). Dropped from the default content-API nightly (#423). createCluster is the only cluster op that passes, and only with the flag on."
+      "operationId": "createClusterRegistration",
+      "reason": "The v2 /clusters surface is dynamic cluster management — an opt-in operator feature (DYNAMIC_CLUSTER_MANAGEMENT_ENABLED, off by default; clusters self-register via discovery) that is orthogonal to this suite's content-API model (clusterId is not a content entity and doesn't chain). Dropped from the default content-API nightly (#423). createClusterRegistration is the only cluster op that passes, and only with the flag on. (Renamed from createCluster upstream, camunda/camunda-hub#25876.)"
     },
     {
-      "operationId": "getClusters",
-      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also currently broken: GET /clusters returns 500 even with the flag on (camunda/camunda-hub#25908)."
+      "operationId": "getClusterRegistrations",
+      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also currently broken: GET /clusters returns 500 even with the flag on (camunda/camunda-hub#25908). (Renamed from getClusters upstream, camunda/camunda-hub#25876.)",
+      "knownIssue": {
+        "summary": "GET /clusters returns 500 for every request",
+        "url": "https://github.com/camunda/camunda-hub/issues/25908"
+      }
     },
     {
-      "operationId": "deleteCluster",
-      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also needs a chainable clusterId to test: clusterId isn't modelled as a semantic type, so createCluster -> deleteCluster can't chain (camunda/camunda-hub#25907)."
+      "operationId": "removeClusterRegistration",
+      "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also needs a chainable clusterId to test: clusterId isn't modelled as a semantic type, so create -> remove can't chain (camunda/camunda-hub#25907). (Renamed from deleteCluster upstream, camunda/camunda-hub#25876.)"
     },
     {
       "operationId": "getClusterUsageMetrics",
       "reason": "Opt-in dynamic-cluster-management surface, out of scope for the content-API nightly (#423). Also needs a chainable clusterId: GET /clusters/usage-metrics has a required `id` (clusterId) query param that can't be sourced (camunda/camunda-hub#25907)."
+    },
+    {
+      "operationId": "createVersion",
+      "reason": "Versions are unobtainable via the public API: every file it can create lives inside a project (process application), and those cannot be versioned (400 'Cannot create a version for file … as it is located inside a process application'). Blocked on camunda/camunda-hub#25801; tracked here via #419. Re-enable once versioning is unblocked.",
+      "knownIssue": {
+        "summary": "Versions can't be created via the public API",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801"
+      }
+    },
+    {
+      "operationId": "getVersion",
+      "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419).",
+      "knownIssue": {
+        "summary": "Versions can't be created via the public API",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801"
+      }
+    },
+    {
+      "operationId": "updateVersion",
+      "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419).",
+      "knownIssue": {
+        "summary": "Versions can't be created via the public API",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801"
+      }
+    },
+    {
+      "operationId": "deleteVersion",
+      "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419).",
+      "knownIssue": {
+        "summary": "Versions can't be created via the public API",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801"
+      }
+    },
+    {
+      "operationId": "restoreVersion",
+      "reason": "Depends on a soft-deleted version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419).",
+      "knownIssue": {
+        "summary": "Versions can't be created via the public API",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801"
+      }
+    },
+    {
+      "operationId": "deleteCatalogAsset",
+      "reason": "No way to obtain a deletable catalog assetKey via the public API: ingestCatalogAssets succeeds but deleteCatalogAsset then 404s on the ingested asset's id (the ingested element-template isn't resolvable as a deletable asset by that key). Blocked on camunda/camunda-hub#25576. Re-enable once a real assetKey can be sourced.",
+      "knownIssue": {
+        "summary": "deleteCatalogAsset has no obtainable assetKey",
+        "url": "https://github.com/camunda/camunda-hub/issues/25576"
+      }
     }
   ]
 }

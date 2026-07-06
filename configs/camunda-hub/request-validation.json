@@ -1,7 +1,9 @@
 {
   "$comment": "Per-config request-validation settings for camunda-hub. enumCaseInsensitive: true — Hub accepts enum values case-insensitively, so a case-only mutation is NOT rejected with 400; the generator therefore omits case-only enum mutations rather than emitting them as false-positive 400-expecting tests. authAbsentMode: 'all-secured' — the Hub Public API v2 is uniformly Bearer-authenticated via a single global `security: [{ bearerAuth: [] }]` requirement and declares no `x-enforcement: conditional` schemes, so the 401 auth-absent surface is every secured op. authDenyMode: 'all-secured' — Hub checks body-validation (400) and resource-existence (404) before the authority gate (@PreAuthorize, 403), so only keyless, no-required-body, no-required-non-path-param secured ops are targeted (camunda/camunda-hub#25264). resourceFixtures (#352): map each resource-key name (path param OR body field) to the env var holding a REAL key the runner creates before tests run; wherever the generator would emit a filler ('x', or '1' from constraintViolations/parameters) for one of these, it emits `process.env[<ENV>] || '<filler>'` (|| so an unset OR empty env var falls back) so a malformed-field test rides on a valid envelope (the path resource exists / the referenced project|folder is accessible) and reaches body validation (400) instead of a 404 lookup or 403 access check on 'x'. parentFolderKey reuses the folder fixture. The body `projectKey` maps to RV_FIXTURE_V2_PROJECT_KEY (a ProcessApplication), matching pathResourceFixtures: createFile/createFolder/updateFile/updateFolder @PreAuthorize resolve the projectKey as a ProcessApplication, so a V2 key is the accessible move/create target that gets a malformed-field test past the 403 gate into body validation (a V1 `Project`/workspace id 403s). The runner creates the file/folder fixtures inside this V2 project too (scripts/e2e/run-hub.sh make_fixtures).",
   "enumCaseInsensitive": true,
-  "unenforcedStringFormats": ["date-time"],
+  "unenforcedStringFormats": [
+    "date-time"
+  ],
   "authAbsentMode": "all-secured",
   "authDenyMode": "all-secured",
   "resourceFixtures": {
@@ -14,5 +16,31 @@
   },
   "pathResourceFixtures": {
     "projectKey": "RV_FIXTURE_V2_PROJECT_KEY"
-  }
+  },
+  "excludeOperations": [
+    {
+      "operationId": "updateVersion",
+      "reason": "Blocked on camunda/camunda-hub#25801 (tracked via #419): a version can't be created via the public API (every v2-creatable file lives inside a process application, which can't be versioned), so RV_FIXTURE_VERSION_KEY is empty and updateVersion's negative tests 404 on the missing version instead of reaching body validation (400). Excluded from the negative suite until versioning is unblocked.",
+      "knownIssue": {
+        "summary": "updateVersion / restoreVersion — versioning blocked, no version fixture can exist",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801",
+        "tracker": "https://github.com/camunda/api-test-generator/issues/419"
+      }
+    },
+    {
+      "operationId": "restoreVersion",
+      "reason": "Blocked on camunda/camunda-hub#25801 (tracked via #419): same as updateVersion — no version can exist, so restoreVersion's negative tests 404 instead of 400. Excluded until versioning is unblocked.",
+      "knownIssue": {
+        "summary": "updateVersion / restoreVersion — versioning blocked, no version fixture can exist",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801",
+        "tracker": "https://github.com/camunda/api-test-generator/issues/419"
+      }
+    }
+  ],
+  "knownIssues": [
+    {
+      "summary": "Wrong-type tests on resource-key body fields (projectKey, folderKey, …) are skipped — Hub 403s/500s on a malformed key instead of 400",
+      "url": "https://github.com/camunda/camunda-hub/issues/25926"
+    }
+  ]
 }
