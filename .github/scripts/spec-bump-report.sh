@@ -82,3 +82,16 @@ else
   echo "Opening new tracking issue"
   gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" --label "$DRIFT_LABEL" >/dev/null
 fi
+
+# Close a stale auto-bump PR if one is open: we're on the issue path because
+# latest no longer flows through cleanly (or no App token), so a pin-bump PR
+# pointing at an older clean SHA would be misleading.
+if [ -n "${CONFIG:-}" ]; then
+  bump_branch="chore/spec-bump-${CONFIG}"
+  bump_pr="$(gh pr list --head "$bump_branch" --state open --json number --jq '.[0].number // empty')"
+  if [ -n "$bump_pr" ]; then
+    gh pr close "$bump_pr" \
+      --comment "Latest no longer flows through cleanly (see the tracking issue) — closing this auto-bump PR until it's green again." >/dev/null || true
+    echo "Closed stale bump PR #${bump_pr}."
+  fi
+fi

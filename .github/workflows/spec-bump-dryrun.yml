@@ -8,14 +8,26 @@
 #
 # It fetches camunda/camunda@main (instead of the pinned SHA), runs the full
 # generate pipeline + regression invariants against it, and diffs the operation
-# surface vs the pin. On any drift it opens/updates ONE rolling tracking issue;
-# when latest flows through cleanly again it closes it.
+# surface vs the pin. It then routes on the result:
+#   - CLEAN drift (generate + invariants pass): opens/updates a rolling bump PR
+#     (chore/spec-bump-camunda-oca) that re-pins to latest — ready to review/merge.
+#   - BROKEN drift (generate or invariants fail): opens/updates ONE rolling
+#     tracking issue instead (adopting needs modelling work first).
+#   - No content change: closes the issue/PR.
+#
+# The bump PR is opened with a GitHub App token (Vault-minted, same pattern as
+# nightly-camunda-hub.yml) so ci.yml triggers on it — the built-in GITHUB_TOKEN
+# can't (loop-prevention). If the App token isn't available it FALLS BACK to the
+# tracking-issue path, so the signal is never lost.
+#   Prereq (admin, one-time): install the GitHub App whose creds live in Vault
+#   (secret/data/products/web-modeler/ci/preview-envs) on camunda/api-test-generator
+#   with Contents: write + Pull requests: write. Until then, clean drift reports
+#   via the tracking issue.
 #
 # NON-BLOCKING BY DESIGN: schedule + manual dispatch only, never pull_request —
 # it can never fail anyone's PR. camunda-hub is intentionally NOT covered here:
 # nightly-camunda-hub.yml already clones camunda-hub@main and bundles it
-# unpinned every night, so the hub already gets a latest-main dry-run daily
-# (with the Vault/GitHub-App auth that private repo needs).
+# unpinned every night, so the hub already gets a latest-main dry-run daily.
 name: Spec-bump dry-run (camunda-oca)
 
 on:
@@ -25,8 +37,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  issues: write
+  contents: read # push to the bump branch uses the App token, not GITHUB_TOKEN
+  issues: write # tracking issue (breakage / no-token fallback)
+  pull-requests: write # close a stale bump PR from the fallback/no-drift paths
+  id-token: write # Vault OIDC to mint the App token
 
 concurrency:
   group: spec-bump-dryrun
@@ -127,6 +141,17 @@ jobs:
           echo "n_added=${n_added}" >> "$GITHUB_OUTPUT"
           echo "n_removed=${n_removed}" >> "$GITHUB_OUTPUT"
           echo "Added: ${n_added}, Removed: ${n_removed}"
+          # Content change = latest bundle hash differs from the pinned one. A SHA
+          # can move upstream with byte-identical spec content (unrelated commit);
+          # only a real content change is worth a bump PR / tracking issue.
+          pinned_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/${CONFIG}/spec-pin.json','utf8')).expectedSpecHash)")
+          latest_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('spec/${CONFIG}/bundled/spec-metadata.json','utf8')).specHash)")
+          if [ "$pinned_hash" = "$latest_hash" ]; then
+            echo "content_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Spec content is byte-identical to the pin (SHA moved, content did not)."
+          else
+            echo "content_changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Generate pipeline against latest
         id: generate
@@ -148,23 +173,61 @@ jobs:
           TEST_SEED: snapshot-baseline
         run: npm test
 
-      - name: Classify drift signal
-        id: classify
-        if: always() && steps.refs.outputs.drifted == 'true'
-        run: |
-          # A "signal" (worth a tracking issue) is: generation broke, invariants
-          # broke, or the operation surface changed. A bare SHA difference with a
-          # clean generate + invariants and an unchanged surface is NOT a signal.
-          signal=false
-          [ "${{ steps.generate.outcome }}" != "success" ] && signal=true
-          [ "${{ steps.invariants.outcome }}" != "success" ] && signal=true
-          [ "${{ steps.opdiff.outputs.n_added }}" != "0" ] && signal=true
-          [ "${{ steps.opdiff.outputs.n_removed }}" != "0" ] && signal=true
-          echo "signal=${signal}" >> "$GITHUB_OUTPUT"
-          echo "Drift signal: ${signal}"
+      # --- Mint the App token for the bump PR (clean drift only) ---------------
+      # Same Vault→App pattern as nightly-camunda-hub.yml. Both steps are
+      # continue-on-error: if the App isn't provisioned on this repo yet, the
+      # token comes back empty and the routing falls back to the tracking issue.
+      - name: Fetch GitHub App creds from Vault
+        id: vault
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success' && steps.invariants.outcome == 'success'
+        continue-on-error: true
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
 
+      - name: Mint App token scoped to this repo
+        id: app-token
+        if: steps.vault.outcome == 'success' && steps.vault.outputs.APP_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ steps.vault.outputs.APP_ID }}
+          private-key: ${{ steps.vault.outputs.APP_PRIVATE_KEY }}
+          owner: camunda
+          repositories: api-test-generator
+
+      # --- Route on the outcome ------------------------------------------------
+      # CLEAN drift + App token → open/update the rolling bump PR.
+      - name: Open/update the auto-bump PR
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success' && steps.invariants.outcome == 'success' &&
+          steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LATEST: ${{ steps.refs.outputs.latest }}
+          N_ADDED: ${{ steps.opdiff.outputs.n_added }}
+          N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+          ADDED: ${{ steps.opdiff.outputs.added }}
+          REMOVED: ${{ steps.opdiff.outputs.removed }}
+        run: bash .github/scripts/spec-bump-open-pr.sh
+
+      # BROKEN drift (generate/invariants failed) OR clean-but-no-App-token
+      # → the tracking issue (fallback preserves the signal).
       - name: Report drift to the rolling tracking issue
-        if: always() && steps.classify.outputs.signal == 'true'
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.generate.outcome != 'success' || steps.invariants.outcome != 'success' ||
+           steps.app-token.outputs.token == '')
         env:
           GH_TOKEN: ${{ github.token }}
           PINNED: ${{ steps.refs.outputs.pinned }}
@@ -177,14 +240,12 @@ jobs:
           INV_OUTCOME: ${{ steps.invariants.outcome }}
         run: bash .github/scripts/spec-bump-report.sh
 
-      - name: Close the tracking issue when latest is clean
-        # Close the rolling issue if it's open when there's no drift signal —
-        # either the pin is already at latest (drifted == false, so classify was
-        # skipped) OR latest flowed through cleanly (signal == false). Both must
-        # pass LATEST for the resolve script's close comment.
+      # No meaningful drift (pin at latest, or content byte-identical) → close
+      # any open tracking issue / bump PR.
+      - name: Close tracking issue + bump PR when clean
         if: >-
           always() &&
-          (steps.refs.outputs.drifted == 'false' || steps.classify.outputs.signal == 'false')
+          (steps.refs.outputs.drifted == 'false' || steps.opdiff.outputs.content_changed == 'false')
         env:
           GH_TOKEN: ${{ github.token }}
           LATEST: ${{ steps.refs.outputs.latest }}
