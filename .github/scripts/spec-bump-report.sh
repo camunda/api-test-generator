@@ -23,15 +23,22 @@ emoji() { [ "$1" = "success" ] && echo "✅" || echo "❌"; }
 
 # --- Build the body ---------------------------------------------------------
 list_or_none() {
-  if [ -z "$1" ]; then
+  local lines total
+  # Keep only non-empty lines. Treats an empty OR whitespace-only value (e.g. a
+  # stray newline from a multiline step output) as "none". grep no-match exits 1
+  # — || true keeps that non-fatal under `set -euo pipefail`.
+  lines=$(printf '%s\n' "$1" | grep -E '.' || true)
+  if [ -z "$lines" ]; then
     echo "_(none)_"
-  else
-    # Cap the printed list so a huge diff can't produce an oversized issue body.
-    # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
-    echo "$1" | grep . | head -50 | sed 's/^/- `/;s/$/`/'
-    local total
-    total=$(echo "$1" | grep -c .)
-    [ "$total" -gt 50 ] && echo "- …and $((total - 50)) more"
+    return
+  fi
+  total=$(printf '%s\n' "$lines" | grep -c . || true)
+  # Cap the printed list so a huge diff can't produce an oversized issue body.
+  # head closes the pipe after 50 lines (SIGPIPE upstream) — || true guards it.
+  # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
+  printf '%s\n' "$lines" | head -50 | sed 's/^/- `/;s/$/`/' || true
+  if [ "$total" -gt 50 ]; then
+    echo "- …and $((total - 50)) more"
   fi
 }
 

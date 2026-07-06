@@ -63,7 +63,7 @@ jobs:
       - name: Resolve pinned + latest upstream SHA
         id: refs
         run: |
-          pinned=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
+          pinned=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/${CONFIG}/spec-pin.json','utf8')).specRef)")
           latest=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
           if [ -z "$latest" ]; then
             echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH} via git ls-remote"
@@ -103,8 +103,15 @@ jobs:
         id: opdiff
         if: steps.refs.outputs.drifted == 'true'
         run: |
-          added=$(comm -13 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
-          removed=$(comm -23 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          # comm requires both inputs sorted in the SAME collation. spec-operations
+          # sorts in JS (code-point order); re-sort under LC_ALL=C so comm's byte
+          # comparison matches exactly and it can't silently misbehave on a
+          # locale-sorted runner.
+          LC_ALL=C sort -o /tmp/pinned-ops.txt /tmp/pinned-ops.txt
+          LC_ALL=C sort -o /tmp/latest-ops.txt /tmp/latest-ops.txt
+          # || true: comm exits 0 anyway, but guards an empty file.
+          added=$(LC_ALL=C comm -13 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          removed=$(LC_ALL=C comm -23 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
           {
             echo 'added<<EOF'
             echo "$added"
@@ -113,8 +120,10 @@ jobs:
             echo "$removed"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
-          n_added=$([ -z "$added" ] && echo 0 || echo "$added" | grep -c .)
-          n_removed=$([ -z "$removed" ] && echo 0 || echo "$removed" | grep -c .)
+          # printf (no trailing newline) so an empty value counts 0; grep exits 1
+          # on no match, so || true keeps it non-fatal under pipefail.
+          n_added=$(printf '%s' "$added" | grep -c . || true)
+          n_removed=$(printf '%s' "$removed" | grep -c . || true)
           echo "n_added=${n_added}" >> "$GITHUB_OUTPUT"
           echo "n_removed=${n_removed}" >> "$GITHUB_OUTPUT"
           echo "Added: ${n_added}, Removed: ${n_removed}"
