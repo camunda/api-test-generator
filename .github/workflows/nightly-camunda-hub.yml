@@ -362,34 +362,47 @@ jobs:
           def ref(url):
               num = url.rstrip("/").split("/")[-1]
               return ("camunda-hub#" if "/camunda-hub/" in url else "#") + num
+          # Fully defensive: positive-suppress.json isn't schema-validated for
+          # knownIssue, so tolerate any malformed shape (non-dict entry, missing
+          # or non-string summary/url) by skipping it — never throw and break the
+          # nightly reporting.
           def bullets(known_issues):
               seen, lines = set(), []
               for ki in known_issues:
+                  if not isinstance(ki, dict):
+                      continue
                   url = ki.get("url")
                   summary = ki.get("summary")
-                  # Skip malformed entries (missing summary/url) rather than
-                  # KeyError-ing the nightly — positive-suppress.json is not
-                  # schema-validated for knownIssue.
-                  if not url or not summary or url in seen:
+                  if not isinstance(url, str) or not url or url in seen:
+                      continue
+                  if not isinstance(summary, str) or not summary:
                       continue
                   seen.add(url)
                   line = f"• {summary} — <{url}|{ref(url)}>"
                   tr = ki.get("tracker")
-                  if tr:
+                  if isinstance(tr, str) and tr:
                       line += f" (tracked via <{tr}|{ref(tr)}>)"
                   lines.append(line)
               return "\\n".join(lines)
           def cfg(p):
               try:
-                  return json.load(open(p))
+                  d = json.load(open(p))
+                  return d if isinstance(d, dict) else {}
               except Exception:
                   return {}
+          def as_list(v):
+              return v if isinstance(v, list) else []
           # Per-op knownIssue (from suppress/exclude entries) + suite-wide
           # top-level knownIssues[] (skips not tied to a single op, e.g. the
-          # generator-level wrong-type-key skip).
+          # generator-level wrong-type-key skip). Guards for list/dict shapes so
+          # a wrong JSON shape can't throw here.
           def known(c, entries_key):
-              perop = [e["knownIssue"] for e in c.get(entries_key, []) if e.get("knownIssue")]
-              return perop + c.get("knownIssues", [])
+              perop = [
+                  e["knownIssue"]
+                  for e in as_list(c.get(entries_key))
+                  if isinstance(e, dict) and e.get("knownIssue")
+              ]
+              return perop + as_list(c.get("knownIssues"))
           pos = cfg("configs/camunda-hub/positive-suppress.json")
           neg = cfg("configs/camunda-hub/request-validation.json")
           print(f"positive_known_issues={bullets(known(pos, 'suppress'))}")
