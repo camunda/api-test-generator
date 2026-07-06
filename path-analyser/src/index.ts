@@ -1630,6 +1630,40 @@ export function buildRequestBodyFromCanonical(
         scenario.bindings.jobTypeVar = nonExistentType;
       }
     }
+    // #408 / #168 — bind a REQUIRED nested `filter.*` scope field to its
+    // produced semantic's var. The `semanticFallback` pass above deliberately
+    // skips `filter.*` paths (line ~1327), and a required nested filter scalar
+    // is otherwise materialised by `synthesizeObjectFromPrefix`, which has no
+    // binding context and emits the literal `'placeholder'`. That leaves a
+    // scoped search unscoped even when the chain produced the key — e.g.
+    // `searchVersions` chains createFile (→ fileKeyVar) but its body was
+    // `{ filter: { fileKey: 'placeholder' } }`. Rewrite the dotted body path to
+    // the produced `${…Var}` instead. Gated to REQUIRED filter fields whose
+    // semantic has a graph producer/establisher (so the planner chained it and
+    // the var resolves at runtime) — optional filters stay unbound (#168).
+    const requiredBodyPaths = new Set(
+      nodes.filter((n) => n.required).map((n) => n.path.replace(/\[\]$/, '')),
+    );
+    for (const entry of graph.operations[opId]?.requestBodySemantics ?? []) {
+      const fieldPath = entry.fieldPath;
+      if (!(fieldPath.startsWith('filter.') || fieldPath.startsWith('filter['))) continue;
+      // Gate on REQUIRED filter fields whose semantic has a graph
+      // producer/establisher: a required field forces the planner to chain that
+      // producer (so the `${…Var}` is extracted upstream and resolves at
+      // runtime), while an optional filter stays unbound (preserving #168). The
+      // feature-suite scenario object doesn't carry `producedSemanticTypes`, so
+      // the producer index — not the scenario's produced set — is the reliable
+      // signal here.
+      if (!requiredBodyPaths.has(fieldPath)) continue;
+      const hasProducer =
+        !!graph.producersByType[entry.semantic]?.length ||
+        !!graph.establishersByType?.[entry.semantic]?.length;
+      if (!hasProducer) continue;
+      const varName = `${camelCase(entry.semantic)}Var`;
+      scenario.bindings ||= {};
+      if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
+      setLeafPlaceholder(template, fieldPath, `${'${'}${varName}}`);
+    }
     // Removed prior absolute guard (folded into unified omission pass above).
     return { kind: 'json' as const, template };
   }
