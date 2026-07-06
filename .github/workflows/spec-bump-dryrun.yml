@@ -19,12 +19,6 @@
 name: Spec-bump dry-run (camunda-oca)
 
 on:
-  # TEMP(test): run on push to the feature branch to exercise the full flow
-  # (fetch → diff → generate → invariants → tracking issue) before merge.
-  # REVERT this push block before merging — leaves schedule + dispatch only.
-  push:
-    branches:
-      - feat/spec-bump-dryrun
   schedule:
     # Mondays 06:00 UTC — a weekly heads-up, well clear of the 02:00 hub nightly.
     - cron: '0 6 * * 1'
