@@ -257,7 +257,7 @@ npm run build --workspaces --if-present
 |--------|-------------|
 | `npm run fetch-spec` | Fetch and bundle the upstream OpenAPI spec (from `main` branch) |
 | `npm run fetch-spec:ref` | Fetch a specific branch/tag: `SPEC_REF=stable/8.8 npm run fetch-spec:ref` |
-| `npm run bump-spec-pin` | Re-pin a config's spec: `npm run bump-spec-pin -- --config <name> [--ref <sha>] [--dry-run]` (see Spec pin → Bumping the spec pin) |
+| `npm run bump-spec-pin` | Re-pin a config's spec: `npm run bump-spec-pin -- --config <name> [--ref <sha\|branch\|tag>] [--dry-run]` (see Spec pin → Bumping the spec pin) |
 | `npm run extract-graph` | Build the semantic graph extractor and extract the dependency graph |
 | `npm run generate:scenarios` | Build the path analyser and generate scenario JSON files |
 | `npm run codegen:playwright` | Build and emit a Playwright test for a single endpoint |

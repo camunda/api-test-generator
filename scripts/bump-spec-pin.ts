@@ -12,8 +12,8 @@
  *     && CONFIG=<config> npm test
  *
  * Usage:
- *   npm run bump-spec-pin -- --config camunda-oca [--ref <sha|branch>] [--dry-run]
- *   npm run bump-spec-pin -- --config camunda-hub [--ref <sha>] [--dry-run]
+ *   npm run bump-spec-pin -- --config camunda-oca [--ref <sha|branch|tag>] [--dry-run]
+ *   npm run bump-spec-pin -- --config camunda-hub [--ref <sha|branch|tag>] [--dry-run]
  *
  * Modes (inferred from the active config's spec source — `localSpecDir` present
  * ⇒ local-bundle, otherwise network-fetch):
