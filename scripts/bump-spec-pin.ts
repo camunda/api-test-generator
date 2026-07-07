@@ -7,7 +7,9 @@
  * the `$comment` and key order). It does NOT commit — review the diff, then
  * regenerate + run invariants to confirm the new spec is clean before landing:
  *
- *   CONFIG=<config> npm run testsuite:generate && CONFIG=<config> npm test
+ *   CONFIG=<config> npm run testsuite:generate \
+ *     && CONFIG=<config> npm run generate:request-validation \
+ *     && CONFIG=<config> npm test
  *
  * Usage:
  *   npm run bump-spec-pin -- --config camunda-oca [--ref <sha|branch>] [--dry-run]
@@ -195,7 +197,7 @@ function main(): void {
   writeFileSync(pinPath, `${JSON.stringify(pinRaw, null, 2)}\n`);
   console.error(`  wrote ${pinPath}`);
   console.error(
-    `\nNext: CONFIG=${config} npm run testsuite:generate && CONFIG=${config} npm test  (confirm the new spec is clean, update any changed invariants), then commit.`,
+    `\nNext: CONFIG=${config} npm run testsuite:generate && CONFIG=${config} npm run generate:request-validation && CONFIG=${config} npm test  (confirm the new spec is clean, update any changed invariants), then commit.`,
   );
 }
 
