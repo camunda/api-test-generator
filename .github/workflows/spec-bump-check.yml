@@ -1,0 +1,402 @@
+# Scheduled, non-blocking check of the spec-pin bump for both configs (#387).
+#
+# A spec-pin bump isn't always mechanical: latest upstream main can pull in a
+# whole new domain the generator doesn't yet model (this bit us bumping
+# camunda-oca to the agent-instance domain — see #386). Today that only shows
+# up when someone manually attempts the bump. This turns "surprise at bump
+# time" into a recurring, signal-only heads-up — for camunda-oca AND camunda-hub.
+#
+# For each config it resolves latest upstream main (instead of the pinned SHA),
+# runs the full generate pipeline + regression invariants against it, and diffs
+# the operation surface vs the pin. It then routes on the result:
+#   - CLEAN drift (generate + invariants pass): opens/updates a rolling bump PR
+#     (chore/spec-bump-<config>) that re-pins to latest — ready to review/merge.
+#   - BROKEN drift (generate or invariants fail): opens/updates ONE rolling
+#     tracking issue instead (adopting needs modelling work first).
+#   - No content change: closes the issue/PR.
+#
+# Two configs, two spec sources (see configs/<name>/config.json):
+#   - camunda-oca: PUBLIC network-fetch from camunda/camunda@main (git ls-remote
+#     + fetch-spec:ref). No clone token needed.
+#   - camunda-hub: PRIVATE local-bundle from a ../camunda-hub sibling clone. The
+#     preview-envs GitHub App (Vault JWT/OIDC) mints a read token to clone it —
+#     the same wiring ci.yml's hub-invariants leg uses. The token is embedded in
+#     the sibling's origin URL so bump-spec-pin can re-fetch --ref during the bump.
+#
+# Two App tokens are involved: preview-envs (READ camunda-hub, clone only) and
+# qa-processes (WRITE api-test-generator, opens the bump PR). The bump PR is
+# opened as the qa-processes App — the same App + Vault wiring camunda/camunda
+# uses for its nightly-fix PRs (e.g. camunda#56716) — so ci.yml triggers on it
+# (the built-in GITHUB_TOKEN can't, loop-prevention). If the qa-processes token
+# isn't available it FALLS BACK to the tracking-issue path, so the signal is
+# never lost.
+#   Prereq (one-time): the qa-processes App must be able to open PRs on
+#   camunda/api-test-generator (Contents: write + Pull requests: write). Its
+#   creds already live in Vault (secret/data/products/qa/ci/github.com/apps/
+#   camunda/qa-processes) and this repo already has the approle secrets
+#   (VAULT_ROLE_ID/SECRET_ID/ADDR). Until it can reach this repo, clean drift
+#   reports via the tracking issue.
+#
+# NON-BLOCKING BY DESIGN: schedule + manual dispatch only, never pull_request —
+# it can never fail anyone's PR. Legs run independently (fail-fast: false, a
+# per-config concurrency group), so a hub Vault hiccup can't block the oca leg.
+name: Spec-bump check
+
+on:
+  schedule:
+    # Daily 06:00 UTC — a heads-up on upstream drift, well clear of the 02:00 hub
+    # nightly. Cheap on no-op days (generate is gated on real content change) and
+    # non-spammy (an already-open bump PR is left untouched).
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read # push to the bump branch uses the App token, not GITHUB_TOKEN
+  issues: write # tracking issue (breakage / no-token fallback)
+  pull-requests: write # close a stale bump PR from the fallback/no-drift paths
+  id-token: write # OIDC → Vault for the preview-envs clone token (hub leg)
+
+jobs:
+  check:
+    name: Check ${{ matrix.config }} against upstream main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Per-config group so the oca and hub legs never serialise against each other.
+    concurrency:
+      group: spec-bump-check-${{ matrix.config }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: camunda-oca
+            upstream_repo: camunda/camunda
+            private: false
+            issue_title: 'Spec-bump check: camunda-oca drifted from the pin'
+          - config: camunda-hub
+            upstream_repo: camunda/camunda-hub
+            private: true
+            issue_title: 'Spec-bump check: camunda-hub drifted from the pin'
+    env:
+      CONFIG: ${{ matrix.config }}
+      UPSTREAM_REPO: ${{ matrix.upstream_repo }}
+      UPSTREAM_BRANCH: main
+      IS_PRIVATE: ${{ matrix.private }}
+      # Rolling tracking issue is found by this exact title (single issue, no spam).
+      ISSUE_TITLE: ${{ matrix.issue_title }}
+      DRIFT_LABEL: spec-drift
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          # Don't persist the built-in GITHUB_TOKEN as an http.extraheader: it
+          # is read-only here (permissions.contents: read) and its Authorization
+          # header takes precedence over the App-token URL when the bump PR is
+          # pushed, causing a 403 as github-actions[bot]. The bump push supplies
+          # its own credential via the qa-processes App-token URL; nothing else
+          # in this job needs it (oca spec fetch is a public clone; the hub
+          # sibling clone carries its own preview-envs token in its remote URL).
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      # --- Hub only: mint a preview-envs read token to clone camunda-hub -------
+      # Same Vault (JWT/OIDC) + App wiring as ci.yml's hub-invariants leg.
+      - name: Fetch camunda-hub GitHub App creds from Vault
+        id: hub-app-creds
+        if: matrix.private
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
+
+      - name: Mint camunda-hub clone token from the GitHub App
+        id: hub-token
+        if: matrix.private
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ steps.hub-app-creds.outputs.APP_ID }}
+          private-key: ${{ steps.hub-app-creds.outputs.APP_PRIVATE_KEY }}
+          owner: camunda
+          repositories: camunda-hub
+
+      - name: Resolve pinned + latest upstream SHA
+        id: refs
+        env:
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          pinned=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/${CONFIG}/spec-pin.json','utf8')).specRef)")
+          if [ "$IS_PRIVATE" = "true" ]; then
+            # Private local-bundle (hub): clone the sibling with a token-carrying
+            # origin URL (so both fetch-spec and bump-spec-pin --ref can fetch),
+            # then read latest main from it.
+            if [ -z "${HUB_TOKEN}" ]; then
+              echo "::error::No camunda-hub clone token — preview-envs App token empty (check Vault OIDC + the App is installed on camunda/camunda-hub with Contents: Read)."
+              exit 1
+            fi
+            dest="${GITHUB_WORKSPACE}/../camunda-hub"
+            mkdir -p "$dest"
+            ( cd "$dest" && git init -q \
+              && git remote add origin "https://x-access-token:${HUB_TOKEN}@github.com/${UPSTREAM_REPO}.git" \
+              && git fetch --depth 1 origin "${UPSTREAM_BRANCH}" )
+            latest=$(git -C "$dest" rev-parse FETCH_HEAD)
+          else
+            latest=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          fi
+          if [ -z "$latest" ]; then
+            echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}"
+            exit 1
+          fi
+          echo "pinned=${pinned}" >> "$GITHUB_OUTPUT"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+          echo "Pinned: ${pinned}"
+          echo "Latest: ${latest}"
+          if [ "$pinned" = "$latest" ]; then
+            echo "drifted=false" >> "$GITHUB_OUTPUT"
+            echo "Pin is already at latest main — nothing to check."
+          else
+            echo "drifted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Capture pinned operation surface
+        if: steps.refs.outputs.drifted == 'true'
+        env:
+          PINNED: ${{ steps.refs.outputs.pinned }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_PRIVATE" = "true" ]; then
+            # hub: check out the pinned SHA in the sibling; fetch-spec bundles
+            # whatever the sibling has checked out (SPEC_REF is ignored).
+            dest="${GITHUB_WORKSPACE}/../camunda-hub"
+            git -C "$dest" fetch --depth 1 origin "$PINNED"
+            git -C "$dest" checkout -q --detach FETCH_HEAD
+            npm run fetch-spec
+          else
+            SPEC_REF="$PINNED" npm run fetch-spec:ref
+          fi
+          npm run -s spec-operations > /tmp/pinned-ops.txt
+          echo "Pinned operations: $(wc -l < /tmp/pinned-ops.txt)"
+
+      # Fetch latest LAST so the latest bundle is what generate + invariants see
+      # (and, for hub, so the sibling is left checked out at latest for the bump).
+      - name: Fetch latest upstream spec
+        if: steps.refs.outputs.drifted == 'true'
+        env:
+          LATEST: ${{ steps.refs.outputs.latest }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_PRIVATE" = "true" ]; then
+            dest="${GITHUB_WORKSPACE}/../camunda-hub"
+            git -C "$dest" fetch --depth 1 origin "$LATEST"
+            git -C "$dest" checkout -q --detach FETCH_HEAD
+            npm run fetch-spec
+          else
+            SPEC_REF="$LATEST" npm run fetch-spec:ref
+          fi
+          npm run -s spec-operations > /tmp/latest-ops.txt
+          echo "Latest operations: $(wc -l < /tmp/latest-ops.txt)"
+
+      - name: Diff operation surface
+        id: opdiff
+        if: steps.refs.outputs.drifted == 'true'
+        run: |
+          # comm requires both inputs sorted in the SAME collation. spec-operations
+          # sorts in JS (code-point order); re-sort under LC_ALL=C so comm's byte
+          # comparison matches exactly and it can't silently misbehave on a
+          # locale-sorted runner.
+          LC_ALL=C sort -o /tmp/pinned-ops.txt /tmp/pinned-ops.txt
+          LC_ALL=C sort -o /tmp/latest-ops.txt /tmp/latest-ops.txt
+          # || true: comm exits 0 anyway, but guards an empty file.
+          added=$(LC_ALL=C comm -13 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          removed=$(LC_ALL=C comm -23 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          # Cap the lists written to step outputs: a very large upstream diff
+          # (hundreds of new ops) could otherwise exceed GitHub Actions' output
+          # size limit and fail the job before routing — losing the actionable
+          # signal. The counts (n_added/n_removed) below stay exact (computed
+          # from the full lists), and the PR/report scripts render only the
+          # first ~50 lines anyway, so a 200-line cap is a lossless preview here.
+          added_out=$(printf '%s\n' "$added" | head -200)
+          removed_out=$(printf '%s\n' "$removed" | head -200)
+          {
+            echo 'added<<EOF'
+            echo "$added_out"
+            echo 'EOF'
+            echo 'removed<<EOF'
+            echo "$removed_out"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          # printf (no trailing newline) so an empty value counts 0; grep exits 1
+          # on no match, so || true keeps it non-fatal under pipefail.
+          n_added=$(printf '%s' "$added" | grep -c . || true)
+          n_removed=$(printf '%s' "$removed" | grep -c . || true)
+          echo "n_added=${n_added}" >> "$GITHUB_OUTPUT"
+          echo "n_removed=${n_removed}" >> "$GITHUB_OUTPUT"
+          echo "Added: ${n_added}, Removed: ${n_removed}"
+          # Content change = latest bundle hash differs from the pinned one. A SHA
+          # can move upstream with byte-identical spec content (unrelated commit);
+          # only a real content change is worth a bump PR / tracking issue.
+          pinned_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/${CONFIG}/spec-pin.json','utf8')).expectedSpecHash)")
+          latest_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('spec/${CONFIG}/bundled/spec-metadata.json','utf8')).specHash)")
+          if [ "$pinned_hash" = "$latest_hash" ]; then
+            echo "content_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Spec content is byte-identical to the pin (SHA moved, content did not)."
+          else
+            echo "content_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate pipeline against latest
+        id: generate
+        # Skip on SHA-only drift (content byte-identical): the generated output
+        # would match the validated baseline and routing closes artifacts via the
+        # content_changed=='false' path anyway, so the full pipeline is wasted work.
+        if: steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true'
+        continue-on-error: true
+        env:
+          TEST_SEED: snapshot-baseline
+        run: |
+          npm run testsuite:generate
+          npm run generate:request-validation
+
+      - name: Regression invariants against latest
+        id: invariants
+        # Only meaningful if generation produced outputs — which only happens on
+        # a real content change (see the generate step's gate).
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success'
+        continue-on-error: true
+        env:
+          ALLOW_SPEC_DRIFT: '1'
+          TEST_SEED: snapshot-baseline
+        run: |
+          # Run each config's OWN Layer-3 invariants. oca runs the full suite
+          # (npm test) as it always has; hub runs just its scoped invariants
+          # file — the same command ci.yml's hub-invariants leg uses — because
+          # the full suite also includes oca-specific codegen tests that don't
+          # apply to a hub run and would fail it.
+          if [ "$IS_PRIVATE" = "true" ]; then
+            npx vitest run configs/camunda-hub/regression-invariants.test.ts
+          else
+            npm test
+          fi
+
+      # --- Mint the qa-processes App token for the bump PR (clean drift only) --
+      # Same wiring as camunda/camunda's nightly-fix workflow (which opens PRs as
+      # app/qa-processes, e.g. camunda/camunda#56716): the shared composite action
+      # reads the qa-processes App id + private key from Vault (approle auth via
+      # VAULT_ROLE_ID/SECRET_ID — already repo secrets) and mints an installation
+      # token. continue-on-error: if the App can't reach this repo yet, the token
+      # is empty and routing falls back to the tracking issue.
+      - name: Generate qa-processes App token
+        id: app-token
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success' && steps.invariants.outcome == 'success'
+        continue-on-error: true
+        # Pinned to a full commit SHA (supply-chain hardening): this sub-action
+        # has no release tag of its own, so we pin main's HEAD and bump it
+        # intentionally. SHA = camunda/infra-global-github-actions main @ 2026-07-06.
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+
+      # --- Route on the outcome ------------------------------------------------
+      # CLEAN drift + App token → open/update the rolling bump PR.
+      - name: Open/update the auto-bump PR
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success' && steps.invariants.outcome == 'success' &&
+          steps.app-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LATEST: ${{ steps.refs.outputs.latest }}
+          N_ADDED: ${{ steps.opdiff.outputs.n_added }}
+          N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+          ADDED: ${{ steps.opdiff.outputs.added }}
+          REMOVED: ${{ steps.opdiff.outputs.removed }}
+        run: bash .github/scripts/spec-bump-open-pr.sh
+
+      # BROKEN drift (generate/invariants failed) OR clean-but-no-App-token
+      # → the tracking issue (fallback preserves the signal).
+      - name: Report drift to the rolling tracking issue
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.generate.outcome != 'success' || steps.invariants.outcome != 'success' ||
+           steps.app-token.outputs.token == '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ steps.refs.outputs.pinned }}
+          LATEST: ${{ steps.refs.outputs.latest }}
+          N_ADDED: ${{ steps.opdiff.outputs.n_added }}
+          N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+          ADDED: ${{ steps.opdiff.outputs.added }}
+          REMOVED: ${{ steps.opdiff.outputs.removed }}
+          GEN_OUTCOME: ${{ steps.generate.outcome }}
+          INV_OUTCOME: ${{ steps.invariants.outcome }}
+        run: bash .github/scripts/spec-bump-report.sh
+
+      # No meaningful drift (pin at latest, or content byte-identical) → close
+      # any open tracking issue / bump PR.
+      - name: Close tracking issue + bump PR when clean
+        if: >-
+          always() &&
+          (steps.refs.outputs.drifted == 'false' || steps.opdiff.outputs.content_changed == 'false')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.refs.outputs.latest }}
+        run: bash .github/scripts/spec-bump-resolve.sh
+
+      # Public config (oca): the spec is camunda/camunda's public OpenAPI, so
+      # uploading the full bundle + generated suite for debugging leaks nothing.
+      - name: Upload generated outputs
+        if: steps.refs.outputs.drifted == 'true' && !matrix.private
+        uses: actions/upload-artifact@v7
+        with:
+          name: spec-bump-check-outputs-${{ matrix.config }}
+          path: |
+            generated
+            spec
+            /tmp/pinned-ops.txt
+            /tmp/latest-ops.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Private config (hub): this repo is PUBLIC, so do NOT publish the bundled
+      # spec or generated suite — that would leak the private, unreleased
+      # camunda-hub API content to anyone with artifact access. Upload only
+      # low-sensitivity diagnostics: the operationId lists (already present in
+      # the committed hub invariants) and spec-metadata.json (hashes + counts,
+      # not spec content).
+      - name: Upload diagnostics (private leg — no spec/generated)
+        if: steps.refs.outputs.drifted == 'true' && matrix.private
+        uses: actions/upload-artifact@v7
+        with:
+          name: spec-bump-check-outputs-${{ matrix.config }}
+          path: |
+            spec/${{ matrix.config }}/bundled/spec-metadata.json
+            /tmp/pinned-ops.txt
+            /tmp/latest-ops.txt
+          if-no-files-found: warn
+          retention-days: 14

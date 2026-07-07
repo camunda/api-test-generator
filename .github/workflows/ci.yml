@@ -291,7 +291,8 @@ jobs:
   # check). It intentionally depends on external state (upstream main), so a
   # spec change upstream reds every open PR until the pin is bumped — useful as a
   # visible signal, but it must not block unrelated PRs on that adoption work.
-  # (The scheduled dry-run #434/#435 is the non-PR home for the same signal.)
+  # (The scheduled spec-bump-check workflow is the non-PR home for the same
+  # signal; see also #435.)
   spec-freshness:
     name: Spec freshness (pins vs upstream main)
     runs-on: ubuntu-latest

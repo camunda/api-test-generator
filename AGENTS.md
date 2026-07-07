@@ -450,8 +450,24 @@ as the hub leg.
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
-and runtime breakage the pinned PR leg deliberately can't. (See #387/#434 for the
-scheduled spec-bump drift dry-run.)
+and runtime breakage the pinned PR leg deliberately can't.
+
+The **spec-bump check** ([spec-bump-check.yml](.github/workflows/spec-bump-check.yml),
+#387) is a scheduled (**daily** 06:00 UTC) + `workflow_dispatch` job — a
+per-config **matrix over `camunda-oca` and `camunda-hub`**, never `pull_request`
+(it can't fail anyone's PR). For each config it resolves latest upstream `main`,
+generates + runs that config's invariants against it, diffs the operation
+surface, then routes: **clean** drift → opens/updates a rolling bump PR
+(`chore/spec-bump-<config>`) via `bump-spec-pin`; **broken** drift → one rolling
+tracking issue; **no content change** → closes the artifact. Generate + invariants
+are gated on real content drift (SHA-only moves are cheap no-ops). Two App tokens:
+**preview-envs** (Vault JWT/OIDC) mints a read token to clone the private
+`camunda-hub` sibling (oca is a public network-fetch, no token); **qa-processes**
+(Vault approle) opens the bump PR as `app/qa-processes` so `ci.yml` triggers on it
+(the built-in `GITHUB_TOKEN` can't — loop-prevention). If the qa-processes token
+is unavailable, routing falls back to the tracking issue. Checkout uses
+`persist-credentials: false` so its read-only header can't shadow the App-token
+push.
 
 ## Pre-push checklist
 

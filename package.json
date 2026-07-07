@@ -14,6 +14,7 @@
   "scripts": {
     "fetch-spec": "tsx scripts/fetch-spec.ts",
     "fetch-spec:ref": "tsx scripts/fetch-spec.ts --ref-required",
+    "spec-operations": "tsx scripts/spec-operations.ts",
     "fetch-sdk-maps": "tsx scripts/fetch-sdk-maps.ts",
     "list-targets": "tsx materializer/src/index.ts list-targets",
     "with-config": "tsx scripts/with-config.ts",
