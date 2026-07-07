@@ -72,6 +72,13 @@ Review the invariant deltas (if CI flags any) before merging." >/dev/null
 # --force is safe here: we returned early above if a PR was open, so the branch
 # is either new or an abandoned one from a previously closed PR (no reviewer
 # work to clobber).
+#
+# actions/checkout persists the built-in GITHUB_TOKEN as an http.extraheader in
+# the local git config, and that Authorization header takes precedence over any
+# token embedded in the remote URL — so the App token would be ignored and the
+# push authenticates as the read-only github-actions[bot] (403 "Permission
+# denied"). Drop the persisted header first so the App-token URL below is used.
+git config --local --unset-all 'http.https://github.com/.extraheader' 2>/dev/null || true
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 git push --force origin "$branch"
 
