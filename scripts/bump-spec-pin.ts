@@ -59,6 +59,17 @@ function git(args: string[], cwd = REPO_ROOT): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+// The clone's current checkout — its branch name, or the commit SHA if
+// detached. Used to restore the sibling clone after a `--ref` bump so we don't
+// leave a developer's working copy in a surprising state.
+function currentRef(gitRoot: string): string {
+  try {
+    return git(['-C', gitRoot, 'symbolic-ref', '--quiet', '--short', 'HEAD']);
+  } catch {
+    return git(['-C', gitRoot, 'rev-parse', 'HEAD']); // detached HEAD
+  }
+}
+
 const SHA_RE = /^[0-9a-f]{40}$/i;
 
 // specRef MUST be a resolved 40-char commit SHA (branches drift). Resolve the
@@ -157,7 +168,7 @@ function main(): void {
 
   const spec = getActiveSpecSource(REPO_ROOT);
   const localBundle = spec.localSpecDir !== undefined;
-  let newRef: string;
+  let newRef = '';
 
   if (localBundle) {
     // local-bundle (hub): bundle from the sibling clone; specRef = its HEAD.
@@ -166,16 +177,23 @@ function main(): void {
     const specDirAbs = resolve(REPO_ROOT, spec.localSpecDir ?? '');
     const siblingRoot = git(['-C', specDirAbs, 'rev-parse', '--show-toplevel']);
     const wantRef = arg('ref');
-    if (wantRef) {
-      // `fetch` updates FETCH_HEAD but NOT an existing local branch of the same
-      // name, so check out the freshly-fetched commit (detached) rather than a
-      // possibly-stale local branch (`git checkout main` could land on old main).
-      git(['-C', siblingRoot, 'fetch', '--depth', '1', 'origin', wantRef]);
-      git(['-C', siblingRoot, 'checkout', '--detach', 'FETCH_HEAD']);
+    // Only --ref moves the clone; capture its current checkout so we can restore
+    // it (in `finally`, even on error) rather than leaving it detached.
+    const restoreRef = wantRef ? currentRef(siblingRoot) : undefined;
+    try {
+      if (wantRef) {
+        // `fetch` updates FETCH_HEAD but NOT an existing local branch of the same
+        // name, so check out the freshly-fetched commit (detached) rather than a
+        // possibly-stale local branch (`git checkout main` could land on old main).
+        git(['-C', siblingRoot, 'fetch', '--depth', '1', 'origin', wantRef]);
+        git(['-C', siblingRoot, 'checkout', '--detach', 'FETCH_HEAD']);
+      }
+      newRef = git(['-C', siblingRoot, 'rev-parse', 'HEAD']);
+      console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
+      run('fetch-spec', { ...process.env });
+    } finally {
+      if (restoreRef) git(['-C', siblingRoot, 'checkout', restoreRef]);
     }
-    newRef = git(['-C', siblingRoot, 'rev-parse', 'HEAD']);
-    console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
-    run('fetch-spec', { ...process.env });
   } else {
     // network-fetch (oca): resolve --ref (or the remote's default branch) to a
     // 40-char SHA before it's written to spec-pin.json / passed as SPEC_REF.

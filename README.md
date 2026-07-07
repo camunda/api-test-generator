@@ -370,8 +370,9 @@ npm run bump-spec-pin -- --config camunda-oca --ref stable/8.10
 
 # camunda-hub — private, bundled in "local mode" from the sibling clone
 # ../camunda-hub (SPEC_REF is ignored). Bumps to that clone's checked-out HEAD;
-# pass --ref <sha> to check that out first. Requires camunda-hub cloned as a
-# sibling: <parent>/{api-test-generator, camunda-hub}.
+# pass --ref <sha|branch|tag> to check that out first (the clone is restored
+# afterwards). Requires camunda-hub cloned as a sibling:
+# <parent>/{api-test-generator, camunda-hub}.
 npm run bump-spec-pin -- --config camunda-hub
 
 # Preview any bump without writing:
