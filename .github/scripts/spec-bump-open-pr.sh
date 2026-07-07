@@ -36,7 +36,7 @@ existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].nu
 if [ -n "$existing" ]; then
   echo "Bump PR #${existing} already open — leaving it as-is (not force-updating)."
   issue="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
-    --json number,title --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" | head -1)"
+    --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\") | .number] | first // empty")"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null
     echo "Closed superseded tracking issue #${issue}."
@@ -113,7 +113,7 @@ gh pr create --draft --base main --head "$branch" --title "$title" --body-file "
 
 # Clean up the tracking issue if one is open — the PR supersedes it.
 issue="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
-  --json number,title --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" | head -1)"
+  --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\") | .number] | first // empty")"
 if [ -n "$issue" ]; then
   gh issue close "$issue" \
     --comment "✅ Latest now flows through cleanly — superseded by the auto-bump PR (branch \`${branch}\`). Closing this tracking issue." >/dev/null

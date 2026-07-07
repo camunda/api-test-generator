@@ -12,7 +12,7 @@ set -euo pipefail
 run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
 existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
-  --json number,title --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" | head -1)"
+  --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\") | .number] | first // empty")"
 
 if [ -n "$existing" ]; then
   echo "Closing tracking issue #${existing} — latest now flows through cleanly."

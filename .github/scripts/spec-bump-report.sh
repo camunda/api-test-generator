@@ -72,7 +72,7 @@ gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drift
 
 # --- Find the rolling issue by exact title ----------------------------------
 existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
-  --json number,title --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" | head -1)"
+  --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\") | .number] | first // empty")"
 
 if [ -n "$existing" ]; then
   echo "Updating existing tracking issue #${existing}"
