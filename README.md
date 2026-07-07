@@ -257,6 +257,7 @@ npm run build --workspaces --if-present
 |--------|-------------|
 | `npm run fetch-spec` | Fetch and bundle the upstream OpenAPI spec (from `main` branch) |
 | `npm run fetch-spec:ref` | Fetch a specific branch/tag: `SPEC_REF=stable/8.8 npm run fetch-spec:ref` |
+| `npm run bump-spec-pin` | Re-pin a config's spec: `npm run bump-spec-pin -- --config <name> [--ref <sha>] [--dry-run]` (see Spec pin → Bumping the spec pin) |
 | `npm run extract-graph` | Build the semantic graph extractor and extract the dependency graph |
 | `npm run generate:scenarios` | Build the path analyser and generate scenario JSON files |
 | `npm run codegen:playwright` | Build and emit a Playwright test for a single endpoint |
@@ -351,24 +352,45 @@ aborts the entire run with a single actionable error if the bundled spec
 drifts from that hash, so reviewers don't have to debug a confusing
 invariant failure when the real cause is upstream drift.
 
-To bump the spec:
+Each config has its own pin at `configs/<config>/spec-pin.json`.
+
+#### Bumping the spec pin
+
+Use the `bump-spec-pin` script — it resolves the target ref, fetches + bundles
+the spec, and rewrites `configs/<config>/spec-pin.json` (`specRef` as a resolved
+40-char commit SHA + the new `expectedSpecHash`, preserving the `$comment`). It
+does **not** commit — you review the diff, verify, then commit.
 
 ```bash
-# 1. Fetch the new spec. SPEC_REF can be a branch, tag, or commit SHA;
-#    a branch/tag is fine for convenience here, but step 3 must record
-#    the resolved 40-char commit SHA in spec-pin.json (branches drift).
-SPEC_REF=stable/8.10 npm run fetch-spec:ref
+# camunda-oca — public, fetched from camunda/camunda. Defaults to the main tip;
+# pass --ref <sha|branch|tag> for a specific one (resolved to a SHA).
+npm run bump-spec-pin -- --config camunda-oca
+npm run bump-spec-pin -- --config camunda-oca --ref stable/8.10
 
-# 2. Regenerate the pipeline so the invariants run against fresh output
-npm run testsuite:generate
-npm run generate:request-validation
+# camunda-hub — private, bundled in "local mode" from the sibling clone
+# ../camunda-hub (SPEC_REF is ignored). Bumps to that clone's checked-out HEAD;
+# pass --ref <sha> to check that out first. Requires camunda-hub cloned as a
+# sibling: <parent>/{api-test-generator, camunda-hub}.
+npm run bump-spec-pin -- --config camunda-hub
 
-# 3. Update configs/camunda-oca/spec-pin.json:
-#    - specRef:          the resolved 40-char commit SHA (NOT the branch/tag)
-#    - expectedSpecHash: the `specHash` printed in spec/<config>/bundled/spec-metadata.json
-# 4. Update any invariants whose values legitimately changed, then commit
-#    spec-pin.json alongside the invariant updates.
+# Preview any bump without writing:
+npm run bump-spec-pin -- --config <name> --dry-run
 ```
+
+Then verify the new spec flows through cleanly, update any invariants whose
+values legitimately changed, and commit `spec-pin.json` + the invariant updates
+together:
+
+```bash
+CONFIG=<name> npm run testsuite:generate \
+  && CONFIG=<name> npm run generate:request-validation \
+  && CONFIG=<name> npm test
+```
+
+> **specRef is always a resolved commit SHA** (branches drift). For camunda-oca
+> that's a `camunda/camunda` SHA; for camunda-hub, a `camunda/camunda-hub` SHA.
+> See [AGENTS.md → Spec pin](AGENTS.md) for the OCA (network-fetch) vs hub
+> (local-bundle) modes in detail.
 
 ### Continuous integration
 
