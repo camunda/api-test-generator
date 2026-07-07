@@ -23,7 +23,6 @@ N_ADDED="${N_ADDED:-0}"
 N_REMOVED="${N_REMOVED:-0}"
 
 pin_path="configs/${CONFIG}/spec-pin.json"
-meta_path="spec/${CONFIG}/bundled/spec-metadata.json"
 branch="chore/spec-bump-${CONFIG}"
 short="${LATEST:0:12}"
 run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -45,17 +44,12 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
-new_hash="$(node -e "console.log(JSON.parse(require('fs').readFileSync('${meta_path}','utf8')).specHash)")"
-
-# Rewrite the pin, preserving key order + the $comment.
-node -e '
-  const fs = require("fs");
-  const [p, ref, hash] = process.argv.slice(1);
-  const d = JSON.parse(fs.readFileSync(p, "utf8"));
-  d.specRef = ref;
-  d.expectedSpecHash = hash;
-  fs.writeFileSync(p, JSON.stringify(d, null, 2) + "\n");
-' "$pin_path" "$LATEST" "$new_hash"
+# Rewrite the pin via the shared bumper (single source of truth for pin writes):
+# it resolves --ref to a 40-char SHA and writes specRef + expectedSpecHash,
+# preserving the $comment. The dry-run already bundled this ref to verify it's
+# clean; bump-spec-pin re-bundles the same ref (cheap) and writes that same
+# validated pin.
+npm run bump-spec-pin -- --config "$CONFIG" --ref "$LATEST"
 
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
