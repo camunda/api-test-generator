@@ -295,8 +295,11 @@ jobs:
   spec-freshness:
     name: Spec freshness (pins vs upstream main)
     runs-on: ubuntu-latest
-    # Needs Vault/App secrets for the hub-side check; fork PRs don't get repo
-    # secrets, so skip there (runs on push + same-repo PRs).
+    # The hub-side check needs Vault/App secrets; fork PRs don't get repo
+    # secrets, so skip the whole job there (runs on push + same-repo PRs). The
+    # camunda-oca half is public, but on a fork the "pin behind upstream" signal
+    # is irrelevant to an external contributor's change, so skipping entirely is
+    # the least-confusing choice.
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -304,11 +307,21 @@ jobs:
     permissions:
       contents: read
       id-token: write # OIDC → Vault (hub clone token)
+    env:
+      # Mapped from the secret so step-level `if: env.VAULT_ADDR != ''` guards can
+      # skip the hub-side steps when secrets are unavailable (e.g. Dependabot PRs,
+      # which pass the same-repo guard above but get no secrets) — the job then
+      # runs the public camunda-oca check only, instead of going red on missing
+      # credentials.
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          # This job mints a separate App token for the private hub clone; don't
+          # leave the default GITHUB_TOKEN persisted in .git/config.
+          persist-credentials: false
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v6
@@ -344,8 +357,12 @@ jobs:
           fi
 
       # --- camunda-hub (private → App token; local-bundle) --------------------
+      # Guarded on secret availability: if Vault secrets aren't present (e.g. a
+      # Dependabot PR), these three steps skip and the job reports the OCA check
+      # only, rather than going red on missing credentials.
       - name: Fetch camunda-hub GitHub App creds from Vault
         id: app-creds
+        if: env.VAULT_ADDR != ''
         uses: hashicorp/vault-action@v3
         with:
           url: ${{ secrets.VAULT_ADDR }}
@@ -359,6 +376,7 @@ jobs:
 
       - name: Mint camunda-hub clone token from the GitHub App
         id: hub-token
+        if: env.VAULT_ADDR != ''
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ steps.app-creds.outputs.APP_ID }}
@@ -368,6 +386,7 @@ jobs:
 
       - name: camunda-hub — pin vs camunda/camunda-hub@main
         id: hub
+        if: env.VAULT_ADDR != ''
         env:
           CONFIG: camunda-hub
           HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
@@ -397,7 +416,8 @@ jobs:
         run: |
           oca="${{ steps.oca.outputs.behind }}"
           hub="${{ steps.hub.outputs.behind }}"
-          echo "behind — camunda-oca: ${oca}, camunda-hub: ${hub}"
+          # Empty hub = the hub check was skipped (no Vault secrets); don't fail on it.
+          echo "behind — camunda-oca: ${oca}, camunda-hub: ${hub:-skipped (no secrets)}"
           if [ "$oca" = "true" ] || [ "$hub" = "true" ]; then
             echo "::error::A pinned spec is behind upstream main. Bump the pin(s) above (AGENTS.md → Spec pin) or accept the drift."
             exit 1
