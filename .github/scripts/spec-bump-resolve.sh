@@ -9,10 +9,11 @@ set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN required for gh auth}"
 : "${ISSUE_TITLE:?}" "${LATEST:?}"
-run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
-existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
-  --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\") | .number] | first // empty")"
+# shellcheck source=.github/scripts/spec-bump-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/spec-bump-common.sh"
+
+existing="$(find_rolling_issue)"
 
 if [ -n "$existing" ]; then
   echo "Closing tracking issue #${existing} — latest now flows through cleanly."
@@ -25,8 +26,7 @@ fi
 # Also close the rolling auto-bump PR if open: no drift means the pin is already
 # at latest (the bump was adopted, or never needed).
 if [ -n "${CONFIG:-}" ]; then
-  bump_branch="chore/spec-bump-${CONFIG}"
-  bump_pr="$(gh pr list --head "$bump_branch" --state open --json number --jq '.[0].number // empty')"
+  bump_pr="$(find_bump_pr)"
   if [ -n "$bump_pr" ]; then
     gh pr close "$bump_pr" \
       --comment "Pin is at latest (no drift) — closing this auto-bump PR." >/dev/null || true

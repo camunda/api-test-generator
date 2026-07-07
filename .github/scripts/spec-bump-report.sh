@@ -19,32 +19,14 @@ N_REMOVED="${N_REMOVED:-0}"
 GEN_OUTCOME="${GEN_OUTCOME:-unknown}"
 INV_OUTCOME="${INV_OUTCOME:-unknown}"
 
-run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+# shellcheck source=.github/scripts/spec-bump-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/spec-bump-common.sh"
+
 compare_url="https://github.com/${UPSTREAM_REPO}/compare/${PINNED}...${LATEST}"
 
 emoji() { [ "$1" = "success" ] && echo "✅" || echo "❌"; }
 
 # --- Build the body ---------------------------------------------------------
-list_or_none() {
-  local lines total
-  # Keep only non-empty lines. Treats an empty OR whitespace-only value (e.g. a
-  # stray newline from a multiline step output) as "none". grep no-match exits 1
-  # — || true keeps that non-fatal under `set -euo pipefail`.
-  lines=$(printf '%s\n' "$1" | grep -E '.' || true)
-  if [ -z "$lines" ]; then
-    echo "_(none)_"
-    return
-  fi
-  total=$(printf '%s\n' "$lines" | grep -c . || true)
-  # Cap the printed list so a huge diff can't produce an oversized issue body.
-  # head closes the pipe after 50 lines (SIGPIPE upstream) — || true guards it.
-  # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
-  printf '%s\n' "$lines" | head -50 | sed 's/^/- `/;s/$/`/' || true
-  if [ "$total" -gt 50 ]; then
-    echo "- …and $((total - 50)) more"
-  fi
-}
-
 body_file="$(mktemp)"
 {
   echo "The scheduled check fetched \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` and ran the ${CONFIG} generate pipeline + regression invariants against it. It drifted from the pin — details below. This issue is updated in place on every run and closed automatically once latest flows through cleanly again."
@@ -73,8 +55,7 @@ body_file="$(mktemp)"
 gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
 
 # --- Find the rolling issue by exact title ----------------------------------
-existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \
-  --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\") | .number] | first // empty")"
+existing="$(find_rolling_issue)"
 
 if [ -n "$existing" ]; then
   echo "Updating existing tracking issue #${existing}"
@@ -89,8 +70,7 @@ fi
 # latest no longer flows through cleanly (or no App token), so a pin-bump PR
 # pointing at an older clean SHA would be misleading.
 if [ -n "${CONFIG:-}" ]; then
-  bump_branch="chore/spec-bump-${CONFIG}"
-  bump_pr="$(gh pr list --head "$bump_branch" --state open --json number --jq '.[0].number // empty')"
+  bump_pr="$(find_bump_pr)"
   if [ -n "$bump_pr" ]; then
     gh pr close "$bump_pr" \
       --comment "Latest no longer flows through cleanly (see the tracking issue) — closing this auto-bump PR until it's green again." >/dev/null || true
