@@ -28,7 +28,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { getActiveSpecSource, getSpecBundleDir } from '../path-analyser/src/configResolver.ts';
+import {
+  getActiveConfigName,
+  getActiveSpecSource,
+  getSpecBundleDir,
+} from '../path-analyser/src/configResolver.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -38,7 +42,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+  if (i < 0) return undefined;
+  const value = process.argv[i + 1];
+  // Guard against `--config --dry-run` swallowing the next flag as the value.
+  if (value === undefined || value.startsWith('--')) {
+    throw new Error(`--${name} requires a value`);
+  }
+  return value;
 }
 const hasFlag = (name: string): boolean => process.argv.includes(`--${name}`);
 
@@ -62,7 +72,20 @@ function resolveDefaultBranchSha(repoUrl: string): string {
 // Resolve a user-supplied --ref (SHA passthrough, or branch/tag → SHA).
 function resolveSha(repoUrl: string, ref: string): string {
   if (SHA_RE.test(ref)) return ref.toLowerCase();
-  const sha = git(['ls-remote', repoUrl, ref]).split('\n')[0]?.split('\t')[0] ?? '';
+  const lines = git(['ls-remote', repoUrl, ref])
+    .split('\n')
+    .filter((l) => l.trim() !== '');
+  if (lines.length === 0) {
+    throw new Error(`could not resolve ref '${ref}' to a commit SHA in ${repoUrl}`);
+  }
+  // `ls-remote <ref>` can match multiple refs (e.g. a branch AND a tag of the
+  // same name); don't silently pick the first — require an unambiguous ref.
+  if (lines.length > 1) {
+    throw new Error(
+      `ref '${ref}' is ambiguous in ${repoUrl} (${lines.length} matches); pass a full refname (refs/heads/… or refs/tags/…) or a SHA:\n${lines.join('\n')}`,
+    );
+  }
+  const sha = lines[0].split('\t')[0] ?? '';
   if (!SHA_RE.test(sha)) {
     throw new Error(`could not resolve ref '${ref}' to a commit SHA in ${repoUrl}`);
   }
@@ -91,10 +114,16 @@ function readSpecHash(): string {
 }
 
 function main(): void {
-  const config = arg('config') ?? process.env.CONFIG ?? 'camunda-oca';
   const dryRun = hasFlag('dry-run');
   // configResolver reads CONFIG from the env — set it so every helper + the
   // spawned fetch-spec target the requested config.
+  const requested = (arg('config') ?? process.env.CONFIG ?? '').trim();
+  if (requested) process.env.CONFIG = requested;
+  else delete process.env.CONFIG;
+  // Validate + canonicalise via getActiveConfigName BEFORE building any path:
+  // it enforces the configs.json allowlist + safe-name regex (rejecting e.g.
+  // `--config ../../..`) and falls back to the configs.json default when unset.
+  const config = getActiveConfigName(REPO_ROOT);
   process.env.CONFIG = config;
 
   const pinPath = join(REPO_ROOT, 'configs', config, 'spec-pin.json');
