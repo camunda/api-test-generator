@@ -15,7 +15,8 @@
  *   npm run bump-spec-pin -- --config camunda-oca [--ref <sha|branch>] [--dry-run]
  *   npm run bump-spec-pin -- --config camunda-hub [--ref <sha>] [--dry-run]
  *
- * Modes (from configs.json `spec.source`):
+ * Modes (inferred from the active config's spec source — `localSpecDir` present
+ * ⇒ local-bundle, otherwise network-fetch):
  *   - network-fetch (camunda-oca): `--ref` defaults to the upstream default
  *     branch tip (resolved via `git ls-remote`). Runs `SPEC_REF=<ref>
  *     npm run fetch-spec:ref`.
@@ -74,24 +75,32 @@ function resolveDefaultBranchSha(repoUrl: string): string {
 // Resolve a user-supplied --ref (SHA passthrough, or branch/tag → SHA).
 function resolveSha(repoUrl: string, ref: string): string {
   if (SHA_RE.test(ref)) return ref.toLowerCase();
-  const lines = git(['ls-remote', repoUrl, ref])
+  const entries = git(['ls-remote', repoUrl, ref])
     .split('\n')
-    .filter((l) => l.trim() !== '');
-  if (lines.length === 0) {
+    .filter((l) => l.trim() !== '')
+    .map((l) => {
+      const [sha, name] = l.split('\t');
+      return { sha: sha ?? '', name: name ?? '' };
+    });
+  if (entries.length === 0) {
     throw new Error(`could not resolve ref '${ref}' to a commit SHA in ${repoUrl}`);
   }
-  // `ls-remote <ref>` can match multiple refs (e.g. a branch AND a tag of the
-  // same name); don't silently pick the first — require an unambiguous ref.
-  if (lines.length > 1) {
+  // Ambiguity is >1 DISTINCT ref (e.g. a branch and a tag of the same name).
+  // An annotated tag legitimately lists two lines — `refs/tags/<t>` and the
+  // peeled `refs/tags/<t>^{}` — for the SAME ref, which is not ambiguous.
+  const distinct = new Set(entries.map((e) => e.name.replace(/\^\{\}$/, '')));
+  if (distinct.size > 1) {
     throw new Error(
-      `ref '${ref}' is ambiguous in ${repoUrl} (${lines.length} matches); pass a full refname (refs/heads/… or refs/tags/…) or a SHA:\n${lines.join('\n')}`,
+      `ref '${ref}' is ambiguous in ${repoUrl} (${distinct.size} distinct refs); pass a full refname (refs/heads/… or refs/tags/…) or a SHA:\n${entries.map((e) => `${e.sha}\t${e.name}`).join('\n')}`,
     );
   }
-  const sha = lines[0].split('\t')[0] ?? '';
-  if (!SHA_RE.test(sha)) {
+  // Prefer the peeled commit SHA (`^{}`) so an annotated tag resolves to the
+  // commit it points at, not the tag object.
+  const chosen = entries.find((e) => e.name.endsWith('^{}')) ?? entries[0];
+  if (!SHA_RE.test(chosen.sha)) {
     throw new Error(`could not resolve ref '${ref}' to a commit SHA in ${repoUrl}`);
   }
-  return sha;
+  return chosen.sha.toLowerCase();
 }
 
 function run(cmd: string, env: NodeJS.ProcessEnv): void {
@@ -101,8 +110,14 @@ function run(cmd: string, env: NodeJS.ProcessEnv): void {
     env,
     shell: process.platform === 'win32',
   });
+  if (res.error) {
+    throw new Error(`could not start \`npm run ${cmd}\`: ${res.error.message}`);
+  }
+  if (res.signal) {
+    throw new Error(`\`npm run ${cmd}\` was killed by signal ${res.signal}`);
+  }
   if (res.status !== 0) {
-    throw new Error(`\`npm run ${cmd}\` failed (exit ${res.status ?? res.signal})`);
+    throw new Error(`\`npm run ${cmd}\` failed (exit ${res.status})`);
   }
 }
 
