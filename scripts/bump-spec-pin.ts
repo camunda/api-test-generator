@@ -26,7 +26,7 @@
  * `--dry-run` prints the old → new pin without writing.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -94,6 +94,45 @@ function resolveSha(repoUrl: string, ref: string): string {
   return sha;
 }
 
+// Find the git repo root at/above a directory by walking up to the `.git`
+// entry. File-based (existsSync) so it works where `git` itself can't run — on
+// some macOS setups `git` in the sibling clone fails with "Unable to read
+// current working directory", while plain file reads (which fetch-spec also
+// relies on) succeed.
+function findGitRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 40; i++) {
+    if (existsSync(join(dir, '.git'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`no .git repository found at or above ${startDir}`);
+}
+
+// Read a clone's checked-out HEAD commit SHA without invoking git: resolve
+// `.git/HEAD` (a detached SHA, or a symbolic ref → loose ref file → packed-refs).
+function readHeadSha(gitRoot: string): string {
+  const head = readFileSync(join(gitRoot, '.git', 'HEAD'), 'utf8').trim();
+  if (SHA_RE.test(head)) return head; // detached HEAD
+  const m = /^ref:\s*(\S+)$/.exec(head);
+  if (!m) throw new Error(`unexpected .git/HEAD in ${gitRoot}: '${head}'`);
+  const ref = m[1];
+  const loose = join(gitRoot, '.git', ref);
+  if (existsSync(loose)) {
+    const sha = readFileSync(loose, 'utf8').trim();
+    if (SHA_RE.test(sha)) return sha;
+  }
+  const packed = join(gitRoot, '.git', 'packed-refs');
+  if (existsSync(packed)) {
+    for (const line of readFileSync(packed, 'utf8').split('\n')) {
+      const [sha, name] = line.split(' ');
+      if (name === ref && SHA_RE.test(sha)) return sha;
+    }
+  }
+  throw new Error(`could not resolve ${ref} to a SHA in ${gitRoot}/.git`);
+}
+
 function run(cmd: string, env: NodeJS.ProcessEnv): void {
   const res = spawnSync('npm', ['run', cmd], {
     cwd: REPO_ROOT,
@@ -146,21 +185,19 @@ function main(): void {
 
   if (localBundle) {
     // local-bundle (hub): bundle from the sibling clone; specRef = its HEAD.
-    // Use `git -C <dir>` and keep the child's cwd at REPO_ROOT — launching git
-    // with cwd set to the sibling path fails on macOS ("Unable to read current
-    // working directory: Operation not permitted").
     const specDirAbs = resolve(REPO_ROOT, spec.localSpecDir ?? '');
-    const siblingRoot = git(['-C', specDirAbs, 'rev-parse', '--show-toplevel']);
+    const siblingRoot = findGitRoot(specDirAbs);
     const wantRef = arg('ref');
     if (wantRef) {
-      // `fetch` updates FETCH_HEAD but NOT an existing local branch of the same
-      // name, so check out the freshly-fetched commit directly (detached) rather
-      // than a possibly-stale local branch (`git checkout main` could otherwise
-      // land on the old local `main`).
+      // Only --ref needs git (to move the clone to a specific ref). `fetch`
+      // updates FETCH_HEAD but NOT an existing local branch, so check out the
+      // freshly-fetched commit (detached) rather than a possibly-stale branch.
       git(['-C', siblingRoot, 'fetch', '--depth', '1', 'origin', wantRef]);
       git(['-C', siblingRoot, 'checkout', '--detach', 'FETCH_HEAD']);
     }
-    newRef = git(['-C', siblingRoot, 'rev-parse', 'HEAD']);
+    // Read the checked-out HEAD SHA from `.git` (no git subprocess — see
+    // readHeadSha), so the default bump works even where `git` can't run here.
+    newRef = readHeadSha(siblingRoot);
     console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
     run('fetch-spec', { ...process.env });
   } else {
