@@ -308,7 +308,10 @@ jobs:
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
           steps.generate.outcome == 'success' && steps.invariants.outcome == 'success'
         continue-on-error: true
-        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@main
+        # Pinned to a full commit SHA (supply-chain hardening): this sub-action
+        # has no release tag of its own, so we pin main's HEAD and bump it
+        # intentionally. SHA = camunda/infra-global-github-actions main @ 2026-07-06.
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
         with:
           github-app-id-vault-key: GITHUB_APP_ID
           github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
