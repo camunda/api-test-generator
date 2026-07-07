@@ -280,3 +280,146 @@ jobs:
             spec
           if-no-files-found: warn
           retention-days: 7
+
+  # Spec-freshness heads-up: is each config's PINNED spec still current with its
+  # upstream default branch? Compares by CONTENT HASH (bundles upstream main and
+  # compares to the pin's expectedSpecHash) so it ignores no-op SHA moves and
+  # only reacts to real spec changes. FAILS (red) when a pin is behind — a loud
+  # "bump the pin" nudge (see AGENTS.md → Spec pin).
+  #
+  # IMPORTANT: keep this OUT of branch protection (do NOT make it a required
+  # check). It intentionally depends on external state (upstream main), so a
+  # spec change upstream reds every open PR until the pin is bumped — useful as a
+  # visible signal, but it must not block unrelated PRs on that adoption work.
+  # (The scheduled dry-run #434/#435 is the non-PR home for the same signal.)
+  spec-freshness:
+    name: Spec freshness (pins vs upstream main)
+    runs-on: ubuntu-latest
+    # The hub-side check needs Vault/App secrets; fork PRs don't get repo
+    # secrets, so skip the whole job there (runs on push + same-repo PRs). The
+    # camunda-oca half is public, but on a fork the "pin behind upstream" signal
+    # is irrelevant to an external contributor's change, so skipping entirely is
+    # the least-confusing choice.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC → Vault (hub clone token)
+    env:
+      # Mapped from the secret so step-level `if: env.VAULT_ADDR != ''` guards can
+      # skip the hub-side steps when secrets are unavailable (e.g. Dependabot PRs,
+      # which pass the same-repo guard above but get no secrets) — the job then
+      # runs the public camunda-oca check only, instead of going red on missing
+      # credentials.
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          # This job mints a separate App token for the private hub clone; don't
+          # leave the default GITHUB_TOKEN persisted in .git/config.
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      # --- camunda-oca (public, network-fetch) --------------------------------
+      - name: camunda-oca — pin vs camunda/camunda@main
+        id: oca
+        run: |
+          set -euo pipefail
+          pin_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
+          pin_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).expectedSpecHash)")
+          latest=$(git ls-remote https://github.com/camunda/camunda.git refs/heads/main | cut -f1)
+          echo "pinned=${pin_ref} latest=${latest}"
+          if [ "$pin_ref" = "$latest" ]; then
+            echo "behind=false" >> "$GITHUB_OUTPUT"
+            echo "camunda-oca: pin is at latest main."
+            exit 0
+          fi
+          SPEC_REF="$latest" npm run fetch-spec:ref
+          latest_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('spec/camunda-oca/bundled/spec-metadata.json','utf8')).specHash)")
+          if [ "$pin_hash" = "$latest_hash" ]; then
+            echo "behind=false" >> "$GITHUB_OUTPUT"
+            echo "camunda-oca: SHA moved but spec content is unchanged — pin OK."
+          else
+            echo "behind=true" >> "$GITHUB_OUTPUT"
+            echo "::warning title=camunda-oca pin behind upstream::pinned ${pin_ref} (${pin_hash}) vs camunda/camunda@main ${latest} (${latest_hash}). Bump configs/camunda-oca/spec-pin.json."
+          fi
+
+      # --- camunda-hub (private → App token; local-bundle) --------------------
+      # Guarded on secret availability: if Vault secrets aren't present (e.g. a
+      # Dependabot PR), these three steps skip and the job reports the OCA check
+      # only, rather than going red on missing credentials.
+      - name: Fetch camunda-hub GitHub App creds from Vault
+        id: app-creds
+        if: env.VAULT_ADDR != ''
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
+
+      - name: Mint camunda-hub clone token from the GitHub App
+        id: hub-token
+        if: env.VAULT_ADDR != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ steps.app-creds.outputs.APP_ID }}
+          private-key: ${{ steps.app-creds.outputs.APP_PRIVATE_KEY }}
+          owner: camunda
+          repositories: camunda-hub
+
+      - name: camunda-hub — pin vs camunda/camunda-hub@main
+        id: hub
+        if: env.VAULT_ADDR != ''
+        env:
+          CONFIG: camunda-hub
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$HUB_TOKEN" ]; then
+            echo "::error::No clone token — App token empty (Vault/App auth)."
+            exit 1
+          fi
+          pin_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-hub/spec-pin.json','utf8')).expectedSpecHash)")
+          dest="${GITHUB_WORKSPACE}/../camunda-hub"
+          git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+            clone --depth 1 https://github.com/camunda/camunda-hub.git "$dest"
+          latest=$(git -C "$dest" rev-parse HEAD)
+          npm run fetch-spec
+          latest_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('spec/camunda-hub/bundled/spec-metadata.json','utf8')).specHash)")
+          echo "latest=${latest}"
+          if [ "$pin_hash" = "$latest_hash" ]; then
+            echo "behind=false" >> "$GITHUB_OUTPUT"
+            echo "camunda-hub: spec content matches the pin."
+          else
+            echo "behind=true" >> "$GITHUB_OUTPUT"
+            echo "::warning title=camunda-hub pin behind upstream::camunda/camunda-hub@main ${latest} (${latest_hash}) vs pin (${pin_hash}). Bump configs/camunda-hub/spec-pin.json."
+          fi
+
+      - name: Fail if any pin is behind upstream
+        run: |
+          oca="${{ steps.oca.outputs.behind }}"
+          hub="${{ steps.hub.outputs.behind }}"
+          # Empty hub = the hub check was skipped (no Vault secrets); don't fail on it.
+          echo "behind — camunda-oca: ${oca}, camunda-hub: ${hub:-skipped (no secrets)}"
+          if [ "$oca" = "true" ] || [ "$hub" = "true" ]; then
+            echo "::error::A pinned spec is behind upstream main. Bump the pin(s) above (AGENTS.md → Spec pin) or accept the drift."
+            exit 1
+          fi
+          echo "Both pins are current with upstream main."
