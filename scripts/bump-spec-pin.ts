@@ -150,8 +150,12 @@ function main(): void {
     );
     const wantRef = arg('ref');
     if (wantRef) {
+      // `fetch` updates FETCH_HEAD but NOT an existing local branch of the same
+      // name, so check out the freshly-fetched commit directly (detached) rather
+      // than a possibly-stale local branch (`git checkout main` could otherwise
+      // land on the old local `main`).
       git(['fetch', '--depth', '1', 'origin', wantRef], siblingRoot);
-      git(['checkout', wantRef], siblingRoot);
+      git(['checkout', '--detach', 'FETCH_HEAD'], siblingRoot);
     }
     newRef = git(['rev-parse', 'HEAD'], siblingRoot);
     console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
