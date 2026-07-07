@@ -365,14 +365,34 @@ jobs:
           LATEST: ${{ steps.refs.outputs.latest }}
         run: bash .github/scripts/spec-bump-resolve.sh
 
+      # Public config (oca): the spec is camunda/camunda's public OpenAPI, so
+      # uploading the full bundle + generated suite for debugging leaks nothing.
       - name: Upload generated outputs
-        if: steps.refs.outputs.drifted == 'true'
+        if: steps.refs.outputs.drifted == 'true' && !matrix.private
         uses: actions/upload-artifact@v7
         with:
           name: spec-bump-check-outputs-${{ matrix.config }}
           path: |
             generated
             spec
+            /tmp/pinned-ops.txt
+            /tmp/latest-ops.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Private config (hub): this repo is PUBLIC, so do NOT publish the bundled
+      # spec or generated suite — that would leak the private, unreleased
+      # camunda-hub API content to anyone with artifact access. Upload only
+      # low-sensitivity diagnostics: the operationId lists (already present in
+      # the committed hub invariants) and spec-metadata.json (hashes + counts,
+      # not spec content).
+      - name: Upload diagnostics (private leg — no spec/generated)
+        if: steps.refs.outputs.drifted == 'true' && matrix.private
+        uses: actions/upload-artifact@v7
+        with:
+          name: spec-bump-check-outputs-${{ matrix.config }}
+          path: |
+            spec/${{ matrix.config }}/bundled/spec-metadata.json
             /tmp/pinned-ops.txt
             /tmp/latest-ops.txt
           if-no-files-found: warn

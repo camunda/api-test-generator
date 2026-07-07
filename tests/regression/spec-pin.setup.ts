@@ -82,10 +82,7 @@ export default function setup(): void {
     // must keep failing loud on unexpected drift.
     if (process.env.ALLOW_SPEC_DRIFT === '1') {
       console.warn(
-        `::warning::[spec-pin] Bundled spec drifted from the pin ` +
-          `(pinned ref ${pin.specRef}, expected content hash ${pin.expectedSpecHash}; ` +
-          `actual content hash ${actual}). Continuing because ALLOW_SPEC_DRIFT=1 ` +
-          `(spec-bump check). Invariants below run against the drifted spec.`,
+        `::warning::[spec-pin] Bundled spec drifted from the pin (pinned ref ${pin.specRef}, expected content hash ${pin.expectedSpecHash}; actual content hash ${actual}). Continuing because ALLOW_SPEC_DRIFT=1 (spec-bump check). Invariants below run against the drifted spec.`,
       );
       return;
     }
