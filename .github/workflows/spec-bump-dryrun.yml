@@ -283,7 +283,17 @@ jobs:
         env:
           ALLOW_SPEC_DRIFT: '1'
           TEST_SEED: snapshot-baseline
-        run: npm test
+        run: |
+          # Run each config's OWN Layer-3 invariants. oca runs the full suite
+          # (npm test) as it always has; hub runs just its scoped invariants
+          # file — the same command ci.yml's hub-invariants leg uses — because
+          # the full suite also includes oca-specific codegen tests that don't
+          # apply to a hub run and would fail it.
+          if [ "$IS_PRIVATE" = "true" ]; then
+            npx vitest run configs/camunda-hub/regression-invariants.test.ts
+          else
+            npm test
+          fi
 
       # --- Mint the qa-processes App token for the bump PR (clean drift only) --
       # Same wiring as camunda/camunda's nightly-fix workflow (which opens PRs as
