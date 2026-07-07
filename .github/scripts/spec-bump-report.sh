@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Open or update the single rolling "spec-bump drift" tracking issue for
-# camunda-oca. Called by .github/workflows/spec-bump-check.yml only when a
-# drift signal is present (generation/invariants broke, or the operation
-# surface changed). Idempotent: one issue, found by exact title; re-runs edit
-# it in place and drop a fresh dated comment rather than opening duplicates.
+# Open or update the single rolling "spec-bump drift" tracking issue for the
+# active config (CONFIG). Called by .github/workflows/spec-bump-check.yml only
+# when a drift signal is present (generation/invariants broke, or the operation
+# surface changed). Idempotent: one issue per config, found by exact title;
+# re-runs edit it in place and drop a fresh dated comment rather than opening
+# duplicates.
 #
-# Required env: GH_TOKEN, PINNED, LATEST, N_ADDED, N_REMOVED, ADDED, REMOVED,
+# Required env: GH_TOKEN, CONFIG, ISSUE_TITLE, DRIFT_LABEL, UPSTREAM_REPO,
+# UPSTREAM_BRANCH, PINNED, LATEST, N_ADDED, N_REMOVED, ADDED, REMOVED,
 # GEN_OUTCOME, INV_OUTCOME. GitHub provides GITHUB_* automatically.
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN required for gh auth}"
 : "${ISSUE_TITLE:?}" "${DRIFT_LABEL:?}" "${UPSTREAM_REPO:?}" "${UPSTREAM_BRANCH:?}"
-: "${PINNED:?}" "${LATEST:?}"
+: "${CONFIG:?}" "${PINNED:?}" "${LATEST:?}"
 N_ADDED="${N_ADDED:-0}"
 N_REMOVED="${N_REMOVED:-0}"
 GEN_OUTCOME="${GEN_OUTCOME:-unknown}"
@@ -45,7 +47,7 @@ list_or_none() {
 
 body_file="$(mktemp)"
 {
-  echo "The scheduled check fetched \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` and ran the camunda-oca generate pipeline + regression invariants against it. It drifted from the pin — details below. This issue is updated in place on every run and closed automatically once latest flows through cleanly again."
+  echo "The scheduled check fetched \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` and ran the ${CONFIG} generate pipeline + regression invariants against it. It drifted from the pin — details below. This issue is updated in place on every run and closed automatically once latest flows through cleanly again."
   echo
   echo "| | |"
   echo "|---|---|"
@@ -64,7 +66,7 @@ body_file="$(mktemp)"
   echo "🔎 [Full logs + generated-output artifact](${run_url})"
   echo
   echo "---"
-  echo "**To adopt this bump** (see \`tests/regression/spec-pin.setup.ts\` for the full procedure): re-fetch with \`SPEC_REF=${LATEST} npm run fetch-spec:ref\`, regenerate, update \`configs/camunda-oca/spec-pin.json\` + any legitimately-changed invariants, and commit. If it isn't ready to adopt, this is the heads-up to model the new surface first."
+  echo "**To adopt this bump**: re-pin with \`npm run bump-spec-pin -- --config ${CONFIG} --ref ${LATEST}\` (the single source of truth for pin writes), regenerate, update \`configs/${CONFIG}/spec-pin.json\` + any legitimately-changed invariants, and commit. See \`README.md → Spec pin → Bumping the spec pin\`. If it isn't ready to adopt, this is the heads-up to model the new surface first."
 } > "$body_file"
 
 # --- Ensure the label exists (best-effort) ----------------------------------
