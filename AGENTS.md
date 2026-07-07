@@ -467,7 +467,7 @@ are gated on real content drift (SHA-only moves are cheap no-ops). Two App token
 (the built-in `GITHUB_TOKEN` can't — loop-prevention). If the qa-processes token
 is unavailable, routing falls back to the tracking issue. Checkout uses
 `persist-credentials: false` so its read-only header can't shadow the App-token
-push. Tracked in #434.
+push.
 
 ## Pre-push checklist
 
