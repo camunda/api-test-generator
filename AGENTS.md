@@ -418,12 +418,14 @@ per config**.
 order — match these locally before pushing):
 
 1. `npm ci`
-2. Read `configs/camunda-oca/spec-pin.json` → `specRef`
-3. `npm run lint` — Biome
-4. `tsc --noEmit` for each workspace tsconfig
-5. `SPEC_REF=<pinned> npm run fetch-spec:ref`
-6. `TEST_SEED=snapshot-baseline npm run testsuite:generate` + `npm run generate:request-validation`
-7. `npm test`
+2. `npm run check:no-bom` — fail on any UTF-8 BOM in a tracked file
+3. Read `configs/camunda-oca/spec-pin.json` → `specRef`
+4. `npm run lint` — Biome
+5. `tsc --noEmit` for each workspace tsconfig
+6. `SPEC_REF=<pinned> npm run fetch-spec:ref`
+7. `TEST_SEED=snapshot-baseline npm run testsuite:generate` + `npm run generate:request-validation`
+8. `npm run lint:generated` — Biome on the generated suite (emitter regression guard)
+9. `npm test`
 
 On failure, the `pipeline-outputs` artifact is uploaded for inspection.
 
