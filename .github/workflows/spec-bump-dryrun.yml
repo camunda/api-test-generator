@@ -66,6 +66,14 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          # Don't persist the built-in GITHUB_TOKEN as an http.extraheader: it
+          # is read-only here (permissions.contents: read) and its Authorization
+          # header takes precedence over the App-token URL when the bump PR is
+          # pushed, causing a 403 as github-actions[bot]. The bump push supplies
+          # its own credential via the qa-processes App-token URL; nothing else
+          # in this job needs git auth (spec fetch is a public clone, fallbacks
+          # use gh with an explicit GH_TOKEN).
+          persist-credentials: false
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v6
