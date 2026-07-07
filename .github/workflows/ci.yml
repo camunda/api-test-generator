@@ -125,3 +125,108 @@ jobs:
             spec
           if-no-files-found: warn
           retention-days: 7
+
+  # camunda-hub Layer-3 invariants leg (#440 / #128 CI matrix). Runs in parallel
+  # with `regression` (camunda-oca). NON-REQUIRED — do NOT add "hub-invariants"
+  # to branch protection while we observe its behaviour; it's a signal, not a
+  # gate. Unlike the nightly (unpinned, live Hub), this leg runs against the
+  # PINNED hub spec and only generates + runs the static invariants — no live
+  # Hub, so no backend flakiness. camunda-hub is private, so it needs a clone
+  # token (same Vault → App pattern as nightly-camunda-hub.yml).
+  hub-invariants:
+    name: Hub Layer-3 invariants (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # OIDC → Vault (no long-lived secret stored)
+    env:
+      CONFIG: camunda-hub
+      TEST_SEED: snapshot-baseline
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Fetch camunda-hub GitHub App creds from Vault
+        id: app-creds
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
+
+      - name: Mint camunda-hub clone token from the GitHub App
+        id: hub-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ steps.app-creds.outputs.APP_ID }}
+          private-key: ${{ steps.app-creds.outputs.APP_PRIVATE_KEY }}
+          owner: camunda
+          repositories: camunda-hub
+
+      - name: Read pinned hub specRef
+        id: pin
+        run: |
+          sha=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-hub/spec-pin.json','utf8')).specRef)")
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Pinned camunda-hub specRef: ${sha}"
+
+      # Clone the PINNED commit (not latest main — this is the deterministic
+      # regression leg; the nightly is the unpinned one). Shallow fetch-by-SHA.
+      - name: Clone camunda-hub @ pinned specRef (sibling ../camunda-hub)
+        env:
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          PIN: ${{ steps.pin.outputs.sha }}
+        run: |
+          if [ -z "$HUB_TOKEN" ]; then
+            echo "::error::No clone token — App token empty (check Vault OIDC + preview-envs role, and the App is installed on camunda/camunda-hub with Contents: Read)."
+            exit 1
+          fi
+          dest="${GITHUB_WORKSPACE}/../camunda-hub"
+          mkdir -p "$dest" && cd "$dest" && git init -q
+          git remote add origin https://github.com/camunda/camunda-hub.git
+          git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+            fetch --depth 1 origin "$PIN"
+          git checkout -q FETCH_HEAD
+          echo "camunda-hub pinned at: $(git rev-parse HEAD)"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      # Local-bundle from the sibling clone (SPEC_REF ignored for hub). Then
+      # generate the positive suite (codegen writes the coverage.json +
+      # lifecycle specs the invariants read). request-validation is not needed.
+      - name: Bundle pinned hub spec + generate
+        run: |
+          npm run fetch-spec
+          npm run testsuite:generate
+
+      # The spec-pin globalSetup validates the bundled hash against
+      # configs/camunda-hub/spec-pin.json before the invariants load; running
+      # only the hub invariants file keeps this fast and avoids OCA-assuming tests.
+      - name: Run hub Layer-3 invariants
+        run: npx vitest run configs/camunda-hub/regression-invariants.test.ts
+
+      - name: Upload hub pipeline outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pipeline-outputs-camunda-hub
+          path: |
+            generated
+            spec
+          if-no-files-found: warn
+          retention-days: 7
