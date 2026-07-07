@@ -1,25 +1,35 @@
-# Scheduled, non-blocking dry-run of the camunda-oca spec bump (#387).
+# Scheduled, non-blocking dry-run of the spec-pin bump for both configs (#387).
 #
 # A spec-pin bump isn't always mechanical: latest upstream main can pull in a
 # whole new domain the generator doesn't yet model (this bit us bumping
 # camunda-oca to the agent-instance domain — see #386). Today that only shows
 # up when someone manually attempts the bump. This turns "surprise at bump
-# time" into a recurring, signal-only heads-up.
+# time" into a recurring, signal-only heads-up — for camunda-oca AND camunda-hub.
 #
-# It fetches camunda/camunda@main (instead of the pinned SHA), runs the full
-# generate pipeline + regression invariants against it, and diffs the operation
-# surface vs the pin. It then routes on the result:
+# For each config it resolves latest upstream main (instead of the pinned SHA),
+# runs the full generate pipeline + regression invariants against it, and diffs
+# the operation surface vs the pin. It then routes on the result:
 #   - CLEAN drift (generate + invariants pass): opens/updates a rolling bump PR
-#     (chore/spec-bump-camunda-oca) that re-pins to latest — ready to review/merge.
+#     (chore/spec-bump-<config>) that re-pins to latest — ready to review/merge.
 #   - BROKEN drift (generate or invariants fail): opens/updates ONE rolling
 #     tracking issue instead (adopting needs modelling work first).
 #   - No content change: closes the issue/PR.
 #
-# The bump PR is opened as the qa-processes GitHub App — the same App and Vault
-# wiring camunda/camunda uses to open its nightly-fix PRs (e.g. camunda#56716) —
-# so ci.yml triggers on it (the built-in GITHUB_TOKEN can't, loop-prevention).
-# If the App token isn't available it FALLS BACK to the tracking-issue path, so
-# the signal is never lost.
+# Two configs, two spec sources (see configs/<name>/config.json):
+#   - camunda-oca: PUBLIC network-fetch from camunda/camunda@main (git ls-remote
+#     + fetch-spec:ref). No clone token needed.
+#   - camunda-hub: PRIVATE local-bundle from a ../camunda-hub sibling clone. The
+#     preview-envs GitHub App (Vault JWT/OIDC) mints a read token to clone it —
+#     the same wiring ci.yml's hub-invariants leg uses. The token is embedded in
+#     the sibling's origin URL so bump-spec-pin can re-fetch --ref during the bump.
+#
+# Two App tokens are involved: preview-envs (READ camunda-hub, clone only) and
+# qa-processes (WRITE api-test-generator, opens the bump PR). The bump PR is
+# opened as the qa-processes App — the same App + Vault wiring camunda/camunda
+# uses for its nightly-fix PRs (e.g. camunda#56716) — so ci.yml triggers on it
+# (the built-in GITHUB_TOKEN can't, loop-prevention). If the qa-processes token
+# isn't available it FALLS BACK to the tracking-issue path, so the signal is
+# never lost.
 #   Prereq (one-time): the qa-processes App must be able to open PRs on
 #   camunda/api-test-generator (Contents: write + Pull requests: write). Its
 #   creds already live in Vault (secret/data/products/qa/ci/github.com/apps/
@@ -28,10 +38,9 @@
 #   reports via the tracking issue.
 #
 # NON-BLOCKING BY DESIGN: schedule + manual dispatch only, never pull_request —
-# it can never fail anyone's PR. camunda-hub is intentionally NOT covered here:
-# nightly-camunda-hub.yml already clones camunda-hub@main and bundles it
-# unpinned every night, so the hub already gets a latest-main dry-run daily.
-name: Spec-bump dry-run (camunda-oca)
+# it can never fail anyone's PR. Legs run independently (fail-fast: false, a
+# per-config concurrency group), so a hub Vault hiccup can't block the oca leg.
+name: Spec-bump dry-run
 
 on:
   schedule:
@@ -45,24 +54,37 @@ permissions:
   contents: read # push to the bump branch uses the App token, not GITHUB_TOKEN
   issues: write # tracking issue (breakage / no-token fallback)
   pull-requests: write # close a stale bump PR from the fallback/no-drift paths
-
-concurrency:
-  group: spec-bump-dryrun
-  cancel-in-progress: false
-
-env:
-  CONFIG: camunda-oca
-  UPSTREAM_REPO: camunda/camunda
-  UPSTREAM_BRANCH: main
-  # Rolling tracking issue is found by this exact title (single issue, no spam).
-  ISSUE_TITLE: 'Spec-bump dry-run: camunda-oca drifted from the pin'
-  DRIFT_LABEL: spec-drift
+  id-token: write # OIDC → Vault for the preview-envs clone token (hub leg)
 
 jobs:
   dryrun:
-    name: Dry-run camunda-oca against upstream main
+    name: Dry-run ${{ matrix.config }} against upstream main
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Per-config group so the oca and hub legs never serialise against each other.
+    concurrency:
+      group: spec-bump-dryrun-${{ matrix.config }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: camunda-oca
+            upstream_repo: camunda/camunda
+            private: false
+            issue_title: 'Spec-bump dry-run: camunda-oca drifted from the pin'
+          - config: camunda-hub
+            upstream_repo: camunda/camunda-hub
+            private: true
+            issue_title: 'Spec-bump dry-run: camunda-hub drifted from the pin'
+    env:
+      CONFIG: ${{ matrix.config }}
+      UPSTREAM_REPO: ${{ matrix.upstream_repo }}
+      UPSTREAM_BRANCH: main
+      IS_PRIVATE: ${{ matrix.private }}
+      # Rolling tracking issue is found by this exact title (single issue, no spam).
+      ISSUE_TITLE: ${{ matrix.issue_title }}
+      DRIFT_LABEL: spec-drift
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -73,8 +95,8 @@ jobs:
           # header takes precedence over the App-token URL when the bump PR is
           # pushed, causing a 403 as github-actions[bot]. The bump push supplies
           # its own credential via the qa-processes App-token URL; nothing else
-          # in this job needs git auth (spec fetch is a public clone, fallbacks
-          # use gh with an explicit GH_TOKEN).
+          # in this job needs it (oca spec fetch is a public clone; the hub
+          # sibling clone carries its own preview-envs token in its remote URL).
           persist-credentials: false
 
       - name: Setup Node.js 22
@@ -86,13 +108,58 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # --- Hub only: mint a preview-envs read token to clone camunda-hub -------
+      # Same Vault (JWT/OIDC) + App wiring as ci.yml's hub-invariants leg.
+      - name: Fetch camunda-hub GitHub App creds from Vault
+        id: hub-app-creds
+        if: matrix.private
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
+
+      - name: Mint camunda-hub clone token from the GitHub App
+        id: hub-token
+        if: matrix.private
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ steps.hub-app-creds.outputs.APP_ID }}
+          private-key: ${{ steps.hub-app-creds.outputs.APP_PRIVATE_KEY }}
+          owner: camunda
+          repositories: camunda-hub
+
       - name: Resolve pinned + latest upstream SHA
         id: refs
+        env:
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
         run: |
+          set -euo pipefail
           pinned=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/${CONFIG}/spec-pin.json','utf8')).specRef)")
-          latest=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          if [ "$IS_PRIVATE" = "true" ]; then
+            # Private local-bundle (hub): clone the sibling with a token-carrying
+            # origin URL (so both fetch-spec and bump-spec-pin --ref can fetch),
+            # then read latest main from it.
+            if [ -z "${HUB_TOKEN}" ]; then
+              echo "::error::No camunda-hub clone token — preview-envs App token empty (check Vault OIDC + the App is installed on camunda/camunda-hub with Contents: Read)."
+              exit 1
+            fi
+            dest="${GITHUB_WORKSPACE}/../camunda-hub"
+            mkdir -p "$dest"
+            ( cd "$dest" && git init -q \
+              && git remote add origin "https://x-access-token:${HUB_TOKEN}@github.com/${UPSTREAM_REPO}.git" \
+              && git fetch --depth 1 origin "${UPSTREAM_BRANCH}" )
+            latest=$(git -C "$dest" rev-parse FETCH_HEAD)
+          else
+            latest=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          fi
           if [ -z "$latest" ]; then
-            echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH} via git ls-remote"
+            echo "::error::Could not resolve ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}"
             exit 1
           fi
           echo "pinned=${pinned}" >> "$GITHUB_OUTPUT"
@@ -109,19 +176,38 @@ jobs:
       - name: Capture pinned operation surface
         if: steps.refs.outputs.drifted == 'true'
         env:
-          SPEC_REF: ${{ steps.refs.outputs.pinned }}
+          PINNED: ${{ steps.refs.outputs.pinned }}
         run: |
-          npm run fetch-spec:ref
+          set -euo pipefail
+          if [ "$IS_PRIVATE" = "true" ]; then
+            # hub: check out the pinned SHA in the sibling; fetch-spec bundles
+            # whatever the sibling has checked out (SPEC_REF is ignored).
+            dest="${GITHUB_WORKSPACE}/../camunda-hub"
+            git -C "$dest" fetch --depth 1 origin "$PINNED"
+            git -C "$dest" checkout -q --detach FETCH_HEAD
+            npm run fetch-spec
+          else
+            SPEC_REF="$PINNED" npm run fetch-spec:ref
+          fi
           npm run -s spec-operations > /tmp/pinned-ops.txt
           echo "Pinned operations: $(wc -l < /tmp/pinned-ops.txt)"
 
-      # Fetch latest LAST so the latest bundle is what generate + invariants see.
+      # Fetch latest LAST so the latest bundle is what generate + invariants see
+      # (and, for hub, so the sibling is left checked out at latest for the bump).
       - name: Fetch latest upstream spec
         if: steps.refs.outputs.drifted == 'true'
         env:
-          SPEC_REF: ${{ steps.refs.outputs.latest }}
+          LATEST: ${{ steps.refs.outputs.latest }}
         run: |
-          npm run fetch-spec:ref
+          set -euo pipefail
+          if [ "$IS_PRIVATE" = "true" ]; then
+            dest="${GITHUB_WORKSPACE}/../camunda-hub"
+            git -C "$dest" fetch --depth 1 origin "$LATEST"
+            git -C "$dest" checkout -q --detach FETCH_HEAD
+            npm run fetch-spec
+          else
+            SPEC_REF="$LATEST" npm run fetch-spec:ref
+          fi
           npm run -s spec-operations > /tmp/latest-ops.txt
           echo "Latest operations: $(wc -l < /tmp/latest-ops.txt)"
 
@@ -273,7 +359,7 @@ jobs:
         if: steps.refs.outputs.drifted == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: spec-bump-dryrun-outputs
+          name: spec-bump-dryrun-outputs-${{ matrix.config }}
           path: |
             generated
             spec
