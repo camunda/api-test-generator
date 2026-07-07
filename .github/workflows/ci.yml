@@ -136,6 +136,12 @@ jobs:
   hub-invariants:
     name: Lint, typecheck, hub invariants
     runs-on: ubuntu-latest
+    # Needs Vault/App secrets to clone the private camunda-hub; fork PRs don't
+    # get repo secrets, so skip there (the job would fail at the Vault step for
+    # reasons unrelated to the change). Runs on push + same-repo PRs.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 20
     permissions:
       contents: read
