@@ -377,6 +377,8 @@ npm run bump-spec-pin -- --config camunda-hub
 npm run bump-spec-pin -- --config <name> --dry-run
 ```
 
+Drop `--dry-run` to write the pin.
+
 Then verify the new spec flows through cleanly, update any invariants whose
 values legitimately changed, and commit `spec-pin.json` + the invariant updates
 together:
