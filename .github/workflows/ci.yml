@@ -397,11 +397,12 @@ jobs:
             exit 1
           fi
           pin_hash=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-hub/spec-pin.json','utf8')).expectedSpecHash)")
-          # Mirror the hub-invariants clone exactly (init + remote add + token-
-          # rewritten fetch of the tip of main). `git clone -c url.insteadOf` was
-          # cloning unauthenticated here ("Repository not found" on the private
-          # repo); init+fetch applies the rewrite reliably. Subshell keeps cwd
-          # clean for the fetch-spec bundle step below.
+          # Reuse the hub-invariants init+fetch approach (init + remote add +
+          # token-rewritten fetch), adapted here to the tip of main rather than a
+          # pinned SHA. `git clone -c url.insteadOf` was cloning unauthenticated
+          # here ("Repository not found" on the private repo); init+fetch applies
+          # the rewrite reliably. Subshell keeps cwd clean for the fetch-spec
+          # bundle step below.
           dest="${GITHUB_WORKSPACE}/../camunda-hub"
           (
             mkdir -p "$dest" && cd "$dest" && git init -q
