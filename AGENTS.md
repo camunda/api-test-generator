@@ -133,20 +133,22 @@ spec content drifts.
 > Verify before committing: `git ls-remote https://github.com/camunda/camunda <sha>`
 > must print a line. If it prints nothing, the SHA is wrong.
 
-To bump:
+To bump, use the script (it handles both configs and writes the resolved SHA +
+hash into `spec-pin.json`), then verify and commit:
 
-1. Pick a real commit SHA from `camunda/camunda` (e.g. from
-   <https://github.com/camunda/camunda/commits/main>) and confirm it with
-   `git ls-remote` as above.
-2. `SPEC_REF=<that-sha> npm run fetch-spec:ref` — the bundler resolves any
-   branch/tag/SHA to a SHA and writes `spec/<config>/bundled/spec-metadata.json`.
-3. `npm run testsuite:generate && npm run generate:request-validation`
-4. Update `configs/<active>/spec-pin.json`:
-   - `specRef`: the **resolved 40-char commit SHA** from
-     `spec/<config>/bundled/spec-metadata.json` (never a branch — branches drift,
-     and never this repo's own SHA — see the callout above)
-   - `expectedSpecHash`: the `specHash` printed in `spec/<config>/bundled/spec-metadata.json`
-5. Update any invariants whose values legitimately changed; commit together.
+```bash
+npm run bump-spec-pin -- --config <name> [--ref <sha|branch|tag>]   # omit --ref → default branch tip
+CONFIG=<name> npm run testsuite:generate \
+  && CONFIG=<name> npm run generate:request-validation \
+  && CONFIG=<name> npm test
+# update any invariants whose values legitimately changed, then commit spec-pin.json + updates
+```
+
+See [README.md → Spec pin → Bumping the spec pin](README.md) for details. The
+manual equivalent (for reference): `SPEC_REF=<sha> npm run fetch-spec:ref` →
+regenerate → set `configs/<config>/spec-pin.json` `specRef` (the **resolved
+40-char SHA**, never a branch) + `expectedSpecHash` (from
+`spec/<config>/bundled/spec-metadata.json`) → update invariants → commit.
 
 The procedure above (and the `git ls-remote camunda/camunda` callout) is
 **network-fetch mode**, used by `camunda-oca`. `camunda-hub` differs:
@@ -260,7 +262,7 @@ fixtures and named invariants point directly at the broken property.
 |---|---|---|
 | 1 — extractor constructs | `tests/fixtures/extractor/extractor-constructs.test.ts` | One OpenAPI construct → one extractor property (`required`, `provider`, `fieldPath`, …) |
 | 2 — planner contracts | `tests/fixtures/planner/planner-contracts.test.ts` | Hand-built minimal `OperationGraph` → chain-shape assertion on `generateScenariosForEndpoint` |
-| 3 — bundled-spec invariants | `configs/<config>/regression-invariants.test.ts` (e.g. `configs/camunda-oca/regression-invariants.test.ts`) | Per-config (#128 PR 3) named, human-readable invariants over real pipeline output (requires `npm run pipeline` first). Each file `describe.skipIf`-guards itself to its own CONFIG, so a run only executes the active config's invariants — the default (`camunda-oca`) run skips hub's, and a future per-config CI leg (#128, still pending) would run only its own. |
+| 3 — bundled-spec invariants | `configs/<config>/regression-invariants.test.ts` (e.g. `configs/camunda-oca/regression-invariants.test.ts`) | Per-config (#128 PR 3) named, human-readable invariants over real pipeline output (requires `npm run pipeline` first). Each file `describe.skipIf`-guards itself to its own CONFIG, so a run only executes the active config's invariants: the `regression` CI job runs camunda-oca's, and the `hub invariants` CI job runs camunda-hub's (#128). |
 
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
@@ -411,28 +413,45 @@ fix: address review comments — …
 ## Continuous integration
 
 PR/branch workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml). Runs
-on every PR to `main` and every push to `main`. **It exercises `camunda-oca`
-only** — steps 2 and 5 below are OCA-specific.
+on every PR to `main` and every push to `main`. It has **three parallel jobs**:
+per-config `regression` (camunda-oca) and `hub invariants` (camunda-hub), plus
+an advisory `spec-freshness` heads-up.
 
-Steps (in order — match these locally before pushing):
+**`Lint, typecheck, regression` (camunda-oca)** — the required gate. Steps (in
+order — match these locally before pushing):
 
 1. `npm ci`
-2. Read `configs/camunda-oca/spec-pin.json` → `specRef`
-3. `npm run lint` — Biome
-4. `tsc --noEmit` for each workspace tsconfig
-5. `SPEC_REF=<pinned> npm run fetch-spec:ref`
-6. `TEST_SEED=snapshot-baseline npm run testsuite:generate` + `npm run generate:request-validation`
-7. `npm test`
+2. `npm run check:no-bom` — fail on any UTF-8 BOM in a tracked file
+3. Read `configs/camunda-oca/spec-pin.json` → `specRef`
+4. `npm run lint` — Biome
+5. `tsc --noEmit` for each workspace tsconfig
+6. `SPEC_REF=<pinned> npm run fetch-spec:ref`
+7. `TEST_SEED=snapshot-baseline npm run testsuite:generate` + `npm run generate:request-validation`
+8. `npm run lint:generated` — Biome on the generated suite (emitter regression guard)
+9. `npm test`
 
 On failure, the `pipeline-outputs` artifact is uploaded for inspection.
 
-**`camunda-hub` is not in PR CI yet.** It runs via a separate scheduled
-workflow, [.github/workflows/nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml),
-which clones `camunda-hub@main` (unpinned), generates, and runs the positive +
-negative suites against a live Hub. The per-config PR-CI matrix leg envisaged in
-#128 (fetch the pinned hub spec → generate → run
-`configs/camunda-hub/regression-invariants.test.ts`) is still pending; it needs
-the private `camunda-hub` clone auth wired into `ci.yml`.
+**`Lint, typecheck, hub invariants` (camunda-hub)** — the same lint + typecheck,
+then clones the **pinned** `camunda-hub` spec (private repo → Vault → GitHub App
+token, same pattern as the nightly), bundles + generates both suites, and runs
+`configs/camunda-hub/regression-invariants.test.ts`. No live Hub — pinned +
+generate + invariants only, so no backend flakiness. Runs on `push` + same-repo
+PRs (fork PRs lack the clone secrets). It becomes a *merge-blocking* gate only
+when added to branch protection's required checks (that toggle is the on-switch).
+
+**`Spec freshness (pins vs upstream main)`** — an **advisory** job (never make it
+a required check): it compares each config's pinned spec to its upstream default
+branch **by content hash** and fails (red) when a pin is behind, as a "bump the
+pin" nudge (`npm run bump-spec-pin`). It intentionally depends on external state
+(upstream moves on its own), so it must not gate merges. Same fork/secret guard
+as the hub leg.
+
+The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
+is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
+the positive + negative suites against a **live Hub** — catching upstream drift
+and runtime breakage the pinned PR leg deliberately can't. (See #387/#434 for the
+scheduled spec-bump drift dry-run.)
 
 ## Pre-push checklist
 
