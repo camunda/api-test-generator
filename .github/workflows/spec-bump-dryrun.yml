@@ -35,8 +35,10 @@ name: Spec-bump dry-run (camunda-oca)
 
 on:
   schedule:
-    # Mondays 06:00 UTC — a weekly heads-up, well clear of the 02:00 hub nightly.
-    - cron: '0 6 * * 1'
+    # Daily 06:00 UTC — a heads-up on upstream drift, well clear of the 02:00 hub
+    # nightly. Cheap on no-op days (generate is gated on real content change) and
+    # non-spammy (an already-open bump PR is left untouched).
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 permissions:
