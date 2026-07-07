@@ -4,7 +4,8 @@
 # pass, operation surface unchanged), or when there's no meaningful drift.
 # Called by spec-bump-check.yml for both configs. No-op if no such issue is open.
 #
-# Required env: GH_TOKEN, LATEST. GitHub provides GITHUB_* automatically.
+# Required env: GH_TOKEN, ISSUE_TITLE, LATEST (CONFIG optional — enables the
+# bump-PR cleanup). GitHub provides GITHUB_* automatically.
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN required for gh auth}"

@@ -14,7 +14,8 @@
 # this repo (NOT the built-in GITHUB_TOKEN — PRs it opens don't trigger CI). The
 # workflow only invokes this script when such a token was minted.
 #
-# Required env: GH_TOKEN, CONFIG, LATEST, N_ADDED, N_REMOVED, ADDED, REMOVED.
+# Required env: GH_TOKEN, CONFIG, LATEST, ISSUE_TITLE, N_ADDED, N_REMOVED,
+# ADDED, REMOVED. Optional (defaulted): UPSTREAM_REPO, UPSTREAM_BRANCH.
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN (App/PAT with contents+PR write) required}"

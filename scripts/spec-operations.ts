@@ -28,7 +28,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'options', 'head', 'trace']);
 
 function collectOperationIds(bundle: unknown): string[] {
-  if (!isRecord(bundle) || !isRecord(bundle.paths)) return [];
+  if (!isRecord(bundle) || !isRecord(bundle.paths)) {
+    // Fail fast rather than returning []: an empty surface would make the
+    // op-diff report every operation as removed/added (see #387 usage).
+    throw new Error('bundle has no `paths` object — not a valid OpenAPI bundle');
+  }
   const ids: string[] = [];
   for (const item of Object.values(bundle.paths)) {
     if (!isRecord(item)) continue;
@@ -54,7 +58,20 @@ function main(): void {
     );
     process.exit(2);
   }
-  for (const id of collectOperationIds(raw)) {
+  let ids: string[];
+  try {
+    ids = collectOperationIds(raw);
+  } catch (err) {
+    console.error(`[spec-operations] ${bundlePath}: ${String(err)} — re-run fetch-spec.`);
+    process.exit(2);
+  }
+  if (ids.length === 0) {
+    console.error(
+      `[spec-operations] no operations found in ${bundlePath} — refusing to emit an empty surface (it would corrupt the op-diff). Re-run fetch-spec.`,
+    );
+    process.exit(2);
+  }
+  for (const id of ids) {
     console.log(id);
   }
 }
