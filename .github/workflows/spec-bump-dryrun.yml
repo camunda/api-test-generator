@@ -136,12 +136,20 @@ jobs:
           # || true: comm exits 0 anyway, but guards an empty file.
           added=$(LC_ALL=C comm -13 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
           removed=$(LC_ALL=C comm -23 /tmp/pinned-ops.txt /tmp/latest-ops.txt || true)
+          # Cap the lists written to step outputs: a very large upstream diff
+          # (hundreds of new ops) could otherwise exceed GitHub Actions' output
+          # size limit and fail the job before routing — losing the actionable
+          # signal. The counts (n_added/n_removed) below stay exact (computed
+          # from the full lists), and the PR/report scripts render only the
+          # first ~50 lines anyway, so a 200-line cap is a lossless preview here.
+          added_out=$(printf '%s\n' "$added" | head -200)
+          removed_out=$(printf '%s\n' "$removed" | head -200)
           {
             echo 'added<<EOF'
-            echo "$added"
+            echo "$added_out"
             echo 'EOF'
             echo 'removed<<EOF'
-            echo "$removed"
+            echo "$removed_out"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
           # printf (no trailing newline) so an empty value counts 0; grep exits 1
@@ -165,7 +173,10 @@ jobs:
 
       - name: Generate pipeline against latest
         id: generate
-        if: steps.refs.outputs.drifted == 'true'
+        # Skip on SHA-only drift (content byte-identical): the generated output
+        # would match the validated baseline and routing closes artifacts via the
+        # content_changed=='false' path anyway, so the full pipeline is wasted work.
+        if: steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true'
         continue-on-error: true
         env:
           TEST_SEED: snapshot-baseline
@@ -175,8 +186,11 @@ jobs:
 
       - name: Regression invariants against latest
         id: invariants
-        # Only meaningful if generation produced outputs.
-        if: steps.refs.outputs.drifted == 'true' && steps.generate.outcome == 'success'
+        # Only meaningful if generation produced outputs — which only happens on
+        # a real content change (see the generate step's gate).
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success'
         continue-on-error: true
         env:
           ALLOW_SPEC_DRIFT: '1'
