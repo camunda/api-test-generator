@@ -362,8 +362,9 @@ the spec, and rewrites `configs/<config>/spec-pin.json` (`specRef` as a resolved
 does **not** commit — you review the diff, verify, then commit.
 
 ```bash
-# camunda-oca — public, fetched from camunda/camunda. Defaults to the main tip;
-# pass --ref <sha|branch|tag> for a specific one (resolved to a SHA).
+# camunda-oca — public, fetched from camunda/camunda. Defaults to the repo's
+# default-branch tip (resolved via `git ls-remote <repo> HEAD`); pass
+# --ref <sha|branch|tag> for a specific one (resolved to a SHA).
 npm run bump-spec-pin -- --config camunda-oca
 npm run bump-spec-pin -- --config camunda-oca --ref stable/8.10
 
