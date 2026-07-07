@@ -133,20 +133,22 @@ spec content drifts.
 > Verify before committing: `git ls-remote https://github.com/camunda/camunda <sha>`
 > must print a line. If it prints nothing, the SHA is wrong.
 
-To bump:
+To bump, use the script (it handles both configs and writes the resolved SHA +
+hash into `spec-pin.json`), then verify and commit:
 
-1. Pick a real commit SHA from `camunda/camunda` (e.g. from
-   <https://github.com/camunda/camunda/commits/main>) and confirm it with
-   `git ls-remote` as above.
-2. `SPEC_REF=<that-sha> npm run fetch-spec:ref` — the bundler resolves any
-   branch/tag/SHA to a SHA and writes `spec/<config>/bundled/spec-metadata.json`.
-3. `npm run testsuite:generate && npm run generate:request-validation`
-4. Update `configs/<active>/spec-pin.json`:
-   - `specRef`: the **resolved 40-char commit SHA** from
-     `spec/<config>/bundled/spec-metadata.json` (never a branch — branches drift,
-     and never this repo's own SHA — see the callout above)
-   - `expectedSpecHash`: the `specHash` printed in `spec/<config>/bundled/spec-metadata.json`
-5. Update any invariants whose values legitimately changed; commit together.
+```bash
+npm run bump-spec-pin -- --config <name> [--ref <sha|branch|tag>]   # omit --ref → default branch tip
+CONFIG=<name> npm run testsuite:generate \
+  && CONFIG=<name> npm run generate:request-validation \
+  && CONFIG=<name> npm test
+# update any invariants whose values legitimately changed, then commit spec-pin.json + updates
+```
+
+See [README.md → Spec pin → Bumping the spec pin](README.md) for details. The
+manual equivalent (for reference): `SPEC_REF=<sha> npm run fetch-spec:ref` →
+regenerate → set `configs/<config>/spec-pin.json` `specRef` (the **resolved
+40-char SHA**, never a branch) + `expectedSpecHash` (from
+`spec/<config>/bundled/spec-metadata.json`) → update invariants → commit.
 
 The procedure above (and the `git ls-remote camunda/camunda` callout) is
 **network-fetch mode**, used by `camunda-oca`. `camunda-hub` differs:
@@ -411,8 +413,9 @@ fix: address review comments — …
 ## Continuous integration
 
 PR/branch workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml). Runs
-on every PR to `main` and every push to `main`. It has **two parallel jobs, one
-per config**.
+on every PR to `main` and every push to `main`. It has **three parallel jobs**:
+per-config `regression` (camunda-oca) and `hub invariants` (camunda-hub), plus
+an advisory `spec-freshness` heads-up.
 
 **`Lint, typecheck, regression` (camunda-oca)** — the required gate. Steps (in
 order — match these locally before pushing):
@@ -436,6 +439,13 @@ token, same pattern as the nightly), bundles + generates both suites, and runs
 generate + invariants only, so no backend flakiness. Runs on `push` + same-repo
 PRs (fork PRs lack the clone secrets). It becomes a *merge-blocking* gate only
 when added to branch protection's required checks (that toggle is the on-switch).
+
+**`Spec freshness (pins vs upstream main)`** — an **advisory** job (never make it
+a required check): it compares each config's pinned spec to its upstream default
+branch **by content hash** and fails (red) when a pin is behind, as a "bump the
+pin" nudge (`npm run bump-spec-pin`). It intentionally depends on external state
+(upstream moves on its own), so it must not gate merges. Same fork/secret guard
+as the hub leg.
 
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
