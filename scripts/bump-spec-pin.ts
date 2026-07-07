@@ -1,0 +1,144 @@
+#!/usr/bin/env tsx
+/**
+ * bump-spec-pin — re-pin a config's spec to a newer upstream ref.
+ *
+ * Resolves a target upstream ref, fetches + bundles that spec, and rewrites
+ * `configs/<config>/spec-pin.json` (`specRef` + `expectedSpecHash`, preserving
+ * the `$comment` and key order). It does NOT commit — review the diff, then
+ * regenerate + run invariants to confirm the new spec is clean before landing:
+ *
+ *   CONFIG=<config> npm run testsuite:generate && CONFIG=<config> npm test
+ *
+ * Usage:
+ *   npm run bump-spec-pin -- --config camunda-oca [--ref <sha|branch>] [--dry-run]
+ *   npm run bump-spec-pin -- --config camunda-hub [--ref <sha>] [--dry-run]
+ *
+ * Modes (from configs.json `spec.source`):
+ *   - network-fetch (camunda-oca): `--ref` defaults to the upstream default
+ *     branch tip (resolved via `git ls-remote`). Runs `SPEC_REF=<ref>
+ *     npm run fetch-spec:ref`.
+ *   - local-bundle (camunda-hub): bundles from the sibling clone
+ *     (`../camunda-hub`); `--ref` (if given) is checked out there first, else the
+ *     sibling's current HEAD is used. `specRef` = that SHA.
+ *
+ * `--dry-run` prints the old → new pin without writing.
+ */
+import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+import { getActiveSpecSource, getSpecBundleDir } from '../path-analyser/src/configResolver.ts';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function arg(name: string): string | undefined {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+const hasFlag = (name: string): boolean => process.argv.includes(`--${name}`);
+
+function git(args: string[], cwd = REPO_ROOT): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+}
+
+function run(cmd: string, env: NodeJS.ProcessEnv): void {
+  const res = spawnSync('npm', ['run', cmd], {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+    env,
+    shell: process.platform === 'win32',
+  });
+  if (res.status !== 0) {
+    throw new Error(`\`npm run ${cmd}\` failed (exit ${res.status ?? res.signal})`);
+  }
+}
+
+function readSpecHash(): string {
+  const metaPath = join(getSpecBundleDir(REPO_ROOT), 'spec-metadata.json');
+  const raw: unknown = JSON.parse(readFileSync(metaPath, 'utf8'));
+  if (!isRecord(raw) || typeof raw.specHash !== 'string') {
+    throw new Error(`spec-metadata.json at ${metaPath} is malformed`);
+  }
+  return raw.specHash;
+}
+
+function main(): void {
+  const config = arg('config') ?? process.env.CONFIG ?? 'camunda-oca';
+  const dryRun = hasFlag('dry-run');
+  // configResolver reads CONFIG from the env — set it so every helper + the
+  // spawned fetch-spec target the requested config.
+  process.env.CONFIG = config;
+
+  const pinPath = join(REPO_ROOT, 'configs', config, 'spec-pin.json');
+  const pinRaw: unknown = JSON.parse(readFileSync(pinPath, 'utf8'));
+  if (
+    !isRecord(pinRaw) ||
+    typeof pinRaw.specRef !== 'string' ||
+    typeof pinRaw.expectedSpecHash !== 'string'
+  ) {
+    throw new Error(`spec-pin.json at ${pinPath} is malformed`);
+  }
+  const oldRef = pinRaw.specRef;
+  const oldHash = pinRaw.expectedSpecHash;
+
+  const spec = getActiveSpecSource(REPO_ROOT);
+  const localBundle = spec.localSpecDir !== undefined;
+  let newRef: string;
+
+  if (localBundle) {
+    // local-bundle (hub): bundle from the sibling clone; specRef = its HEAD.
+    const siblingRoot = git(
+      ['rev-parse', '--show-toplevel'],
+      resolve(REPO_ROOT, spec.localSpecDir ?? ''),
+    );
+    const wantRef = arg('ref');
+    if (wantRef) {
+      git(['fetch', '--depth', '1', 'origin', wantRef], siblingRoot);
+      git(['checkout', wantRef], siblingRoot);
+    }
+    newRef = git(['rev-parse', 'HEAD'], siblingRoot);
+    console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
+    run('fetch-spec', { ...process.env });
+  } else {
+    // network-fetch (oca): --ref or the upstream default branch tip.
+    const repoUrl = spec.repoUrl;
+    if (!repoUrl) throw new Error(`${config}: spec.repoUrl is required for network-fetch mode`);
+    newRef = arg('ref') ?? git(['ls-remote', repoUrl, 'refs/heads/main']).split('\t')[0];
+    if (!newRef) throw new Error(`could not resolve a ref for ${config} from ${repoUrl}`);
+    console.error(`[bump-spec-pin] ${config}: network-fetch ${repoUrl} @ ${newRef}`);
+    run('fetch-spec:ref', { ...process.env, SPEC_REF: newRef });
+  }
+
+  const newHash = readSpecHash();
+
+  console.error(`\n[bump-spec-pin] ${config}`);
+  console.error(`  specRef:  ${oldRef}  →  ${newRef}`);
+  console.error(`  specHash: ${oldHash}  →  ${newHash}`);
+
+  if (oldRef === newRef && oldHash === newHash) {
+    console.error('  pin already current — nothing to write.');
+    return;
+  }
+  if (oldHash === newHash) {
+    console.error('  note: SHA moved but spec content is unchanged (hash identical).');
+  }
+  if (dryRun) {
+    console.error('  --dry-run: not writing spec-pin.json.');
+    return;
+  }
+
+  pinRaw.specRef = newRef;
+  pinRaw.expectedSpecHash = newHash;
+  writeFileSync(pinPath, `${JSON.stringify(pinRaw, null, 2)}\n`);
+  console.error(`  wrote ${pinPath}`);
+  console.error(
+    `\nNext: CONFIG=${config} npm run testsuite:generate && CONFIG=${config} npm test  (confirm the new spec is clean, update any changed invariants), then commit.`,
+  );
+}
+
+main();
