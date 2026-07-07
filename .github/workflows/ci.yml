@@ -126,17 +126,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # camunda-hub Layer-3 invariants leg (#440 / #128 CI matrix). Runs in parallel
-  # with `regression` (camunda-oca). NON-REQUIRED — do NOT add "hub-invariants"
-  # to branch protection while we observe its behaviour; it's a signal, not a
-  # gate. Unlike the nightly (unpinned, live Hub), this leg runs against the
-  # PINNED hub spec and only generates + runs the static invariants — no live
-  # Hub, so no backend flakiness. camunda-hub is private, so it needs a clone
-  # token (same Vault → App pattern as nightly-camunda-hub.yml).
+  # camunda-hub leg (#440 / #128 CI matrix). Runs in parallel with `regression`
+  # (camunda-oca): the same lint + typecheck gates, then generates the hub suite
+  # and runs the hub Layer-3 invariants. Unlike the nightly (unpinned, live Hub),
+  # this leg runs against the PINNED hub spec and does NOT touch a live Hub — so
+  # no backend flakiness. camunda-hub is private, so it needs a clone token (same
+  # Vault → App pattern as nightly-camunda-hub.yml). Intended as a required gate
+  # (add "Lint, typecheck, hub invariants" to branch protection).
   hub-invariants:
-    name: Hub Layer-3 invariants (non-required)
+    name: Lint, typecheck, hub invariants
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write # OIDC → Vault (no long-lived secret stored)
@@ -149,6 +149,47 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      # --- lint + typecheck (config-independent; fail fast before the clone) ---
+      - name: Check for UTF-8 BOMs
+        run: npm run check:no-bom
+
+      - name: Lint (Biome)
+        run: npm run lint
+
+      - name: Typecheck (semantic-graph-extractor)
+        run: npx tsc --noEmit -p semantic-graph-extractor/tsconfig.json
+
+      - name: Typecheck (path-analyser)
+        run: npx tsc --noEmit -p path-analyser/tsconfig.json
+
+      - name: Build path-analyser (emit .d.ts for downstream typechecks)
+        run: npm run build:analyser
+
+      - name: Typecheck (emitter-sdk)
+        run: npx tsc --noEmit -p emitter-sdk/tsconfig.json
+
+      - name: Build emitter-sdk (emit .d.ts for materializer typecheck)
+        run: npm run build -w @camunda8/emitter-sdk
+
+      - name: Typecheck (materializer)
+        run: npx tsc --noEmit -p materializer/tsconfig.json
+
+      - name: Typecheck (request-validation)
+        run: npx tsc --noEmit -p request-validation/tsconfig.json
+
+      - name: Typecheck (tests)
+        run: npx tsc --noEmit -p tests/tsconfig.json
+
+      # --- clone the PINNED hub spec (private repo → App token) ---------------
       - name: Fetch camunda-hub GitHub App creds from Vault
         id: app-creds
         uses: hashicorp/vault-action@v3
@@ -197,15 +238,6 @@ jobs:
           git checkout -q FETCH_HEAD
           echo "camunda-hub pinned at: $(git rev-parse HEAD)"
 
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install deps
-        run: npm ci
-
       # Local-bundle from the sibling clone (SPEC_REF ignored for hub). Then
       # generate the positive suite (codegen writes the coverage.json +
       # lifecycle specs the invariants read). request-validation is not needed.
@@ -214,9 +246,12 @@ jobs:
           npm run fetch-spec
           npm run testsuite:generate
 
+      - name: Lint generated hub suite (Biome)
+        run: npm run lint:generated
+
       # The spec-pin globalSetup validates the bundled hash against
       # configs/camunda-hub/spec-pin.json before the invariants load; running
-      # only the hub invariants file keeps this fast and avoids OCA-assuming tests.
+      # only the hub invariants file avoids OCA-assuming tests.
       - name: Run hub Layer-3 invariants
         run: npx vitest run configs/camunda-hub/regression-invariants.test.ts
 
