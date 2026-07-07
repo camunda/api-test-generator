@@ -46,6 +46,29 @@ function git(args: string[], cwd = REPO_ROOT): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+const SHA_RE = /^[0-9a-f]{40}$/i;
+
+// specRef MUST be a resolved 40-char commit SHA (branches drift). Resolve the
+// remote's default branch tip via `HEAD` (no hardcoded `main`, so it works for
+// any config's repo).
+function resolveDefaultBranchSha(repoUrl: string): string {
+  const sha = git(['ls-remote', repoUrl, 'HEAD']).split('\n')[0]?.split('\t')[0] ?? '';
+  if (!SHA_RE.test(sha)) {
+    throw new Error(`could not resolve default-branch HEAD to a SHA for ${repoUrl} (got '${sha}')`);
+  }
+  return sha;
+}
+
+// Resolve a user-supplied --ref (SHA passthrough, or branch/tag → SHA).
+function resolveSha(repoUrl: string, ref: string): string {
+  if (SHA_RE.test(ref)) return ref.toLowerCase();
+  const sha = git(['ls-remote', repoUrl, ref]).split('\n')[0]?.split('\t')[0] ?? '';
+  if (!SHA_RE.test(sha)) {
+    throw new Error(`could not resolve ref '${ref}' to a commit SHA in ${repoUrl}`);
+  }
+  return sha;
+}
+
 function run(cmd: string, env: NodeJS.ProcessEnv): void {
   const res = spawnSync('npm', ['run', cmd], {
     cwd: REPO_ROOT,
@@ -105,11 +128,12 @@ function main(): void {
     console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
     run('fetch-spec', { ...process.env });
   } else {
-    // network-fetch (oca): --ref or the upstream default branch tip.
+    // network-fetch (oca): resolve --ref (or the remote's default branch) to a
+    // 40-char SHA before it's written to spec-pin.json / passed as SPEC_REF.
     const repoUrl = spec.repoUrl;
     if (!repoUrl) throw new Error(`${config}: spec.repoUrl is required for network-fetch mode`);
-    newRef = arg('ref') ?? git(['ls-remote', repoUrl, 'refs/heads/main']).split('\t')[0];
-    if (!newRef) throw new Error(`could not resolve a ref for ${config} from ${repoUrl}`);
+    const wantRef = arg('ref');
+    newRef = wantRef ? resolveSha(repoUrl, wantRef) : resolveDefaultBranchSha(repoUrl);
     console.error(`[bump-spec-pin] ${config}: network-fetch ${repoUrl} @ ${newRef}`);
     run('fetch-spec:ref', { ...process.env, SPEC_REF: newRef });
   }
