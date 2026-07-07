@@ -73,8 +73,8 @@ export default function setup(): void {
   const pin = loadPin();
   const actual = loadActualSpecHash();
   if (actual !== pin.expectedSpecHash) {
-    // Escape hatch for the scheduled spec-bump dry-run
-    // (.github/workflows/spec-bump-dryrun.yml), which deliberately fetches the
+    // Escape hatch for the scheduled spec-bump check
+    // (.github/workflows/spec-bump-check.yml), which deliberately fetches the
     // latest upstream spec (hash ≠ pin by design) to check whether it still
     // flows through the generator + invariants. There, a drift is the signal
     // we WANT to observe, not a precondition failure — so warn and let the
@@ -85,7 +85,7 @@ export default function setup(): void {
         `::warning::[spec-pin] Bundled spec drifted from the pin ` +
           `(pinned ref ${pin.specRef}, expected content hash ${pin.expectedSpecHash}; ` +
           `actual content hash ${actual}). Continuing because ALLOW_SPEC_DRIFT=1 ` +
-          `(spec-bump dry-run). Invariants below run against the drifted spec.`,
+          `(spec-bump check). Invariants below run against the drifted spec.`,
       );
       return;
     }

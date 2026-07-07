@@ -3,7 +3,7 @@
  * spec-operations — print the operationIds of the active config's bundled
  * spec, one per line, sorted.
  *
- * Used by the scheduled spec-bump dry-run (.github/workflows/spec-bump-dryrun.yml)
+ * Used by the scheduled spec-bump check (.github/workflows/spec-bump-check.yml)
  * to diff the operation surface of the latest upstream spec against the pinned
  * one: `comm`-ing the pinned vs latest output surfaces added/removed operations
  * — the early "a whole new upstream domain appeared" heads-up #387 is about.

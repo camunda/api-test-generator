@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Open or update the single rolling "spec-bump drift" tracking issue for
-# camunda-oca. Called by .github/workflows/spec-bump-dryrun.yml only when a
+# camunda-oca. Called by .github/workflows/spec-bump-check.yml only when a
 # drift signal is present (generation/invariants broke, or the operation
 # surface changed). Idempotent: one issue, found by exact title; re-runs edit
 # it in place and drop a fresh dated comment rather than opening duplicates.
@@ -45,7 +45,7 @@ list_or_none() {
 
 body_file="$(mktemp)"
 {
-  echo "The scheduled dry-run fetched \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` and ran the camunda-oca generate pipeline + regression invariants against it. It drifted from the pin — details below. This issue is updated in place on every run and closed automatically once latest flows through cleanly again."
+  echo "The scheduled check fetched \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` and ran the camunda-oca generate pipeline + regression invariants against it. It drifted from the pin — details below. This issue is updated in place on every run and closed automatically once latest flows through cleanly again."
   echo
   echo "| | |"
   echo "|---|---|"
@@ -68,7 +68,7 @@ body_file="$(mktemp)"
 } > "$body_file"
 
 # --- Ensure the label exists (best-effort) ----------------------------------
-gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump dry-run)" 2>/dev/null || true
+gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
 
 # --- Find the rolling issue by exact title ----------------------------------
 existing="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" \

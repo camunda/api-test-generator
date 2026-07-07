@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Close the rolling "spec-bump drift" tracking issue when latest upstream main
 # flows through the camunda-oca pipeline cleanly (generate + invariants pass,
-# operation surface unchanged). Called by spec-bump-dryrun.yml. No-op if no
+# operation surface unchanged). Called by spec-bump-check.yml. No-op if no
 # such issue is open.
 #
 # Required env: GH_TOKEN, LATEST. GitHub provides GITHUB_* automatically.

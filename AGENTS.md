@@ -452,7 +452,7 @@ is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
 and runtime breakage the pinned PR leg deliberately can't.
 
-The **spec-bump dry-run** ([spec-bump-dryrun.yml](.github/workflows/spec-bump-dryrun.yml),
+The **spec-bump check** ([spec-bump-check.yml](.github/workflows/spec-bump-check.yml),
 #387) is a scheduled (**daily** 06:00 UTC) + `workflow_dispatch` job — a
 per-config **matrix over `camunda-oca` and `camunda-hub`**, never `pull_request`
 (it can't fail anyone's PR). For each config it resolves latest upstream `main`,

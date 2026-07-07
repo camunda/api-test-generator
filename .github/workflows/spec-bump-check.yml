@@ -1,4 +1,4 @@
-# Scheduled, non-blocking dry-run of the spec-pin bump for both configs (#387).
+# Scheduled, non-blocking check of the spec-pin bump for both configs (#387).
 #
 # A spec-pin bump isn't always mechanical: latest upstream main can pull in a
 # whole new domain the generator doesn't yet model (this bit us bumping
@@ -40,7 +40,7 @@
 # NON-BLOCKING BY DESIGN: schedule + manual dispatch only, never pull_request —
 # it can never fail anyone's PR. Legs run independently (fail-fast: false, a
 # per-config concurrency group), so a hub Vault hiccup can't block the oca leg.
-name: Spec-bump dry-run
+name: Spec-bump check
 
 on:
   schedule:
@@ -57,13 +57,13 @@ permissions:
   id-token: write # OIDC → Vault for the preview-envs clone token (hub leg)
 
 jobs:
-  dryrun:
-    name: Dry-run ${{ matrix.config }} against upstream main
+  check:
+    name: Check ${{ matrix.config }} against upstream main
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Per-config group so the oca and hub legs never serialise against each other.
     concurrency:
-      group: spec-bump-dryrun-${{ matrix.config }}
+      group: spec-bump-check-${{ matrix.config }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
@@ -72,11 +72,11 @@ jobs:
           - config: camunda-oca
             upstream_repo: camunda/camunda
             private: false
-            issue_title: 'Spec-bump dry-run: camunda-oca drifted from the pin'
+            issue_title: 'Spec-bump check: camunda-oca drifted from the pin'
           - config: camunda-hub
             upstream_repo: camunda/camunda-hub
             private: true
-            issue_title: 'Spec-bump dry-run: camunda-hub drifted from the pin'
+            issue_title: 'Spec-bump check: camunda-hub drifted from the pin'
     env:
       CONFIG: ${{ matrix.config }}
       UPSTREAM_REPO: ${{ matrix.upstream_repo }}
@@ -168,7 +168,7 @@ jobs:
           echo "Latest: ${latest}"
           if [ "$pinned" = "$latest" ]; then
             echo "drifted=false" >> "$GITHUB_OUTPUT"
-            echo "Pin is already at latest main — nothing to dry-run."
+            echo "Pin is already at latest main — nothing to check."
           else
             echo "drifted=true" >> "$GITHUB_OUTPUT"
           fi
@@ -369,7 +369,7 @@ jobs:
         if: steps.refs.outputs.drifted == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: spec-bump-dryrun-outputs-${{ matrix.config }}
+          name: spec-bump-check-outputs-${{ matrix.config }}
           path: |
             generated
             spec
