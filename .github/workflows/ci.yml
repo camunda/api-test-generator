@@ -407,7 +407,7 @@ jobs:
             mkdir -p "$dest" && cd "$dest" && git init -q
             git remote add origin https://github.com/camunda/camunda-hub.git
             git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
-              fetch --depth 1 origin HEAD
+              fetch --depth 1 origin main
             git checkout -q FETCH_HEAD
           )
           latest=$(git -C "$dest" rev-parse HEAD)
