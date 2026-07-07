@@ -144,20 +144,21 @@ function main(): void {
 
   if (localBundle) {
     // local-bundle (hub): bundle from the sibling clone; specRef = its HEAD.
-    const siblingRoot = git(
-      ['rev-parse', '--show-toplevel'],
-      resolve(REPO_ROOT, spec.localSpecDir ?? ''),
-    );
+    // Use `git -C <dir>` and keep the child's cwd at REPO_ROOT — launching git
+    // with cwd set to the sibling path fails on macOS ("Unable to read current
+    // working directory: Operation not permitted").
+    const specDirAbs = resolve(REPO_ROOT, spec.localSpecDir ?? '');
+    const siblingRoot = git(['-C', specDirAbs, 'rev-parse', '--show-toplevel']);
     const wantRef = arg('ref');
     if (wantRef) {
       // `fetch` updates FETCH_HEAD but NOT an existing local branch of the same
       // name, so check out the freshly-fetched commit directly (detached) rather
       // than a possibly-stale local branch (`git checkout main` could otherwise
       // land on the old local `main`).
-      git(['fetch', '--depth', '1', 'origin', wantRef], siblingRoot);
-      git(['checkout', '--detach', 'FETCH_HEAD'], siblingRoot);
+      git(['-C', siblingRoot, 'fetch', '--depth', '1', 'origin', wantRef]);
+      git(['-C', siblingRoot, 'checkout', '--detach', 'FETCH_HEAD']);
     }
-    newRef = git(['rev-parse', 'HEAD'], siblingRoot);
+    newRef = git(['-C', siblingRoot, 'rev-parse', 'HEAD']);
     console.error(`[bump-spec-pin] ${config}: local-bundle from ${siblingRoot} @ ${newRef}`);
     run('fetch-spec', { ...process.env });
   } else {
