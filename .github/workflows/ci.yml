@@ -131,8 +131,13 @@ jobs:
   # and runs the hub Layer-3 invariants. Unlike the nightly (unpinned, live Hub),
   # this leg runs against the PINNED hub spec and does NOT touch a live Hub — so
   # no backend flakiness. camunda-hub is private, so it needs a clone token (same
-  # Vault → App pattern as nightly-camunda-hub.yml). Intended as a required gate
-  # (add "Lint, typecheck, hub invariants" to branch protection).
+  # Vault → App pattern as nightly-camunda-hub.yml).
+  #
+  # Gating: this is a normal job that always runs (on push + same-repo PRs). It
+  # only *blocks* merges once someone adds "Lint, typecheck, hub invariants" to
+  # branch protection's required checks — that branch-protection toggle is the
+  # on-switch, not anything in this file. Until then it's a visible pass/fail
+  # signal. Enabling it as a required gate is the intended end state.
   hub-invariants:
     name: Lint, typecheck, hub invariants
     runs-on: ubuntu-latest
@@ -244,13 +249,17 @@ jobs:
           git checkout -q FETCH_HEAD
           echo "camunda-hub pinned at: $(git rev-parse HEAD)"
 
-      # Local-bundle from the sibling clone (SPEC_REF ignored for hub). Then
-      # generate the positive suite (codegen writes the coverage.json +
-      # lifecycle specs the invariants read). request-validation is not needed.
+      # Local-bundle from the sibling clone (SPEC_REF ignored for hub). Generate
+      # BOTH suites so PR CI catches hub generator breakage pre-merge (#440):
+      # testsuite:generate writes the coverage.json + lifecycle specs the
+      # invariants read; generate:request-validation exercises the hub negative
+      # generator too (a crash there otherwise only surfaces in the nightly).
+      # Still no live Hub.
       - name: Bundle pinned hub spec + generate
         run: |
           npm run fetch-spec
           npm run testsuite:generate
+          npm run generate:request-validation
 
       - name: Lint generated hub suite (Biome)
         run: npm run lint:generated
