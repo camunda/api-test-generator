@@ -55,39 +55,17 @@ jobs:
           persist-credentials: false
 
       # --- Clone token for the private camunda-hub -----------------------------
-      # The private camunda-hub clone uses a short-lived GitHub App installation
-      # token (not a personal PAT). We fetch the App credentials from Vault via
-      # GitHub OIDC/JWT (no long-lived secret stored — GitHub mints a per-run OIDC
-      # token, see `id-token: write` above, which Vault's JWT backend validates
-      # against a role bound to this repo), then mint an installation token scoped
-      # to camunda/camunda-hub from them.
-      #
-      # Requires (both on the Vault side, granted to this repo's JWT role):
-      #   - read on secret/data/products/web-modeler/ci/preview-envs, holding
-      #     GITHUB_PREVIEW_ENVIRONMENTS_APP_ID + _APP_PRIVATE_KEY
-      # And on the GitHub side: that App installed on camunda/camunda-hub with
-      # Contents: Read (without it, token minting below 403s).
-      - name: Fetch camunda-hub GitHub App creds from Vault
-        id: app-creds
-        uses: hashicorp/vault-action@v3
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
-
-      - name: Mint camunda-hub clone token from the GitHub App
+      # Mint a short-lived GitHub App installation token (via Vault OIDC/JWT) to
+      # clone the private repo. Shared with ci.yml + spec-bump-check — see
+      # .github/actions/hub-clone-token.
+      - name: Mint camunda-hub clone token
         id: hub-token
-        uses: actions/create-github-app-token@v2
+        uses: ./.github/actions/hub-clone-token
         with:
-          app-id: ${{ steps.app-creds.outputs.APP_ID }}
-          private-key: ${{ steps.app-creds.outputs.APP_PRIVATE_KEY }}
-          owner: camunda
-          repositories: camunda-hub
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       # --- Clone camunda-hub @ latest main as a sibling (../camunda-hub) -------
       # start-hub.sh and the local-bundle spec source both expect ../camunda-hub.
@@ -428,22 +406,19 @@ jobs:
       # secret/data/products/qa/ci/common, key SLACK_BOT_USER_OAUTH_TOKEN — the
       # bound Vault role must be granted read on that path. always() so a failed
       # run still notifies. The bot must be invited to #camunda-hub-api-test-results.
+      # Notification infra must not fail an otherwise-complete run — continue-on-
+      # error, and the Notify steps skip on the empty token output. Shared with
+      # spec-bump-check — see .github/actions/slack-token.
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
         if: always()
-        # Notification infra must not fail an otherwise-complete run — if the
-        # Vault fetch fails (path/permission not ready), the Notify Slack step
-        # below simply skips on the empty token output (matches the TestRail step).
         continue-on-error: true
-        uses: hashicorp/vault-action@v3
+        uses: ./.github/actions/slack-token
         with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: Notify Slack (positive suite)
         id: slack-positive

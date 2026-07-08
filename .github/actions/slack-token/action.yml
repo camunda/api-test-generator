@@ -1,0 +1,41 @@
+name: Slack bot token
+description: >-
+  Fetch the Slack bot user OAuth token from Vault (GitHub OIDC/JWT — no
+  long-lived secret stored) for chat.postMessage. Requires the caller job to
+  have `id-token: write`. Pair with `continue-on-error: true` on the calling
+  step so a Vault hiccup can't fail an otherwise-complete run; the SLACK_BOT_TOKEN
+  output is then empty and notify steps skip on it.
+
+inputs:
+  vault-url:
+    description: Vault address (secrets.VAULT_ADDR).
+    required: true
+  vault-jwt-path:
+    description: Vault JWT auth path (secrets.VAULT_JWT_PATH).
+    required: true
+  vault-jwt-role:
+    description: Vault JWT role (secrets.VAULT_JWT_ROLE).
+    required: true
+  vault-jwt-audience:
+    description: Vault JWT GitHub audience (secrets.VAULT_JWT_AUDIENCE).
+    required: true
+
+outputs:
+  SLACK_BOT_TOKEN:
+    description: Slack bot user OAuth token. Empty if the Vault fetch failed.
+    value: ${{ steps.fetch.outputs.SLACK_BOT_TOKEN }}
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch Slack bot token from Vault
+      id: fetch
+      uses: hashicorp/vault-action@v3
+      with:
+        url: ${{ inputs.vault-url }}
+        method: jwt
+        path: ${{ inputs.vault-jwt-path }}
+        role: ${{ inputs.vault-jwt-role }}
+        jwtGithubAudience: ${{ inputs.vault-jwt-audience }}
+        secrets: |
+          secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
