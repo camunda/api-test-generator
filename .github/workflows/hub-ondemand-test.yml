@@ -107,7 +107,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hub-ondemand-reports-${{ github.ref_name }}
+          # No branch suffix: artifact names can't contain '/' (breaks feature/*
+          # branches), and artifacts are already scoped per-run (the run page shows
+          # the branch + inputs).
+          name: hub-ondemand-reports
           path: test-results/e2e-camunda-hub/
           retention-days: 14
 

@@ -26,6 +26,15 @@ runs:
           echo "::error::No camunda-hub clone token — App token empty (check Vault OIDC + preview-envs role, and that the App is installed on camunda/camunda-hub with Contents: Read)."
           exit 1
         fi
+        # Validate the ref (it can come from a workflow_dispatch input): reject an
+        # empty value or one that git could parse as an option, and restrict to a
+        # ref/SHA charset — so it can't inject flags into the fetch below.
+        case "$HUB_REF" in
+          ''|-*) echo "::error::invalid camunda-hub ref '${HUB_REF}' (empty or starts with '-')"; exit 1 ;;
+        esac
+        if ! printf '%s' "$HUB_REF" | grep -qE '^[A-Za-z0-9._/-]+$'; then
+          echo "::error::camunda-hub ref '${HUB_REF}' has disallowed characters (allowed: A-Za-z0-9 . _ / -)"; exit 1
+        fi
         dest="${GITHUB_WORKSPACE}/../camunda-hub"
         mkdir -p "$dest" && cd "$dest" && git init -q
         git remote get-url origin >/dev/null 2>&1 || git remote add origin https://github.com/camunda/camunda-hub.git
