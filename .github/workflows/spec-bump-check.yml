@@ -382,29 +382,36 @@ jobs:
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: ${{ matrix.issue_title }}
           ADDED: ${{ steps.opdiff.outputs.added }}
           REMOVED: ${{ steps.opdiff.outputs.removed }}
           N_ADDED: ${{ steps.opdiff.outputs.n_added }}
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
         run: |
           set -uo pipefail
-          issue_title='Spec-bump check: camunda-hub drifted from the pin'
+          # ISSUE_TITLE (matrix env) is the single source of truth for the
+          # routing issue title — used directly here, no hard-coded copy.
           # Link the actionable artifact this run routed the drift to: the bump
           # PR (clean) or the tracking issue (broken). Read-only lookups.
           pr_url="$(gh pr list --head chore/spec-bump-camunda-hub --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)"
           pr_num="$(gh pr list --head chore/spec-bump-camunda-hub --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-          issue_url="$(gh issue list --state open --search "in:title \"${issue_title}\"" --json number,title,url --jq "[.[] | select(.title == \"${issue_title}\")] | .[0].url // empty" 2>/dev/null || true)"
-          issue_num="$(gh issue list --state open --search "in:title \"${issue_title}\"" --json number,title --jq "[.[] | select(.title == \"${issue_title}\")] | .[0].number // empty" 2>/dev/null || true)"
+          issue_url="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" --json number,title,url --jq "[.[] | select(.title == \"${ISSUE_TITLE}\")] | .[0].url // empty" 2>/dev/null || true)"
+          issue_num="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\")] | .[0].number // empty" 2>/dev/null || true)"
           if [ -n "$pr_url" ]; then
             link_md="➡️ Adopt via <${pr_url}|bump PR #${pr_num}>"
           elif [ -n "$issue_url" ]; then
             link_md="📋 Blocked — see <${issue_url}|tracking issue #${issue_num}>"
           else
-            link_md="ℹ️ Canonical heads-up: the \`${issue_title}\` issue/PR."
+            link_md="ℹ️ Canonical heads-up: the \`${ISSUE_TITLE}\` issue/PR."
           fi
+          # JSON-escape (backslash + double-quote) before interpolating into the
+          # Slack payload's quoted JSON string — operationIds are normally safe
+          # camelCase, but spec-operations doesn't sanitise, so a hostile/odd
+          # upstream id must not be able to produce invalid JSON. (Matches the
+          # esc() pattern in nightly-camunda-hub.yml's known-issue bullets.)
+          jesc() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
           # Comma-join the first 30 ids; append "… (+N more)" past the cap so a
-          # big drift isn't silently truncated. operationIds are camelCase (no
-          # JSON-sensitive chars), safe to interpolate into the Slack payload.
+          # big drift isn't silently truncated.
           csv() {
             local out
             out="$(printf '%s' "$1" | grep -E '.' | head -30 | paste -sd, - | sed 's/,/, /g' || true)"
@@ -412,9 +419,9 @@ jobs:
             printf '%s' "$out"
           }
           {
-            echo "link_md=${link_md}"
-            echo "added_csv=$(csv "${ADDED:-}" "${N_ADDED:-0}")"
-            echo "removed_csv=$(csv "${REMOVED:-}" "${N_REMOVED:-0}")"
+            echo "link_md=$(jesc "$link_md")"
+            echo "added_csv=$(jesc "$(csv "${ADDED:-}" "${N_ADDED:-0}")")"
+            echo "removed_csv=$(jesc "$(csv "${REMOVED:-}" "${N_REMOVED:-0}")")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack (hub op-surface drift)
