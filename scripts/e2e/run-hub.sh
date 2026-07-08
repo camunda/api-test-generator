@@ -122,7 +122,13 @@ if step generate; then
   # below. SKIP_BUNDLE=1 opts out (the nightly bundles in its own step from a
   # fresh clone; or a dev deliberately running against the current on-disk bundle).
   if [ -z "${SKIP_BUNDLE:-}" ]; then
-    CONFIG="$CONFIG" npm run fetch-spec >/dev/null
+    # >/dev/null drops only the noisy success stdout; fetch-spec + the bundler
+    # write errors to stderr (visible), and set -e aborts on failure. Add an
+    # actionable hint for the common local cause (sibling unreadable / wrong ref).
+    if ! CONFIG="$CONFIG" npm run fetch-spec >/dev/null; then
+      echo "::error:: re-bundle failed — is ../camunda-hub readable and checked out at the intended ref? (see the error above; or set SKIP_BUNDLE=1 to use the current on-disk bundle)"
+      exit 1
+    fi
     sib="$(git -C ../camunda-hub rev-parse --short HEAD 2>/dev/null || echo '?')"
     echo "  ✓ spec re-bundled from ../camunda-hub @ ${sib}"
     echo "    ↳ prebuilt Hub runs LATEST main; if ${sib} is behind, run"
