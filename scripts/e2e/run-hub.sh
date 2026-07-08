@@ -115,6 +115,27 @@ fi
 # ============================ 1. GENERATE ============================
 if step generate; then
   echo "── generate ─────────────────────────────"
+  # Re-bundle the spec from the ../camunda-hub sibling so generation reflects the
+  # sibling's CURRENT checkout — never a stale on-disk bundle (the "forgot to
+  # fetch-spec and used yesterday's spec" footgun). The prebuilt Hub runs the
+  # camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} image (SNAPSHOT = latest published
+  # build), so the sibling must match that image for spec<->runtime parity —
+  # surfaced below. SKIP_BUNDLE=1 opts out (the nightly bundles in its own step
+  # from a fresh clone; or a dev deliberately running the current on-disk bundle).
+  if [ -z "${SKIP_BUNDLE:-}" ]; then
+    # >/dev/null drops only the noisy success stdout; fetch-spec + the bundler
+    # write errors to stderr (visible), and set -e aborts on failure. Add an
+    # actionable hint for the common local cause (sibling unreadable / wrong ref).
+    if ! CONFIG="$CONFIG" npm run fetch-spec >/dev/null; then
+      echo "::error:: re-bundle failed — is ../camunda-hub readable and checked out at the intended ref? (see the error above; or set SKIP_BUNDLE=1 to use the current on-disk bundle)"
+      exit 1
+    fi
+    sib="$(git -C ../camunda-hub rev-parse --short HEAD 2>/dev/null || echo '?')"
+    echo "  ✓ spec re-bundled from ../camunda-hub @ ${sib}"
+    echo "    ↳ prebuilt Hub runs camunda/hub:\${HUB_IMAGE_TAG:-SNAPSHOT} (SNAPSHOT = latest"
+    echo "      published build); if ${sib} lags that image, run 'git -C ../camunda-hub"
+    echo "      checkout main && git -C ../camunda-hub pull' then re-run."
+  fi
   if [ -z "${SKIP_POSITIVE:-}" ]; then
     CONFIG="$CONFIG" npm run extract-graph >/dev/null
     CONFIG="$CONFIG" npm run generate:scenarios >/dev/null
