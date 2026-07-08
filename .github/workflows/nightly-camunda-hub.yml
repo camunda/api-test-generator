@@ -125,31 +125,9 @@ jobs:
       # connections and can return 404/502/503 before the app is ready. The
       # consecutive-401 streak debounces that flapping. Dump the Hub log on timeout.
       - name: Wait for Hub to be ready
-        run: |
-          url="http://localhost:${HUB_UI_PORT}/api/v2/"
-          echo "Waiting for Hub at $url (image pull + boot, up to 10m)..."
-          deadline=$(( SECONDS + 600 )); streak=0; need=3; last=""
-          while :; do
-            code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo 000)
-            if [ "$code" = "401" ]; then
-              streak=$(( streak + 1 ))
-            else
-              [ "$code" != "$last" ] && echo "  …not ready yet (HTTP $code)"
-              streak=0
-            fi
-            last="$code"
-            if [ "$streak" -ge "$need" ]; then
-              echo "Hub ready (HTTP 401 x$need consecutive after ${SECONDS}s)."
-              break
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Hub did not become ready within 10m (last code: $code)"
-              echo "----- docker logs hub (tail) -----"
-              docker logs --tail 150 hub 2>&1 || echo "(no hub container log)"
-              exit 1
-            fi
-            sleep 5
-          done
+        uses: ./.github/actions/wait-for-hub
+        with:
+          url: http://localhost:${{ env.HUB_UI_PORT }}/api/v2/
 
       # --- 2,3,5,6. Regenerate, run (positive + negative), build reports -------
       # STEPS="generate run" (NO curl): the Playwright suite is the gate and its
