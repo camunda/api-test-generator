@@ -109,30 +109,15 @@ jobs:
         run: npm ci
 
       # --- Hub only: mint a preview-envs read token to clone camunda-hub -------
-      # Same Vault (JWT/OIDC) + App wiring as ci.yml's hub-invariants leg.
-      - name: Fetch camunda-hub GitHub App creds from Vault
-        id: hub-app-creds
-        if: matrix.private
-        uses: hashicorp/vault-action@v3
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
-
-      - name: Mint camunda-hub clone token from the GitHub App
+      - name: Mint camunda-hub clone token
         id: hub-token
         if: matrix.private
-        uses: actions/create-github-app-token@v2
+        uses: ./.github/actions/hub-clone-token
         with:
-          app-id: ${{ steps.hub-app-creds.outputs.APP_ID }}
-          private-key: ${{ steps.hub-app-creds.outputs.APP_PRIVATE_KEY }}
-          owner: camunda
-          repositories: camunda-hub
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: Resolve pinned + latest upstream SHA
         id: refs
@@ -367,6 +352,114 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LATEST: ${{ steps.refs.outputs.latest }}
         run: bash .github/scripts/spec-bump-resolve.sh
+
+      # --- Hub-only: Slack heads-up on OPERATION-surface drift (#435) -----------
+      # The hub team lives in #camunda-hub-api-test-results, so mirror the
+      # GitHub artifact this run just created (bump PR or tracking issue) as a
+      # Slack alert. Only when the operationId surface actually changed
+      # (n_added/n_removed) — a field-level-only content change is silent here.
+      # The diff is already computed above (steps.opdiff), so this just formats +
+      # links; no recomputation. content_changed=='true' is the sentinel that the
+      # opdiff step ran (it's unset when drifted=='false').
+      - name: Fetch Slack bot token from Vault (hub drift)
+        id: slack-secrets
+        if: >-
+          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0')
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Build hub drift Slack payload
+        id: slack-payload
+        if: >-
+          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0') &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        # Notification formatting must not fail the run (gh/API transient errors).
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: ${{ matrix.issue_title }}
+          CONFIG: ${{ matrix.config }}
+          PINNED: ${{ steps.refs.outputs.pinned }}
+          LATEST: ${{ steps.refs.outputs.latest }}
+          ADDED: ${{ steps.opdiff.outputs.added }}
+          REMOVED: ${{ steps.opdiff.outputs.removed }}
+          N_ADDED: ${{ steps.opdiff.outputs.n_added }}
+          N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+        run: |
+          set -uo pipefail
+          # ISSUE_TITLE + CONFIG (matrix env) are the single source of truth for
+          # the routing issue title + bump branch — used directly here, no
+          # hard-coded copies that could drift from the routing.
+          # Link the actionable artifact this run routed the drift to: the bump
+          # PR (clean) or the tracking issue (broken). Read-only lookups.
+          bump_branch="chore/spec-bump-${CONFIG}"
+          pr_url="$(gh pr list --head "$bump_branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)"
+          pr_num="$(gh pr list --head "$bump_branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          issue_url="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" --json number,title,url --jq "[.[] | select(.title == \"${ISSUE_TITLE}\")] | .[0].url // empty" 2>/dev/null || true)"
+          issue_num="$(gh issue list --state open --search "in:title \"${ISSUE_TITLE}\"" --json number,title --jq "[.[] | select(.title == \"${ISSUE_TITLE}\")] | .[0].number // empty" 2>/dev/null || true)"
+          if [ -n "$pr_url" ]; then
+            link="➡️ Adopt via <${pr_url}|bump PR #${pr_num}>"
+          elif [ -n "$issue_url" ]; then
+            link="📋 Blocked — see <${issue_url}|tracking issue #${issue_num}>"
+          else
+            link="ℹ️ Canonical heads-up: the \`${ISSUE_TITLE}\` issue/PR."
+          fi
+          # Comma-join the first 30 ids; append "… (+N more)" past the cap so a
+          # big drift isn't silently truncated.
+          csv() {
+            local out
+            out="$(printf '%s' "$1" | grep -E '.' | head -30 | paste -sd, - | sed 's/,/, /g' || true)"
+            if [ "${2:-0}" -gt 30 ]; then out="${out}, … (+$(( $2 - 30 )) more)"; fi
+            printf '%s' "$out"
+          }
+          # Assemble the full message and JSON-encode it with Node's JSON.stringify
+          # (Node is already set up) — guarantees valid JSON escaping for ANY input
+          # (quotes, backslashes, control chars), so an odd upstream operationId
+          # can't break the payload. The output is the fully-quoted JSON string,
+          # interpolated raw into the payload below as `"text": <value>`.
+          # shellcheck disable=SC2016  # single quotes intentional: ${e.*} are JS
+          # template refs read from process.env, not shell expansions.
+          ADDED_CSV="$(csv "${ADDED:-}" "${N_ADDED:-0}")" \
+          REMOVED_CSV="$(csv "${REMOVED:-}" "${N_REMOVED:-0}")" \
+          LINK="$link" \
+          node -e '
+            const e = process.env;
+            const text =
+              `🔎 *camunda-hub upstream op-surface drift* vs the pin ` +
+              `(\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
+              `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
+              `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}\n` +
+              `${e.LINK}`;
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
+          '
+
+      - name: Notify Slack (hub op-surface drift)
+        # Non-blocking + only when the payload built cleanly (don't post a
+        # half-built message if slack-payload errored under continue-on-error).
+        if: >-
+          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0') &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
+          steps.slack-payload.outcome == 'success'
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          # text_json is already a JSON.stringify'd (fully quoted, fully escaped)
+          # string, so interpolate it raw as the value — no surrounding quotes.
+          payload: |
+            {
+              "channel": "#camunda-hub-api-test-results",
+              "text": ${{ steps.slack-payload.outputs.text_json }}
+            }
 
       # Public config (oca): the spec is camunda/camunda's public OpenAPI, so
       # uploading the full bundle + generated suite for debugging leaks nothing.

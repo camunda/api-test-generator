@@ -1,0 +1,55 @@
+name: camunda-hub clone token
+description: >-
+  Mint a short-lived GitHub App installation token to clone the private
+  camunda/camunda-hub. Reads the preview-envs App credentials from Vault (GitHub
+  OIDC/JWT — no long-lived secret stored) and mints an installation token scoped
+  to camunda/camunda-hub. Requires the caller job to have `id-token: write` and
+  to have checked out the repo first (local composite action). The App must be
+  installed on camunda/camunda-hub with Contents: Read, or minting 403s.
+
+inputs:
+  vault-url:
+    description: Vault address (secrets.VAULT_ADDR).
+    required: true
+  vault-jwt-path:
+    description: Vault JWT auth path (secrets.VAULT_JWT_PATH).
+    required: true
+  vault-jwt-role:
+    description: Vault JWT role (secrets.VAULT_JWT_ROLE).
+    required: true
+  vault-jwt-audience:
+    description: Vault JWT GitHub audience (secrets.VAULT_JWT_AUDIENCE).
+    required: true
+
+outputs:
+  token:
+    description: >-
+      GitHub App installation token scoped to camunda/camunda-hub. Empty if
+      minting failed and the caller set continue-on-error — check for empty
+      before use.
+    value: ${{ steps.mint.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch camunda-hub GitHub App creds from Vault
+      id: creds
+      uses: hashicorp/vault-action@v3
+      with:
+        url: ${{ inputs.vault-url }}
+        method: jwt
+        path: ${{ inputs.vault-jwt-path }}
+        role: ${{ inputs.vault-jwt-role }}
+        jwtGithubAudience: ${{ inputs.vault-jwt-audience }}
+        secrets: |
+          secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
+          secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
+
+    - name: Mint camunda-hub clone token from the GitHub App
+      id: mint
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ steps.creds.outputs.APP_ID }}
+        private-key: ${{ steps.creds.outputs.APP_PRIVATE_KEY }}
+        owner: camunda
+        repositories: camunda-hub

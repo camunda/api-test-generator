@@ -201,27 +201,14 @@ jobs:
         run: npx tsc --noEmit -p tests/tsconfig.json
 
       # --- clone the PINNED hub spec (private repo → App token) ---------------
-      - name: Fetch camunda-hub GitHub App creds from Vault
-        id: app-creds
-        uses: hashicorp/vault-action@v3
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
-
-      - name: Mint camunda-hub clone token from the GitHub App
+      - name: Mint camunda-hub clone token
         id: hub-token
-        uses: actions/create-github-app-token@v2
+        uses: ./.github/actions/hub-clone-token
         with:
-          app-id: ${{ steps.app-creds.outputs.APP_ID }}
-          private-key: ${{ steps.app-creds.outputs.APP_PRIVATE_KEY }}
-          owner: camunda
-          repositories: camunda-hub
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: Read pinned hub specRef
         id: pin
@@ -361,29 +348,15 @@ jobs:
       # Guarded on secret availability: if Vault secrets aren't present (e.g. a
       # Dependabot PR), these three steps skip and the job reports the OCA check
       # only, rather than going red on missing credentials.
-      - name: Fetch camunda-hub GitHub App creds from Vault
-        id: app-creds
-        if: env.VAULT_ADDR != ''
-        uses: hashicorp/vault-action@v3
-        with:
-          url: ${{ secrets.VAULT_ADDR }}
-          method: jwt
-          path: ${{ secrets.VAULT_JWT_PATH }}
-          role: ${{ secrets.VAULT_JWT_ROLE }}
-          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-          secrets: |
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_ID | APP_ID ;
-            secret/data/products/web-modeler/ci/preview-envs GITHUB_PREVIEW_ENVIRONMENTS_APP_PRIVATE_KEY | APP_PRIVATE_KEY ;
-
-      - name: Mint camunda-hub clone token from the GitHub App
+      - name: Mint camunda-hub clone token
         id: hub-token
         if: env.VAULT_ADDR != ''
-        uses: actions/create-github-app-token@v2
+        uses: ./.github/actions/hub-clone-token
         with:
-          app-id: ${{ steps.app-creds.outputs.APP_ID }}
-          private-key: ${{ steps.app-creds.outputs.APP_PRIVATE_KEY }}
-          owner: camunda
-          repositories: camunda-hub
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: camunda-hub — pin vs camunda/camunda-hub@main
         id: hub
