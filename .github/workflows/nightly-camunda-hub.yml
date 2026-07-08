@@ -204,6 +204,65 @@ jobs:
           path: test-results/e2e-camunda-hub/
           retention-days: 14
 
+      # --- Operation-surface drift heads-up (#435) -----------------------------
+      # The nightly runs UNPINNED (latest camunda-hub@main), so a new/renamed
+      # upstream domain currently only shows up as a red run. Surface *which*
+      # operationIds appeared/disappeared vs the recorded pin
+      # (configs/camunda-hub/spec-pin.json) as a threaded Slack reply, so the
+      # channel sees the new surface explicitly. The canonical, richer signal is
+      # still the spec-bump-check tracking issue (#434) — this is the same info
+      # delivered to the nightly's audience, reusing `spec-operations`.
+      #
+      # Runs POST-run + continue-on-error: it re-checks out the pinned ref in the
+      # sibling and re-bundles (mutating spec/camunda-hub/bundled), which is only
+      # safe once the suites — which need the latest bundle — have finished. The
+      # bundle currently on disk is latest (generate never re-bundles), so we read
+      # latest first, then swap to pinned. Only emits drift when the surfaces
+      # actually differ, so a fresh pin posts nothing (no noise).
+      - name: Hub op-surface drift vs pinned baseline
+        id: op-drift
+        if: always()
+        continue-on-error: true
+        env:
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+        run: |
+          set -uo pipefail
+          # 1. Latest op surface — the bundle on disk is still latest.
+          if ! CONFIG=camunda-hub npm run -s spec-operations > /tmp/hub-latest-ops.txt; then
+            echo "Could not read the latest op surface — skipping drift heads-up."; exit 0
+          fi
+          pinned="$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-hub/spec-pin.json','utf8')).specRef)")"
+          if [ -z "$pinned" ] || [ -z "${HUB_TOKEN:-}" ]; then
+            echo "No pinned ref or clone token — skipping drift heads-up."; exit 0
+          fi
+          # 2. Pinned op surface — fetch + check out the pin in the sibling, re-bundle.
+          dest="${GITHUB_WORKSPACE}/../camunda-hub"
+          git -C "$dest" -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+            fetch --depth 1 origin "$pinned"
+          git -C "$dest" checkout -q --detach FETCH_HEAD
+          if ! CONFIG=camunda-hub npm run fetch-spec >/dev/null \
+             || ! CONFIG=camunda-hub npm run -s spec-operations > /tmp/hub-pinned-ops.txt; then
+            echo "Could not bundle the pinned ref — skipping drift heads-up."; exit 0
+          fi
+          # 3. Diff (LC_ALL=C so comm's byte order matches the re-sorted inputs).
+          LC_ALL=C sort -o /tmp/hub-latest-ops.txt /tmp/hub-latest-ops.txt
+          LC_ALL=C sort -o /tmp/hub-pinned-ops.txt /tmp/hub-pinned-ops.txt
+          added="$(LC_ALL=C comm -13 /tmp/hub-pinned-ops.txt /tmp/hub-latest-ops.txt || true)"
+          removed="$(LC_ALL=C comm -23 /tmp/hub-pinned-ops.txt /tmp/hub-latest-ops.txt || true)"
+          n_added="$(printf '%s' "$added" | grep -c . || true)"
+          n_removed="$(printf '%s' "$removed" | grep -c . || true)"
+          echo "Op-surface vs pin ${pinned:0:12}: +${n_added} / -${n_removed}"
+          # operationIds are camelCase identifiers (no JSON-sensitive chars), so a
+          # comma-join is safe to interpolate into the Slack payload. Cap at 30.
+          csv() { printf '%s' "$1" | grep -E '.' | head -30 | paste -sd, - | sed 's/,/, /g' || true; }
+          {
+            echo "n_added=${n_added}"
+            echo "n_removed=${n_removed}"
+            echo "pinned_short=${pinned:0:12}"
+            echo "added_csv=$(csv "$added")"
+            echo "removed_csv=$(csv "$removed")"
+          } >> "$GITHUB_OUTPUT"
+
       # --- 7. Results summary --------------------------------------------------
       # Write per-profile Playwright pass/fail (from the JSON reporter stats) to
       # the GitHub Actions run summary. The Playwright HTML report (in the artifact)
@@ -473,6 +532,22 @@ jobs:
               "channel": "${{ env.SLACK_CHANNEL }}",
               "thread_ts": "${{ steps.slack-positive.outputs.ts }}",
               "text": "ℹ️ Some operations are skipped in the positive suite due to known issues:\n${{ steps.known-issues.outputs.positive_known_issues }}"
+            }
+
+      # Threaded reply: which operations appeared/disappeared upstream vs the pin
+      # (#435). Only posts when the surface actually drifted — a fresh pin is
+      # silent. Derived by the "Hub op-surface drift vs pinned baseline" step.
+      - name: Notify Slack (positive — upstream op-surface drift)
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' && (steps.op-drift.outputs.n_added != '0' || steps.op-drift.outputs.n_removed != '0') }}
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "thread_ts": "${{ steps.slack-positive.outputs.ts }}",
+              "text": "🔎 *Upstream op-surface drift* vs the pinned baseline (`${{ steps.op-drift.outputs.pinned_short }}`):\n🆕 added (${{ steps.op-drift.outputs.n_added }}): ${{ steps.op-drift.outputs.added_csv }}\n🗑️ removed (${{ steps.op-drift.outputs.n_removed }}): ${{ steps.op-drift.outputs.removed_csv }}\nℹ️ Canonical heads-up: the `Spec-bump check: camunda-hub drifted from the pin` tracking issue."
             }
 
       - name: Notify Slack (negative suite)
