@@ -23,9 +23,6 @@ on:
       hub_image_tag:
         description: 'camunda/hub image tag to run (SNAPSHOT = latest published build)'
         default: SNAPSHOT
-      rv_profiles:
-        description: 'Negative (request-validation) profiles to run'
-        default: secured rbac
 
 permissions:
   contents: read
@@ -109,7 +106,8 @@ jobs:
       - name: Generate + run positive + negative suites
         env:
           STEPS: generate run
-          RV_PROFILES: ${{ inputs.rv_profiles }}
+          # Always the full hub run — same suites the nightly runs.
+          RV_PROFILES: secured rbac
         run: ./scripts/e2e/run-hub.sh
 
       - name: Stop Hub
@@ -129,7 +127,6 @@ jobs:
         env:
           HUB_REF: ${{ inputs.hub_ref }}
           HUB_IMAGE_TAG: ${{ inputs.hub_image_tag }}
-          RV_PROFILES: ${{ inputs.rv_profiles }}
         run: |
           out="test-results/e2e-camunda-hub"
           summarize() { # profile
@@ -153,5 +150,6 @@ jobs:
             summarize positive
             echo ""
             echo "### Negative (request-validation)"
-            for p in ${RV_PROFILES}; do summarize "$p"; done
+            summarize secured
+            summarize rbac
           } >> "$GITHUB_STEP_SUMMARY"
