@@ -180,8 +180,9 @@ ref that clone currently has checked out. Implications:
 - **Running the hub suites locally (the nightly's path):** the hub spec is bundled
   from the `../camunda-hub` **sibling clone** at runtime and is **gitignored** — no
   branch commit or the spec-pin governs it (local runs are unpinned, like the
-  nightly). The prebuilt Hub always runs **latest** `SNAPSHOT`, so keep the sibling
-  at latest for spec↔runtime parity:
+  nightly). The prebuilt Hub runs the `camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}` image
+  (`SNAPSHOT` = latest published build; override `HUB_IMAGE_TAG` to pin), so keep the
+  sibling at the matching ref for spec↔runtime parity:
   ```bash
   git -C ../camunda-hub checkout main && git -C ../camunda-hub pull   # sibling → latest
   HUB_MODE=prebuilt ./docker/start-hub.sh start

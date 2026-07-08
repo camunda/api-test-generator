@@ -131,8 +131,9 @@ if step generate; then
     fi
     sib="$(git -C ../camunda-hub rev-parse --short HEAD 2>/dev/null || echo '?')"
     echo "  ✓ spec re-bundled from ../camunda-hub @ ${sib}"
-    echo "    ↳ prebuilt Hub runs LATEST main; if ${sib} is behind, run"
-    echo "      'git -C ../camunda-hub checkout main && git -C ../camunda-hub pull' then re-run."
+    echo "    ↳ prebuilt Hub runs camunda/hub:\${HUB_IMAGE_TAG:-SNAPSHOT} (SNAPSHOT = latest"
+    echo "      published build); if ${sib} lags that image, run 'git -C ../camunda-hub"
+    echo "      checkout main && git -C ../camunda-hub pull' then re-run."
   fi
   if [ -z "${SKIP_POSITIVE:-}" ]; then
     CONFIG="$CONFIG" npm run extract-graph >/dev/null
