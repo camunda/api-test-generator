@@ -238,10 +238,15 @@ jobs:
             echo "No pinned ref or clone token — skipping drift heads-up."; exit 0
           fi
           # 2. Pinned op surface — fetch + check out the pin in the sibling, re-bundle.
+          # Check fetch/checkout explicitly: under `set -u` (no -e) a failed fetch
+          # would leave the sibling at latest, so "pinned" ops would equal latest
+          # and the diff would silently show no drift (false negative).
           dest="${GITHUB_WORKSPACE}/../camunda-hub"
-          git -C "$dest" -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            fetch --depth 1 origin "$pinned"
-          git -C "$dest" checkout -q --detach FETCH_HEAD
+          if ! git -C "$dest" -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+                 fetch --depth 1 origin "$pinned" \
+             || ! git -C "$dest" checkout -q --detach FETCH_HEAD; then
+            echo "Could not check out the pinned ref — skipping drift heads-up."; exit 0
+          fi
           if ! CONFIG=camunda-hub npm run fetch-spec >/dev/null \
              || ! CONFIG=camunda-hub npm run -s spec-operations > /tmp/hub-pinned-ops.txt; then
             echo "Could not bundle the pinned ref — skipping drift heads-up."; exit 0
@@ -560,7 +565,7 @@ jobs:
       # (#435). Only posts when the surface actually drifted — a fresh pin is
       # silent. Derived by the "Hub op-surface drift vs pinned baseline" step.
       - name: Notify Slack (positive — upstream op-surface drift)
-        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' && (steps.op-drift.outputs.n_added != '0' || steps.op-drift.outputs.n_removed != '0') }}
+        if: ${{ always() && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' && steps.slack-positive.outputs.ts != '' && steps.op-drift.outputs.pinned_short != '' && (steps.op-drift.outputs.n_added != '0' || steps.op-drift.outputs.n_removed != '0') }}
         uses: slackapi/slack-github-action@v2
         with:
           method: chat.postMessage
