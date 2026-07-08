@@ -117,10 +117,11 @@ if step generate; then
   echo "── generate ─────────────────────────────"
   # Re-bundle the spec from the ../camunda-hub sibling so generation reflects the
   # sibling's CURRENT checkout — never a stale on-disk bundle (the "forgot to
-  # fetch-spec and used yesterday's spec" footgun). The prebuilt Hub runs LATEST
-  # main, so the sibling must be at latest for spec<->runtime parity — surfaced
-  # below. SKIP_BUNDLE=1 opts out (the nightly bundles in its own step from a
-  # fresh clone; or a dev deliberately running against the current on-disk bundle).
+  # fetch-spec and used yesterday's spec" footgun). The prebuilt Hub runs the
+  # camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} image (SNAPSHOT = latest published
+  # build), so the sibling must match that image for spec<->runtime parity —
+  # surfaced below. SKIP_BUNDLE=1 opts out (the nightly bundles in its own step
+  # from a fresh clone; or a dev deliberately running the current on-disk bundle).
   if [ -z "${SKIP_BUNDLE:-}" ]; then
     # >/dev/null drops only the noisy success stdout; fetch-spec + the bundler
     # write errors to stderr (visible), and set -e aborts on failure. Add an
