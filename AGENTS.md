@@ -469,6 +469,14 @@ is unavailable, routing falls back to the tracking issue. Checkout uses
 `persist-credentials: false` so its read-only header can't shadow the App-token
 push.
 
+For **camunda-hub** only, when the *operation* surface changed (an operationId
+added/removed, not just a field), it also posts a Slack alert to
+`#camunda-hub-api-test-results` (Slack bot token via the same Vault JWT auth)
+linking the bump PR / tracking issue it just created — so the hub team sees a
+new upstream domain in their channel, not only as a GitHub issue (#435). The
+op-surface diff is already computed for the routing above, so the Slack step
+only formats + links; it does not recompute.
+
 ## Pre-push checklist
 
 Local equivalent of the CI gate. Run before every push:

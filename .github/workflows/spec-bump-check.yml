@@ -368,6 +368,88 @@ jobs:
           LATEST: ${{ steps.refs.outputs.latest }}
         run: bash .github/scripts/spec-bump-resolve.sh
 
+      # --- Hub-only: Slack heads-up on OPERATION-surface drift (#435) -----------
+      # The hub team lives in #camunda-hub-api-test-results, so mirror the
+      # GitHub artifact this run just created (bump PR or tracking issue) as a
+      # Slack alert. Only when the operationId surface actually changed
+      # (n_added/n_removed) — a field-level-only content change is silent here.
+      # The diff is already computed above (steps.opdiff), so this just formats +
+      # links; no recomputation. content_changed=='true' is the sentinel that the
+      # opdiff step ran (it's unset when drifted=='false').
+      - name: Fetch Slack bot token from Vault (hub drift)
+        id: slack-secrets
+        if: >-
+          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0')
+        continue-on-error: true
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common SLACK_BOT_USER_OAUTH_TOKEN | SLACK_BOT_TOKEN ;
+
+      - name: Build hub drift Slack payload
+        id: slack-payload
+        if: >-
+          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0') &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADDED: ${{ steps.opdiff.outputs.added }}
+          REMOVED: ${{ steps.opdiff.outputs.removed }}
+          N_ADDED: ${{ steps.opdiff.outputs.n_added }}
+          N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+        run: |
+          set -uo pipefail
+          issue_title='Spec-bump check: camunda-hub drifted from the pin'
+          # Link the actionable artifact this run routed the drift to: the bump
+          # PR (clean) or the tracking issue (broken). Read-only lookups.
+          pr_url="$(gh pr list --head chore/spec-bump-camunda-hub --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)"
+          pr_num="$(gh pr list --head chore/spec-bump-camunda-hub --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          issue_url="$(gh issue list --state open --search "in:title \"${issue_title}\"" --json number,title,url --jq "[.[] | select(.title == \"${issue_title}\")] | .[0].url // empty" 2>/dev/null || true)"
+          issue_num="$(gh issue list --state open --search "in:title \"${issue_title}\"" --json number,title --jq "[.[] | select(.title == \"${issue_title}\")] | .[0].number // empty" 2>/dev/null || true)"
+          if [ -n "$pr_url" ]; then
+            link_md="➡️ Adopt via <${pr_url}|bump PR #${pr_num}>"
+          elif [ -n "$issue_url" ]; then
+            link_md="📋 Blocked — see <${issue_url}|tracking issue #${issue_num}>"
+          else
+            link_md="ℹ️ Canonical heads-up: the \`${issue_title}\` issue/PR."
+          fi
+          # Comma-join the first 30 ids; append "… (+N more)" past the cap so a
+          # big drift isn't silently truncated. operationIds are camelCase (no
+          # JSON-sensitive chars), safe to interpolate into the Slack payload.
+          csv() {
+            local out
+            out="$(printf '%s' "$1" | grep -E '.' | head -30 | paste -sd, - | sed 's/,/, /g' || true)"
+            if [ "${2:-0}" -gt 30 ]; then out="${out}, … (+$(( $2 - 30 )) more)"; fi
+            printf '%s' "$out"
+          }
+          {
+            echo "link_md=${link_md}"
+            echo "added_csv=$(csv "${ADDED:-}" "${N_ADDED:-0}")"
+            echo "removed_csv=$(csv "${REMOVED:-}" "${N_REMOVED:-0}")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack (hub op-surface drift)
+        if: >-
+          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0') &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-api-test-results",
+              "text": "🔎 *camunda-hub upstream op-surface drift* vs the pin (`${{ steps.refs.outputs.pinned }}` → latest `${{ steps.refs.outputs.latest }}`):\n🆕 added (${{ steps.opdiff.outputs.n_added }}): ${{ steps.slack-payload.outputs.added_csv }}\n🗑️ removed (${{ steps.opdiff.outputs.n_removed }}): ${{ steps.slack-payload.outputs.removed_csv }}\n${{ steps.slack-payload.outputs.link_md }}"
+            }
+
       # Public config (oca): the spec is camunda/camunda's public OpenAPI, so
       # uploading the full bundle + generated suite for debugging leaks nothing.
       - name: Upload generated outputs
