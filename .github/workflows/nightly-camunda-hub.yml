@@ -268,7 +268,14 @@ jobs:
           echo "Op-surface vs pin ${pinned:0:12}: +${n_added} / -${n_removed}"
           # operationIds are camelCase identifiers (no JSON-sensitive chars), so a
           # comma-join is safe to interpolate into the Slack payload. Cap at 30.
-          csv() { printf '%s' "$1" | grep -E '.' | head -30 | paste -sd, - | sed 's/,/, /g' || true; }
+          # Comma-join the first 30 ids; append "… (+N more)" when the count
+          # ($2) exceeds the cap so a big drift isn't silently truncated.
+          csv() {
+            local out
+            out="$(printf '%s' "$1" | grep -E '.' | head -30 | paste -sd, - | sed 's/,/, /g' || true)"
+            if [ "${2:-0}" -gt 30 ]; then out="${out}, … (+$(( $2 - 30 )) more)"; fi
+            printf '%s' "$out"
+          }
           # Link to the actionable artifact spec-bump-check routes this drift to:
           # a bump PR (clean drift) or the tracking issue (broken drift). Prefer
           # the PR; fall back to the issue; else a plain note (spec-bump-check
@@ -292,8 +299,8 @@ jobs:
             echo "n_added=${n_added}"
             echo "n_removed=${n_removed}"
             echo "pinned_short=${pinned:0:12}"
-            echo "added_csv=$(csv "$added")"
-            echo "removed_csv=$(csv "$removed")"
+            echo "added_csv=$(csv "$added" "$n_added")"
+            echo "removed_csv=$(csv "$removed" "$n_removed")"
             echo "link_md=${link_md}"
           } >> "$GITHUB_OUTPUT"
 
