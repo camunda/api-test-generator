@@ -229,14 +229,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          # Seed every output up front so the "skip" exits below leave
+          # well-defined values. Downstream the Slack step compares against '0'
+          # and '' — an unset output reads as '' (and '' != '0' is true), which
+          # would otherwise fire a blank drift message. Real values are appended
+          # at the end (last write wins). skip() logs + exits cleanly.
+          {
+            echo "n_added=0"; echo "n_removed=0"; echo "pinned_short="
+            echo "added_csv="; echo "removed_csv="; echo "link_md="
+          } >> "$GITHUB_OUTPUT"
+          skip() { echo "$1 — skipping drift heads-up."; exit 0; }
           # 1. Latest op surface — the bundle on disk is still latest.
-          if ! CONFIG=camunda-hub npm run -s spec-operations > /tmp/hub-latest-ops.txt; then
-            echo "Could not read the latest op surface — skipping drift heads-up."; exit 0
-          fi
+          CONFIG=camunda-hub npm run -s spec-operations > /tmp/hub-latest-ops.txt \
+            || skip "Could not read the latest op surface"
           pinned="$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-hub/spec-pin.json','utf8')).specRef)")"
-          if [ -z "$pinned" ] || [ -z "${HUB_TOKEN:-}" ]; then
-            echo "No pinned ref or clone token — skipping drift heads-up."; exit 0
-          fi
+          if [ -z "$pinned" ] || [ -z "${HUB_TOKEN:-}" ]; then skip "No pinned ref or clone token"; fi
           # 2. Pinned op surface — fetch + check out the pin in the sibling, re-bundle.
           # Check fetch/checkout explicitly: under `set -u` (no -e) a failed fetch
           # would leave the sibling at latest, so "pinned" ops would equal latest
@@ -245,11 +252,11 @@ jobs:
           if ! git -C "$dest" -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
                  fetch --depth 1 origin "$pinned" \
              || ! git -C "$dest" checkout -q --detach FETCH_HEAD; then
-            echo "Could not check out the pinned ref — skipping drift heads-up."; exit 0
+            skip "Could not check out the pinned ref"
           fi
           if ! CONFIG=camunda-hub npm run fetch-spec >/dev/null \
              || ! CONFIG=camunda-hub npm run -s spec-operations > /tmp/hub-pinned-ops.txt; then
-            echo "Could not bundle the pinned ref — skipping drift heads-up."; exit 0
+            skip "Could not bundle the pinned ref"
           fi
           # 3. Diff (LC_ALL=C so comm's byte order matches the re-sorted inputs).
           LC_ALL=C sort -o /tmp/hub-latest-ops.txt /tmp/hub-latest-ops.txt
