@@ -59,21 +59,10 @@ jobs:
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       - name: Clone camunda-hub @ ${{ inputs.hub_ref }} (sibling ../camunda-hub)
-        env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
-          HUB_REF: ${{ inputs.hub_ref }}
-        run: |
-          if [ -z "$HUB_TOKEN" ]; then
-            echo "::error::No clone token — App token empty (Vault OIDC + preview-envs role, App installed on camunda/camunda-hub with Contents: Read)."
-            exit 1
-          fi
-          dest="${GITHUB_WORKSPACE}/../camunda-hub"
-          mkdir -p "$dest" && cd "$dest" && git init -q
-          git remote add origin https://github.com/camunda/camunda-hub.git
-          git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            fetch --depth 1 origin "$HUB_REF"
-          git checkout -q FETCH_HEAD
-          echo "camunda-hub @ $(git rev-parse --short HEAD) (ref: $HUB_REF)"
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-token.outputs.token }}
+          ref: ${{ inputs.hub_ref }}
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v6
@@ -124,32 +113,8 @@ jobs:
 
       - name: Write results to run summary
         if: always()
-        env:
-          HUB_REF: ${{ inputs.hub_ref }}
-          HUB_IMAGE_TAG: ${{ inputs.hub_image_tag }}
-        run: |
-          out="test-results/e2e-camunda-hub"
-          summarize() { # profile
-            local f="$out/pw-$1.json"
-            if [ -f "$f" ]; then
-              python3 -c "import json; s=json.load(open('$f')).get('stats',{}); print(f\"- **$1**: {s.get('expected',0)} passed, {s.get('unexpected',0)} failed\")"
-            else
-              echo "- **$1**: (no report — run may have failed before this profile)"
-            fi
-          }
-          stale="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('staleSuppressedOpIds',[])))" 2>/dev/null || true)"
-          {
-            echo "## Hub on-demand test — \`${GITHUB_REF_NAME}\`"
-            echo "hub ref: \`${HUB_REF}\` · image: \`camunda/hub:${HUB_IMAGE_TAG}\`"
-            echo ""
-            if [ -n "$stale" ]; then
-              echo "> ⚠️ **Config drift:** \`positive-suppress.json\` lists \`${stale}\` no longer in the spec — update the suppress list."
-              echo ""
-            fi
-            echo "### Positive (lifecycle)"
-            summarize positive
-            echo ""
-            echo "### Negative (request-validation)"
-            summarize secured
-            summarize rbac
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: ./.github/actions/hub-run-summary
+        with:
+          heading: |
+            ## Hub on-demand test — `${{ github.ref_name }}`
+            hub ref: `${{ inputs.hub_ref }}` · image: `camunda/hub:${{ inputs.hub_image_tag }}`

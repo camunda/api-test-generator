@@ -220,21 +220,10 @@ jobs:
       # Clone the PINNED commit (not latest main — this is the deterministic
       # regression leg; the nightly is the unpinned one). Shallow fetch-by-SHA.
       - name: Clone camunda-hub @ pinned specRef (sibling ../camunda-hub)
-        env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
-          PIN: ${{ steps.pin.outputs.sha }}
-        run: |
-          if [ -z "$HUB_TOKEN" ]; then
-            echo "::error::No clone token — App token empty (check Vault OIDC + preview-envs role, and the App is installed on camunda/camunda-hub with Contents: Read)."
-            exit 1
-          fi
-          dest="${GITHUB_WORKSPACE}/../camunda-hub"
-          mkdir -p "$dest" && cd "$dest" && git init -q
-          git remote add origin https://github.com/camunda/camunda-hub.git
-          git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            fetch --depth 1 origin "$PIN"
-          git checkout -q FETCH_HEAD
-          echo "camunda-hub pinned at: $(git rev-parse HEAD)"
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-token.outputs.token }}
+          ref: ${{ steps.pin.outputs.sha }}
 
       # Local-bundle from the sibling clone (SPEC_REF ignored for hub). Generate
       # BOTH suites so PR CI catches hub generator breakage pre-merge (#440):

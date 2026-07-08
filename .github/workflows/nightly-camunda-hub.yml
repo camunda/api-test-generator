@@ -72,18 +72,10 @@ jobs:
       # We always take latest main → "always on latest" (spec pin NOT enforced).
       # Token: the App installation token minted in the step above.
       - name: Clone camunda-hub (latest main)
-        env:
-          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
-        run: |
-          if [ -z "$HUB_TOKEN" ]; then
-            echo "::error::No clone token — App installation token was empty (check Vault OIDC auth + role read on web-modeler/ci/preview-envs, and that the App is installed on camunda/camunda-hub with Contents: Read)."
-            exit 1
-          fi
-          # Scope the token rewrite to this single clone (via `git -c`) rather than
-          # persisting it in ~/.gitconfig — nothing with the token is left on disk.
-          git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
-            clone --depth 1 https://github.com/camunda/camunda-hub.git "${GITHUB_WORKSPACE}/../camunda-hub"
-          echo "camunda-hub at: $(cd "${GITHUB_WORKSPACE}/../camunda-hub" && git rev-parse HEAD)"
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-token.outputs.token }}
+          ref: main
 
       # --- Toolchain -----------------------------------------------------------
       - name: Setup Node.js 22
@@ -170,33 +162,9 @@ jobs:
       # has the full per-test detail + request/response attachments.
       - name: Write results to run summary
         if: always()
-        run: |
-          out="test-results/e2e-camunda-hub"
-          summarize() { # profile
-            local f="$out/pw-$1.json"
-            if [ -f "$f" ]; then
-              python3 -c "import json; s=json.load(open('$f')).get('stats',{}); print(f\"- **$1**: {s.get('expected',0)} passed, {s.get('unexpected',0)} failed\")"
-            else
-              echo "- **$1**: (no report — run may have failed before this profile)"
-            fi
-          }
-          # Config drift: positive-suppress entries no longer in the bundled
-          # spec (materializer records these on coverage.json rather than
-          # failing generate — e.g. an upstream op rename/removal).
-          stale="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('staleSuppressedOpIds',[])))" 2>/dev/null || true)"
-          {
-            echo "## Nightly — camunda-hub API tests"
-            if [ -n "$stale" ]; then
-              echo "> ⚠️ **Config drift:** \`positive-suppress.json\` lists \`${stale}\` no longer in the spec (renamed/removed upstream?) — update the suppress list."
-              echo ""
-            fi
-            echo "### Positive (lifecycle)"
-            summarize positive
-            echo ""
-            echo "### Negative (request-validation)"
-            summarize secured
-            summarize rbac
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: ./.github/actions/hub-run-summary
+        with:
+          heading: '## Nightly — camunda-hub API tests'
 
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
       # Fetch the TestRail creds from Vault via the same GitHub OIDC/JWT auth used
