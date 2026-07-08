@@ -167,6 +167,10 @@ jobs:
           # are positive-suppressed in configs/camunda-hub/positive-suppress.json.
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
+          # The "Bundle latest camunda-hub spec" step above already re-bundled
+          # from the fresh latest-main clone, so skip run-hub.sh's own re-bundle
+          # (which exists for local runs against a possibly-stale on-disk bundle).
+          SKIP_BUNDLE: '1'
         run: ./scripts/e2e/run-hub.sh
 
       # --- Always stop Hub + collect artifacts ---------------------------------

@@ -115,6 +115,19 @@ fi
 # ============================ 1. GENERATE ============================
 if step generate; then
   echo "── generate ─────────────────────────────"
+  # Re-bundle the spec from the ../camunda-hub sibling so generation reflects the
+  # sibling's CURRENT checkout — never a stale on-disk bundle (the "forgot to
+  # fetch-spec and used yesterday's spec" footgun). The prebuilt Hub runs LATEST
+  # main, so the sibling must be at latest for spec<->runtime parity — surfaced
+  # below. SKIP_BUNDLE=1 opts out (the nightly bundles in its own step from a
+  # fresh clone; or a dev deliberately running against the current on-disk bundle).
+  if [ -z "${SKIP_BUNDLE:-}" ]; then
+    CONFIG="$CONFIG" npm run fetch-spec >/dev/null
+    sib="$(git -C ../camunda-hub rev-parse --short HEAD 2>/dev/null || echo '?')"
+    echo "  ✓ spec re-bundled from ../camunda-hub @ ${sib}"
+    echo "    ↳ prebuilt Hub runs LATEST main; if ${sib} is behind, run"
+    echo "      'git -C ../camunda-hub checkout main && git -C ../camunda-hub pull' then re-run."
+  fi
   if [ -z "${SKIP_POSITIVE:-}" ]; then
     CONFIG="$CONFIG" npm run extract-graph >/dev/null
     CONFIG="$CONFIG" npm run generate:scenarios >/dev/null

@@ -177,6 +177,22 @@ ref that clone currently has checked out. Implications:
 - The nightly (`.github/workflows/nightly-camunda-hub.yml`) runs hub **unpinned**
   (clones `camunda-hub@main`, bundles latest) — the pin governs only the
   Layer-3 invariants in `configs/camunda-hub/regression-invariants.test.ts`.
+- **Running the hub suites locally (the nightly's path):** the hub spec is bundled
+  from the `../camunda-hub` **sibling clone** at runtime and is **gitignored** — no
+  branch commit or the spec-pin governs it (local runs are unpinned, like the
+  nightly). The prebuilt Hub always runs **latest** `SNAPSHOT`, so keep the sibling
+  at latest for spec↔runtime parity:
+  ```bash
+  git -C ../camunda-hub checkout main && git -C ../camunda-hub pull   # sibling → latest
+  HUB_MODE=prebuilt ./docker/start-hub.sh start
+  STEPS="generate run" RV_PROFILES="secured rbac" ./scripts/e2e/run-hub.sh
+  ```
+  `run-hub.sh`'s `generate` step **auto-re-bundles** from the sibling (so it never
+  runs against a stale on-disk bundle — this bit us once: a day-old bundle marked
+  `page.startCursor/endCursor` `required` while latest had dropped them, producing
+  false search-op failures). Set `SKIP_BUNDLE=1` to run against the current on-disk
+  bundle instead. Don't invoke `npx playwright` directly — that skips the
+  `POS_FIXTURE_*` env `run-hub.sh` sets (e.g. valid-BPMN `POS_FIXTURE_FILE_CONTENT`).
 
 ## Code style & lint (Biome)
 
