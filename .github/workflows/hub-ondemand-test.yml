@@ -23,6 +23,11 @@ on:
       hub_image_tag:
         description: 'camunda/hub image tag to run (SNAPSHOT = latest published build)'
         default: SNAPSHOT
+  # TEMPORARY (remove before merge): run on PR so #459 can smoke-test the workflow
+  # itself — a workflow_dispatch-only workflow isn't dispatchable until it's on the
+  # default branch. On the pull_request event there are no `inputs`, so the steps
+  # below fall back to main / SNAPSHOT via `|| 'main'` / `|| 'SNAPSHOT'`.
+  pull_request:
 
 permissions:
   contents: read
@@ -43,6 +48,8 @@ jobs:
     name: Generate + run hub suites on ${{ github.ref_name }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Vault OIDC + the clone token need repo secrets — skip fork PRs (no access).
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout api-test-generator (the dispatched branch)
         uses: actions/checkout@v6
@@ -62,7 +69,7 @@ jobs:
         uses: ./.github/actions/clone-hub-sibling
         with:
           token: ${{ steps.hub-token.outputs.token }}
-          ref: ${{ inputs.hub_ref }}
+          ref: ${{ inputs.hub_ref || 'main' }}
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v6
@@ -81,7 +88,7 @@ jobs:
       - name: Start Hub (prebuilt image)
         env:
           HUB_MODE: prebuilt
-          HUB_IMAGE_TAG: ${{ inputs.hub_image_tag }}
+          HUB_IMAGE_TAG: ${{ inputs.hub_image_tag || 'SNAPSHOT' }}
         run: ./docker/start-hub.sh start
 
       - name: Wait for Hub to be ready
@@ -120,4 +127,4 @@ jobs:
         with:
           heading: |
             ## Hub on-demand test — `${{ github.ref_name }}`
-            hub ref: `${{ inputs.hub_ref }}` · image: `camunda/hub:${{ inputs.hub_image_tag }}`
+            hub ref: `${{ inputs.hub_ref || 'main' }}` · image: `camunda/hub:${{ inputs.hub_image_tag || 'SNAPSHOT' }}`
