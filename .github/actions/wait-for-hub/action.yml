@@ -1,0 +1,51 @@
+name: Wait for Hub to be ready
+description: >-
+  Poll the Hub v2 surface until it returns 401 (auth required = the security
+  layer is wired and the app is serving) for several CONSECUTIVE checks, or time
+  out. A bare "any response" check is unreliable — during Spring Boot startup the
+  port accepts connections and can return 404/502/503 before the app is ready; the
+  consecutive-401 streak debounces that. Dumps the hub container log on timeout.
+
+inputs:
+  url:
+    description: The v2 base URL to poll (e.g. http://localhost:8088/api/v2/).
+    required: true
+  timeout-seconds:
+    description: Max seconds to wait for readiness.
+    default: '600'
+  container:
+    description: Hub container name to tail logs from on timeout.
+    default: hub
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        HUB_URL: ${{ inputs.url }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        HUB_CONTAINER: ${{ inputs.container }}
+      run: |
+        echo "Waiting for Hub at $HUB_URL (image pull + boot, up to $(( TIMEOUT_SECONDS / 60 ))m)..."
+        deadline=$(( SECONDS + TIMEOUT_SECONDS )); streak=0; need=3; last=""
+        while :; do
+          code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$HUB_URL" 2>/dev/null || echo 000)
+          if [ "$code" = "401" ]; then
+            streak=$(( streak + 1 ))
+          else
+            [ "$code" != "$last" ] && echo "  …not ready yet (HTTP $code)"
+            streak=0
+          fi
+          last="$code"
+          if [ "$streak" -ge "$need" ]; then
+            echo "Hub ready (HTTP 401 x$need consecutive after ${SECONDS}s)."
+            break
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "::error::Hub did not become ready within $(( TIMEOUT_SECONDS / 60 ))m (last code: $code)"
+            echo "----- docker logs $HUB_CONTAINER (tail) -----"
+            docker logs --tail 150 "$HUB_CONTAINER" 2>&1 || echo "(no hub container log)"
+            exit 1
+          fi
+          sleep 5
+        done

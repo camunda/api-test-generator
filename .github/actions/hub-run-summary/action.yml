@@ -1,0 +1,43 @@
+name: Hub run summary
+description: >-
+  Append per-suite pass/fail (positive + secured + rbac) plus any config-drift note
+  to the GitHub run summary, read from the camunda-hub Playwright JSON reports under
+  test-results/e2e-camunda-hub/. Shared by the nightly and the on-demand test.
+
+inputs:
+  heading:
+    description: Markdown heading block for this summary (may be multi-line).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        HEADING: ${{ inputs.heading }}
+      run: |
+        out="test-results/e2e-camunda-hub"
+        summarize() { # profile
+          local f="$out/pw-$1.json"
+          if [ -f "$f" ]; then
+            python3 -c "import json; s=json.load(open('$f')).get('stats',{}); print(f\"- **$1**: {s.get('expected',0)} passed, {s.get('unexpected',0)} failed\")"
+          else
+            echo "- **$1**: (no report — run may have failed before this profile)"
+          fi
+        }
+        # Config drift: positive-suppress entries no longer in the bundled spec
+        # (materializer records these on coverage.json rather than failing generate).
+        stale="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('staleSuppressedOpIds',[])))" 2>/dev/null || true)"
+        {
+          printf '%s\n' "$HEADING"
+          if [ -n "$stale" ]; then
+            echo "> ⚠️ **Config drift:** \`positive-suppress.json\` lists \`${stale}\` no longer in the spec (renamed/removed upstream?) — update the suppress list."
+            echo ""
+          fi
+          echo "### Positive (lifecycle)"
+          summarize positive
+          echo ""
+          echo "### Negative (request-validation)"
+          summarize secured
+          summarize rbac
+        } >> "$GITHUB_STEP_SUMMARY"

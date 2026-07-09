@@ -469,6 +469,20 @@ is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
 and runtime breakage the pinned PR leg deliberately can't.
 
+The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
+is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
+(`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch
+picker) to run the same generate → live-Hub flow on that branch's generator without
+waiting for the schedule. It's a test tool — results go to the run summary + uploaded
+Playwright reports only (no Slack/TestRail). `hub_ref` / `hub_image_tag` inputs default
+to `main` / `SNAPSHOT` (dispatch-overridable). It shares all its hub plumbing with the
+nightly rather than duplicating it — the composite actions
+[`hub-clone-token`](.github/actions/hub-clone-token),
+[`clone-hub-sibling`](.github/actions/clone-hub-sibling),
+[`wait-for-hub`](.github/actions/wait-for-hub), and
+[`hub-run-summary`](.github/actions/hub-run-summary), plus `scripts/e2e/run-hub.sh`
+(which auto-re-bundles). (`clone-hub-sibling` is also used by ci.yml's hub-invariants leg.)
+
 The **spec-bump check** ([spec-bump-check.yml](.github/workflows/spec-bump-check.yml),
 #387) is a scheduled (**daily** 06:00 UTC) + `workflow_dispatch` job — a
 per-config **matrix over `camunda-oca` and `camunda-hub`**, never `pull_request`
