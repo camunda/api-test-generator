@@ -1,5 +1,5 @@
 {
   "$comment": "Spec pin for the bundled-spec invariants regression layer. The invariants in configs/camunda-oca/regression-invariants.test.ts assert named properties of the upstream spec content fingerprinted by `expectedSpecHash`. `specRef` MUST be a full 40-char commit SHA on camunda/camunda (not a branch like `main`) so the baseline does not drift on every upstream merge. CI fetches the spec at `specRef` (requires camunda-schema-bundler >= 2.1.0 for SHA support) and aborts early via tests/regression/spec-pin.setup.ts if its hash drifts, so reviewers see a clear 'spec changed upstream — re-pin' signal instead of confusing invariant failures. To bump: pick a newer SHA, run `SPEC_REF=<sha> npm run fetch-spec:ref`, regenerate the pipeline, update any invariants whose values legitimately changed, then update both fields below in the same PR.",
-  "specRef": "2d51d5a244b8a055dce4a7c2f544ad49d3a57276",
-  "expectedSpecHash": "sha256:5018d5a2c0a3ac4c901ce1d5ccd246e08960e1cf0c4d7e1af04fb2b548568c8a"
+  "specRef": "51b3e81c2d79346d9c107a226dd8e21de2e96716",
+  "expectedSpecHash": "sha256:280d2e6b69d447778def1673ffe33375e21960b31e259ddade66fc7feea6a3e1"
 }
