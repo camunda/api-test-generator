@@ -191,13 +191,13 @@
     },
     {
       "@type": "EntityKind",
-      "name": "AgentInstanceIteration",
+      "name": "AgentInstanceLoopIteration",
       "shape": "immutable-entity",
       "identifiers": [
-        "IterationId"
+        "LoopIterationId"
       ],
       "establishedBy": "createAgentInstanceHistoryItem",
-      "description": "#386 — a logical grouping of one LLM call, its tool dispatches, and their results within an agent instance's conversation history. Identified by a client-minted IterationId supplied in the createAgentInstanceHistoryItem body (so IterationId is a clientMintedIdentifier via the upstream x-semantic-establishes annotation, not a producer-chained key). Append-only: once written it is never updated or deleted, and it is read back only via searchAgentInstanceHistory (no canonical get-by-id), so it carries neither the CRUD triple nor a runtime fetcher — hence shape: immutable-entity."
+      "description": "#386 — a logical grouping of one LLM call, its tool dispatches, and their results within an agent instance's conversation history. Identified by a client-minted LoopIterationId supplied in the createAgentInstanceHistoryItem body (field `loopIteration`) by the AI Agent Connector (so LoopIterationId is a clientMintedIdentifier via the upstream x-semantic-establishes annotation, not a producer-chained key). Append-only: once written it is never updated or deleted, and it is read back only via searchAgentInstanceHistory (no canonical get-by-id), so it carries neither the CRUD triple nor a runtime fetcher — hence shape: immutable-entity. (Upstream renamed AgentInstanceIteration→AgentInstanceLoopIteration and IterationId→LoopIterationId.)"
     }
   ]
 }
