@@ -2,11 +2,11 @@
 # build and report the result back onto the PR.
 #
 # Triggered by a repository_dispatch (type: camunda-hub-pr) sent FROM a
-# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying the PR's
-# source SHA + the pr-<sha> image ref. It runs the shared hub-suite reusable
-# against that ref/image (our own Keycloak; #462 decision) and posts a commit
-# status back onto the camunda-hub PR (POST .../statuses/{sha}) — mirroring how
-# c8-cross-component-e2e-tests reports on hub PRs.
+# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying just the
+# PR's source SHA + number. It derives the pr-<sha> image ref, runs the shared
+# hub-suite reusable against it (our own Keycloak; #462 decision) and posts a
+# commit status back onto the camunda-hub PR (POST .../statuses/{sha}) — mirroring
+# how c8-cross-component-e2e-tests reports on hub PRs.
 #
 # ⚠️ PREREQS (see #462; this stays a DRAFT until they land):
 #   1. Registry read creds to pull the private pr-<sha> image — reuses the
@@ -39,7 +39,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate the whole workflow on a well-formed source_sha. clone-hub-sibling accepts
+  # arbitrary refs (branches/tags), so without this a non-SHA payload (e.g. `main`)
+  # would run the full suite and try to pull `...:pr-main` before failing in the
+  # reporter. Validating up front means the run job never starts for a bad SHA,
+  # and downstream jobs consume the validated value (not the raw payload).
+  validate:
+    name: Validate dispatch payload
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.v.outputs.source_sha }}
+    steps:
+      - name: Validate source_sha is a 40-char hex commit SHA
+        id: v
+        env:
+          SHA: ${{ github.event.client_payload.source_sha }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
+            echo "::error::source_sha '$SHA' is not a 40-char hex commit SHA."
+            exit 1
+          fi
+          echo "source_sha=$SHA" >> "$GITHUB_OUTPUT"
+
   run:
+    needs: validate
     uses: ./.github/workflows/_hub-suite-run.yml
     secrets:
       VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
@@ -51,25 +75,27 @@ jobs:
       REGISTRY_USERNAME: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_USER }}
       REGISTRY_PASSWORD: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_PASSWORD }}
     with:
-      hub_ref: ${{ github.event.client_payload.source_sha }}
-      # DERIVED from source_sha, NOT taken from the payload: a payload-supplied
-      # hub_image could point at a different tag than the reported commit (run
-      # image X, report status on SHA Y). Building it here pins the image to the
-      # exact commit we report on. registry + repo are fixed; only the pr-<sha>
-      # tag varies. The reusable still validates the result (well-formed + path).
-      hub_image: registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ github.event.client_payload.source_sha }}
+      hub_ref: ${{ needs.validate.outputs.source_sha }}
+      # DERIVED from the validated source_sha, NOT taken from the payload: a
+      # payload-supplied hub_image could point at a different tag than the
+      # reported commit (run image X, report status on SHA Y). Building it here
+      # pins the image to the exact commit we report on. registry + repo are
+      # fixed; only the pr-<sha> tag varies. The reusable still validates it.
+      hub_image: registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}
       # Hardcoded, NOT taken from the payload: forwarding an untrusted
       # hub_registry lets a caller send '' to skip the login + image-allowlist
       # validation entirely. Fixing it here guarantees validation always runs.
       hub_registry: registry.camunda.cloud
       summary_heading: |
         ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
-        source_sha: `${{ github.event.client_payload.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ github.event.client_payload.source_sha }}`
+        source_sha: `${{ needs.validate.outputs.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}`
 
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
-    needs: run
-    if: always()
+    needs: [validate, run]
+    # Report whenever the SHA was valid (whatever the run result). If validate
+    # failed there's no real commit to post a status on, so skip.
+    if: always() && needs.validate.result == 'success'
     runs-on: ubuntu-latest
     steps:
       # PREREQ #2: mint a token that can write statuses on camunda/camunda-hub
@@ -93,18 +119,12 @@ jobs:
         if: steps.status-token.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.status-token.outputs.token }}
-          SHA: ${{ github.event.client_payload.source_sha }}
+          # Already validated as a 40-char hex SHA by the `validate` job.
+          SHA: ${{ needs.validate.outputs.source_sha }}
           RESULT: ${{ needs.run.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          # source_sha comes from an untrusted dispatch payload; a malformed value
-          # (e.g. containing slashes) would craft an unexpected API path. Require a
-          # full 40-char hex commit SHA before touching the statuses endpoint.
-          if ! printf '%s' "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
-            echo "::error::source_sha '$SHA' is not a 40-char hex commit SHA."
-            exit 1
-          fi
           # Map the run result to a commit-status state. cancelled/skipped map to
           # "error" (an infra/manual condition, not a test failure) so a genuine
           # "failure" stays meaningful.
