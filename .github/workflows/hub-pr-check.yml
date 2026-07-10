@@ -18,9 +18,10 @@
 #   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
 #      sending the repository_dispatch.
 #
-# Expected client_payload: { source_sha, pr_number, hub_image }. The registry is
-# NOT taken from the payload — it's fixed to registry.camunda.cloud below so the
-# login + image-allowlist validation always runs (see the `hub_registry` input).
+# Expected client_payload: { source_sha, pr_number }. The image ref and registry
+# are NOT taken from the payload — they're derived/fixed below (image =
+# .../hub-restapi-self-managed:pr-<source_sha>, registry = registry.camunda.cloud)
+# so the image can't drift from the reported commit and validation always runs.
 name: Hub PR check
 
 on:
@@ -51,15 +52,19 @@ jobs:
       REGISTRY_PASSWORD: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_PASSWORD }}
     with:
       hub_ref: ${{ github.event.client_payload.source_sha }}
-      hub_image: ${{ github.event.client_payload.hub_image }}
+      # DERIVED from source_sha, NOT taken from the payload: a payload-supplied
+      # hub_image could point at a different tag than the reported commit (run
+      # image X, report status on SHA Y). Building it here pins the image to the
+      # exact commit we report on. registry + repo are fixed; only the pr-<sha>
+      # tag varies. The reusable still validates the result (well-formed + path).
+      hub_image: registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ github.event.client_payload.source_sha }}
       # Hardcoded, NOT taken from the payload: forwarding an untrusted
       # hub_registry lets a caller send '' to skip the login + image-allowlist
-      # validation entirely (then run an arbitrary public hub_image). Fixing it
-      # here guarantees validation always runs for the PR-check path.
+      # validation entirely. Fixing it here guarantees validation always runs.
       hub_registry: registry.camunda.cloud
       summary_heading: |
         ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
-        source_sha: `${{ github.event.client_payload.source_sha }}` · image: `${{ github.event.client_payload.hub_image }}`
+        source_sha: `${{ github.event.client_payload.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ github.event.client_payload.source_sha }}`
 
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
