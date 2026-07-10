@@ -5,13 +5,9 @@
 # to test (gh workflow run hub-ondemand-test.yml --ref <branch>, or the Actions UI
 # "Run workflow" branch picker) and it checks out + tests that branch's generator.
 #
-# It mirrors the nightly's generate+run but is a TEST TOOL, not a monitor: results
-# go to the run summary + uploaded Playwright reports only — no Slack, no TestRail.
-#
-# Spec/runtime default to camunda-hub@main + camunda/hub:SNAPSHOT (latest, like the
-# nightly); both are dispatch-overridable to reproduce against a specific hub build.
-# run-hub.sh re-bundles the spec from the sibling clone itself (the auto-re-bundle
-# guard), so there's no separate bundle step.
+# It's a TEST TOOL, not a monitor: results go to the run summary + uploaded
+# Playwright reports only — no Slack, no TestRail. The run body itself lives in the
+# reusable _hub-suite-run.yml (shared with the PR check, #462).
 name: Hub on-demand test
 
 on:
@@ -24,100 +20,28 @@ on:
         description: 'camunda/hub image tag to run (SNAPSHOT = latest published build)'
         default: SNAPSHOT
 
-permissions:
-  contents: read
-  id-token: write # OIDC → Vault for the camunda-hub clone token
-
 # One run per branch; a new dispatch cancels an in-flight one for the same ref.
 concurrency:
   group: hub-ondemand-test-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CONFIG: camunda-hub
-  HUB_UI_PORT: '8088'
-  KEYCLOAK_PORT: '18080'
-
 jobs:
-  test:
-    name: Generate + run hub suites on ${{ github.ref_name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Checkout api-test-generator (the dispatched branch)
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Mint camunda-hub clone token
-        id: hub-token
-        uses: ./.github/actions/hub-clone-token
-        with:
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-
-      - name: Clone camunda-hub @ ${{ inputs.hub_ref }} (sibling ../camunda-hub)
-        uses: ./.github/actions/clone-hub-sibling
-        with:
-          token: ${{ steps.hub-token.outputs.token }}
-          ref: ${{ inputs.hub_ref }}
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Start Hub (prebuilt image)
-        env:
-          HUB_MODE: prebuilt
-          HUB_IMAGE_TAG: ${{ inputs.hub_image_tag }}
-        run: ./docker/start-hub.sh start
-
-      - name: Wait for Hub to be ready
-        uses: ./.github/actions/wait-for-hub
-        with:
-          url: http://localhost:${{ env.HUB_UI_PORT }}/api/v2/
-
-      # run-hub.sh's generate step auto-re-bundles the spec from the sibling we
-      # just cloned at hub_ref (the SKIP_BUNDLE guard is unset), so the generated
-      # suite always matches the ref under test — no separate bundle step needed.
-      - name: Generate + run positive + negative suites
-        env:
-          STEPS: generate run
-          # Always the full hub run — same suites the nightly runs.
-          RV_PROFILES: secured rbac
-        run: ./scripts/e2e/run-hub.sh
-
-      - name: Stop Hub
-        if: always()
-        run: ./docker/start-hub.sh stop || true
-
-      - name: Upload Playwright reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          # No branch suffix: artifact names can't contain '/' (breaks feature/*
-          # branches), and artifacts are already scoped per-run (the run page shows
-          # the branch + inputs).
-          name: hub-ondemand-reports
-          path: test-results/e2e-camunda-hub/
-          retention-days: 14
-
-      - name: Write results to run summary
-        if: always()
-        uses: ./.github/actions/hub-run-summary
-        with:
-          heading: |
-            ## Hub on-demand test — `${{ github.ref_name }}`
-            hub ref: `${{ inputs.hub_ref }}` · image: `camunda/hub:${{ inputs.hub_image_tag }}`
+  run:
+    # A reusable workflow can't be granted MORE than its caller holds, so the
+    # OIDC token the reusable needs (Vault mint → camunda-hub clone) only reaches
+    # it if we grant id-token: write here.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_hub-suite-run.yml
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
+    with:
+      hub_ref: ${{ inputs.hub_ref }}
+      hub_image: camunda/hub:${{ inputs.hub_image_tag }}
+      summary_heading: |
+        ## Hub on-demand test — `${{ github.ref_name }}`
+        hub ref: `${{ inputs.hub_ref }}` · image: `camunda/hub:${{ inputs.hub_image_tag }}`

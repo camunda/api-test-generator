@@ -281,6 +281,13 @@ case "${1:-start}" in
     # The container is managed by docker compose, so there's no make PID to track;
     # `stop` tears it down via `docker compose down`.
     if [ "${HUB_MODE:-source}" = "prebuilt" ]; then
+      # Resolve the Hub image ref HERE (bash handles nested defaults reliably;
+      # Compose interpolation does not, across versions) so docker-compose.hub.yml
+      # only needs a single-level ${HUB_IMAGE:-…}. Precedence: explicit HUB_IMAGE
+      # (full registry/repo/tag, e.g. the PR check's pr-<sha>) > HUB_IMAGE_TAG on
+      # the public repo > SNAPSHOT.
+      export HUB_IMAGE="${HUB_IMAGE:-camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}}"
+      echo "Hub image: ${HUB_IMAGE}"
       # Bring up only the hub + its deps (NOT websockets — it's a private image
       # the suite doesn't need; excluding it keeps the prebuilt path free of any
       # Camunda registry credentials since camunda/hub itself is public).
@@ -298,7 +305,7 @@ case "${1:-start}" in
         sleep 15
       done
       fix_keycloak
-      echo "Hub app: prebuilt image camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} (container 'hub')."
+      echo "Hub app: prebuilt image ${HUB_IMAGE} (container 'hub')."
       echo "Run './docker/start-hub.sh stop' to stop."
       exit 0
     fi

@@ -1,0 +1,125 @@
+# Reusable hub-suite run (workflow_call). The shared body behind every "generate
+# the hub suite + run it against a live Hub" entry point — the on-demand test
+# (hub-ondemand-test.yml) and the PR check (hub-pr-check.yml, #462) both call it,
+# so the orchestration lives in ONE place. Bundles the spec from ../camunda-hub @
+# `hub_ref` and runs the `hub_image` container via the prebuilt path, with the
+# keycloak/identity/db this repo provisions (we control auth). Results → run
+# summary + uploaded Playwright reports.
+name: _hub-suite-run
+
+on:
+  workflow_call:
+    inputs:
+      hub_ref:
+        description: camunda-hub ref/SHA to clone + bundle the spec from.
+        type: string
+        default: main
+      hub_image:
+        description: >-
+          Full Hub image ref to run (e.g. camunda/hub:SNAPSHOT, or an internal
+          registry ref like registry.camunda.cloud/team-hub/hub:pr-<sha>).
+        type: string
+        default: camunda/hub:SNAPSHOT
+      summary_heading:
+        description: Markdown heading block for the run summary.
+        type: string
+        required: true
+    # Declared explicitly (not `inherit`) so the interface is least-privilege and
+    # callers can't accidentally omit one. Used by the hub-clone-token action.
+    secrets:
+      VAULT_ADDR:
+        required: true
+      VAULT_JWT_PATH:
+        required: true
+      VAULT_JWT_ROLE:
+        required: true
+      VAULT_JWT_AUDIENCE:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC → Vault for the camunda-hub clone token
+
+env:
+  CONFIG: camunda-hub
+  HUB_UI_PORT: '8088'
+  KEYCLOAK_PORT: '18080'
+
+jobs:
+  run:
+    name: Generate + run hub suites (${{ inputs.hub_ref }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Mint camunda-hub clone token
+        id: hub-token
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Clone camunda-hub @ ${{ inputs.hub_ref }} (sibling ../camunda-hub)
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-token.outputs.token }}
+          ref: ${{ inputs.hub_ref }}
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Hub (prebuilt image)
+        env:
+          HUB_MODE: prebuilt
+          # Full image ref (registry + repo + tag); docker-compose.hub.yml reads it.
+          HUB_IMAGE: ${{ inputs.hub_image }}
+        run: ./docker/start-hub.sh start
+
+      - name: Wait for Hub to be ready
+        uses: ./.github/actions/wait-for-hub
+        with:
+          url: http://localhost:${{ env.HUB_UI_PORT }}/api/v2/
+
+      # run-hub.sh's generate step auto-re-bundles from the sibling cloned at
+      # hub_ref (SKIP_BUNDLE unset), so the generated suite matches the ref under
+      # test — no separate bundle step needed.
+      - name: Generate + run positive + negative suites
+        env:
+          STEPS: generate run
+          RV_PROFILES: secured rbac
+        run: ./scripts/e2e/run-hub.sh
+
+      - name: Stop Hub
+        if: always()
+        run: ./docker/start-hub.sh stop || true
+
+      - name: Upload Playwright reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-suite-reports
+          path: test-results/e2e-camunda-hub/
+          retention-days: 14
+
+      - name: Write results to run summary
+        if: always()
+        uses: ./.github/actions/hub-run-summary
+        with:
+          heading: ${{ inputs.summary_heading }}
