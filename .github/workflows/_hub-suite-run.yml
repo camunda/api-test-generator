@@ -16,8 +16,9 @@ on:
         default: main
       hub_image:
         description: >-
-          Full Hub image ref to run (e.g. camunda/hub:SNAPSHOT, or an internal
-          registry ref like registry.camunda.cloud/team-hub/hub:pr-<sha>).
+          Full Hub image ref to run (e.g. camunda/hub:SNAPSHOT, or the internal
+          PR image registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-<sha>,
+          which is the same artifact published as camunda/hub).
         type: string
         default: camunda/hub:SNAPSHOT
       summary_heading:
@@ -27,9 +28,11 @@ on:
       hub_registry:
         description: >-
           Optional container registry host to `docker login` before pulling
-          hub_image (e.g. registry.camunda.cloud for a private pr-<sha> image).
-          Leave empty for public camunda/hub. When set, REGISTRY_USERNAME/PASSWORD
-          must be provided.
+          hub_image (e.g. registry.camunda.cloud for the private
+          hub-restapi-self-managed:pr-<sha> image). Leave empty for public
+          camunda/hub. When set, it must be on HUB_REGISTRY_ALLOWLIST, hub_image
+          must be under HUB_IMAGE_ALLOWLIST, and REGISTRY_USERNAME/PASSWORD must
+          be provided.
         type: string
         default: ''
     # Declared explicitly (not `inherit`) so the interface is least-privilege and

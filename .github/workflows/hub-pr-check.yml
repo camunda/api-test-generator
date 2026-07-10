@@ -4,21 +4,23 @@
 # Triggered by a repository_dispatch (type: camunda-hub-pr) sent FROM a
 # camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying the PR's
 # source SHA + the pr-<sha> image ref. It runs the shared hub-suite reusable
-# against that ref/image (our own Keycloak; #462 decision) and PATCHes a commit
-# status back onto the camunda-hub PR — mirroring how c8-cross-component-e2e-tests
-# reports on hub PRs.
+# against that ref/image (our own Keycloak; #462 decision) and posts a commit
+# status back onto the camunda-hub PR (POST .../statuses/{sha}) — mirroring how
+# c8-cross-component-e2e-tests reports on hub PRs.
 #
 # ⚠️ PREREQS (see #462; this stays a DRAFT until they land):
 #   1. Registry read creds to pull the private pr-<sha> image — reuses the
 #      existing CAMUNDA_CONTAINER_REGISTRY_USER/PASSWORD secrets (same pair
 #      camunda-hub uses to pull team-hub images). ✅ already provisioned.
 #   2. The qa-processes App (installed on camunda/camunda-hub) needs
-#      `Commit statuses: write` so the report job can PATCH a status — it no-ops
-#      (continue-on-error) until the scope is granted.
+#      `Commit statuses: write` so the report job can post a status
+#      (POST .../statuses/{sha}) — it no-ops (continue-on-error) until granted.
 #   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
 #      sending the repository_dispatch.
 #
-# Expected client_payload: { source_sha, pr_number, hub_image, hub_registry }.
+# Expected client_payload: { source_sha, pr_number, hub_image }. The registry is
+# NOT taken from the payload — it's fixed to registry.camunda.cloud below so the
+# login + image-allowlist validation always runs (see the `hub_registry` input).
 name: Hub PR check
 
 on:
