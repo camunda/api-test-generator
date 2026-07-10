@@ -57,6 +57,11 @@ env:
   CONFIG: camunda-hub
   HUB_UI_PORT: '8088'
   KEYCLOAK_PORT: '18080'
+  # Registries the login step is allowed to send credentials to. hub_registry
+  # can arrive from an external repository_dispatch payload (hub-pr-check), so
+  # it is validated against this allowlist before `docker login` to prevent
+  # credential exfiltration to an attacker-controlled host. Space-separated.
+  HUB_REGISTRY_ALLOWLIST: registry.camunda.cloud
 
 jobs:
   run:
@@ -104,9 +109,28 @@ jobs:
         if: inputs.hub_registry != ''
         env:
           REGISTRY: ${{ inputs.hub_registry }}
+          HUB_IMAGE: ${{ inputs.hub_image }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
+          # Only send credentials to an allowlisted host — hub_registry may come
+          # from an untrusted dispatch payload. Reject anything else.
+          allowed=false
+          for r in $HUB_REGISTRY_ALLOWLIST; do
+            [ "$REGISTRY" = "$r" ] && allowed=true
+          done
+          if [ "$allowed" != true ]; then
+            echo "::error::hub_registry='$REGISTRY' is not in the allowlist ($HUB_REGISTRY_ALLOWLIST)."
+            exit 1
+          fi
+          # The image must actually live in that registry, else login is pointless
+          # (and a mismatch signals a crafted payload).
+          case "$HUB_IMAGE" in
+            "$REGISTRY"/*) ;;
+            *)
+              echo "::error::hub_image='$HUB_IMAGE' does not start with hub_registry='$REGISTRY/'."
+              exit 1 ;;
+          esac
           if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
             echo "::error::hub_registry=$REGISTRY set but REGISTRY_USERNAME/PASSWORD not provided."
             exit 1

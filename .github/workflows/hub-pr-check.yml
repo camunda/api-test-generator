@@ -85,7 +85,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          state="failure"; [ "$RESULT" = "success" ] && state="success"
+          # Map the run result to a commit-status state. cancelled/skipped map to
+          # "error" (an infra/manual condition, not a test failure) so a genuine
+          # "failure" stays meaningful.
+          case "$RESULT" in
+            success) state=success ;;
+            failure) state=failure ;;
+            *)       state=error ;;
+          esac
           gh api -X POST "repos/camunda/camunda-hub/statuses/${SHA}" \
             -f state="$state" \
             -f target_url="$RUN_URL" \
