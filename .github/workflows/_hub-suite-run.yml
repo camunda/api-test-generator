@@ -16,14 +16,25 @@ on:
         default: main
       hub_image:
         description: >-
-          Full Hub image ref to run (e.g. camunda/hub:SNAPSHOT, or an internal
-          registry ref like registry.camunda.cloud/team-hub/hub:pr-<sha>).
+          Full Hub image ref to run (e.g. camunda/hub:SNAPSHOT, or the internal
+          PR image registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-<sha>,
+          which is the same artifact published as camunda/hub).
         type: string
         default: camunda/hub:SNAPSHOT
       summary_heading:
         description: Markdown heading block for the run summary.
         type: string
         required: true
+      hub_registry:
+        description: >-
+          Optional container registry host to `docker login` before pulling
+          hub_image (e.g. registry.camunda.cloud for the private
+          hub-restapi-self-managed:pr-<sha> image). Leave empty for public
+          camunda/hub. When set, it must be on HUB_REGISTRY_ALLOWLIST, hub_image
+          must be under HUB_IMAGE_ALLOWLIST, and REGISTRY_USERNAME/PASSWORD must
+          be provided.
+        type: string
+        default: ''
     # Declared explicitly (not `inherit`) so the interface is least-privilege and
     # callers can't accidentally omit one. Used by the hub-clone-token action.
     secrets:
@@ -35,6 +46,11 @@ on:
         required: true
       VAULT_JWT_AUDIENCE:
         required: true
+      # Only needed when hub_registry is set (private pr-<sha> image pulls).
+      REGISTRY_USERNAME:
+        required: false
+      REGISTRY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -44,6 +60,17 @@ env:
   CONFIG: camunda-hub
   HUB_UI_PORT: '8088'
   KEYCLOAK_PORT: '18080'
+  # Registries the login step is allowed to send credentials to. hub_registry
+  # can arrive from an external repository_dispatch payload (hub-pr-check), so
+  # it is validated against this allowlist before `docker login` to prevent
+  # credential exfiltration to an attacker-controlled host. Space-separated.
+  HUB_REGISTRY_ALLOWLIST: registry.camunda.cloud
+  # Image repository prefixes we're willing to pull + run when a registry is set.
+  # Pinned to the specific Hub PR image repo (the restapi-self-managed component
+  # is the same artifact published as camunda/hub) — not the whole team-hub org —
+  # so a crafted payload can't run some other team-hub image with these creds.
+  # Space-separated.
+  HUB_IMAGE_ALLOWLIST: 'registry.camunda.cloud/team-hub/hub-restapi-self-managed:'
 
 jobs:
   run:
@@ -84,6 +111,53 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Only for a private image (e.g. the PR check's internal pr-<sha>); skipped
+      # for public camunda/hub. Uses --password-stdin (no token in argv/logs).
+      - name: Log in to the Hub image registry
+        if: inputs.hub_registry != ''
+        env:
+          REGISTRY: ${{ inputs.hub_registry }}
+          HUB_IMAGE: ${{ inputs.hub_image }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # hub_image can come from an untrusted dispatch payload. Require a single
+          # well-formed image reference (no whitespace/control chars) before it's
+          # matched, logged, or handed to docker/compose downstream.
+          # :tag is required (not optional) so this stays consistent with the
+          # tag-prefixed HUB_IMAGE_ALLOWLIST below and the PR-image format.
+          if [ "$(printf '%s' "$HUB_IMAGE" | wc -l)" -ne 0 ] \
+             || ! printf '%s' "$HUB_IMAGE" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+(@sha256:[a-f0-9]+)?$'; then
+            echo "::error::hub_image='$HUB_IMAGE' is not a well-formed single image reference (repo:tag required)."
+            exit 1
+          fi
+          # Only send credentials to an allowlisted host — hub_registry may come
+          # from an untrusted dispatch payload. Reject anything else.
+          allowed=false
+          for r in $HUB_REGISTRY_ALLOWLIST; do
+            [ "$REGISTRY" = "$r" ] && allowed=true
+          done
+          if [ "$allowed" != true ]; then
+            echo "::error::hub_registry='$REGISTRY' is not in the allowlist ($HUB_REGISTRY_ALLOWLIST)."
+            exit 1
+          fi
+          # The image must live under an allowlisted repository path (not just the
+          # allowlisted registry) — limits blast radius and catches crafted payloads.
+          image_ok=false
+          for p in $HUB_IMAGE_ALLOWLIST; do
+            case "$HUB_IMAGE" in "$p"*) image_ok=true ;; esac
+          done
+          if [ "$image_ok" != true ]; then
+            echo "::error::hub_image='$HUB_IMAGE' is not under an allowed path ($HUB_IMAGE_ALLOWLIST)."
+            exit 1
+          fi
+          if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::error::hub_registry=$REGISTRY set but REGISTRY_USERNAME/PASSWORD not provided."
+            exit 1
+          fi
+          printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Start Hub (prebuilt image)
         env:

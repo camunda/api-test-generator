@@ -1,0 +1,141 @@
+# Hub PR check (#462) — run our generated hub suite against a camunda-hub PR's
+# build and report the result back onto the PR.
+#
+# Triggered by a repository_dispatch (type: camunda-hub-pr) sent FROM a
+# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying just the
+# PR's source SHA + number. It derives the pr-<sha> image ref, runs the shared
+# hub-suite reusable against it (our own Keycloak; #462 decision) and posts a
+# commit status back onto the camunda-hub PR (POST .../statuses/{sha}) — mirroring
+# how c8-cross-component-e2e-tests reports on hub PRs.
+#
+# ⚠️ PREREQS (see #462; this stays a DRAFT until they land):
+#   1. Registry read creds to pull the private pr-<sha> image — reuses the
+#      existing CAMUNDA_CONTAINER_REGISTRY_USER/PASSWORD secrets (same pair
+#      camunda-hub uses to pull team-hub images). ✅ already provisioned.
+#   2. The qa-processes App (installed on camunda/camunda-hub) needs
+#      `Commit statuses: write` so the report job can post a status
+#      (POST .../statuses/{sha}) — it no-ops (continue-on-error) until granted.
+#   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
+#      sending the repository_dispatch.
+#
+# Expected client_payload: { source_sha, pr_number }. The image ref and registry
+# are NOT taken from the payload — they're derived/fixed below (image =
+# .../hub-restapi-self-managed:pr-<source_sha>, registry = registry.camunda.cloud)
+# so the image can't drift from the reported commit and validation always runs.
+name: Hub PR check
+
+on:
+  repository_dispatch:
+    types: [camunda-hub-pr]
+
+permissions:
+  contents: read
+  id-token: write # OIDC → Vault (clone token in the reusable)
+
+concurrency:
+  # Fall back to source_sha so a missing/blank pr_number can't collapse unrelated
+  # dispatches into the constant group `hub-pr-check-` (they'd cancel each other).
+  group: hub-pr-check-${{ github.event.client_payload.pr_number || github.event.client_payload.source_sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Gate the whole workflow on a well-formed source_sha. clone-hub-sibling accepts
+  # arbitrary refs (branches/tags), so without this a non-SHA payload (e.g. `main`)
+  # would run the full suite and try to pull `...:pr-main` before failing in the
+  # reporter. Validating up front means the run job never starts for a bad SHA,
+  # and downstream jobs consume the validated value (not the raw payload).
+  validate:
+    name: Validate dispatch payload
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.v.outputs.source_sha }}
+    steps:
+      - name: Validate source_sha is a 40-char hex commit SHA
+        id: v
+        env:
+          SHA: ${{ github.event.client_payload.source_sha }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
+            echo "::error::source_sha '$SHA' is not a 40-char hex commit SHA."
+            exit 1
+          fi
+          echo "source_sha=$SHA" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: validate
+    uses: ./.github/workflows/_hub-suite-run.yml
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
+      # Registry creds to pull the private team-hub pr-<sha> image (the same
+      # pair camunda-hub uses for team-hub pulls).
+      REGISTRY_USERNAME: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_PASSWORD }}
+    with:
+      hub_ref: ${{ needs.validate.outputs.source_sha }}
+      # DERIVED from the validated source_sha, NOT taken from the payload: a
+      # payload-supplied hub_image could point at a different tag than the
+      # reported commit (run image X, report status on SHA Y). Building it here
+      # pins the image to the exact commit we report on. registry + repo are
+      # fixed; only the pr-<sha> tag varies. The reusable still validates it.
+      hub_image: registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}
+      # Hardcoded, NOT taken from the payload: forwarding an untrusted
+      # hub_registry lets a caller send '' to skip the login + image-allowlist
+      # validation entirely. Fixing it here guarantees validation always runs.
+      hub_registry: registry.camunda.cloud
+      summary_heading: |
+        ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
+        source_sha: `${{ needs.validate.outputs.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}`
+
+  # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
+  report:
+    needs: [validate, run]
+    # Report whenever the SHA was valid (whatever the run result). If validate
+    # failed there's no real commit to post a status on, so skip.
+    if: always() && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # PREREQ #2: mint a token that can write statuses on camunda/camunda-hub
+      # (qa-processes App installed there with Statuses: write). continue-on-error
+      # so an unprovisioned App just skips the report rather than failing the run.
+      - name: Mint camunda-hub status token (qa-processes App)
+        id: status-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+
+      - name: Report status back to the camunda-hub PR
+        if: steps.status-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.status-token.outputs.token }}
+          # Already validated as a 40-char hex SHA by the `validate` job.
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RESULT: ${{ needs.run.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Map the run result to a commit-status state. cancelled/skipped map to
+          # "error" (an infra/manual condition, not a test failure) so a genuine
+          # "failure" stays meaningful.
+          case "$RESULT" in
+            success) state=success ;;
+            failure) state=failure ;;
+            *)       state=error ;;
+          esac
+          gh api -X POST "repos/camunda/camunda-hub/statuses/${SHA}" \
+            -f state="$state" \
+            -f target_url="$RUN_URL" \
+            -f context="api-test-generator/hub-suite" \
+            -f description="Generated hub suite: ${state}" >/dev/null
+          echo "Reported '${state}' on camunda-hub@${SHA:0:12}"
