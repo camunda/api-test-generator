@@ -24,6 +24,14 @@ on:
         description: Markdown heading block for the run summary.
         type: string
         required: true
+      hub_registry:
+        description: >-
+          Optional container registry host to `docker login` before pulling
+          hub_image (e.g. registry.camunda.cloud for a private pr-<sha> image).
+          Leave empty for public camunda/hub. When set, REGISTRY_USERNAME/PASSWORD
+          must be provided.
+        type: string
+        default: ''
     # Declared explicitly (not `inherit`) so the interface is least-privilege and
     # callers can't accidentally omit one. Used by the hub-clone-token action.
     secrets:
@@ -35,6 +43,11 @@ on:
         required: true
       VAULT_JWT_AUDIENCE:
         required: true
+      # Only needed when hub_registry is set (private pr-<sha> image pulls).
+      REGISTRY_USERNAME:
+        required: false
+      REGISTRY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -84,6 +97,21 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Only for a private image (e.g. the PR check's internal pr-<sha>); skipped
+      # for public camunda/hub. Uses --password-stdin (no token in argv/logs).
+      - name: Log in to the Hub image registry
+        if: inputs.hub_registry != ''
+        env:
+          REGISTRY: ${{ inputs.hub_registry }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::error::hub_registry=$REGISTRY set but REGISTRY_USERNAME/PASSWORD not provided."
+            exit 1
+          fi
+          printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Start Hub (prebuilt image)
         env:

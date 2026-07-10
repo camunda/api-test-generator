@@ -1,0 +1,91 @@
+# Hub PR check (#462) — run our generated hub suite against a camunda-hub PR's
+# build and report the result back onto the PR.
+#
+# Triggered by a repository_dispatch (type: camunda-hub-pr) sent FROM a
+# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying the PR's
+# source SHA + the pr-<sha> image ref. It runs the shared hub-suite reusable
+# against that ref/image (our own Keycloak; #462 decision) and PATCHes a commit
+# status back onto the camunda-hub PR — mirroring how c8-cross-component-e2e-tests
+# reports on hub PRs.
+#
+# ⚠️ PREREQS (not yet provisioned — see #462; this stays a DRAFT until they land):
+#   1. Registry read creds to pull the private pr-<sha> image
+#      (HUB_REGISTRY_USERNAME / HUB_REGISTRY_PASSWORD repo secrets, or a Vault path).
+#   2. A token that can write commit statuses on camunda/camunda-hub — the
+#      qa-processes App installed there with `Statuses: write` (the report job below
+#      mints it; it no-ops if the App can't reach camunda-hub yet).
+#   3. The camunda-hub-side dispatch workflow (Part B) sending the repository_dispatch.
+#
+# Expected client_payload: { source_sha, pr_number, hub_image, hub_registry }.
+name: Hub PR check
+
+on:
+  repository_dispatch:
+    types: [camunda-hub-pr]
+
+permissions:
+  contents: read
+  id-token: write # OIDC → Vault (clone token in the reusable)
+
+concurrency:
+  group: hub-pr-check-${{ github.event.client_payload.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    uses: ./.github/workflows/_hub-suite-run.yml
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
+      # PREREQ #1: private pr-<sha> image pull creds (empty until provisioned).
+      REGISTRY_USERNAME: ${{ secrets.HUB_REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.HUB_REGISTRY_PASSWORD }}
+    with:
+      hub_ref: ${{ github.event.client_payload.source_sha }}
+      hub_image: ${{ github.event.client_payload.hub_image }}
+      hub_registry: ${{ github.event.client_payload.hub_registry }}
+      summary_heading: |
+        ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
+        source_sha: `${{ github.event.client_payload.source_sha }}` · image: `${{ github.event.client_payload.hub_image }}`
+
+  # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
+  report:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      # PREREQ #2: mint a token that can write statuses on camunda/camunda-hub
+      # (qa-processes App installed there with Statuses: write). continue-on-error
+      # so an unprovisioned App just skips the report rather than failing the run.
+      - name: Mint camunda-hub status token (qa-processes App)
+        id: status-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+
+      - name: Report status back to the camunda-hub PR
+        if: steps.status-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.status-token.outputs.token }}
+          SHA: ${{ github.event.client_payload.source_sha }}
+          RESULT: ${{ needs.run.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          state="failure"; [ "$RESULT" = "success" ] && state="success"
+          gh api -X POST "repos/camunda/camunda-hub/statuses/${SHA}" \
+            -f state="$state" \
+            -f target_url="$RUN_URL" \
+            -f context="api-test-generator/hub-suite" \
+            -f description="Generated hub suite: ${state}" >/dev/null
+          echo "Reported '${state}' on camunda-hub@${SHA:0:12}"
