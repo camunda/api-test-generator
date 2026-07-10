@@ -63,9 +63,11 @@ env:
   # credential exfiltration to an attacker-controlled host. Space-separated.
   HUB_REGISTRY_ALLOWLIST: registry.camunda.cloud
   # Image repository prefixes we're willing to pull + run when a registry is set.
-  # Tighter than "any image in the allowlisted registry" so a crafted payload
-  # can't run some other image under registry.camunda.cloud. Space-separated.
-  HUB_IMAGE_ALLOWLIST: registry.camunda.cloud/team-hub/
+  # Pinned to the specific Hub PR image repo (the restapi-self-managed component
+  # is the same artifact published as camunda/hub) — not the whole team-hub org —
+  # so a crafted payload can't run some other team-hub image with these creds.
+  # Space-separated.
+  HUB_IMAGE_ALLOWLIST: 'registry.camunda.cloud/team-hub/hub-restapi-self-managed:'
 
 jobs:
   run:

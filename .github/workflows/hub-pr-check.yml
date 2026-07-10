@@ -50,7 +50,11 @@ jobs:
     with:
       hub_ref: ${{ github.event.client_payload.source_sha }}
       hub_image: ${{ github.event.client_payload.hub_image }}
-      hub_registry: ${{ github.event.client_payload.hub_registry }}
+      # Hardcoded, NOT taken from the payload: forwarding an untrusted
+      # hub_registry lets a caller send '' to skip the login + image-allowlist
+      # validation entirely (then run an arbitrary public hub_image). Fixing it
+      # here guarantees validation always runs for the PR-check path.
+      hub_registry: registry.camunda.cloud
       summary_heading: |
         ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
         source_sha: `${{ github.event.client_payload.source_sha }}` · image: `${{ github.event.client_payload.hub_image }}`
