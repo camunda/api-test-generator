@@ -114,6 +114,10 @@ jobs:
           vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
           vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
           vault-url: ${{ secrets.VAULT_ADDR }}
+          # Scope the token to camunda-hub (the repo we post the status on) —
+          # without this it defaults to the current repo and the POST 404s.
+          owner: camunda
+          repositories: camunda-hub
 
       - name: Report status back to the camunda-hub PR
         if: steps.status-token.outputs.token != ''
