@@ -122,6 +122,15 @@ jobs:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
+          set -euo pipefail
+          # hub_image can come from an untrusted dispatch payload. Require a single
+          # well-formed image reference (no whitespace/control chars) before it's
+          # matched, logged, or handed to docker/compose downstream.
+          if [ "$(printf '%s' "$HUB_IMAGE" | wc -l)" -ne 0 ] \
+             || ! printf '%s' "$HUB_IMAGE" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[a-f0-9]+)?$'; then
+            echo "::error::hub_image='$HUB_IMAGE' is not a well-formed single image reference."
+            exit 1
+          fi
           # Only send credentials to an allowlisted host — hub_registry may come
           # from an untrusted dispatch payload. Reject anything else.
           allowed=false
