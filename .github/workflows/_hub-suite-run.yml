@@ -62,6 +62,10 @@ env:
   # it is validated against this allowlist before `docker login` to prevent
   # credential exfiltration to an attacker-controlled host. Space-separated.
   HUB_REGISTRY_ALLOWLIST: registry.camunda.cloud
+  # Image repository prefixes we're willing to pull + run when a registry is set.
+  # Tighter than "any image in the allowlisted registry" so a crafted payload
+  # can't run some other image under registry.camunda.cloud. Space-separated.
+  HUB_IMAGE_ALLOWLIST: registry.camunda.cloud/team-hub/
 
 jobs:
   run:
@@ -123,14 +127,16 @@ jobs:
             echo "::error::hub_registry='$REGISTRY' is not in the allowlist ($HUB_REGISTRY_ALLOWLIST)."
             exit 1
           fi
-          # The image must actually live in that registry, else login is pointless
-          # (and a mismatch signals a crafted payload).
-          case "$HUB_IMAGE" in
-            "$REGISTRY"/*) ;;
-            *)
-              echo "::error::hub_image='$HUB_IMAGE' does not start with hub_registry='$REGISTRY/'."
-              exit 1 ;;
-          esac
+          # The image must live under an allowlisted repository path (not just the
+          # allowlisted registry) — limits blast radius and catches crafted payloads.
+          image_ok=false
+          for p in $HUB_IMAGE_ALLOWLIST; do
+            case "$HUB_IMAGE" in "$p"*) image_ok=true ;; esac
+          done
+          if [ "$image_ok" != true ]; then
+            echo "::error::hub_image='$HUB_IMAGE' is not under an allowed path ($HUB_IMAGE_ALLOWLIST)."
+            exit 1
+          fi
           if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
             echo "::error::hub_registry=$REGISTRY set but REGISTRY_USERNAME/PASSWORD not provided."
             exit 1

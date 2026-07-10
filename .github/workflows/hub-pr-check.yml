@@ -30,7 +30,9 @@ permissions:
   id-token: write # OIDC → Vault (clone token in the reusable)
 
 concurrency:
-  group: hub-pr-check-${{ github.event.client_payload.pr_number }}
+  # Fall back to source_sha so a missing/blank pr_number can't collapse unrelated
+  # dispatches into the constant group `hub-pr-check-` (they'd cancel each other).
+  group: hub-pr-check-${{ github.event.client_payload.pr_number || github.event.client_payload.source_sha }}
   cancel-in-progress: true
 
 jobs:
@@ -85,6 +87,13 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # source_sha comes from an untrusted dispatch payload; a malformed value
+          # (e.g. containing slashes) would craft an unexpected API path. Require a
+          # full 40-char hex commit SHA before touching the statuses endpoint.
+          if ! printf '%s' "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
+            echo "::error::source_sha '$SHA' is not a 40-char hex commit SHA."
+            exit 1
+          fi
           # Map the run result to a commit-status state. cancelled/skipped map to
           # "error" (an infra/manual condition, not a test failure) so a genuine
           # "failure" stays meaningful.
