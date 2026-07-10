@@ -27,6 +27,12 @@ concurrency:
 
 jobs:
   run:
+    # A reusable workflow can't be granted MORE than its caller holds, so the
+    # OIDC token the reusable needs (Vault mint → camunda-hub clone) only reaches
+    # it if we grant id-token: write here.
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/_hub-suite-run.yml
     secrets:
       VAULT_ADDR: ${{ secrets.VAULT_ADDR }}

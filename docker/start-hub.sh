@@ -305,7 +305,7 @@ case "${1:-start}" in
         sleep 15
       done
       fix_keycloak
-      echo "Hub app: prebuilt image camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT} (container 'hub')."
+      echo "Hub app: prebuilt image ${HUB_IMAGE} (container 'hub')."
       echo "Run './docker/start-hub.sh stop' to stop."
       exit 0
     fi
