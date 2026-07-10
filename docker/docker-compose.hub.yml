@@ -169,12 +169,15 @@ services:
 
   # Prebuilt Hub (Camunda Web Modeler) image — the CI/nightly alternative to
   # building from source via `make local-self-managed`. Only started with
-  # `--profile prebuilt` (HUB_MODE=prebuilt ./docker/start-hub.sh start). Uses the
-  # public camunda/hub:SNAPSHOT image, wired to the same keycloak/identity/db this
-  # compose already provisions (incl. the c8-client tokens the suite uses).
+  # `--profile prebuilt` (HUB_MODE=prebuilt ./docker/start-hub.sh start). Defaults
+  # to the public camunda/hub:SNAPSHOT image, wired to the same keycloak/identity/db
+  # this compose already provisions (incl. the c8-client tokens the suite uses).
+  # HUB_IMAGE overrides the whole ref (registry+repo+tag) — e.g. an internal
+  # registry.camunda.cloud/.../hub:pr-<sha> for the PR check (#462); HUB_IMAGE_TAG
+  # still overrides just the tag on the public repo.
   hub:
     profiles: ["prebuilt"]
-    image: camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}
+    image: ${HUB_IMAGE:-camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: hub
     # Long-form depends_on so hub waits for its deps to be HEALTHY (not merely
