@@ -28,7 +28,11 @@ concurrency:
 jobs:
   run:
     uses: ./.github/workflows/_hub-suite-run.yml
-    secrets: inherit
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
     with:
       hub_ref: ${{ inputs.hub_ref }}
       hub_image: camunda/hub:${{ inputs.hub_image_tag }}

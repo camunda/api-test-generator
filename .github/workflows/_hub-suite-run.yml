@@ -24,6 +24,17 @@ on:
         description: Markdown heading block for the run summary.
         type: string
         required: true
+    # Declared explicitly (not `inherit`) so the interface is least-privilege and
+    # callers can't accidentally omit one. Used by the hub-clone-token action.
+    secrets:
+      VAULT_ADDR:
+        required: true
+      VAULT_JWT_PATH:
+        required: true
+      VAULT_JWT_ROLE:
+        required: true
+      VAULT_JWT_AUDIENCE:
+        required: true
 
 permissions:
   contents: read
