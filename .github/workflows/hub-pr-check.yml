@@ -8,13 +8,15 @@
 # status back onto the camunda-hub PR — mirroring how c8-cross-component-e2e-tests
 # reports on hub PRs.
 #
-# ⚠️ PREREQS (not yet provisioned — see #462; this stays a DRAFT until they land):
-#   1. Registry read creds to pull the private pr-<sha> image
-#      (HUB_REGISTRY_USERNAME / HUB_REGISTRY_PASSWORD repo secrets, or a Vault path).
-#   2. A token that can write commit statuses on camunda/camunda-hub — the
-#      qa-processes App installed there with `Statuses: write` (the report job below
-#      mints it; it no-ops if the App can't reach camunda-hub yet).
-#   3. The camunda-hub-side dispatch workflow (Part B) sending the repository_dispatch.
+# ⚠️ PREREQS (see #462; this stays a DRAFT until they land):
+#   1. Registry read creds to pull the private pr-<sha> image — reuses the
+#      existing CAMUNDA_CONTAINER_REGISTRY_USER/PASSWORD secrets (same pair
+#      camunda-hub uses to pull team-hub images). ✅ already provisioned.
+#   2. The qa-processes App (installed on camunda/camunda-hub) needs
+#      `Commit statuses: write` so the report job can PATCH a status — it no-ops
+#      (continue-on-error) until the scope is granted.
+#   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
+#      sending the repository_dispatch.
 #
 # Expected client_payload: { source_sha, pr_number, hub_image, hub_registry }.
 name: Hub PR check
@@ -39,9 +41,10 @@ jobs:
       VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
       VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
       VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
-      # PREREQ #1: private pr-<sha> image pull creds (empty until provisioned).
-      REGISTRY_USERNAME: ${{ secrets.HUB_REGISTRY_USERNAME }}
-      REGISTRY_PASSWORD: ${{ secrets.HUB_REGISTRY_PASSWORD }}
+      # Registry creds to pull the private team-hub pr-<sha> image (the same
+      # pair camunda-hub uses for team-hub pulls).
+      REGISTRY_USERNAME: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.CAMUNDA_CONTAINER_REGISTRY_PASSWORD }}
     with:
       hub_ref: ${{ github.event.client_payload.source_sha }}
       hub_image: ${{ github.event.client_payload.hub_image }}
