@@ -385,16 +385,22 @@ jobs:
       # --- Hub-only: Slack heads-up on OPERATION-surface drift (#435) -----------
       # The hub team lives in #camunda-hub-api-test-results, so mirror the
       # GitHub artifact this run just created (bump PR or tracking issue) as a
-      # Slack alert. Only when the operationId surface actually changed
-      # (n_added/n_removed) — a field-level-only content change is silent here.
-      # The diff is already computed above (steps.opdiff), so this just formats +
-      # links; no recomputation. content_changed=='true' is the sentinel that the
-      # opdiff step ran (it's unset when drifted=='false').
+      # Slack alert. Fires when the operationId surface actually changed
+      # (n_added/n_removed) OR when unmapped (uncovered) operations blocked the
+      # auto-adopt path — that second case matters even with zero op-count
+      # churn (e.g. an existing op regresses to uncovered), and without it the
+      # only place that signal shows up is the GitHub tracking issue itself,
+      # which nobody's watching by default. A field-level-only content change
+      # with neither is still silent here. The diff is already computed above
+      # (steps.opdiff), so this just formats + links; no recomputation.
+      # content_changed=='true' is the sentinel that the opdiff step ran (it's
+      # unset when drifted=='false').
       - name: Fetch Slack bot token from Vault (hub drift)
         id: slack-secrets
         if: >-
           matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
-          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0')
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0' ||
+           steps.unmapped.outputs.has_unmapped == 'true')
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -407,7 +413,8 @@ jobs:
         id: slack-payload
         if: >-
           matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
-          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0') &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0' ||
+           steps.unmapped.outputs.has_unmapped == 'true') &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         # Notification formatting must not fail the run (gh/API transient errors).
         continue-on-error: true
@@ -421,6 +428,7 @@ jobs:
           REMOVED: ${{ steps.opdiff.outputs.removed }}
           N_ADDED: ${{ steps.opdiff.outputs.n_added }}
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
+          UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
         run: |
           set -uo pipefail
           # ISSUE_TITLE + CONFIG (matrix env) are the single source of truth for
@@ -457,15 +465,19 @@ jobs:
           # template refs read from process.env, not shell expansions.
           ADDED_CSV="$(csv "${ADDED:-}" "${N_ADDED:-0}")" \
           REMOVED_CSV="$(csv "${REMOVED:-}" "${N_REMOVED:-0}")" \
+          UNMAPPED_CSV="$(csv "${UNMAPPED:-}" 0)" \
           LINK="$link" \
           node -e '
             const e = process.env;
+            const unmappedLine = e.UNMAPPED_CSV
+              ? `\n🚫 *missing coverage* (blocks auto-adopt): ${e.UNMAPPED_CSV}`
+              : "";
             const text =
               `🔎 *camunda-hub upstream op-surface drift* vs the pin ` +
               `(\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
               `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
-              `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}\n` +
-              `${e.LINK}`;
+              `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}` +
+              unmappedLine + `\n${e.LINK}`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 
@@ -474,7 +486,8 @@ jobs:
         # half-built message if slack-payload errored under continue-on-error).
         if: >-
           matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
-          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0') &&
+          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0' ||
+           steps.unmapped.outputs.has_unmapped == 'true') &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
           steps.slack-payload.outcome == 'success'
         continue-on-error: true
