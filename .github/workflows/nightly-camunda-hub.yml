@@ -25,6 +25,9 @@ permissions:
   # Mint a GitHub OIDC token so Vault can authenticate this job via JWT (no
   # long-lived role-id/secret-id stored as repo secrets — smaller blast radius).
   id-token: write
+  # Rolling tracking issue for unmapped spec operations (#471) — open/update/
+  # close a single issue via the built-in GITHUB_TOKEN, no App token needed.
+  issues: write
 
 # Don't pile up overlapping nightly runs.
 concurrency:
@@ -165,6 +168,21 @@ jobs:
         uses: ./.github/actions/hub-run-summary
         with:
           heading: '## Nightly — camunda-hub API tests'
+
+      # --- Unmapped-operations tracking issue (#471) ---------------------------
+      # hub-run-summary already warns in the job summary when generate produces
+      # coverage.json with a non-empty summary.unmappedOperations, but that's
+      # easy to miss on a nightly nobody's watching. This makes it durable: a
+      # single rolling issue (found by exact title, no spam) opens on the first
+      # occurrence, updates if the list changes, and auto-closes once it's
+      # empty again — same pattern spec-bump-check.yml uses for its tracking
+      # issue. Nightly-only (not hub-pr-check): a cross-cutting coverage gap
+      # isn't the fault of whichever PR happened to trigger a dispatch.
+      - name: Open/update/close unmapped-operations tracking issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/hub-unmapped-issue.sh
 
       # --- Publish to TestRail (mirrors camunda/camunda's trcli step) ----------
       # Fetch the TestRail creds from Vault via the same GitHub OIDC/JWT auth used
