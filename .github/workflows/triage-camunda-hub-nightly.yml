@@ -117,13 +117,12 @@ jobs:
           fi
 
       # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
-      # Anthropic key + GitHub token, from the SAME Vault KV path this repo's
-      # nightly already reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no new
-      # policy is needed — KV v2 read is path-level. Key names match what lives at
-      # qa/ci/common: CLAUDE_API_KEY (the Anthropic key) and GH_TOKEN (the org QA
-      # token, reused here for `gh issue create` on camunda-hub). Both are needed,
-      # so let a genuinely-missing key fail loudly rather than silently degrade.
-      - name: Fetch Anthropic key + GitHub token from Vault
+      # Anthropic key only, from the SAME Vault KV path this repo's nightly already
+      # reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no new policy is needed
+      # — KV v2 read is path-level. Key name matches what lives at qa/ci/common:
+      # CLAUDE_API_KEY. (GitHub writes use the qa-processes App token below, not a
+      # PAT.) Required, so a genuinely-missing key fails loudly.
+      - name: Fetch Anthropic key from Vault
         id: vault
         uses: hashicorp/vault-action@v3
         with:
@@ -134,7 +133,29 @@ jobs:
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           secrets: |
             secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
-            secret/data/products/qa/ci/common GH_TOKEN | GH_TOKEN ;
+
+      # GitHub App token for all of the agent's `gh` work — searching + creating
+      # camunda-hub issues (Issues:Write) — instead of a shared org PAT. Same App
+      # + Vault wiring as spec-bump-check.yml and the stale-PR janitor. Scoped to
+      # camunda-hub (the only repo the agent writes to). continue-on-error: if the
+      # App can't reach camunda-hub, the token is empty and the agent degrades to
+      # report-only (Slack still surfaces the bug) rather than failing the run.
+      - name: Generate qa-processes App token (camunda-hub issues)
+        id: qa-token
+        continue-on-error: true
+        # Pinned SHA — same pin as spec-bump-check.yml + the janitor. Bump intentionally.
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
 
       - name: Fetch Slack bot token from Vault
         id: slack
@@ -219,9 +240,10 @@ jobs:
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
-          # Org QA token, reused for `gh issue create` on camunda-hub. If it lacks
-          # Issues:Write on that repo, the agent falls back to report-only at runtime.
-          GH_TOKEN: ${{ steps.vault.outputs.GH_TOKEN }}
+          # qa-processes App token (scoped to camunda-hub) for the agent's `gh`
+          # issue search + create. Empty if the App couldn't be reached → the
+          # agent falls back to report-only at runtime.
+          GH_TOKEN: ${{ steps.qa-token.outputs.token }}
           NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
           REPORTS_DIR: ${{ env.REPORTS_DIR }}
           WORKSPACE_NAME: ${{ steps.ws.outputs.name }}

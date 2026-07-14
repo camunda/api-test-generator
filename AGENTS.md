@@ -482,10 +482,13 @@ It debugs each positive + negative failure, classifies it **product /
 infrastructure / flakiness**, reconciles against the `knownIssue` configs, and —
 for a genuine product bug with no explaining recent `camunda-hub` commit — files a
 `camunda-hub` issue (the OpenAPI v2 spec is the request/response oracle). It posts
-a triaged digest to `#camunda-hub-api-test-results` via the same Slack bot, reusing
-the nightly's Vault plumbing (`CLAUDE_API_KEY` + `GH_TOKEN` at
-`secret/data/products/qa/ci/common`; [`slack-token`](.github/actions/slack-token)
-+ [`hub-clone-token`](.github/actions/hub-clone-token)). `workflow_run` only fires
+a triaged digest to `#camunda-hub-api-test-results` via the same Slack bot. Auth:
+`CLAUDE_API_KEY` at `secret/data/products/qa/ci/common` (agent) +
+[`slack-token`](.github/actions/slack-token) (Slack) +
+[`hub-clone-token`](.github/actions/hub-clone-token) (workspace-cli clone of the
+private camunda-hub); the agent's camunda-hub issue writes use a **qa-processes**
+App token (Vault approle, same as spec-bump-check + the janitor), not a PAT.
+`workflow_run` only fires
 from the default branch — use `workflow_dispatch` with a past `nightly_run_id` to
 test. Slack formatting lives in
 [scripts/triage/hub-triage-format-slack.sh](scripts/triage/hub-triage-format-slack.sh).
