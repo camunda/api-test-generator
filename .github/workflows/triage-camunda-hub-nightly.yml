@@ -1,0 +1,334 @@
+# description: Triage agent for the camunda-hub nightly API test run. Fires when
+#              "Nightly — camunda-hub API tests" completes, downloads its
+#              camunda-hub-nightly-reports artifact (JSON/JUnit + HTML report +
+#              traces/screenshots), spins up a 3-repo workspace (api-test-generator,
+#              camunda-docs, camunda-hub @ main) via workspace-cli, and runs a Claude
+#              Code triage agent. The agent debugs each positive + negative failure,
+#              classifies it product / infrastructure / flakiness, cross-checks the
+#              camunda-hub OpenAPI spec + recent commits (skipping bugs explained by a
+#              recent change), files camunda-hub issues for genuine new product bugs,
+#              and posts a triaged digest to #camunda-hub-api-test-results.
+# type: CI
+# owner: @camunda/test-automation-team
+---
+name: Triage — camunda-hub nightly API failures
+
+on:
+  # Auto-run when the nightly test workflow finishes (any conclusion — a green
+  # night is still reported). The `name:` here must match nightly-camunda-hub.yml.
+  workflow_run:
+    workflows: ["Nightly — camunda-hub API tests"]
+    types: [completed]
+  # Ad-hoc: triage a specific past nightly run.
+  workflow_dispatch:
+    inputs:
+      nightly_run_id:
+        description: 'Run ID of a "Nightly — camunda-hub API tests" run to triage (with the camunda-hub-nightly-reports artifact).'
+        required: true
+      slack_channel:
+        description: 'Slack channel to post to (name or ID). Override for test runs.'
+        default: '#camunda-hub-api-test-results'
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  # OIDC token so Vault can authenticate this job via JWT (no long-lived secrets).
+  id-token: write
+  # Read the triggering run's artifacts (download-artifact across runs).
+  actions: read
+
+# Never overlap two triage runs.
+concurrency:
+  group: triage-camunda-hub
+  cancel-in-progress: false
+
+env:
+  CONFIG: camunda-hub
+  SLACK_CHANNEL: ${{ github.event.inputs.slack_channel || '#camunda-hub-api-test-results' }}
+  # Where the downloaded nightly reports land (exported to the agent as $REPORTS_DIR).
+  REPORTS_DIR: ${{ github.workspace }}/hub-reports
+
+jobs:
+  triage:
+    name: Download reports → workspace → Claude triage → Slack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          # Short-lived GITHUB_TOKEN must not linger in .git/config — the private
+          # camunda-hub clone uses the Vault-issued App token configured below.
+          persist-credentials: false
+
+      # --- Resolve which nightly run to triage --------------------------------
+      # workflow_run → the run that triggered us; workflow_dispatch → the input.
+      - name: Resolve nightly run id
+        id: nightly
+        env:
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          INPUT_RUN_ID: ${{ github.event.inputs.nightly_run_id }}
+        run: |
+          set -euo pipefail
+          run_id="${INPUT_RUN_ID:-$EVENT_RUN_ID}"
+          if [ -z "$run_id" ]; then
+            echo "::error::No nightly run id (neither workflow_run event nor input)."; exit 1
+          fi
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${run_id}" >> "$GITHUB_OUTPUT"
+          echo "Triaging nightly run ${run_id}"
+
+      # --- Download the nightly reports artifact ------------------------------
+      # The artifact lives on the triggering run in THIS repo, so github.token
+      # (actions: read) suffices. Contains pw-{positive,secured,rbac}.{json,junit.xml}
+      # plus the HTML report dirs with traces/screenshots (failures only).
+      - name: Download camunda-hub-nightly-reports
+        uses: actions/download-artifact@v4
+        with:
+          name: camunda-hub-nightly-reports
+          path: ${{ env.REPORTS_DIR }}
+          run-id: ${{ steps.nightly.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Show downloaded reports
+        run: |
+          echo "REPORTS_DIR=${REPORTS_DIR}"
+          find "${REPORTS_DIR}" -maxdepth 2 -type f | head -50 || true
+
+      # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
+      # Anthropic key + GitHub token, from the SAME Vault KV path this repo's
+      # nightly already reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no new
+      # policy is needed — KV v2 read is path-level. Key names match what lives at
+      # qa/ci/common: CLAUDE_API_KEY (the Anthropic key) and GH_TOKEN (the org QA
+      # token, reused here for `gh issue create` on camunda-hub). Both are needed,
+      # so let a genuinely-missing key fail loudly rather than silently degrade.
+      - name: Fetch Anthropic key + GitHub token from Vault
+        id: vault
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
+            secret/data/products/qa/ci/common GH_TOKEN | GH_TOKEN ;
+
+      - name: Fetch Slack bot token from Vault
+        id: slack
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      # Clone token for the private camunda-hub (Contents:Read). A single git
+      # `insteadOf` with this App installation token clones camunda-hub AND the two
+      # public repos (installation tokens can read public repos), so workspace-cli
+      # resolves all three from the manifest without extra creds.
+      - name: Mint camunda-hub clone token
+        id: hub-token
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      # --- Toolchain ----------------------------------------------------------
+      - name: Setup Go (for workspace-cli)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Setup Node.js 22 (for Claude Code CLI)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install workspace-cli
+        run: |
+          set -euo pipefail
+          go install github.com/camunda/workspace-cli/cmd/workspace@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Install Claude Code CLI
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      # Route all github.com clones through the App token so workspace-cli can
+      # clone the private camunda-hub (public repos ride the same token).
+      - name: Configure git credentials for cloning
+        env:
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      # --- Create the 3-repo workspace ----------------------------------------
+      - name: Stage workspace manifest + guidance
+        id: manifest
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.workspace-templates"
+          src="resources/workspace-templates/camunda-hub-nightlies"
+          cp "$src/camunda-hub-nightlies.guidance.yaml" "$HOME/.workspace-templates/camunda-hub-nightlies.yaml"
+          cp "$src/camunda-hub-nightlies.guidance.md"   "$HOME/.workspace-templates/camunda-hub-nightlies.guidance.md"
+          echo "MANIFEST=$HOME/.workspace-templates/camunda-hub-nightlies.yaml" >> "$GITHUB_OUTPUT"
+
+      - name: Compute workspace name
+        id: ws
+        run: echo "name=hub-triage-${{ steps.nightly.outputs.run_id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Create workspace
+        run: |
+          set -euo pipefail
+          workspace create "${{ steps.ws.outputs.name }}" \
+            --manifest "${{ steps.manifest.outputs.MANIFEST }}"
+
+      # --- Run the Claude triage agent ----------------------------------------
+      - name: Run Claude triage agent in workspace
+        id: agent
+        env:
+          ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
+          # Org QA token, reused for `gh issue create` on camunda-hub. If it lacks
+          # Issues:Write on that repo, the agent falls back to report-only at runtime.
+          GH_TOKEN: ${{ steps.vault.outputs.GH_TOKEN }}
+          NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+          REPORTS_DIR: ${{ env.REPORTS_DIR }}
+          WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
+        run: |
+          set -euo pipefail
+          ws_dir="$HOME/workspaces/${WORKSPACE_NAME}"
+          rm -f /tmp/hub-triage.json
+
+          prompt=$(cat <<EOF
+          You are the camunda-hub nightly API TRIAGE agent, working in the workspace at ${ws_dir}.
+          Read AGENTS.md and the workspace guidance ("camunda-hub Nightly API Triage — Workspace
+          Guidance") FIRST — it defines the two suites, the debug procedure, the three categories,
+          the product-bug commit-dedup rule, the known-issue reconciliation, and the exact output
+          schema. Follow it precisely.
+
+          Inputs:
+          - The downloaded nightly reports are at: ${REPORTS_DIR}
+            (pw-positive.{json,junit.xml}, pw-secured.*, pw-rbac.*, and pw-*/index.html HTML reports
+            with traces/screenshots for failing tests).
+          - OpenAPI spec: ${ws_dir}/camunda-hub/restapi/public-api/src/main/resources/openapi/v2/*.yaml
+          - Suite configs (known issues): ${ws_dir}/api-test-generator/configs/camunda-hub/positive-suppress.json
+            and request-validation.json
+          - Nightly run URL: ${NIGHTLY_RUN_URL}
+          - NOTE: the generated *.spec.ts files are gitignored and NOT present here — recover what
+            each test asserted from the report's request/response attachment + assertion error, not
+            from source.
+
+          Do this:
+          1. Parse both suites' JSON/JUnit and enumerate every failing test (positive + negative).
+          2. For each failure: read its trace/screenshot/response in the HTML report to see the
+             actual request+response+assertion, then resolve the operation in the OpenAPI v2 spec.
+          3. Classify each as product / infrastructure / flakiness with evidence.
+          4. Reconcile against the knownIssue entries before calling anything a NEW bug.
+          5. For each PRODUCT bug that is NOT already-known: search recent camunda-hub main commits
+             for a related change. If a related commit explains it → action "skip" (record the commit).
+             If not → search for an existing open camunda-hub issue; link it if found, else file a new
+             one with \`gh issue create --repo camunda/camunda-hub\` (GH_TOKEN is set) and record the URL.
+             If GH_TOKEN is empty or filing fails, set action "report-only" with file_error.
+          6. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
+
+          You are read-only on api-test-generator and camunda-docs. The ONLY write action allowed is
+          filing a camunda-hub issue per the rules. Do NOT open PRs or edit any file.
+          EOF
+          )
+
+          set +e
+          claude -p "$prompt" --dangerously-skip-permissions
+          agent_rc=$?
+          set -e
+          echo "claude exit code: ${agent_rc}"
+
+          if [ ! -s /tmp/hub-triage.json ]; then
+            echo "::warning::Agent did not write /tmp/hub-triage.json — writing a crash sentinel."
+            printf '{"run_url":"%s","suites":{},"failures":[],"counts":{},"agent_error":true}\n' \
+              "${NIGHTLY_RUN_URL}" > /tmp/hub-triage.json
+          fi
+          cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
+
+      # --- Post the triaged digest to Slack -----------------------------------
+      - name: Post triage summary to Slack
+        id: slack-summary
+        if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+        run: |
+          set -euo pipefail
+          f="${GITHUB_WORKSPACE}/hub-triage.json"
+          summary=$(bash scripts/triage/hub-triage-format-slack.sh "$f" summary || true)
+          text=":mag: *camunda-hub API Triage — $(date -u +%Y-%m-%d)*"$'\n'"${summary}"
+          text="${text}"$'\n\n'"<${NIGHTLY_RUN_URL}|📊 nightly run> · <${RUN_URL}|🔎 triage run>"
+
+          payload=$(jq -nc --arg channel "$SLACK_CHANNEL" --arg text "$text" \
+            '{channel: $channel, text: $text, mrkdwn: true}')
+          response=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "$payload")
+          echo "$response" | jq '.'
+          ts=$(echo "$response" | jq -r '.ts // ""')
+          channel=$(echo "$response" | jq -r '.channel // ""')
+          echo "ts=${ts}"           >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || echo "::warning::Slack summary post failed"
+
+      - name: Post per-failure detail to Slack thread
+        if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' && steps.slack-summary.outputs.ts != '' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          SLACK_TS: ${{ steps.slack-summary.outputs.ts }}
+          SLACK_CHANNEL_ID: ${{ steps.slack-summary.outputs.channel }}
+        run: |
+          set -euo pipefail
+          f="${GITHUB_WORKSPACE}/hub-triage.json"
+          detail=$(bash scripts/triage/hub-triage-format-slack.sh "$f" thread || true)
+          # No failures → no thread reply.
+          [ -z "$detail" ] && { echo "No failures — skipping thread reply."; exit 0; }
+          payload=$(jq -nc \
+            --arg channel   "$SLACK_CHANNEL_ID" \
+            --arg thread_ts "$SLACK_TS" \
+            --arg text      "$detail" \
+            '{channel: $channel, thread_ts: $thread_ts, text: $text, mrkdwn: true}')
+          response=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "$payload")
+          [ "$(echo "$response" | jq -r '.ok')" = "true" ] || echo "::warning::Slack thread reply failed"
+
+      # --- Persist the triage result ------------------------------------------
+      - name: Upload triage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-triage-${{ steps.nightly.outputs.run_id }}
+          path: hub-triage.json
+          retention-days: 30
+
+      - name: Write triage to run summary
+        if: always()
+        run: |
+          {
+            echo "## camunda-hub API Triage"
+            echo ""
+            echo '```json'
+            cat "${GITHUB_WORKSPACE}/hub-triage.json" 2>/dev/null || echo "{}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
