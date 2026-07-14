@@ -18,10 +18,12 @@
 #   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
 #      sending the repository_dispatch.
 #
-# Expected client_payload: { source_sha, pr_number }. The image ref and registry
-# are NOT taken from the payload — they're derived/fixed below (image =
-# .../hub-restapi-self-managed:pr-<source_sha>, registry = registry.camunda.cloud)
-# so the image can't drift from the reported commit and validation always runs.
+# Expected client_payload: { source_sha, pr_number, caller_run_url }. The image
+# ref and registry are NOT taken from the payload — they're derived/fixed below
+# (image = .../hub-restapi-self-managed:pr-<source_sha>, registry =
+# registry.camunda.cloud) so the image can't drift from the reported commit and
+# validation always runs. caller_run_url (a link back to the camunda-hub run
+# that dispatched this) is optional and validated before use — see below.
 name: Hub PR check
 
 on:
@@ -49,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.v.outputs.source_sha }}
+      caller_run_url: ${{ steps.caller.outputs.caller_run_url }}
     steps:
       - name: Validate source_sha is a 40-char hex commit SHA
         id: v
@@ -61,6 +64,23 @@ jobs:
             exit 1
           fi
           echo "source_sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      # caller_run_url is purely informational (a convenience link in the run
+      # summary), so an invalid/missing value degrades to no link rather than
+      # failing the run — but it's still untrusted payload, so it's validated
+      # against the exact expected shape before ever being used, same as every
+      # other payload-derived value in this workflow.
+      - name: Validate caller_run_url (optional; empty if missing/invalid)
+        id: caller
+        env:
+          URL: ${{ github.event.client_payload.caller_run_url }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$URL" | grep -qE '^https://github\.com/camunda/camunda-hub/actions/runs/[0-9]+$'; then
+            echo "caller_run_url=$URL" >> "$GITHUB_OUTPUT"
+          else
+            echo "caller_run_url=" >> "$GITHUB_OUTPUT"
+          fi
 
   run:
     needs: validate
@@ -89,6 +109,7 @@ jobs:
       summary_heading: |
         ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
         source_sha: `${{ needs.validate.outputs.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}`
+        ${{ needs.validate.outputs.caller_run_url != '' && format('Triggered by: [camunda-hub run]({0})', needs.validate.outputs.caller_run_url) || '' }}
 
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
