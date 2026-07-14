@@ -87,7 +87,12 @@ jobs:
       # The artifact lives on the triggering run in THIS repo, so github.token
       # (actions: read) suffices. Contains pw-{positive,secured,rbac}.{json,junit.xml}
       # plus the HTML report dirs with traces/screenshots (failures only).
+      # continue-on-error: a missing artifact (nightly crashed before its always()
+      # upload) must NOT hard-fail the job — we detect it below and report it as
+      # inconclusive rather than dying silently or implying a green night.
       - name: Download camunda-hub-nightly-reports
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: camunda-hub-nightly-reports
@@ -95,10 +100,21 @@ jobs:
           run-id: ${{ steps.nightly.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      - name: Show downloaded reports
+      # No-false-all-clear: a triage with no report data must announce itself as
+      # inconclusive, never post a green digest. has_reports gates the agent step.
+      - name: Check reports present
+        id: reports
         run: |
+          set -euo pipefail
           echo "REPORTS_DIR=${REPORTS_DIR}"
-          find "${REPORTS_DIR}" -maxdepth 2 -type f | head -50 || true
+          find "${REPORTS_DIR}" -maxdepth 2 -type f 2>/dev/null | head -50 || true
+          count=$(find "${REPORTS_DIR}" -maxdepth 2 -name 'pw-*.json' 2>/dev/null | wc -l | tr -d ' ')
+          if [ "${count}" -gt 0 ]; then
+            echo "has_reports=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_reports=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No pw-*.json reports found (download outcome: ${{ steps.download.outcome }}). Reporting as inconclusive."
+          fi
 
       # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
       # Anthropic key + GitHub token, from the SAME Vault KV path this repo's
@@ -191,6 +207,7 @@ jobs:
         run: echo "name=hub-triage-${{ steps.nightly.outputs.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Create workspace
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
         run: |
           set -euo pipefail
           workspace create "${{ steps.ws.outputs.name }}" \
@@ -199,6 +216,7 @@ jobs:
       # --- Run the Claude triage agent ----------------------------------------
       - name: Run Claude triage agent in workspace
         id: agent
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
           # Org QA token, reused for `gh issue create` on camunda-hub. If it lacks
@@ -235,13 +253,18 @@ jobs:
           1. Parse both suites' JSON/JUnit and enumerate every failing test (positive + negative).
           2. For each failure: read its trace/screenshot/response in the HTML report to see the
              actual request+response+assertion, then resolve the operation in the OpenAPI v2 spec.
-          3. Classify each as product / infrastructure / flakiness with evidence.
+          3. Classify each as product / infrastructure / flakiness with evidence. A "product" bug
+             REQUIRES the response to CONTRADICT the spec; if the response and spec AGREE but the test
+             failed, that is a test-generation bug (subcategory "test-generation", action "report-only",
+             routed to api-test-generator) — never a camunda-hub issue.
           4. Reconcile against the knownIssue entries before calling anything a NEW bug.
-          5. For each PRODUCT bug that is NOT already-known: search recent camunda-hub main commits
-             for a related change. If a related commit explains it → action "skip" (record the commit).
-             If not → search for an existing open camunda-hub issue; link it if found, else file a new
-             one with \`gh issue create --repo camunda/camunda-hub\` (GH_TOKEN is set) and record the URL.
-             If GH_TOKEN is empty or filing fails, set action "report-only" with file_error.
+          5. For each PRODUCT bug (response contradicts spec) that is NOT already-known: search recent
+             camunda-hub main commits for a related change. If a related commit explains it → action
+             "skip" (record the commit). If not → compute the fingerprint, dedup by the
+             \`nightly-api-triage fp=<fp>\` marker (then by symptom), and either link the existing issue
+             or file a new one with \`gh issue create --repo camunda/camunda-hub\` (labels kind/bug +
+             nightly-detected, fingerprint marker in the body). If GH_TOKEN is empty or filing fails,
+             set action "report-only" with file_error.
           6. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
 
           You are read-only on api-test-generator and camunda-docs. The ONLY write action allowed is
@@ -261,6 +284,17 @@ jobs:
               "${NIGHTLY_RUN_URL}" > /tmp/hub-triage.json
           fi
           cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
+
+      # No reports downloaded → write an inconclusive result so Slack announces it
+      # (never a green digest). Mirrors the c8 "no false all-clear" rule.
+      - name: Write inconclusive result (no reports)
+        if: ${{ steps.reports.outputs.has_reports != 'true' }}
+        env:
+          NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+        run: |
+          set -euo pipefail
+          printf '{"run_url":"%s","suites":{},"failures":[],"counts":{},"inconclusive":true}\n' \
+            "${NIGHTLY_RUN_URL}" > "${GITHUB_WORKSPACE}/hub-triage.json"
 
       # --- Post the triaged digest to Slack -----------------------------------
       - name: Post triage summary to Slack

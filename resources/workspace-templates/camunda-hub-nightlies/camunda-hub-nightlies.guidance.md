@@ -41,9 +41,11 @@ The nightly (`api-test-generator/.github/workflows/nightly-camunda-hub.yml`) gen
 
 ## Classification — pick exactly one category per failure
 
-- **product** — the API's actual behavior **contradicts the OpenAPI spec** (positive op returns a 4xx/5xx or wrong body where the spec says 2xx; negative test shows the API *accepted* a malformed/unauth request the spec requires it to reject, or rejected with the wrong status). The evidence is: spec says X, response body shows Y.
+- **product** — the API's actual behavior **contradicts the OpenAPI spec** (positive op returns a 4xx/5xx or wrong body where the spec says 2xx; negative test shows the API *accepted* a malformed/unauth request the spec requires it to reject, or rejected with the wrong status). The evidence is: **spec says X, response body shows Y, and X ≠ Y**. This is the only category that can result in a filed camunda-hub issue.
 - **infrastructure** — the failure is **not an API-contract assertion**: Hub failed to boot / the readiness gate never went 401-ready, keycloak/identity/db startup error, fixture creation failed (`make_fixtures` — tests then see 404/403 instead of the intended 400), network/timeout, a suite crashed before writing its report, runner OOM/SIGTERM. These are environment problems, not product defects.
 - **flakiness** — non-deterministic: the test passed on a Playwright **retry** (`results[]` has both a failed and a later passed attempt), an ordering/race between dependent operations, or a transient that does not reproduce in the response evidence. Flag it as flaky with the retry evidence; do not escalate it as a product bug.
+
+**Critical disambiguation — the API matching the spec is NOT a product bug.** When the response and the OpenAPI spec **agree** with each other but the *test* failed, the **generated test** built a wrong request or asserted the wrong expectation — a **test-generation bug in api-test-generator**, not a camunda-hub defect. Do not classify it `product` and do not file a camunda-hub issue. Report it with `category: "product"` reasoning noted, `subcategory: "test-generation"`, `action: "report-only"`, and a note routing it to the api-test-generator / test-automation team (they own the generator + `configs/camunda-hub`). A filed camunda-hub issue is only ever correct when the response **contradicts** the spec.
 
 If you genuinely cannot determine the category from the evidence, classify as **infrastructure** with `confidence: "low"` and say exactly what evidence was missing — never guess "product".
 
@@ -71,13 +73,42 @@ For any failure you classify as **product** and that is **not** an already-known
    Also try `gh search commits --repo camunda/camunda-hub "<operationId>"` and open PRs (`gh pr list --repo camunda/camunda-hub --search "<operationId>" --state all`).
 3. **Decision:**
    - **A related commit exists** (the response changed because of an intentional recent product change) → **SKIP filing.** Record the failure as `category: "product"`, `related_commit: <sha/url>`, `action: "skip"`, and note "explained by recent intentional change — the generated suite/spec-pin needs to catch up, not a product defect." This is the "if there is a related commit, skip; otherwise no" rule.
-   - **No related commit** → this is a **genuine, un-owned product bug**. Set `action: "file"`. Before filing, **search for an existing open issue** (`gh issue list --repo camunda/camunda-hub --search "<operationId> in:title" --state open`); if one exists, link it (`known_issue: true`) instead of filing a duplicate. Otherwise file a new issue (see below) and record its url.
+   - **No related commit** → this is a **genuine, un-owned product bug**. Set `action: "file"` and go to the filing section below (which dedups against existing issues by a stable fingerprint before creating anything).
 
-Only **product** failures get the commit-dedup treatment. Infrastructure and flakiness are reported in Slack but never filed as camunda-hub product issues.
+Only **product** failures whose response **contradicts** the spec get the commit-dedup + filing treatment. Infrastructure, flakiness, and test-generation (`subcategory: "test-generation"`) failures are reported in Slack but never filed as camunda-hub product issues.
 
-## Filing a product-bug issue (only when `action: "file"` and no existing issue)
+## Filing a product-bug issue (only when `action: "file"`)
 
-Use `gh issue create --repo camunda/camunda-hub` with `GH_TOKEN` set to the issue-scoped token the workflow exports. Title: `[nightly-api] <operationId> — <one-line contract violation>`. Body must contain: suite/profile, spec file + test title, **expected (with a quote/pointer to the openapi op) vs actual (the response body from the trace)**, the nightly run URL, and `Found by the camunda-hub nightly API triage agent`. Record the returned issue URL in the triage output. If `gh issue create` fails (token lacks Issues:Write), do **not** fail the run — set `action: "report-only"` with `file_error` and let Slack surface it for a human.
+**Compute a stable fingerprint** so the same bug is filed **once**, not re-filed every night:
+
+```
+fp = printf '%s::%s::%s' "<operationId>" "<suite>" "<expected>-><actual>" | sha256sum | cut -c1-8
+```
+
+Use `operationId`, suite (`positive`/`negative`), and the expected→actual status signature — matrix-independent, so a bug that fails nightly keeps the same `fp`.
+
+**Dedup FIRST — search by the fingerprint marker, then by symptom:**
+
+```bash
+# 1) exact prior filing by this agent (open OR closed)
+gh search issues --repo camunda/camunda-hub "nightly-api-triage fp=<fp>" --state all
+# 2) fallback: a human-filed bug for the same op/symptom
+gh issue list --repo camunda/camunda-hub --search "<operationId> in:title" --state open
+```
+
+- **Open issue found** (either search) → link it: set `known_issue: true`, `known_issue_url: <url>`, `action: "report-only"`. If it's a human-filed match without the marker, add a comment appending `nightly-api-triage fp=<fp>` so future runs dedup on it. Do **not** open a duplicate.
+- **Only a closed marker match** → the bug recurred: `gh issue reopen`, comment with the new run, link it.
+- **No match** → file a new issue.
+
+**Creating the issue** — `gh issue create --repo camunda/camunda-hub` with `GH_TOKEN` (the token the workflow exports). Title: `[nightly-api] <operationId> — <one-line contract violation>`. Labels: `--label kind/bug --label nightly-detected` (drop a label and retry if the repo rejects it). Body must contain:
+
+- suite/profile, spec file + test title;
+- **expected** (quote/pointer to the OpenAPI op) **vs actual** (the response body from the trace) — the proof the response contradicts the spec;
+- the nightly run URL;
+- a visible marker line: `Fingerprint: nightly-api-triage fp=<fp>` (this is what the dedup search above matches on);
+- `Found by the camunda-hub nightly API triage agent`.
+
+Record the returned issue URL and the `fp` in the triage output. If `gh issue create` fails (empty token / lacks Issues:Write on camunda-hub), do **not** fail the run — set `action: "report-only"` with `file_error` and let Slack surface it for a human.
 
 ## Output — write `/tmp/hub-triage.json`
 
@@ -98,6 +129,7 @@ Emit exactly this shape (the workflow reads it to build the Slack digest and to 
       "test": "createFile › feature-1 …",
       "operationId": "createFile",
       "category": "product|infrastructure|flakiness",
+      "subcategory": null,
       "confidence": "high|medium|low",
       "expected": "201 (spec: files.yaml createFile)",
       "actual": "500 — <response body snippet>",
@@ -105,11 +137,13 @@ Emit exactly this shape (the workflow reads it to build the Slack digest and to 
       "known_issue": false,
       "known_issue_url": null,
       "related_commit": null,
+      "fingerprint": null,
       "action": "file|skip|report-only|none",
-      "issue_url": null
+      "issue_url": null,
+      "file_error": null
     }
   ],
-  "counts": { "product": 0, "infrastructure": 0, "flakiness": 0, "known_issue": 0, "filed": 0, "skipped_recent_change": 0 }
+  "counts": { "product": 0, "infrastructure": 0, "flakiness": 0, "test_generation": 0, "known_issue": 0, "filed": 0, "skipped_recent_change": 0 }
 }
 ```
 

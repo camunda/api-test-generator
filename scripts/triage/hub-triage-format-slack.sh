@@ -26,6 +26,13 @@ case "$MODE" in
   summary)
     jq -r '
       def n(x): (x // 0);
+      # No-false-all-clear: an inconclusive / crashed run must say so, never green.
+      if (.inconclusive // false) then
+        ":warning: *Inconclusive* — the nightly produced no report artifact to triage. The test run may have crashed before uploading results; check the nightly run."
+      elif (.agent_error // false) then
+        ":warning: *Triage incomplete* — the agent errored before writing a result. Check the triage run."
+      else
+      (
       (.counts // {}) as $c
       | (.suites // {}) as $s
       | (n(.failures | length)) as $total
@@ -47,10 +54,13 @@ case "$MODE" in
           + "\n  :package: product: " + (n($c.product)|tostring)
           + "   :wrench: infrastructure: " + (n($c.infrastructure)|tostring)
           + "   :game_die: flakiness: " + (n($c.flakiness)|tostring)
+          + "   :test_tube: test-generation: " + (n($c.test_generation)|tostring)
           + "\n  :ticket: known issue: " + (n($c.known_issue)|tostring)
           + "   :memo: filed: " + (n($c.filed)|tostring)
           + "   :fast_forward: skipped (recent change): " + (n($c.skipped_recent_change)|tostring)
         end
+      )
+      end
     ' "$FILE"
     ;;
 
@@ -58,13 +68,17 @@ case "$MODE" in
     # One bullet per failure, grouped by category. Empty output when there are
     # no failures (caller then skips the thread reply).
     jq -r '
-      def icon(cat):
-        if cat == "product" then ":package:"
-        elif cat == "infrastructure" then ":wrench:"
-        elif cat == "flakiness" then ":game_die:"
+      def icon(f):
+        if (f.subcategory // "") == "test-generation" then ":test_tube:"
+        elif f.category == "product" then ":package:"
+        elif f.category == "infrastructure" then ":wrench:"
+        elif f.category == "flakiness" then ":game_die:"
         else ":grey_question:" end;
+      def catlabel(f):
+        if (f.subcategory // "") == "test-generation" then "test-generation (api-test-generator)"
+        else (f.category // "?") end;
       def line(f):
-        "• " + icon(f.category) + " *" + (f.category // "?") + "* — `"
+        "• " + icon(f) + " *" + catlabel(f) + "* — `"
         + (f.spec // f.operationId // "?") + "` — " + (f.test // "")
         + "\n    expected: " + (f.expected // "?") + "  |  actual: " + (f.actual // "?")
         + (if (f.known_issue // false) then "\n    :ticket: known issue: <" + (f.known_issue_url // "") + ">" else "" end)
