@@ -47,7 +47,7 @@ runs:
               fetch --depth 1 origin "$HUB_REF"; do
           fetch_attempts=$((fetch_attempts + 1))
           if [ "$fetch_attempts" -ge 5 ]; then
-            echo "::error::git fetch of camunda-hub failed after ${fetch_attempts} attempts."
+            echo "::error::git fetch of camunda-hub ref '${HUB_REF}' failed after ${fetch_attempts} attempts."
             exit 1
           fi
           echo "fetch failed (likely transient App-token propagation) — retry ${fetch_attempts}/5 in 10s..."
