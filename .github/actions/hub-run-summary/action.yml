@@ -28,12 +28,13 @@ runs:
         # Config drift: positive-suppress entries no longer in the bundled spec
         # (materializer records these on coverage.json rather than failing generate).
         stale="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('staleSuppressedOpIds',[])))" 2>/dev/null || true)"
-        # Unmapped operations: spec ops with zero generated test coverage (no
-        # entity-kind/scenario-template maps to them and they're not in
-        # positive-suppress.json either) — e.g. a new endpoint the ontology
-        # hasn't caught up with. The materializer records these but never fails
-        # generate on them, so a new operation could otherwise ship untested
-        # with a fully green run. Non-blocking, same as the drift note above.
+        # Unmapped operations: any spec op with zero generated test coverage
+        # right now — no entity-kind/scenario-template maps to it and it's not
+        # in positive-suppress.json either. Could be a new endpoint the
+        # ontology hasn't caught up with, or an existing op that lost coverage.
+        # The materializer records these but never fails generate on them, so
+        # this could otherwise ship untested with a fully green run.
+        # Non-blocking, same as the drift note above.
         unmapped="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('summary',{}).get('unmappedOperations',[])))" 2>/dev/null || true)"
         {
           printf '%s\n' "$HEADING"
@@ -42,7 +43,7 @@ runs:
             echo ""
           fi
           if [ -n "$unmapped" ]; then
-            echo "> ⚠️ **Coverage gap:** \`${unmapped}\` — new spec operation(s) not covered by any generated test. Run \`npm run coverage:report\` locally for details."
+            echo "> ⚠️ **Coverage gap:** \`${unmapped}\` — spec operation(s) not covered by any generated test (not necessarily new — could be an existing op that lost coverage). Run \`npm run coverage:report\` locally for details."
             echo ""
           fi
           echo "### Positive (lifecycle)"
