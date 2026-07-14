@@ -465,19 +465,27 @@ jobs:
           # template refs read from process.env, not shell expansions.
           ADDED_CSV="$(csv "${ADDED:-}" "${N_ADDED:-0}")" \
           REMOVED_CSV="$(csv "${REMOVED:-}" "${N_REMOVED:-0}")" \
-          UNMAPPED_CSV="$(csv "${UNMAPPED:-}" 0)" \
+          UNMAPPED_LIST="${UNMAPPED:-}" \
           LINK="$link" \
           node -e '
             const e = process.env;
-            const unmappedLine = e.UNMAPPED_CSV
-              ? `\n🚫 *missing coverage* (blocks auto-adopt): ${e.UNMAPPED_CSV}`
+            // UNMAPPED is already ", "-joined by the python step that produces it
+            // (a single line, not newline-separated like ADDED/REMOVED) — used
+            // directly, not through the csv() helper above (which expects
+            // newline-separated input and would double the comma-spacing).
+            const unmappedLine = e.UNMAPPED_LIST
+              ? `\n🚫 *missing coverage* (blocks auto-adopt): ${e.UNMAPPED_LIST}`
               : "";
-            const text =
-              `🔎 *camunda-hub upstream op-surface drift* vs the pin ` +
-              `(\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
-              `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
-              `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}` +
-              unmappedLine + `\n${e.LINK}`;
+            // Only claim "op-surface drift" when there is actual operationId
+            // churn — this notify can now fire on missing-coverage alone (zero
+            // added/removed), where that headline would be misleading.
+            const hasChurn = e.N_ADDED !== "0" || e.N_REMOVED !== "0";
+            const headline = hasChurn
+              ? `🔎 *camunda-hub upstream op-surface drift* vs the pin (\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
+                `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
+                `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}`
+              : `🔎 *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`;
+            const text = headline + unmappedLine + `\n${e.LINK}`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 
