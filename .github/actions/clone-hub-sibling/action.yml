@@ -38,7 +38,20 @@ runs:
         dest="${GITHUB_WORKSPACE}/../camunda-hub"
         mkdir -p "$dest" && cd "$dest" && git init -q
         git remote get-url origin >/dev/null 2>&1 || git remote add origin https://github.com/camunda/camunda-hub.git
-        git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
-          fetch --depth 1 origin "$HUB_REF"
+        # Retry to absorb transient "Repository not found" fetch failures — a
+        # freshly-minted App installation token occasionally isn't fully
+        # propagated on GitHub's side yet when the fetch fires immediately
+        # after minting; a short retry clears it without any code change.
+        fetch_attempts=0
+        until git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" \
+              fetch --depth 1 origin "$HUB_REF"; do
+          fetch_attempts=$((fetch_attempts + 1))
+          if [ "$fetch_attempts" -ge 5 ]; then
+            echo "::error::git fetch of camunda-hub failed after ${fetch_attempts} attempts."
+            exit 1
+          fi
+          echo "fetch failed (likely transient App-token propagation) — retry ${fetch_attempts}/5 in 10s..."
+          sleep 10
+        done
         git checkout -q --detach FETCH_HEAD
         echo "camunda-hub @ $(git rev-parse --short HEAD) (ref: $HUB_REF)"
