@@ -50,7 +50,10 @@ gh label create auto-generated --color ededed --description "Opened by automatio
 existing="$(find_bump_pr)"
 if [ -n "$existing" ]; then
   echo "Bump PR #${existing} already open — leaving it as-is (not force-updating)."
-  gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null
+  # Best-effort: a transient API error here must not prevent closing the
+  # superseded tracking issue below (labeling is an auxiliary self-heal, the
+  # issue-close is the actual point of this path).
+  gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
   issue="$(find_rolling_issue)"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null

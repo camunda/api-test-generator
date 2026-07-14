@@ -77,22 +77,31 @@ if [ -n "$existing" ]; then
   # Re-add spec-drift + auto-generated on every update too, not just at
   # creation — self-heals an issue opened before this change (or one a human
   # accidentally un-labeled), so it doesn't stay permanently unlabeled.
-  gh issue edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null
+  # Best-effort (labeling is an auxiliary signal): a transient API error or a
+  # label that failed to create above must not abort the issue update itself.
+  gh issue edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null || true
   # Sync missing-coverage to THIS run's state — add it when unmapped ops are
   # the blocker, remove it if a later run clears them but the issue stays open
-  # for another reason (e.g. invariants still broken). --remove-label on a
-  # label the issue doesn't have is a no-op, not an error.
+  # for another reason (e.g. invariants still broken). Both best-effort, same
+  # reasoning as above; --remove-label on a label the issue doesn't have is a
+  # no-op anyway, not an error.
   if [ -n "$UNMAPPED" ]; then
-    gh issue edit "$existing" --add-label missing-coverage >/dev/null
+    gh issue edit "$existing" --add-label missing-coverage >/dev/null || true
   else
     gh issue edit "$existing" --remove-label missing-coverage >/dev/null 2>&1 || true
   fi
   gh issue comment "$existing" --body "🔁 Re-checked against \`${LATEST}\` — still drifted (generate: \`${GEN_OUTCOME}\`, invariants: \`${INV_OUTCOME}\`, unmapped: \`${UNMAPPED:-none}\`, +${N_ADDED}/-${N_REMOVED} ops). [Run](${run_url})" >/dev/null
 else
   echo "Opening new tracking issue"
-  labels=(--label "$DRIFT_LABEL" --label auto-generated)
-  [ -n "$UNMAPPED" ] && labels+=(--label missing-coverage)
-  gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" "${labels[@]}" >/dev/null
+  # Create with only the always-present labels — if missing-coverage's create
+  # failed above (label create is itself best-effort), --label missing-coverage
+  # here would fail the WHOLE issue creation, losing the tracking issue
+  # entirely rather than just the label. Add it separately, best-effort, after.
+  new_url="$(gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" --label "$DRIFT_LABEL" --label auto-generated)"
+  echo "Opened ${new_url}"
+  if [ -n "$UNMAPPED" ]; then
+    gh issue edit "${new_url##*/}" --add-label missing-coverage >/dev/null || true
+  fi
 fi
 
 # Close a stale auto-bump PR if one is open: we're on the issue path because
