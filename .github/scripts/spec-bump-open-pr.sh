@@ -14,12 +14,12 @@
 # this repo (NOT the built-in GITHUB_TOKEN — PRs it opens don't trigger CI). The
 # workflow only invokes this script when such a token was minted.
 #
-# Required env: GH_TOKEN, CONFIG, LATEST, ISSUE_TITLE, N_ADDED, N_REMOVED,
-# ADDED, REMOVED. Optional (defaulted): UPSTREAM_REPO, UPSTREAM_BRANCH.
+# Required env: GH_TOKEN, CONFIG, LATEST, ISSUE_TITLE, DRIFT_LABEL, N_ADDED,
+# N_REMOVED, ADDED, REMOVED. Optional (defaulted): UPSTREAM_REPO, UPSTREAM_BRANCH.
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN (App/PAT with contents+PR write) required}"
-: "${CONFIG:?}" "${LATEST:?}" "${ISSUE_TITLE:?}"
+: "${CONFIG:?}" "${LATEST:?}" "${ISSUE_TITLE:?}" "${DRIFT_LABEL:?}"
 N_ADDED="${N_ADDED:-0}"
 N_REMOVED="${N_REMOVED:-0}"
 # Which upstream this config validated against (the workflow sets these per
@@ -105,10 +105,17 @@ body_file="$(mktemp)"
   echo "🤖 Rolling PR — updated in place by each check; do not rename the branch (\`${branch}\`)."
 } > "$body_file"
 
+# Labels so this auto-bump PR is distinguishable from a hand-authored one at a
+# glance (#473) — best-effort creation, same pattern spec-bump-report.sh uses
+# for the tracking issue.
+gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
+gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
+
 # No open PR for this branch (checked + returned early above), so always create.
 title="chore(${CONFIG}): bump spec pin to ${short}"
 echo "Opening bump PR."
-gh pr create --draft --base main --head "$branch" --title "$title" --body-file "$body_file" >/dev/null
+gh pr create --draft --base main --head "$branch" --title "$title" --body-file "$body_file" \
+  --label "$DRIFT_LABEL" --label auto-generated >/dev/null
 
 # Clean up the tracking issue if one is open — the PR supersedes it.
 issue="$(find_rolling_issue)"

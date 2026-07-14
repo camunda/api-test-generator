@@ -60,8 +60,13 @@ body_file="$(mktemp)"
   echo "**To adopt this bump**: re-pin with \`npm run bump-spec-pin -- --config ${CONFIG} --ref ${LATEST}\` (the single source of truth for pin writes), regenerate, update \`configs/${CONFIG}/spec-pin.json\` + any legitimately-changed invariants, and commit. See \`README.md → Spec pin → Bumping the spec pin\`. If it isn't ready to adopt, this is the heads-up to model the new surface first."
 } > "$body_file"
 
-# --- Ensure the label exists (best-effort) ----------------------------------
+# --- Ensure the labels exist (best-effort) -----------------------------------
+# spec-drift + auto-generated always apply (this issue is only ever opened by
+# the check, never a human); missing-coverage is added/removed below depending
+# on whether THIS run's blocker is an uncovered operation (#473).
 gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
+gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
+gh label create missing-coverage --color D93F0B --description "A spec operation has no generated test coverage" 2>/dev/null || true
 
 # --- Find the rolling issue by exact title ----------------------------------
 existing="$(find_rolling_issue)"
@@ -69,10 +74,21 @@ existing="$(find_rolling_issue)"
 if [ -n "$existing" ]; then
   echo "Updating existing tracking issue #${existing}"
   gh issue edit "$existing" --body-file "$body_file" >/dev/null
+  # Sync missing-coverage to THIS run's state — add it when unmapped ops are
+  # the blocker, remove it if a later run clears them but the issue stays open
+  # for another reason (e.g. invariants still broken). --remove-label on a
+  # label the issue doesn't have is a no-op, not an error.
+  if [ -n "$UNMAPPED" ]; then
+    gh issue edit "$existing" --add-label missing-coverage >/dev/null
+  else
+    gh issue edit "$existing" --remove-label missing-coverage >/dev/null 2>&1 || true
+  fi
   gh issue comment "$existing" --body "🔁 Re-checked against \`${LATEST}\` — still drifted (generate: \`${GEN_OUTCOME}\`, invariants: \`${INV_OUTCOME}\`, unmapped: \`${UNMAPPED:-none}\`, +${N_ADDED}/-${N_REMOVED} ops). [Run](${run_url})" >/dev/null
 else
   echo "Opening new tracking issue"
-  gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" --label "$DRIFT_LABEL" >/dev/null
+  labels=(--label "$DRIFT_LABEL" --label auto-generated)
+  [ -n "$UNMAPPED" ] && labels+=(--label missing-coverage)
+  gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" "${labels[@]}" >/dev/null
 fi
 
 # Close a stale auto-bump PR if one is open: we're on the issue path because
