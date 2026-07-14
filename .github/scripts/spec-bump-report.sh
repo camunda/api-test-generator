@@ -8,7 +8,10 @@
 #
 # Required env: GH_TOKEN, CONFIG, ISSUE_TITLE, DRIFT_LABEL, UPSTREAM_REPO,
 # UPSTREAM_BRANCH, PINNED, LATEST, N_ADDED, N_REMOVED, ADDED, REMOVED,
-# GEN_OUTCOME, INV_OUTCOME. GitHub provides GITHUB_* automatically.
+# GEN_OUTCOME, INV_OUTCOME. Optional: UNMAPPED (comma-separated operationIds
+# with no generated test coverage — see the "Check for unmapped operations"
+# step; empty when generate didn't succeed or nothing's unmapped). GitHub
+# provides GITHUB_* automatically.
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN required for gh auth}"
@@ -18,6 +21,7 @@ N_ADDED="${N_ADDED:-0}"
 N_REMOVED="${N_REMOVED:-0}"
 GEN_OUTCOME="${GEN_OUTCOME:-unknown}"
 INV_OUTCOME="${INV_OUTCOME:-unknown}"
+UNMAPPED="${UNMAPPED:-}"
 
 # shellcheck source=.github/scripts/spec-bump-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/spec-bump-common.sh"
@@ -37,8 +41,13 @@ body_file="$(mktemp)"
   echo "| Latest \`${UPSTREAM_BRANCH}\` | \`${LATEST}\` ([compare](${compare_url})) |"
   echo "| Generate pipeline | $(emoji "$GEN_OUTCOME") \`${GEN_OUTCOME}\` |"
   echo "| Regression invariants | $(emoji "$INV_OUTCOME") \`${INV_OUTCOME}\` |"
+  echo "| Unmapped (uncovered) operations | $([ -n "$UNMAPPED" ] && echo "❌ ${UNMAPPED}" || echo "✅ none") |"
   echo "| Operations added / removed | ${N_ADDED} / ${N_REMOVED} |"
   echo
+  if [ -n "$UNMAPPED" ]; then
+    echo "⚠️ **Generate and invariants both passed, but this is still not safe to auto-adopt**: \`${UNMAPPED}\` has no generated test coverage at all (no entity-kind/scenario-template maps it, and it's not in \`positive-suppress.json\` either) — model it before bumping, or add it to the suppress list with a tracked reason."
+    echo
+  fi
   echo "🆕 **Added operations** (new upstream surface to model):"
   list_or_none "${ADDED:-}"
   echo
@@ -60,7 +69,7 @@ existing="$(find_rolling_issue)"
 if [ -n "$existing" ]; then
   echo "Updating existing tracking issue #${existing}"
   gh issue edit "$existing" --body-file "$body_file" >/dev/null
-  gh issue comment "$existing" --body "🔁 Re-checked against \`${LATEST}\` — still drifted (generate: \`${GEN_OUTCOME}\`, invariants: \`${INV_OUTCOME}\`, +${N_ADDED}/-${N_REMOVED} ops). [Run](${run_url})" >/dev/null
+  gh issue comment "$existing" --body "🔁 Re-checked against \`${LATEST}\` — still drifted (generate: \`${GEN_OUTCOME}\`, invariants: \`${INV_OUTCOME}\`, unmapped: \`${UNMAPPED:-none}\`, +${N_ADDED}/-${N_REMOVED} ops). [Run](${run_url})" >/dev/null
 else
   echo "Opening new tracking issue"
   gh issue create --title "$ISSUE_TITLE" --body-file "$body_file" --label "$DRIFT_LABEL" >/dev/null
