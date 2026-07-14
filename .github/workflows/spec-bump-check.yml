@@ -44,10 +44,12 @@ name: Spec-bump check
 
 on:
   schedule:
-    # Daily 06:00 UTC — a heads-up on upstream drift, well clear of the 02:00 hub
-    # nightly. Cheap on no-op days (generate is gated on real content change) and
-    # non-spammy (an already-open bump PR is left untouched).
-    - cron: '0 6 * * *'
+    # Daily 03:00 UTC — a heads-up on upstream drift, ~1h after the 02:00 hub
+    # nightly (which has a 25min timeout) so it trails rather than races it,
+    # without the previous 4h gap. Cheap on no-op days (generate is gated on
+    # real content change) and non-spammy (an already-open bump PR is left
+    # untouched).
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 permissions:
