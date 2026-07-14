@@ -469,6 +469,27 @@ is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
 and runtime breakage the pinned PR leg deliberately can't.
 
+The **nightly triage agent**
+([triage-camunda-hub-nightly.yml](.github/workflows/triage-camunda-hub-nightly.yml))
+is the nightly's downstream companion: a `workflow_run` job that fires when the
+nightly completes, downloads its `camunda-hub-nightly-reports` artifact
+(JSON/JUnit + HTML report + traces/screenshots), and runs a **Claude Code** triage
+agent inside a 3-repo [`workspace-cli`](https://github.com/camunda/workspace-cli)
+workspace (`api-test-generator`, `camunda-docs`, `camunda-hub` @ `main` — manifest
++ playbook under
+[resources/workspace-templates/camunda-hub-nightlies/](resources/workspace-templates/camunda-hub-nightlies)).
+It debugs each positive + negative failure, classifies it **product /
+infrastructure / flakiness**, reconciles against the `knownIssue` configs, and —
+for a genuine product bug with no explaining recent `camunda-hub` commit — files a
+`camunda-hub` issue (the OpenAPI v2 spec is the request/response oracle). It posts
+a triaged digest to `#camunda-hub-api-test-results` via the same Slack bot, reusing
+the nightly's Vault plumbing (`CLAUDE_API_KEY` + `GH_TOKEN` at
+`secret/data/products/qa/ci/common`; [`slack-token`](.github/actions/slack-token)
++ [`hub-clone-token`](.github/actions/hub-clone-token)). `workflow_run` only fires
+from the default branch — use `workflow_dispatch` with a past `nightly_run_id` to
+test. Slack formatting lives in
+[scripts/triage/hub-triage-format-slack.sh](scripts/triage/hub-triage-format-slack.sh).
+
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
 (`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch
