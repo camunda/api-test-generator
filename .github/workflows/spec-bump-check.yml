@@ -280,6 +280,30 @@ jobs:
             npm test
           fi
 
+      # generate/invariants passing only proves the KNOWN, modeled surface still
+      # works — regression-invariants.test.ts asserts specific hand-picked
+      # behaviors, not blanket coverage. A new upstream operation the ontology
+      # hasn't caught up with yet generates zero tests for it (silent skip, not
+      # a failure) and would otherwise sail through as "clean" and get
+      # auto-bumped via the PR below with no test coverage at all. Read the
+      # same summary.unmappedOperations coverage.json already records (see
+      # hub-run-summary's job-summary warning) and treat non-empty as NOT
+      # clean, same as a generate/invariants failure.
+      - name: Check for unmapped operations against latest
+        id: unmapped
+        if: >-
+          steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
+          steps.generate.outcome == 'success'
+        run: |
+          unmapped="$(python3 -c "import json; print(', '.join(json.load(open('generated/${CONFIG}/playwright/coverage.json')).get('summary',{}).get('unmappedOperations',[])))" 2>/dev/null || true)"
+          echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+          if [ -n "$unmapped" ]; then
+            echo "has_unmapped=true" >> "$GITHUB_OUTPUT"
+            echo "Unmapped (uncovered) operations: ${unmapped}"
+          else
+            echo "has_unmapped=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # --- Mint the qa-processes App token for the bump PR (clean drift only) --
       # Same wiring as camunda/camunda's nightly-fix workflow (which opens PRs as
       # app/qa-processes, e.g. camunda/camunda#56716): the shared composite action
@@ -291,7 +315,8 @@ jobs:
         id: app-token
         if: >-
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
-          steps.generate.outcome == 'success' && steps.invariants.outcome == 'success'
+          steps.generate.outcome == 'success' && steps.invariants.outcome == 'success' &&
+          steps.unmapped.outputs.has_unmapped != 'true'
         continue-on-error: true
         # Pinned to a full commit SHA (supply-chain hardening): this sub-action
         # has no release tag of its own, so we pin main's HEAD and bump it
@@ -313,6 +338,7 @@ jobs:
         if: >-
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
           steps.generate.outcome == 'success' && steps.invariants.outcome == 'success' &&
+          steps.unmapped.outputs.has_unmapped != 'true' &&
           steps.app-token.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -323,13 +349,15 @@ jobs:
           REMOVED: ${{ steps.opdiff.outputs.removed }}
         run: bash .github/scripts/spec-bump-open-pr.sh
 
-      # BROKEN drift (generate/invariants failed) OR clean-but-no-App-token
-      # → the tracking issue (fallback preserves the signal).
+      # BROKEN drift (generate/invariants failed), unmapped (uncovered) operations,
+      # OR clean-but-no-App-token → the tracking issue (fallback preserves the
+      # signal, and blocks the auto-bump path so an uncovered op can't get
+      # silently adopted).
       - name: Report drift to the rolling tracking issue
         if: >-
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
           (steps.generate.outcome != 'success' || steps.invariants.outcome != 'success' ||
-           steps.app-token.outputs.token == '')
+           steps.unmapped.outputs.has_unmapped == 'true' || steps.app-token.outputs.token == '')
         env:
           GH_TOKEN: ${{ github.token }}
           PINNED: ${{ steps.refs.outputs.pinned }}
@@ -340,6 +368,7 @@ jobs:
           REMOVED: ${{ steps.opdiff.outputs.removed }}
           GEN_OUTCOME: ${{ steps.generate.outcome }}
           INV_OUTCOME: ${{ steps.invariants.outcome }}
+          UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
         run: bash .github/scripts/spec-bump-report.sh
 
       # No meaningful drift (pin at latest, or content byte-identical) → close
