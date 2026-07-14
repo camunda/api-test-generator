@@ -1,0 +1,158 @@
+# description: Daily janitor for the camunda-hub nightly API triage flow. Closes
+#              every open PR labelled `nightly-api-fix` that has gone stale
+#              (untouched for STALE_DAYS, default 1) and is not merged, across BOTH
+#              api-test-generator (test-generation fixes) and camunda-hub (product
+#              fixes for issues the triage agent filed) — so each night's triage
+#              starts with no in-flight bot fix PRs. PRs labelled `do-not-close`
+#              are always kept. Mirrors c8-cross-component-e2e-tests'
+#              close-stale-fix-prs.yml, extended to the two repos this flow spans.
+# type: CI
+# owner: @camunda/test-automation-team
+---
+name: Close stale nightly-api-fix PRs
+
+on:
+  schedule:
+    # 01:00 UTC daily — before the 02:00 nightly (nightly-camunda-hub.yml) and its
+    # downstream triage, so the day starts with a clean slate of fix PRs.
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      stale_days:
+        description: 'Close PRs untouched for N days (default 1 — daily fresh start).'
+        default: '1'
+        required: false
+      dry_run:
+        description: 'Print what would be closed but do not close anything.'
+        type: boolean
+        default: false
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  # Writes are done with the qa-processes App token minted below, NOT the
+  # built-in GITHUB_TOKEN (which can only reach this repo). Keep the job token
+  # read-only.
+  contents: read
+
+concurrency:
+  group: close-stale-nightly-api-fix-prs
+  cancel-in-progress: false
+
+jobs:
+  close-stale:
+    name: Close stale nightly-api-fix PRs (${{ matrix.repo }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # One leg per repo; a missing/inaccessible token on one repo must not
+      # cancel the other leg.
+      fail-fast: false
+      matrix:
+        repo: [api-test-generator, camunda-hub]
+
+    steps:
+      # Mint a qa-processes App installation token scoped to just this matrix
+      # repo (same App + Vault wiring as spec-bump-check.yml's bump-PR token).
+      # continue-on-error: if the App isn't installed on the repo yet, the token
+      # is empty and the close step below skips that leg with a warning rather
+      # than failing the run.
+      - name: Generate qa-processes App token (${{ matrix.repo }})
+        id: app-token
+        continue-on-error: true
+        # Pinned to a full commit SHA (supply-chain hardening) — same pin as
+        # spec-bump-check.yml. Bump intentionally.
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: ${{ matrix.repo }}
+
+      - name: Skip leg — no token
+        if: ${{ steps.app-token.outputs.token == '' }}
+        run: |
+          echo "::warning::qa-processes token unavailable for camunda/${{ matrix.repo }} (App not installed / no PR-write). Skipping this leg."
+          {
+            printf '## Close stale nightly-api-fix PRs — %s\n\n' "${{ matrix.repo }}"
+            printf ':warning: Skipped — qa-processes token unavailable for this repo.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Identify and close stale nightly-api-fix PRs (${{ matrix.repo }})
+        if: ${{ steps.app-token.outputs.token != '' }}
+        env:
+          GH_TOKEN:   ${{ steps.app-token.outputs.token }}
+          REPO:       camunda/${{ matrix.repo }}
+          STALE_DAYS: ${{ inputs.stale_days || '1' }}
+          DRY_RUN:    ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+
+          cutoff_epoch=$(date -u -d "${STALE_DAYS} days ago" +%s 2>/dev/null \
+                       || date -u -v-"${STALE_DAYS}"d +%s)
+          echo "Repo: ${REPO}"
+          echo "Closing nightly-api-fix PRs not updated since $(date -u -d "@${cutoff_epoch}" +%FT%TZ 2>/dev/null || echo "${STALE_DAYS} days ago")"
+          echo "Dry-run: ${DRY_RUN}"
+
+          # Open PRs labelled nightly-api-fix, excluding those held by do-not-close.
+          mapfile -t prs < <(
+            gh pr list \
+              --repo "$REPO" \
+              --state open \
+              --limit 200 \
+              --json number,url,title,updatedAt,labels \
+              --jq '
+                .[] |
+                select(
+                  ([.labels[].name] | any(. == "nightly-api-fix"))
+                  and ([.labels[].name] | any(. == "do-not-close") | not)
+                ) |
+                @json
+              '
+          )
+
+          closed=0
+          kept=0
+          for raw in "${prs[@]}"; do
+            number=$(echo "$raw" | jq -r '.number')
+            title=$(echo  "$raw" | jq -r '.title')
+            # Staleness is by LAST ACTIVITY (updatedAt), so an actively reviewed
+            # PR isn't reaped mid-discussion; a truly abandoned one ages out.
+            updated=$(echo "$raw" | jq -r '.updatedAt')
+            updated_epoch=$(date -u -d "$updated" +%s 2>/dev/null \
+                          || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$updated" +%s 2>/dev/null \
+                          || echo 0)
+
+            if [ "$updated_epoch" -ge "$cutoff_epoch" ]; then
+              echo "  KEEP   #$number — updated $updated (within window): $title"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            echo "  CLOSE  #$number — updated $updated: $title"
+            if [ "$DRY_RUN" != "true" ]; then
+              gh pr close "$number" \
+                --repo "$REPO" \
+                --comment "Closed by the \`close-stale-nightly-api-fix-prs\` janitor: \`nightly-api-fix\` PRs are closed daily if not merged, so each night's triage starts clean. Add the \`do-not-close\` label to hold this PR across the daily reset." \
+                || echo "::warning::Failed to close ${REPO}#$number"
+            fi
+            closed=$((closed + 1))
+          done
+
+          echo ""
+          echo "Result (${REPO}): ${closed} closed, ${kept} kept"
+          {
+            printf '## Close stale nightly-api-fix PRs — %s\n\n' "${{ matrix.repo }}"
+            printf 'Threshold: **%s days**, dry-run: **%s**\n\n' "$STALE_DAYS" "$DRY_RUN"
+            printf -- '- Closed: **%s**\n' "$closed"
+            printf -- '- Kept (within window or `do-not-close`): **%s**\n' "$kept"
+          } >> "$GITHUB_STEP_SUMMARY"

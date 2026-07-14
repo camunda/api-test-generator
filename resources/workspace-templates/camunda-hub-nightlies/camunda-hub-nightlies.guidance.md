@@ -106,6 +106,7 @@ gh issue list --repo camunda/camunda-hub --search "<operationId> in:title" --sta
 - **expected** (quote/pointer to the OpenAPI op) **vs actual** (the response body from the trace) — the proof the response contradicts the spec;
 - the nightly run URL;
 - a visible marker line: `Fingerprint: nightly-api-triage fp=<fp>` (this is what the dedup search above matches on);
+- a note that any PR fixing this should carry the **`nightly-api-fix`** label (the `close-stale-nightly-api-fix-prs` janitor reaps stale fix PRs with that label across both repos; `do-not-close` holds one);
 - `Found by the camunda-hub nightly API triage agent`.
 
 Record the returned issue URL and the `fp` in the triage output. If `gh issue create` fails (empty token / lacks Issues:Write on camunda-hub), do **not** fail the run — set `action: "report-only"` with `file_error` and let Slack surface it for a human.
