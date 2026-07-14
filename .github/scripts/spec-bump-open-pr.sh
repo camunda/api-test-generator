@@ -34,14 +34,23 @@ pin_path="configs/${CONFIG}/spec-pin.json"
 branch="$(bump_branch)"
 short="${LATEST:0:12}"
 
+# Labels so this PR is distinguishable from a hand-authored one at a glance
+# (#473) — created here (best-effort) too, since the early-return path below
+# can reach a `gh pr edit` before the later creation calls run.
+gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
+gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
+
 # If a bump PR is already open, leave it alone — it may carry reviewer edits
 # (e.g. invariant updates), and force-pushing the rolling branch would clobber
 # them. It's still a valid "adopt the bump" PR even if upstream has moved a bit
 # further; the next run picks up fresh drift once it's merged or closed. We only
-# make sure the tracking issue is closed (the PR supersedes it).
+# make sure the tracking issue is closed (the PR supersedes it), and — since an
+# existing bump PR could predate this labeling change — self-heal its labels
+# too rather than leaving it permanently unlabeled.
 existing="$(find_bump_pr)"
 if [ -n "$existing" ]; then
   echo "Bump PR #${existing} already open — leaving it as-is (not force-updating)."
+  gh pr edit "$existing" --add-label "$DRIFT_LABEL" --add-label auto-generated >/dev/null
   issue="$(find_rolling_issue)"
   if [ -n "$issue" ]; then
     gh issue close "$issue" --comment "Superseded by the open auto-bump PR #${existing}. Closing." >/dev/null
@@ -104,12 +113,6 @@ body_file="$(mktemp)"
   echo
   echo "🤖 Rolling PR — updated in place by each check; do not rename the branch (\`${branch}\`)."
 } > "$body_file"
-
-# Labels so this auto-bump PR is distinguishable from a hand-authored one at a
-# glance (#473) — best-effort creation, same pattern spec-bump-report.sh uses
-# for the tracking issue.
-gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
-gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
 
 # No open PR for this branch (checked + returned early above), so always create.
 title="chore(${CONFIG}): bump spec pin to ${short}"
