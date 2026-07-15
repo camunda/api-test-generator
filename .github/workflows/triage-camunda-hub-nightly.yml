@@ -343,43 +343,67 @@ jobs:
           done || true
           grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
 
-      # --- Discover operations already covered by an open fix PR ---------------
+      # --- Discover open fix PRs, by actual diff content ------------------------
       # Mirrors the c8-orchestration-cluster-e2e-nightly-triage.yml reference's
       # "skip dispatch when an open failing-test-fix PR already exists" dedup —
       # without this, the same persisting bug could get a duplicate fix PR
-      # opened every night until the first one merges. Fix PRs embed a
-      # `Fixes-operationId: <id>` marker line (mirroring the `fp=` marker
-      # already used for camunda-hub issue dedup); this builds an
-      # operationId → PR-URL map from every open nightly-api-fix PR's marker(s)
-      # and hands it to the agent, so it can both skip re-fixing what's already
-      # in flight AND link the existing PR directly (no need for the agent to
-      # re-derive the URL itself). Read-only against this repo — github.token
-      # suffices, no need for the (possibly-unavailable) qa-processes token.
-      - name: Discover operations already covered by an open fix PR
+      # opened every night until the first one merges. The reference matches by
+      # FILE PATH (their tests map 1:1 to committed spec files); that doesn't
+      # translate here — our fix PRs touch shared config files
+      # (positive-suppress.json, ontology mappings, generator source) where the
+      # operationId lives IN the content, not the path. So this fetches each
+      # open nightly-api-fix PR's actual diff (ground truth, not a self-reported
+      # tag) and hands the raw list to the agent, which checks whether its
+      # operationId appears anywhere in an open PR's diff before attempting a
+      # new fix. Read-only against this repo — github.token suffices, no
+      # dependency on the (possibly-unavailable) qa-processes token.
+      - name: Discover open fix PRs (for dedup by diff content)
         id: covered
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          map=$(gh pr list --repo camunda/api-test-generator \
-                  --search "label:nightly-api-fix is:open" \
-                  --limit 200 --json body,url \
-                  --jq '
-                    [.[] | . as $pr
-                     | ($pr.body | [scan("Fixes-operationId: ([^\n\r]+)")] | map(.[0])) as $ids
-                     | $ids[] | {(.): $pr.url}]
-                    | add // {}
-                  ' 2>/dev/null || echo '{}')
-          echo "operation_map=${map}" >> "$GITHUB_OUTPUT"
-          echo "Already covered by an open fix PR: ${map}"
+          out="${GITHUB_WORKSPACE}/open-fix-prs.json"
+          acc="$(mktemp)"
+          diff_file="$(mktemp)"
+          echo '[]' > "$acc"
+          nums=$(gh pr list --repo camunda/api-test-generator \
+                   --search "label:nightly-api-fix is:open" \
+                   --limit 50 --json number --jq '.[].number' 2>/dev/null || echo "")
+          if [ -n "$nums" ]; then
+            while IFS= read -r n; do
+              [ -z "$n" ] && continue
+              # Cap each PR's diff: the guardrails require fix PRs to be
+              # minimal/mechanical, so a large diff here is itself a signal
+              # something's off — this just bounds the worst-case file size.
+              # Diff content is passed via --rawfile and the running
+              # accumulator via a temp FILE (never a shell variable) — a diff
+              # containing an embedded newline round-tripped through
+              # `var=$(...)` was observed to produce invalid JSON (a raw
+              # unescaped control character survives into the string) on this
+              # jq/shell combination; file-to-file avoids that class of bug
+              # entirely rather than chasing its root cause.
+              gh pr diff "$n" --repo camunda/api-test-generator 2>/dev/null | head -c 20000 > "$diff_file" || true
+              jq -n --argjson acc "$(cat "$acc")" --arg n "$n" \
+                --arg url "https://github.com/camunda/api-test-generator/pull/${n}" \
+                --rawfile diff "$diff_file" \
+                '$acc + [{number: ($n|tonumber), url: $url, diff: $diff}]' > "${acc}.new"
+              mv "${acc}.new" "$acc"
+            done <<< "$nums"
+          fi
+          cp "$acc" "$out"
+          rm -f "$acc" "$diff_file"
+          count=$(jq 'length' "$out")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Open nightly-api-fix PRs found: ${count}"
 
       # --- Run the Claude triage agent ----------------------------------------
       - name: Run Claude triage agent in workspace
         id: agent
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
-          COVERED_OPERATION_MAP: ${{ steps.covered.outputs.operation_map }}
+          OPEN_FIX_PRS_FILE: ${{ github.workspace }}/open-fix-prs.json
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
           # Two separately-scoped tokens — see "Configure git credentials" above
           # and the guidance's Role section for which one is valid where.
@@ -419,8 +443,11 @@ jobs:
           - Suite configs (known issues): ${ws_dir}/api-test-generator/configs/camunda-hub/positive-suppress.json
             and request-validation.json
           - Nightly run URL: ${NIGHTLY_RUN_URL}
-          - Operations already covered by an open nightly-api-fix PR, as a JSON map of
-            operationId -> PR URL (may be {}): ${COVERED_OPERATION_MAP}
+          - Open fix PRs already in flight (JSON array of {number, url, diff}, may be []):
+            ${OPEN_FIX_PRS_FILE} — before fixing ANY operationId, check whether it appears
+            anywhere in one of these diffs (a substring match, e.g. as a JSON key in
+            positive-suppress.json or a comment); if so, that operation is already being
+            fixed elsewhere.
           - NOTE: the generated *.spec.ts files are gitignored and NOT present here — recover what
             each test asserted from the report's request/response attachment + assertion error, not
             from source.
@@ -444,12 +471,12 @@ jobs:
              or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
              (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
              If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
-          7. For each test-generation bug or unmapped operation whose operationId is a key in the
-             covered map above: do NOT attempt a fix — set action "skip" and use the map's URL for
-             that operationId as fix_pr_url. Otherwise, per the guidance's guardrails, either apply a
-             minimal fix and open an api-test-generator PR using GH_TOKEN_GENERATOR (label
-             nightly-api-fix, embedding the Fixes-operationId marker, already pre-created), or — if
-             you're not fully confident — action "report-only". Never push directly to main.
+          7. For each test-generation bug or unmapped operation: search ${OPEN_FIX_PRS_FILE}'s diffs
+             for the operationId FIRST. If it appears in any listed PR's diff: do NOT attempt a fix —
+             set action "skip" and fix_pr_url to that PR's url. Otherwise, per the guidance's
+             guardrails, either apply a minimal fix and open an api-test-generator PR using
+             GH_TOKEN_GENERATOR (label nightly-api-fix, already pre-created), or — if you're not fully
+             confident — action "report-only". Never push directly to main.
           8. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF
           )
