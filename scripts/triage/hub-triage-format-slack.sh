@@ -49,11 +49,20 @@ case "$MODE" in
       # nonsense count (e.g. a 4-char string masquerading as "4 operations").
       # Coerce non-arrays to [] first so the count is 0, not a lie.
       def arrlen(x): (x // []) as $v | (if ($v|type) == "array" then ($v|length) else 0 end);
+      # A present-but-wrong-typed field is a genuine schema violation, not
+      # legitimate "nothing to report" (that case is field ABSENT, i.e. null,
+      # which arrlen already treats as 0 correctly). Coercing a violation to 0
+      # the same way would silently turn real, lost triage data into a false
+      # all-clear — exactly what this script exists to prevent. Caught
+      # separately below, before the normal zero-failures path can fire.
+      def bad_type(x): x as $v | ($v != null) and (($v|type) != "array");
       # No-false-all-clear: an inconclusive / crashed run must say so, never green.
       if (.inconclusive // false) then
         ":warning: *Inconclusive* — the nightly produced no report artifact to triage. The test run may have crashed before uploading results; check the nightly run."
       elif (.agent_error // false) then
         ":warning: *Triage incomplete* — the agent errored before writing a result. Check the triage run."
+      elif (bad_type(.failures) or bad_type(.unmapped_operations)) then
+        ":warning: *Triage result has a schema violation* — failures or unmapped_operations is not an array. Treating as inconclusive rather than risk reporting a false all-clear; check the raw triage JSON for this run."
       else
       (
       (.counts // {}) as $c
