@@ -471,13 +471,21 @@ jobs:
              or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
              (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
              If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
-          7. For each test-generation bug or unmapped operation: search ${OPEN_FIX_PRS_FILE}'s diffs
+          7. For EVERY product bug you just filed OR found already-known (known_issue: true) — not only
+             newly-filed ones — also suppress the affected test in api-test-generator: per the
+             guidance's "Suppressing a confirmed product bug" section, ONLY the exact operationId+suite
+             this failure implicates, never other operations. Check ${OPEN_FIX_PRS_FILE}'s diffs first;
+             if already covered by an open PR, set suppress_pr_url to that PR's url instead of opening a
+             duplicate. Record the result as suppress_pr_url (or leave null + suppress_error, a separate
+             field from file_error, if it couldn't be done) — independent of the issue-filing action
+             above, never fails the run.
+          8. For each test-generation bug or unmapped operation: search ${OPEN_FIX_PRS_FILE}'s diffs
              for the operationId FIRST. If it appears in any listed PR's diff: do NOT attempt a fix —
              set action "skip" and fix_pr_url to that PR's url. Otherwise, per the guidance's
              guardrails, either apply a minimal fix and open an api-test-generator PR using
              GH_TOKEN_GENERATOR (label nightly-api-fix, already pre-created), or — if you're not fully
              confident — action "report-only". Never push directly to main.
-          8. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
+          9. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF
           )
 

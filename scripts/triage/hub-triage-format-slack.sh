@@ -149,10 +149,14 @@ case "$MODE" in
              link_or_note(f.fix_pr_url;
                if (f.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
+        + (if (f.suppress_pr_url // null) != null then link_or_note(f.suppress_pr_url; ":no_entry: suppressed") else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
              (if (f.subcategory // "") == "test-generation"
               then "\n    :warning: could not open fix PR: "
               else "\n    :warning: could not file issue: " end) + s(f.file_error; "")
+           else "" end)
+        + (if (f.category // "") == "product" and (f.suppress_pr_url // null) == null and ((f.suppress_error // "") != "") then
+             "\n    :warning: could not suppress: " + s(f.suppress_error; "")
            else "" end);
       def uline(u):
         "• :no_entry_sign: *unmapped* — `" + s(u.operationId; "?") + "` — no generated test"
