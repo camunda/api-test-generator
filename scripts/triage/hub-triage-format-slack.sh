@@ -84,7 +84,11 @@ case "$MODE" in
       # AND test-generation failures, so using it here would over-report (a
       # night with only test-generation fixes, zero unmapped-op fixes, would
       # still show a non-zero "fix PR(s) opened" on the coverage-gap line).
-      | ((.unmapped_operations // []) | map(select((.fix_pr_url // null) != null)) | length) as $unmapped_fixed
+      # action == "skip" also carries a fix_pr_url (pointing at an existing,
+      # already-in-flight PR — see the dedup check), so counting any non-null
+      # fix_pr_url here would overstate how many PRs were freshly OPENED this
+      # run. Only action == "fix-pr" is a new PR.
+      | ((.unmapped_operations // []) | map(select((.action // "") == "fix-pr")) | length) as $unmapped_fixed
       | (
           if $unmapped_total == 0 then ""
           else "\n:no_entry_sign: *Coverage gap:* " + ($unmapped_total|tostring)

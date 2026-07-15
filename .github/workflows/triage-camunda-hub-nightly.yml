@@ -528,22 +528,25 @@ jobs:
           fi
           cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
 
-      # --- Validate any fix PR the agent opened --------------------------------
+      # --- Validate any fix/suppress PR the agent opened -----------------------
       # Mirrors the c8-orchestration-cluster-e2e-nightly-fix.yml reference this
       # agent is modeled on: "after the PR is open, trigger the matching
       # on-demand workflow and patch the PR body with the run URL." ci.yml's
       # hub-invariants job already runs automatically on the PR (lint/typecheck/
       # static regression invariants against the PINNED spec) — but that never
-      # starts a live Hub, so it cannot confirm the fix actually produces a
-      # passing test. hub-ondemand-test.yml does exactly that (unpinned, live
-      # Hub, real Playwright run) but is workflow_dispatch-only — nothing
-      # triggers it automatically otherwise, so without this step a human has
-      # to remember to kick it off by hand before trusting the PR.
+      # starts a live Hub, so it cannot confirm the fix/suppression actually
+      # works. hub-ondemand-test.yml does exactly that (unpinned, live Hub,
+      # real Playwright run) but is workflow_dispatch-only — nothing triggers
+      # it automatically otherwise, so without this step a human has to
+      # remember to kick it off by hand before trusting the PR. Covers BOTH
+      # fix_pr_url (test-generation/coverage fixes) and suppress_pr_url
+      # (product-bug suppressions) — a suppress PR needs the same live-Hub
+      # proof that the operation is now correctly excluded.
       # Deterministic, not agent-driven: dispatching a known workflow and
       # patching a PR body with its run link is pure mechanics, no judgment
       # involved — matches this whole PR's principle of using an agent only
       # where interpretation is actually needed.
-      - name: Trigger on-demand validation for any opened fix PR
+      - name: Trigger on-demand validation for any opened fix/suppress PR
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         continue-on-error: true
         env:
@@ -553,16 +556,20 @@ jobs:
           f="${GITHUB_WORKSPACE}/hub-triage.json"
           [ -s "$f" ] || exit 0
 
-          # Every fix_pr_url the agent recorded, deduped (failures[] and
-          # unmapped_operations[] can each carry one).
+          # Every fix_pr_url AND suppress_pr_url the agent recorded, deduped
+          # (failures[] can carry either; unmapped_operations[] only fix_pr_url).
+          # Both are real api-test-generator PRs the agent opened — a
+          # suppress PR needs the same live-Hub proof a fix PR does (that the
+          # operation is now correctly suppressed, not that anything broke).
           urls=$(jq -r '
             [(.failures // [] | .[]? | .fix_pr_url // empty),
+             (.failures // [] | .[]? | .suppress_pr_url // empty),
              (.unmapped_operations // [] | .[]? | .fix_pr_url // empty)]
             | map(select(type == "string" and length > 0))
             | unique | .[]
           ' "$f" 2>/dev/null || true)
           if [ -z "$urls" ]; then
-            echo "No fix PRs to validate this run."
+            echo "No fix/suppress PRs to validate this run."
             exit 0
           fi
           if [ -z "${GH_TOKEN:-}" ]; then
@@ -573,7 +580,7 @@ jobs:
           while IFS= read -r pr_url; do
             [ -z "$pr_url" ] && continue
             pr_num="${pr_url##*/}"
-            echo "Validating fix PR #${pr_num} (${pr_url})"
+            echo "Validating fix/suppress PR #${pr_num} (${pr_url})"
 
             branch=$(gh pr view "$pr_num" --repo "$REPO" --json headRefName --jq .headRefName 2>/dev/null || true)
             if [ -z "$branch" ]; then
@@ -584,7 +591,7 @@ jobs:
             if ! gh workflow run hub-ondemand-test.yml --repo "$REPO" --ref "$branch"; then
               echo "::warning::Could not dispatch hub-ondemand-test.yml for ${pr_url}"
               gh pr comment "$pr_num" --repo "$REPO" \
-                --body ":warning: Could not auto-dispatch on-demand validation (\`hub-ondemand-test.yml\`) for this fix — please trigger it manually against this branch before merging (it starts a live Hub and runs the real suite; \`hub-invariants\` on this PR only checks static invariants against the pinned spec, not a live run)." \
+                --body ":warning: Could not auto-dispatch on-demand validation (\`hub-ondemand-test.yml\`) for this PR — please trigger it manually against this branch before merging (it starts a live Hub and runs the real suite; \`hub-invariants\` on this PR only checks static invariants against the pinned spec, not a live run)." \
                 2>/dev/null || true
               continue
             fi
@@ -602,7 +609,7 @@ jobs:
             done
 
             note_body=$(if [ -n "$run_url" ]; then
-              printf '🔎 **On-demand validation**: [hub-ondemand-test run](%s) — dispatched automatically. This confirms the fix actually passes against a live Hub, not just static invariants (which is all `hub-invariants` on this PR checks).' "$run_url"
+              printf '🔎 **On-demand validation**: [hub-ondemand-test run](%s) — dispatched automatically. This confirms the change actually passes against a live Hub, not just static invariants (which is all `hub-invariants` on this PR checks).' "$run_url"
             else
               printf '⚠️ Dispatched `hub-ondemand-test.yml` for validation but could not resolve the run URL within the poll window — check the Actions tab for branch `%s`.' "$branch"
             fi)
