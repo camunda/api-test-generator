@@ -411,10 +411,17 @@ jobs:
                 echo "::warning::Could not fetch diff for open fix PR #${n} — its dedup coverage for this run will be incomplete (empty diff), which could let a duplicate PR get opened for an already-in-flight fix."
                 : > "$diff_file"
               fi
-              jq -n --argjson acc "$(cat "$acc")" --arg n "$n" \
+              # --slurpfile reads the accumulator straight from the file
+              # (binding $acc to a 1-element array containing it, hence
+              # $acc[0] below) rather than injecting its content as a
+              # command-line argument — with up to 50 PRs x a 20KB diff cap
+              # each, --argjson acc "$(cat "$acc")" could approach/exceed
+              # ARG_MAX after JSON-escaping overhead and fail this step,
+              # silently defeating the dedup guardrail.
+              jq -n --slurpfile acc "$acc" --arg n "$n" \
                 --arg url "https://github.com/camunda/api-test-generator/pull/${n}" \
                 --rawfile diff "$diff_file" \
-                '$acc + [{number: ($n|tonumber), url: $url, diff: $diff}]' > "${acc}.new"
+                '$acc[0] + [{number: ($n|tonumber), url: $url, diff: $diff}]' > "${acc}.new"
               mv "${acc}.new" "$acc"
             done <<< "$nums"
           fi
