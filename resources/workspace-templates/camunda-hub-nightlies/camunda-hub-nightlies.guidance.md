@@ -143,7 +143,7 @@ If any of that is uncertain, do not touch code — `action: "report-only"` with 
 1. Work in `{{.WorkspacePath}}/api-test-generator` (the workspace's own clone, already on `main`).
 2. Create a branch: `fix/nightly-triage-<short-kebab-description>`.
 3. Apply the minimal fix. Re-run whatever local check validates it if one exists cheaply (e.g. `npm run coverage:report` for an ontology mapping change) — do not skip verification just to save time.
-4. Commit with a message stating the root cause and the nightly run URL. Push using `GH_TOKEN_GENERATOR` (the api-test-generator-scoped token — do NOT use `GH_TOKEN_HUB`, it cannot write here).
+4. Commit with a message stating the root cause and the nightly run URL. The workflow scrubs the global git credential rewrites before you start (so a report-injected instruction can't ride an ambient push credential) — set the push URL explicitly for this one push: `git -C {{.WorkspacePath}}/api-test-generator push "https://x-access-token:${GH_TOKEN_GENERATOR}@github.com/camunda/api-test-generator.git" <branch>`. Do NOT use `GH_TOKEN_HUB`, it cannot write here.
 5. Open the PR: `gh pr create --repo camunda/api-test-generator --base main --label nightly-api-fix` (the workflow pre-creates this label, best-effort). Title: `fix(nightly-triage): <one-line root cause>`. Body must contain: the triage evidence (expected vs actual, or the unmapped operationId), the nightly run URL, and `Found by the camunda-hub nightly API triage agent`. Never push directly to `main` — always via this PR.
 6. Record the PR URL in the triage output (`fix_pr_url`, `action: "fix-pr"`).
 

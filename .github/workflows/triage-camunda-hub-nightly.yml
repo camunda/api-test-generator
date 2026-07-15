@@ -111,8 +111,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "REPORTS_DIR=${REPORTS_DIR}"
+          # download-artifact may not create this directory at all if the
+          # artifact was totally missing (continue-on-error just swallows that
+          # failure) — mkdir -p first so `find` below has something to search
+          # instead of erroring out and killing this step under pipefail.
+          mkdir -p "${REPORTS_DIR}"
           find "${REPORTS_DIR}" -maxdepth 2 -type f 2>/dev/null | head -50 || true
-          count=$(find "${REPORTS_DIR}" -maxdepth 2 -name 'pw-*.json' 2>/dev/null | wc -l | tr -d ' ')
+          count=$(find "${REPORTS_DIR}" -maxdepth 2 -name 'pw-*.json' 2>/dev/null | wc -l | tr -d ' ' || echo 0)
           if [ "${count}" -gt 0 ]; then
             echo "has_reports=true" >> "$GITHUB_OUTPUT"
           else
@@ -240,32 +245,37 @@ jobs:
         with:
           node-version: '22'
 
+      # Pinned to a commit SHA (workspace-cli has no tagged releases) rather
+      # than @latest, so an upstream breaking change can't silently start
+      # failing nightly triage — bump intentionally. SHA = camunda/
+      # workspace-cli main HEAD @ 2026-07-15.
       - name: Install workspace-cli
         run: |
           set -euo pipefail
-          go install github.com/camunda/workspace-cli/cmd/workspace@latest
+          go install github.com/camunda/workspace-cli/cmd/workspace@e1b3f19dd244957db5eb3b4ebd5bc71999c3deb0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
+      # Pinned version (same as the c8-orchestration-cluster-e2e-nightly-fix.yml
+      # reference this agent is modeled on) — bump intentionally.
       - name: Install Claude Code CLI
         run: |
           set -euo pipefail
-          npm install -g @anthropic-ai/claude-code
+          npm install -g @anthropic-ai/claude-code@2.1.156
           claude --version
 
-      # Route all github.com clones through the (read-only) hub-clone token so
-      # workspace-cli can clone the private camunda-hub (public repos ride the
-      # same token). Then layer a MORE SPECIFIC override just for
-      # camunda/api-test-generator using the write-scoped generator token — git
-      # matches the longest matching insteadOf prefix, so this repo-specific
-      # rule wins over the blanket one above for pushes the agent makes there,
-      # without widening write access to camunda-hub or camunda-docs.
+      # Scope EACH rewrite to the specific repo that needs it — NOT a blanket
+      # "https://github.com/" rewrite. camunda-docs and api-test-generator are
+      # both public (workspace-cli clones them anonymously, no token needed);
+      # only camunda-hub is private and needs the read-only hub-clone token.
+      # This is narrower than "every github.com clone rides the hub token" —
+      # reduces what a hypothetical leak (debug log, error message) could expose.
       - name: Configure git credentials for cloning
         env:
           HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
           GENERATOR_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
         run: |
           set -euo pipefail
-          git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf "https://github.com/camunda/camunda-hub"
           if [ -n "$GENERATOR_TOKEN" ]; then
             git config --global url."https://x-access-token:${GENERATOR_TOKEN}@github.com/camunda/api-test-generator".insteadOf "https://github.com/camunda/api-test-generator"
           fi
@@ -291,6 +301,26 @@ jobs:
           set -euo pipefail
           workspace create "${{ steps.ws.outputs.name }}" \
             --manifest "${{ steps.manifest.outputs.MANIFEST }}"
+
+      # Cloning is done — scrub the token-bearing url.*.insteadOf rewrites from
+      # global gitconfig BEFORE the agent (running with
+      # --dangerously-skip-permissions, and fed untrusted report content) can
+      # read them. If it needs to push a fix PR, the guidance instructs it to
+      # set the credential explicitly at push time from $GH_TOKEN_GENERATOR —
+      # it never needs the persisted global rewrite for that.
+      - name: Scrub git credentials before running the agent
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        run: |
+          # --unset-all needs the exact key, and the key itself embeds the
+          # token value — enumerate every url.*.insteadof key and unset any
+          # whose key contains the token marker, rather than reconstructing
+          # the token value here.
+          git config --global --get-regexp '^url\..*\.insteadof$' 2>/dev/null | while read -r key _; do
+            case "$key" in
+              *x-access-token*) git config --global --unset-all "$key" ;;
+            esac
+          done
+          grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
 
       # --- Run the Claude triage agent ----------------------------------------
       - name: Run Claude triage agent in workspace
@@ -395,6 +425,9 @@ jobs:
       - name: Post triage summary to Slack
         id: slack-summary
         if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' }}
+        # Notification infra must not fail the run — the triage JSON is already
+        # produced and uploaded regardless of whether Slack is reachable.
+        continue-on-error: true
         env:
           SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -421,6 +454,7 @@ jobs:
 
       - name: Post per-failure detail to Slack thread
         if: ${{ always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' && steps.slack-summary.outputs.ts != '' }}
+        continue-on-error: true
         env:
           SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
           SLACK_TS: ${{ steps.slack-summary.outputs.ts }}

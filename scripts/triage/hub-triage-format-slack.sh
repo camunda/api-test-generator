@@ -22,10 +22,27 @@ if [ ! -s "$FILE" ]; then
   exit 0
 fi
 
+# Malformed (non-JSON) content: same degrade-gracefully contract as the
+# missing-file case above, rather than letting jq's non-zero exit propagate
+# under set -e (the caller currently does `|| true`, which would otherwise
+# turn this into a silent empty Slack message instead of a visible warning).
+if ! jq empty "$FILE" 2>/dev/null; then
+  case "$MODE" in
+    summary) printf ':warning: Triage result file is not valid JSON — the agent may have written a partial/corrupt result. Check the run.' ;;
+    thread)  printf '' ;;
+  esac
+  exit 0
+fi
+
 case "$MODE" in
   summary)
     jq -r '
-      def n(x): (x // 0);
+      # Coerce to a number regardless of whether the agent wrote it as a JSON
+      # number or (schema drift) a numeric string — a bare `x // 0` still
+      # throws on a string in later numeric comparisons/arithmetic.
+      def n(x): (x // 0) as $v | (if ($v|type) == "number" then $v
+                                   elif ($v|type) == "string" then ($v|tonumber? // 0)
+                                   else 0 end);
       # No-false-all-clear: an inconclusive / crashed run must say so, never green.
       if (.inconclusive // false) then
         ":warning: *Inconclusive* — the nightly produced no report artifact to triage. The test run may have crashed before uploading results; check the nightly run."
@@ -82,6 +99,11 @@ case "$MODE" in
     # One bullet per failure, grouped by category. Empty output when there are
     # no failures (caller then skips the thread reply).
     jq -r '
+      # Coerce any field to a display string regardless of its actual JSON
+      # type (the schema promises strings, but a malformed field — a number,
+      # object, or null slipping past `// "?"` — must still degrade to a
+      # readable line instead of a jq "cannot add ... and string" error).
+      def s(x; d): ((x // d) | tostring);
       def icon(f):
         if (f.subcategory // "") == "test-generation" then ":test_tube:"
         elif f.category == "product" then ":package:"
@@ -90,20 +112,27 @@ case "$MODE" in
         else ":grey_question:" end;
       def catlabel(f):
         if (f.subcategory // "") == "test-generation" then "test-generation (api-test-generator)"
-        else (f.category // "?") end;
+        else s(f.category; "?") end;
+      # Only render a knownIssue/URL-style link when the URL is actually
+      # present — an empty/null url must not render as a bare "<>", which
+      # looks like a broken link rather than a missing one.
+      def link_or_note(url; linklabel):
+        (url // "") as $u
+        | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
+          else "\n    " + linklabel + ": (no URL recorded)" end;
       def line(f):
         "• " + icon(f) + " *" + catlabel(f) + "* — `"
-        + (f.spec // f.operationId // "?") + "` — " + (f.test // "")
-        + "\n    expected: " + (f.expected // "?") + "  |  actual: " + (f.actual // "?")
-        + (if (f.known_issue // false) then "\n    :ticket: known issue: <" + (f.known_issue_url // "") + ">" else "" end)
-        + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + (f.related_commit|tostring) else "" end)
-        + (if (f.issue_url // null) != null then "\n    :memo: filed: <" + f.issue_url + ">" else "" end)
-        + (if (f.fix_pr_url // null) != null then "\n    :hammer_and_wrench: fix PR: <" + f.fix_pr_url + ">" else "" end)
-        + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then "\n    :warning: could not file issue: " + f.file_error else "" end);
+        + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
+        + "\n    expected: " + s(f.expected; "?") + "  |  actual: " + s(f.actual; "?")
+        + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
+        + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
+        + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
+        + (if (f.fix_pr_url // null) != null then link_or_note(f.fix_pr_url; ":hammer_and_wrench: fix PR") else "" end)
+        + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then "\n    :warning: could not file issue: " + s(f.file_error; "") else "" end);
       def uline(u):
-        "• :no_entry_sign: *unmapped* — `" + (u.operationId // "?") + "` — no generated test"
-        + (if (u.fix_pr_url // null) != null then "\n    :hammer_and_wrench: fix PR: <" + u.fix_pr_url + ">" else "" end)
-        + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + u.file_error else "" end);
+        "• :no_entry_sign: *unmapped* — `" + s(u.operationId; "?") + "` — no generated test"
+        + (if (u.fix_pr_url // null) != null then link_or_note(u.fix_pr_url; ":hammer_and_wrench: fix PR") else "" end)
+        + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
       ((.failures // []) | map(line(.))) as $flines
       | ((.unmapped_operations // []) | map(uline(.))) as $ulines
       | ($flines + $ulines) as $all

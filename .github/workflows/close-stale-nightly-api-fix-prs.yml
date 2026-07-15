@@ -92,8 +92,8 @@ jobs:
         env:
           GH_TOKEN:   ${{ steps.app-token.outputs.token }}
           REPO:       camunda/${{ matrix.repo }}
-          STALE_DAYS: ${{ inputs.stale_days || '1' }}
-          DRY_RUN:    ${{ inputs.dry_run || 'false' }}
+          STALE_DAYS: ${{ github.event.inputs.stale_days || '1' }}
+          DRY_RUN:    ${{ github.event.inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
 

@@ -148,21 +148,27 @@ jobs:
         if: always()
         run: ./docker/start-hub.sh stop || true
 
+      # Copy coverage.json (summary.unmappedOperations — spec ops with zero
+      # generated test coverage, #470/#475) into the report directory BEFORE
+      # upload, rather than listing it as a second `path:` entry below.
+      # upload-artifact v4 preserves full relative paths once 2+ root paths are
+      # given (it only flattens a single-directory upload to that directory's
+      # contents) — a second entry here would silently move every existing
+      # pw-*.json file from the artifact root to a nested
+      # test-results/e2e-camunda-hub/ path too, breaking the triage workflow's
+      # existing report-detection logic. Copying into the same tree keeps this
+      # a single-path upload, so the existing flat layout (and this file
+      # landing at the same flat level) is unaffected.
+      - name: Stage coverage.json alongside the reports
+        if: always()
+        run: cp generated/camunda-hub/playwright/coverage.json test-results/e2e-camunda-hub/coverage.json 2>/dev/null || true
+
       - name: Upload Playwright reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: camunda-hub-nightly-reports
-          # coverage.json (summary.unmappedOperations — spec ops with zero
-          # generated test coverage, #470/#475) lives outside test-results/,
-          # so it's listed separately here. Without it, the nightly triage
-          # agent (triage-camunda-hub-nightly.yml) has no way to see operations
-          # that were silently skipped at generate time — those never appear as
-          # a failing test (there's no test to fail), so omitting this file
-          # would let a real coverage gap report as "all green" downstream.
-          path: |
-            test-results/e2e-camunda-hub/
-            generated/camunda-hub/playwright/coverage.json
+          path: test-results/e2e-camunda-hub/
           retention-days: 14
 
       # --- 7. Results summary --------------------------------------------------
