@@ -473,24 +473,31 @@ The **nightly triage agent**
 ([triage-camunda-hub-nightly.yml](.github/workflows/triage-camunda-hub-nightly.yml))
 is the nightly's downstream companion: a `workflow_run` job that fires when the
 nightly completes, downloads its `camunda-hub-nightly-reports` artifact
-(JSON/JUnit + HTML report + traces/screenshots), and runs a **Claude Code** triage
-agent inside a 3-repo [`workspace-cli`](https://github.com/camunda/workspace-cli)
-workspace (`api-test-generator`, `camunda-docs`, `camunda-hub` @ `main` — manifest
-+ playbook under
+(JSON/JUnit + HTML report + traces/screenshots + `coverage.json`), and runs a
+**Claude Code** triage agent inside a 3-repo
+[`workspace-cli`](https://github.com/camunda/workspace-cli) workspace
+(`api-test-generator`, `camunda-docs`, `camunda-hub` @ `main` — manifest +
+playbook under
 [resources/workspace-templates/camunda-hub-nightlies/](resources/workspace-templates/camunda-hub-nightlies)).
 It debugs each positive + negative failure, classifies it **product /
-infrastructure / flakiness**, reconciles against the `knownIssue` configs, and —
-for a genuine product bug with no explaining recent `camunda-hub` commit — files a
-`camunda-hub` issue (the OpenAPI v2 spec is the request/response oracle). It posts
-a triaged digest to `#camunda-hub-api-test-results` via the same Slack bot. Auth:
-`CLAUDE_API_KEY` at `secret/data/products/qa/ci/common` (agent) +
-[`slack-token`](.github/actions/slack-token) (Slack) +
+infrastructure / flakiness** (plus a `test-generation` subcategory), reconciles
+against the `knownIssue` configs, checks `coverage.json`'s
+`summary.unmappedOperations` every run (these never show up as a failing test, so
+an all-green suite pair can still hide a real coverage gap) — and, for a genuine
+product bug with no explaining recent `camunda-hub` commit, files a `camunda-hub`
+issue (the OpenAPI v2 spec is the request/response oracle). Write access is
+asymmetric: `camunda-hub` gets issues only, ever; for a confirmed test-generation
+bug or an unmapped operation with an obvious, minimal, safe fix, the agent may
+instead open a PR against `api-test-generator` (never a direct push to `main`) —
+two separately-scoped qa-processes App tokens enforce this (`GH_TOKEN_HUB`,
+issues-only; `GH_TOKEN_GENERATOR`, the SAME contents+PR-write grant
+spec-bump-check.yml's bump-PR token already uses on this repo, so no new App
+permission is needed). It posts a triaged digest to `#camunda-hub-api-test-results`
+via the same Slack bot. Auth: `CLAUDE_API_KEY` at `secret/data/products/qa/ci/common`
+(agent) + [`slack-token`](.github/actions/slack-token) (Slack) +
 [`hub-clone-token`](.github/actions/hub-clone-token) (workspace-cli clone of the
-private camunda-hub); the agent's camunda-hub issue writes use a **qa-processes**
-App token (Vault approle, same as spec-bump-check + the janitor), not a PAT.
-`workflow_run` only fires
-from the default branch — use `workflow_dispatch` with a past `nightly_run_id` to
-test. Slack formatting lives in
+private camunda-hub). `workflow_run` only fires from the default branch — use
+`workflow_dispatch` with a past `nightly_run_id` to test. Slack formatting lives in
 [scripts/triage/hub-triage-format-slack.sh](scripts/triage/hub-triage-format-slack.sh).
 
 The **stale-fix-PR janitor**

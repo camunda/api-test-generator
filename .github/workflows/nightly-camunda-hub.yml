@@ -153,7 +153,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: camunda-hub-nightly-reports
-          path: test-results/e2e-camunda-hub/
+          # coverage.json (summary.unmappedOperations — spec ops with zero
+          # generated test coverage, #470/#475) lives outside test-results/,
+          # so it's listed separately here. Without it, the nightly triage
+          # agent (triage-camunda-hub-nightly.yml) has no way to see operations
+          # that were silently skipped at generate time — those never appear as
+          # a failing test (there's no test to fail), so omitting this file
+          # would let a real coverage gap report as "all green" downstream.
+          path: |
+            test-results/e2e-camunda-hub/
+            generated/camunda-hub/playwright/coverage.json
           retention-days: 14
 
       # --- 7. Results summary --------------------------------------------------

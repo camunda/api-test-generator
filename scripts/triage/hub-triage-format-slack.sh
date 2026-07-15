@@ -36,6 +36,7 @@ case "$MODE" in
       (.counts // {}) as $c
       | (.suites // {}) as $s
       | (n(.failures | length)) as $total
+      | (n(.unmapped_operations | length)) as $unmapped_total
       | (
           "*Suites*  •  positive: " +
           ((n($s.positive.failed) > 0 | if . then ":x: " else ":white_check_mark: " end)
@@ -46,8 +47,20 @@ case "$MODE" in
             + (n($s.negative.passed)|tostring) + " passed / " + (n($s.negative.failed)|tostring) + " failed"
             + (if ($s.negative.report // "present") == "missing" then " :warning: no report" else "" end))
         ) as $suites
-      | if $total == 0 then
-          $suites + "\n:white_check_mark: *No failures tonight* — both suites green."
+      | (
+          if $unmapped_total == 0 then ""
+          else "\n:no_entry_sign: *Coverage gap:* " + ($unmapped_total|tostring)
+               + " operation(s) with no generated test — " + (n($c.fixed)|tostring) + " fix PR(s) opened."
+          end
+        ) as $coverage_line
+      # No-false-all-clear applies here too: zero failing TESTS is not the same
+      # as zero gaps — a suite can be all-green while an operation has no test
+      # at all (it never appears as a failure). Only call the night fully clean
+      # when BOTH are zero.
+      | if $total == 0 and $unmapped_total == 0 then
+          $suites + "\n:white_check_mark: *No failures tonight* — both suites green, no coverage gaps."
+        elif $total == 0 then
+          $suites + "\n:white_check_mark: No failing tests." + $coverage_line
         else
           $suites
           + "\n*Triage — " + ($total|tostring) + " failing test(s):*"
@@ -58,6 +71,7 @@ case "$MODE" in
           + "\n  :ticket: known issue: " + (n($c.known_issue)|tostring)
           + "   :memo: filed: " + (n($c.filed)|tostring)
           + "   :fast_forward: skipped (recent change): " + (n($c.skipped_recent_change)|tostring)
+          + $coverage_line
         end
       )
       end
@@ -84,9 +98,16 @@ case "$MODE" in
         + (if (f.known_issue // false) then "\n    :ticket: known issue: <" + (f.known_issue_url // "") + ">" else "" end)
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + (f.related_commit|tostring) else "" end)
         + (if (f.issue_url // null) != null then "\n    :memo: filed: <" + f.issue_url + ">" else "" end)
+        + (if (f.fix_pr_url // null) != null then "\n    :hammer_and_wrench: fix PR: <" + f.fix_pr_url + ">" else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then "\n    :warning: could not file issue: " + f.file_error else "" end);
-      (.failures // [])
-      | if length == 0 then "" else (map(line(.)) | join("\n")) end
+      def uline(u):
+        "• :no_entry_sign: *unmapped* — `" + (u.operationId // "?") + "` — no generated test"
+        + (if (u.fix_pr_url // null) != null then "\n    :hammer_and_wrench: fix PR: <" + u.fix_pr_url + ">" else "" end)
+        + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + u.file_error else "" end);
+      ((.failures // []) | map(line(.))) as $flines
+      | ((.unmapped_operations // []) | map(uline(.))) as $ulines
+      | ($flines + $ulines) as $all
+      | if ($all | length) == 0 then "" else ($all | join("\n")) end
     ' "$FILE"
     ;;
 

@@ -1,13 +1,17 @@
 # description: Triage agent for the camunda-hub nightly API test run. Fires when
 #              "Nightly — camunda-hub API tests" completes, downloads its
 #              camunda-hub-nightly-reports artifact (JSON/JUnit + HTML report +
-#              traces/screenshots), spins up a 3-repo workspace (api-test-generator,
-#              camunda-docs, camunda-hub @ main) via workspace-cli, and runs a Claude
-#              Code triage agent. The agent debugs each positive + negative failure,
-#              classifies it product / infrastructure / flakiness, cross-checks the
-#              camunda-hub OpenAPI spec + recent commits (skipping bugs explained by a
-#              recent change), files camunda-hub issues for genuine new product bugs,
-#              and posts a triaged digest to #camunda-hub-api-test-results.
+#              traces/screenshots/coverage.json), spins up a 3-repo workspace
+#              (api-test-generator, camunda-docs, camunda-hub @ main) via
+#              workspace-cli, and runs a Claude Code triage agent. The agent debugs
+#              each positive + negative failure (plus unmapped-operation coverage
+#              gaps from coverage.json), classifies failures product / infrastructure
+#              / flakiness, cross-checks the camunda-hub OpenAPI spec + recent commits
+#              (skipping bugs explained by a recent change). Write access is
+#              asymmetric: camunda-hub gets issues only (never code); api-test-
+#              generator may get a PR for a confirmed test-generation bug or a
+#              coverage gap with an obvious minimal fix. Posts a triaged digest to
+#              #camunda-hub-api-test-results.
 # type: CI
 # owner: @camunda/test-automation-team
 ---
@@ -134,14 +138,16 @@ jobs:
           secrets: |
             secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
 
-      # GitHub App token for all of the agent's `gh` work — searching + creating
-      # camunda-hub issues (Issues:Write) — instead of a shared org PAT. Same App
-      # + Vault wiring as spec-bump-check.yml and the stale-PR janitor. Scoped to
-      # camunda-hub (the only repo the agent writes to). continue-on-error: if the
-      # App can't reach camunda-hub, the token is empty and the agent degrades to
-      # report-only (Slack still surfaces the bug) rather than failing the run.
+      # Two separately-scoped GitHub App tokens — the agent's write access is
+      # asymmetric by design (camunda-hub: issues only; api-test-generator: may
+      # open a PR for a confirmed test-generation/coverage fix), so each repo
+      # gets its own token rather than one broad grant. Same App + Vault wiring
+      # as spec-bump-check.yml and the stale-PR janitor in both cases.
+      # continue-on-error: if the App can't reach a repo, that token is empty
+      # and the agent degrades to report-only for that repo (Slack still
+      # surfaces the bug) rather than failing the run.
       - name: Generate qa-processes App token (camunda-hub issues)
-        id: qa-token
+        id: qa-token-hub
         continue-on-error: true
         # Pinned SHA — same pin as spec-bump-check.yml + the janitor. Bump intentionally.
         uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
@@ -156,6 +162,49 @@ jobs:
           vault-url: ${{ secrets.VAULT_ADDR }}
           owner: camunda
           repositories: camunda-hub
+
+      # Same App, scoped to api-test-generator instead — this is the SAME grant
+      # (contents:write + pull-requests:write) spec-bump-check.yml's bump-PR
+      # token already uses successfully on this repo (e.g. the chore/spec-bump-*
+      # PRs), so opening a fix PR here needs no new App permission.
+      - name: Generate qa-processes App token (api-test-generator fix PRs)
+        id: qa-token-generator
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+
+      # Best-effort label pre-creation, deterministic bash (not left to the
+      # agent's own retry-on-error, which is fuzzier). kind/bug already exists
+      # on camunda-hub; nightly-detected and nightly-api-fix don't yet.
+      - name: Ensure labels exist (camunda-hub)
+        if: ${{ steps.qa-token-hub.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.qa-token-hub.outputs.token }}
+        run: |
+          gh label create kind/bug --repo camunda/camunda-hub --color d73a4a --description "A confirmed defect" 2>/dev/null || true
+          gh label create nightly-detected --repo camunda/camunda-hub --color 5319e7 --description "Filed by the camunda-hub nightly API triage agent" 2>/dev/null || true
+          # The agent never opens a PR here (issues only), but a human fixing a
+          # filed issue is asked to carry this label — pre-create it so the
+          # close-stale-nightly-api-fix-prs janitor's camunda-hub leg (and the
+          # human) find it ready.
+          gh label create nightly-api-fix --repo camunda/camunda-hub --color FF4444 --description "Human fix PR for a nightly-detected camunda-hub issue" 2>/dev/null || true
+
+      - name: Ensure labels exist (api-test-generator)
+        if: ${{ steps.qa-token-generator.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
+        run: |
+          gh label create nightly-api-fix --repo camunda/api-test-generator --color FF4444 --description "Bot-opened fix PR for a nightly triage finding (test-generation bug or coverage gap)" 2>/dev/null || true
 
       - name: Fetch Slack bot token from Vault
         id: slack
@@ -203,14 +252,23 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           claude --version
 
-      # Route all github.com clones through the App token so workspace-cli can
-      # clone the private camunda-hub (public repos ride the same token).
+      # Route all github.com clones through the (read-only) hub-clone token so
+      # workspace-cli can clone the private camunda-hub (public repos ride the
+      # same token). Then layer a MORE SPECIFIC override just for
+      # camunda/api-test-generator using the write-scoped generator token — git
+      # matches the longest matching insteadOf prefix, so this repo-specific
+      # rule wins over the blanket one above for pushes the agent makes there,
+      # without widening write access to camunda-hub or camunda-docs.
       - name: Configure git credentials for cloning
         env:
           HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          GENERATOR_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
         run: |
           set -euo pipefail
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          if [ -n "$GENERATOR_TOKEN" ]; then
+            git config --global url."https://x-access-token:${GENERATOR_TOKEN}@github.com/camunda/api-test-generator".insteadOf "https://github.com/camunda/api-test-generator"
+          fi
 
       # --- Create the 3-repo workspace ----------------------------------------
       - name: Stage workspace manifest + guidance
@@ -240,10 +298,12 @@ jobs:
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
-          # qa-processes App token (scoped to camunda-hub) for the agent's `gh`
-          # issue search + create. Empty if the App couldn't be reached → the
-          # agent falls back to report-only at runtime.
-          GH_TOKEN: ${{ steps.qa-token.outputs.token }}
+          # Two separately-scoped tokens — see "Configure git credentials" above
+          # and the guidance's Role section for which one is valid where.
+          # Empty if the App couldn't be reached → the agent falls back to
+          # report-only for that repo at runtime.
+          GH_TOKEN_HUB: ${{ steps.qa-token-hub.outputs.token }}
+          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
           NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
           REPORTS_DIR: ${{ env.REPORTS_DIR }}
           WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
@@ -255,14 +315,23 @@ jobs:
           prompt=$(cat <<EOF
           You are the camunda-hub nightly API TRIAGE agent, working in the workspace at ${ws_dir}.
           Read AGENTS.md and the workspace guidance ("camunda-hub Nightly API Triage — Workspace
-          Guidance") FIRST — it defines the two suites, the debug procedure, the three categories,
-          the product-bug commit-dedup rule, the known-issue reconciliation, and the exact output
-          schema. Follow it precisely.
+          Guidance") FIRST — it defines the two suites, the unmapped-operations coverage check, the
+          debug procedure, the categories, the product-bug commit-dedup rule, the known-issue
+          reconciliation, the test-generation/coverage fix-PR procedure, and the exact output schema.
+          Follow it precisely.
+
+          Your write access is asymmetric — memorize this: camunda-hub gets issues ONLY, never code,
+          never a PR, never a push (use \$GH_TOKEN_HUB for that, nothing else). api-test-generator may
+          get a PR, but ONLY for a confirmed test-generation bug or an unmapped-operation with an
+          obvious, minimal, safe fix — never a direct push to main (use \$GH_TOKEN_GENERATOR for that,
+          and only after you're confident per the guidance's guardrails). camunda-docs is always
+          read-only. When in doubt, report-only — that is always the safe choice.
 
           Inputs:
           - The downloaded nightly reports are at: ${REPORTS_DIR}
-            (pw-positive.{json,junit.xml}, pw-secured.*, pw-rbac.*, and pw-*/index.html HTML reports
-            with traces/screenshots for failing tests).
+            (pw-positive.{json,junit.xml}, pw-secured.*, pw-rbac.*, pw-*/index.html HTML reports with
+            traces/screenshots for failing tests, and coverage.json — check its
+            summary.unmappedOperations EVERY run, independent of suite pass/fail, per the guidance).
           - OpenAPI spec: ${ws_dir}/camunda-hub/restapi/public-api/src/main/resources/openapi/v2/*.yaml
           - Suite configs (known issues): ${ws_dir}/api-test-generator/configs/camunda-hub/positive-suppress.json
             and request-validation.json
@@ -273,24 +342,28 @@ jobs:
 
           Do this:
           1. Parse both suites' JSON/JUnit and enumerate every failing test (positive + negative).
-          2. For each failure: read its trace/screenshot/response in the HTML report to see the
+          2. Check coverage.json's summary.unmappedOperations regardless of suite results — these
+             never show up as failing tests, so they're easy to miss on an all-green night.
+          3. For each test failure: read its trace/screenshot/response in the HTML report to see the
              actual request+response+assertion, then resolve the operation in the OpenAPI v2 spec.
-          3. Classify each as product / infrastructure / flakiness with evidence. A "product" bug
-             REQUIRES the response to CONTRADICT the spec; if the response and spec AGREE but the test
-             failed, that is a test-generation bug (subcategory "test-generation", action "report-only",
-             routed to api-test-generator) — never a camunda-hub issue.
-          4. Reconcile against the knownIssue entries before calling anything a NEW bug.
-          5. For each PRODUCT bug (response contradicts spec) that is NOT already-known: search recent
+          4. Classify each as product / infrastructure / flakiness with evidence. A "product" bug
+             REQUIRES the response to CONTRADICT the spec (mind the 400→404→403 precedence quirk
+             described in the guidance before calling a status mismatch a product bug); if the
+             response and spec AGREE but the test failed, that is a test-generation bug (subcategory
+             "test-generation") — never a camunda-hub issue.
+          5. Reconcile against the knownIssue entries before calling anything a NEW bug.
+          6. For each PRODUCT bug (response contradicts spec) that is NOT already-known: search recent
              camunda-hub main commits for a related change. If a related commit explains it → action
              "skip" (record the commit). If not → compute the fingerprint, dedup by the
              \`nightly-api-triage fp=<fp>\` marker (then by symptom), and either link the existing issue
-             or file a new one with \`gh issue create --repo camunda/camunda-hub\` (labels kind/bug +
-             nightly-detected, fingerprint marker in the body). If GH_TOKEN is empty or filing fails,
-             set action "report-only" with file_error.
-          6. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
-
-          You are read-only on api-test-generator and camunda-docs. The ONLY write action allowed is
-          filing a camunda-hub issue per the rules. Do NOT open PRs or edit any file.
+             or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
+             (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
+             If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
+          7. For each test-generation bug or unmapped operation: per the guidance's guardrails, either
+             apply a minimal fix and open an api-test-generator PR using GH_TOKEN_GENERATOR (label
+             nightly-api-fix, already pre-created), or — if you're not fully confident — action
+             "report-only". Never push directly to main.
+          8. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF
           )
 
