@@ -481,20 +481,29 @@ playbook under
 [resources/workspace-templates/camunda-hub-nightlies/](resources/workspace-templates/camunda-hub-nightlies)).
 It debugs each positive + negative failure, classifies it **product /
 infrastructure / flakiness** (plus a `test-generation` subcategory), reconciles
-against the `knownIssue` configs, checks `coverage.json`'s
+against the `knownIssue` configs, and checks `coverage.json`'s
 `summary.unmappedOperations` every run (these never show up as a failing test, so
-an all-green suite pair can still hide a real coverage gap) — and, for a genuine
-product bug with no explaining recent `camunda-hub` commit, files a `camunda-hub`
-issue (the OpenAPI v2 spec is the request/response oracle). Write access is
-asymmetric: `camunda-hub` gets issues only, ever; for a confirmed test-generation
-bug or an unmapped operation with an obvious, minimal, safe fix, the agent may
-instead open a PR against `api-test-generator` (never a direct push to `main`) —
-two separately-scoped qa-processes App tokens enforce this (`GH_TOKEN_HUB`,
-issues-only; `GH_TOKEN_GENERATOR`, the SAME contents+PR-write grant
-spec-bump-check.yml's bump-PR token already uses on this repo, so no new App
-permission is needed). Any fix PR the agent opens is automatically validated —
-a deterministic (non-agent) workflow step reads every `fix_pr_url` from the
-triage result and dispatches
+an all-green suite pair can still hide a real coverage gap). Write access is
+asymmetric: `camunda-hub` gets issues only, ever — a genuine product bug (no
+explaining recent commit) gets a filed/linked `camunda-hub` issue (the OpenAPI v2
+spec is the request/response oracle), fingerprint-deduped so it's filed once, not
+every night. `api-test-generator` may instead get a PR (never a direct push to
+`main`), for three cases: (1) a test-generation bug or (2) an unmapped operation,
+each with an obvious, minimal, safe fix; or (3) a **confirmed product bug**,
+where instead of a code fix the agent **suppresses the affected test**
+(`positive-suppress.json` / `request-validation.json`, scoped to the exact
+operation+suite the failure implicates, referencing the camunda-hub issue) —
+runs for every product bug seen, newly-filed or already-known, mirroring the
+existing manual precedent for entries like camunda-hub#25801/#25907. Two
+separately-scoped qa-processes App tokens enforce the write-access split
+(`GH_TOKEN_HUB`, issues-only; `GH_TOKEN_GENERATOR`, the SAME contents+PR-write
+grant spec-bump-check.yml's bump-PR token already uses on this repo, so no new
+App permission is needed). Before opening ANY PR, a deterministic step fetches
+every open `nightly-api-fix`-labelled PR's actual diff (not a self-reported tag)
+so the agent can skip an operation already being fixed/suppressed elsewhere,
+rather than opening a duplicate. Any PR the agent does open is automatically
+validated — a deterministic (non-agent) workflow step reads every `fix_pr_url`/
+`suppress_pr_url` from the triage result and dispatches
 [hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) against that
 branch (a live-Hub run; the `hub-invariants` job that runs automatically on
 the PR via `ci.yml` only checks static invariants against the pinned spec),
