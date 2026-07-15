@@ -141,9 +141,13 @@ jobs:
   hub-invariants:
     name: Lint, typecheck, hub invariants
     runs-on: ubuntu-latest
-    # Needs Vault/App secrets to clone the private camunda-hub; fork PRs don't
-    # get repo secrets, so skip there (the job would fail at the Vault step for
-    # reasons unrelated to the change). Runs on push + same-repo PRs.
+    # Real forks don't get repo secrets, so skip there entirely (the job would
+    # fail at the Vault step for reasons unrelated to the change). Dependabot
+    # PRs, however, are same-repo (not forks) and DO pass this check, yet still
+    # get no secrets (a GitHub Actions restriction on Dependabot-triggered
+    # runs) — so the job still runs for them, and the hub-only steps below are
+    # individually guarded on VAULT_ADDR so lint/typecheck stay green instead
+    # of failing on a missing clone token (#455).
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -154,6 +158,11 @@ jobs:
     env:
       CONFIG: camunda-hub
       TEST_SEED: snapshot-baseline
+      # Mapped from the secret so step-level `if: env.VAULT_ADDR != ''` guards
+      # can skip the hub-clone steps when secrets are unavailable (Dependabot
+      # PRs) — lint/typecheck (config-independent) still run and the job
+      # still passes; only the hub-invariants signal itself is skipped.
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -201,8 +210,21 @@ jobs:
         run: npx tsc --noEmit -p tests/tsconfig.json
 
       # --- clone the PINNED hub spec (private repo → App token) ---------------
+      # Guarded on secret availability: if Vault secrets aren't present (e.g. a
+      # Dependabot PR), these hub-only steps skip and the job reports the
+      # lint/typecheck signal only, rather than going red on a missing clone
+      # token (#455). That guard alone would ALSO silently skip on a genuine
+      # secrets misconfiguration for a normal (non-Dependabot) run — so assert
+      # loudly first: missing secrets are only expected from Dependabot.
+      - name: Fail loudly if Vault secrets are missing outside the known Dependabot case
+        if: env.VAULT_ADDR == '' && github.actor != 'dependabot[bot]'
+        run: |
+          echo "::error::VAULT_ADDR is empty for actor '${{ github.actor }}' (event: ${{ github.event_name }}). Missing Vault secrets are only expected on Dependabot PRs — this looks like a secrets misconfiguration, not that case. Failing loudly instead of silently skipping hub-invariants."
+          exit 1
+
       - name: Mint camunda-hub clone token
         id: hub-token
+        if: env.VAULT_ADDR != ''
         uses: ./.github/actions/hub-clone-token
         with:
           vault-url: ${{ secrets.VAULT_ADDR }}
@@ -220,6 +242,7 @@ jobs:
       # Clone the PINNED commit (not latest main — this is the deterministic
       # regression leg; the nightly is the unpinned one). Shallow fetch-by-SHA.
       - name: Clone camunda-hub @ pinned specRef (sibling ../camunda-hub)
+        if: env.VAULT_ADDR != ''
         uses: ./.github/actions/clone-hub-sibling
         with:
           token: ${{ steps.hub-token.outputs.token }}
@@ -232,18 +255,21 @@ jobs:
       # generator too (a crash there otherwise only surfaces in the nightly).
       # Still no live Hub.
       - name: Bundle pinned hub spec + generate
+        if: env.VAULT_ADDR != ''
         run: |
           npm run fetch-spec
           npm run testsuite:generate
           npm run generate:request-validation
 
       - name: Lint generated hub suite (Biome)
+        if: env.VAULT_ADDR != ''
         run: npm run lint:generated
 
       # The spec-pin globalSetup validates the bundled hash against
       # configs/camunda-hub/spec-pin.json before the invariants load; running
       # only the hub invariants file avoids OCA-assuming tests.
       - name: Run hub Layer-3 invariants
+        if: env.VAULT_ADDR != ''
         run: npx vitest run configs/camunda-hub/regression-invariants.test.ts
 
       - name: Upload hub pipeline outputs on failure
