@@ -275,6 +275,15 @@ jobs:
           GENERATOR_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
         run: |
           set -euo pipefail
+          # hub-token isn't continue-on-error (unlike the two qa-processes
+          # tokens) — camunda-hub is the one repo this workflow cannot function
+          # without. Fail here with a clear reason rather than silently
+          # configuring a rewrite with an empty token and letting `workspace
+          # create` fail later with a much less actionable git/auth error.
+          if [ -z "$HUB_TOKEN" ]; then
+            echo "::error::No camunda-hub clone token — hub-clone-token action returned empty (check Vault OIDC + preview-envs role, and that the App is installed on camunda/camunda-hub with Contents: Read)."
+            exit 1
+          fi
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf "https://github.com/camunda/camunda-hub"
           if [ -n "$GENERATOR_TOKEN" ]; then
             git config --global url."https://x-access-token:${GENERATOR_TOKEN}@github.com/camunda/api-test-generator".insteadOf "https://github.com/camunda/api-test-generator"

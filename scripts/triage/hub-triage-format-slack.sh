@@ -117,7 +117,7 @@ case "$MODE" in
       # present — an empty/null url must not render as a bare "<>", which
       # looks like a broken link rather than a missing one.
       def link_or_note(url; linklabel):
-        (url // "") as $u
+        s(url; "") as $u
         | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
           else "\n    " + linklabel + ": (no URL recorded)" end;
       def line(f):
