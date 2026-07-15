@@ -492,8 +492,17 @@ instead open a PR against `api-test-generator` (never a direct push to `main`) �
 two separately-scoped qa-processes App tokens enforce this (`GH_TOKEN_HUB`,
 issues-only; `GH_TOKEN_GENERATOR`, the SAME contents+PR-write grant
 spec-bump-check.yml's bump-PR token already uses on this repo, so no new App
-permission is needed). It posts a triaged digest to `#camunda-hub-api-test-results`
-via the same Slack bot. Auth: `CLAUDE_API_KEY` at `secret/data/products/qa/ci/common`
+permission is needed). Any fix PR the agent opens is automatically validated —
+a deterministic (non-agent) workflow step reads every `fix_pr_url` from the
+triage result and dispatches
+[hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) against that
+branch (a live-Hub run; the `hub-invariants` job that runs automatically on
+the PR via `ci.yml` only checks static invariants against the pinned spec),
+then comments the run link on the PR — mirrors the "trigger the on-demand
+workflow + patch the PR" step from the c8-orchestration-cluster-e2e-nightly-fix.yml
+reference this agent is modeled on. It posts a triaged digest to
+`#camunda-hub-api-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
+at `secret/data/products/qa/ci/common`
 (agent) + [`slack-token`](.github/actions/slack-token) (Slack) +
 [`hub-clone-token`](.github/actions/hub-clone-token) (workspace-cli clone of the
 private camunda-hub). `workflow_run` only fires from the default branch — use
