@@ -382,12 +382,18 @@ jobs:
           acc="$(mktemp)"
           diff_file="$(mktemp)"
           echo '[]' > "$acc"
+          # Capture stderr to a file, NOT via 2>&1 into $nums — 2>&1 would mix
+          # any stderr warning gh/jq emit into the PR-number list even on the
+          # success path, and a non-numeric line later breaks ($n|tonumber)
+          # and aborts this step under pipefail.
+          list_err="$(mktemp)"
           if ! nums=$(gh pr list --repo camunda/api-test-generator \
                    --search "label:nightly-api-fix is:open" \
-                   --limit 50 --json number --jq '.[].number' 2>&1); then
-            echo "::warning::Could not list open nightly-api-fix PRs (${nums}) — dedup coverage for this run will be empty, which could let a duplicate PR get opened for an already-in-flight fix."
+                   --limit 50 --json number --jq '.[].number' 2>"$list_err"); then
+            echo "::warning::Could not list open nightly-api-fix PRs ($(cat "$list_err")) — dedup coverage for this run will be empty, which could let a duplicate PR get opened for an already-in-flight fix."
             nums=""
           fi
+          rm -f "$list_err"
           if [ -n "$nums" ]; then
             while IFS= read -r n; do
               [ -z "$n" ] && continue
