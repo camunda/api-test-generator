@@ -96,8 +96,11 @@ case "$MODE" in
     ;;
 
   thread)
-    # One bullet per failure, grouped by category. Empty output when there are
-    # no failures (caller then skips the thread reply).
+    # One bullet per failure (in report order, not grouped by category) plus
+    # one bullet per unmapped operation appended after them. Empty output only
+    # when BOTH failures and unmapped_operations are empty (caller then skips
+    # the thread reply) — a clean suite pair with a real coverage gap still
+    # produces bullets here.
     jq -r '
       # Coerce any field to a display string regardless of its actual JSON
       # type (the schema promises strings, but a malformed field — a number,
