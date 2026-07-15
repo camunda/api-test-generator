@@ -263,16 +263,18 @@ jobs:
           npm install -g @anthropic-ai/claude-code@2.1.156
           claude --version
 
-      # Scope EACH rewrite to the specific repo that needs it — NOT a blanket
-      # "https://github.com/" rewrite. camunda-docs and api-test-generator are
-      # both public (workspace-cli clones them anonymously, no token needed);
-      # only camunda-hub is private and needs the read-only hub-clone token.
-      # This is narrower than "every github.com clone rides the hub token" —
-      # reduces what a hypothetical leak (debug log, error message) could expose.
+      # Only camunda-hub needs a clone rewrite: it's the one private repo, and
+      # the ONLY thing cloning needs. camunda-docs and api-test-generator are
+      # both public — workspace-cli clones them anonymously, no token needed
+      # for that. api-test-generator does NOT get a persisted rewrite here
+      # even though the agent may later push there: the guidance has it set
+      # GH_TOKEN_GENERATOR explicitly on the push URL at push time (see
+      # "Fixing a test-generation / coverage bug"), so a global rewrite would
+      # only add exposure (present in gitconfig during `workspace create`,
+      # before the later scrub step) with no cloning benefit.
       - name: Configure git credentials for cloning
         env:
           HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
-          GENERATOR_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
         run: |
           set -euo pipefail
           # hub-token isn't continue-on-error (unlike the two qa-processes
@@ -285,9 +287,6 @@ jobs:
             exit 1
           fi
           git config --global url."https://x-access-token:${HUB_TOKEN}@github.com/camunda/camunda-hub".insteadOf "https://github.com/camunda/camunda-hub"
-          if [ -n "$GENERATOR_TOKEN" ]; then
-            git config --global url."https://x-access-token:${GENERATOR_TOKEN}@github.com/camunda/api-test-generator".insteadOf "https://github.com/camunda/api-test-generator"
-          fi
 
       # --- Create the 3-repo workspace ----------------------------------------
       - name: Stage workspace manifest + guidance

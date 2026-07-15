@@ -97,6 +97,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          # stale_days is a free-form workflow_dispatch string input — validate
+          # it's a plain non-negative integer before feeding it to `date`
+          # arithmetic, so a bad/empty input fails here with a clear message
+          # instead of an opaque `date` parse error.
+          if ! [[ "$STALE_DAYS" =~ ^[0-9]+$ ]]; then
+            echo "::error::stale_days must be a non-negative integer, got: '${STALE_DAYS}'"
+            exit 1
+          fi
+
           cutoff_epoch=$(date -u -d "${STALE_DAYS} days ago" +%s 2>/dev/null \
                        || date -u -v-"${STALE_DAYS}"d +%s)
           echo "Repo: ${REPO}"
