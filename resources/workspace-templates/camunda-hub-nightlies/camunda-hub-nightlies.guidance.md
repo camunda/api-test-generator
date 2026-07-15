@@ -132,7 +132,10 @@ This is the ONE place you may write code, and it's scoped tightly. Applies to ex
 - A failure classified `subcategory: "test-generation"` (response and spec agree, the generated test itself is wrong).
 - An entry in `unmapped_operations[]` (see "Unmapped operations" above) where a concrete fix is obvious.
 
+**Dedup FIRST — do not fix what's already being fixed.** The workflow passes you a JSON map of `operationId -> PR URL` for every operation already covered by an open `nightly-api-fix` PR (empty `{}` if none). If the operationId you're about to fix is a key in that map, **do not attempt a fix** — set `action: "skip"` and `fix_pr_url` to the map's URL for that operationId. Without this check the same persisting bug would get a duplicate fix PR opened every night until the first one merges.
+
 **When to fix vs. report-only** — fix ONLY if all of these hold, otherwise fall back to `action: "report-only"` and explain what's missing:
+- It is NOT already covered by an open fix PR (see dedup check above).
 - The root cause is fully understood from the evidence (trace/response + spec + generator source) — no guessing.
 - The fix is minimal and mechanical: a `positive-suppress.json` / `request-validation.json` entry (with a `knownIssue` pointing at this triage run), a small, obviously-correct ontology/entity-kind mapping fix, or a narrowly-scoped assertion/expected-status correction in generator source — NOT a refactor, NOT a change touching more than the one operation/test at fault.
 - You can articulate the fix in one sentence someone could verify by reading the diff alone.
@@ -144,7 +147,7 @@ If any of that is uncertain, do not touch code — `action: "report-only"` with 
 2. Create a branch: `fix/nightly-triage-<short-kebab-description>`.
 3. Apply the minimal fix. Re-run whatever local check validates it if one exists cheaply (e.g. `npm run coverage:report` for an ontology mapping change) — do not skip verification just to save time.
 4. Commit with a message stating the root cause and the nightly run URL. The workflow scrubs the global git credential rewrites before you start (so a report-injected instruction can't ride an ambient push credential) — set the push URL explicitly for this one push: `git -C {{.WorkspacePath}}/api-test-generator push "https://x-access-token:${GH_TOKEN_GENERATOR}@github.com/camunda/api-test-generator.git" <branch>`. Do NOT use `GH_TOKEN_HUB`, it cannot write here.
-5. Open the PR: `gh pr create --repo camunda/api-test-generator --base main --label nightly-api-fix` (the workflow pre-creates this label, best-effort). Title: `fix(nightly-triage): <one-line root cause>`. Body must contain: the triage evidence (expected vs actual, or the unmapped operationId), the nightly run URL, and `Found by the camunda-hub nightly API triage agent`. Never push directly to `main` — always via this PR.
+5. Open the PR: `gh pr create --repo camunda/api-test-generator --base main --label nightly-api-fix` (the workflow pre-creates this label, best-effort). Title: `fix(nightly-triage): <one-line root cause>`. Body **must** contain a visible marker line `Fixes-operationId: <operationId>` (one per operation the fix addresses, one per line if more than one) — this is what the workflow's dedup check (above) matches on for every future run, exactly like the `Fingerprint: nightly-api-triage fp=<fp>` marker does for camunda-hub issues. A PR without this marker is invisible to the dedup check and WILL get duplicated the next time this operation fails. Body must also contain: the triage evidence (expected vs actual, or the unmapped operationId), the nightly run URL, and `Found by the camunda-hub nightly API triage agent`. Never push directly to `main` — always via this PR.
 6. Record the PR URL in the triage output (`fix_pr_url`, `action: "fix-pr"`). You do not need to trigger validation yourself — the workflow reads every `fix_pr_url` you record and automatically dispatches `hub-ondemand-test.yml` (a live-Hub run, not just static invariants) against the PR's branch, then comments the run link on the PR. This is why recording `fix_pr_url` accurately matters: it is the workflow's only way to find the PR to validate.
 
 If `gh pr create` fails (empty `GH_TOKEN_GENERATOR` / push rejected), do not fail the run — set `action: "report-only"` with `file_error` and let Slack surface it for a human, same as a failed issue filing.
@@ -186,7 +189,7 @@ Emit exactly this shape (the workflow reads it to build the Slack digest and to 
   "unmapped_operations": [
     {
       "operationId": "archiveWorkspace",
-      "action": "report-only|fix-pr",
+      "action": "report-only|fix-pr|skip",
       "fix_pr_url": null,
       "file_error": null
     }

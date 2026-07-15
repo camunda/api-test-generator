@@ -343,11 +343,43 @@ jobs:
           done || true
           grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
 
+      # --- Discover operations already covered by an open fix PR ---------------
+      # Mirrors the c8-orchestration-cluster-e2e-nightly-triage.yml reference's
+      # "skip dispatch when an open failing-test-fix PR already exists" dedup —
+      # without this, the same persisting bug could get a duplicate fix PR
+      # opened every night until the first one merges. Fix PRs embed a
+      # `Fixes-operationId: <id>` marker line (mirroring the `fp=` marker
+      # already used for camunda-hub issue dedup); this builds an
+      # operationId → PR-URL map from every open nightly-api-fix PR's marker(s)
+      # and hands it to the agent, so it can both skip re-fixing what's already
+      # in flight AND link the existing PR directly (no need for the agent to
+      # re-derive the URL itself). Read-only against this repo — github.token
+      # suffices, no need for the (possibly-unavailable) qa-processes token.
+      - name: Discover operations already covered by an open fix PR
+        id: covered
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          map=$(gh pr list --repo camunda/api-test-generator \
+                  --search "label:nightly-api-fix is:open" \
+                  --limit 200 --json body,url \
+                  --jq '
+                    [.[] | . as $pr
+                     | ($pr.body | [scan("Fixes-operationId: ([^\n\r]+)")] | map(.[0])) as $ids
+                     | $ids[] | {(.): $pr.url}]
+                    | add // {}
+                  ' 2>/dev/null || echo '{}')
+          echo "operation_map=${map}" >> "$GITHUB_OUTPUT"
+          echo "Already covered by an open fix PR: ${map}"
+
       # --- Run the Claude triage agent ----------------------------------------
       - name: Run Claude triage agent in workspace
         id: agent
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
+          COVERED_OPERATION_MAP: ${{ steps.covered.outputs.operation_map }}
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
           # Two separately-scoped tokens — see "Configure git credentials" above
           # and the guidance's Role section for which one is valid where.
@@ -387,6 +419,8 @@ jobs:
           - Suite configs (known issues): ${ws_dir}/api-test-generator/configs/camunda-hub/positive-suppress.json
             and request-validation.json
           - Nightly run URL: ${NIGHTLY_RUN_URL}
+          - Operations already covered by an open nightly-api-fix PR, as a JSON map of
+            operationId -> PR URL (may be {}): ${COVERED_OPERATION_MAP}
           - NOTE: the generated *.spec.ts files are gitignored and NOT present here — recover what
             each test asserted from the report's request/response attachment + assertion error, not
             from source.
@@ -410,10 +444,12 @@ jobs:
              or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
              (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
              If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
-          7. For each test-generation bug or unmapped operation: per the guidance's guardrails, either
-             apply a minimal fix and open an api-test-generator PR using GH_TOKEN_GENERATOR (label
-             nightly-api-fix, already pre-created), or — if you're not fully confident — action
-             "report-only". Never push directly to main.
+          7. For each test-generation bug or unmapped operation whose operationId is a key in the
+             covered map above: do NOT attempt a fix — set action "skip" and use the map's URL for
+             that operationId as fix_pr_url. Otherwise, per the guidance's guardrails, either apply a
+             minimal fix and open an api-test-generator PR using GH_TOKEN_GENERATOR (label
+             nightly-api-fix, embedding the Fixes-operationId marker, already pre-created), or — if
+             you're not fully confident — action "report-only". Never push directly to main.
           8. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF
           )
