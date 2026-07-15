@@ -12,6 +12,19 @@ set -euo pipefail
 FILE="${1:?usage: hub-triage-format-slack.sh <triage.json> <summary|thread>}"
 MODE="${2:?usage: hub-triage-format-slack.sh <triage.json> <summary|thread>}"
 
+# Validate MODE up front — the missing-file and malformed-JSON early exits
+# below each have their own case "$MODE" with no `*)` fallback, so an
+# unexpected mode combined with either of those conditions would otherwise
+# fall through silently (exit 0, no output) instead of the clear "unknown
+# mode" error the final case block gives for a well-formed file.
+case "$MODE" in
+  summary | thread) ;;
+  *)
+    echo "unknown mode: $MODE" >&2
+    exit 2
+    ;;
+esac
+
 # Missing/empty file: the agent crashed before writing. Emit a sentinel the
 # caller can post rather than a misleading green.
 if [ ! -s "$FILE" ]; then
