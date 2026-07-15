@@ -161,7 +161,18 @@ jobs:
       # landing at the same flat level) is unaffected.
       - name: Stage coverage.json alongside the reports
         if: always()
-        run: cp generated/camunda-hub/playwright/coverage.json test-results/e2e-camunda-hub/coverage.json 2>/dev/null || true
+        run: |
+          src="generated/camunda-hub/playwright/coverage.json"
+          if [ -f "$src" ]; then
+            cp "$src" test-results/e2e-camunda-hub/coverage.json
+          else
+            # Missing here means either generate never ran (e.g. an earlier
+            # step failed before codegen) or the emitter's output path
+            # changed — either way, the triage agent silently loses its only
+            # way to see unmapped-operation coverage gaps. Surface that loudly
+            # rather than letting it disappear into a quiet cp failure.
+            echo "::warning::coverage.json not found at ${src} — the triage agent will not be able to check for unmapped operations this run."
+          fi
 
       - name: Upload Playwright reports
         if: always()
