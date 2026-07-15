@@ -213,7 +213,15 @@ jobs:
       # Guarded on secret availability: if Vault secrets aren't present (e.g. a
       # Dependabot PR), these hub-only steps skip and the job reports the
       # lint/typecheck signal only, rather than going red on a missing clone
-      # token (#455).
+      # token (#455). That guard alone would ALSO silently skip on a genuine
+      # secrets misconfiguration for a normal (non-Dependabot) run — so assert
+      # loudly first: missing secrets are only expected from Dependabot.
+      - name: Fail loudly if Vault secrets are missing outside the known Dependabot case
+        if: env.VAULT_ADDR == '' && github.actor != 'dependabot[bot]'
+        run: |
+          echo "::error::VAULT_ADDR is empty for actor '${{ github.actor }}' (event: ${{ github.event_name }}). Missing Vault secrets are only expected on Dependabot PRs — this looks like a secrets misconfiguration, not that case. Failing loudly instead of silently skipping hub-invariants."
+          exit 1
+
       - name: Mint camunda-hub clone token
         id: hub-token
         if: env.VAULT_ADDR != ''
