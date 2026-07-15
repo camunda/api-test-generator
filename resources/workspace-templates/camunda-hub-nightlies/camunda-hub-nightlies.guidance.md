@@ -156,8 +156,15 @@ This is the ONE place you may write code, and it's scoped tightly. Applies to ex
 
 This matches by actual diff *content*, not by file path — unlike a one-test-per-file suite, our fix PRs touch shared config files where the operationId lives inside the content, not the path, so path-only matching wouldn't distinguish which operation within a shared file was addressed.
 
+**Check for a systemic pattern BEFORE fixing anything (do this once, across all this run's failures, before touching the first one).** The nightly runs against camunda-hub's unpinned `main` spec, so a single new OpenAPI construct (a new `discriminator`/`oneOf` shape, a new format, a schema pattern the emitter/materializer has never modeled) can make several *different* operations fail the same way in one night. Before opening any test-generation fix PR, scan this run's other `subcategory: "test-generation"` failures and `unmapped_operations[]` entries for the same underlying cause (same missing schema handling, same emitter gap — not just coincidentally the same HTTP status). If **two or more** failures in this run trace to the same root cause, that is a systemic generator gap, not N independent one-off bugs:
+- Do **not** open one narrow fix PR per affected operation — that patches symptoms across several operations while leaving the actual generator gap unaddressed, and reads to a reviewer as N unrelated PRs instead of one design problem.
+- Set `action: "report-only"` for **all** of them, and in each one's reasoning name the other affected operationIds and the shared root cause, so a human sees the pattern immediately from the Slack digest / triage JSON rather than piecing it together from separate reports.
+
+A single isolated test-generation failure with no sibling in this run still follows the normal fix-vs-report gate below.
+
 **When to fix vs. report-only** — fix ONLY if all of these hold, otherwise fall back to `action: "report-only"` and explain what's missing:
 - It is NOT already covered by an open fix PR (see dedup check above).
+- It is NOT part of a systemic pattern shared with another failure in this same run (see above).
 - The root cause is fully understood from the evidence (trace/response + spec + generator source) — no guessing.
 - The fix is minimal and mechanical: a `positive-suppress.json` / `request-validation.json` entry (with a `knownIssue` pointing at this triage run), a small, obviously-correct ontology/entity-kind mapping fix, or a narrowly-scoped assertion/expected-status correction in generator source — NOT a refactor, NOT a change touching more than the one operation/test at fault.
 - You can articulate the fix in one sentence someone could verify by reading the diff alone.
