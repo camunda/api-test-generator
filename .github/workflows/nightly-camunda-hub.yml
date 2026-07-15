@@ -164,6 +164,11 @@ jobs:
         run: |
           src="generated/camunda-hub/playwright/coverage.json"
           if [ -f "$src" ]; then
+            # mkdir -p: this is an always() step, so it can run before
+            # run-hub.sh ever creates test-results/e2e-camunda-hub/ (e.g. an
+            # early setup failure) — don't let a missing destination
+            # directory turn this best-effort step into a hard failure.
+            mkdir -p test-results/e2e-camunda-hub
             cp "$src" test-results/e2e-camunda-hub/coverage.json
           else
             # Missing here means either generate never ran (e.g. an earlier

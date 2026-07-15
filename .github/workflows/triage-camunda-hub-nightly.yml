@@ -117,7 +117,15 @@ jobs:
           # instead of erroring out and killing this step under pipefail.
           mkdir -p "${REPORTS_DIR}"
           find "${REPORTS_DIR}" -maxdepth 2 -type f 2>/dev/null | head -50 || true
-          count=$(find "${REPORTS_DIR}" -maxdepth 2 -name 'pw-*.json' 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+          # Neutralize find's own exit code INSIDE the subshell, at the
+          # source, rather than a trailing `|| echo 0` on the whole
+          # substitution: if find fails after already emitting some paths
+          # (e.g. a permission error partway through), pipefail would still
+          # make the outer pipe's status non-zero even though wc/tr both
+          # succeeded — and `|| echo 0` would then APPEND "0" after the
+          # count wc already produced, making $count a two-line, non-numeric
+          # value that breaks the -gt comparison below.
+          count=$( (find "${REPORTS_DIR}" -maxdepth 2 -name 'pw-*.json' 2>/dev/null || true) | wc -l | tr -d ' ')
           if [ "${count}" -gt 0 ]; then
             echo "has_reports=true" >> "$GITHUB_OUTPUT"
           else
@@ -323,11 +331,16 @@ jobs:
           # token value — enumerate every url.*.insteadof key and unset any
           # whose key contains the token marker, rather than reconstructing
           # the token value here.
+          # GitHub Actions runs bash steps with -e/pipefail by default even
+          # without an explicit `set` line — --get-regexp exits 1 when there
+          # are no matches (e.g. a future change removes the earlier rewrite
+          # entirely), which would otherwise abort this step even though
+          # "nothing to scrub" is a perfectly valid, unremarkable state.
           git config --global --get-regexp '^url\..*\.insteadof$' 2>/dev/null | while read -r key _; do
             case "$key" in
               *x-access-token*) git config --global --unset-all "$key" ;;
             esac
-          done
+          done || true
           grep -qi 'x-access-token' "$HOME/.gitconfig" 2>/dev/null && echo "::warning::token-bearing gitconfig entry survived scrub" || true
 
       # --- Run the Claude triage agent ----------------------------------------

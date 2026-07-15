@@ -146,7 +146,11 @@ case "$MODE" in
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
         + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
         + (if (f.fix_pr_url // null) != null then link_or_note(f.fix_pr_url; ":hammer_and_wrench: fix PR") else "" end)
-        + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then "\n    :warning: could not file issue: " + s(f.file_error; "") else "" end);
+        + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
+             (if (f.subcategory // "") == "test-generation"
+              then "\n    :warning: could not open fix PR: "
+              else "\n    :warning: could not file issue: " end) + s(f.file_error; "")
+           else "" end);
       def uline(u):
         "• :no_entry_sign: *unmapped* — `" + s(u.operationId; "?") + "` — no generated test"
         + (if (u.fix_pr_url // null) != null then link_or_note(u.fix_pr_url; ":hammer_and_wrench: fix PR") else "" end)
