@@ -79,10 +79,16 @@ case "$MODE" in
             + (n($s.negative.passed)|tostring) + " passed / " + (n($s.negative.failed)|tostring) + " failed"
             + (if ($s.negative.report // "present") == "missing" then " :warning: no report" else "" end))
         ) as $suites
+      # Count entries with a fix_pr_url directly within unmapped_operations —
+      # counts.fixed is scored by the agent across BOTH unmapped operations
+      # AND test-generation failures, so using it here would over-report (a
+      # night with only test-generation fixes, zero unmapped-op fixes, would
+      # still show a non-zero "fix PR(s) opened" on the coverage-gap line).
+      | ((.unmapped_operations // []) | map(select((.fix_pr_url // null) != null)) | length) as $unmapped_fixed
       | (
           if $unmapped_total == 0 then ""
           else "\n:no_entry_sign: *Coverage gap:* " + ($unmapped_total|tostring)
-               + " operation(s) with no generated test — " + (n($c.fixed)|tostring) + " fix PR(s) opened."
+               + " operation(s) with no generated test — " + ($unmapped_fixed|tostring) + " fix PR(s) opened."
           end
         ) as $coverage_line
       # No-false-all-clear applies here too: zero failing TESTS is not the same

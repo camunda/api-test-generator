@@ -137,9 +137,17 @@ jobs:
             # Staleness is by LAST ACTIVITY (updatedAt), so an actively reviewed
             # PR isn't reaped mid-discussion; a truly abandoned one ages out.
             updated=$(echo "$raw" | jq -r '.updatedAt')
-            updated_epoch=$(date -u -d "$updated" +%s 2>/dev/null \
-                          || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$updated" +%s 2>/dev/null \
-                          || echo 0)
+            if ! updated_epoch=$(date -u -d "$updated" +%s 2>/dev/null \
+                          || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$updated" +%s 2>/dev/null); then
+              # An unparsable timestamp means we genuinely don't know this PR's
+              # age — falling back to epoch 0 would make it look infinitely
+              # stale and get it closed on every run regardless of its real
+              # activity. KEEP is the safe default when we can't tell.
+              echo "::warning::Could not parse updatedAt ('$updated') for #$number — treating as KEEP rather than assuming it's stale."
+              echo "  KEEP   #$number — unparsable updatedAt ($updated): $title"
+              kept=$((kept + 1))
+              continue
+            fi
 
             if [ "$updated_epoch" -ge "$cutoff_epoch" ]; then
               echo "  KEEP   #$number — updated $updated (within window): $title"
@@ -149,12 +157,16 @@ jobs:
 
             echo "  CLOSE  #$number — updated $updated: $title"
             if [ "$DRY_RUN" != "true" ]; then
-              gh pr close "$number" \
+              if gh pr close "$number" \
                 --repo "$REPO" \
-                --comment "Closed by the \`close-stale-nightly-api-fix-prs\` janitor: \`nightly-api-fix\` PRs are closed daily if not merged, so each night's triage starts clean. Add the \`do-not-close\` label to hold this PR across the daily reset." \
-                || echo "::warning::Failed to close ${REPO}#$number"
+                --comment "Closed by the \`close-stale-nightly-api-fix-prs\` janitor: \`nightly-api-fix\` PRs are closed daily if not merged, so each night's triage starts clean. Add the \`do-not-close\` label to hold this PR across the daily reset."; then
+                closed=$((closed + 1))
+              else
+                echo "::warning::Failed to close ${REPO}#$number"
+              fi
+            else
+              closed=$((closed + 1))
             fi
-            closed=$((closed + 1))
           done
 
           echo ""

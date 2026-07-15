@@ -243,10 +243,15 @@ jobs:
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
       # --- Toolchain ----------------------------------------------------------
+      # 'stable' (not a pinned major) — the exact Go version isn't part of this
+      # workflow's deterministic behavior (workspace-cli itself is already
+      # pinned to a commit SHA below), so tracking stable avoids running an
+      # EOL, security-fix-less toolchain that a hardcoded version would drift
+      # into over time.
       - name: Setup Go (for workspace-cli)
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: 'stable'
 
       - name: Setup Node.js 22 (for Claude Code CLI)
         uses: actions/setup-node@v6
@@ -384,7 +389,10 @@ jobs:
               # unescaped control character survives into the string) on this
               # jq/shell combination; file-to-file avoids that class of bug
               # entirely rather than chasing its root cause.
-              gh pr diff "$n" --repo camunda/api-test-generator 2>/dev/null | head -c 20000 > "$diff_file" || true
+              if ! gh pr diff "$n" --repo camunda/api-test-generator 2>/dev/null | head -c 20000 > "$diff_file"; then
+                echo "::warning::Could not fetch diff for open fix PR #${n} — its dedup coverage for this run will be incomplete (empty diff), which could let a duplicate PR get opened for an already-in-flight fix."
+                : > "$diff_file"
+              fi
               jq -n --argjson acc "$(cat "$acc")" --arg n "$n" \
                 --arg url "https://github.com/camunda/api-test-generator/pull/${n}" \
                 --rawfile diff "$diff_file" \
