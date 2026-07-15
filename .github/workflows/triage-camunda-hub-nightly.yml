@@ -586,6 +586,18 @@ jobs:
 
           while IFS= read -r pr_url; do
             [ -z "$pr_url" ] && continue
+            # hub-triage.json is written by an agent working from untrusted
+            # report content — validate the URL is exactly a well-formed
+            # camunda/api-test-generator PR URL before deriving anything from
+            # it. $REPO is already hardcoded (not derived from $pr_url), so
+            # this can't redirect gh calls to a different repo, but an
+            # unvalidated value could still resolve to an unrelated real PR
+            # number on THIS repo and cause a dispatch/comment against the
+            # wrong branch.
+            if ! [[ "$pr_url" =~ ^https://github\.com/camunda/api-test-generator/pull/[0-9]+$ ]]; then
+              echo "::warning::Skipping malformed/unexpected PR URL from triage JSON: ${pr_url}"
+              continue
+            fi
             pr_num="${pr_url##*/}"
             echo "Validating fix/suppress PR #${pr_num} (${pr_url})"
 
