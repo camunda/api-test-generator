@@ -43,6 +43,12 @@ case "$MODE" in
       def n(x): (x // 0) as $v | (if ($v|type) == "number" then $v
                                    elif ($v|type) == "string" then ($v|tonumber? // 0)
                                    else 0 end);
+      # length does not throw on a scalar (string to char count, object to
+      # key count), so a malformed failures/unmapped_operations (wrong type,
+      # not an array) would not crash here, it would silently produce a
+      # nonsense count (e.g. a 4-char string masquerading as "4 operations").
+      # Coerce non-arrays to [] first so the count is 0, not a lie.
+      def arrlen(x): (x // []) as $v | (if ($v|type) == "array" then ($v|length) else 0 end);
       # No-false-all-clear: an inconclusive / crashed run must say so, never green.
       if (.inconclusive // false) then
         ":warning: *Inconclusive* — the nightly produced no report artifact to triage. The test run may have crashed before uploading results; check the nightly run."
@@ -52,8 +58,8 @@ case "$MODE" in
       (
       (.counts // {}) as $c
       | (.suites // {}) as $s
-      | (n(.failures | length)) as $total
-      | (n(.unmapped_operations | length)) as $unmapped_total
+      | (n(arrlen(.failures))) as $total
+      | (n(arrlen(.unmapped_operations))) as $unmapped_total
       | (
           "*Suites*  •  positive: " +
           ((n($s.positive.failed) > 0 | if . then ":x: " else ":white_check_mark: " end)
@@ -136,8 +142,12 @@ case "$MODE" in
         "• :no_entry_sign: *unmapped* — `" + s(u.operationId; "?") + "` — no generated test"
         + (if (u.fix_pr_url // null) != null then link_or_note(u.fix_pr_url; ":hammer_and_wrench: fix PR") else "" end)
         + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
-      ((.failures // []) | map(line(.))) as $flines
-      | ((.unmapped_operations // []) | map(uline(.))) as $ulines
+      # Guard against the schema being violated (e.g. failures/unmapped_operations
+      # written as an object or string instead of an array) — arr() coerces
+      # anything non-array to [] rather than letting map() throw.
+      def arr(x): (x // []) as $v | (if ($v|type) == "array" then $v else [] end);
+      (arr(.failures) | map(line(.))) as $flines
+      | (arr(.unmapped_operations) | map(uline(.))) as $ulines
       | ($flines + $ulines) as $all
       | if ($all | length) == 0 then "" else ($all | join("\n")) end
     ' "$FILE"
