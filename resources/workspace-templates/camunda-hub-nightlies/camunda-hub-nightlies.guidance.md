@@ -185,6 +185,14 @@ If `gh pr create` fails (empty `GH_TOKEN_GENERATOR` / push rejected), do not fai
 
 Emit exactly this shape (the workflow reads it to build the Slack digest and to know which issues you filed):
 
+**`expected` and `actual` are short values, not explanations.** One line each —
+the status/value and a brief pointer (e.g. `"422 (asserted by the generated
+test)"`, `"400 — {\"title\":\"Bad Request\",...}"`), matching the schema
+example below. Your reasoning, root-cause analysis, and evidence trail belong
+in `evidence` (or the issue/PR body you file), not here — these two fields
+get rendered directly in the Slack thread, one line each, and a paragraph in
+either makes the digest unreadable.
+
 ```json
 {
   "run_url": "<nightly run URL from $NIGHTLY_RUN_URL>",

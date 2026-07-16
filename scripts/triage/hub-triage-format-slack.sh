@@ -145,6 +145,12 @@ case "$MODE" in
       # object, or null slipping past `// "?"` — must still degrade to a
       # readable line instead of a jq "cannot add ... and string" error).
       def s(x; d): ((x // d) | tostring);
+      # Defensive cap on a per-finding display field (expected/actual) — the
+      # guidance asks the agent for a short one-line value here, evidence and
+      # reasoning belong in `evidence` instead, but this is a jq-level backstop
+      # in case a future run still writes something long: a single overlong
+      # field must not make the whole thread reply unreadable.
+      def cap(x; d; n): s(x; d) as $v | if ($v | length) > n then ($v[0:n] + "…") else $v end;
       def icon(f):
         if (f.subcategory // "") == "test-generation" then ":test_tube:"
         elif f.category == "product" then ":package:"
@@ -154,25 +160,65 @@ case "$MODE" in
       def catlabel(f):
         if (f.subcategory // "") == "test-generation" then "test-generation (api-test-generator)"
         else s(f.category; "?") end;
-      # Only render a knownIssue/URL-style link when the URL is actually
-      # present — an empty/null url must not render as a bare "<>", which
-      # looks like a broken link rather than a missing one.
+      # True only for an actual, non-empty URL string. Checks (x|type) itself
+      # rather than routing through s()/tostring: a schema-violating non-
+      # string value (true, 42, {}) would stringify to something non-empty
+      # ("true", "42", "{}") and be wrongly treated as a present URL — this
+      # pages real on-call groups (and, below, renders a Slack link), so only
+      # a genuine string counts either way.
+      def has_url(x): (x | type) == "string" and (x | length) > 0;
+      # Only render a knownIssue/URL-style link when the URL is actually a
+      # present, non-empty string — the same has_url() rule the medic-ping
+      # triggers use. Without this, a schema-violating non-string value (true,
+      # 42, {}) would stringify via s()/tostring into something non-empty and
+      # render as a garbage Slack link (<true>, <42>) instead of falling back
+      # to "(no URL recorded)".
       def link_or_note(url; linklabel):
-        s(url; "") as $u
-        | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
-          else "\n    " + linklabel + ": (no URL recorded)" end;
+        if has_url(url) then "\n    " + linklabel + ": <" + s(url; "") + ">"
+        else "\n    " + linklabel + ": (no URL recorded)" end;
+      # Owner→medic Slack subteam mentions — pings the actual on-call group,
+      # not plain text (same mechanism as the camunda/camunda AlwaysGreen
+      # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
+      #   - hub_medic: action == "file" AND a non-empty issue_url — a FRESH
+      #     hub issue was actually filed this run. Requiring the URL guards
+      #     against paging on a schema-violating/incomplete agent-authored
+      #     entry that claims action "file" without one.
+      #   - test_automation_medic: action == "fix-pr" with a non-empty
+      #     fix_pr_url (a fresh generator-side fix PR) OR a non-empty
+      #     suppress_pr_url (a suppress PR — also lives in api-test-generator,
+      #     needs our review) — deduped to exactly one mention even if both
+      #     happened to be true for the same finding (the schema does not
+      #     declare them mutually exclusive).
+      #
+      # hub_medic never fires on an already-known recurrence (action ==
+      # "report-only"/"skip") — otherwise it gets paged nightly for something
+      # already tracked and unfixed. The test_automation_medic suppress_pr_url
+      # trigger is intentionally independent of action: per the guidance, a
+      # suppress PR is opened for every confirmed bug, including one already
+      # known (action == "report-only", known_issue == true) — the PR is
+      # fresh and needs review either way, even though the underlying hub
+      # issue is not.
+      #
+      # One mention per finding, inline in the thread reply only (never the
+      # top-level summary message) so it stays precise, not a blanket ping.
+      def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
+      def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
       def line(f):
-        "• " + icon(f) + " *" + catlabel(f) + "* — `"
+        (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) as $needs_ta_medic
+        | "• " + icon(f) + " *" + catlabel(f) + "* — `"
         + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
-        + "\n    expected: " + s(f.expected; "?") + "  |  actual: " + s(f.actual; "?")
+        + "\n    expected: " + cap(f.expected; "?"; 120) + "  |  actual: " + cap(f.actual; "?"; 120)
         + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
         + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
+        + (if (f.action // "") == "file" and has_url(f.issue_url)
+           then "\n    :rotating_light: " + hub_medic else "" end)
         + (if (f.fix_pr_url // null) != null then
              link_or_note(f.fix_pr_url;
                if (f.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
         + (if (f.suppress_pr_url // null) != null then link_or_note(f.suppress_pr_url; ":no_entry: suppressed") else "" end)
+        + (if $needs_ta_medic then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
              (if (f.subcategory // "") == "test-generation"
               then "\n    :warning: could not open fix PR: "
@@ -187,6 +233,8 @@ case "$MODE" in
              link_or_note(u.fix_pr_url;
                if (u.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
+        + (if (u.action // "") == "fix-pr" and has_url(u.fix_pr_url)
+           then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
       # Guard against the schema being violated (e.g. failures/unmapped_operations
       # written as an object or string instead of an array) — arr() coerces
