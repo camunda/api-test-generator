@@ -145,6 +145,12 @@ case "$MODE" in
       # object, or null slipping past `// "?"` — must still degrade to a
       # readable line instead of a jq "cannot add ... and string" error).
       def s(x; d): ((x // d) | tostring);
+      # Defensive cap on a per-finding display field (expected/actual) — the
+      # guidance asks the agent for a short one-line value here, evidence and
+      # reasoning belong in `evidence` instead, but this is a jq-level backstop
+      # in case a future run still writes something long: a single overlong
+      # field must not make the whole thread reply unreadable.
+      def cap(x; d; n): s(x; d) as $v | if ($v | length) > n then ($v[0:n] + "…") else $v end;
       def icon(f):
         if (f.subcategory // "") == "test-generation" then ":test_tube:"
         elif f.category == "product" then ":package:"
@@ -198,7 +204,7 @@ case "$MODE" in
         (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) as $needs_ta_medic
         | "• " + icon(f) + " *" + catlabel(f) + "* — `"
         + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
-        + "\n    expected: " + s(f.expected; "?") + "  |  actual: " + s(f.actual; "?")
+        + "\n    expected: " + cap(f.expected; "?"; 120) + "  |  actual: " + cap(f.actual; "?"; 120)
         + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
         + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
