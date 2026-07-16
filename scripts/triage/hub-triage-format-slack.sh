@@ -160,19 +160,22 @@ case "$MODE" in
       def catlabel(f):
         if (f.subcategory // "") == "test-generation" then "test-generation (api-test-generator)"
         else s(f.category; "?") end;
-      # Only render a knownIssue/URL-style link when the URL is actually
-      # present — an empty/null url must not render as a bare "<>", which
-      # looks like a broken link rather than a missing one.
-      def link_or_note(url; linklabel):
-        s(url; "") as $u
-        | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
-          else "\n    " + linklabel + ": (no URL recorded)" end;
       # True only for an actual, non-empty URL string. Checks (x|type) itself
       # rather than routing through s()/tostring: a schema-violating non-
       # string value (true, 42, {}) would stringify to something non-empty
       # ("true", "42", "{}") and be wrongly treated as a present URL — this
-      # pages real on-call groups, so only a genuine string counts.
+      # pages real on-call groups (and, below, renders a Slack link), so only
+      # a genuine string counts either way.
       def has_url(x): (x | type) == "string" and (x | length) > 0;
+      # Only render a knownIssue/URL-style link when the URL is actually a
+      # present, non-empty string — the same has_url() rule the medic-ping
+      # triggers use. Without this, a schema-violating non-string value (true,
+      # 42, {}) would stringify via s()/tostring into something non-empty and
+      # render as a garbage Slack link (<true>, <42>) instead of falling back
+      # to "(no URL recorded)".
+      def link_or_note(url; linklabel):
+        if has_url(url) then "\n    " + linklabel + ": <" + s(url; "") + ">"
+        else "\n    " + linklabel + ": (no URL recorded)" end;
       # Owner→medic Slack subteam mentions — pings the actual on-call group,
       # not plain text (same mechanism as the camunda/camunda AlwaysGreen
       # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
