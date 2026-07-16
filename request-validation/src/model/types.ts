@@ -95,37 +95,47 @@ export interface SpecModel {
   operations: OperationModel[];
 }
 
-export type ScenarioKind =
-  | 'missing-required'
-  | 'missing-required-combo'
-  | 'type-mismatch'
-  | 'union'
-  | 'constraint-violation'
-  | 'enum-violation'
-  | 'additional-prop'
-  | 'oneof-ambiguous'
-  | 'oneof-none-match'
-  | 'discriminator-mismatch'
-  | 'param-missing'
-  | 'param-type-mismatch'
-  | 'param-enum-violation'
-  | 'param-constraint-violation'
-  | 'missing-body'
-  | 'body-top-type-mismatch'
-  | 'nested-additional-prop'
-  | 'unique-items-violation'
-  | 'multiple-of-violation'
-  | 'format-invalid'
-  | 'additional-prop-general'
-  | 'oneof-multi-ambiguous'
-  | 'oneof-cross-bleed'
-  | 'discriminator-structure-mismatch'
-  | 'allof-missing-required'
-  | 'allof-conflict'
-  | 'not-found-fake-id'
-  | 'auth-absent'
-  | 'auth-invalid'
-  | 'auth-deny';
+/**
+ * Runtime source of truth for `ScenarioKind` — the type is derived from this
+ * array (below) rather than hand-duplicated, so a value list consuming it at
+ * runtime (e.g. config.ts's scenario-kind validation) can import
+ * `SCENARIO_KINDS` directly instead of maintaining a second, driftable copy
+ * of this same list.
+ */
+export const SCENARIO_KINDS = [
+  'missing-required',
+  'missing-required-combo',
+  'type-mismatch',
+  'union',
+  'constraint-violation',
+  'enum-violation',
+  'additional-prop',
+  'oneof-ambiguous',
+  'oneof-none-match',
+  'discriminator-mismatch',
+  'param-missing',
+  'param-type-mismatch',
+  'param-enum-violation',
+  'param-constraint-violation',
+  'missing-body',
+  'body-top-type-mismatch',
+  'nested-additional-prop',
+  'unique-items-violation',
+  'multiple-of-violation',
+  'format-invalid',
+  'additional-prop-general',
+  'oneof-multi-ambiguous',
+  'oneof-cross-bleed',
+  'discriminator-structure-mismatch',
+  'allof-missing-required',
+  'allof-conflict',
+  'not-found-fake-id',
+  'auth-absent',
+  'auth-invalid',
+  'auth-deny',
+] as const;
+
+export type ScenarioKind = (typeof SCENARIO_KINDS)[number];
 
 export interface ValidationScenario {
   id: string;

@@ -285,6 +285,21 @@ fixtures and named invariants point directly at the broken property.
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
 
+### Coverage has two axes: presence and completeness
+
+- **Endpoint presence** — does this operation have a generated test at all.
+  `coverage.json`'s `summary.unmappedOperations` (per-config, see the
+  nightly/CI job summaries) measures exactly this, and only this.
+- **Assertion completeness** — for a test that exists, does it check every
+  part of the documented contract (status code, response body shape,
+  headers, …), or only part of it.
+
+An empty `unmappedOperations` proves the first axis, not the second. When
+asked whether coverage is complete, don't answer from that one metric alone.
+Enumerate the contract dimensions that matter and check each one explicitly
+against the product's actual documented spec — not against this generator's
+own internal definition of "has a test."
+
 ### Standing rule for every bug fix to extractor or planner
 
 1. **Add a fixture demonstrating the bug BEFORE the fix.** The fixture

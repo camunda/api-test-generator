@@ -35,12 +35,38 @@
         "url": "https://github.com/camunda/camunda-hub/issues/25801",
         "tracker": "https://github.com/camunda/api-test-generator/issues/419"
       }
+    },
+    {
+      "operationId": "ingestCatalogAssets",
+      "reason": "Its missing-required-multipart-part cases hit camunda-hub#26448 (ProblemDetail missing `type` on Spring's own framework-level validation errors). Its 2 auth-absent/auth-invalid cases are separately the camunda-hub#26447 pattern (see knownProblemDetailShapeGaps below) — those two ARE otherwise-valid, still-passing status-code coverage; excluding the whole op drops them too rather than building a third (operationId + scenarioKind) suppression mechanism just to save 2 tests per op across the 2 ops affected here. Accepted as a small, disclosed cost, not a coverage-neutral exclusion.",
+      "knownIssue": {
+        "summary": "ProblemDetail missing `type` on Spring's own framework-level validation errors (missing/malformed multipart parts, missing/malformed query params)",
+        "url": "https://github.com/camunda/camunda-hub/issues/26448"
+      }
+    },
+    {
+      "operationId": "getClusterUsageMetrics",
+      "reason": "Its missing/wrong-type-on-required-query-param cases (id/start/end) hit camunda-hub#26448: Spring's own MissingServletRequestParameterException/MethodArgumentTypeMismatchException handling returns a ProblemDetail missing `type` (confirmed live — same root cause as the multipart case, broader than the issue's original title). Its 2 auth-absent/auth-invalid cases are separately the camunda-hub#26447 pattern (see knownProblemDetailShapeGaps below) and are otherwise-valid, still-passing status-code coverage; excluding the whole op drops those 2 too, same disclosed tradeoff as ingestCatalogAssets above.",
+      "knownIssue": {
+        "summary": "ProblemDetail missing `type` on Spring's own framework-level validation errors (missing/malformed multipart parts, missing/malformed query params)",
+        "url": "https://github.com/camunda/camunda-hub/issues/26448"
+      }
     }
   ],
   "knownIssues": [
     {
       "summary": "Wrong-type tests on resource-key body fields (projectKey, folderKey, …) are skipped — Hub 403s/500s on a malformed key instead of 400",
       "url": "https://github.com/camunda/camunda-hub/issues/25926"
+    }
+  ],
+  "knownProblemDetailShapeGaps": [
+    {
+      "scenarioKinds": ["auth-absent", "auth-invalid"],
+      "reason": "Live-verified (hub-ondemand-test.yml run 29422042438): every 401 response returns a completely empty body instead of a ProblemDetail — Spring Security's authentication entry point rejects the request before the app's own ProblemDetail assembly ever runs. Systemic across ~39 operations, so excluding each op (excludeOperations) would drop its other, unaffected negative coverage too. The status-code assertion for these scenarios is unaffected — only the shape check is skipped.",
+      "knownIssue": {
+        "summary": "Every 401 response returns an empty body instead of a ProblemDetail",
+        "url": "https://github.com/camunda/camunda-hub/issues/26447"
+      }
     }
   ]
 }

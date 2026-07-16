@@ -70,14 +70,63 @@ export interface RequestContext {
 }
 
 /**
- * Assert the server responded with the expected status. On mismatch:
+ * Every error response in this API (every 4xx/5xx, both configs) is DECLARED
+ * in the OpenAPI spec as a `ProblemDetail` per RFC 9457, served as
+ * `application/problem+json` — a single, uniform shape reused across all
+ * operations, so there is nothing per-endpoint to look up. Required fields
+ * per the spec's shared `ProblemDetail` schema. (Real runtime behavior can
+ * still deviate from this contract — that deviation is exactly what this
+ * check is for.)
+ */
+const PROBLEM_DETAIL_STRING_FIELDS = ['type', 'title', 'detail', 'instance'] as const;
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Check `body` against the `ProblemDetail` shape. Returns an empty array when
+ * valid, otherwise one human-readable message per violation.
+ */
+function validateProblemDetailShape(
+  body: unknown,
+  expectedStatus: number,
+  parseError: string | undefined,
+): string[] {
+  if (parseError) return [`response body is not valid JSON: ${parseError}`];
+  if (body === undefined) return ['response body is empty; expected a ProblemDetail object'];
+  if (!isRecord(body)) {
+    // typeof null === 'object', so without this the message would misreport
+    // a literal `null` body (e.g. response text "null") as "got object".
+    const got = body === null ? 'null' : Array.isArray(body) ? 'array' : typeof body;
+    return [`response body is not a JSON object (got ${got})`];
+  }
+  const errors: string[] = [];
+  for (const field of PROBLEM_DETAIL_STRING_FIELDS) {
+    if (typeof body[field] !== 'string') {
+      errors.push(`ProblemDetail.${field} missing or not a string (got ${JSON.stringify(body[field])})`);
+    }
+  }
+  if (typeof body.status !== 'number') {
+    errors.push(`ProblemDetail.status missing or not a number (got ${JSON.stringify(body.status)})`);
+  } else if (body.status !== expectedStatus) {
+    errors.push(`ProblemDetail.status (${body.status}) does not match the HTTP status (${expectedStatus})`);
+  }
+  return errors;
+}
+
+/**
+ * Assert the server responded with the expected status AND, when it did, that
+ * the error body conforms to the API's `ProblemDetail` shape (RFC 9457). On
+ * either mismatch:
  *
  *   1. Attach `request.json` and `response.json` artifacts to the Playwright
  *      report so `npx playwright show-report` (and the JSON reporter) carry
  *      the full request/response payloads.
  *   2. Throw an `expect` failure whose message includes the method, URL,
- *      expected vs. actual status, and a truncated response body — so the
- *      `list` reporter inline output is immediately diagnostic.
+ *      expected vs. actual status (and any shape violations), plus a
+ *      truncated response body — so the `list` reporter inline output is
+ *      immediately diagnostic.
  *
  * Pass tests do not produce attachments, keeping the report size bounded.
  */
@@ -86,16 +135,55 @@ export async function assertResponseStatus(
   res: APIResponse,
   expected: number,
   ctx: RequestContext,
+  opts?: {
+    /**
+     * Skip the ProblemDetail shape check for this call, keeping the status
+     * assertion. Set only for scenario kinds with a known, systemic,
+     * upstream-tracked shape gap (see `knownProblemDetailShapeGaps` in the
+     * request-validation config) — never to silence a one-off failure.
+     */
+    skipProblemDetailShape?: boolean;
+  },
 ): Promise<void> {
   const actual = res.status();
-  if (actual === expected) return;
+  const statusMismatch = actual !== expected;
+  // Only judge the body's shape when: the status itself is right (a wrong
+  // status already fails the test on its own, and its body may not even be
+  // an error response — e.g. a 200 body when a 4xx was expected), the caller
+  // hasn't opted this scenario out (see `opts.skipProblemDetailShape`), and
+  // `expected` is itself an error status — `ProblemDetail` is only the
+  // declared shape for 4xx/5xx, so a 2xx-expecting caller (none exist today,
+  // but nothing statically prevents one) must never be shape-checked against
+  // it. This is knowable from the status alone, before reading the body, so a
+  // clean pass that needs no shape check never pays for reading/parsing a
+  // body it would only discard — the original "no body read on a plain
+  // match" behavior is preserved for that case.
+  const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
+  if (!statusMismatch && !shouldCheckShape) return;
 
   let bodyText = '';
   try {
     bodyText = await res.text();
   } catch {
-    // Response body may already be consumed; the status mismatch is still actionable.
+    // Response body may already be consumed; the checks below still run
+    // against whatever was captured (an empty body fails shape validation).
   }
+
+  let shapeErrors: string[] = [];
+  if (shouldCheckShape) {
+    let bodyJson: unknown;
+    let parseError: string | undefined;
+    if (bodyText) {
+      try {
+        bodyJson = JSON.parse(bodyText);
+      } catch (e) {
+        parseError = e instanceof Error ? e.message : String(e);
+      }
+    }
+    shapeErrors = validateProblemDetailShape(bodyJson, expected, parseError);
+  }
+
+  if (!statusMismatch && shapeErrors.length === 0) return;
 
   const requestArtifact = JSON.stringify(
     {
@@ -123,6 +211,7 @@ export async function assertResponseStatus(
       body: tryParseJson(cappedBodyText.value) ?? cappedBodyText.value,
       bodyTruncated: cappedBodyText.truncated || undefined,
       bodyOriginalBytes: cappedBodyText.truncated ? cappedBodyText.originalBytes : undefined,
+      problemDetailShapeErrors: shapeErrors.length > 0 ? shapeErrors : undefined,
     },
     null,
     2,
@@ -142,9 +231,17 @@ export async function assertResponseStatus(
     `  scenarioKind:    ${ctx.scenarioKind}\n` +
     `  expected status: ${expected}\n` +
     `  actual status:   ${actual} ${res.statusText()}\n` +
+    (shapeErrors.length > 0
+      ? `  ProblemDetail shape violations:\n${shapeErrors.map((e) => `    - ${e}`).join('\n')}\n`
+      : '') +
     `  request body:    ${formatRequestPayload(ctx)}\n` +
     `  response body:   ${truncate(bodyText, 500)}`;
-  expect(actual, summary).toBe(expected);
+
+  if (statusMismatch) {
+    expect(actual, summary).toBe(expected);
+  } else {
+    expect(shapeErrors, summary).toEqual([]);
+  }
 }
 
 function formatRequestPayload(ctx: RequestContext): string {

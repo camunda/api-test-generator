@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import prettier from 'prettier';
-import type { ValidationScenario } from '../model/types.js';
+import type { ScenarioKind, ValidationScenario } from '../model/types.js';
 import { LICENSE_HEADER } from './licenseHeader.js';
 import { materializeStandalone } from './materializeStandalone.js';
 
@@ -26,6 +26,13 @@ interface EmitOpts {
   resourceFixtures?: Record<string, string>;
   /** Path-param-only overrides merged over resourceFixtures (see config). */
   pathResourceFixtures?: Record<string, string>;
+  /**
+   * Scenario kinds with a known, systemic ProblemDetail shape gap (see
+   * `knownProblemDetailShapeGaps` in RequestValidationConfig). Scenarios of a
+   * listed kind still emit their normal status-code assertion — only the
+   * `assertResponseStatus` call's shape check is skipped for them.
+   */
+  problemDetailShapeSkipKinds?: ReadonlySet<ScenarioKind>;
 }
 
 export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
@@ -72,6 +79,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       opts.standalone !== false,
       opts.resourceFixtures,
       opts.pathResourceFixtures,
+      opts.problemDetailShapeSkipKinds,
     );
     let formatted: string;
     try {
@@ -98,6 +106,7 @@ function buildFile(
   standalone: boolean = true,
   resourceFixtures?: Record<string, string>,
   pathResourceFixtures?: Record<string, string>,
+  problemDetailShapeSkipKinds?: ReadonlySet<ScenarioKind>,
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
@@ -171,7 +180,16 @@ function buildFile(
       occurrence.set(base, n);
       finalTitle = `${base} (#${n})`;
     }
-    lines.push(renderScenario(s, finalTitle, standalone, resourceFixtures, pathResourceFixtures));
+    lines.push(
+      renderScenario(
+        s,
+        finalTitle,
+        standalone,
+        resourceFixtures,
+        pathResourceFixtures,
+        problemDetailShapeSkipKinds?.has(s.type) ?? false,
+      ),
+    );
   }
   lines.push('});');
   lines.push('');
@@ -240,6 +258,7 @@ function renderScenario(
   standalone: boolean,
   resourceFixtures?: Record<string, string>,
   pathResourceFixtures?: Record<string, string>,
+  skipProblemDetailShape: boolean = false,
 ): string {
   const fixtures = resourceFixtures ?? {};
   // Path params use the base map with path-only overrides merged on top.
@@ -340,8 +359,13 @@ function renderScenario(
     } else if (s.requestBody) {
       ctxParts.push(`body: requestBody`);
     }
+    // skipProblemDetailShape: a known, systemic ProblemDetail shape gap for
+    // this scenario kind (see knownProblemDetailShapeGaps) — the status-code
+    // assertion above/below is unaffected, only assertResponseStatus's body
+    // shape check is skipped for this call.
+    const assertOpts = skipProblemDetailShape ? ', { skipProblemDetailShape: true }' : '';
     lines.push(
-      `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} });`,
+      `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} }${assertOpts});`,
     );
   } else {
     // Legacy QA-tree mode: bare assertion, no attachments.
