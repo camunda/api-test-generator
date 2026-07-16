@@ -69,6 +69,12 @@ case "$MODE" in
       # all-clear — exactly what this script exists to prevent. Caught
       # separately below, before the normal zero-failures path can fire.
       def bad_type(x): x as $v | ($v != null) and (($v|type) != "array");
+      # Category breakdown lines: only the categories that actually happened
+      # tonight, not a wall of "label: 0"s for every category the schema
+      # happens to define. Same "only show a non-zero one" rule the coverage
+      # line below already uses.
+      def counters(items):
+        items | map(select(.count > 0)) | map(.icon + " " + .label + ": " + (.count|tostring)) | join("   ");
       # No-false-all-clear: an inconclusive / crashed run must say so, never green.
       if (.inconclusive // false) then
         ":warning: *Inconclusive* — the nightly produced no report artifact to triage. The test run may have crashed before uploading results; check the nightly run."
@@ -108,6 +114,17 @@ case "$MODE" in
                + " operation(s) with no generated test — " + ($unmapped_fixed|tostring) + " fix PR(s) opened."
           end
         ) as $coverage_line
+      | (counters([
+          {icon: ":package:", label: "product", count: n($c.product)},
+          {icon: ":wrench:", label: "infrastructure", count: n($c.infrastructure)},
+          {icon: ":game_die:", label: "flakiness", count: n($c.flakiness)},
+          {icon: ":test_tube:", label: "test-generation", count: n($c.test_generation)}
+        ])) as $cat_line
+      | (counters([
+          {icon: ":ticket:", label: "known issue", count: n($c.known_issue)},
+          {icon: ":memo:", label: "filed", count: n($c.filed)},
+          {icon: ":fast_forward:", label: "skipped (recent change)", count: n($c.skipped_recent_change)}
+        ])) as $meta_line
       # No-false-all-clear applies here too: zero failing TESTS is not the same
       # as zero gaps — a suite can be all-green while an operation has no test
       # at all (it never appears as a failure). Only call the night fully clean
@@ -119,13 +136,8 @@ case "$MODE" in
         else
           $suites
           + "\n*Triage — " + ($total|tostring) + " failing test(s):*"
-          + "\n  :package: product: " + (n($c.product)|tostring)
-          + "   :wrench: infrastructure: " + (n($c.infrastructure)|tostring)
-          + "   :game_die: flakiness: " + (n($c.flakiness)|tostring)
-          + "   :test_tube: test-generation: " + (n($c.test_generation)|tostring)
-          + "\n  :ticket: known issue: " + (n($c.known_issue)|tostring)
-          + "   :memo: filed: " + (n($c.filed)|tostring)
-          + "   :fast_forward: skipped (recent change): " + (n($c.skipped_recent_change)|tostring)
+          + (if ($cat_line|length) > 0 then "\n  " + $cat_line else "" end)
+          + (if ($meta_line|length) > 0 then "\n  " + $meta_line else "" end)
           + $coverage_line
         end
       )
@@ -145,12 +157,14 @@ case "$MODE" in
       # object, or null slipping past `// "?"` — must still degrade to a
       # readable line instead of a jq "cannot add ... and string" error).
       def s(x; d): ((x // d) | tostring);
-      # Defensive cap on a per-finding display field (expected/actual) — the
-      # guidance asks the agent for a short one-line value here, evidence and
-      # reasoning belong in `evidence` instead, but this is a jq-level backstop
-      # in case a future run still writes something long: a single overlong
-      # field must not make the whole thread reply unreadable.
-      def cap(x; d; n): s(x; d) as $v | if ($v | length) > n then ($v[0:n] + "…") else $v end;
+      # Leading numeric token (a status code, in practice) if the value starts
+      # with one, else the value itself capped short — the compact title line
+      # wants just "expected 200, got 400", not the full reasoning string the
+      # guidance already asks the agent to keep out of these fields anyway.
+      def leadNum(x; d):
+        (s(x; d)) as $v
+        | (try ($v | capture("^(?<n>[0-9]+)").n) catch null)
+          // (if ($v | length) > 20 then ($v[0:20] + "…") else $v end);
       def icon(f):
         if (f.subcategory // "") == "test-generation" then ":test_tube:"
         elif f.category == "product" then ":package:"
@@ -167,15 +181,21 @@ case "$MODE" in
       # pages real on-call groups (and, below, renders a Slack link), so only
       # a genuine string counts either way.
       def has_url(x): (x | type) == "string" and (x | length) > 0;
-      # Only render a knownIssue/URL-style link when the URL is actually a
-      # present, non-empty string — the same has_url() rule the medic-ping
-      # triggers use. Without this, a schema-violating non-string value (true,
-      # 42, {}) would stringify via s()/tostring into something non-empty and
-      # render as a garbage Slack link (<true>, <42>) instead of falling back
-      # to "(no URL recorded)".
-      def link_or_note(url; linklabel):
-        if has_url(url) then "\n    " + linklabel + ": <" + s(url; "") + ">"
-        else "\n    " + linklabel + ": (no URL recorded)" end;
+      # Compact icon+link, e.g. ":ticket: <url>" — no text label, the icon
+      # carries the meaning (matches the rest of this compact per-finding
+      # line). Only rendered when the URL is actually a present, non-empty
+      # string — the same has_url() rule the medic-ping triggers use, so a
+      # schema-violating non-string value (true, 42, {}) is silently omitted
+      # here rather than rendered as a garbage link (<true>, <42>). Omitting
+      # (not a "(no URL recorded)" fallback) is deliberate: this compact line
+      # only shows what IS there, it does not call out what is missing.
+      def compactLink(url; icon): if has_url(url) then icon + " <" + s(url; "") + ">" else "" end;
+      # operationId with a fallback to spec when it is missing OR an empty
+      # string — plain `//` alone would not catch the empty-string case,
+      # since jq only treats null/false as falsy, not "".
+      def opLabel(f):
+        (f.operationId // "") as $o
+        | if ($o | type) == "string" and ($o | length) > 0 then $o else s(f.spec; "?") end;
       # Owner→medic Slack subteam mentions — pings the actual on-call group,
       # not plain text (same mechanism as the camunda/camunda AlwaysGreen
       # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
@@ -186,7 +206,12 @@ case "$MODE" in
       #   - test_automation_medic: action == "fix-pr" with a non-empty
       #     fix_pr_url (a fresh generator-side fix PR) OR a non-empty
       #     suppress_pr_url (a suppress PR — also lives in api-test-generator,
-      #     needs our review) — deduped to exactly one mention even if both
+      #     needs our review) OR its own could-not-classify signal
+      #     (category: "infrastructure" AND confidence: "low", the exact
+      #     fallback combination the classification guidance defines —
+      #     NOT any low-confidence finding, an unrelated future use of
+      #     confidence should not page anyone)
+      #     — deduped to exactly one mention even if more than one of these
       #     happened to be true for the same finding (the schema does not
       #     declare them mutually exclusive).
       #
@@ -203,21 +228,47 @@ case "$MODE" in
       # top-level summary message) so it stays precise, not a blanket ping.
       def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
       def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
+      # An admission from the agent that it could not confidently pick a
+      # category — never silently folded into an ordinary infrastructure
+      # finding. Called out with its own line AND routed to the
+      # test-automation medic so a human makes the call, rather than the
+      # low confidence going unnoticed under a category label that reads
+      # as a settled decision.
+      def undecided(f): (f.category // "") == "infrastructure" and (f.confidence // "") == "low";
+      # related_commit carries a sha/url per the guidance (proof of the
+      # "explained by recent intentional change" skip decision) — render it
+      # as a link when it actually looks like one, else as inline text,
+      # rather than collapsing it to a generic marker that loses the actual
+      # reference. has_url() only checks "non-empty string" (fine for the
+      # other fields here, which the schema always populates with real
+      # URLs) — a bare commit sha would satisfy that and get wrongly
+      # wrapped in the Slack <...> link syntax, so this needs its own,
+      # stricter check for an actual http(s) URL.
+      def relatedCommitNote(x):
+        if has_url(x) and (x | test("^https?://")) then compactLink(x; ":fast_forward:")
+        elif (x | type) == "string" and (x | length) > 0 then ":fast_forward: " + x
+        else "" end;
+      # Compact per-finding line: title (category, operationId, short
+      # expected/actual) + one links line (icon+URL only, whichever are
+      # present — nothing shown for whichever are absent) + medic ping(s) +
+      # any operational error warnings. Full detail (the full agent
+      # reasoning, response bodies, etc.) lives in the linked issue, PR, or
+      # nightly run, not repeated here — this is a pointer, not the evidence.
       def line(f):
-        (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) as $needs_ta_medic
-        | "• " + icon(f) + " *" + catlabel(f) + "* — `"
-        + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
-        + "\n    expected: " + cap(f.expected; "?"; 120) + "  |  actual: " + cap(f.actual; "?"; 120)
-        + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
-        + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
-        + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
+        ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
+        | ([
+            (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
+            relatedCommitNote(f.related_commit),
+            compactLink(f.issue_url; ":memo:"),
+            compactLink(f.fix_pr_url; if (f.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end),
+            compactLink(f.suppress_pr_url; ":no_entry:")
+          ] | map(select(length > 0)) | join("  ")) as $links_line
+        | "• " + icon(f) + " " + catlabel(f) + " — `" + opLabel(f)
+        + "` — expected " + leadNum(f.expected; "?") + ", got " + leadNum(f.actual; "?")
+        + (if undecided(f) then "\n    :grey_question: *could not confidently classify — needs human triage*" else "" end)
+        + (if ($links_line | length) > 0 then "\n    " + $links_line else "" end)
         + (if (f.action // "") == "file" and has_url(f.issue_url)
            then "\n    :rotating_light: " + hub_medic else "" end)
-        + (if (f.fix_pr_url // null) != null then
-             link_or_note(f.fix_pr_url;
-               if (f.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
-           else "" end)
-        + (if (f.suppress_pr_url // null) != null then link_or_note(f.suppress_pr_url; ":no_entry: suppressed") else "" end)
         + (if $needs_ta_medic then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
              (if (f.subcategory // "") == "test-generation"
@@ -228,13 +279,11 @@ case "$MODE" in
              "\n    :warning: could not suppress: " + s(f.suppress_error; "")
            else "" end);
       def uline(u):
-        "• :no_entry_sign: *unmapped* — `" + s(u.operationId; "?") + "` — no generated test"
-        + (if (u.fix_pr_url // null) != null then
-             link_or_note(u.fix_pr_url;
-               if (u.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
-           else "" end)
-        + (if (u.action // "") == "fix-pr" and has_url(u.fix_pr_url)
-           then "\n    :rotating_light: " + test_automation_medic else "" end)
+        ((u.action // "") == "fix-pr" and has_url(u.fix_pr_url)) as $needs_ta_medic
+        | (compactLink(u.fix_pr_url; if (u.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end)) as $link
+        | "• :no_entry_sign: unmapped — `" + s(u.operationId; "?") + "` — no generated test"
+        + (if ($link | length) > 0 then "\n    " + $link else "" end)
+        + (if $needs_ta_medic then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
       # Guard against the schema being violated (e.g. failures/unmapped_operations
       # written as an object or string instead of an array) — arr() coerces

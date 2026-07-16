@@ -62,7 +62,7 @@ For each entry in `unmappedOperations`: this is a generator/ontology gap, not a 
 
 **Critical disambiguation — the API matching the spec is NOT a product bug.** When the response and the OpenAPI spec **agree** with each other but the *test* failed, the **generated test** built a wrong request or asserted the wrong expectation — a **test-generation bug in api-test-generator**, not a camunda-hub defect. Do not classify it `product` and do not file a camunda-hub issue. Report it with `category: "product"` reasoning noted, `subcategory: "test-generation"`. This is one of the two cases where you may open an api-test-generator PR instead of just reporting — see "Fixing a test-generation / coverage bug" below for when that's appropriate versus falling back to `action: "report-only"`. A filed camunda-hub issue is only ever correct when the response **contradicts** the spec.
 
-If you genuinely cannot determine the category from the evidence, classify as **infrastructure** with `confidence: "low"` and say exactly what evidence was missing — never guess "product".
+If you genuinely cannot determine the category from the evidence, do not guess "product". Set `category: "infrastructure"` and `confidence: "low"`, and say exactly what evidence was missing in `evidence`. This exact combination is treated as an explicit **could-not-classify** signal downstream: the Slack thread calls it out distinctly (not as an ordinary infrastructure finding) and pings the test-automation medic so a human makes the call — so use it honestly whenever you're genuinely unsure, rather than picking a category just to fill the field.
 
 ## Known-issue reconciliation (do this before calling anything a NEW bug)
 
