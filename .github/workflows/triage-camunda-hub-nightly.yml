@@ -155,14 +155,16 @@ jobs:
           fi
 
       # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
-      # Anthropic key only, from the SAME Vault KV path this repo's nightly already
-      # reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no new policy is needed
-      # — KV v2 read is path-level. Key name matches what lives at qa/ci/common:
-      # CLAUDE_API_KEY. (GitHub writes use the qa-processes App token below, not a
-      # PAT.) Required, so a genuinely-missing key fails loudly.
-      - name: Fetch Anthropic key from Vault
+      # Anthropic key + a GitHub PAT, from the SAME Vault KV path this repo's
+      # nightly already reads (SLACK_BOT_USER_OAUTH_TOKEN + TESTRAIL_*), so no
+      # new policy is needed — KV v2 read is path-level. Key names match what
+      # lives at qa/ci/common: CLAUDE_API_KEY, GH_TOKEN. (GitHub *writes* use
+      # the qa-processes App tokens below, not this PAT — it exists solely to
+      # authenticate the workspace-cli install below, see that step's comment.
+      # Required, so a genuinely-missing key fails loudly.
+      - name: Fetch Anthropic key + GitHub PAT from Vault
         id: vault
-        # Only the agent needs this, and the agent only runs when has_reports
+        # Only the agent needs these, and the agent only runs when has_reports
         # is true (see below) — gating it here too means a Vault hiccup on a
         # no-reports night can't hard-fail the job before it reaches the
         # inconclusive-result write.
@@ -176,6 +178,7 @@ jobs:
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           secrets: |
             secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
+            secret/data/products/qa/ci/common GH_TOKEN | GH_PAT ;
 
       # Two separately-scoped GitHub App tokens — the agent's write access is
       # asymmetric by design (camunda-hub: issues only; api-test-generator: may
@@ -278,12 +281,17 @@ jobs:
       # pinned to a commit SHA below), so tracking stable avoids running an
       # EOL, security-fix-less toolchain that a hardcoded version would drift
       # into over time.
+      # Only needed to build the agent's workspace, which only happens when
+      # has_reports is true — gated the same as the token/credential steps
+      # above, so a no-reports night can't hard-fail here either.
       - name: Setup Go (for workspace-cli)
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
         uses: actions/setup-go@v5
         with:
           go-version: 'stable'
 
       - name: Setup Node.js 22 (for Claude Code CLI)
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -292,15 +300,46 @@ jobs:
       # than @latest, so an upstream breaking change can't silently start
       # failing nightly triage — bump intentionally. SHA = camunda/
       # workspace-cli main HEAD @ 2026-07-15.
+      #
+      # workspace-cli is ITSELF a private repo (a separate concern from "which
+      # repos workspace-cli clones" — the "Configure git credentials for
+      # cloning" step below, for camunda-hub) — go install's checksum lookup
+      # against sum.golang.org 404s for a private module, and it then falls
+      # back to an unauthenticated `git ls-remote`, which fails outright. Two
+      # things fix this, matching the same pattern the c8-orchestration-
+      # cluster-e2e-nightly-fix.yml reference this agent is modeled on
+      # already uses: GOPRIVATE tells Go to skip the public checksum lookup
+      # entirely for camunda/*, and a repo-specific insteadOf authenticates
+      # the actual git fetch with the Vault-issued PAT — the qa-processes App
+      # token can't be used here, it has no grant on this repo.
       - name: Install workspace-cli
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        env:
+          GOPRIVATE: github.com/camunda/*
+          GH_PAT: ${{ steps.vault.outputs.GH_PAT }}
         run: |
           set -euo pipefail
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::No GitHub PAT from Vault — cannot authenticate the private workspace-cli module fetch."
+            exit 1
+          fi
+          # Scoped, temporary gitconfig for this credential only — NOT the
+          # persistent $HOME/.gitconfig the later camunda-hub clone rewrite
+          # uses. If `go install` fails (or anything else in this step does),
+          # the trap still removes it: the PAT can never outlive this one
+          # step, regardless of exit status, and never needs the later
+          # "Scrub git credentials" step to find and remove it.
+          GIT_CONFIG_GLOBAL="$(mktemp)"
+          export GIT_CONFIG_GLOBAL
+          trap 'rm -f "$GIT_CONFIG_GLOBAL"' EXIT
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/camunda/workspace-cli".insteadOf "https://github.com/camunda/workspace-cli"
           go install github.com/camunda/workspace-cli/cmd/workspace@e1b3f19dd244957db5eb3b4ebd5bc71999c3deb0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       # Pinned version (same as the c8-orchestration-cluster-e2e-nightly-fix.yml
       # reference this agent is modeled on) — bump intentionally.
       - name: Install Claude Code CLI
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
         run: |
           set -euo pipefail
           npm install -g @anthropic-ai/claude-code@2.1.156
@@ -338,14 +377,12 @@ jobs:
 
       # --- Create the 3-repo workspace ----------------------------------------
       - name: Stage workspace manifest + guidance
-        id: manifest
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.workspace-templates"
           src="resources/workspace-templates/camunda-hub-nightlies"
           cp "$src/camunda-hub-nightlies.guidance.yaml" "$HOME/.workspace-templates/camunda-hub-nightlies.yaml"
           cp "$src/camunda-hub-nightlies.guidance.md"   "$HOME/.workspace-templates/camunda-hub-nightlies.guidance.md"
-          echo "MANIFEST=$HOME/.workspace-templates/camunda-hub-nightlies.yaml" >> "$GITHUB_OUTPUT"
 
       - name: Compute workspace name
         id: ws
@@ -355,8 +392,17 @@ jobs:
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         run: |
           set -euo pipefail
+          # --manifest takes a bare NAME (workspace-cli resolves it against
+          # ~/.workspace-templates/<name>.yaml itself, trying .yaml then .yml)
+          # — NOT a path and NOT an extension, despite the staged file above
+          # literally being that path. Passing the full path (as this step
+          # used to) makes workspace-cli try to resolve it AGAIN relative to
+          # its own templates dir, producing a doubled, nonexistent path.
+          # Matches the exact invocation the c8-orchestration-cluster-e2e-
+          # nightly-fix.yml reference this agent is modeled on already uses
+          # (`--manifest camunda-orchestration-cluster-nightly`, no path).
           workspace create "${{ steps.ws.outputs.name }}" \
-            --manifest "${{ steps.manifest.outputs.MANIFEST }}"
+            --manifest camunda-hub-nightlies
 
       # Cloning is done — scrub the token-bearing url.*.insteadOf rewrites from
       # global gitconfig BEFORE the agent (running with
