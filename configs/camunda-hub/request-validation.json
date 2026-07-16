@@ -38,9 +38,17 @@
     },
     {
       "operationId": "ingestCatalogAssets",
-      "reason": "Every negative case for this op is affected by one of two live-verified shape bugs: its 2 auth-absent/auth-invalid cases hit camunda-hub#26447 (empty 401 body), and its remaining missing-required-multipart-part cases hit camunda-hub#26448 (ProblemDetail missing `type`). Excluding the whole op costs no currently-valid coverage — nothing else is generated for it.",
+      "reason": "Every negative case for this op is affected by one of two live-verified shape bugs: its 2 auth-absent/auth-invalid cases hit camunda-hub#26447 (empty 401 body), and its remaining missing-required-multipart-part cases hit camunda-hub#26448 (ProblemDetail missing `type` on Spring's own framework-level validation errors). Excluding the whole op costs no currently-valid coverage — nothing else is generated for it.",
       "knownIssue": {
-        "summary": "ingestCatalogAssets — every negative case hits either the 401-empty-body bug or the multipart-missing-type bug",
+        "summary": "ProblemDetail missing `type` on Spring's own framework-level validation errors (missing/malformed multipart parts, missing/malformed query params)",
+        "url": "https://github.com/camunda/camunda-hub/issues/26448"
+      }
+    },
+    {
+      "operationId": "getClusterUsageMetrics",
+      "reason": "Every non-auth negative case for this op (Missing/wrong-type on required query params id/start/end) hits camunda-hub#26448: Spring's own MissingServletRequestParameterException/MethodArgumentTypeMismatchException handling returns a ProblemDetail missing `type` (confirmed live — same root cause as the multipart case, broader than the issue's original title). Its 2 auth-absent/auth-invalid cases separately hit camunda-hub#26447. Excluding the whole op costs no currently-valid coverage.",
+      "knownIssue": {
+        "summary": "ProblemDetail missing `type` on Spring's own framework-level validation errors (missing/malformed multipart parts, missing/malformed query params)",
         "url": "https://github.com/camunda/camunda-hub/issues/26448"
       }
     }
