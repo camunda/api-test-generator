@@ -161,6 +161,11 @@ case "$MODE" in
         s(url; "") as $u
         | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
           else "\n    " + linklabel + ": (no URL recorded)" end;
+      # True only for an actually-present, non-empty URL string — a present
+      # key with an empty value ("" — a schema violation / agent bug) must
+      # not count as a real link present, same rule link_or_note itself
+      # already applies when deciding whether to render "(no URL recorded)".
+      def has_url(x): (s(x; "") | length) > 0;
       # Owner→medic Slack subteam mentions — pings the actual on-call group,
       # not plain text (same mechanism as the camunda/camunda AlwaysGreen
       # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
@@ -181,14 +186,14 @@ case "$MODE" in
       def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
       def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
       def line(f):
-        (((f.action // "") == "fix-pr") or ((f.suppress_pr_url // null) != null)) as $needs_ta_medic
+        (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) as $needs_ta_medic
         | "• " + icon(f) + " *" + catlabel(f) + "* — `"
         + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
         + "\n    expected: " + s(f.expected; "?") + "  |  actual: " + s(f.actual; "?")
         + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
         + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
-        + (if (f.action // "") == "file" and ((s(f.issue_url; "")) | length) > 0
+        + (if (f.action // "") == "file" and has_url(f.issue_url)
            then "\n    :rotating_light: " + hub_medic else "" end)
         + (if (f.fix_pr_url // null) != null then
              link_or_note(f.fix_pr_url;
@@ -210,7 +215,8 @@ case "$MODE" in
              link_or_note(u.fix_pr_url;
                if (u.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
-        + (if (u.action // "") == "fix-pr" then "\n    :rotating_light: " + test_automation_medic else "" end)
+        + (if (u.action // "") == "fix-pr" and has_url(u.fix_pr_url)
+           then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
       # Guard against the schema being violated (e.g. failures/unmapped_operations
       # written as an object or string instead of an array) — arr() coerces
