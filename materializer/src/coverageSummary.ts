@@ -42,10 +42,8 @@ export interface CoverageSummary {
   /**
    * Ops with ZERO generated test — endpoint-presence coverage only. An empty
    * array means every operation has a test; it does NOT mean every test
-   * checks the full documented contract. See AGENTS.md → "'Are we missing
-   * any tests?' has two different answers" — a test can exist here and still
-   * assert less than the spec documents (this is exactly how the negative
-   * suite's missing ProblemDetail-shape check stayed invisible, see #484).
+   * checks the full documented contract. See AGENTS.md → "Coverage has two
+   * axes: presence and completeness".
    */
   unmappedOperations: string[];
   perTemplate: PerTemplateSummary[];

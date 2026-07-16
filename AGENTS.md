@@ -285,34 +285,20 @@ fixtures and named invariants point directly at the broken property.
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
 
-### "Are we missing any tests?" has two different answers
+### Coverage has two axes: presence and completeness
 
-Coverage has (at least) two independent axes, and it's easy to answer this
-question from only one of them:
-
-- **Endpoint presence** — does this operation have a generated test at all?
+- **Endpoint presence** — does this operation have a generated test at all.
   `coverage.json`'s `summary.unmappedOperations` (per-config, see the
-  nightly/CI job summaries) answers exactly this, and only this.
-- **Assertion completeness** — for a test that *does* exist, does it check
-  every part of the documented contract, or only part of it?
+  nightly/CI job summaries) measures exactly this, and only this.
+- **Assertion completeness** — for a test that exists, does it check every
+  part of the documented contract (status code, response body shape,
+  headers, …), or only part of it.
 
-`unmappedOperations` being empty does NOT mean nothing is missing. Case in
-point: the camunda-hub request-validation (negative) suite had a generated
-test for every 400/401/403/404 case — `unmappedOperations` was clean — but
-those tests only asserted the HTTP status code, never that the error body
-matched the OpenAPI spec's declared `ProblemDetail` shape. That gap was
-invisible to the presence metric and was only found by cross-checking against
-an external, itemized deliverable list (camunda-hub#24448) line by line, not
-by re-asking "is anything missing" against `coverage.json`. It then found two
-real, previously-invisible product bugs (camunda-hub#26447, #26448) — see
-`request-validation/templates/support/http.ts`'s `validateProblemDetailShape`
-and `api-test-generator#484`.
-
-When asked whether coverage is complete, don't answer from one aggregate
-number. Enumerate the contract dimensions that matter (status codes, response
-body shape, headers, …) and check each one explicitly against the product's
-actual documented spec — not against this generator's own internal
-definition of "has a test."
+An empty `unmappedOperations` proves the first axis, not the second. When
+asked whether coverage is complete, don't answer from that one metric alone.
+Enumerate the contract dimensions that matter and check each one explicitly
+against the product's actual documented spec — not against this generator's
+own internal definition of "has a test."
 
 ### Standing rule for every bug fix to extractor or planner
 
