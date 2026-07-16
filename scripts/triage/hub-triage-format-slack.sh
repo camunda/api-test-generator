@@ -161,6 +161,17 @@ case "$MODE" in
         s(url; "") as $u
         | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
           else "\n    " + linklabel + ": (no URL recorded)" end;
+      # Owner→medic Slack subteam mentions — pings the actual on-call group,
+      # not plain text (same mechanism as the camunda/camunda AlwaysGreen
+      # feedback.mjs / alwaysgreen-streak-detector.yml). Only on a FRESH
+      # filing/fix this run (action == "file" / "fix-pr"), never on an
+      # already-known recurrence (action == "report-only"/"skip") — otherwise
+      # the medic gets paged nightly for something already tracked and
+      # unfixed. One mention per finding, inline in the thread reply only
+      # (never the top-level summary message) so it stays precise, not a
+      # blanket ping.
+      def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
+      def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
       def line(f):
         "• " + icon(f) + " *" + catlabel(f) + "* — `"
         + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
@@ -168,11 +179,14 @@ case "$MODE" in
         + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
         + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
+        + (if (f.action // "") == "file" then "\n    :rotating_light: " + hub_medic else "" end)
         + (if (f.fix_pr_url // null) != null then
              link_or_note(f.fix_pr_url;
                if (f.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
+        + (if (f.action // "") == "fix-pr" then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (f.suppress_pr_url // null) != null then link_or_note(f.suppress_pr_url; ":no_entry: suppressed") else "" end)
+        + (if (f.suppress_pr_url // null) != null then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
              (if (f.subcategory // "") == "test-generation"
               then "\n    :warning: could not open fix PR: "
@@ -187,6 +201,7 @@ case "$MODE" in
              link_or_note(u.fix_pr_url;
                if (u.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
+        + (if (u.action // "") == "fix-pr" then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (u.action // "") == "report-only" and ((u.file_error // "") != "") then "\n    :warning: could not open fix PR: " + s(u.file_error; "") else "" end);
       # Guard against the schema being violated (e.g. failures/unmapped_operations
       # written as an object or string instead of an array) — arr() coerces
