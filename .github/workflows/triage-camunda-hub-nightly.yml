@@ -369,14 +369,12 @@ jobs:
 
       # --- Create the 3-repo workspace ----------------------------------------
       - name: Stage workspace manifest + guidance
-        id: manifest
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.workspace-templates"
           src="resources/workspace-templates/camunda-hub-nightlies"
           cp "$src/camunda-hub-nightlies.guidance.yaml" "$HOME/.workspace-templates/camunda-hub-nightlies.yaml"
           cp "$src/camunda-hub-nightlies.guidance.md"   "$HOME/.workspace-templates/camunda-hub-nightlies.guidance.md"
-          echo "MANIFEST=$HOME/.workspace-templates/camunda-hub-nightlies.yaml" >> "$GITHUB_OUTPUT"
 
       - name: Compute workspace name
         id: ws
@@ -386,8 +384,17 @@ jobs:
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         run: |
           set -euo pipefail
+          # --manifest takes a bare NAME (workspace-cli resolves it against
+          # ~/.workspace-templates/<name>.yaml itself, trying .yaml then .yml)
+          # — NOT a path and NOT an extension, despite the staged file above
+          # literally being that path. Passing the full path (as this step
+          # used to) makes workspace-cli try to resolve it AGAIN relative to
+          # its own templates dir, producing a doubled, nonexistent path.
+          # Matches the exact invocation the c8-orchestration-cluster-e2e-
+          # nightly-fix.yml reference this agent is modeled on already uses
+          # (`--manifest camunda-orchestration-cluster-nightly`, no path).
           workspace create "${{ steps.ws.outputs.name }}" \
-            --manifest "${{ steps.manifest.outputs.MANIFEST }}"
+            --manifest camunda-hub-nightlies
 
       # Cloning is done — scrub the token-bearing url.*.insteadOf rewrites from
       # global gitconfig BEFORE the agent (running with
