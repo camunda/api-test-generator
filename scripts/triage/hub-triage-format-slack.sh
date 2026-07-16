@@ -190,6 +190,12 @@ case "$MODE" in
       # (not a "(no URL recorded)" fallback) is deliberate: this compact line
       # only shows what IS there, it does not call out what is missing.
       def compactLink(url; icon): if has_url(url) then icon + " <" + s(url; "") + ">" else "" end;
+      # operationId with a fallback to spec when it is missing OR an empty
+      # string — plain `//` alone would not catch the empty-string case,
+      # since jq only treats null/false as falsy, not "".
+      def opLabel(f):
+        (f.operationId // "") as $o
+        | if ($o | type) == "string" and ($o | length) > 0 then $o else s(f.spec; "?") end;
       # Owner→medic Slack subteam mentions — pings the actual on-call group,
       # not plain text (same mechanism as the camunda/camunda AlwaysGreen
       # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
@@ -201,7 +207,10 @@ case "$MODE" in
       #     fix_pr_url (a fresh generator-side fix PR) OR a non-empty
       #     suppress_pr_url (a suppress PR — also lives in api-test-generator,
       #     needs our review) OR its own could-not-classify signal
-      #     (confidence: "low", per the classification fallback above)
+      #     (category: "infrastructure" AND confidence: "low", the exact
+      #     fallback combination the classification guidance defines —
+      #     NOT any low-confidence finding, an unrelated future use of
+      #     confidence should not page anyone)
       #     — deduped to exactly one mention even if more than one of these
       #     happened to be true for the same finding (the schema does not
       #     declare them mutually exclusive).
@@ -225,7 +234,20 @@ case "$MODE" in
       # test-automation medic so a human makes the call, rather than the
       # low confidence going unnoticed under a category label that reads
       # as a settled decision.
-      def undecided(f): (f.confidence // "") == "low";
+      def undecided(f): (f.category // "") == "infrastructure" and (f.confidence // "") == "low";
+      # related_commit carries a sha/url per the guidance (proof of the
+      # "explained by recent intentional change" skip decision) — render it
+      # as a link when it actually looks like one, else as inline text,
+      # rather than collapsing it to a generic marker that loses the actual
+      # reference. has_url() only checks "non-empty string" (fine for the
+      # other fields here, which the schema always populates with real
+      # URLs) — a bare commit sha would satisfy that and get wrongly
+      # wrapped in the Slack <...> link syntax, so this needs its own,
+      # stricter check for an actual http(s) URL.
+      def relatedCommitNote(x):
+        if has_url(x) and (x | test("^https?://")) then compactLink(x; ":fast_forward:")
+        elif (x | type) == "string" and (x | length) > 0 then ":fast_forward: " + x
+        else "" end;
       # Compact per-finding line: title (category, operationId, short
       # expected/actual) + one links line (icon+URL only, whichever are
       # present — nothing shown for whichever are absent) + medic ping(s) +
@@ -236,12 +258,12 @@ case "$MODE" in
         ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
         | ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
-            (if (f.related_commit // null) != null then ":fast_forward: recent change" else "" end),
+            relatedCommitNote(f.related_commit),
             compactLink(f.issue_url; ":memo:"),
             compactLink(f.fix_pr_url; if (f.action // "") == "skip" then ":recycle:" else ":hammer_and_wrench:" end),
             compactLink(f.suppress_pr_url; ":no_entry:")
           ] | map(select(length > 0)) | join("  ")) as $links_line
-        | "• " + icon(f) + " " + catlabel(f) + " — `" + s(f.operationId; "?")
+        | "• " + icon(f) + " " + catlabel(f) + " — `" + opLabel(f)
         + "` — expected " + leadNum(f.expected; "?") + ", got " + leadNum(f.actual; "?")
         + (if undecided(f) then "\n    :grey_question: *could not confidently classify — needs human triage*" else "" end)
         + (if ($links_line | length) > 0 then "\n    " + $links_line else "" end)
