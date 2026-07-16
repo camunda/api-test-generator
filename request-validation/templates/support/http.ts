@@ -127,6 +127,15 @@ export async function assertResponseStatus(
   res: APIResponse,
   expected: number,
   ctx: RequestContext,
+  opts?: {
+    /**
+     * Skip the ProblemDetail shape check for this call, keeping the status
+     * assertion. Set only for scenario kinds with a known, systemic,
+     * upstream-tracked shape gap (see `knownProblemDetailShapeGaps` in the
+     * request-validation config) — never to silence a one-off failure.
+     */
+    skipProblemDetailShape?: boolean;
+  },
 ): Promise<void> {
   const actual = res.status();
 
@@ -151,7 +160,10 @@ export async function assertResponseStatus(
   // Only judge the body's shape when the status itself is right — a wrong
   // status already fails the test on its own, and its body may not even be
   // an error response (e.g. a 200 body when a 4xx was expected).
-  const shapeErrors = statusMismatch ? [] : validateProblemDetailShape(bodyJson, expected, parseError);
+  const shapeErrors =
+    statusMismatch || opts?.skipProblemDetailShape
+      ? []
+      : validateProblemDetailShape(bodyJson, expected, parseError);
 
   if (!statusMismatch && shapeErrors.length === 0) return;
 

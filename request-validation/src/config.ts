@@ -1,5 +1,42 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ScenarioKind } from './model/types.js';
+
+// Mirrors model/types.ts's ScenarioKind union so config-time typos in
+// `knownProblemDetailShapeGaps[].scenarioKinds` fail fast instead of silently
+// matching nothing.
+const SCENARIO_KINDS: ReadonlySet<string> = new Set<ScenarioKind>([
+  'missing-required',
+  'missing-required-combo',
+  'type-mismatch',
+  'union',
+  'constraint-violation',
+  'enum-violation',
+  'additional-prop',
+  'oneof-ambiguous',
+  'oneof-none-match',
+  'discriminator-mismatch',
+  'param-missing',
+  'param-type-mismatch',
+  'param-enum-violation',
+  'param-constraint-violation',
+  'missing-body',
+  'body-top-type-mismatch',
+  'nested-additional-prop',
+  'unique-items-violation',
+  'multiple-of-violation',
+  'format-invalid',
+  'additional-prop-general',
+  'oneof-multi-ambiguous',
+  'oneof-cross-bleed',
+  'discriminator-structure-mismatch',
+  'allof-missing-required',
+  'allof-conflict',
+  'not-found-fake-id',
+  'auth-absent',
+  'auth-invalid',
+  'auth-deny',
+]);
 
 /**
  * Per-config request-validation settings.
@@ -127,6 +164,26 @@ export interface RequestValidationConfig {
    * per-entry `knownIssue`s.
    */
   knownIssues?: KnownIssue[];
+  /**
+   * Scenario kinds where the server is known, for a systemic reason not tied
+   * to one operation, to violate the ProblemDetail response-shape contract
+   * (e.g. Hub returning an empty body on every 401 — camunda/camunda-hub#26447,
+   * because Spring Security's authentication entry point rejects the request
+   * before the app's own ProblemDetail assembly ever runs). Generated tests
+   * for a listed scenario kind still assert the HTTP status code as normal —
+   * only the ProblemDetail shape check is skipped, so unrelated coverage for
+   * the same operation (missing-required, type-mismatch, …) is unaffected.
+   *
+   * Use `excludeOperations` instead when a gap is scoped to one operation
+   * (dropping the op costs nothing there); use this when the gap is scoped to
+   * a *scenario kind* across many operations, where excluding every affected
+   * operation would drop unrelated, still-valid coverage too.
+   */
+  knownProblemDetailShapeGaps?: {
+    scenarioKinds: ScenarioKind[];
+    reason: string;
+    knownIssue: KnownIssue;
+  }[];
 }
 
 /**
@@ -194,6 +251,24 @@ function isExcludeOperations(
         typeof e.reason === 'string' &&
         e.reason.trim().length > 0 &&
         (e.knownIssue === undefined || isKnownIssue(e.knownIssue)),
+    )
+  );
+}
+
+function isKnownProblemDetailShapeGaps(
+  v: unknown,
+): v is { scenarioKinds: ScenarioKind[]; reason: string; knownIssue: KnownIssue }[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (e) =>
+        isPlainObject(e) &&
+        Array.isArray(e.scenarioKinds) &&
+        e.scenarioKinds.length > 0 &&
+        e.scenarioKinds.every((k) => typeof k === 'string' && SCENARIO_KINDS.has(k)) &&
+        typeof e.reason === 'string' &&
+        e.reason.trim().length > 0 &&
+        isKnownIssue(e.knownIssue),
     )
   );
 }
@@ -297,6 +372,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.knownIssues = v;
+  }
+  if ('knownProblemDetailShapeGaps' in parsed) {
+    const v = parsed.knownProblemDetailShapeGaps;
+    if (!isKnownProblemDetailShapeGaps(v)) {
+      throw new Error(
+        `Invalid ${configPath}: "knownProblemDetailShapeGaps" must be an array of { scenarioKinds, reason, knownIssue } objects — scenarioKinds a non-empty array of valid ScenarioKind values, reason a non-empty string, and knownIssue a required { summary, url, tracker? }.`,
+      );
+    }
+    merged.knownProblemDetailShapeGaps = v;
   }
   return merged;
 }

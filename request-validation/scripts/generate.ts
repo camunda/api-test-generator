@@ -186,6 +186,19 @@ async function main() {
       );
     }
   }
+  // Flatten knownProblemDetailShapeGaps into a single scenario-kind skip set
+  // for the emitter (#26447-style systemic gaps — see request-validation.json).
+  // Unlike excludeOperations, this drops nothing from generation: the emitter
+  // still emits the scenario and its status-code assertion, only skipping the
+  // ProblemDetail shape check for the listed kinds.
+  const problemDetailShapeSkipKinds = new Set(
+    (rvConfig.knownProblemDetailShapeGaps ?? []).flatMap((g) => g.scenarioKinds),
+  );
+  for (const g of rvConfig.knownProblemDetailShapeGaps ?? []) {
+    console.log(
+      `  ⏭  known-problem-detail-shape-gap: [${g.scenarioKinds.join(', ')}] — ${g.reason}`,
+    );
+  }
   const specCommit: string | undefined = specProvenance;
   // When TEST_SEED is set (or left at the default), use a stable placeholder
   // so generator output is byte-reproducible. Set TEST_SEED=random to opt in
@@ -744,6 +757,7 @@ async function main() {
       generationTimestamp,
       resourceFixtures: rvConfig.resourceFixtures,
       pathResourceFixtures: rvConfig.pathResourceFixtures,
+      problemDetailShapeSkipKinds,
     });
   }
   console.log('[generate] Summary:', {

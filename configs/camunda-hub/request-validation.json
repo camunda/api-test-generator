@@ -35,12 +35,30 @@
         "url": "https://github.com/camunda/camunda-hub/issues/25801",
         "tracker": "https://github.com/camunda/api-test-generator/issues/419"
       }
+    },
+    {
+      "operationId": "ingestCatalogAssets",
+      "reason": "Every negative case for this op is affected by one of two live-verified shape bugs: its 2 auth-absent/auth-invalid cases hit camunda-hub#26447 (empty 401 body), and its remaining missing-required-multipart-part cases hit camunda-hub#26448 (ProblemDetail missing `type`). Excluding the whole op costs no currently-valid coverage — nothing else is generated for it.",
+      "knownIssue": {
+        "summary": "ingestCatalogAssets — every negative case hits either the 401-empty-body bug or the multipart-missing-type bug",
+        "url": "https://github.com/camunda/camunda-hub/issues/26448"
+      }
     }
   ],
   "knownIssues": [
     {
       "summary": "Wrong-type tests on resource-key body fields (projectKey, folderKey, …) are skipped — Hub 403s/500s on a malformed key instead of 400",
       "url": "https://github.com/camunda/camunda-hub/issues/25926"
+    }
+  ],
+  "knownProblemDetailShapeGaps": [
+    {
+      "scenarioKinds": ["auth-absent", "auth-invalid"],
+      "reason": "Live-verified (hub-ondemand-test.yml run 29422042438): every 401 response returns a completely empty body instead of a ProblemDetail — Spring Security's authentication entry point rejects the request before the app's own ProblemDetail assembly ever runs. Systemic across ~39 operations, so excluding each op (excludeOperations) would drop its other, unaffected negative coverage too. The status-code assertion for these scenarios is unaffected — only the shape check is skipped.",
+      "knownIssue": {
+        "summary": "Every 401 response returns an empty body instead of a ProblemDetail",
+        "url": "https://github.com/camunda/camunda-hub/issues/26447"
+      }
     }
   ]
 }
