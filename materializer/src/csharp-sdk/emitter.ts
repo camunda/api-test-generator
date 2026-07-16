@@ -1,4 +1,4 @@
-import { assertSafeGlobalContextSeeds } from 'path-analyser/domainSemanticsValidator';
+import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,

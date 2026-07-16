@@ -72,9 +72,9 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
             declaration: false,
             sourceMap: true,
             outDir: './dist',
-            rootDir: './src',
+            rootDir: '.',
           },
-          include: ['src/**/*.ts'],
+          include: ['**/*.ts'],
           exclude: ['node_modules', 'dist'],
         },
         null,
@@ -107,6 +107,23 @@ API_BASE_URL=http://localhost:8080/v2
 
 # Optional: custom timeout for API calls
 # API_TIMEOUT_MS=30000
+`,
+    },
+    {
+      relativePath: 'types/camunda8-sdk.d.ts',
+      content: `declare module '@camunda8/sdk' {
+  export type ApiClientMethod = (args?: unknown) => Promise<any>;
+
+  export interface ApiClient {
+    [key: string]: ApiClientMethod;
+  }
+
+  export interface RestClientError extends Error {
+    status?: number;
+  }
+
+  export function createApiClient(options: { baseUrl?: string }): ApiClient;
+}
 `,
     },
     {

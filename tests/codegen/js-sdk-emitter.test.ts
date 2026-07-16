@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { createJsSdkEmitter, jsSuiteFileName, renderJsSuite } from '../../materializer/src/js-sdk/emitter.js';
 import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
@@ -54,7 +56,10 @@ describe('JavaScript SDK Emitter', () => {
     expect(files).toHaveLength(1);
     expect(files[0].relativePath).toBe('getWidget/getWidget.feature.test.ts');
     expect(files[0].content).toContain("import { describe, it, expect, beforeEach } from 'vitest';");
-    expect(files[0].content).toContain("import type { ApiClient, RestClientError } from '@camunda8/sdk';");
+    expect(files[0].content).toContain("import { createApiClient } from '@camunda8/sdk';");
+    expect(files[0].content).toContain(
+      "import type { ApiClient, RestClientError } from '@camunda8/sdk';",
+    );
   });
 
   test('rendered suite substitutes path params and renders extract bindings', () => {
@@ -63,6 +68,13 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).toContain("const url1 = `/widgets/${ctx['widgetIdVar'] ?? '{widgetId}'}`;"
     );
     expect(output).toContain('expect(response1.status).toBe(200);');
-    expect(output).toContain("ctx['widgetId'] = response1.data?.id;");
+    expect(output).toContain("ctx['widgetId'] = response1.data?.data?.id;");
+  });
+
+  test('js SDK generation script builds the emitter before generation', () => {
+    const pkgPath = path.resolve(process.cwd(), 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string> };
+
+    expect(pkg.scripts?.['codegen:js-sdk:all']).toContain('build:emitter-sdk');
   });
 });
