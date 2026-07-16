@@ -163,30 +163,39 @@ case "$MODE" in
           else "\n    " + linklabel + ": (no URL recorded)" end;
       # Owner→medic Slack subteam mentions — pings the actual on-call group,
       # not plain text (same mechanism as the camunda/camunda AlwaysGreen
-      # feedback.mjs / alwaysgreen-streak-detector.yml). Only on a FRESH
-      # filing/fix this run (action == "file" / "fix-pr"), never on an
-      # already-known recurrence (action == "report-only"/"skip") — otherwise
-      # the medic gets paged nightly for something already tracked and
-      # unfixed. One mention per finding, inline in the thread reply only
+      # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
+      #   - hub_medic: action == "file" AND a non-empty issue_url — a FRESH
+      #     hub issue was actually filed this run. Requiring the URL guards
+      #     against paging on a schema-violating/incomplete agent-authored
+      #     entry that claims action "file" without one.
+      #   - test_automation_medic: action == "fix-pr" (a fresh generator-side
+      #     fix PR) OR suppress_pr_url present (a suppress PR — also lives in
+      #     api-test-generator) — deduped to exactly one mention even if both
+      #     happened to be true for the same finding (the schema does not
+      #     declare them mutually exclusive).
+      # Never on an already-known recurrence (action == "report-only"/"skip")
+      # — otherwise the medic gets paged nightly for something already tracked
+      # and unfixed. One mention per finding, inline in the thread reply only
       # (never the top-level summary message) so it stays precise, not a
       # blanket ping.
       def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
       def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
       def line(f):
-        "• " + icon(f) + " *" + catlabel(f) + "* — `"
+        (((f.action // "") == "fix-pr") or ((f.suppress_pr_url // null) != null)) as $needs_ta_medic
+        | "• " + icon(f) + " *" + catlabel(f) + "* — `"
         + s(f.spec // f.operationId; "?") + "` — " + s(f.test; "")
         + "\n    expected: " + s(f.expected; "?") + "  |  actual: " + s(f.actual; "?")
         + (if (f.known_issue // false) then link_or_note(f.known_issue_url; ":ticket: known issue") else "" end)
         + (if (f.related_commit // null) != null then "\n    :fast_forward: skipped — explained by recent change: " + s(f.related_commit; "") else "" end)
         + (if (f.issue_url // null) != null then link_or_note(f.issue_url; ":memo: filed") else "" end)
-        + (if (f.action // "") == "file" then "\n    :rotating_light: " + hub_medic else "" end)
+        + (if (f.action // "") == "file" and ((s(f.issue_url; "")) | length) > 0
+           then "\n    :rotating_light: " + hub_medic else "" end)
         + (if (f.fix_pr_url // null) != null then
              link_or_note(f.fix_pr_url;
                if (f.action // "") == "skip" then ":recycle: already being fixed" else ":hammer_and_wrench: fix PR" end)
            else "" end)
-        + (if (f.action // "") == "fix-pr" then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (f.suppress_pr_url // null) != null then link_or_note(f.suppress_pr_url; ":no_entry: suppressed") else "" end)
-        + (if (f.suppress_pr_url // null) != null then "\n    :rotating_light: " + test_automation_medic else "" end)
+        + (if $needs_ta_medic then "\n    :rotating_light: " + test_automation_medic else "" end)
         + (if (f.action // "") == "report-only" and ((f.file_error // "") != "") then
              (if (f.subcategory // "") == "test-generation"
               then "\n    :warning: could not open fix PR: "
