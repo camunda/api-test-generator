@@ -18,6 +18,14 @@
       }
     },
     {
+      "operationId": "createVersion",
+      "reason": "createVersion 400s in the positive suite: every v2-creatable file lives inside a process application, and Hub forbids versioning a file inside a process application (\"Cannot create a version for file <id>, as it is located inside a process application\"). Versions are therefore unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419).",
+      "knownIssue": {
+        "summary": "Versions can't be created via the public API",
+        "url": "https://github.com/camunda/camunda-hub/issues/25801"
+      }
+    },
+    {
       "operationId": "getVersion",
       "reason": "Depends on a version existing, which requires createVersion — unobtainable via the public API (camunda/camunda-hub#25801, tracked via #419).",
       "knownIssue": {
