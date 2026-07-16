@@ -78,4 +78,40 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).toContain('await Client.CreateProcessInstanceAsync(');
     expect(files[0].content).not.toContain('[object Object]');
   });
+
+  test('renders the RANDOM placeholder through the seeding helper instead of ctx["RANDOM"]', async () => {
+    const emitter = createCsharpEmitter({});
+    const randomCollection: EndpointScenarioCollection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          bindings: {
+            processDefinitionIdVar1: ['proc_', '$', '{RANDOM}'].join(''),
+          },
+        },
+      ],
+    };
+
+    const files = await emitter.emit(randomCollection, EMIT_CTX);
+
+    expect(files[0].content).toContain('SeedBinding("RANDOM")');
+    expect(files[0].content).not.toContain('ctx["RANDOM"]');
+  });
+
+  test('imports the RestSdk.Models namespace for generated request types', async () => {
+    const emitter = createCsharpEmitter({});
+    const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+
+    expect(files[0].content).toContain('using Camunda.Orchestration.RestSdk.Models;');
+  });
+
+  test('uses HttpRequestException for generated error-path assertions', async () => {
+    const emitter = createCsharpEmitter({});
+    const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+
+    expect(files[0].content).toContain('Assert.ThrowsAsync<HttpRequestException>');
+    expect(files[0].content).toContain('(int?)ex.StatusCode');
+    expect(files[0].content).not.toContain('CamundaSdkException');
+  });
 });
