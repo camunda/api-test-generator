@@ -484,6 +484,69 @@ is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
 and runtime breakage the pinned PR leg deliberately can't.
 
+The **nightly triage agent**
+([triage-camunda-hub-nightly.yml](.github/workflows/triage-camunda-hub-nightly.yml))
+is the nightly's downstream companion: a `workflow_run` job that fires when the
+nightly completes, downloads its `camunda-hub-nightly-reports` artifact
+(JSON/JUnit + HTML report + traces/screenshots + `coverage.json`), and runs a
+**Claude Code** triage agent inside a 3-repo
+[`workspace-cli`](https://github.com/camunda/workspace-cli) workspace
+(`api-test-generator`, `camunda-docs`, `camunda-hub` @ `main` — manifest +
+playbook under
+[resources/workspace-templates/camunda-hub-nightlies/](resources/workspace-templates/camunda-hub-nightlies)).
+It debugs each positive + negative failure, classifies it **product /
+infrastructure / flakiness** (plus a `test-generation` subcategory), reconciles
+against the `knownIssue` configs, and checks `coverage.json`'s
+`summary.unmappedOperations` every run (these never show up as a failing test, so
+an all-green suite pair can still hide a real coverage gap). **The agent's**
+write access is asymmetric: it gets `camunda-hub` issues only, ever, never code
+or a PR there — a genuine product bug (no explaining recent commit) gets a
+filed/linked `camunda-hub` issue (the OpenAPI v2 spec is the request/response
+oracle), fingerprint-deduped so it's filed once, not
+every night. `api-test-generator` may instead get a PR (never a direct push to
+`main`), for three cases: (1) a test-generation bug or (2) an unmapped operation,
+each with an obvious, minimal, safe fix; or (3) a **confirmed product bug**,
+where instead of a code fix the agent **suppresses the affected test**
+(`positive-suppress.json` / `request-validation.json`, scoped to the exact
+operation+suite the failure implicates, referencing the camunda-hub issue) —
+runs for every product bug seen, newly-filed or already-known, mirroring the
+existing manual precedent for entries like camunda-hub#25801/#25907. Two
+separately-scoped qa-processes App tokens enforce the write-access split
+(`GH_TOKEN_HUB`, issues-only; `GH_TOKEN_GENERATOR`, the SAME contents+PR-write
+grant spec-bump-check.yml's bump-PR token already uses on this repo, so no new
+App permission is needed). Before opening ANY PR, a deterministic step fetches
+every open `nightly-api-fix`-labelled PR's actual diff (not a self-reported tag)
+so the agent can skip an operation already being fixed/suppressed elsewhere,
+rather than opening a duplicate. Any PR the agent does open is automatically
+validated — a deterministic (non-agent) workflow step reads every `fix_pr_url`/
+`suppress_pr_url` from the triage result and dispatches
+[hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) against that
+branch (a live-Hub run; the `hub-invariants` job that runs automatically on
+the PR via `ci.yml` only checks static invariants against the pinned spec),
+then comments the run link on the PR — mirrors the "trigger the on-demand
+workflow + patch the PR" step from the c8-orchestration-cluster-e2e-nightly-fix.yml
+reference this agent is modeled on. It posts a triaged digest to
+`#camunda-hub-api-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
+at `secret/data/products/qa/ci/common`
+(agent) + [`slack-token`](.github/actions/slack-token) (Slack) +
+[`hub-clone-token`](.github/actions/hub-clone-token) (workspace-cli clone of the
+private camunda-hub). `workflow_run` only fires from the default branch — use
+`workflow_dispatch` with a past `nightly_run_id` to test. Slack formatting lives in
+[scripts/triage/hub-triage-format-slack.sh](scripts/triage/hub-triage-format-slack.sh).
+
+The **stale-fix-PR janitor**
+([close-stale-nightly-api-fix-prs.yml](.github/workflows/close-stale-nightly-api-fix-prs.yml))
+is the triage flow's daily housekeeper: at 01:00 UTC (before the nightly + triage)
+it closes every open PR labelled **`nightly-api-fix`** that has gone stale
+(untouched ≥ `stale_days`, default 1) and isn't merged, so each night starts with
+no in-flight bot fix PRs. It runs a **matrix over both repos the flow spans** —
+`api-test-generator` (test-generation fixes) and `camunda-hub` (product fixes for
+issues the triage agent filed) — minting a per-repo **qa-processes** App token
+(Vault approle, same wiring as spec-bump-check; a leg with no token skips with a
+warning). `do-not-close` holds a PR across the daily reset; `dry_run` previews.
+Fix PRs must carry the `nightly-api-fix` label to be managed (the filed issues say
+so).
+
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
 (`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch

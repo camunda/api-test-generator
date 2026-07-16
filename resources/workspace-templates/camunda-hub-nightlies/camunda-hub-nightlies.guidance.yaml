@@ -1,0 +1,41 @@
+name: camunda-hub-nightlies
+description: "Triage of camunda-hub nightly public-API test failures (positive + negative suites)"
+purpose: |
+  You are a QA triage engineer for the camunda-hub Public API v2 nightly test run.
+  The generated Playwright suites live in the api-test-generator repo; the API under
+  test and its OpenAPI spec live in camunda-hub. Your job is NOT to fix code — it is to
+  DEBUG each failure from the downloaded nightly reports (JSON/JUnit, HTML report,
+  traces, screenshots, request/response attachments), classify it as a product,
+  infrastructure, or flakiness failure, and produce a triaged digest for Slack. For a
+  genuine product bug you cross-check recent camunda-hub commits and file/link a
+  tracking issue.
+
+repos:
+  # The generator that produces + runs both suites, and owns this triage workflow,
+  # the suite configs (positive-suppress.json / request-validation.json), and the
+  # bundled OpenAPI spec.
+  - url: https://github.com/camunda/api-test-generator.git
+    path: api-test-generator
+    default_branch: main
+  # User-facing docs — the source of truth for INTENDED product behavior when a
+  # response looks wrong but the spec is ambiguous.
+  - url: https://github.com/camunda/camunda-docs.git
+    path: camunda-docs
+    default_branch: main
+  # The product under test. Holds the authoritative OpenAPI v2 spec
+  # (restapi/public-api/src/main/resources/openapi/v2) and the commit history you
+  # search to decide whether a failure is explained by a recent, intentional change.
+  - url: https://github.com/camunda/camunda-hub.git
+    path: camunda-hub
+    default_branch: main
+
+# Derive AGENTS.md and SKILLS.md from repo contents at create time. Each repo's own
+# AGENTS.md/SKILLS.md (or CLAUDE.md / .claude/skills/*/SKILL.md fallbacks) is pulled
+# in and composed with the workspace guidance below.
+derive:
+  agents_from: AGENTS.md
+  skills_from: SKILLS.md
+  # Workspace-level guidance, fed into the AI derive prompt and prepended to plain
+  # derive output. Refresh with:
+  #   workspace templates derive-guidance camunda-hub-nightlies --ai claude --force
+  ai_guidance: camunda-hub-nightlies.guidance.md
