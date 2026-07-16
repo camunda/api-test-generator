@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 /**
  * Regression coverage for assertResponseStatus's ProblemDetail shape check
@@ -26,6 +26,20 @@ function fakeResponse(status: number, bodyText: string) {
     text: async () => bodyText,
     headers: () => ({}),
   } as unknown as import('@playwright/test').APIResponse;
+}
+
+// Same as fakeResponse, but text() is a spy — lets a test assert the body was
+// never read at all (the fast-path case).
+function fakeResponseWithTextSpy(status: number, bodyText: string) {
+  const textSpy = vi.fn(async () => bodyText);
+  // biome-ignore lint/plugin: minimal test fake for Playwright's APIResponse; only the methods assertResponseStatus actually calls are implemented.
+  const res = {
+    status: () => status,
+    statusText: () => 'STATUS_TEXT',
+    text: textSpy,
+    headers: () => ({}),
+  } as unknown as import('@playwright/test').APIResponse;
+  return { res, textSpy };
 }
 
 function fakeTestInfo() {
@@ -152,5 +166,26 @@ describe('assertResponseStatus — ProblemDetail shape check', () => {
     await expect(
       assertResponseStatus(fakeTestInfo(), fakeResponse(200, 'not json at all'), 200, ctx),
     ).resolves.toBeUndefined();
+  });
+
+  it('never reads the response body on a clean pass with skipProblemDetailShape set', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const { res, textSpy } = fakeResponseWithTextSpy(400, VALID_PROBLEM_DETAIL_400);
+    await assertResponseStatus(fakeTestInfo(), res, 400, ctx, { skipProblemDetailShape: true });
+    expect(textSpy).not.toHaveBeenCalled();
+  });
+
+  it('never reads the response body on a clean pass for a non-error expected status', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const { res, textSpy } = fakeResponseWithTextSpy(200, 'irrelevant');
+    await assertResponseStatus(fakeTestInfo(), res, 200, ctx);
+    expect(textSpy).not.toHaveBeenCalled();
+  });
+
+  it('does read the response body when a shape check is actually needed', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const { res, textSpy } = fakeResponseWithTextSpy(400, VALID_PROBLEM_DETAIL_400);
+    await assertResponseStatus(fakeTestInfo(), res, 400, ctx);
+    expect(textSpy).toHaveBeenCalledTimes(1);
   });
 });

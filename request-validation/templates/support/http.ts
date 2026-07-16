@@ -146,6 +146,20 @@ export async function assertResponseStatus(
   },
 ): Promise<void> {
   const actual = res.status();
+  const statusMismatch = actual !== expected;
+  // Only judge the body's shape when: the status itself is right (a wrong
+  // status already fails the test on its own, and its body may not even be
+  // an error response — e.g. a 200 body when a 4xx was expected), the caller
+  // hasn't opted this scenario out (see `opts.skipProblemDetailShape`), and
+  // `expected` is itself an error status — `ProblemDetail` is only the
+  // declared shape for 4xx/5xx, so a 2xx-expecting caller (none exist today,
+  // but nothing statically prevents one) must never be shape-checked against
+  // it. This is knowable from the status alone, before reading the body, so a
+  // clean pass that needs no shape check never pays for reading/parsing a
+  // body it would only discard — the original "no body read on a plain
+  // match" behavior is preserved for that case.
+  const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
+  if (!statusMismatch && !shouldCheckShape) return;
 
   let bodyText = '';
   try {
@@ -155,18 +169,6 @@ export async function assertResponseStatus(
     // against whatever was captured (an empty body fails shape validation).
   }
 
-  const statusMismatch = actual !== expected;
-  // Only judge the body's shape when: the status itself is right (a wrong
-  // status already fails the test on its own, and its body may not even be
-  // an error response — e.g. a 200 body when a 4xx was expected), the caller
-  // hasn't opted this scenario out (see `opts.skipProblemDetailShape`), and
-  // `expected` is itself an error status — `ProblemDetail` is only the
-  // declared shape for 4xx/5xx, so a 2xx-expecting caller (none exist today,
-  // but nothing statically prevents one) must never be shape-checked against
-  // it. Parsing is deferred into this branch so a status-mismatch or an
-  // opted-out scenario never pays for a JSON.parse whose result would be
-  // discarded anyway.
-  const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
   let shapeErrors: string[] = [];
   if (shouldCheckShape) {
     let bodyJson: unknown;
