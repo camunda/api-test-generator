@@ -96,7 +96,10 @@ function validateProblemDetailShape(
   if (parseError) return [`response body is not valid JSON: ${parseError}`];
   if (body === undefined) return ['response body is empty; expected a ProblemDetail object'];
   if (!isRecord(body)) {
-    return [`response body is not a JSON object (got ${Array.isArray(body) ? 'array' : typeof body})`];
+    // typeof null === 'object', so without this the message would misreport
+    // a literal `null` body (e.g. response text "null") as "got object".
+    const got = body === null ? 'null' : Array.isArray(body) ? 'array' : typeof body;
+    return [`response body is not a JSON object (got ${got})`];
   }
   const errors: string[] = [];
   for (const field of PROBLEM_DETAIL_STRING_FIELDS) {

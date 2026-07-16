@@ -103,6 +103,15 @@ describe('assertResponseStatus — ProblemDetail shape check', () => {
     ).rejects.toThrow(/not a JSON object \(got array\)/);
   });
 
+  it("fails with 'got null', not 'got object', when the body is the literal JSON null", async () => {
+    // typeof null === 'object' in JS — without special-casing, this would
+    // misreport as "got object" instead of the actual value.
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, 'null'), 400, ctx),
+    ).rejects.toThrow(/not a JSON object \(got null\)/);
+  });
+
   it("fails when the body's embedded status disagrees with the actual HTTP status", async () => {
     const assertResponseStatus = await loadAssertResponseStatus();
     const body = JSON.stringify({
