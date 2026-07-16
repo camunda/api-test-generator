@@ -318,6 +318,10 @@ public abstract class TestFixtureBase
 
         public string Generate(string varName)
         {
+            if (varName == "RANDOM")
+            {
+                return RandomBase36(6);
+            }
             if (varName == "tenantIdVar")
             {
                 return "<default>";

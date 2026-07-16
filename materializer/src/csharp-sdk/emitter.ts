@@ -6,7 +6,7 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
-import type { SdkMappingSource } from './sdk-mapping.js';
+import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.js';
 
 /**
  * A single operation-map entry as committed in
@@ -26,16 +26,6 @@ export interface CsharpOperationMapEntry {
  * first entry's `region` as the method name.
  */
 export type CsharpOperationMap = Record<string, CsharpOperationMapEntry[]>;
-
-function isCsharpOperationMapEntry(value: unknown): value is CsharpOperationMapEntry {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'region' in value &&
-    typeof value.region === 'string' &&
-    value.region.length > 0
-  );
-}
 
 export function csharpSdkSuiteFileName(
   collection: EndpointScenarioCollection,
@@ -58,20 +48,7 @@ export function renderCsharpSdkSuite(
 }
 
 export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrategy {
-  // Index the operation map by operationId for O(1) lookup per emitted step,
-  // instead of an O(n) linear scan over every entry on each resolveMethod call.
-  const methodByOpId = new Map<string, string>();
-  if (mapping) {
-    for (const [opId, entries] of Object.entries(mapping)) {
-      const first = entries?.[0];
-      if (isCsharpOperationMapEntry(first)) methodByOpId.set(opId, first.region);
-    }
-  }
-  const mappingSource: SdkMappingSource = {
-    resolveMethod(opId: string): string {
-      return methodByOpId.get(opId) ?? `${toPascalCase(opId)}Async`;
-    },
-  };
+  const mappingSource: SdkMappingSource = new CsharpOperationMapSource(mapping);
   return {
     id: 'csharp-sdk',
     name: 'C# SDK (Camunda Orchestration)',
@@ -115,6 +92,7 @@ function buildSuiteSource(
   lines.push('using System.Net.Http;');
   lines.push('using System.Threading.Tasks;');
   lines.push('using Camunda.Orchestration.Sdk;');
+  lines.push('using Camunda.Orchestration.RestSdk.Models;');
   lines.push('using Xunit;');
   lines.push('');
   lines.push('namespace CamundaIntegrationTests;');
@@ -234,7 +212,7 @@ function renderScenarioTest(
       const documentFileField = step.operationId === 'createDocuments' ? 'files' : 'file';
 
       if (expectError) {
-        body.push('        var ex = await Assert.ThrowsAsync<CamundaSdkException>(async () =>');
+        body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () =>');
         body.push('        {');
         if (method === 'DeployResourcesFromFilesAsync') {
           const resources = multipart.files.resources;
@@ -261,7 +239,7 @@ function renderScenarioTest(
           body.push(`          await Client.${method}(content${idx + 1});`);
         }
         body.push('        });');
-        body.push(`        Assert.Equal((int?)${step.expect.status}, ex.Status);`);
+        body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.StatusCode);`);
         body.push('      }');
         return;
       }
@@ -327,7 +305,7 @@ function renderScenarioTest(
 
     const requestParts = buildRequestParts(step);
     if (expectError) {
-      body.push('        var ex = await Assert.ThrowsAsync<CamundaSdkException>(async () => {');
+      body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () => {');
       if (requestParts.length > 0) {
         body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
         body.push(`          await Client.${method}(${requestVar});`);
@@ -335,7 +313,7 @@ function renderScenarioTest(
         body.push(`          await Client.${method}();`);
       }
       body.push('        });');
-      body.push(`        Assert.Equal((int?)${step.expect.status}, ex.Status);`);
+      body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.StatusCode);`);
       body.push('      }');
       return;
     }
@@ -433,7 +411,7 @@ function renderCsharpValue(value: unknown, indent = ''): string {
 function renderTemplateString(value: string): string {
   const fullMatch = value.match(/^\$\{([^}]+)\}$/);
   if (fullMatch) {
-    return `RequireBinding(ctx, ${stringLiteral(fullMatch[1])})`;
+    return renderTemplateToken(fullMatch[1]);
   }
   const templateRe = /\$\{([^}]+)\}/g;
   if (!templateRe.test(value)) {
@@ -447,13 +425,20 @@ function renderTemplateString(value: string): string {
     const [token, name] = match;
     const prefix = value.slice(lastIndex, match.index);
     if (prefix) parts.push(escapeInterpolatedLiteral(prefix));
-    parts.push(`{RequireBinding(ctx, ${stringLiteral(name)})}`);
+    parts.push(`{${renderTemplateToken(name)}}`);
     lastIndex = match.index + token.length;
     match = templateRe.exec(value);
   }
   const suffix = value.slice(lastIndex);
   if (suffix) parts.push(escapeInterpolatedLiteral(suffix));
   return `$"${parts.join('')}"`;
+}
+
+function renderTemplateToken(name: string): string {
+  if (name === 'RANDOM') {
+    return 'SeedBinding("RANDOM")';
+  }
+  return `RequireBinding(ctx, ${stringLiteral(name)})`;
 }
 
 function normalizeMultipartTemplate(template: unknown): {
