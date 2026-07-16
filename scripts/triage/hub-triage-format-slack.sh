@@ -200,7 +200,9 @@ case "$MODE" in
       #   - test_automation_medic: action == "fix-pr" with a non-empty
       #     fix_pr_url (a fresh generator-side fix PR) OR a non-empty
       #     suppress_pr_url (a suppress PR — also lives in api-test-generator,
-      #     needs our review) — deduped to exactly one mention even if both
+      #     needs our review) OR its own could-not-classify signal
+      #     (confidence: "low", per the classification fallback above)
+      #     — deduped to exactly one mention even if more than one of these
       #     happened to be true for the same finding (the schema does not
       #     declare them mutually exclusive).
       #
@@ -217,6 +219,13 @@ case "$MODE" in
       # top-level summary message) so it stays precise, not a blanket ping.
       def hub_medic: "<!subteam^S014VK4482H|hub-medic>";
       def test_automation_medic: "<!subteam^S09UF0EV0HG|test-automation-medic>";
+      # An admission from the agent that it could not confidently pick a
+      # category — never silently folded into an ordinary infrastructure
+      # finding. Called out with its own line AND routed to the
+      # test-automation medic so a human makes the call, rather than the
+      # low confidence going unnoticed under a category label that reads
+      # as a settled decision.
+      def undecided(f): (f.confidence // "") == "low";
       # Compact per-finding line: title (category, operationId, short
       # expected/actual) + one links line (icon+URL only, whichever are
       # present — nothing shown for whichever are absent) + medic ping(s) +
@@ -224,7 +233,7 @@ case "$MODE" in
       # reasoning, response bodies, etc.) lives in the linked issue, PR, or
       # nightly run, not repeated here — this is a pointer, not the evidence.
       def line(f):
-        (((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) as $needs_ta_medic
+        ((((f.action // "") == "fix-pr" and has_url(f.fix_pr_url)) or has_url(f.suppress_pr_url)) or undecided(f)) as $needs_ta_medic
         | ([
             (if (f.known_issue // false) then compactLink(f.known_issue_url; ":ticket:") else "" end),
             (if (f.related_commit // null) != null then ":fast_forward: recent change" else "" end),
@@ -234,6 +243,7 @@ case "$MODE" in
           ] | map(select(length > 0)) | join("  ")) as $links_line
         | "• " + icon(f) + " " + catlabel(f) + " — `" + s(f.operationId; "?")
         + "` — expected " + leadNum(f.expected; "?") + ", got " + leadNum(f.actual; "?")
+        + (if undecided(f) then "\n    :grey_question: *could not confidently classify — needs human triage*" else "" end)
         + (if ($links_line | length) > 0 then "\n    " + $links_line else "" end)
         + (if (f.action // "") == "file" and has_url(f.issue_url)
            then "\n    :rotating_light: " + hub_medic else "" end)
