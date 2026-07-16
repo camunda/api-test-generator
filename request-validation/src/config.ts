@@ -1,42 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ScenarioKind } from './model/types.js';
+import { SCENARIO_KINDS, type ScenarioKind } from './model/types.js';
 
-// Mirrors model/types.ts's ScenarioKind union so config-time typos in
-// `knownProblemDetailShapeGaps[].scenarioKinds` fail fast instead of silently
-// matching nothing.
-const SCENARIO_KINDS: ReadonlySet<string> = new Set<ScenarioKind>([
-  'missing-required',
-  'missing-required-combo',
-  'type-mismatch',
-  'union',
-  'constraint-violation',
-  'enum-violation',
-  'additional-prop',
-  'oneof-ambiguous',
-  'oneof-none-match',
-  'discriminator-mismatch',
-  'param-missing',
-  'param-type-mismatch',
-  'param-enum-violation',
-  'param-constraint-violation',
-  'missing-body',
-  'body-top-type-mismatch',
-  'nested-additional-prop',
-  'unique-items-violation',
-  'multiple-of-violation',
-  'format-invalid',
-  'additional-prop-general',
-  'oneof-multi-ambiguous',
-  'oneof-cross-bleed',
-  'discriminator-structure-mismatch',
-  'allof-missing-required',
-  'allof-conflict',
-  'not-found-fake-id',
-  'auth-absent',
-  'auth-invalid',
-  'auth-deny',
-]);
+// Runtime lookup set for config-time validation of
+// `knownProblemDetailShapeGaps[].scenarioKinds` — built from the same
+// SCENARIO_KINDS array the ScenarioKind type is derived from (model/types.ts),
+// so a typo fails fast and a future added/renamed kind can't drift the two
+// out of sync.
+const SCENARIO_KIND_SET: ReadonlySet<string> = new Set(SCENARIO_KINDS);
 
 /**
  * Per-config request-validation settings.
@@ -265,7 +236,7 @@ function isKnownProblemDetailShapeGaps(
         isPlainObject(e) &&
         Array.isArray(e.scenarioKinds) &&
         e.scenarioKinds.length > 0 &&
-        e.scenarioKinds.every((k) => typeof k === 'string' && SCENARIO_KINDS.has(k)) &&
+        e.scenarioKinds.every((k) => typeof k === 'string' && SCENARIO_KIND_SET.has(k)) &&
         typeof e.reason === 'string' &&
         e.reason.trim().length > 0 &&
         isKnownIssue(e.knownIssue),

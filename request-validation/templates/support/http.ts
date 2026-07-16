@@ -70,13 +70,19 @@ export interface RequestContext {
 }
 
 /**
- * Every error response in this API (every 4xx/5xx, both configs) is a
- * `ProblemDetail` per RFC 9457, served as `application/problem+json` — a
- * single, uniform shape reused across all operations, so there is nothing
- * per-endpoint to look up. Required fields per the spec's shared
- * `ProblemDetail` schema.
+ * Every error response in this API (every 4xx/5xx, both configs) is DECLARED
+ * in the OpenAPI spec as a `ProblemDetail` per RFC 9457, served as
+ * `application/problem+json` — a single, uniform shape reused across all
+ * operations, so there is nothing per-endpoint to look up. Required fields
+ * per the spec's shared `ProblemDetail` schema. (Real runtime behavior can
+ * still deviate from this contract — that deviation is exactly what this
+ * check is for.)
  */
 const PROBLEM_DETAIL_STRING_FIELDS = ['type', 'title', 'detail', 'instance'] as const;
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
 
 /**
  * Check `body` against the `ProblemDetail` shape. Returns an empty array when
@@ -89,20 +95,19 @@ function validateProblemDetailShape(
 ): string[] {
   if (parseError) return [`response body is not valid JSON: ${parseError}`];
   if (body === undefined) return ['response body is empty; expected a ProblemDetail object'];
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+  if (!isRecord(body)) {
     return [`response body is not a JSON object (got ${Array.isArray(body) ? 'array' : typeof body})`];
   }
-  const b = body as Record<string, unknown>;
   const errors: string[] = [];
   for (const field of PROBLEM_DETAIL_STRING_FIELDS) {
-    if (typeof b[field] !== 'string') {
-      errors.push(`ProblemDetail.${field} missing or not a string (got ${JSON.stringify(b[field])})`);
+    if (typeof body[field] !== 'string') {
+      errors.push(`ProblemDetail.${field} missing or not a string (got ${JSON.stringify(body[field])})`);
     }
   }
-  if (typeof b.status !== 'number') {
-    errors.push(`ProblemDetail.status missing or not a number (got ${JSON.stringify(b.status)})`);
-  } else if (b.status !== expectedStatus) {
-    errors.push(`ProblemDetail.status (${b.status}) does not match the HTTP status (${expectedStatus})`);
+  if (typeof body.status !== 'number') {
+    errors.push(`ProblemDetail.status missing or not a number (got ${JSON.stringify(body.status)})`);
+  } else if (body.status !== expectedStatus) {
+    errors.push(`ProblemDetail.status (${body.status}) does not match the HTTP status (${expectedStatus})`);
   }
   return errors;
 }
@@ -148,22 +153,30 @@ export async function assertResponseStatus(
   }
 
   const statusMismatch = actual !== expected;
-  let bodyJson: unknown;
-  let parseError: string | undefined;
-  if (bodyText) {
-    try {
-      bodyJson = JSON.parse(bodyText);
-    } catch (e) {
-      parseError = e instanceof Error ? e.message : String(e);
-    }
-  }
-  // Only judge the body's shape when the status itself is right — a wrong
+  // Only judge the body's shape when: the status itself is right (a wrong
   // status already fails the test on its own, and its body may not even be
-  // an error response (e.g. a 200 body when a 4xx was expected).
-  const shapeErrors =
-    statusMismatch || opts?.skipProblemDetailShape
-      ? []
-      : validateProblemDetailShape(bodyJson, expected, parseError);
+  // an error response — e.g. a 200 body when a 4xx was expected), the caller
+  // hasn't opted this scenario out (see `opts.skipProblemDetailShape`), and
+  // `expected` is itself an error status — `ProblemDetail` is only the
+  // declared shape for 4xx/5xx, so a 2xx-expecting caller (none exist today,
+  // but nothing statically prevents one) must never be shape-checked against
+  // it. Parsing is deferred into this branch so a status-mismatch or an
+  // opted-out scenario never pays for a JSON.parse whose result would be
+  // discarded anyway.
+  const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
+  let shapeErrors: string[] = [];
+  if (shouldCheckShape) {
+    let bodyJson: unknown;
+    let parseError: string | undefined;
+    if (bodyText) {
+      try {
+        bodyJson = JSON.parse(bodyText);
+      } catch (e) {
+        parseError = e instanceof Error ? e.message : String(e);
+      }
+    }
+    shapeErrors = validateProblemDetailShape(bodyJson, expected, parseError);
+  }
 
   if (!statusMismatch && shapeErrors.length === 0) return;
 
