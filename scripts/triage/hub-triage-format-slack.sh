@@ -161,11 +161,12 @@ case "$MODE" in
         s(url; "") as $u
         | if ($u | length) > 0 then "\n    " + linklabel + ": <" + $u + ">"
           else "\n    " + linklabel + ": (no URL recorded)" end;
-      # True only for an actually-present, non-empty URL string — a present
-      # key with an empty value ("" — a schema violation / agent bug) must
-      # not count as a real link present, same rule link_or_note itself
-      # already applies when deciding whether to render "(no URL recorded)".
-      def has_url(x): (s(x; "") | length) > 0;
+      # True only for an actual, non-empty URL string. Checks (x|type) itself
+      # rather than routing through s()/tostring: a schema-violating non-
+      # string value (true, 42, {}) would stringify to something non-empty
+      # ("true", "42", "{}") and be wrongly treated as a present URL — this
+      # pages real on-call groups, so only a genuine string counts.
+      def has_url(x): (x | type) == "string" and (x | length) > 0;
       # Owner→medic Slack subteam mentions — pings the actual on-call group,
       # not plain text (same mechanism as the camunda/camunda AlwaysGreen
       # feedback.mjs / alwaysgreen-streak-detector.yml). Fires on:
