@@ -301,18 +301,17 @@ jobs:
       # failing nightly triage — bump intentionally. SHA = camunda/
       # workspace-cli main HEAD @ 2026-07-15.
       #
-      # workspace-cli is ITSELF a private repo (separate from the "which repos
-      # workspace-cli clones" concern below) — go install's checksum lookup
+      # workspace-cli is ITSELF a private repo (a separate concern from "which
+      # repos workspace-cli clones" — the "Configure git credentials for
+      # cloning" step below, for camunda-hub) — go install's checksum lookup
       # against sum.golang.org 404s for a private module, and it then falls
       # back to an unauthenticated `git ls-remote`, which fails outright. Two
       # things fix this, matching the same pattern the c8-orchestration-
       # cluster-e2e-nightly-fix.yml reference this agent is modeled on
       # already uses: GOPRIVATE tells Go to skip the public checksum lookup
-      # entirely for camunda/*, and the repo-specific insteadOf (more
-      # specific than, so it takes precedence over, the camunda-hub rewrite
-      # above) authenticates the actual git fetch with the Vault-issued PAT —
-      # the qa-processes App token can't be used here, it has no grant on
-      # this repo.
+      # entirely for camunda/*, and a repo-specific insteadOf authenticates
+      # the actual git fetch with the Vault-issued PAT — the qa-processes App
+      # token can't be used here, it has no grant on this repo.
       - name: Install workspace-cli
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
@@ -324,6 +323,15 @@ jobs:
             echo "::error::No GitHub PAT from Vault — cannot authenticate the private workspace-cli module fetch."
             exit 1
           fi
+          # Scoped, temporary gitconfig for this credential only — NOT the
+          # persistent $HOME/.gitconfig the later camunda-hub clone rewrite
+          # uses. If `go install` fails (or anything else in this step does),
+          # the trap still removes it: the PAT can never outlive this one
+          # step, regardless of exit status, and never needs the later
+          # "Scrub git credentials" step to find and remove it.
+          GIT_CONFIG_GLOBAL="$(mktemp)"
+          export GIT_CONFIG_GLOBAL
+          trap 'rm -f "$GIT_CONFIG_GLOBAL"' EXIT
           git config --global url."https://x-access-token:${GH_PAT}@github.com/camunda/workspace-cli".insteadOf "https://github.com/camunda/workspace-cli"
           go install github.com/camunda/workspace-cli/cmd/workspace@e1b3f19dd244957db5eb3b4ebd5bc71999c3deb0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
