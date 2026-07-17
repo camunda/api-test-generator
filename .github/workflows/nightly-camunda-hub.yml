@@ -365,21 +365,25 @@ jobs:
                   return {}
           def as_list(v):
               return v if isinstance(v, list) else []
-          # Per-op knownIssue (from suppress/exclude entries) + suite-wide
-          # top-level knownIssues[] (skips not tied to a single op, e.g. the
-          # generator-level wrong-type-key skip). Guards for list/dict shapes so
-          # a wrong JSON shape can't throw here.
-          def known(c, entries_key):
+          # Per-op knownIssue (from suppress/exclude entries, one or more
+          # array keys per config — request-validation.json has both
+          # excludeOperations[] and the scenario-kind-scoped
+          # knownProblemDetailShapeGaps[], #484) + suite-wide top-level
+          # knownIssues[] (skips not tied to a single op, e.g. the
+          # generator-level wrong-type-key skip). Guards for list/dict shapes
+          # so a wrong JSON shape can't throw here.
+          def known(c, entries_keys):
               perop = [
                   e["knownIssue"]
-                  for e in as_list(c.get(entries_key))
+                  for key in entries_keys
+                  for e in as_list(c.get(key))
                   if isinstance(e, dict) and e.get("knownIssue")
               ]
               return perop + as_list(c.get("knownIssues"))
           pos = cfg("configs/camunda-hub/positive-suppress.json")
           neg = cfg("configs/camunda-hub/request-validation.json")
-          print(f"positive_known_issues={bullets(known(pos, 'suppress'))}")
-          print(f"negative_known_issues={bullets(known(neg, 'excludeOperations'))}")
+          print(f"positive_known_issues={bullets(known(pos, ['suppress']))}")
+          print(f"negative_known_issues={bullets(known(neg, ['excludeOperations', 'knownProblemDetailShapeGaps']))}")
           PY
 
       # Fetch the Slack bot token from Vault via the same GitHub OIDC/JWT auth used
