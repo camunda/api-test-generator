@@ -85,7 +85,10 @@ function inspectKnownIssues(
 // (config-file relative path, entry-array keys carrying per-entry knownIssue).
 const SOURCES: { file: string; entryKeys: string[] }[] = [
   { file: 'positive-suppress.json', entryKeys: ['suppress'] },
-  { file: 'request-validation.json', entryKeys: ['excludeOperations'] },
+  {
+    file: 'request-validation.json',
+    entryKeys: ['excludeOperations', 'knownProblemDetailShapeGaps'],
+  },
 ];
 
 function configNames(): string[] {
