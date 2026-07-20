@@ -84,7 +84,16 @@ function buildSuiteSource(
 
   const lines: string[] = [];
   const suiteName = opts.suiteName || collection.endpoint.operationId;
-  const className = `${toPascalCase(suiteName)}Tests`;
+  // The mode suffix (omitted for the default `feature` mode to preserve
+  // existing class names) disambiguates the C# type name across sibling
+  // suites for the same operationId. Unlike Playwright's file-scoped
+  // `test.describe` blocks or Python's per-module functions, C# classes
+  // share a single namespace across every compiled file, so a feature
+  // suite and a variant suite for the same operation previously collided
+  // as CS0101 "namespace already contains a definition" once both were
+  // compiled into the same project.
+  const modeSuffix = opts.mode && opts.mode !== 'feature' ? toPascalCase(opts.mode) : '';
+  const className = `${toPascalCase(suiteName)}${modeSuffix}Tests`;
 
   lines.push('using System;');
   lines.push('using System.Collections.Generic;');

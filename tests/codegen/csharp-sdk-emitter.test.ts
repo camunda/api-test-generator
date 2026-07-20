@@ -79,6 +79,30 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('[object Object]');
   });
 
+  test('feature and variant suites for the same operationId emit distinct C# class names', async () => {
+    // Regression: a feature suite and a variant suite for the same
+    // operationId previously both emitted `public class
+    // CreateProcessInstanceTests`, which is a CS0101 duplicate-type error
+    // once both files are compiled into the same project (C# classes
+    // share one namespace across all files, unlike Playwright's
+    // file-scoped `test.describe` blocks).
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const featureFiles = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+    const variantFiles = await emitter.emit(SAMPLE_COLLECTION, { ...EMIT_CTX, mode: 'variant' });
+
+    const classNameOf = (content: string): string | null => {
+      const match = /public class (\w+) : TestFixtureBase/.exec(content);
+      return match ? match[1] : null;
+    };
+
+    const featureClassName = classNameOf(featureFiles[0].content);
+    const variantClassName = classNameOf(variantFiles[0].content);
+
+    expect(featureClassName).toBe('CreateProcessInstanceTests');
+    expect(variantClassName).not.toBeNull();
+    expect(variantClassName).not.toBe(featureClassName);
+  });
+
   test('renders the RANDOM placeholder through the seeding helper instead of ctx["RANDOM"]', async () => {
     const emitter = createCsharpEmitter({});
     const randomCollection: EndpointScenarioCollection = {
@@ -108,7 +132,22 @@ describe('C# SDK Emitter', () => {
 
   test('uses HttpRequestException for generated error-path assertions', async () => {
     const emitter = createCsharpEmitter({});
-    const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+    const errorCollection: EndpointScenarioCollection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...SAMPLE_COLLECTION.scenarios[0].requestPlan[0],
+              expect: { status: 400 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(errorCollection, EMIT_CTX);
 
     expect(files[0].content).toContain('Assert.ThrowsAsync<HttpRequestException>');
     expect(files[0].content).toContain('(int?)ex.StatusCode');
