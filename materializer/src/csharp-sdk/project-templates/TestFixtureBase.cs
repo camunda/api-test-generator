@@ -328,11 +328,11 @@ public abstract class TestFixtureBase
             }
             if (Regex.IsMatch(varName, "correlation", RegexOptions.IgnoreCase))
             {
-                return $"corr-{runId}-{NextCounter(\"corr\")}-{RandomBase36(4)}";
+                return $"corr-{runId}-{NextCounter("corr")}-{RandomBase36(4)}";
             }
             if (Regex.IsMatch(varName, "(key|id)$", RegexOptions.IgnoreCase))
             {
-                return $"{varName}-{runId}-{NextCounter(\"id\")}-{RandomBase36(6)}";
+                return $"{varName}-{runId}-{NextCounter("id")}-{RandomBase36(6)}";
             }
             if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
             {
