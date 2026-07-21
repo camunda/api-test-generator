@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vitest';
 import {
   createPythonSdkEmitter,
   pythonSuiteFileName,
+  renderPythonBody,
   renderPythonSuite,
 } from '../../materializer/src/python-sdk/emitter.js';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.js';
@@ -24,6 +25,16 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
       name: 'happy path',
       description: 'Create a widget with a name',
       operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+      requestPlan: [
+        {
+          operationId: 'createWidget',
+          method: 'POST',
+          pathTemplate: '/widgets',
+          bodyKind: 'json',
+          bodyTemplate: { name: 'widget-1' },
+          expect: { status: 201 },
+        },
+      ],
       producedSemanticTypes: [],
       satisfiedSemanticTypes: [],
     },
@@ -121,6 +132,28 @@ describe('Python SDK Emitter', () => {
   });
 
   describe('Python syntax correctness', () => {
+    test('renderPythonBody emits Python booleans/null literals', () => {
+      const body = renderPythonBody(
+        {
+          enabled: true,
+          archived: false,
+          owner: null,
+          labels: ['x', null, true],
+          tenantId: `${'${'}tenantIdVar}`,
+        },
+        {},
+      );
+
+      expect(body).toContain("'enabled': True");
+      expect(body).toContain("'archived': False");
+      expect(body).toContain("'owner': None");
+      expect(body).toContain("'labels': ['x', None, True]");
+      expect(body).toContain("'tenantId': ctx.get('tenant_id_var')");
+      expect(body).not.toContain(': true');
+      expect(body).not.toContain(': false');
+      expect(body).not.toContain(': null');
+    });
+
     test('generated code contains valid Python syntax markers', () => {
       const output = renderPythonSuite(SAMPLE_COLLECTION);
 
@@ -162,7 +195,43 @@ describe('Python SDK Emitter', () => {
     test('test functions include operation steps', () => {
       const output = renderPythonSuite(SAMPLE_COLLECTION);
       expect(output).toContain('# Step 1: createWidget');
-      expect(output).toContain('pass  # TODO: implement');
+    });
+
+    test('uses requestPlan for executable step emission (no TODO placeholders)', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            operations: [{ operationId: 'placeholderOp', method: 'GET', path: '/placeholder' }],
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets/{widgetKey}',
+                pathParams: [{ name: 'widgetKey', var: 'widgetKeyVar' }],
+                bodyKind: 'json',
+                bodyTemplate: {
+                  enabled: true,
+                  archived: false,
+                  owner: null,
+                },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+
+      expect(output).toContain('# Step 1: createWidget');
+      expect(output).toContain("url_1 = f'/widgets/{ctx.get('widget_key_var') or 'widgetKey'}'");
+      expect(output).toContain("body_1 = {'enabled': True, 'archived': False, 'owner': None}");
+      expect(output).toContain('response_1 = await client.create_widget(');
+      expect(output).toContain("assert response_1['status'] == 201");
+      expect(output).not.toContain('placeholderOp');
+      expect(output).not.toContain('pass  # TODO: implement');
     });
 
     test('scenario name is converted to valid test function name', () => {
