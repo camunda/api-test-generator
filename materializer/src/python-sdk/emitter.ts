@@ -4,8 +4,15 @@
  */
 
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
-import type { EndpointScenarioCollection } from 'path-analyser/types';
+import type { EndpointScenarioCollection, RequestStep } from 'path-analyser/types';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
+
+function toSnakeCase(value: string): string {
+  return value
+    .replace(/([A-Z])/g, '_$1')
+    .toLowerCase()
+    .replace(/^_/, '');
+}
 
 /**
  * Build the file name a scenario collection lowers to.
@@ -13,10 +20,7 @@ import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
  */
 export function pythonSuiteFileName(collection: EndpointScenarioCollection): string {
   const operationId = collection.endpoint.operationId;
-  const snakeCase = operationId
-    .replace(/([A-Z])/g, '_$1')
-    .toLowerCase()
-    .replace(/^_/, '');
+  const snakeCase = toSnakeCase(operationId);
   return `test_${snakeCase}.py`;
 }
 
@@ -30,18 +34,18 @@ export function pythonSuiteFileName(collection: EndpointScenarioCollection): str
  * The fallback gives the broker a recognizable URL (and a 4xx) when a
  * path-param binding is missing.
  */
-export function buildPythonUrlExpression(pathTemplate: string): string {
-  const toSnakeCase = (s: string): string =>
-    s
-      .replace(/([A-Z])/g, '_$1')
-      .toLowerCase()
-      .replace(/^_/, '');
+export function buildPythonUrlExpression(
+  pathTemplate: string,
+  pathParams?: { name: string; var: string }[],
+): string {
+  const varByName = new Map((pathParams ?? []).map((p) => [p.name, p.var]));
 
   let result = pathTemplate;
   result = result.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
-    const snakeParam = toSnakeCase(paramName);
+    const bindingVar = varByName.get(paramName);
+    const snakeParam = bindingVar ? toSnakeCase(bindingVar) : `${toSnakeCase(paramName)}_var`;
     // Use f-string syntax with Python bracket notation
-    return `{ctx.get('${snakeParam}_var') or '${paramName}'}`;
+    return `{ctx.get('${snakeParam}') or '${paramName}'}`;
   });
   return `f'${result}'`;
 }
@@ -133,7 +137,7 @@ export function createPythonSdkEmitter(
  */
 export function renderPythonSuite(
   collection: EndpointScenarioCollection,
-  _opts: {
+  opts: {
     operationMap?: OperationMapSource;
   } = {},
 ): string {
@@ -147,7 +151,7 @@ export function renderPythonSuite(
   lines.push('');
   lines.push('import pytest');
   lines.push('from typing import Any, Dict');
-  lines.push('from unittest.mock import AsyncMock, MagicMock, patch');
+  lines.push('from unittest.mock import AsyncMock');
   lines.push('');
 
   // Test context setup
@@ -173,6 +177,26 @@ export function renderPythonSuite(
   lines.push('    """Provide a fresh test context for each test."""');
   lines.push('    return TestContext()');
   lines.push('');
+  lines.push('def get_nested_value(value: Any, field_path: str) -> Any:');
+  lines.push('    """Safely navigate dotted field paths on dict/list payloads."""');
+  lines.push('    current = value');
+  lines.push("    for part in field_path.split('.'):");
+  lines.push('        if current is None:');
+  lines.push('            return None');
+  lines.push('        if part.isdigit():');
+  lines.push('            if not isinstance(current, list):');
+  lines.push('                return None');
+  lines.push('            index = int(part)');
+  lines.push('            if index >= len(current):');
+  lines.push('                return None');
+  lines.push('            current = current[index]');
+  lines.push('            continue');
+  lines.push('        if isinstance(current, dict):');
+  lines.push('            current = current.get(part)');
+  lines.push('            continue');
+  lines.push('        return None');
+  lines.push('    return current');
+  lines.push('');
 
   // Test scenarios
   for (const scenario of collection.scenarios) {
@@ -185,17 +209,101 @@ export function renderPythonSuite(
       lines.push(`    ${scenario.description}`);
     }
     lines.push(`    """`);
+    lines.push('    client = AsyncMock()');
 
-    // Render steps from operations
-    const operations = scenario.operations || [];
-    for (let i = 0; i < operations.length; i++) {
-      const op = operations[i];
-      lines.push(`    # Step ${i + 1}: ${op.operationId}`);
-      lines.push(`    pass  # TODO: implement`);
+    const bindings = scenario.bindings ?? {};
+    for (const [key, value] of Object.entries(bindings)) {
+      if (value === '__PENDING__') continue;
+      lines.push(`    ctx.set('${key}', ${renderPythonValue(value)})`);
+    }
+
+    const requestPlan = scenario.requestPlan ?? [];
+    for (let i = 0; i < requestPlan.length; i++) {
+      renderPythonRequestStep(lines, requestPlan[i], i, opts.operationMap);
+    }
+
+    if (requestPlan.length === 0) {
+      lines.push('    # No request plan available for this scenario');
     }
 
     lines.push('');
   }
 
   return lines.join('\n');
+}
+
+function resolvePythonMethodName(operationId: string, operationMap?: OperationMapSource): string {
+  const entry = operationMap?.lookup(operationId);
+  if (entry) {
+    const method = entry.method;
+    if (typeof method === 'string' && method.length > 0) return method;
+    const qualifiedName = entry.qualifiedName;
+    if (typeof qualifiedName === 'string' && qualifiedName.length > 0) {
+      const segments = qualifiedName.split('.');
+      return segments[segments.length - 1] ?? toSnakeCase(operationId);
+    }
+  }
+  return toSnakeCase(operationId);
+}
+
+function renderPythonRequestStep(
+  lines: string[],
+  step: RequestStep,
+  index: number,
+  operationMap?: OperationMapSource,
+): void {
+  const stepNum = index + 1;
+  const responseVar = `response_${stepNum}`;
+  const methodName = resolvePythonMethodName(step.operationId, operationMap);
+  const payloadTemplate =
+    step.bodyKind === 'multipart'
+      ? (step.multipartTemplate ?? step.bodyTemplate)
+      : step.bodyTemplate;
+  const requestArgs: string[] = [];
+
+  lines.push(`    # Step ${stepNum}: ${step.operationId}`);
+
+  if (step.pathTemplate) {
+    const urlExpr = buildPythonUrlExpression(step.pathTemplate, step.pathParams);
+    lines.push(`    url_${stepNum} = ${urlExpr}`);
+    requestArgs.push(`path=url_${stepNum}`);
+  }
+
+  if (payloadTemplate !== undefined) {
+    const bodyExpr = renderPythonBody(payloadTemplate, {});
+    lines.push(`    body_${stepNum} = ${bodyExpr}`);
+    const payloadKey = step.bodyKind === 'multipart' ? 'multipart' : 'body';
+    requestArgs.push(`${payloadKey}=body_${stepNum}`);
+  }
+
+  if (step.expect.status >= 400) {
+    lines.push(
+      `    client.${methodName}.side_effect = RuntimeError('Expected ${step.expect.status}')`,
+    );
+    lines.push('    with pytest.raises(RuntimeError):');
+    lines.push(`        await client.${methodName}(`);
+    for (const arg of requestArgs) {
+      lines.push(`            ${arg},`);
+    }
+    lines.push('        )');
+    return;
+  }
+
+  lines.push(
+    `    client.${methodName}.return_value = {'status': ${step.expect.status}, 'data': {}}`,
+  );
+  lines.push(`    ${responseVar} = await client.${methodName}(`);
+  for (const arg of requestArgs) {
+    lines.push(`        ${arg},`);
+  }
+  lines.push('    )');
+  lines.push(`    assert ${responseVar}['status'] == ${step.expect.status}`);
+
+  if (step.extract && step.extract.length > 0) {
+    for (const extract of step.extract) {
+      lines.push(
+        `    ctx.set('${extract.bind}', get_nested_value(${responseVar}.get('data'), '${extract.fieldPath}'))`,
+      );
+    }
+  }
 }
