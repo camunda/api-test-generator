@@ -9830,9 +9830,14 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       assertionsRun++;
       // The Python emitter resolves ${var} body-template placeholders to
-      // ctx.get('<snake_var>') at code-generation time. Any remaining ${...}
+      // ctx.get('<var>') at code-generation time. Any remaining ${...}
       // literal indicates a missing binding and would break the test.
-      if (/\$\{[^}]+\}/.test(src)) {
+      // `${RANDOM}` is an intentional runtime seed token embedded verbatim in
+      // planner-minted literal bindings (mirrors the JS SDK invariant below,
+      // and path-analyser/src/scenarioGenerator.ts's `proc_${RANDOM}` /
+      // `jobType_${RANDOM}` literals) — it is not a missing-binding bug.
+      const placeholders = src.match(/\$\{[^}]+\}/g) ?? [];
+      if (placeholders.some((p) => p !== '${RANDOM}')) {
         offenders.push(file);
       }
     }
@@ -9840,6 +9845,67 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     expect(
       offenders,
       'Emitted Python SDK test file(s) contain unresolved ${...} placeholder strings.',
+    ).toEqual([]);
+  });
+
+  it('no emitted Python SDK test contains a placeholder "pass  # TODO: implement" stub (#354)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      // #354: the Python emitter used to lower every requestPlan step to a
+      // single `pass  # TODO: implement` stub. This asserts the emitted
+      // suite is real, executable content, not a scaffold placeholder.
+      if (src.includes('pass  # TODO: implement')) {
+        offenders.push(file);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) contain unimplemented "pass  # TODO: implement" stub(s).',
+    ).toEqual([]);
+  });
+
+  it('every "# Step N:" comment in an emitted Python SDK test is followed by a real client call (#354)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    // #354: a step comment with no corresponding `await client.<method>(...)`
+    // invocation would mean the emitter lowered scenario.requestPlan into a
+    // comment only, silently dropping the actual request — assert every
+    // emitted file's step count and real-call count agree.
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      const stepCount = (src.match(/# Step \d+:/g) ?? []).length;
+      const clientCallCount = (src.match(/await client\.\w+\(/g) ?? []).length;
+      if (stepCount > 0 && clientCallCount < stepCount) {
+        offenders.push(`${file} (steps=${stepCount}, client calls=${clientCallCount})`);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) have step comments with no corresponding client call.',
     ).toEqual([]);
   });
 

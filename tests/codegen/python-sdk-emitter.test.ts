@@ -13,6 +13,7 @@ import {
   renderPythonBody,
   renderPythonSuite,
 } from '../../materializer/src/python-sdk/emitter.js';
+import { createOperationMapSourceFromJson } from '../../materializer/src/python-sdk/sdk-mapping.js';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.js';
 
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
@@ -148,7 +149,9 @@ describe('Python SDK Emitter', () => {
       expect(body).toContain("'archived': False");
       expect(body).toContain("'owner': None");
       expect(body).toContain("'labels': ['x', None, True]");
-      expect(body).toContain("'tenantId': ctx.get('tenant_id_var')");
+      // #354: ctx keys must be the planner's original binding name (unchanged
+      // casing), not snake_cased — this must match ctx.set('tenantIdVar', ...).
+      expect(body).toContain("'tenantId': ctx.get('tenantIdVar')");
       expect(body).not.toContain(': true');
       expect(body).not.toContain(': false');
       expect(body).not.toContain(': null');
@@ -226,7 +229,9 @@ describe('Python SDK Emitter', () => {
       const output = renderPythonSuite(collection);
 
       expect(output).toContain('# Step 1: createWidget');
-      expect(output).toContain("url_1 = f'/widgets/{ctx.get('widget_key_var') or 'widgetKey'}'");
+      // #354: ctx key must be the planner's original binding name (widgetKeyVar),
+      // matching whatever ctx.set(...) would use for the same binding.
+      expect(output).toContain("url_1 = f'/widgets/{ctx.get('widgetKeyVar') or 'widgetKey'}'");
       expect(output).toContain("body_1 = {'enabled': True, 'archived': False, 'owner': None}");
       expect(output).toContain('response_1 = await client.create_widget(');
       expect(output).toContain("assert response_1['status'] == 201");
@@ -247,6 +252,92 @@ describe('Python SDK Emitter', () => {
 
       const output = renderPythonSuite(collection);
       expect(output).toContain('test_complex_scenario_with_spaces');
+    });
+  });
+
+  // #354 gap 4: ctx.set(...) (scenario.bindings) must use the exact same key
+  // as ctx.get(...) (path-param / body-placeholder lookups). The planner
+  // keys bindings by their original variable name (e.g. widgetKeyVar); the
+  // emitter must not snake_case one side and not the other.
+  describe('binding-key resolution (#354)', () => {
+    test('ctx.set and ctx.get use the same unmodified key for path params', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            bindings: { widgetKeyVar: 'seed-widget-1' },
+            requestPlan: [
+              {
+                operationId: 'getWidget',
+                method: 'GET',
+                pathTemplate: '/widgets/{widgetKey}',
+                pathParams: [{ name: 'widgetKey', var: 'widgetKeyVar' }],
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+
+      expect(output).toContain("ctx.set('widgetKeyVar', 'seed-widget-1')");
+      expect(output).toContain("ctx.get('widgetKeyVar')");
+      expect(output).not.toContain('widget_key_var');
+    });
+
+    test('ctx.set and ctx.get use the same unmodified key for body placeholders', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            bindings: { tenantIdVar: 'acme' },
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: { tenantId: `${'${'}tenantIdVar}` },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+
+      expect(output).toContain("ctx.set('tenantIdVar', 'acme')");
+      expect(output).toContain("ctx.get('tenantIdVar')");
+      expect(output).not.toContain('tenant_id_var');
+    });
+  });
+
+  // #354 gap 6: the real upstream operation-map.json shapes each entry as an
+  // array of { file, region, label } (see csharp-sdk/examples/operation-map.json
+  // for the reference format shared across emitters), not a single
+  // { package, method, qualifiedName } object.
+  describe('operation map resolution (#354)', () => {
+    test('resolves the SDK method name from the real op-map shape (array of {file,region,label})', () => {
+      const operationMap = createOperationMapSourceFromJson(
+        JSON.stringify({
+          createWidget: [
+            { file: 'src/client.py', region: 'create_widget_via_sdk', label: 'Create widget' },
+          ],
+        }),
+      );
+
+      const output = renderPythonSuite(SAMPLE_COLLECTION, { operationMap });
+      expect(output).toContain('await client.create_widget_via_sdk(');
+    });
+
+    test('falls back to snake_case(operationId) when the operation is not in the map', () => {
+      const operationMap = createOperationMapSourceFromJson(JSON.stringify({}));
+      const output = renderPythonSuite(SAMPLE_COLLECTION, { operationMap });
+      expect(output).toContain('await client.create_widget(');
     });
   });
 });
