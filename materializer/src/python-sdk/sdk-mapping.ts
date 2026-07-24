@@ -54,18 +54,36 @@ export function substituteWholeStringPlaceholders(
 }
 
 /**
+ * A single entry in the operation map: one documented SDK call site for an
+ * operationId. Upstream SDK operation-map.json files model this as an array
+ * per operationId — see csharp-sdk/examples/operation-map.json for the
+ * reference shape shared across emitters (#354).
+ */
+export interface OperationMapEntry {
+  /** Source file (relative to the SDK repo root) documenting the call. */
+  file: string;
+  /** SDK method/function name for the operation (e.g. 'create_widget'). */
+  region: string;
+  /** Optional human-readable label. */
+  label?: string;
+}
+
+/**
  * Representation of an operation map loaded from JSON.
- * Maps OpenAPI operationId to SDK method/function references.
+ * Maps OpenAPI operationId to a list of SDK call-site references; the first
+ * entry's `region` is the canonical method name for that operationId.
  */
 export interface OperationMap {
-  [operationId: string]: {
-    /** SDK package or module reference (e.g., 'orchestration_client.v1') */
-    package?: string;
-    /** SDK function/method name (e.g., 'deploy_process') */
-    method?: string;
-    /** Full qualified path if needed */
-    qualifiedName?: string;
-  };
+  [operationId: string]: OperationMapEntry[];
+}
+
+function isOperationMapEntry(value: unknown): value is OperationMapEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const file = Reflect.get(value, 'file');
+  const region = Reflect.get(value, 'region');
+  if (typeof file !== 'string' || typeof region !== 'string') return false;
+  const label = Reflect.get(value, 'label');
+  return label === undefined || typeof label === 'string';
 }
 
 /**
@@ -112,10 +130,10 @@ export class OperationMapSource {
    * Returns undefined if the operation is not in the map.
    */
   lookup(operationId: string): OperationMapEntry | undefined {
-    const entry = this.map[operationId];
-    if (!entry || typeof entry !== 'object') return undefined;
-    // biome-ignore lint/plugin: runtime contract boundary — entry validated as a non-null object above
-    return entry as OperationMapEntry;
+    const entries = this.map[operationId];
+    if (!Array.isArray(entries) || entries.length === 0) return undefined;
+    const first = entries[0];
+    return isOperationMapEntry(first) ? first : undefined;
   }
 
   /**
@@ -131,11 +149,4 @@ export class OperationMapSource {
   has(operationId: string): boolean {
     return operationId in this.map;
   }
-}
-
-/**
- * A single entry in the operation map.
- */
-export interface OperationMapEntry {
-  [key: string]: unknown;
 }

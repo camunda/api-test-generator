@@ -42,10 +42,12 @@ export function buildPythonUrlExpression(
 
   let result = pathTemplate;
   result = result.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
-    const bindingVar = varByName.get(paramName);
-    const snakeParam = bindingVar ? toSnakeCase(bindingVar) : `${toSnakeCase(paramName)}_var`;
+    // ctx keys are the planner's original binding variable names (e.g.
+    // widgetKeyVar) — this must match the ctx.set(...) calls emitted for
+    // scenario.bindings verbatim, so no casing transform here (#354).
+    const varName = varByName.get(paramName) ?? paramName;
     // Use f-string syntax with Python bracket notation
-    return `{ctx.get('${snakeParam}') or '${paramName}'}`;
+    return `{ctx.get('${varName}') or '${paramName}'}`;
   });
   return `f'${result}'`;
 }
@@ -71,11 +73,10 @@ function renderPythonValue(value: unknown): string {
   if (typeof value === 'string') {
     const whole = /^\$\{([^}]+)\}$/.exec(value);
     if (whole) {
-      const snakeVar = whole[1]
-        .replace(/([A-Z])/g, '_$1')
-        .toLowerCase()
-        .replace(/^_/, '');
-      return `ctx.get('${snakeVar}')`;
+      // ctx keys are the planner's original binding variable names (e.g.
+      // tenantIdVar) — must match the ctx.set(...) calls emitted for
+      // scenario.bindings verbatim, so no casing transform here (#354).
+      return `ctx.get('${whole[1]}')`;
     }
     return renderPythonStringLiteral(value);
   }
@@ -234,14 +235,8 @@ export function renderPythonSuite(
 
 function resolvePythonMethodName(operationId: string, operationMap?: OperationMapSource): string {
   const entry = operationMap?.lookup(operationId);
-  if (entry) {
-    const method = entry.method;
-    if (typeof method === 'string' && method.length > 0) return method;
-    const qualifiedName = entry.qualifiedName;
-    if (typeof qualifiedName === 'string' && qualifiedName.length > 0) {
-      const segments = qualifiedName.split('.');
-      return segments[segments.length - 1] ?? toSnakeCase(operationId);
-    }
+  if (entry && entry.region.length > 0) {
+    return entry.region;
   }
   return toSnakeCase(operationId);
 }
