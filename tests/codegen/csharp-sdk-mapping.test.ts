@@ -4,11 +4,11 @@ import {
   FallbackMappingSource,
 } from '../../materializer/src/csharp-sdk/sdk-mapping.js';
 
-const OPERATION_MAP = {
+const OPERATION_MAP: Record<string, { file: string; region: string }[]> = {
   activateJobs: [{ file: 'noop', region: 'ActivateJobsAsync' }],
   createProcessInstance: [{ file: 'noop', region: 'CreateProcessInstanceAsync' }],
   completeJob: [{ file: 'noop', region: 'CompleteJobAsync' }],
-} as const;
+};
 
 describe('C# SDK mapping fallback', () => {
   test('keeps PascalCase Async method names unchanged', () => {
