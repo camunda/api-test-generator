@@ -5,6 +5,14 @@ import {
 } from '../../materializer/src/csharp-sdk/emitter.js';
 import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
 
+const BASE_REQUEST_STEP = {
+  operationId: 'createProcessInstance',
+  method: 'POST',
+  pathTemplate: '/process-instances',
+  pathParams: [],
+  expect: { status: 200 },
+} satisfies RequestStep;
+
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   endpoint: { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
   requiredSemanticTypes: [],
@@ -19,15 +27,7 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
       ],
       producedSemanticTypes: [],
       satisfiedSemanticTypes: [],
-      requestPlan: [
-        {
-          operationId: 'createProcessInstance',
-          method: 'POST',
-          pathTemplate: '/process-instances',
-          pathParams: [],
-          expect: { status: 200 },
-        } satisfies RequestStep,
-      ],
+      requestPlan: [BASE_REQUEST_STEP],
     },
   ],
 };
@@ -139,7 +139,7 @@ describe('C# SDK Emitter', () => {
           ...SAMPLE_COLLECTION.scenarios[0],
           requestPlan: [
             {
-              ...SAMPLE_COLLECTION.scenarios[0].requestPlan[0],
+              ...BASE_REQUEST_STEP,
               expect: { status: 400 },
             } satisfies RequestStep,
           ],
