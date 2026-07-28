@@ -111,9 +111,204 @@ jobs:
         source_sha: `${{ needs.validate.outputs.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}`
         ${{ needs.validate.outputs.caller_run_url != '' && format('Triggered by: [camunda-hub run]({0})', needs.validate.outputs.caller_run_url) || '' }}
 
+  # Best-effort, READ-ONLY classification of a failing run — this suite is
+  # regenerated fresh from the PR's own spec every time, so a failure is just
+  # as likely to be api-test-generator not yet handling a new/changed
+  # endpoint shape as it is a real hub regression (unlike a stable, unchanging
+  # E2E suite, where "it went red" reliably means "the PR broke it" — see the
+  # AlwaysGreen SaaS/SM/C8Run model in c8-cross-component-e2e-tests, which
+  # works precisely because ITS suite doesn't change). Mints NO write-capable
+  # token for either repo — it cannot file an issue, open a PR, or push,
+  # regardless of the CLI permission flag below, so its blast radius is
+  # confined to "read files, write a JSON classification." Every step below
+  # is continue-on-error (or self-contained via `set +e`): a failure here must
+  # never fail this check or block the PR — `report` below degrades to the
+  # original three-way hedge if this job doesn't produce a usable result.
+  classify:
+    name: Classify hub-suite failure (read-only)
+    needs: [validate, run]
+    if: needs.run.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # OIDC → Vault
+    outputs:
+      category: ${{ steps.parse.outputs.category }}
+      confidence: ${{ steps.parse.outputs.confidence }}
+      summary: ${{ steps.parse.outputs.summary }}
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download hub-suite Playwright reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-suite-reports
+          path: test-results/e2e-camunda-hub
+
+      # Contents:Read only — same token type _hub-suite-run.yml itself already
+      # uses to clone for generation, never a write-capable App token.
+      - name: Mint camunda-hub clone token (read-only)
+        id: hub-token
+        continue-on-error: true
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Clone camunda-hub @ PR sha (sibling ../camunda-hub)
+        if: steps.hub-token.outputs.token != ''
+        continue-on-error: true
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-token.outputs.token }}
+          ref: ${{ needs.validate.outputs.source_sha }}
+
+      # One clone, diffed against main, instead of cloning both refs
+      # separately — the OpenAPI dir only, this is the one signal that
+      # actually distinguishes "generator doesn't handle this yet" (operation
+      # is new/changed in this PR) from "hub regressed" (operation unchanged).
+      - name: Diff the OpenAPI spec against main
+        if: steps.hub-token.outputs.token != ''
+        continue-on-error: true
+        env:
+          SHA: ${{ needs.validate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          cd ../camunda-hub
+          git fetch -q origin main
+          git diff "${SHA}" origin/main -- restapi/public-api/src/main/resources/openapi/v2 \
+            > "${GITHUB_WORKSPACE}/spec-diff.txt" || true
+
+      - name: Fetch Anthropic key from Vault
+        id: vault
+        continue-on-error: true
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: jwt
+          path: ${{ secrets.VAULT_JWT_PATH }}
+          role: ${{ secrets.VAULT_JWT_ROLE }}
+          jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+          secrets: |
+            secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
+
+      - name: Setup Node.js 22 (for Claude Code CLI)
+        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Pinned version — same as triage-camunda-hub-nightly.yml. Bump intentionally.
+      - name: Install Claude Code CLI
+        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code@2.1.156
+          claude --version
+
+      - name: Run classification agent (read-only)
+        id: agent
+        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
+          REPORTS_DIR: ${{ github.workspace }}/test-results/e2e-camunda-hub
+          SPEC_DIR: ${{ github.workspace }}/../camunda-hub/restapi/public-api/src/main/resources/openapi/v2
+          SPEC_DIFF_FILE: ${{ github.workspace }}/spec-diff.txt
+        run: |
+          set -euo pipefail
+          rm -f /tmp/hub-pr-classification.json
+
+          prompt=$(cat <<EOF
+          You are classifying a SINGLE failing generated-hub-suite run, triggered by
+          a camunda-hub pull request. This is READ-ONLY: do not modify any file, do
+          not run any git/network write command, do not open any issue or PR — you
+          are producing a classification only.
+
+          Inputs:
+          - Playwright/JUnit reports: ${REPORTS_DIR} (pw-positive.json, pw-secured.json,
+            pw-rbac.json, junit + HTML reports with traces/screenshots for failing tests)
+            — may be absent if the artifact upload/download itself failed; say so if so.
+          - OpenAPI spec AT THIS PR's SHA: ${SPEC_DIR}/*.yaml (may be absent if the
+            camunda-hub clone step failed; treat as unavailable, don't guess).
+          - Spec diff (this PR's sha vs camunda-hub main), OpenAPI dir only: ${SPEC_DIFF_FILE}
+            (empty file = this PR does not touch the API spec, or the diff step failed).
+          - Known-issue configs: configs/camunda-hub/positive-suppress.json and
+            configs/camunda-hub/request-validation.json (their knownIssue /
+            knownProblemDetailShapeGaps entries).
+
+          Do this:
+          1. Parse the reports and enumerate every failing test, with its request/
+             response evidence from the trace/HTML report.
+          2. Resolve each failing operationId in the OpenAPI spec at this PR's sha.
+          3. Check the spec diff: is this operationId's definition NEW or CHANGED by
+             this PR? If yes, and the failure looks like the generated test's
+             expectations don't match the new/changed shape (wrong assumed schema,
+             unhandled new construct) -> category "generator-gap" (api-test-generator
+             does not yet correctly handle this shape; NOT a hub bug).
+          4. If the operationId is UNCHANGED by this PR and its response contradicts
+             the (unchanged) spec -> category "product" (a likely real regression;
+             this PR probably broke something via a shared code path).
+          5. Reconcile against the known-issue configs first — if the failure matches
+             an existing knownIssue/knownProblemDetailShapeGaps entry, use its real
+             category and note it is already tracked in your summary.
+          6. If Hub failed to boot, a suite produced no report, or the failure is
+             clearly environmental -> category "infra".
+          7. If a test passed on a Playwright retry -> category "flaky".
+          8. If you genuinely cannot tell from the evidence (including: reports or
+             spec were unavailable above) -> category "unknown" with confidence "low"
+             and say what evidence was missing — never guess "product".
+
+          Write your answer to /tmp/hub-pr-classification.json as EXACTLY this shape,
+          nothing else:
+          {
+            "category": "product|generator-gap|infra|flaky|unknown",
+            "confidence": "high|medium|low",
+            "summary": "<one sentence, under 200 chars, no line breaks>",
+            "affected_operation_ids": ["..."]
+          }
+          EOF
+          )
+
+          set +e
+          claude -p "$prompt" --dangerously-skip-permissions
+          agent_rc=$?
+          set -e
+          echo "claude exit code: ${agent_rc}"
+
+      - name: Parse classification (falls back to "unknown" on any failure above)
+        id: parse
+        if: always()
+        run: |
+          set -euo pipefail
+          f=/tmp/hub-pr-classification.json
+          if [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
+            category=$(jq -r '.category // "unknown"' "$f")
+            confidence=$(jq -r '.confidence // "low"' "$f")
+            summary=$(jq -r '.summary // ""' "$f" | tr '\n' ' ' | cut -c1-300)
+          else
+            category="unknown"
+            confidence="low"
+            summary="Classification agent did not produce a usable result — see the run for details."
+          fi
+          {
+            echo "category=${category}"
+            echo "confidence=${confidence}"
+            echo "summary=${summary}"
+          } >> "$GITHUB_OUTPUT"
+
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
-    needs: [validate, run]
+    needs: [validate, run, classify]
     # Report whenever the SHA was valid (whatever the run result). If validate
     # failed there's no real commit to post a status on, so skip.
     if: always() && needs.validate.result == 'success'
@@ -172,15 +367,88 @@ jobs:
       # surface, where red really does almost always mean the PR broke
       # something. This suite is generated fresh from the PR's own OpenAPI
       # spec — a failure here is just as likely to be api-test-generator not
-      # yet handling a new/changed endpoint shape (an unmapped operation, an
-      # unmodelled schema construct) as it is an actual hub regression, plus
-      # the usual infra/flakiness causes. The message below names all three
-      # rather than asserting the wrong one as fact.
+      # yet handling a new/changed endpoint shape as an actual hub
+      # regression, plus the usual infra/flakiness causes. When the `classify`
+      # job above produced a usable verdict, state it (with its confidence);
+      # otherwise fall back to naming all three possibilities rather than
+      # asserting the wrong one as fact.
       #
       # Failure only — a genuine test failure (RESULT == "failure"), not
       # cancelled/skipped/infra "error", which would misreport an operational
-      # condition as a regression. continue-on-error above: a Vault hiccup
-      # here must not fail this run.
+      # condition as a regression.
+      - name: Build Slack alert text
+        id: msg
+        if: always() && needs.run.result == 'failure'
+        env:
+          PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CALLER_RUN_URL: ${{ needs.validate.outputs.caller_run_url }}
+          CATEGORY: ${{ needs.classify.outputs.category }}
+          CONFIDENCE: ${{ needs.classify.outputs.confidence }}
+          SUMMARY: ${{ needs.classify.outputs.summary }}
+        run: |
+          set -euo pipefail
+          hub_medic='<!subteam^S014VK4482H|hub-medic>'
+          ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
+          # product ALSO pings hub-medic — it's their pipeline (this PR) that
+          # a confirmed regression implicates, same "whoever owns the broken
+          # thing" routing every AlwaysGreen variant we looked at uses.
+          case "$CATEGORY" in
+            product)
+              verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
+              ping="${hub_medic} ${ta_medic}"
+              ;;
+            generator-gap)
+              verdict="Likely api-test-generator not yet handling a new/changed endpoint shape, not a hub bug (confidence: ${CONFIDENCE}). ${SUMMARY}"
+              ping="${ta_medic}"
+              ;;
+            infra)
+              verdict="Looks like an infrastructure failure, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
+              ping="${ta_medic}"
+              ;;
+            flaky)
+              verdict="Looks flaky, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
+              ping="${ta_medic}"
+              ;;
+            *)
+              # classify didn't run, errored, or genuinely couldn't tell —
+              # same three-way hedge this alert shipped with originally.
+              verdict="Could be a real regression from this PR, an unhandled case in api-test-generator for a new/changed endpoint (unmapped operation, unmodelled schema shape), or infra/flakiness — check the run to tell which before this merges."
+              ping="${ta_medic}"
+              ;;
+          esac
+
+          # Built via printf %s placeholders, not a literal multi-line
+          # string — this run: block is YAML-indented, and a bash string
+          # spanning literal source lines would bake that indentation into
+          # every line of the actual Slack message.
+          caller_line=""
+          if [ -n "$CALLER_RUN_URL" ]; then
+            caller_line=$(printf '\n• Triggered by: <%s|camunda-hub run>' "$CALLER_RUN_URL")
+          fi
+
+          # Backtick-wrapped SHA built separately (double-quoted, backticks
+          # escaped) — a literal backtick inside the single-quoted printf
+          # format string below trips shellcheck's SC2016 (it reads as an
+          # unexpanded command substitution attempt, even though single
+          # quotes make it literal either way).
+          sha_code="\`${SHA}\`"
+
+          text=$(printf ':red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/%s|#%s> @ %s\n• Run: <%s|View failing tests>%s\n\n%s\n\n%s please take a look.' \
+            "$PR_NUMBER" "$PR_NUMBER" "$sha_code" "$RUN_URL" "$caller_line" "$verdict" "$ping")
+
+          # Random delimiter, not a fixed string like "SLACKMSG" — $SUMMARY is
+          # agent-produced free text and must never be able to prematurely
+          # terminate this GITHUB_OUTPUT heredoc (the standard multiline-
+          # output-injection concern for any value with untrusted content).
+          delim="SLACKMSG_$(openssl rand -hex 8 2>/dev/null || echo "${RANDOM}${RANDOM}")"
+          {
+            echo "text<<${delim}"
+            echo "$text"
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
         if: always() && needs.run.result == 'failure'
@@ -192,6 +460,10 @@ jobs:
           vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
+      # toJSON() properly encodes the text (quotes/newlines) rather than
+      # manual \n concatenation — necessary now that the message can embed
+      # agent-produced free text (SUMMARY), which manual string-building
+      # can't safely guarantee is JSON-clean.
       - name: Notify Slack (generated hub suite failed on camunda-hub PR)
         if: always() && needs.run.result == 'failure' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         uses: slackapi/slack-github-action@v2
@@ -201,5 +473,5 @@ jobs:
           payload: |
             {
               "channel": "#prj-qa-sandbox",
-              "text": ":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/${{ github.event.client_payload.pr_number }}|#${{ github.event.client_payload.pr_number }}> @ `${{ needs.validate.outputs.source_sha }}`\n• Run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View failing tests>${{ needs.validate.outputs.caller_run_url != '' && format('\n• Triggered by: <{0}|camunda-hub run>', needs.validate.outputs.caller_run_url) || '' }}\n\nCould be a real regression from this PR, an unhandled case in api-test-generator for a new/changed endpoint (unmapped operation, unmodelled schema shape), or infra/flakiness — check the run to tell which before this merges.\n\n<!subteam^S09UF0EV0HG|test-automation-medic> please take a look."
+              "text": ${{ toJSON(steps.msg.outputs.text) }}
             }
