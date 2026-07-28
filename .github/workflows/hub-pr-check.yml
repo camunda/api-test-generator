@@ -52,6 +52,7 @@ jobs:
     outputs:
       source_sha: ${{ steps.v.outputs.source_sha }}
       caller_run_url: ${{ steps.caller.outputs.caller_run_url }}
+      pr_number: ${{ steps.prnum.outputs.pr_number }}
     steps:
       - name: Validate source_sha is a 40-char hex commit SHA
         id: v
@@ -82,6 +83,24 @@ jobs:
             echo "caller_run_url=" >> "$GITHUB_OUTPUT"
           fi
 
+      # pr_number is display-only (summary heading, Slack link text) — never
+      # used to gate a credential or write action — so, same as
+      # caller_run_url, an invalid value degrades to empty rather than failing
+      # the run. Still validated before use: it's untrusted dispatch payload,
+      # and downstream embeds it in a Slack markup link, where a value
+      # containing e.g. a `|` or `>` could otherwise break the link syntax.
+      - name: Validate pr_number (optional; empty if missing/invalid)
+        id: prnum
+        env:
+          N: ${{ github.event.client_payload.pr_number }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$N" | grep -qE '^[1-9][0-9]*$'; then
+            echo "pr_number=$N" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+          fi
+
   run:
     needs: validate
     uses: ./.github/workflows/_hub-suite-run.yml
@@ -107,7 +126,7 @@ jobs:
       # validation entirely. Fixing it here guarantees validation always runs.
       hub_registry: registry.camunda.cloud
       summary_heading: |
-        ## Hub PR check — camunda-hub#${{ github.event.client_payload.pr_number }}
+        ## Hub PR check — camunda-hub#${{ needs.validate.outputs.pr_number != '' && needs.validate.outputs.pr_number || '?' }}
         source_sha: `${{ needs.validate.outputs.source_sha }}` · image: `registry.camunda.cloud/team-hub/hub-restapi-self-managed:pr-${{ needs.validate.outputs.source_sha }}`
         ${{ needs.validate.outputs.caller_run_url != '' && format('Triggered by: [camunda-hub run]({0})', needs.validate.outputs.caller_run_url) || '' }}
 
@@ -183,7 +202,13 @@ jobs:
           set -euo pipefail
           cd ../camunda-hub
           git fetch -q origin main
-          git diff "${SHA}" origin/main -- restapi/public-api/src/main/resources/openapi/v2 \
+          # main FIRST, PR sha second: `git diff <old> <new>` shows +/- from
+          # old to new, so this way the PR's own additions/changes show as
+          # `+` — the natural reading for "what did this PR add or change
+          # relative to main." The reverse order would flip that polarity
+          # (a genuinely new construct would show as REMOVED), which could
+          # mislead the classifier's new-vs-changed-vs-unchanged judgment.
+          git diff origin/main "${SHA}" -- restapi/public-api/src/main/resources/openapi/v2 \
             > "${GITHUB_WORKSPACE}/spec-diff.txt" || true
 
       - name: Fetch Anthropic key from Vault
@@ -230,9 +255,11 @@ jobs:
 
           prompt=$(cat <<EOF
           You are classifying a SINGLE failing generated-hub-suite run, triggered by
-          a camunda-hub pull request. This is READ-ONLY: do not modify any file, do
-          not run any git/network write command, do not open any issue or PR — you
-          are producing a classification only.
+          a camunda-hub pull request. This is READ-ONLY with respect to the checked-
+          out repos: do not modify any file inside them, do not run any git/network
+          write command, do not open any issue or PR. Your ONLY required write is
+          the one output file below -- writing it is expected and necessary, not an
+          exception to "read-only."
 
           Inputs:
           - Playwright/JUnit reports: ${REPORTS_DIR} (pw-positive.json, pw-secured.json,
@@ -294,7 +321,10 @@ jobs:
           if [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
             category=$(jq -r '.category // "unknown"' "$f")
             confidence=$(jq -r '.confidence // "low"' "$f")
-            summary=$(jq -r '.summary // ""' "$f" | tr '\n' ' ' | cut -c1-300)
+            # 200, matching the prompt's own "under 200 chars" contract —
+            # not a looser bound that would let a non-compliant response
+            # through longer than what we actually asked for.
+            summary=$(jq -r '.summary // ""' "$f" | tr '\n' ' ' | cut -c1-200)
           else
             category="unknown"
             confidence="low"
@@ -380,7 +410,9 @@ jobs:
         id: msg
         if: always() && needs.run.result == 'failure'
         env:
-          PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          # Validated (digits-only) by the `validate` job — empty if the
+          # dispatch payload's pr_number was missing/malformed.
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CALLER_RUN_URL: ${{ needs.validate.outputs.caller_run_url }}
@@ -435,8 +467,18 @@ jobs:
           # quotes make it literal either way).
           sha_code="\`${SHA}\`"
 
-          text=$(printf ':red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/%s|#%s> @ %s\n• Run: <%s|View failing tests>%s\n\n%s\n\n%s please take a look.' \
-            "$PR_NUMBER" "$PR_NUMBER" "$sha_code" "$RUN_URL" "$caller_line" "$verdict" "$ping")
+          # PR_NUMBER can be empty (validate rejected a malformed dispatch
+          # payload) — degrade to plain text rather than emit a Slack link
+          # with an empty target (<.../pull/|#>), which renders broken.
+          if [ -n "$PR_NUMBER" ]; then
+            source_line=$(printf 'camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/%s|#%s> @ %s' \
+              "$PR_NUMBER" "$PR_NUMBER" "$sha_code")
+          else
+            source_line=$(printf 'camunda/camunda-hub @ %s (PR number unavailable)' "$sha_code")
+          fi
+
+          text=$(printf ':red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: %s\n• Run: <%s|View failing tests>%s\n\n%s\n\n%s please take a look.' \
+            "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
 
           # Random delimiter, not a fixed string like "SLACKMSG" — $SUMMARY is
           # agent-produced free text and must never be able to prematurely
@@ -466,6 +508,7 @@ jobs:
       # can't safely guarantee is JSON-clean.
       - name: Notify Slack (generated hub suite failed on camunda-hub PR)
         if: always() && needs.run.result == 'failure' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
         uses: slackapi/slack-github-action@v2
         with:
           method: chat.postMessage
