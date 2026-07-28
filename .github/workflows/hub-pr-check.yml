@@ -164,3 +164,31 @@ jobs:
             -f context="api-test-generator/hub-suite" \
             -f description="Generated hub suite: ${state}" >/dev/null
           echo "Reported '${state}' on camunda-hub@${SHA:0:12}"
+
+      # Slack heads-up, mirroring the AlwaysGreen SaaS-E2E failure alert style
+      # (camunda/c8-cross-component-e2e-tests). Failure only — a genuine test
+      # failure (RESULT == "failure"), not cancelled/skipped/infra "error",
+      # which would misreport an operational condition as a regression.
+      # continue-on-error above: a Vault hiccup here must not fail this run.
+      - name: Fetch Slack bot token from Vault
+        id: slack-secrets
+        if: always() && needs.run.result == 'failure'
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Notify Slack (generated hub suite failed on camunda-hub PR)
+        if: always() && needs.run.result == 'failure' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#prj-qa-sandbox",
+              "text": ":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/${{ github.event.client_payload.pr_number }}|#${{ github.event.client_payload.pr_number }}> @ `${{ needs.validate.outputs.source_sha }}`\n• Run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View failing tests>${{ needs.validate.outputs.caller_run_url != '' && format('\n• Triggered by: <{0}|camunda-hub run>', needs.validate.outputs.caller_run_url) || '' }}\n\nA regression may have been introduced. Please investigate before merging.\n\n<!subteam^S09UF0EV0HG|test-automation-medic> please take a look."
+            }
