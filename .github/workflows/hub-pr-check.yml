@@ -165,11 +165,22 @@ jobs:
             -f description="Generated hub suite: ${state}" >/dev/null
           echo "Reported '${state}' on camunda-hub@${SHA:0:12}"
 
-      # Slack heads-up, mirroring the AlwaysGreen SaaS-E2E failure alert style
-      # (camunda/c8-cross-component-e2e-tests). Failure only — a genuine test
-      # failure (RESULT == "failure"), not cancelled/skipped/infra "error",
-      # which would misreport an operational condition as a regression.
-      # continue-on-error above: a Vault hiccup here must not fail this run.
+      # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
+      # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
+      # regression may have been introduced" framing verbatim: that alert
+      # fires on a fixed, generated E2E suite testing a stable product
+      # surface, where red really does almost always mean the PR broke
+      # something. This suite is generated fresh from the PR's own OpenAPI
+      # spec — a failure here is just as likely to be api-test-generator not
+      # yet handling a new/changed endpoint shape (an unmapped operation, an
+      # unmodelled schema construct) as it is an actual hub regression, plus
+      # the usual infra/flakiness causes. The message below names all three
+      # rather than asserting the wrong one as fact.
+      #
+      # Failure only — a genuine test failure (RESULT == "failure"), not
+      # cancelled/skipped/infra "error", which would misreport an operational
+      # condition as a regression. continue-on-error above: a Vault hiccup
+      # here must not fail this run.
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
         if: always() && needs.run.result == 'failure'
@@ -190,5 +201,5 @@ jobs:
           payload: |
             {
               "channel": "#prj-qa-sandbox",
-              "text": ":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/${{ github.event.client_payload.pr_number }}|#${{ github.event.client_payload.pr_number }}> @ `${{ needs.validate.outputs.source_sha }}`\n• Run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View failing tests>${{ needs.validate.outputs.caller_run_url != '' && format('\n• Triggered by: <{0}|camunda-hub run>', needs.validate.outputs.caller_run_url) || '' }}\n\nA regression may have been introduced. Please investigate before merging.\n\n<!subteam^S09UF0EV0HG|test-automation-medic> please take a look."
+              "text": ":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/${{ github.event.client_payload.pr_number }}|#${{ github.event.client_payload.pr_number }}> @ `${{ needs.validate.outputs.source_sha }}`\n• Run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View failing tests>${{ needs.validate.outputs.caller_run_url != '' && format('\n• Triggered by: <{0}|camunda-hub run>', needs.validate.outputs.caller_run_url) || '' }}\n\nCould be a real regression from this PR, an unhandled case in api-test-generator for a new/changed endpoint (unmapped operation, unmodelled schema shape), or infra/flakiness — check the run to tell which before this merges.\n\n<!subteam^S09UF0EV0HG|test-automation-medic> please take a look."
             }
