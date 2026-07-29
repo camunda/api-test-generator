@@ -178,6 +178,11 @@ jobs:
           fi
           npm run -s spec-operations > /tmp/pinned-ops.txt
           echo "Pinned operations: $(wc -l < /tmp/pinned-ops.txt)"
+          # Companion field-level fingerprint (#492) — spec-operations.ts only
+          # sees whole operationIds, so a property added/removed/newly-required
+          # WITHIN an existing operation is otherwise invisible until a human
+          # hand-diffs the upstream YAML (as happened investigating #494).
+          npm run -s spec-fields > /tmp/pinned-fields.json
 
       # Fetch latest LAST so the latest bundle is what generate + invariants see
       # (and, for hub, so the sibling is left checked out at latest for the bump).
@@ -197,6 +202,7 @@ jobs:
           fi
           npm run -s spec-operations > /tmp/latest-ops.txt
           echo "Latest operations: $(wc -l < /tmp/latest-ops.txt)"
+          npm run -s spec-fields > /tmp/latest-fields.json
 
       - name: Diff operation surface
         id: opdiff
@@ -245,6 +251,53 @@ jobs:
           else
             echo "content_changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # #492: catches a property added/removed/newly-required WITHIN an
+      # EXISTING operation — spec-operations.ts's diff above only sees whole
+      # operationIds, so this is otherwise invisible until a human hand-diffs
+      # the upstream YAML (as happened investigating #494's clusters.profiles
+      # addition). Gated on content_changed like generate/invariants below —
+      # a byte-identical bundle has nothing to field-diff either.
+      #
+      # A brand-new-or-newly-required REQUEST property is the one case that
+      # can silently need generator work (no existing fixture provides it) —
+      # spec-field-diff.ts exits 1 when it finds one, which becomes the
+      # has_newly_required gate below. Everything else (added/removed
+      # properties otherwise) is informational only, same as
+      # clusters.profiles: additive, optional, needed no generator change.
+      - name: Diff field-level schema changes
+        id: fielddiff
+        if: steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true'
+        run: |
+          set -euo pipefail
+          if npm run -s spec-field-diff -- /tmp/pinned-fields.json /tmp/latest-fields.json > /tmp/field-diff.json; then
+            echo "has_newly_required=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_newly_required=true" >> "$GITHUB_OUTPUT"
+          fi
+          # Rendered as "operationId (side): property (type)" lines, same
+          # capped-preview convention as opdiff's added/removed above — counts
+          # stay exact (from the full JSON), only the rendered preview is capped.
+          # shellcheck disable=SC2016  # single quotes intentional: ${...} are JS
+          # template refs evaluated by node, not shell expansions.
+          node -e '
+            const d = JSON.parse(require("fs").readFileSync("/tmp/field-diff.json", "utf8"));
+            const render = (c) => `${c.operationId} (${c.side}): ${c.property}` + (c.type ? ` (${c.type})` : "");
+            const cap = (arr) => arr.slice(0, 200).map(render).join("\n");
+            console.log("added<<EOF");
+            console.log(cap(d.added));
+            console.log("EOF");
+            console.log("removed<<EOF");
+            console.log(cap(d.removed));
+            console.log("EOF");
+            console.log("newly_required<<EOF");
+            console.log(cap(d.newlyRequired));
+            console.log("EOF");
+            console.log(`n_added=${d.added.length}`);
+            console.log(`n_removed=${d.removed.length}`);
+            console.log(`n_newly_required=${d.newlyRequired.length}`);
+          ' >> "$GITHUB_OUTPUT"
+          echo "Field changes — added: $(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/field-diff.json','utf8')).added.length)"), removed: $(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/field-diff.json','utf8')).removed.length)"), newly required: $(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/field-diff.json','utf8')).newlyRequired.length)")"
 
       - name: Generate pipeline against latest
         id: generate
@@ -318,7 +371,8 @@ jobs:
         if: >-
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
           steps.generate.outcome == 'success' && steps.invariants.outcome == 'success' &&
-          steps.unmapped.outputs.has_unmapped != 'true'
+          steps.unmapped.outputs.has_unmapped != 'true' &&
+          steps.fielddiff.outputs.has_newly_required != 'true'
         continue-on-error: true
         # Pinned to a full commit SHA (supply-chain hardening): this sub-action
         # has no release tag of its own, so we pin main's HEAD and bump it
@@ -341,6 +395,7 @@ jobs:
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
           steps.generate.outcome == 'success' && steps.invariants.outcome == 'success' &&
           steps.unmapped.outputs.has_unmapped != 'true' &&
+          steps.fielddiff.outputs.has_newly_required != 'true' &&
           steps.app-token.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -349,17 +404,24 @@ jobs:
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
           ADDED: ${{ steps.opdiff.outputs.added }}
           REMOVED: ${{ steps.opdiff.outputs.removed }}
+          FIELD_ADDED: ${{ steps.fielddiff.outputs.added }}
+          FIELD_REMOVED: ${{ steps.fielddiff.outputs.removed }}
+          N_FIELD_ADDED: ${{ steps.fielddiff.outputs.n_added }}
+          N_FIELD_REMOVED: ${{ steps.fielddiff.outputs.n_removed }}
         run: bash .github/scripts/spec-bump-open-pr.sh
 
-      # BROKEN drift (generate/invariants failed), unmapped (uncovered) operations,
-      # OR clean-but-no-App-token → the tracking issue (fallback preserves the
-      # signal, and blocks the auto-bump path so an uncovered op can't get
-      # silently adopted).
+      # BROKEN drift (generate/invariants failed), unmapped (uncovered)
+      # operations, a newly-required request property with no existing
+      # fixture (#492), OR clean-but-no-App-token → the tracking issue
+      # (fallback preserves the signal, and blocks the auto-bump path so an
+      # uncovered op / unfixtured required field can't get silently adopted).
       - name: Report drift to the rolling tracking issue
         if: >-
           steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true' &&
           (steps.generate.outcome != 'success' || steps.invariants.outcome != 'success' ||
-           steps.unmapped.outputs.has_unmapped == 'true' || steps.app-token.outputs.token == '')
+           steps.unmapped.outputs.has_unmapped == 'true' ||
+           steps.fielddiff.outputs.has_newly_required == 'true' ||
+           steps.app-token.outputs.token == '')
         env:
           GH_TOKEN: ${{ github.token }}
           PINNED: ${{ steps.refs.outputs.pinned }}
@@ -371,6 +433,8 @@ jobs:
           GEN_OUTCOME: ${{ steps.generate.outcome }}
           INV_OUTCOME: ${{ steps.invariants.outcome }}
           UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
+          NEWLY_REQUIRED: ${{ steps.fielddiff.outputs.newly_required }}
+          N_NEWLY_REQUIRED: ${{ steps.fielddiff.outputs.n_newly_required }}
         run: bash .github/scripts/spec-bump-report.sh
 
       # No meaningful drift (pin at latest, or content byte-identical) → close

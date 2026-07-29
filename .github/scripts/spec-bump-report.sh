@@ -10,8 +10,11 @@
 # UPSTREAM_BRANCH, PINNED, LATEST, N_ADDED, N_REMOVED, ADDED, REMOVED,
 # GEN_OUTCOME, INV_OUTCOME. Optional: UNMAPPED (comma-separated operationIds
 # with no generated test coverage — see the "Check for unmapped operations"
-# step; empty when generate didn't succeed or nothing's unmapped). GitHub
-# provides GITHUB_* automatically.
+# step; empty when generate didn't succeed or nothing's unmapped). NEWLY_REQUIRED
+# (#492; newline-separated "operationId (side): property (type)" lines — a
+# request property that's brand-new-and-required, or flipped from optional to
+# required, with no existing fixture; see the "Diff field-level schema changes"
+# step) / N_NEWLY_REQUIRED. GitHub provides GITHUB_* automatically.
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN required for gh auth}"
@@ -22,6 +25,8 @@ N_REMOVED="${N_REMOVED:-0}"
 GEN_OUTCOME="${GEN_OUTCOME:-unknown}"
 INV_OUTCOME="${INV_OUTCOME:-unknown}"
 UNMAPPED="${UNMAPPED:-}"
+NEWLY_REQUIRED="${NEWLY_REQUIRED:-}"
+N_NEWLY_REQUIRED="${N_NEWLY_REQUIRED:-0}"
 
 # shellcheck source=.github/scripts/spec-bump-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/spec-bump-common.sh"
@@ -42,10 +47,18 @@ body_file="$(mktemp)"
   echo "| Generate pipeline | $(emoji "$GEN_OUTCOME") \`${GEN_OUTCOME}\` |"
   echo "| Regression invariants | $(emoji "$INV_OUTCOME") \`${INV_OUTCOME}\` |"
   echo "| Unmapped (uncovered) operations | $([ -n "$UNMAPPED" ] && echo "❌ ${UNMAPPED}" || echo "✅ none") |"
+  echo "| Newly-required properties (no fixture) | $([ "$N_NEWLY_REQUIRED" != "0" ] && echo "❌ ${N_NEWLY_REQUIRED}" || echo "✅ none") |"
   echo "| Operations added / removed | ${N_ADDED} / ${N_REMOVED} |"
   echo
   if [ -n "$UNMAPPED" ]; then
     echo "⚠️ **Generate and invariants both passed, but this is still not safe to auto-adopt**: \`${UNMAPPED}\` has no generated test coverage at all (no entity-kind/scenario-template maps it, and it's not in \`positive-suppress.json\` either) — model it before bumping, or add it to the suppress list with a tracked reason."
+    echo
+  fi
+  if [ "$N_NEWLY_REQUIRED" != "0" ]; then
+    echo "⚠️ **Generate and invariants both passed, but this is still not safe to auto-adopt** (#492): the properties below are brand-new-and-required, or flipped from optional to required, on an EXISTING operation's request body — no existing fixture provides them, so requests built from this pin's minimal request bodies may now 400 where they didn't before. Add a fixture/semantic-type mapping (see \`resourceFixtures\`/\`pathResourceFixtures\` in \`configs/${CONFIG}/request-validation.json\`) before bumping."
+    echo
+    echo "🆕 **Newly-required properties**:"
+    list_or_none "${NEWLY_REQUIRED}"
     echo
   fi
   echo "🆕 **Added operations** (new upstream surface to model):"
@@ -67,6 +80,7 @@ body_file="$(mktemp)"
 gh label create "$DRIFT_LABEL" --color BFD4F2 --description "Upstream spec drifted from the pin (spec-bump check)" 2>/dev/null || true
 gh label create auto-generated --color ededed --description "Opened by automation, not a human" 2>/dev/null || true
 gh label create missing-coverage --color D93F0B --description "A spec operation has no generated test coverage" 2>/dev/null || true
+gh label create needs-fixture --color D93F0B --description "A newly-required request property has no existing fixture (#492)" 2>/dev/null || true
 
 # --- Find the rolling issue by exact title ----------------------------------
 existing="$(find_rolling_issue)"
@@ -90,7 +104,13 @@ if [ -n "$existing" ]; then
   else
     gh issue edit "$existing" --remove-label missing-coverage >/dev/null 2>&1 || true
   fi
-  gh issue comment "$existing" --body "🔁 Re-checked against \`${LATEST}\` — still drifted (generate: \`${GEN_OUTCOME}\`, invariants: \`${INV_OUTCOME}\`, unmapped: \`${UNMAPPED:-none}\`, +${N_ADDED}/-${N_REMOVED} ops). [Run](${run_url})" >/dev/null
+  # Same sync pattern as missing-coverage above, for the newly-required-field blocker (#492).
+  if [ "$N_NEWLY_REQUIRED" != "0" ]; then
+    gh issue edit "$existing" --add-label needs-fixture >/dev/null || true
+  else
+    gh issue edit "$existing" --remove-label needs-fixture >/dev/null 2>&1 || true
+  fi
+  gh issue comment "$existing" --body "🔁 Re-checked against \`${LATEST}\` — still drifted (generate: \`${GEN_OUTCOME}\`, invariants: \`${INV_OUTCOME}\`, unmapped: \`${UNMAPPED:-none}\`, newly-required: \`${N_NEWLY_REQUIRED}\`, +${N_ADDED}/-${N_REMOVED} ops). [Run](${run_url})" >/dev/null
 else
   echo "Opening new tracking issue"
   # Create with only the always-present labels — if missing-coverage's create
@@ -101,6 +121,9 @@ else
   echo "Opened ${new_url}"
   if [ -n "$UNMAPPED" ]; then
     gh issue edit "${new_url##*/}" --add-label missing-coverage >/dev/null || true
+  fi
+  if [ "$N_NEWLY_REQUIRED" != "0" ]; then
+    gh issue edit "${new_url##*/}" --add-label needs-fixture >/dev/null || true
   fi
 fi
 
