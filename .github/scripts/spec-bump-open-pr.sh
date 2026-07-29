@@ -111,6 +111,19 @@ body_file="$(mktemp)"
   echo "🗑️ **Operations removed** (${N_REMOVED}):"
   list_or_none "${REMOVED:-}"
   echo
+  # Only shown when there's something to show (#492) — the common case is no
+  # field-level change, and an empty section every PR would just be clutter.
+  # Newly-required request properties never reach here: they gate this PR
+  # path entirely and route to the tracking issue instead (see fielddiff's
+  # has_newly_required check in the workflow).
+  if [ "${N_FIELD_ADDED:-0}" != "0" ] || [ "${N_FIELD_REMOVED:-0}" != "0" ]; then
+    echo "🔬 **Field-level schema changes** within existing operations (informational — additive/optional changes need no generator update; see #492):"
+    echo "- Added (${N_FIELD_ADDED:-0}):"
+    list_or_none "${FIELD_ADDED:-}"
+    echo "- Removed (${N_FIELD_REMOVED:-0}):"
+    list_or_none "${FIELD_REMOVED:-}"
+    echo
+  fi
   echo "✅ Validated green by the check: [generate + invariants run](${run_url})."
   echo "⚠️ If CI here flags any invariant whose value legitimately changed, update \`configs/${CONFIG}/regression-invariants.test.ts\` in this PR before merging."
   echo
