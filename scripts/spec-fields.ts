@@ -50,22 +50,49 @@ interface OperationFields {
   response: SideFields | null;
 }
 
-// One level of $ref resolution into components.schemas, unwrapping a single
-// allOf wrapper too (the common "description + $ref" pattern seen in this
-// spec, e.g. CreateClusterRequest.license) — anything deeper stays opaque.
+// $ref resolution into components.schemas, plus allOf composition: a
+// single-branch allOf is the common "description + $ref" wrapper pattern
+// (e.g. CreateClusterRequest.license) and unwraps to that one branch; a
+// genuine multi-branch allOf (composing a base schema + operation-specific
+// fields — not currently used at the top level of any request/response in
+// this spec, but a plausible upstream pattern) has its branches' properties
+// and required arrays MERGED, not dropped. Silently returning {} for a
+// multi-branch allOf would defeat this tool's entire point: missing exactly
+// the kind of field-level change a human wouldn't otherwise catch either.
+// Anything deeper than one level of composition stays opaque (top-level only
+// by design — see the file header).
+//
+// `seen` guards against a $ref cycle (schema A -> B -> A) recursing forever;
+// each $ref is added before resolving its target and any repeat short-
+// circuits to null rather than looping.
 function resolveSchema(
   schema: unknown,
   components: Record<string, unknown>,
+  seen: ReadonlySet<string> = new Set(),
 ): Record<string, unknown> | null {
   if (!isRecord(schema)) return null;
   if (typeof schema.$ref === 'string') {
+    if (seen.has(schema.$ref)) return null;
     const name = schema.$ref.split('/').pop();
     const schemas = isRecord(components.schemas) ? components.schemas : {};
     const resolved = name ? schemas[name] : undefined;
-    return isRecord(resolved) ? resolved : null;
+    if (!isRecord(resolved)) return null;
+    return resolveSchema(resolved, components, new Set([...seen, schema.$ref]));
   }
-  if (Array.isArray(schema.allOf) && schema.allOf.length === 1) {
-    return resolveSchema(schema.allOf[0], components);
+  if (Array.isArray(schema.allOf)) {
+    if (schema.allOf.length === 1) return resolveSchema(schema.allOf[0], components, seen);
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const branch of schema.allOf) {
+      const resolvedBranch = resolveSchema(branch, components, seen);
+      if (resolvedBranch && isRecord(resolvedBranch.properties)) {
+        Object.assign(properties, resolvedBranch.properties);
+      }
+      if (resolvedBranch && Array.isArray(resolvedBranch.required)) {
+        required.push(...resolvedBranch.required);
+      }
+    }
+    return { properties, required };
   }
   return schema;
 }
