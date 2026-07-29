@@ -80,9 +80,20 @@ function resolveSchema(
     return resolveSchema(resolved, components, new Set([...seen, schema.$ref]));
   }
   if (Array.isArray(schema.allOf)) {
-    if (schema.allOf.length === 1) return resolveSchema(schema.allOf[0], components, seen);
+    // Single- and multi-branch allOf get the SAME treatment: merge every
+    // branch's properties/required AND the wrapper object's own top-level
+    // properties/required, if any. A single-branch allOf is NOT reliably a
+    // pure "description + $ref" wrapper with nothing of its own — confirmed
+    // in the real camunda-oca bundle, where the entire *SearchQuery/
+    // *SearchQueryResult family (105 schemas) uses exactly this shape, e.g.
+    // ProcessInstanceSearchQuery: `allOf: [{$ref: SearchQueryRequest}]` PLUS
+    // its own `sort`/`filter` properties sitting alongside allOf — a
+    // single-branch-only unwrap would have silently dropped both, the two
+    // most operation-specific fields on that request body.
     const properties: Record<string, unknown> = {};
     const required: string[] = [];
+    if (isRecord(schema.properties)) Object.assign(properties, schema.properties);
+    if (Array.isArray(schema.required)) required.push(...schema.required);
     for (const branch of schema.allOf) {
       const resolvedBranch = resolveSchema(branch, components, seen);
       if (resolvedBranch && isRecord(resolvedBranch.properties)) {
