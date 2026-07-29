@@ -526,7 +526,7 @@ the PR via `ci.yml` only checks static invariants against the pinned spec),
 then comments the run link on the PR — mirrors the "trigger the on-demand
 workflow + patch the PR" step from the c8-orchestration-cluster-e2e-nightly-fix.yml
 reference this agent is modeled on. It posts a triaged digest to
-`#camunda-hub-api-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
+`#camunda-hub-nightly-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
 at `secret/data/products/qa/ci/common`
 (agent) + [`slack-token`](.github/actions/slack-token) (Slack) +
 [`hub-clone-token`](.github/actions/hub-clone-token) (workspace-cli clone of the
@@ -580,7 +580,7 @@ push.
 
 For **camunda-hub** only, when the *operation* surface changed (an operationId
 added/removed, not just a field), it also posts a Slack alert to
-`#camunda-hub-api-test-results` (Slack bot token via the same Vault JWT auth)
+`#camunda-hub-nightly-test-results` (Slack bot token via the same Vault JWT auth)
 linking the bump PR / tracking issue it just created — so the hub team sees a
 new upstream domain in their channel, not only as a GitHub issue (#435). The
 op-surface diff is already computed for the routing above, so the Slack step

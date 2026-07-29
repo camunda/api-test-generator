@@ -11,7 +11,7 @@
 #              asymmetric: camunda-hub gets issues only (never code); api-test-
 #              generator may get a PR for a confirmed test-generation bug or a
 #              coverage gap with an obvious minimal fix. Posts a triaged digest to
-#              #camunda-hub-api-test-results.
+#              #camunda-hub-nightly-test-results.
 # type: CI
 # owner: @camunda/test-automation-team
 ---
@@ -31,7 +31,7 @@ on:
         required: true
       slack_channel:
         description: 'Slack channel to post to (name or ID). Override for test runs.'
-        default: '#camunda-hub-api-test-results'
+        default: '#camunda-hub-nightly-test-results'
         required: false
 
 defaults:
@@ -57,7 +57,7 @@ concurrency:
 
 env:
   CONFIG: camunda-hub
-  SLACK_CHANNEL: ${{ github.event.inputs.slack_channel || '#camunda-hub-api-test-results' }}
+  SLACK_CHANNEL: ${{ github.event.inputs.slack_channel || '#camunda-hub-nightly-test-results' }}
   # Where the downloaded nightly reports land (exported to the agent as $REPORTS_DIR).
   REPORTS_DIR: ${{ github.workspace }}/hub-reports
 
