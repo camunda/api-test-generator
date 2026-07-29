@@ -269,12 +269,24 @@ jobs:
         id: fielddiff
         if: steps.refs.outputs.drifted == 'true' && steps.opdiff.outputs.content_changed == 'true'
         run: |
-          set -euo pipefail
-          if npm run -s spec-field-diff -- /tmp/pinned-fields.json /tmp/latest-fields.json > /tmp/field-diff.json; then
-            echo "has_newly_required=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_newly_required=true" >> "$GITHUB_OUTPUT"
-          fi
+          set -uo pipefail
+          npm run -s spec-field-diff -- /tmp/pinned-fields.json /tmp/latest-fields.json > /tmp/field-diff.json
+          diff_rc=$?
+          set -e
+          # Exit 1 is spec-field-diff.ts's deliberate "found a newly-required
+          # request property" signal — but exit 2 is a real failure (unreadable
+          # file, invalid JSON), and anything else is unexpected. Only exit 1
+          # gets treated as the intentional signal; any other non-zero code
+          # fails this step loudly instead of silently routing a script crash
+          # down the same "newly required" path as a genuine finding.
+          case "$diff_rc" in
+            0) echo "has_newly_required=false" >> "$GITHUB_OUTPUT" ;;
+            1) echo "has_newly_required=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::spec-field-diff exited ${diff_rc} (expected 0 or 1) — see the log above for the cause."
+              exit "$diff_rc"
+              ;;
+          esac
           # Rendered as "operationId (side): property (type)" lines, same
           # capped-preview convention as opdiff's added/removed above — counts
           # stay exact (from the full JSON), only the rendered preview is capped.

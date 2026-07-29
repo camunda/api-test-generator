@@ -44,8 +44,27 @@ interface Change {
   type?: string;
 }
 
+// Exit 2 on any read/parse failure — NOT the bare 1 an uncaught exception
+// would otherwise produce (confirmed: Node exits 1 on an uncaught JSON.parse
+// SyntaxError), which would be indistinguishable from main()'s intentional
+// exit-1 "newlyRequired found" signal. The workflow depends on that
+// distinction (0 = clean, 1 = newly-required, anything else = real failure)
+// to avoid silently routing a script crash down the same path as a genuine
+// newly-required-field finding.
 function loadSnapshot(path: string): Snapshot {
-  return JSON.parse(readFileSync(path, 'utf8'));
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    console.error(`[spec-field-diff] cannot read ${path}: ${String(err)}`);
+    process.exit(2);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error(`[spec-field-diff] ${path} is not valid JSON: ${String(err)}`);
+    process.exit(2);
+  }
 }
 
 function diffSide(
