@@ -535,6 +535,6 @@ jobs:
           token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
           payload: |
             {
-              "channel": "#prj-qa-sandbox",
+              "channel": "#camunda-hub-pr-e2e-results",
               "text": ${{ toJSON(steps.msg.outputs.text) }}
             }
