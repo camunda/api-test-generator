@@ -461,7 +461,7 @@ jobs:
         run: bash .github/scripts/spec-bump-resolve.sh
 
       # --- Hub-only: Slack heads-up on ANY content drift (#435) -----------------
-      # The hub team lives in #camunda-hub-api-test-results, so mirror the
+      # The hub team lives in #camunda-hub-nightly-test-results, so mirror the
       # GitHub artifact this run just created (bump PR or tracking issue) as a
       # Slack alert. Fires on ANY real content drift (content_changed=='true',
       # the sentinel that the opdiff step actually ran — unset when
@@ -581,7 +581,7 @@ jobs:
           # string, so interpolate it raw as the value — no surrounding quotes.
           payload: |
             {
-              "channel": "#camunda-hub-api-test-results",
+              "channel": "#camunda-hub-nightly-test-results",
               "text": ${{ steps.slack-payload.outputs.text_json }}
             }
 

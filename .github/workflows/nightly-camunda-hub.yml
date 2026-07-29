@@ -36,8 +36,8 @@ env:
   HUB_UI_PORT: '8088'
   KEYCLOAK_PORT: '18080'
   # Channel to publish results to. The Slack bot must be invited to this channel
-  # for chat.postMessage to succeed (`/invite @<bot>` in #camunda-hub-api-test-results).
-  SLACK_CHANNEL: '#camunda-hub-api-test-results'
+  # for chat.postMessage to succeed (`/invite @<bot>` in #camunda-hub-nightly-test-results).
+  SLACK_CHANNEL: '#camunda-hub-nightly-test-results'
 
 jobs:
   nightly-hub:
@@ -390,7 +390,7 @@ jobs:
       # for the clone token (no token stored as a repo secret). Lives at
       # secret/data/products/qa/ci/common, key SLACK_BOT_USER_OAUTH_TOKEN — the
       # bound Vault role must be granted read on that path. always() so a failed
-      # run still notifies. The bot must be invited to #camunda-hub-api-test-results.
+      # run still notifies. The bot must be invited to #camunda-hub-nightly-test-results.
       # Notification infra must not fail an otherwise-complete run — continue-on-
       # error, and the Notify steps skip on the empty token output. Shared with
       # spec-bump-check — see .github/actions/slack-token.
