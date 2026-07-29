@@ -384,25 +384,19 @@ jobs:
           LATEST: ${{ steps.refs.outputs.latest }}
         run: bash .github/scripts/spec-bump-resolve.sh
 
-      # --- Hub-only: Slack heads-up on OPERATION-surface drift (#435) -----------
+      # --- Hub-only: Slack heads-up on ANY content drift (#435) -----------------
       # The hub team lives in #camunda-hub-api-test-results, so mirror the
       # GitHub artifact this run just created (bump PR or tracking issue) as a
-      # Slack alert. Fires when the operationId surface actually changed
-      # (n_added/n_removed) OR when unmapped (uncovered) operations blocked the
-      # auto-adopt path — that second case matters even with zero op-count
-      # churn (e.g. an existing op regresses to uncovered), and without it the
-      # only place that signal shows up is the GitHub tracking issue itself,
-      # which nobody's watching by default. A field-level-only content change
-      # with neither is still silent here. The diff is already computed above
-      # (steps.opdiff), so this just formats + links; no recomputation.
-      # content_changed=='true' is the sentinel that the opdiff step ran (it's
-      # unset when drifted=='false').
+      # Slack alert. Fires on ANY real content drift (content_changed=='true',
+      # the sentinel that the opdiff step actually ran — unset when
+      # drifted=='false') — never silent, even for a field-level-only change
+      # with zero operationId churn and no unmapped operations: the point is
+      # "we're behind, here's the PR to review," not just op-surface churn.
+      # The diff is already computed above (steps.opdiff), so this just
+      # formats + links; no recomputation.
       - name: Fetch Slack bot token from Vault (hub drift)
         id: slack-secrets
-        if: >-
-          matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
-          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0' ||
-           steps.unmapped.outputs.has_unmapped == 'true')
+        if: matrix.private && steps.opdiff.outputs.content_changed == 'true'
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -415,8 +409,6 @@ jobs:
         id: slack-payload
         if: >-
           matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
-          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0' ||
-           steps.unmapped.outputs.has_unmapped == 'true') &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         # Notification formatting must not fail the run (gh/API transient errors).
         continue-on-error: true
@@ -479,25 +471,29 @@ jobs:
               ? `\n🚫 *missing coverage* (blocks auto-adopt): ${e.UNMAPPED_LIST}`
               : "";
             // Only claim "op-surface drift" when there is actual operationId
-            // churn — this notify can now fire on missing-coverage alone (zero
-            // added/removed), where that headline would be misleading.
+            // churn, and only claim "coverage regression" when there is a
+            // real unmapped-operations hit — this now fires on ANY content
+            // drift, including neither (a field-level-only change), which
+            // gets its own honest, non-misleading headline instead of being
+            // silently dropped or mislabeled as a regression.
             const hasChurn = e.N_ADDED !== "0" || e.N_REMOVED !== "0";
+            const hasUnmapped = !!e.UNMAPPED_LIST;
             const headline = hasChurn
-              ? `🔎 *camunda-hub upstream op-surface drift* vs the pin (\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
+              ? `:alert2: *camunda-hub upstream op-surface drift* vs the pin (\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
                 `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
                 `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}`
-              : `🔎 *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`;
+              : hasUnmapped
+              ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
+              : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
             const text = headline + unmappedLine + `\n${e.LINK}`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 
-      - name: Notify Slack (hub op-surface drift)
+      - name: Notify Slack (hub spec drift)
         # Non-blocking + only when the payload built cleanly (don't post a
         # half-built message if slack-payload errored under continue-on-error).
         if: >-
           matrix.private && steps.opdiff.outputs.content_changed == 'true' &&
-          (steps.opdiff.outputs.n_added != '0' || steps.opdiff.outputs.n_removed != '0' ||
-           steps.unmapped.outputs.has_unmapped == 'true') &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != '' &&
           steps.slack-payload.outcome == 'success'
         continue-on-error: true
