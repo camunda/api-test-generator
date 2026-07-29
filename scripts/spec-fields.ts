@@ -121,6 +121,27 @@ function describeType(propSchema: unknown): string {
   return `${typeof propSchema.type === 'string' ? propSchema.type : 'unknown'}${nullableSuffix}`;
 }
 
+// Resolves a $ref pointing into a top-level components bucket OTHER than
+// schemas — e.g. an operation's requestBody as `$ref: "#/components/
+// requestBodies/Foo"`, or a response entry as `$ref: "#/components/
+// responses/Foo"`. Distinct from resolveSchema (which only ever resolves
+// into components.schemas): these two component kinds live in their own
+// buckets, so the bucket name is a parameter, not hardcoded.
+function resolveComponentRef(
+  obj: unknown,
+  bucketKey: string,
+  components: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (!isRecord(obj)) return null;
+  if (typeof obj.$ref === 'string') {
+    const name = obj.$ref.split('/').pop();
+    const bucket = isRecord(components[bucketKey]) ? components[bucketKey] : {};
+    const resolved = name ? bucket[name] : undefined;
+    return isRecord(resolved) ? resolved : null;
+  }
+  return obj;
+}
+
 function extractFields(schema: unknown, components: Record<string, unknown>): SideFields | null {
   const resolved = resolveSchema(schema, components);
   if (!resolved || !isRecord(resolved.properties)) return null;
@@ -140,8 +161,10 @@ function primarySuccessSchema(
   components: Record<string, unknown>,
 ): SideFields | null {
   if (!isRecord(responses)) return null;
-  for (const [status, resp] of Object.entries(responses)) {
-    if (!status.startsWith('2') || !isRecord(resp)) continue;
+  for (const [status, respRaw] of Object.entries(responses)) {
+    if (!status.startsWith('2')) continue;
+    const resp = resolveComponentRef(respRaw, 'responses', components);
+    if (!resp) continue;
     const content = resp.content;
     if (!isRecord(content)) continue;
     const json = content['application/json'];
@@ -165,8 +188,9 @@ function collectOperationFields(bundle: unknown): Record<string, OperationFields
         continue;
 
       let request: SideFields | null = null;
-      if (isRecord(op.requestBody)) {
-        const content = op.requestBody.content;
+      const requestBody = resolveComponentRef(op.requestBody, 'requestBodies', components);
+      if (requestBody) {
+        const content = requestBody.content;
         const json = isRecord(content) ? content['application/json'] : undefined;
         if (isRecord(json)) request = extractFields(json.schema, components);
       }
@@ -193,6 +217,16 @@ function main(): void {
     fields = collectOperationFields(raw);
   } catch (err) {
     console.error(`[spec-fields] ${bundlePath}: ${String(err)} — re-run fetch-spec.`);
+    process.exit(2);
+  }
+  // Same refusal as spec-operations.ts: an empty surface here would let
+  // spec-field-diff.ts silently report "no field changes" for a run whose
+  // bundle is actually broken/reshaped, which could let an unsafe drift
+  // auto-adopt instead of failing loudly.
+  if (Object.keys(fields).length === 0) {
+    console.error(
+      `[spec-fields] no operations found in ${bundlePath} — refusing to emit an empty field surface (it would corrupt the field-diff). Re-run fetch-spec.`,
+    );
     process.exit(2);
   }
   console.log(JSON.stringify(fields, null, 2));
