@@ -330,6 +330,26 @@ jobs:
             confidence="low"
             summary="Classification agent did not produce a usable result — see the run for details."
           fi
+
+          # Enforce the exact enum contract for category/confidence — unlike
+          # summary (already newline-stripped above), these were written to
+          # $GITHUB_OUTPUT as-is. A value containing an embedded newline would
+          # inject arbitrary extra lines into $GITHUB_OUTPUT (confirmed
+          # locally: category="product\nfake_output=injected" produces a
+          # genuine extra output line), corrupting/overriding whatever the
+          # downstream Slack-routing step reads. Falling back to the same
+          # "unknown"/"low" default on any non-matching value closes that off
+          # entirely: only these exact, single-line literals ever reach
+          # $GITHUB_OUTPUT for these two fields.
+          case "$category" in
+            product|generator-gap|infra|flaky|unknown) ;;
+            *) category="unknown" ;;
+          esac
+          case "$confidence" in
+            high|medium|low) ;;
+            *) confidence="low" ;;
+          esac
+
           {
             echo "category=${category}"
             echo "confidence=${confidence}"
