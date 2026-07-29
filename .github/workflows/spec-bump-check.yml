@@ -479,12 +479,12 @@ jobs:
             const hasChurn = e.N_ADDED !== "0" || e.N_REMOVED !== "0";
             const hasUnmapped = !!e.UNMAPPED_LIST;
             const headline = hasChurn
-              ? `🔎 *camunda-hub upstream op-surface drift* vs the pin (\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
+              ? `:alert2: *camunda-hub upstream op-surface drift* vs the pin (\`${e.PINNED}\` → latest \`${e.LATEST}\`):\n` +
                 `🆕 added (${e.N_ADDED}): ${e.ADDED_CSV}\n` +
                 `🗑️ removed (${e.N_REMOVED}): ${e.REMOVED_CSV}`
               : hasUnmapped
-              ? `🔎 *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
-              : `🔎 *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
+              ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
+              : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
             const text = headline + unmappedLine + `\n${e.LINK}`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
