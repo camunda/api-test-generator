@@ -162,7 +162,7 @@ function renderScenarioTest(
     operationMap?: OperationMapJsonSource;
   } = {},
 ): void {
-  const testName = `${scenario.id} — ${escapeQuotesForString(scenario.name || 'scenario')}`;
+  const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
 
   lines.push('  it(');
   lines.push(`    '${testName}',`);

@@ -112,7 +112,7 @@ API_BASE_URL=http://localhost:8080/v2
     {
       relativePath: 'types/camunda8-sdk.d.ts',
       content: `declare module '@camunda8/sdk' {
-  export type ApiClientMethod = (args?: unknown) => Promise<any>;
+  export type ApiClientMethod = (args?: unknown) => Promise<unknown>;
 
   export interface ApiClient {
     [key: string]: ApiClientMethod;
