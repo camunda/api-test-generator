@@ -43,9 +43,9 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
             'test:ui': 'vitest --ui',
           },
           devDependencies: {
-            '@vitest/ui': '^1.6.0',
+            '@vitest/ui': '^4.1.0',
             typescript: '^5.3.0',
-            vitest: '^1.6.0',
+            vitest: '^4.1.0',
           },
           dependencies: {
             '@camunda8/sdk': '^8.5.0',
