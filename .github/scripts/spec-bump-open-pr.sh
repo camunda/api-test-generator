@@ -143,3 +143,55 @@ if [ -n "$issue" ]; then
     --comment "✅ Latest now flows through cleanly — superseded by the auto-bump PR (branch \`${branch}\`). Closing this tracking issue." >/dev/null
   echo "Closed superseded tracking issue #${issue}."
 fi
+
+# --- Hub only: trigger on-demand validation against a live Hub -------------
+# Mirrors the same pattern the nightly triage agent uses for its own fix/
+# suppress PRs (see "Trigger on-demand validation..." in
+# triage-camunda-hub-nightly.yml): ci.yml's hub-invariants job already runs
+# automatically on this PR, but it never starts a live Hub (static
+# invariants against the pinned spec only), so it can't confirm the new pin
+# actually works end-to-end. hub-ondemand-test.yml does exactly that but is
+# workflow_dispatch-only — nothing triggers it automatically otherwise.
+#
+# camunda-oca has no equivalent live-instance workflow, hence IS_PRIVATE-only.
+#
+# Unlike the triage agent's PRs (LLM-authored from untrusted nightly-report
+# content, hence that workflow's extra ".github/** touched?" guard before
+# dispatching with production secrets), this diff is fully deterministic:
+# this script staged exactly configs/${CONFIG}/spec-pin.json above — nothing
+# else — via `git add "$pin_path"` + the earlier `git diff --cached --quiet`
+# early-return. There's no agent-authored content that could smuggle in a
+# .github/** change, so that extra guard doesn't apply here.
+if [ "${IS_PRIVATE:-}" = "true" ]; then
+  pr_num="$(find_bump_pr)"
+  if [ -z "$pr_num" ]; then
+    echo "::warning::Could not resolve the bump PR number for validation dispatch — skipping."
+  elif ! gh workflow run hub-ondemand-test.yml --repo camunda/api-test-generator --ref "$branch"; then
+    echo "::warning::Could not dispatch hub-ondemand-test.yml for the bump PR."
+    gh pr comment "$pr_num" --repo camunda/api-test-generator \
+      --body ":warning: Could not auto-dispatch on-demand validation (\`hub-ondemand-test.yml\`) for this PR — please trigger it manually against this branch before merging (it starts a live Hub and runs the real suite; \`hub-invariants\` on this PR only checks static invariants against the pinned spec, not a live run)." \
+      2>/dev/null || true
+  else
+    # workflow_run creation isn't synchronous with the dispatch call — poll
+    # briefly for the run this dispatch just created.
+    run_url=""
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      sleep 3
+      run_id=$(gh run list --repo camunda/api-test-generator --workflow=hub-ondemand-test.yml \
+        --branch "$branch" --event workflow_dispatch --limit 1 --json databaseId \
+        --jq '.[0].databaseId // empty' 2>/dev/null || true)
+      if [ -n "$run_id" ]; then
+        run_url="https://github.com/camunda/api-test-generator/actions/runs/${run_id}"
+        break
+      fi
+    done
+    # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
+    note_body=$(if [ -n "$run_url" ]; then
+      printf '🔎 **On-demand validation**: [hub-ondemand-test run](%s) — dispatched automatically. This confirms the new pin actually passes against a live Hub, not just static invariants (which is all `hub-invariants` on this PR checks).' "$run_url"
+    else
+      printf '⚠️ Dispatched `hub-ondemand-test.yml` for validation but could not resolve the run URL within the poll window — check the Actions tab for branch `%s`.' "$branch"
+    fi)
+    gh pr comment "$pr_num" --repo camunda/api-test-generator --body "$note_body" 2>/dev/null \
+      || echo "::warning::Could not comment validation link on #${pr_num}"
+  fi
+fi
