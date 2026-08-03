@@ -146,7 +146,13 @@ jobs:
   classify:
     name: Classify hub-suite failure (read-only)
     needs: [validate, run]
-    if: needs.run.result == 'failure'
+    # `always()` is required, not decorative: a job-level `if:` that doesn't
+    # reference a status-check function gets an implicit `success() &&`
+    # prepended by GitHub Actions, which is always false here (`run` failed)
+    # — so without this, the condition below never actually runs the job.
+    # Confirmed this is exactly what happened: every failing run to date
+    # (including the real ones from 2026-08-02) shows this job with steps: [].
+    if: always() && needs.run.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
