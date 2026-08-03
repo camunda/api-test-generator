@@ -100,8 +100,15 @@ function buildSuiteSource(
   lines.push('using System.IO;');
   lines.push('using System.Net.Http;');
   lines.push('using System.Threading.Tasks;');
+  // The real Camunda.Orchestration.Sdk NuGet package is a single flat
+  // namespace (client + request/response DTOs together) — there is no
+  // separate RestSdk.Models namespace in the published package. That
+  // namespace only exists in this repo's local vendored reference client
+  // under csharp-sdk/src/Camunda.Orchestration.RestSdk/, which generated
+  // suites do not reference. Importing it here causes CS0234 on the
+  // `using` line and cascading CS0246s for every DTO type in every
+  // generated file (confirmed via a real `dotnet build`).
   lines.push('using Camunda.Orchestration.Sdk;');
-  lines.push('using Camunda.Orchestration.RestSdk.Models;');
   lines.push('using Xunit;');
   lines.push('');
   lines.push('namespace CamundaIntegrationTests;');
