@@ -22,10 +22,50 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
         {
           operationId: 'getUser',
           method: 'GET',
-          pathTemplate: '/users/{username}',
-          pathParams: [{ name: 'widgetId', var: 'widgetIdVar' }],
+          pathTemplate: '/users/{widgetId}',
           expect: { status: 200 },
           extract: [{ fieldPath: 'data.id', bind: 'widgetId' }],
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+// Regression fixture for the path-params bug: an operation whose only
+// params are path segments (no request body) — e.g. real "assign X to Y"
+// operations like `assignClientToGroup` (PUT /groups/{groupId}/clients/{clientId}).
+// step.pathParams is never populated by path-analyser (repo memory item 7);
+// path params must be derived from pathTemplate instead, or the input object
+// is emitted empty and the real SDK call fails with a 400.
+const PATH_PARAMS_ONLY_COLLECTION: EndpointScenarioCollection = {
+  endpoint: {
+    operationId: 'assignClientToGroup',
+    method: 'PUT',
+    path: '/groups/{groupId}/clients/{clientId}',
+  },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'path #1',
+      description: 'Assign a client to a group',
+      operations: [
+        {
+          operationId: 'assignClientToGroup',
+          method: 'PUT',
+          path: '/groups/{groupId}/clients/{clientId}',
+        },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { groupIdVar: 'group_1', clientIdVar: 'client_1' },
+      requestPlan: [
+        {
+          operationId: 'assignClientToGroup',
+          method: 'PUT',
+          pathTemplate: '/groups/{groupId}/clients/{clientId}',
+          expect: { status: 204 },
         } satisfies RequestStep,
       ],
     },
@@ -156,5 +196,13 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).toContain("ctx['nameVar'] = ctx['nameVar'] ?? seedBinding('nameVar');");
     expect(output).not.toContain('pending binding');
     expect(output).not.toContain("ctx['nameVar'] = undefined;");
+  });
+
+  test('a path-params-only operation (no body) derives its input from pathTemplate, not the dead step.pathParams field', () => {
+    const output = renderJsSuite(PATH_PARAMS_ONLY_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("groupId: ctx['groupIdVar'],");
+    expect(output).toContain("clientId: ctx['clientIdVar'],");
+    expect(output).not.toContain('const input1 = {\n      };');
   });
 });
