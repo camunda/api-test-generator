@@ -10,7 +10,12 @@ import type {
   EndpointScenarioCollection,
   RequestStep,
 } from 'path-analyser/types';
+import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
 import { renderJavaScriptBody } from './sdk-mapping.js';
+
+// Regenerate via `npm run js-sdk:dump-methods --workspace materializer`
+// whenever the @camunda8/sdk devDependency is bumped.
+const KNOWN_SDK_METHODS = new Set<string>(knownSdkMethods.methods);
 
 /**
  * Build the file name a scenario collection lowers to.
@@ -144,6 +149,32 @@ export function renderJsSuite(
  */
 function renderScenarioTest(lines: string[], scenario: EndpointScenario): void {
   const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
+  const operations = scenario.requestPlan || [];
+
+  // Spec/SDK version skew: some operationIds have no backing method on the
+  // installed @camunda8/sdk yet (see known-sdk-methods.json). Emitting a
+  // real call for these throws an opaque runtime TypeError, so skip the
+  // whole scenario instead — a chain that depends on a missing step can't
+  // run regardless of which step it is.
+  const missingMethods = [
+    ...new Set(
+      operations
+        .map((step) => toSdkMethodName(step.operationId))
+        .filter((method) => !KNOWN_SDK_METHODS.has(method)),
+    ),
+  ];
+
+  if (missingMethods.length > 0) {
+    const reason = `no method ${missingMethods.map((m) => `'${m}'`).join(', ')} on installed @camunda8/sdk@${knownSdkMethods.sdkVersion} (spec/SDK version skew)`;
+    lines.push('  it.skip(');
+    lines.push(`    '${testName}',`);
+    lines.push('    async () => {');
+    lines.push(`      // SKIPPED: ${reason}`);
+    lines.push('    },');
+    lines.push('  );');
+    lines.push('');
+    return;
+  }
 
   lines.push('  it(');
   lines.push(`    '${testName}',`);
@@ -164,7 +195,6 @@ function renderScenarioTest(lines: string[], scenario: EndpointScenario): void {
   }
 
   // Render each operation in the request plan
-  const operations = scenario.requestPlan || [];
   for (let i = 0; i < operations.length; i++) {
     const step = operations[i];
     renderRequestStep(lines, step, i);
