@@ -30,7 +30,9 @@ import {
 } from '../src/analysis/oneOfAdvanced.js';
 import { generateOneOfAmbiguous } from '../src/analysis/oneOfAmbiguous.js';
 import { generateOneOfNoneMatch } from '../src/analysis/oneOfNoneMatch.js';
+import { generatePaginationCursorInvalid } from '../src/analysis/paginationCursor.js';
 import { generatePaginationLimitInvalid } from '../src/analysis/paginationLimit.js';
+import { generatePaginationOffsetPastTotal } from '../src/analysis/paginationOffset.js';
 import { generateParamConstraintViolations } from '../src/analysis/paramConstraintViolations.js';
 import {
   generateParamEnumViolation,
@@ -336,6 +338,26 @@ async function main() {
       scenarios.push(
         ...generatePaginationLimitInvalid(model.operations, {
           capPerOperation: undefined,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    // page.from past the real result count -> 200 with an empty page (verified
+    // live against camunda-oca); NOT the same as an out-of-window 500, which
+    // paginationOffset.ts's header comment explains why it's deliberately not
+    // modeled here.
+    if (wantKind('pagination-offset-past-total')) {
+      scenarios.push(
+        ...generatePaginationOffsetPastTotal(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    // page.after/before that's base64-pattern-valid but doesn't decode to a
+    // real cursor -> 400 (verified live against camunda-oca).
+    if (wantKind('pagination-cursor-invalid')) {
+      scenarios.push(
+        ...generatePaginationCursorInvalid(model.operations, {
           onlyOperations: opts.onlyOperations,
         }),
       );

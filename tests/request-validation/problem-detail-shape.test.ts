@@ -189,3 +189,73 @@ describe('assertResponseStatus — ProblemDetail shape check', () => {
     expect(textSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * expectEmptyItems (#501) — a 2xx-expecting scenario where the correct
+ * behavior is a genuinely empty result page, not an error (e.g.
+ * pagination-offset-past-total: `page.from` past the real total -> 200,
+ * `items: []`, verified live against camunda-oca).
+ */
+describe('assertResponseStatus — expectEmptyItems check', () => {
+  it('passes silently when items is a genuinely empty array', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({ items: [], page: { totalItems: 5 } });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(200, body), 200, ctx, {
+        expectEmptyItems: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails when items is non-empty', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({ items: [{ id: 1 }], page: { totalItems: 5 } });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(200, body), 200, ctx, {
+        expectEmptyItems: true,
+      }),
+    ).rejects.toThrow(/response body\.items expected to be empty but has 1 item\(s\)/);
+  });
+
+  it('fails when items is missing or not an array', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({ page: { totalItems: 5 } });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(200, body), 200, ctx, {
+        expectEmptyItems: true,
+      }),
+    ).rejects.toThrow(/response body\.items is missing or not an array/);
+  });
+
+  it('fails when the body is not JSON at all', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(200, 'not json'), 200, ctx, {
+        expectEmptyItems: true,
+      }),
+    ).rejects.toThrow(/response body is not valid JSON/);
+  });
+
+  it('still fails on a status mismatch even when expectEmptyItems is set', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(500, ''), 200, ctx, {
+        expectEmptyItems: true,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('never reads the response body on a clean pass without expectEmptyItems set', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const { res, textSpy } = fakeResponseWithTextSpy(200, JSON.stringify({ items: [1] }));
+    await assertResponseStatus(fakeTestInfo(), res, 200, ctx);
+    expect(textSpy).not.toHaveBeenCalled();
+  });
+
+  it('does read the response body when expectEmptyItems is set', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const { res, textSpy } = fakeResponseWithTextSpy(200, JSON.stringify({ items: [] }));
+    await assertResponseStatus(fakeTestInfo(), res, 200, ctx, { expectEmptyItems: true });
+    expect(textSpy).toHaveBeenCalledTimes(1);
+  });
+});

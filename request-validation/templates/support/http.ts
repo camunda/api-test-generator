@@ -116,6 +116,28 @@ function validateProblemDetailShape(
 }
 
 /**
+ * Check `body` for a genuinely empty result page (`items: []`). Used for a
+ * `200`-expecting scenario, not a `ProblemDetail` — see `expectEmptyItems`.
+ */
+function validateEmptyItemsShape(body: unknown, parseError: string | undefined): string[] {
+  if (parseError) return [`response body is not valid JSON: ${parseError}`];
+  if (body === undefined) {
+    return ['response body is empty; expected an object with an empty `items` array'];
+  }
+  if (!isRecord(body)) {
+    const got = body === null ? 'null' : Array.isArray(body) ? 'array' : typeof body;
+    return [`response body is not a JSON object (got ${got})`];
+  }
+  if (!Array.isArray(body.items)) {
+    return [`response body.items is missing or not an array (got ${JSON.stringify(body.items)})`];
+  }
+  if (body.items.length !== 0) {
+    return [`response body.items expected to be empty but has ${body.items.length} item(s)`];
+  }
+  return [];
+}
+
+/**
  * Assert the server responded with the expected status AND, when it did, that
  * the error body conforms to the API's `ProblemDetail` shape (RFC 9457). On
  * either mismatch:
@@ -143,6 +165,15 @@ export async function assertResponseStatus(
      * request-validation config) — never to silence a one-off failure.
      */
     skipProblemDetailShape?: boolean;
+    /**
+     * Also assert the response body's `items` array is empty. For a handful
+     * of scenarios (e.g. a search `page` offset/cursor genuinely past the end
+     * of the real result set) the API's correct, verified behavior is `200`
+     * with an empty page, not an error — this is the 2xx-expecting case the
+     * `shouldCheckShape` comment below anticipated. Meaningless (ignored) when
+     * `expected` is not itself 2xx.
+     */
+    expectEmptyItems?: boolean;
   },
 ): Promise<void> {
   const actual = res.status();
@@ -152,14 +183,16 @@ export async function assertResponseStatus(
   // an error response — e.g. a 200 body when a 4xx was expected), the caller
   // hasn't opted this scenario out (see `opts.skipProblemDetailShape`), and
   // `expected` is itself an error status — `ProblemDetail` is only the
-  // declared shape for 4xx/5xx, so a 2xx-expecting caller (none exist today,
-  // but nothing statically prevents one) must never be shape-checked against
-  // it. This is knowable from the status alone, before reading the body, so a
-  // clean pass that needs no shape check never pays for reading/parsing a
-  // body it would only discard — the original "no body read on a plain
-  // match" behavior is preserved for that case.
+  // declared shape for 4xx/5xx, so a 2xx-expecting caller must never be
+  // shape-checked against it (see `shouldCheckEmptyItems` below for the one
+  // 2xx-expecting check that does exist). This is knowable from the status
+  // alone, before reading the body, so a clean pass that needs no shape check
+  // never pays for reading/parsing a body it would only discard — the
+  // original "no body read on a plain match" behavior is preserved for that
+  // case.
   const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
-  if (!statusMismatch && !shouldCheckShape) return;
+  const shouldCheckEmptyItems = !statusMismatch && !!opts?.expectEmptyItems;
+  if (!statusMismatch && !shouldCheckShape && !shouldCheckEmptyItems) return;
 
   let bodyText = '';
   try {
@@ -170,7 +203,7 @@ export async function assertResponseStatus(
   }
 
   let shapeErrors: string[] = [];
-  if (shouldCheckShape) {
+  if (shouldCheckShape || shouldCheckEmptyItems) {
     let bodyJson: unknown;
     let parseError: string | undefined;
     if (bodyText) {
@@ -180,7 +213,9 @@ export async function assertResponseStatus(
         parseError = e instanceof Error ? e.message : String(e);
       }
     }
-    shapeErrors = validateProblemDetailShape(bodyJson, expected, parseError);
+    shapeErrors = shouldCheckShape
+      ? validateProblemDetailShape(bodyJson, expected, parseError)
+      : validateEmptyItemsShape(bodyJson, parseError);
   }
 
   if (!statusMismatch && shapeErrors.length === 0) return;
@@ -211,7 +246,7 @@ export async function assertResponseStatus(
       body: tryParseJson(cappedBodyText.value) ?? cappedBodyText.value,
       bodyTruncated: cappedBodyText.truncated || undefined,
       bodyOriginalBytes: cappedBodyText.truncated ? cappedBodyText.originalBytes : undefined,
-      problemDetailShapeErrors: shapeErrors.length > 0 ? shapeErrors : undefined,
+      shapeErrors: shapeErrors.length > 0 ? shapeErrors : undefined,
     },
     null,
     2,
@@ -232,7 +267,7 @@ export async function assertResponseStatus(
     `  expected status: ${expected}\n` +
     `  actual status:   ${actual} ${res.statusText()}\n` +
     (shapeErrors.length > 0
-      ? `  ProblemDetail shape violations:\n${shapeErrors.map((e) => `    - ${e}`).join('\n')}\n`
+      ? `  Response body shape violations:\n${shapeErrors.map((e) => `    - ${e}`).join('\n')}\n`
       : '') +
     `  request body:    ${formatRequestPayload(ctx)}\n` +
     `  response body:   ${truncate(bodyText, 500)}`;

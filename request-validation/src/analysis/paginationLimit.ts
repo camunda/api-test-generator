@@ -1,6 +1,7 @@
-import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
+import type { OperationModel, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { makeId } from './common.js';
+import { findLimitOnlyBranch, findPaginationPage, isRecord } from './paginationShape.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
@@ -14,67 +15,20 @@ interface PaginationLimitField {
 }
 
 /**
- * Search/list bodies model pagination as a `page` property whose schema is
- * `{ allOf: [<oneOf of LimitPagination/OffsetPagination/CursorForward.../
- * CursorBackward...>] }` — two hops below the request body root, and `page`
- * itself typically lives inside one of the root schema's OWN `allOf`
- * branches (e.g. `ProcessInstanceSearchQuery = { allOf: [SearchQueryRequest,
- * {filter...}] }`), not directly on `root.properties` — a third hop. The
- * generic `oneof-*` kinds only look at a root-level `oneOf` (never present
- * here), and the shared walker's `mergeAllOf` bails on the page-level shape
- * (an `allOf` branch with `oneOf` and no `type`), so `page.limit` is
- * invisible to every walker-based kind too (`constraint-violation` included)
- * even though it carries a real `minimum`/`maximum`. `op.requestBodySchema`
- * is already fully dereferenced (see `spec/loader.ts`'s
- * `SwaggerParser.dereference`), so no `$ref`-following is needed here — just
- * unwrap single-entry `allOf` wrappers.
- *
- * Matched by shape, not by schema title: the wrapper is named
- * `SearchQueryPageRequest` in camunda-oca but `SearchQueryPage` in
- * camunda-hub, even though both are the same pagination-family shape.
+ * `page.limit`'s `minimum`/`maximum` (see `paginationShape.ts` for why it's
+ * invisible to every other kind) — matched via the `LimitPagination` branch
+ * (the `oneOf` branch whose only property is `limit`), present in every
+ * config's pagination family.
  */
 export function findPaginationLimitField(op: OperationModel): PaginationLimitField | undefined {
-  const root = op.requestBodySchema;
-  if (!root) return undefined;
-  for (const [propName, propSchema] of Object.entries(collectTopLevelProperties(root))) {
-    const unwrapped = unwrapSingleAllOf(propSchema);
-    if (!unwrapped || !Array.isArray(unwrapped.oneOf)) continue;
-    for (const branch of unwrapped.oneOf) {
-      const keys = Object.keys(branch.properties ?? {});
-      if (keys.length !== 1 || keys[0] !== 'limit') continue;
-      const limitSchema = branch.properties?.limit;
-      if (typeof limitSchema?.minimum !== 'number' && typeof limitSchema?.maximum !== 'number') {
-        continue;
-      }
-      return { pageProp: propName, minimum: limitSchema?.minimum, maximum: limitSchema?.maximum };
-    }
+  const page = findPaginationPage(op);
+  if (!page) return undefined;
+  const branch = findLimitOnlyBranch(page.branches);
+  const limitSchema = branch?.properties?.limit;
+  if (typeof limitSchema?.minimum !== 'number' && typeof limitSchema?.maximum !== 'number') {
+    return undefined;
   }
-  return undefined;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-
-// One level only: every concrete search-request schema observed merges its
-// own `filter`/`sort` object directly alongside a shared base (e.g.
-// `SearchQueryRequest`) via a flat `allOf: [base, {filter,sort}]` — never a
-// nested allOf-of-allOf for the root itself.
-function collectTopLevelProperties(root: SchemaFragment): Record<string, SchemaFragment> {
-  const props: Record<string, SchemaFragment> = { ...root.properties };
-  if (Array.isArray(root.allOf)) {
-    for (const branch of root.allOf) {
-      if (branch.properties) Object.assign(props, branch.properties);
-    }
-  }
-  return props;
-}
-
-function unwrapSingleAllOf(schema: SchemaFragment): SchemaFragment {
-  if (Array.isArray(schema.allOf) && schema.allOf.length === 1 && !schema.oneOf) {
-    return schema.allOf[0];
-  }
-  return schema;
+  return { pageProp: page.pageProp, minimum: limitSchema?.minimum, maximum: limitSchema?.maximum };
 }
 
 function planLimitMutations(minimum?: number, maximum?: number): { kind: string; value: number }[] {

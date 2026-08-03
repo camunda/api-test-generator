@@ -132,6 +132,17 @@ function buildFile(
         'they are not supported in legacy QA-tree mode (--no-standalone / --qa-import-depth).',
     );
   }
+  // pagination-offset-past-total relies on assertResponseStatus's
+  // expectEmptyItems opt, which only exists in the vendored standalone
+  // support module (see http.ts). Same guard shape as auth-deny above.
+  const usesEmptyItemsCheck = scenarios.some((s) => s.type === 'pagination-offset-past-total');
+  if (usesEmptyItemsCheck && !standalone) {
+    throw new Error(
+      'pagination-offset-past-total scenarios require the standalone support module ' +
+        "(assertResponseStatus's expectEmptyItems); they are not supported in legacy QA-tree " +
+        'mode (--no-standalone / --qa-import-depth).',
+    );
+  }
   const usesAuthHeaders = scenarios.some(
     (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding === 'multipart',
   );
@@ -363,7 +374,12 @@ function renderScenario(
     // this scenario kind (see knownProblemDetailShapeGaps) — the status-code
     // assertion above/below is unaffected, only assertResponseStatus's body
     // shape check is skipped for this call.
-    const assertOpts = skipProblemDetailShape ? ', { skipProblemDetailShape: true }' : '';
+    // expectEmptyItems: pagination-offset-past-total's 200 response is a
+    // genuinely empty page, not a ProblemDetail — see http.ts.
+    const assertOptFields: string[] = [];
+    if (skipProblemDetailShape) assertOptFields.push('skipProblemDetailShape: true');
+    if (s.type === 'pagination-offset-past-total') assertOptFields.push('expectEmptyItems: true');
+    const assertOpts = assertOptFields.length ? `, { ${assertOptFields.join(', ')} }` : '';
     lines.push(
       `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} }${assertOpts});`,
     );
