@@ -108,7 +108,9 @@ describe('Python SDK Emitter', () => {
 
       // Verify test function
       expect(output).toContain('@pytest.mark.asyncio');
-      expect(output).toContain('async def test_happy_path(ctx: TestContext)');
+      // #<naming-fix>: prefixed with the scenario's own id (unique within a
+      // collection) so scenarios sharing a display name don't collide.
+      expect(output).toContain('async def test_sc1_happy_path(ctx: TestContext)');
       expect(output).toContain('Step 1: createWidget');
     });
 
@@ -128,8 +130,8 @@ describe('Python SDK Emitter', () => {
       };
 
       const output = renderPythonSuite(multiScenarioCollection);
-      expect(output).toContain('test_happy_path');
-      expect(output).toContain('test_error_case');
+      expect(output).toContain('test_sc1_happy_path');
+      expect(output).toContain('test_sc2_error_case');
     });
   });
 
@@ -252,7 +254,37 @@ describe('Python SDK Emitter', () => {
       };
 
       const output = renderPythonSuite(collection);
-      expect(output).toContain('test_complex_scenario_with_spaces');
+      expect(output).toContain('test_sc1_complex_scenario_with_spaces');
+    });
+
+    test('non-identifier characters in scenario name are folded to underscores (invalid Python identifier bug)', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            name: 'createProcessInstance - bpmn #1',
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+      expect(output).toContain('async def test_sc1_createprocessinstance_bpmn_1(ctx: TestContext)');
+      expect(output).not.toMatch(/async def test_\S*[^\w\s(].*\(/);
+    });
+
+    test('scenarios sharing the same display name still get distinct test functions', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          { ...SAMPLE_COLLECTION.scenarios[0], id: 'sc1', name: 'duplicate name' },
+          { ...SAMPLE_COLLECTION.scenarios[0], id: 'sc2', name: 'duplicate name' },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+      expect(output).toContain('async def test_sc1_duplicate_name(ctx: TestContext)');
+      expect(output).toContain('async def test_sc2_duplicate_name(ctx: TestContext)');
     });
   });
 
@@ -354,6 +386,18 @@ describe('Python SDK Emitter', () => {
       expect(pyproject).toBeDefined();
       expect(pyproject?.content).toContain('camunda-orchestration-sdk>=9.0.0');
       expect(pyproject?.content).not.toMatch(/camunda-orchestration-sdk>=10\./);
+    });
+
+    // The suite is a flat collection of test_*.py files with no importable
+    // package of its own. Without package-mode = false, poetry-core's build
+    // backend tries to build/install a "camunda-sdk-tests" package, finds no
+    // matching module/folder, and `pip install -e .` fails with
+    // ModuleOrPackageNotFoundError (confirmed via a real pip install).
+    test('disables poetry package-mode so the dependency-only project builds', () => {
+      const files = loadPythonProjectScaffoldingFiles();
+      const pyproject = files.find((f) => f.relativePath === 'pyproject.toml');
+      expect(pyproject).toBeDefined();
+      expect(pyproject?.content).toMatch(/\[tool\.poetry\][^[]*package-mode\s*=\s*false/);
     });
   });
 });

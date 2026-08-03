@@ -4,7 +4,7 @@
  */
 
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
-import type { EndpointScenarioCollection, RequestStep } from 'path-analyser/types';
+import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from 'path-analyser/types';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
 function toSnakeCase(value: string): string {
@@ -12,6 +12,25 @@ function toSnakeCase(value: string): string {
     .replace(/([A-Z])/g, '_$1')
     .toLowerCase()
     .replace(/^_/, '');
+}
+
+/**
+ * Build a valid, collision-free Python test-function-name suffix from a
+ * scenario. `scenario.name` may contain characters that aren't legal in a
+ * Python identifier (spaces, `-`, `#`, ...), so every non `[a-z0-9_]`
+ * character is folded to `_`. The scenario's own `id` (unique within a
+ * collection, see scenarioGenerator.ts) is always prefixed so scenarios that
+ * share a display name still get distinct test functions instead of silently
+ * overwriting each other.
+ */
+function toPythonTestName(scenario: EndpointScenario): string {
+  const base = `${scenario.id}_${scenario.name || 'scenario'}`;
+  const cleaned = base
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return cleaned.length > 0 ? cleaned : `scenario_${scenario.id}`;
 }
 
 /**
@@ -201,7 +220,7 @@ export function renderPythonSuite(
 
   // Test scenarios
   for (const scenario of collection.scenarios) {
-    const testName = scenario.name?.toLowerCase().replace(/\s+/g, '_') || `scenario_${scenario.id}`;
+    const testName = toPythonTestName(scenario);
     lines.push(`@pytest.mark.asyncio`);
     lines.push(`async def test_${testName}(ctx: TestContext) -> None:`);
     lines.push(`    """`);

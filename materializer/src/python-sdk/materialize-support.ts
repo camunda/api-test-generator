@@ -52,6 +52,13 @@ dependencies = [
     "httpx>=0.24",
 ]
 
+[tool.poetry]
+# This project is a flat pytest suite with no importable package of its own —
+# only its dependencies need installing. Without this, poetry-core's build
+# backend tries to build/install a "camunda-sdk-tests" package, finds no
+# matching module/folder, and fails (confirmed via a real pip install -e . run).
+package-mode = false
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["."]
