@@ -13,6 +13,7 @@ import {
   renderPythonBody,
   renderPythonSuite,
 } from '../../materializer/src/python-sdk/emitter.js';
+import { loadPythonProjectScaffoldingFiles } from '../../materializer/src/python-sdk/materialize-support.js';
 import { createOperationMapSourceFromJson } from '../../materializer/src/python-sdk/sdk-mapping.js';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.js';
 
@@ -338,6 +339,21 @@ describe('Python SDK Emitter', () => {
       const operationMap = createOperationMapSourceFromJson(JSON.stringify({}));
       const output = renderPythonSuite(SAMPLE_COLLECTION, { operationMap });
       expect(output).toContain('await client.create_widget(');
+    });
+  });
+
+  // The emitted pyproject.toml must pin a real, installable release of the
+  // upstream SDK. PyPI's highest stable camunda-orchestration-sdk release is
+  // 9.0.1 (10.x only exists as unlisted dev pre-releases pip excludes by
+  // default), so `>=10.0.0` can never resolve: `pip install -e .` fails with
+  // "No matching distribution found" for every consumer, on every OS.
+  describe('pyproject.toml scaffolding (dependency pin)', () => {
+    test('pins an installable camunda-orchestration-sdk release', () => {
+      const files = loadPythonProjectScaffoldingFiles();
+      const pyproject = files.find((f) => f.relativePath === 'pyproject.toml');
+      expect(pyproject).toBeDefined();
+      expect(pyproject?.content).toContain('camunda-orchestration-sdk>=9.0.0');
+      expect(pyproject?.content).not.toMatch(/camunda-orchestration-sdk>=10\./);
     });
   });
 });
