@@ -29,18 +29,6 @@ name: Hub PR check
 on:
   repository_dispatch:
     types: [camunda-hub-pr]
-  # TEMPORARY — testing #507's Slack-alert fix on this branch (repository_dispatch
-  # always runs the version of this workflow on main, so it can't exercise a
-  # not-yet-merged fix). Remove before merge.
-  workflow_dispatch:
-    inputs:
-      source_sha:
-        description: 'TEST-ONLY: 40-char hex SHA (fake is fine — only exercises validate/report)'
-        required: true
-      pr_number:
-        required: false
-      caller_run_url:
-        required: false
 
 permissions:
   contents: read
@@ -49,7 +37,7 @@ permissions:
 concurrency:
   # Fall back to source_sha so a missing/blank pr_number can't collapse unrelated
   # dispatches into the constant group `hub-pr-check-` (they'd cancel each other).
-  group: hub-pr-check-${{ github.event.client_payload.pr_number || github.event.client_payload.source_sha || github.event.inputs.source_sha }}
+  group: hub-pr-check-${{ github.event.client_payload.pr_number || github.event.client_payload.source_sha }}
   cancel-in-progress: true
 
 jobs:
@@ -69,7 +57,7 @@ jobs:
       - name: Validate source_sha is a 40-char hex commit SHA
         id: v
         env:
-          SHA: ${{ github.event.client_payload.source_sha || github.event.inputs.source_sha }}
+          SHA: ${{ github.event.client_payload.source_sha }}
         run: |
           set -euo pipefail
           if ! printf '%s' "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
@@ -86,7 +74,7 @@ jobs:
       - name: Validate caller_run_url (optional; empty if missing/invalid)
         id: caller
         env:
-          URL: ${{ github.event.client_payload.caller_run_url || github.event.inputs.caller_run_url }}
+          URL: ${{ github.event.client_payload.caller_run_url }}
         run: |
           set -euo pipefail
           if printf '%s' "$URL" | grep -qE '^https://github\.com/camunda/camunda-hub/actions/runs/[0-9]+$'; then
@@ -104,7 +92,7 @@ jobs:
       - name: Validate pr_number (optional; empty if missing/invalid)
         id: prnum
         env:
-          N: ${{ github.event.client_payload.pr_number || github.event.inputs.pr_number }}
+          N: ${{ github.event.client_payload.pr_number }}
         run: |
           set -euo pipefail
           if printf '%s' "$N" | grep -qE '^[1-9][0-9]*$'; then
