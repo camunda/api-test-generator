@@ -30,6 +30,7 @@ import {
 } from '../src/analysis/oneOfAdvanced.js';
 import { generateOneOfAmbiguous } from '../src/analysis/oneOfAmbiguous.js';
 import { generateOneOfNoneMatch } from '../src/analysis/oneOfNoneMatch.js';
+import { generatePaginationLimitInvalid } from '../src/analysis/paginationLimit.js';
 import { generateParamConstraintViolations } from '../src/analysis/paramConstraintViolations.js';
 import {
   generateParamEnumViolation,
@@ -323,6 +324,17 @@ async function main() {
     if (wantKind('constraint-violation')) {
       scenarios.push(
         ...generateConstraintViolations(model.operations, {
+          capPerOperation: undefined,
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    // page.limit (search/list pagination) carries a real minimum/maximum but is
+    // invisible to the walker-based constraint-violation generator above — see
+    // paginationLimit.ts's header comment (#501).
+    if (wantKind('pagination-limit-invalid')) {
+      scenarios.push(
+        ...generatePaginationLimitInvalid(model.operations, {
           capPerOperation: undefined,
           onlyOperations: opts.onlyOperations,
         }),
