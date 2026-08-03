@@ -56,8 +56,8 @@ malformed-request scenario kinds.
 is the fastest path from clone to a running server:
 
 ```bash
-# One-off install (Node ≥ 22)
-npm install -g @camunda8/c8ctl
+# One-off install (Node ≥ 22) — the published package is @camunda8/cli, which installs the `c8ctl` binary
+npm install -g @camunda8/cli
 
 # Start a cluster pinned to a specific Camunda version
 c8ctl cluster start 8.9
