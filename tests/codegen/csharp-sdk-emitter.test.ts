@@ -123,11 +123,16 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('ctx["RANDOM"]');
   });
 
-  test('imports the RestSdk.Models namespace for generated request types', async () => {
+  test('does not import the local-only RestSdk.Models namespace for generated request types', async () => {
+    // The real Camunda.Orchestration.Sdk NuGet package is a single flat
+    // namespace; RestSdk.Models only exists in this repo's local vendored
+    // reference client and doesn't resolve against the published package
+    // (confirmed via a real `dotnet build` against the restored package).
     const emitter = createCsharpEmitter({});
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
 
-    expect(files[0].content).toContain('using Camunda.Orchestration.RestSdk.Models;');
+    expect(files[0].content).toContain('using Camunda.Orchestration.Sdk;');
+    expect(files[0].content).not.toContain('Camunda.Orchestration.RestSdk');
   });
 
   test('uses HttpRequestException for generated error-path assertions', async () => {
