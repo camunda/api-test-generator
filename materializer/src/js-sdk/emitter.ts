@@ -15,6 +15,7 @@ import type {
 // a literal, a planner-driven seedBinding() call, or (skipped here — js-sdk
 // has no config plumbing for it yet) a universal globalContextSeeds entry.
 import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
+import { camelCase } from '../playwright/stepRenderer.js';
 import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
 import { renderJavaScriptBody } from './sdk-mapping.js';
 
@@ -292,8 +293,11 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
   if (payloadTemplate) {
     lines.push(`        ...body${stepNum},`);
   }
-  for (const param of step.pathParams ?? []) {
-    lines.push(`        ${renderObjectKey(param.name)}: ctx['${param.var}'],`);
+  // step.pathParams is never populated by path-analyser (see
+  // materializer/src/playwright/stepRenderer.ts's buildUrlExpression and
+  // repo memory item 7) — path params are derived from pathTemplate instead.
+  for (const name of derivePathParamNames(step.pathTemplate)) {
+    lines.push(`        ${renderObjectKey(name)}: ctx['${camelCase(name)}Var'],`);
   }
   lines.push('      };');
 
@@ -338,6 +342,14 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
   }
 
   lines.push('');
+}
+
+const PATH_PARAM_RE = /\{([^}]+)\}/g;
+
+/** Extract `{paramName}` placeholder names from a path template, in order. */
+function derivePathParamNames(pathTemplate: string | undefined): string[] {
+  if (!pathTemplate) return [];
+  return [...pathTemplate.matchAll(PATH_PARAM_RE)].map((m) => m[1]);
 }
 
 /**
