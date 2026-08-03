@@ -46,7 +46,7 @@ authors = [
     {name = "api-test-generator", email = "none@example.com"}
 ]
 dependencies = [
-    "camunda-orchestration-sdk>=10.0.0",
+    "camunda-orchestration-sdk>=9.0.0",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "httpx>=0.24",
