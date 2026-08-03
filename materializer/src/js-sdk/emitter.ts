@@ -180,6 +180,18 @@ function renderScenarioTest(lines: string[], scenario: EndpointScenario): void {
   lines.push(`    '${testName}',`);
   lines.push(`    async () => {`);
 
+  if (operations.length > 0) {
+    // Declared once per test (rather than inlined per call) so the `any` it
+    // introduces stays on one short, unwrapped line — the biome formatter
+    // wraps long inline casts across lines, which would otherwise separate
+    // a per-call `biome-ignore` comment from the token it's meant to cover.
+    lines.push(
+      '      // biome-ignore lint/suspicious/noExplicitAny: dynamically-shaped SDK response requires chained optional-property access',
+    );
+    lines.push('      type SdkCall = (...args: unknown[]) => Promise<any>;');
+    lines.push('');
+  }
+
   // Seed context from scenario.bindings
   if (scenario.bindings && Object.keys(scenario.bindings).length > 0) {
     lines.push('      // Seed bindings');
@@ -262,11 +274,9 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
   // .bind(client) preserves the `this` binding the real SDK's generated
   // methods rely on internally (e.g. accessing `this._client`) — without
   // it, detaching the method reference from `client` before calling it
-  // throws at runtime. `any` (rather than `unknown`) matches the emitted
-  // code's need to chain deep, dynamically-shaped response access.
-  lines.push(
-    `      const call${stepNum} = client.${method}.bind(client) as (...args: unknown[]) => Promise<any>;`,
-  );
+  // throws at runtime. `SdkCall` (declared once per test) matches the
+  // emitted code's need to chain deep, dynamically-shaped response access.
+  lines.push(`      const call${stepNum} = client.${method}.bind(client) as SdkCall;`);
 
   if (isErrorExpected) {
     lines.push('      try {');
