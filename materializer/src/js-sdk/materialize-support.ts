@@ -113,6 +113,43 @@ API_BASE_URL=http://localhost:8080/v2
 `,
     },
     {
+      // '@camunda8/sdk' isn't installed in the emitted project (it's a
+      // placeholder dependency), so without this ambient declaration every
+      // generated suite fails `tsc` with TS2307 "Cannot find module".
+      relativePath: 'types/camunda8-sdk.d.ts',
+      content: `declare module '@camunda8/sdk' {
+  // Response bodies are arbitrary, dynamically-shaped JSON (the emitted
+  // scenarios chain deep optional/array access, e.g. \`data?.items?.[0]?.id\`),
+  // so \`data\` is intentionally untyped here rather than \`unknown\` /
+  // \`Record<string, unknown>\` (both of which reject property/index access
+  // without narrowing). This mirrors how REST-client libraries commonly
+  // type dynamic response bodies (e.g. axios's \`response.data\`).
+  export interface ApiClientResponse {
+    status: number;
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic REST response body, see comment above
+    data?: any;
+  }
+
+  export type ApiClientMethod = (args?: {
+    path?: string;
+    body?: unknown;
+    query?: Record<string, unknown>;
+    multipart?: unknown;
+  }) => Promise<ApiClientResponse>;
+
+  export interface ApiClient {
+    [method: string]: ApiClientMethod;
+  }
+
+  export interface RestClientError extends Error {
+    status?: number;
+  }
+
+  export function createApiClient(options?: { baseUrl?: string }): ApiClient;
+}
+`,
+    },
+    {
       relativePath: 'README.md',
       content: [
         '# Camunda JavaScript SDK Integration Tests',

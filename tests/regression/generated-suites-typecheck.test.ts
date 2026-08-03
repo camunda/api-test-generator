@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   getPlaywrightSuiteDir,
   getRequestValidationSuiteDir,
+  getSdkOutDir,
 } from '../../path-analyser/src/configResolver.ts';
 
 /**
@@ -51,6 +52,10 @@ const SUITES: readonly Suite[] = [
   {
     label: 'request-validation (secured)',
     tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'secured', 'tsconfig.json'),
+  },
+  {
+    label: 'js-sdk',
+    tsconfig: path.join(getSdkOutDir(REPO_ROOT, 'js-sdk'), 'tsconfig.json'),
   },
 ];
 
