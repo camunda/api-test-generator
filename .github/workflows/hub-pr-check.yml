@@ -146,7 +146,13 @@ jobs:
   classify:
     name: Classify hub-suite failure (read-only)
     needs: [validate, run]
-    if: needs.run.result == 'failure'
+    # `always()` is required, not decorative: a job-level `if:` that doesn't
+    # reference a status-check function gets an implicit `success() &&`
+    # prepended by GitHub Actions, which is always false here (`run` failed)
+    # — so without this, the condition below never actually runs the job.
+    # Confirmed this is exactly what happened: every failing run to date
+    # (including the real ones from 2026-08-02) shows this job with steps: [].
+    if: always() && needs.run.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -382,6 +388,16 @@ jobs:
     if: always() && needs.validate.result == 'success'
     runs-on: ubuntu-latest
     steps:
+      # Needed for the local `./.github/actions/slack-token` action below —
+      # without this, that step fails to resolve ("Can't find 'action.yml'")
+      # and, since it's continue-on-error, fails silently: SLACK_BOT_TOKEN
+      # comes back empty, the Notify Slack step's `if` is false, and every
+      # hub-suite failure since #495 has gone unreported to Slack.
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
       # PREREQ #2: mint a token that can write statuses on camunda/camunda-hub
       # (qa-processes App installed there with Statuses: write). continue-on-error
       # so an unprovisioned App just skips the report rather than failing the run.
