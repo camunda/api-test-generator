@@ -35,6 +35,16 @@ on:
           be provided.
         type: string
         default: ''
+    outputs:
+      unmapped_operations:
+        description: >-
+          Comma-separated operationIds with zero generated test coverage
+          (empty if none). coverage.json itself isn't in the uploaded
+          hub-suite-reports artifact (a different directory), so a caller
+          needing this — e.g. hub-pr-check.yml's classify step, to tell a
+          real regression apart from "the generator hasn't modelled this
+          new/changed operation yet" — reads it from here instead.
+        value: ${{ jobs.run.outputs.unmapped_operations }}
     # Declared explicitly (not `inherit`) so the interface is least-privilege and
     # callers can't accidentally omit one. Used by the hub-clone-token action.
     secrets:
@@ -77,6 +87,8 @@ jobs:
     name: Generate + run hub suites (${{ inputs.hub_ref }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      unmapped_operations: ${{ steps.unmapped.outputs.unmapped }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -179,6 +191,33 @@ jobs:
           STEPS: generate run
           RV_PROFILES: secured rbac
         run: ./scripts/e2e/run-hub.sh
+
+      # An unmapped operation is a SILENT skip, not a generate failure (see
+      # AGENTS.md → "Coverage has two axes") — the materializer records it in
+      # coverage.json but never fails generate on it, so a run with a
+      # genuinely new/changed spec operation the generator can't model yet
+      # would otherwise stay fully green here (every generated test still
+      # passes; there's just no test at all for the new one). hub-run-summary
+      # below already surfaces this as a non-blocking ⚠️ note in the job
+      # summary, easy to miss — this makes it an actual failure instead, so
+      # callers (hub-pr-check.yml in particular, run on every camunda-hub PR)
+      # catch a coverage gap on the PR that introduced it rather than a day
+      # later via the separate spec-bump tracking issue. `if: always()`: run
+      # this even if the suite run above already failed for an unrelated
+      # reason, so both signals surface together instead of one hiding the other.
+      - name: Fail if any operation has no generated test coverage
+        id: unmapped
+        if: always()
+        run: |
+          set -euo pipefail
+          unmapped="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('summary',{}).get('unmappedOperations',[])))" 2>/dev/null || true)"
+          echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+          if [ -n "$unmapped" ]; then
+            echo "::error::Coverage gap: operation(s) with no generated test at all: ${unmapped}. This is not a Playwright failure — the generator's ontology/scenario-templates don't model this operation yet (see AGENTS.md → \"Coverage has two axes\")."
+            exit 1
+          fi
+          echo "No unmapped (uncovered) operations."
+          echo "No unmapped (uncovered) operations."
 
       - name: Stop Hub
         if: always()
