@@ -210,13 +210,32 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          unmapped="$(python3 -c "import json; print(', '.join(json.load(open('generated/camunda-hub/playwright/coverage.json')).get('summary',{}).get('unmappedOperations',[])))" 2>/dev/null || true)"
+          # A read/parse failure (missing file, corrupt JSON) is NOT the same
+          # as "no unmapped operations" — the old `2>/dev/null || true` swallowed
+          # both identically and would have printed a false "clean" message even
+          # when coverage.json was missing/broken (e.g. an earlier crash). This
+          # step's whole point is to be a trustworthy gate, so a read/parse
+          # failure now fails loudly and distinctly instead.
+          unmapped_script='
+          import json, sys
+          try:
+              with open("generated/camunda-hub/playwright/coverage.json") as f:
+                  data = json.load(f)
+          except Exception as e:
+              print(f"ERROR: {e}", file=sys.stderr)
+              sys.exit(2)
+          print(", ".join(data.get("summary", {}).get("unmappedOperations", [])))
+          '
+          if ! unmapped="$(python3 -c "$unmapped_script")"; then
+            echo "::error::Could not read/parse generated/camunda-hub/playwright/coverage.json — treating this as a coverage-check failure rather than silently assuming there are no unmapped operations."
+            echo "unmapped=" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
           echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
           if [ -n "$unmapped" ]; then
             echo "::error::Coverage gap: operation(s) with no generated test at all: ${unmapped}. This is not a Playwright failure — the generator's ontology/scenario-templates don't model this operation yet (see AGENTS.md → \"Coverage has two axes\")."
             exit 1
           fi
-          echo "No unmapped (uncovered) operations."
           echo "No unmapped (uncovered) operations."
 
       - name: Stop Hub
