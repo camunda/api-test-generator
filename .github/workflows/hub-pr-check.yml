@@ -249,6 +249,12 @@ jobs:
           REPORTS_DIR: ${{ github.workspace }}/test-results/e2e-camunda-hub
           SPEC_DIR: ${{ github.workspace }}/../camunda-hub/restapi/public-api/src/main/resources/openapi/v2
           SPEC_DIFF_FILE: ${{ github.workspace }}/spec-diff.txt
+          # From _hub-suite-run.yml's own coverage check — comma-separated,
+          # empty if none. This is the ONE failure mode with no failing test
+          # to read at all (a silent skip, not an assertion failure), so it
+          # needs to be handed to the agent directly rather than left for it
+          # to infer from reports that won't mention it.
+          UNMAPPED_OPERATIONS: ${{ needs.run.outputs.unmapped_operations }}
         run: |
           set -euo pipefail
           rm -f /tmp/hub-pr-classification.json
@@ -272,8 +278,20 @@ jobs:
           - Known-issue configs: configs/camunda-hub/positive-suppress.json and
             configs/camunda-hub/request-validation.json (their knownIssue /
             knownProblemDetailShapeGaps entries).
+          - Unmapped (uncovered) operationIds this run found, if any: ${UNMAPPED_OPERATIONS:-<none>}
+            -- these have NO generated test at all (a silent skip, not a failing
+            test you'll find in the reports). This is the reason the run may have
+            failed even with zero failing tests in the Playwright reports.
 
           Do this:
+          0. If UNMAPPED_OPERATIONS is non-empty, check the spec diff for each
+             listed operationId first: a new/changed operation the generator has
+             never modelled yet is expected to be unmapped -> category
+             "generator-gap", confidence "high", summary naming the operationId(s)
+             and that api-test-generator's ontology/scenario-templates don't cover
+             them yet. This is NOT a hub bug. Only fall through to the steps below
+             if UNMAPPED_OPERATIONS is empty, OR the run has ADDITIONAL failing
+             tests beyond just the unmapped ones (classify those the normal way).
           1. Parse the reports and enumerate every failing test, with its request/
              response evidence from the trace/HTML report.
           2. Resolve each failing operationId in the OpenAPI spec at this PR's sha.
