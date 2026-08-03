@@ -130,6 +130,7 @@ export const SCENARIO_KINDS = [
   'allof-missing-required',
   'allof-conflict',
   'not-found-fake-id',
+  'pagination-limit-invalid',
   'auth-absent',
   'auth-invalid',
   'auth-deny',
