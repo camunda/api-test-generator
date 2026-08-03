@@ -59,6 +59,42 @@ const UNMAPPED_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+// Regression fixture for the pending-binding fix: a scenario whose only
+// binding has no in-scenario producer step (`bindings.nameVar ===
+// '__PENDING__'`), mirroring the real `publishMessage` scenario that
+// motivated the fix. `seedBindings` is planner-computed data (see
+// path-analyser/src/seedBindings.ts) already present on real scenario JSON.
+const PENDING_BINDING_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'publishMessage', method: 'POST', path: '/messages/publication' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'base',
+      description: 'Publish a message with a client-minted name',
+      operations: [
+        { operationId: 'publishMessage', method: 'POST', path: '/messages/publication' },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { nameVar: '__PENDING__' },
+      seedBindings: ['nameVar'],
+      requestPlan: [
+        {
+          operationId: 'publishMessage',
+          method: 'POST',
+          pathTemplate: '/messages/publication',
+          expect: { status: 200 },
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholder syntax used by the planner's bodyTemplate format, not a JS template literal
+          bodyTemplate: { name: '${nameVar}' },
+          bodyKind: 'json',
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
     const emitter = createJsSdkEmitter();
@@ -110,5 +146,15 @@ describe('JavaScript SDK Emitter', () => {
     );
     expect(output).not.toContain('const input1 = {');
     expect(output).not.toContain('client.getNonexistentThing');
+  });
+
+  test('a __PENDING__ binding with a planner seedBindings entry is seeded via seedBinding(), not left undefined', () => {
+    const output = renderJsSuite(PENDING_BINDING_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("import { initSpecSalt, seedBinding } from '../support/seeding';");
+    expect(output).toContain('initSpecSalt("publishMessage");');
+    expect(output).toContain("ctx['nameVar'] = ctx['nameVar'] ?? seedBinding('nameVar');");
+    expect(output).not.toContain('pending binding');
+    expect(output).not.toContain("ctx['nameVar'] = undefined;");
   });
 });

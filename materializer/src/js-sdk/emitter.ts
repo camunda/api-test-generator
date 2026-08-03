@@ -10,12 +10,38 @@ import type {
   EndpointScenarioCollection,
   RequestStep,
 } from 'path-analyser/types';
+// Reused rather than re-implemented: the Playwright emitter already owns the
+// canonical logic for resolving a scenario's __PENDING__ bindings into either
+// a literal, a planner-driven seedBinding() call, or (skipped here — js-sdk
+// has no config plumbing for it yet) a universal globalContextSeeds entry.
+import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
 import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
 import { renderJavaScriptBody } from './sdk-mapping.js';
 
 // Regenerate via `npm run js-sdk:dump-methods --workspace materializer`
 // whenever the @camunda8/sdk devDependency is bumped.
 const KNOWN_SDK_METHODS = new Set<string>(knownSdkMethods.methods);
+
+/**
+ * Compute the `ctx['x'] = ...` seed lines for a scenario's bindings, reusing
+ * the Playwright emitter's canonical ctx-seeding logic (see ctxSeeding.ts's
+ * module doc comment for the emission order: literals, then planner
+ * seedBindings, then — not wired here — global context seeds). js-sdk has
+ * no config plumbing yet for globalContextSeeds/fixtureEnvByBinding, so
+ * those are intentionally omitted rather than reimplemented ad hoc.
+ */
+function computeScenarioSeedLines(scenario: EndpointScenario, indent: string): string[] {
+  return emitCtxSeeding({
+    indent,
+    bindings: scenario.bindings,
+    seedBindings: scenario.seedBindings,
+    globalContextSeeds: [],
+    uniqueBindings: computeUniqueBindings(
+      scenario.requestPlan,
+      scenario.modelDerivedLiteralBindings,
+    ),
+  });
+}
 
 /**
  * Build the file name a scenario collection lowers to.
@@ -92,7 +118,19 @@ export function renderJsSuite(
   lines.push("import { describe, it, expect, beforeEach } from 'vitest';");
   lines.push("import { Camunda8 } from '@camunda8/sdk';");
   lines.push("import type { HttpSdkError } from '@camunda8/sdk';");
+  const needsSeeding = collection.scenarios.some(
+    (scenario) => computeScenarioSeedLines(scenario, '').length > 0,
+  );
+  if (needsSeeding) {
+    lines.push("import { initSpecSalt, seedBinding } from '../support/seeding';");
+  }
   lines.push('');
+  if (needsSeeding) {
+    // Mixed into the seed so parallel vitest workers (sharing one TEST_SEED)
+    // don't draw the same sequence for the same binding name.
+    lines.push(`initSpecSalt(${JSON.stringify(operationId)});`);
+    lines.push('');
+  }
 
   // =========================================================================
   // Test context interface and setup
@@ -192,17 +230,13 @@ function renderScenarioTest(lines: string[], scenario: EndpointScenario): void {
     lines.push('');
   }
 
-  // Seed context from scenario.bindings
-  if (scenario.bindings && Object.keys(scenario.bindings).length > 0) {
-    lines.push('      // Seed bindings');
-    for (const [key, value] of Object.entries(scenario.bindings)) {
-      if (value === '__PENDING__') {
-        lines.push(`      ctx['${key}'] = undefined; // pending binding`);
-      } else {
-        const literal = JSON.stringify(value);
-        lines.push(`      ctx['${key}'] = ${literal};`);
-      }
-    }
+  // Seed context from scenario.bindings — literals verbatim, __PENDING__
+  // bindings via the planner-computed scenario.seedBindings (falls back to
+  // a deterministic seedBinding() call rather than leaving the value
+  // undefined, which used to silently drop required request-body fields).
+  const seedLines = computeScenarioSeedLines(scenario, '      ');
+  if (seedLines.length > 0) {
+    lines.push(...seedLines);
     lines.push('');
   }
 
