@@ -166,32 +166,56 @@ if [ "${IS_PRIVATE:-}" = "true" ]; then
   pr_num="$(find_bump_pr)"
   if [ -z "$pr_num" ]; then
     echo "::warning::Could not resolve the bump PR number for validation dispatch — skipping."
-  elif ! gh workflow run hub-ondemand-test.yml --repo camunda/api-test-generator --ref "$branch"; then
-    echo "::warning::Could not dispatch hub-ondemand-test.yml for the bump PR."
-    gh pr comment "$pr_num" --repo camunda/api-test-generator \
-      --body ":warning: Could not auto-dispatch on-demand validation (\`hub-ondemand-test.yml\`) for this PR — please trigger it manually against this branch before merging (it starts a live Hub and runs the real suite; \`hub-invariants\` on this PR only checks static invariants against the pinned spec, not a live run)." \
-      2>/dev/null || true
   else
-    # workflow_run creation isn't synchronous with the dispatch call — poll
-    # briefly for the run this dispatch just created.
-    run_url=""
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      sleep 3
-      run_id=$(gh run list --repo camunda/api-test-generator --workflow=hub-ondemand-test.yml \
-        --branch "$branch" --event workflow_dispatch --limit 1 --json databaseId \
-        --jq '.[0].databaseId // empty' 2>/dev/null || true)
-      if [ -n "$run_id" ]; then
-        run_url="https://github.com/camunda/api-test-generator/actions/runs/${run_id}"
-        break
-      fi
-    done
-    # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
-    note_body=$(if [ -n "$run_url" ]; then
-      printf '🔎 **On-demand validation**: [hub-ondemand-test run](%s) — dispatched automatically. This confirms the new pin actually passes against a live Hub, not just static invariants (which is all `hub-invariants` on this PR checks).' "$run_url"
+    # Captured BEFORE dispatch: this is the ROLLING bump branch (force-pushed
+    # and reused across every bump cycle, unlike the triage agent's one-shot
+    # per-PR branches this polling logic is adapted from) — an OLD
+    # hub-ondemand-test.yml run from a previous, unrelated bump cycle can
+    # already exist for this exact branch name. Without a time filter,
+    # `gh run list --limit 1` could return that stale run before the new
+    # dispatch is even indexed (workflow_run creation isn't synchronous with
+    # the dispatch call), commenting a link to the wrong run entirely. A 30s
+    # buffer tolerates clock skew between this runner and GitHub's own
+    # timestamps, same as trigger-api-test-generator.yml's identical "reject
+    # anything older than our own action" guard.
+    dispatched_at="$(date -u -d '30 seconds ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -v-30S +%Y-%m-%dT%H:%M:%SZ)"
+
+    if ! gh workflow run hub-ondemand-test.yml --repo camunda/api-test-generator --ref "$branch"; then
+      echo "::warning::Could not dispatch hub-ondemand-test.yml for the bump PR."
+      gh pr comment "$pr_num" --repo camunda/api-test-generator \
+        --body ":warning: Could not auto-dispatch on-demand validation (\`hub-ondemand-test.yml\`) for this PR — please trigger it manually against this branch before merging (it starts a live Hub and runs the real suite; \`hub-invariants\` on this PR only checks static invariants against the pinned spec, not a live run)." \
+        2>/dev/null || true
     else
-      printf '⚠️ Dispatched `hub-ondemand-test.yml` for validation but could not resolve the run URL within the poll window — check the Actions tab for branch `%s`.' "$branch"
-    fi)
-    gh pr comment "$pr_num" --repo camunda/api-test-generator --body "$note_body" 2>/dev/null \
-      || echo "::warning::Could not comment validation link on #${pr_num}"
+      # Poll briefly for the run this dispatch just created, filtering out
+      # anything older than dispatched_at (see above) — a handful of
+      # candidates, not just the newest one, since a stale run could easily
+      # sort first if our new one is still being indexed.
+      run_url=""
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 3
+        # gh's own --jq/-q takes exactly one expression, no --arg passthrough
+        # (confirmed against `gh run list --help`) — piped into a real jq
+        # instead, which does support it.
+        # shellcheck disable=SC2016  # $since is a jq --arg var, not shell
+        run_id=$(gh run list --repo camunda/api-test-generator --workflow=hub-ondemand-test.yml \
+          --branch "$branch" --event workflow_dispatch --limit 5 --json databaseId,createdAt \
+          2>/dev/null | jq -r --arg since "$dispatched_at" \
+          '[.[] | select(.createdAt >= $since)] | sort_by(.createdAt) | .[0].databaseId // empty' \
+          2>/dev/null || true)
+        if [ -n "$run_id" ]; then
+          run_url="https://github.com/camunda/api-test-generator/actions/runs/${run_id}"
+          break
+        fi
+      done
+      # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
+      note_body=$(if [ -n "$run_url" ]; then
+        printf '🔎 **On-demand validation**: [hub-ondemand-test run](%s) — dispatched automatically. This confirms the new pin actually passes against a live Hub, not just static invariants (which is all `hub-invariants` on this PR checks).' "$run_url"
+      else
+        printf '⚠️ Dispatched `hub-ondemand-test.yml` for validation but could not resolve the run URL within the poll window — check the Actions tab for branch `%s`.' "$branch"
+      fi)
+      gh pr comment "$pr_num" --repo camunda/api-test-generator --body "$note_body" 2>/dev/null \
+        || echo "::warning::Could not comment validation link on #${pr_num}"
+    fi
   fi
 fi
