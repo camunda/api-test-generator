@@ -48,7 +48,7 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
             vitest: '^4.1.0',
           },
           dependencies: {
-            '@camunda8/sdk': '^8.5.0',
+            '@camunda8/sdk': '^8.8.0',
           },
         },
         null,
@@ -101,51 +101,53 @@ export default defineConfig({
     },
     {
       relativePath: '.env.example',
-      content: `# Camunda REST API base URL
-API_BASE_URL=http://localhost:8080/v2
+      content: `# Read directly by the Camunda JavaScript SDK's zero-config Camunda8 client
+# (no explicit configuration object is passed in the generated tests).
 
-# Optional: authentication credentials
+# Camunda REST API address. Defaults to http://localhost:8080 if unset.
+ZEEBE_REST_ADDRESS=http://localhost:8080
+
+# Auth strategy: NONE | BASIC | OAUTH | BEARER | COOKIE. Defaults to NONE if unset.
+# CAMUNDA_AUTH_STRATEGY=NONE
+
+# OAuth credentials (only needed when CAMUNDA_AUTH_STRATEGY=OAUTH)
 # CAMUNDA_CLIENT_ID=
 # CAMUNDA_CLIENT_SECRET=
-
-# Optional: custom timeout for API calls
-# API_TIMEOUT_MS=30000
+# CAMUNDA_OAUTH_URL=
 `,
     },
     {
-      // '@camunda8/sdk' isn't installed in the emitted project (it's a
-      // placeholder dependency), so without this ambient declaration every
-      // generated suite fails `tsc` with TS2307 "Cannot find module".
+      // '@camunda8/sdk' isn't installed in the emitted project until `npm
+      // install` is run there (it's declared as a dependency, not vendored),
+      // so without this ambient declaration every generated suite fails
+      // `tsc` with TS2307 "Cannot find module". `skipLibCheck` (see
+      // tsconfig.json above) keeps this shim from conflicting with the real
+      // package's own types once installed.
       relativePath: 'types/camunda8-sdk.d.ts',
       content: `declare module '@camunda8/sdk' {
+  /** A single point of configuration for all Camunda 8 clients; see the real SDK's docs for the full config shape. */
+  export interface Camunda8ClientConfiguration {
+    [key: string]: unknown;
+  }
+
   // Response bodies are arbitrary, dynamically-shaped JSON (the emitted
   // scenarios chain deep optional/array access, e.g. \`data?.items?.[0]?.id\`),
-  // so \`data\` is intentionally untyped here rather than \`unknown\` /
-  // \`Record<string, unknown>\` (both of which reject property/index access
-  // without narrowing). This mirrors how REST-client libraries commonly
-  // type dynamic response bodies (e.g. axios's \`response.data\`).
-  export interface ApiClientResponse {
-    status: number;
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic REST response body, see comment above
-    data?: any;
+  // so method returns are intentionally untyped here rather than \`unknown\`
+  // (which rejects property/index access without narrowing).
+  export type OrchestrationClusterApiClientLoose = {
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic REST request/response body, see comment above
+    [method: string]: (...args: any[]) => Promise<any>;
+  };
+
+  export class Camunda8 {
+    constructor(config?: Camunda8ClientConfiguration);
+    getOrchestrationClusterApiClientLoose(): OrchestrationClusterApiClientLoose;
   }
 
-  export type ApiClientMethod = (args?: {
-    path?: string;
-    body?: unknown;
-    query?: Record<string, unknown>;
-    multipart?: unknown;
-  }) => Promise<ApiClientResponse>;
-
-  export interface ApiClient {
-    [method: string]: ApiClientMethod;
-  }
-
-  export interface RestClientError extends Error {
+  /** Thrown by the SDK on non-2xx responses; \`status\` carries the HTTP status code. */
+  export interface HttpSdkError extends Error {
     status?: number;
   }
-
-  export function createApiClient(options?: { baseUrl?: string }): ApiClient;
 }
 `,
     },
@@ -180,8 +182,9 @@ API_BASE_URL=http://localhost:8080/v2
         '```',
         '',
         'Edit .env to set:',
-        '- `API_BASE_URL` — URL to your Camunda instance (default: http://localhost:8080/v2)',
-        '- Authentication credentials (if required)',
+        '- `ZEEBE_REST_ADDRESS` — URL to your Camunda instance (default: http://localhost:8080)',
+        '- `CAMUNDA_AUTH_STRATEGY` — auth strategy: NONE, BASIC, OAUTH, BEARER, or COOKIE (default: NONE)',
+        '- Additional credentials if using an auth strategy other than NONE',
         '',
         '## Running Tests',
         '',
@@ -215,24 +218,26 @@ API_BASE_URL=http://localhost:8080/v2
         '',
         '```typescript',
         "import { describe, it, expect, beforeEach } from 'vitest';",
-        "import { createApiClient } from '@camunda8/sdk';",
+        "import { Camunda8 } from '@camunda8/sdk';",
         '',
         "describe('operationId (feature tests)', () => {",
-        '  let apiClient;',
+        '  let client;',
         '',
         '  beforeEach(() => {',
-        '    apiClient = createApiClient({ baseUrl: process.env.API_BASE_URL });',
+        '    // Zero-config: reads ZEEBE_REST_ADDRESS / CAMUNDA_AUTH_STRATEGY from env',
+        '    client = new Camunda8().getOrchestrationClusterApiClientLoose();',
         '  });',
         '',
         "  it('scenario-id — scenario name', async () => {",
         '    // Setup context',
         '    const ctx = {};',
         '',
-        '    // Execute operations',
-        '    const response = await apiClient.listProcessInstances({ /* params */ });',
+        '    // Execute operations — the SDK returns response data directly on',
+        '    // success and throws on non-2xx responses',
+        '    const response = await client.listProcessInstances({ /* params */ });',
         '',
         '    // Assert',
-        '    expect(response.status).toBe(200);',
+        '    expect(response.items).toBeDefined();',
         '  });',
         '});',
         '```',

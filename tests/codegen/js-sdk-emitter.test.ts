@@ -34,7 +34,7 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
 
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
-    const emitter = createJsSdkEmitter(undefined);
+    const emitter = createJsSdkEmitter();
     expect(emitter.id).toBe('js-sdk');
     expect(emitter.name).toBe('JavaScript SDK');
     expect(emitter.supportedConfigs).toEqual(['*']);
@@ -45,7 +45,7 @@ describe('JavaScript SDK Emitter', () => {
   });
 
   test('emitter.emit returns one file with generated suite content', async () => {
-    const emitter = createJsSdkEmitter(undefined);
+    const emitter = createJsSdkEmitter();
     const files = await emitter.emit(SAMPLE_COLLECTION, {
       outDir: '/unused',
       suiteName: 'getWidget',
@@ -60,17 +60,17 @@ describe('JavaScript SDK Emitter', () => {
     expect(files[0].content).toContain(
       "import { describe, it, expect, beforeEach } from 'vitest';",
     );
-    expect(files[0].content).toContain(
-      "import type { ApiClient, RestClientError } from '@camunda8/sdk';",
-    );
+    expect(files[0].content).toContain("import { Camunda8 } from '@camunda8/sdk';");
+    expect(files[0].content).toContain("import type { HttpSdkError } from '@camunda8/sdk';");
   });
 
-  test('rendered suite substitutes path params and renders extract bindings', () => {
+  test('rendered suite builds a flat input object and renders extract bindings', () => {
     const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
 
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — asserting the emitter produces this exact template-literal string in output
-    expect(output).toContain("const url1 = `/widgets/${ctx['widgetIdVar'] ?? '{widgetId}'}`;");
-    expect(output).toContain('expect(response1.status).toBe(200);');
-    expect(output).toContain("ctx['widgetId'] = response1.data?.data?.id;");
+    expect(output).toContain('client = new Camunda8().getOrchestrationClusterApiClientLoose();');
+    expect(output).toContain('const input1 = {');
+    expect(output).toContain("widgetId: ctx['widgetIdVar'],");
+    expect(output).not.toContain('expect(response1.status).toBe(200);');
+    expect(output).toContain("ctx['widgetId'] = response1?.data?.id;");
   });
 });

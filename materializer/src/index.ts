@@ -37,7 +37,6 @@ import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitt
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
 import { materializeSdkSupport } from './js-sdk/materialize-support.js';
-import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter, readClientMintedFixtures } from './playwright/emitter.js';
 import {
@@ -66,17 +65,6 @@ registerEmitter(PlaywrightEmitter);
 // they can load operation-map.json files from the spec/ directory. Keeping
 // them here (at module level) would require resolving the repo root before
 // the CLI args are parsed, which is fragile on Windows paths and CI.
-
-/** Load the JS SDK operation map from spec/js-sdk/operation-map.json, or undefined if absent. */
-function loadJsSdkMap(repoRoot: string): OperationMapJsonSource | undefined {
-  const mapPath = path.join(repoRoot, 'spec', 'js-sdk', 'operation-map.json');
-  if (!fsSync.existsSync(mapPath)) return undefined;
-  try {
-    return OperationMapJsonSource.fromJson(fsSync.readFileSync(mapPath, 'utf-8'));
-  } catch {
-    return undefined;
-  }
-}
 
 /** Load the Python SDK operation map from spec/python-sdk/operation-map.json, or undefined if absent. */
 function loadPythonSdkMap(
@@ -418,7 +406,7 @@ interface TargetRunEnv {
  * registered at module level (it has no file-system dependencies).
  */
 function registerSdkEmitters(repoRoot: string): void {
-  registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
+  registerEmitter(createJsSdkEmitter());
   registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
   registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
 }

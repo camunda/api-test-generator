@@ -10,11 +10,7 @@ import type {
   EndpointScenarioCollection,
   RequestStep,
 } from 'path-analyser/types';
-import {
-  buildJavaScriptUrlExpression,
-  type OperationMapJsonSource,
-  renderJavaScriptBody,
-} from './sdk-mapping.js';
+import { renderJavaScriptBody } from './sdk-mapping.js';
 
 /**
  * Build the file name a scenario collection lowers to.
@@ -35,26 +31,19 @@ export function jsSuiteFileName(
  * Main entry point for the JavaScript SDK emitter.
  * Creates and returns the EmitterStrategy implementation.
  *
- * @param operationMap Optional operation map for method resolution
+ * Method names are resolved via `toSdkMethodName` (operationId -> real SDK
+ * method name), not an upstream operation-map.json: that map's `region`
+ * values are doc-example identifiers (PascalCase, sometimes multiple per
+ * operationId for oneOf variants), not the SDK's actual per-operation
+ * method names, so it isn't a reliable dispatch source.
  */
-export function createJsSdkEmitter(
-  operationMap: OperationMapJsonSource | undefined,
-): EmitterStrategy {
+export function createJsSdkEmitter(): EmitterStrategy {
   return {
     id: 'js-sdk',
     name: 'JavaScript SDK',
     supportedConfigs: ['*'],
-    sdkMap: {
-      repo: 'camunda/orchestration-cluster-api-js',
-      path: 'examples/operation-map.json',
-      refEnv: 'JS_SDK_REF',
-      out: 'spec/js-sdk/operation-map.json',
-    },
     async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
-      const content = renderJsSuite(collection, {
-        mode: ctx.mode,
-        operationMap,
-      });
+      const content = renderJsSuite(collection, { mode: ctx.mode });
       return [
         {
           relativePath: jsSuiteFileName(collection, ctx.mode),
@@ -79,7 +68,6 @@ export function renderJsSuite(
   collection: EndpointScenarioCollection,
   opts: {
     mode?: 'feature' | 'integration' | 'variant';
-    operationMap?: OperationMapJsonSource;
   } = {},
 ): string {
   const lines: string[] = [];
@@ -97,8 +85,8 @@ export function renderJsSuite(
   lines.push(' */');
   lines.push('');
   lines.push("import { describe, it, expect, beforeEach } from 'vitest';");
-  lines.push("import { createApiClient } from '@camunda8/sdk';");
-  lines.push("import type { ApiClient, RestClientError } from '@camunda8/sdk';");
+  lines.push("import { Camunda8 } from '@camunda8/sdk';");
+  lines.push("import type { HttpSdkError } from '@camunda8/sdk';");
   lines.push('');
 
   // =========================================================================
@@ -117,16 +105,17 @@ export function renderJsSuite(
   // Test suite describe block
   // =========================================================================
   lines.push(`describe('${operationId} (${mode} tests)', () => {`);
-  lines.push('  let apiClient: ApiClient;');
+  lines.push("  let client: ReturnType<Camunda8['getOrchestrationClusterApiClientLoose']>;");
   lines.push('  let ctx: TestContext;');
   lines.push('');
 
   lines.push('  beforeEach(() => {');
   lines.push('    // Initialize test context');
   lines.push('    ctx = {};');
-  lines.push('    apiClient = createApiClient({');
-  lines.push('      baseUrl: process.env.API_BASE_URL ?? ' + "'http://localhost:8080/v2'" + ',');
-  lines.push('    });');
+  lines.push(
+    '    // Zero-config: the SDK reads ZEEBE_REST_ADDRESS / CAMUNDA_AUTH_STRATEGY from env',
+  );
+  lines.push('    client = new Camunda8().getOrchestrationClusterApiClientLoose();');
   lines.push('  });');
   lines.push('');
 
@@ -134,7 +123,7 @@ export function renderJsSuite(
   // Render each scenario as an async it() block
   // =========================================================================
   for (const scenario of collection.scenarios) {
-    renderScenarioTest(lines, scenario, opts);
+    renderScenarioTest(lines, scenario);
   }
 
   lines.push('});');
@@ -153,14 +142,7 @@ export function renderJsSuite(
  * 4. Assert response status
  * 5. Store response in context for next operation
  */
-function renderScenarioTest(
-  lines: string[],
-  scenario: EndpointScenario,
-  opts: {
-    mode?: 'feature' | 'integration' | 'variant';
-    operationMap?: OperationMapJsonSource;
-  } = {},
-): void {
+function renderScenarioTest(lines: string[], scenario: EndpointScenario): void {
   const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
 
   lines.push('  it(');
@@ -185,7 +167,7 @@ function renderScenarioTest(
   const operations = scenario.requestPlan || [];
   for (let i = 0; i < operations.length; i++) {
     const step = operations[i];
-    renderRequestStep(lines, step, i, opts);
+    renderRequestStep(lines, step, i);
   }
 
   if (operations.length === 0) {
@@ -201,38 +183,26 @@ function renderScenarioTest(
  * Render a single request step (operation execution).
  *
  * Constructs:
- * - URL from path template with parameter substitution
- * - Request body with variable substitution
- * - Proper SDK method invocation
- * - Response assertion
+ * - A single flat input object (path params + body fields merged), matching
+ *   the real SDK's one-argument-per-call method signatures
+ * - A `consistency` second argument for eventually-consistent reads,
+ *   detected via the bound method's arity rather than a hardcoded operation
+ *   list (the real SDK throws a client-side "Missing consistencyManagement
+ *   parameter" error for these operations if it's omitted)
+ * - Proper SDK method invocation and response assertion
  */
-function renderRequestStep(
-  lines: string[],
-  step: RequestStep,
-  stepIndex: number,
-  opts: {
-    mode?: 'feature' | 'integration' | 'variant';
-    operationMap?: OperationMapJsonSource;
-  } = {},
-): void {
+function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number): void {
   const stepNum = stepIndex + 1;
   const opId = step.operationId;
-  const method = opts.operationMap?.lookup(opId) ?? toCamelCase(opId);
+  const method = toSdkMethodName(opId);
   const responseVar = `response${stepNum}`;
   const expectedStatus = step.expect.status;
   const isErrorExpected = expectedStatus >= 400;
-  const requestParts: string[] = [];
 
   lines.push(`      // Step ${stepNum}: ${opId}`);
 
-  // Build URL
-  if (step.pathTemplate) {
-    const urlExpr = buildJavaScriptUrlExpression(step.pathTemplate, step.pathParams);
-    lines.push(`      const url${stepNum} = ${urlExpr};`);
-    requestParts.push(`path: url${stepNum}`);
-  }
-
-  // Build request body if present
+  // Build the request body (if any), then merge it with path params into a
+  // single flat input object.
   const payloadTemplate =
     step.bodyKind === 'multipart'
       ? (step.multipartTemplate ?? step.bodyTemplate)
@@ -240,34 +210,53 @@ function renderRequestStep(
   if (payloadTemplate) {
     const bodyExpr = renderJavaScriptBody(payloadTemplate, {});
     lines.push(`      const body${stepNum} = ${bodyExpr};`);
-    const payloadKey = step.bodyKind === 'multipart' ? 'multipart' : 'body';
-    requestParts.push(`${payloadKey}: body${stepNum}`);
   }
+
+  lines.push(`      const input${stepNum} = {`);
+  if (payloadTemplate) {
+    lines.push(`        ...body${stepNum},`);
+  }
+  for (const param of step.pathParams ?? []) {
+    lines.push(`        ${renderObjectKey(param.name)}: ctx['${param.var}'],`);
+  }
+  lines.push('      };');
+
+  // Some read operations (get-by-id, search) require an explicit consistency
+  // argument as a second parameter; a plain single-arg call throws a
+  // client-side error for exactly those operations. `.length` reflects the
+  // bound method's declared arity at runtime, so this adapts automatically
+  // as the upstream SDK adds/removes eventually-consistent operations.
+  lines.push(
+    `      const consistency${stepNum} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 0 } } : undefined;`,
+  );
+  // .bind(client) preserves the `this` binding the real SDK's generated
+  // methods rely on internally (e.g. accessing `this._client`) — without
+  // it, detaching the method reference from `client` before calling it
+  // throws at runtime. `any` (rather than `unknown`) matches the emitted
+  // code's need to chain deep, dynamically-shaped response access.
+  lines.push(
+    `      const call${stepNum} = client.${method}.bind(client) as (...args: unknown[]) => Promise<any>;`,
+  );
 
   if (isErrorExpected) {
     lines.push('      try {');
-    lines.push(`        const ${responseVar} = await apiClient.${method}({`);
-    for (const part of requestParts) {
-      lines.push(`          ${part},`);
-    }
-    lines.push('        });');
+    lines.push(
+      `        const ${responseVar} = await call${stepNum}(input${stepNum}, consistency${stepNum});`,
+    );
     lines.push(`        expect.fail('Expected ${expectedStatus} but request succeeded');`);
     lines.push('      } catch (error) {');
-    lines.push(`        const restError = error as RestClientError;`);
-    lines.push(`        expect(restError.status).toBe(${expectedStatus});`);
+    lines.push('        const sdkError = error as HttpSdkError;');
+    lines.push(`        expect(sdkError.status).toBe(${expectedStatus});`);
     lines.push('      }');
   } else {
-    lines.push(`      const ${responseVar} = await apiClient.${method}({`);
-    for (const part of requestParts) {
-      lines.push(`        ${part},`);
-    }
-    lines.push('      });');
-    lines.push(`      expect(${responseVar}.status).toBe(${expectedStatus});`);
+    lines.push(
+      `      const ${responseVar} = await call${stepNum}(input${stepNum}, consistency${stepNum});`,
+    );
 
     if (step.extract && step.extract.length > 0) {
       for (const extract of step.extract) {
         const accessor = toOptionalAccessor(extract.fieldPath);
-        lines.push(`      ctx['${extract.bind}'] = ${responseVar}.data${accessor};`);
+        lines.push(`      ctx['${extract.bind}'] = ${responseVar}${accessor};`);
       }
     }
 
@@ -278,16 +267,26 @@ function renderRequestStep(
 }
 
 /**
- * Convert operationId (camelCase) to camelCase SDK method name.
- * Most SDKs use camelCase for method names.
- *
- * @example
- * 'listProcessInstances' -> 'listProcessInstances'
- * 'CreateProcessInstance' -> 'createProcessInstance'
+ * Convert an OpenAPI operationId to the real SDK's camelCase method name.
+ * The SDK's own codegen Title-cases multi-letter acronyms before lowercasing
+ * the leading character (e.g. operationId `getProcessDefinitionXML` ->
+ * method `getProcessDefinitionXml`), unlike a naive camelCase pass.
  */
-function toCamelCase(str: string): string {
-  if (!str) return str;
-  return str.charAt(0).toLowerCase() + str.slice(1);
+function toSdkMethodName(operationId: string): string {
+  if (!operationId) return operationId;
+  const acronymNormalized = operationId.replace(
+    /[A-Z]{2,}/g,
+    (run) => run.charAt(0) + run.slice(1).toLowerCase(),
+  );
+  return acronymNormalized.charAt(0).toLowerCase() + acronymNormalized.slice(1);
+}
+
+/**
+ * Render an object literal key, quoting it only if it isn't a valid bare
+ * JavaScript identifier.
+ */
+function renderObjectKey(name: string): string {
+  return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) ? name : `'${name.replace(/'/g, "\\'")}'`;
 }
 
 /**
