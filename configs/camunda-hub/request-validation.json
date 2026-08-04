@@ -51,6 +51,15 @@
         "summary": "ProblemDetail missing `type` on Spring's own framework-level validation errors (missing/malformed multipart parts, missing/malformed query params)",
         "url": "https://github.com/camunda/camunda-hub/issues/26448"
       }
+    },
+    {
+      "operationId": "createWorkspace",
+      "scenarioKinds": ["malformed-json-body"],
+      "reason": "createWorkspace accepts a syntactically invalid JSON body (200, not 400) and persists the raw garbage text verbatim as `name` — verified live twice (a specific PR's built image, and camunda/hub:SNAPSHOT dispatched directly on main), so it's in current mainline, not tied to one PR. Unlike ingestCatalogAssets/getClusterUsageMetrics above, this op has plenty of other still-passing negative coverage (missing-required, constraint-violation, missing-body, auth, param checks, …) worth keeping — this is exactly the (operationId + scenarioKind) case those entries' comments said wasn't worth building for saving 2 tests; here it's worth it.",
+      "knownIssue": {
+        "summary": "createWorkspace accepts syntactically invalid JSON and persists it as the workspace name",
+        "url": "https://github.com/camunda/camunda-hub/issues/27155"
+      }
     }
   ],
   "knownIssues": [

@@ -117,17 +117,32 @@ export interface RequestValidationConfig {
    */
   pathResourceFixtures?: Record<string, string>;
   /**
-   * Operations to exclude from negative-suite generation entirely, with a
-   * documented reason. Use for ops that are blocked upstream so their negative
-   * tests can't reach the validation path they target (e.g. Hub version ops —
+   * Operations to exclude from negative-suite generation, with a documented
+   * reason. Use for ops that are blocked upstream so their negative tests
+   * can't reach the validation path they target (e.g. Hub version ops —
    * updateVersion/restoreVersion — whose fixture can't exist per
    * camunda/camunda-hub#25801, so they 404 instead of 400; tracked via #419).
-   * The whole op is dropped (all its negative cases), so the nightly stays green
-   * on known blockers instead of perpetually red. Re-enable when unblocked.
+   *
+   * By default (no `scenarioKinds`) the WHOLE op is dropped (all its negative
+   * cases), so the nightly stays green on known blockers instead of
+   * perpetually red. Re-enable when unblocked.
+   *
+   * When `scenarioKinds` is present, only scenarios of those kinds for this
+   * operation are dropped — every other kind's coverage for the op is kept.
+   * Use this when the gap is narrower than the whole operation (e.g.
+   * createWorkspace's malformed-json-body gap, camunda-hub#27155 — its
+   * missing-required/constraint-violation/etc. coverage is unaffected and
+   * shouldn't be thrown away to suppress one kind).
+   *
    * The optional `knownIssue` feeds the nightly's "skipped due to known issues"
    * Slack thread (see the workflow's derive step).
    */
-  excludeOperations?: { operationId: string; reason: string; knownIssue?: KnownIssue }[];
+  excludeOperations?: {
+    operationId: string;
+    scenarioKinds?: ScenarioKind[];
+    reason: string;
+    knownIssue?: KnownIssue;
+  }[];
   /**
    * Suite-wide known issues NOT tied to a single excluded op (e.g. the
    * generator-level wrong-type-key skip for camunda/camunda-hub#25926). Surfaced
@@ -209,9 +224,12 @@ function isKnownIssue(v: unknown): v is KnownIssue {
   );
 }
 
-function isExcludeOperations(
-  v: unknown,
-): v is { operationId: string; reason: string; knownIssue?: KnownIssue }[] {
+function isExcludeOperations(v: unknown): v is {
+  operationId: string;
+  scenarioKinds?: ScenarioKind[];
+  reason: string;
+  knownIssue?: KnownIssue;
+}[] {
   return (
     Array.isArray(v) &&
     v.every(
@@ -219,6 +237,10 @@ function isExcludeOperations(
         isPlainObject(e) &&
         typeof e.operationId === 'string' &&
         e.operationId.trim().length > 0 &&
+        (e.scenarioKinds === undefined ||
+          (Array.isArray(e.scenarioKinds) &&
+            e.scenarioKinds.length > 0 &&
+            e.scenarioKinds.every((k) => typeof k === 'string' && SCENARIO_KIND_SET.has(k)))) &&
         typeof e.reason === 'string' &&
         e.reason.trim().length > 0 &&
         (e.knownIssue === undefined || isKnownIssue(e.knownIssue)),
@@ -330,7 +352,7 @@ export function loadRequestValidationConfig(
     const v = parsed.excludeOperations;
     if (!isExcludeOperations(v)) {
       throw new Error(
-        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, reason, knownIssue? } objects — operationId/reason are non-empty strings, and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
+        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, scenarioKinds?, reason, knownIssue? } objects — operationId/reason are non-empty strings, scenarioKinds (when present) a non-empty array of valid ScenarioKind values, and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
       );
     }
     merged.excludeOperations = v;

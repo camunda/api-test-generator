@@ -131,6 +131,49 @@ describe('request-validation: unenforcedStringFormats', () => {
       expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
     });
 
+    it('parses excludeOperations with an optional scenarioKinds scope (#500-era)', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'createWorkspace',
+              scenarioKinds: ['malformed-json-body'],
+              reason: 'accepts syntactically invalid JSON, persists it as name',
+              knownIssue: {
+                summary: 'createWorkspace accepts malformed JSON',
+                url: 'https://github.com/camunda/camunda-hub/issues/27155',
+              },
+            },
+          ],
+        }),
+      );
+      const cfg = loadRequestValidationConfig(tmpRoot, 'probe');
+      expect(cfg.excludeOperations?.[0]?.scenarioKinds).toEqual(['malformed-json-body']);
+    });
+
+    it('rejects an excludeOperations entry with an empty scenarioKinds array', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [{ operationId: 'createWorkspace', scenarioKinds: [], reason: 'x' }],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
+    it('rejects an excludeOperations entry with an unknown scenarioKinds value', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            { operationId: 'createWorkspace', scenarioKinds: ['not-a-real-kind'], reason: 'x' },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
     it('parses a suite-wide knownIssues array and rejects a malformed one', () => {
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),
