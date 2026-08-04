@@ -191,7 +191,7 @@ export async function assertResponseStatus(
   // original "no body read on a plain match" behavior is preserved for that
   // case.
   const shouldCheckShape = !statusMismatch && expected >= 400 && !opts?.skipProblemDetailShape;
-  const shouldCheckEmptyItems = !statusMismatch && !!opts?.expectEmptyItems;
+  const shouldCheckEmptyItems = !statusMismatch && expected < 400 && !!opts?.expectEmptyItems;
   if (!statusMismatch && !shouldCheckShape && !shouldCheckEmptyItems) return;
 
   let bodyText = '';

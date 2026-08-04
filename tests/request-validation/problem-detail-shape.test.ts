@@ -245,6 +245,19 @@ describe('assertResponseStatus — expectEmptyItems check', () => {
     ).rejects.toThrow();
   });
 
+  it('is ignored for a non-2xx expected status, even combined with skipProblemDetailShape', async () => {
+    // expectEmptyItems is documented as meaningless outside a 2xx `expected`
+    // — a caller combining it with skipProblemDetailShape on a 4xx/5xx
+    // scenario must NOT get an items-array check it never asked for.
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, ''), 400, ctx, {
+        skipProblemDetailShape: true,
+        expectEmptyItems: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('never reads the response body on a clean pass without expectEmptyItems set', async () => {
     const assertResponseStatus = await loadAssertResponseStatus();
     const { res, textSpy } = fakeResponseWithTextSpy(200, JSON.stringify({ items: [1] }));
