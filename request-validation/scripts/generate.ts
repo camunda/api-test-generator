@@ -164,22 +164,42 @@ async function main() {
   // them (blocked-upstream ops whose negative tests can't reach their target,
   // e.g. Hub updateVersion/restoreVersion per camunda-hub#25801). One filter
   // here beats threading an exclude set through every generate*() call.
-  const excludeOps = new Set((rvConfig.excludeOperations ?? []).map((e) => e.operationId));
+  //
+  // An entry with `scenarioKinds` is narrower (#500-era addition, e.g.
+  // camunda-hub#27155's createWorkspace malformed-json-body gap): only those
+  // kinds for that op are dropped, everything else stays. That can't happen
+  // at this model-level filter (it would drop the op for every kind), so
+  // scoped entries are applied later, after generation, as a scenario filter.
+  // Captured BEFORE any filtering below — checking staleness against the
+  // already-filtered model would make every legitimate whole-op exclude
+  // look stale (it was just removed from model.operations by definition).
+  const specOpIds = new Set(model.operations.map((op) => op.operationId));
+  const wholeOpExcludes = (rvConfig.excludeOperations ?? []).filter((e) => !e.scenarioKinds);
+  const scopedExcludes = (rvConfig.excludeOperations ?? []).filter((e) => e.scenarioKinds);
+  const excludeOps = new Set(wholeOpExcludes.map((e) => e.operationId));
   if (excludeOps.size > 0) {
-    const specOpIds = new Set(model.operations.map((op) => op.operationId));
     const before = model.operations.length;
     model.operations = model.operations.filter((op) => !excludeOps.has(op.operationId));
     const dropped = before - model.operations.length;
-    for (const e of rvConfig.excludeOperations ?? []) {
+    for (const e of wholeOpExcludes) {
       console.log(`  ⏭  exclude-operations: ${e.operationId} — ${e.reason}`);
     }
     console.log(`[generate] excluded ${dropped} operation(s) from the negative suite (#419)`);
-    // Surface stale/typo excludeOperations entries: an excluded opId not in the
-    // bundled spec drops nothing, so an upstream rename would silently stop
-    // excluding the op and re-red the nightly with no signal. Warn + emit a
-    // GitHub annotation (mirrors the positive-suppress drift check) so the drift
-    // is explicit; the op then simply isn't excluded (visible), not a silent no-op.
-    const staleExcludes = [...excludeOps].filter((id) => !specOpIds.has(id)).sort();
+  }
+  for (const e of scopedExcludes) {
+    console.log(
+      `  ⏭  exclude-operations (${e.scenarioKinds?.join(', ')} only): ${e.operationId} — ${e.reason}`,
+    );
+  }
+  if (rvConfig.excludeOperations?.length) {
+    // Surface stale/typo excludeOperations entries (either group): an
+    // excluded opId not in the bundled spec drops nothing, so an upstream
+    // rename would silently stop excluding the op and re-red the nightly with
+    // no signal. Warn + emit a GitHub annotation (mirrors the positive-
+    // suppress drift check) so the drift is explicit; the op then simply
+    // isn't excluded (visible), not a silent no-op.
+    const allExcludedIds = rvConfig.excludeOperations.map((e) => e.operationId);
+    const staleExcludes = [...new Set(allExcludedIds)].filter((id) => !specOpIds.has(id)).sort();
     if (staleExcludes.length > 0) {
       const list = staleExcludes.join(', ');
       console.warn(
@@ -538,6 +558,26 @@ async function main() {
         }),
       );
     }
+  }
+
+  // Scoped excludeOperations entries (scenarioKinds present) — drop just the
+  // listed kinds for that op, keeping its other coverage. See the config's
+  // header comment for why this can't happen at the model-level filter above.
+  if (scopedExcludes.length > 0) {
+    const scopedByOp = new Map<string, Set<string>>();
+    for (const e of scopedExcludes) {
+      const kinds = scopedByOp.get(e.operationId) ?? new Set<string>();
+      for (const k of e.scenarioKinds ?? []) kinds.add(k);
+      scopedByOp.set(e.operationId, kinds);
+    }
+    const before = scenarios.length;
+    for (let i = scenarios.length - 1; i >= 0; i--) {
+      const s = scenarios[i];
+      if (scopedByOp.get(s.operationId)?.has(s.type)) scenarios.splice(i, 1);
+    }
+    console.log(
+      `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
+    );
   }
 
   // Dedupe
