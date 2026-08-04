@@ -131,6 +131,8 @@ export const SCENARIO_KINDS = [
   'allof-conflict',
   'not-found-fake-id',
   'pagination-limit-invalid',
+  'pagination-offset-past-total',
+  'pagination-cursor-invalid',
   'auth-absent',
   'auth-invalid',
   'auth-deny',
