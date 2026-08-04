@@ -19,6 +19,7 @@ import { generateConstraintViolations } from '../src/analysis/constraintViolatio
 import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
+import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
 import { generateMultipartMissingRequired } from '../src/analysis/multipartMissingRequired.js';
@@ -443,6 +444,17 @@ async function main() {
     if (wantKind('body-top-type-mismatch')) {
       scenarios.push(
         ...generateBodyTopTypeMismatch(model.operations, {
+          onlyOperations: opts.onlyOperations,
+        }),
+      );
+    }
+    // Unparseable-JSON-syntax body (#499) — hits Spring's own deserialization
+    // exception path before any schema-driven validation runs; verified live
+    // that this returns a complete ProblemDetail (no knownProblemDetailShapeGaps
+    // entry needed).
+    if (wantKind('malformed-json-body')) {
+      scenarios.push(
+        ...generateMalformedJsonBody(model.operations, {
           onlyOperations: opts.onlyOperations,
         }),
       );

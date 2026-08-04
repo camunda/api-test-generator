@@ -206,4 +206,22 @@ describe('shouldSkipForMultipart (#135)', () => {
     const s = scenario({ type: 'additional-prop', requestBody: { name: 'x', __extra__: 1 } });
     expect(shouldSkipForMultipart(s, op)).toBe(false);
   });
+
+  it('skips malformed-json-body on multipart-only ops (#499 — Content-Type: application/json itself is rejected → 415)', () => {
+    const op = multipartOnlyOp({
+      operationId: 'createDocument',
+      multipartSchema: {
+        type: 'object',
+        properties: { file: { type: 'string', format: 'binary' } },
+      },
+    });
+    const s = scenario({ type: 'malformed-json-body', requestBody: '{"malformed": ' });
+    expect(shouldSkipForMultipart(s, op)).toBe(true);
+  });
+
+  it('does NOT skip malformed-json-body on JSON-body ops', () => {
+    const op = jsonOp();
+    const s = scenario({ type: 'malformed-json-body', requestBody: '{"malformed": ' });
+    expect(shouldSkipForMultipart(s, op)).toBe(false);
+  });
 });

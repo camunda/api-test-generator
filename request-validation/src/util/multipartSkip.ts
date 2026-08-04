@@ -1,10 +1,10 @@
 import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
 
 /**
- * Multipart-only operations need four classes of JSON-derived
+ * Multipart-only operations need five classes of JSON-derived
  * validation scenarios dropped before the multipart-adaptation pass
  * tries to wrap them as form-data submissions (rules 1-3 from #135;
- * rule 4 from #364):
+ * rule 4 from #364; rule 5 from #499):
  *
  *   1. `body-top-type-mismatch` — there is no JSON top-level type to
  *      invert. Wrapping `[]` / scalar bodies as form data produces a
@@ -30,6 +30,16 @@ import type { OperationModel, SchemaFragment, ValidationScenario } from '../mode
  *
  *          POST /v2/documents -F file=x -F __unexpectedField=x   -> 201
  *
+ *   5. `malformed-json-body` (#499) — there is no JSON body concept to
+ *      send malformed JSON syntax for; sending `Content-Type:
+ *      application/json` at all is itself rejected. Verified live:
+ *
+ *          POST /v2/documents -H 'Content-Type: application/json' -d '{"malformed": '
+ *            -> 415 Unsupported Media Type, "Content-Type 'application/json' is not supported."
+ *
+ *      A malformed-*multipart*-syntax equivalent is a separate, out-of-scope
+ *      feature (see the #135 note below), not something to send as
+ *      "malformed JSON" against these operations.
  *
  * `shouldSkipForMultipart` returns `true` for scenarios that fall into
  * any of those classes on a multipart-only operation. Other scenarios
@@ -75,6 +85,7 @@ function isArrayPart(schema: SchemaFragment | undefined): boolean {
 export function shouldSkipForMultipart(scenario: ValidationScenario, op: OperationModel): boolean {
   if (!isMultipartOnly(op)) return false;
   if (scenario.type === 'body-top-type-mismatch') return true;
+  if (scenario.type === 'malformed-json-body') return true;
   // #364 — an unknown extra form part is ignored by multipart endpoints
   // (no additionalProperties:false on form data), so the upload returns 201
   // rather than 400. Drop regardless of target.

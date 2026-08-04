@@ -119,6 +119,7 @@ export const SCENARIO_KINDS = [
   'param-constraint-violation',
   'missing-body',
   'body-top-type-mismatch',
+  'malformed-json-body',
   'nested-additional-prop',
   'unique-items-violation',
   'multiple-of-violation',
