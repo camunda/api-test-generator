@@ -1,0 +1,88 @@
+# Live-Hub check for every api-test-generator PR — closes the gap left by
+# ci.yml's `hub-invariants` job, which only checks the PINNED hub spec
+# (ci.yml:131-135), never a live Hub. hub-ondemand-test.yml already does a
+# real generate+run against a live Hub, but is workflow_dispatch-only, so
+# nobody actually runs it before merging unless they remember to.
+#
+# hub-ondemand-test.yml is itself just a thin wrapper around _hub-suite-run.yml
+# (the same reusable hub-pr-check.yml also calls). Calling that reusable
+# directly from a `pull_request`-triggered workflow makes the result a real,
+# native GitHub Actions check on the PR — no polling or manual status-posting
+# needed, unlike the dispatch→poll→comment pattern used for the (fire-and-
+# forget, non-blocking) spec-bump PR validation link.
+name: Hub PR live check
+
+on:
+  pull_request:
+    # Default types (opened, synchronize, reopened) — re-validates on every
+    # push, matching how every other check in this repo already behaves.
+
+concurrency:
+  group: hub-pr-live-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Guard (fork / .github diff)
+    runs-on: ubuntu-latest
+    # Real forks get no repo secrets (the run job would just fail at the
+    # Vault step for reasons unrelated to the change); Dependabot PRs are
+    # same-repo but also get no secrets (a GitHub Actions restriction) — skip
+    # both up front. Same fork check as ci.yml's hub-invariants job
+    # (ci.yml:151-153).
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - name: Check for .github/** changes
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # SECURITY (mirrors triage-camunda-hub-nightly.yml's identical
+          # guard): calling a local reusable workflow (`uses: ./...`) resolves
+          # to the version of that file AS IT EXISTS ON THE PR's OWN COMMIT —
+          # a PR that modifies _hub-suite-run.yml or this workflow file would
+          # have its own modified version execute with production Vault
+          # secrets, no human review required. Fail CLOSED (skip) if the diff
+          # can't even be checked — the cost of an unnecessary manual dispatch
+          # is trivial next to the cost of a wrong guess here.
+          if changed=$(gh pr diff "$PR_NUMBER" --repo "$REPO" --name-only 2>/dev/null); then
+            if grep -qE '^\.github/' <<<"$changed"; then
+              echo "::warning::PR touches .github/** — skipping the live-Hub check for safety; a maintainer must review the workflow changes and run hub-ondemand-test.yml manually before merging."
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "::warning::Could not fetch the changed-files list for this PR — skipping the live-Hub check out of caution."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  run:
+    name: Live Hub suite
+    needs: guard
+    if: needs.guard.outputs.proceed == 'true'
+    permissions:
+      contents: read
+      id-token: write # OIDC → Vault (same as hub-ondemand-test.yml)
+    uses: ./.github/workflows/_hub-suite-run.yml
+    secrets:
+      VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+      VAULT_JWT_PATH: ${{ secrets.VAULT_JWT_PATH }}
+      VAULT_JWT_ROLE: ${{ secrets.VAULT_JWT_ROLE }}
+      VAULT_JWT_AUDIENCE: ${{ secrets.VAULT_JWT_AUDIENCE }}
+    with:
+      # hub_ref/hub_image left at _hub-suite-run.yml's defaults (main /
+      # camunda/hub:SNAPSHOT) — this PR's own generator code is checked out
+      # implicitly (the reusable's own checkout step resolves to the calling
+      # context's SHA), tested against Hub's CURRENT mainline: exactly "does
+      # this PR still pass against a real Hub."
+      summary_heading: |
+        ## Hub PR live check — #${{ github.event.pull_request.number }}
+        `${{ github.event.pull_request.head.sha }}` against camunda-hub main / camunda/hub:SNAPSHOT
