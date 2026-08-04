@@ -526,9 +526,23 @@ jobs:
               verdict="Looks flaky, not a regression (confidence: ${CONFIDENCE}). ${SUMMARY}"
               ping="${ta_medic}"
               ;;
+            unknown)
+              # Rule #4's hardening made this category more likely to fire —
+              # ${SUMMARY} is never empty here: it's either the agent's own
+              # "couldn't establish causation" explanation, or (if classify
+              # errored/produced no usable output at all) the parse step's
+              # "did not produce a usable result" fallback text. Either way,
+              # showing it beats discarding it into the generic three-way
+              # hedge below, which forces a reader to open the run just to
+              # see a one-line diagnostic that was already computed.
+              verdict="Could not confirm this is a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
+              ping="${ta_medic}"
+              ;;
             *)
-              # classify didn't run, errored, or genuinely couldn't tell —
-              # same three-way hedge this alert shipped with originally.
+              # Unreachable in practice — the parse step's own enum
+              # validation already guarantees $CATEGORY is one of the five
+              # cases above by the time it gets here. Kept as a defensive
+              # fallback in case that guarantee is ever weakened upstream.
               verdict="Could be a real regression from this PR, an unhandled case in api-test-generator for a new/changed endpoint (unmapped operation, unmodelled schema shape), or infra/flakiness — check the run to tell which before this merges."
               ping="${ta_medic}"
               ;;
