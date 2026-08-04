@@ -307,8 +307,26 @@ jobs:
              unhandled new construct) -> category "generator-gap" (api-test-generator
              does not yet correctly handle this shape; NOT a hub bug).
           4. If the operationId is UNCHANGED by this PR and its response contradicts
-             the (unchanged) spec -> category "product" (a likely real regression;
-             this PR probably broke something via a shared code path).
+             the (unchanged) spec, that is EITHER a regression this PR introduced via
+             a shared code path, OR a standing, pre-existing bug this PR happens to
+             also expose -- "unchanged and still broken" does not by itself tell you
+             which. This especially applies to a broad/blanket-acceptance failure
+             (e.g. a handler that accepts any malformed input regardless of shape) --
+             that pattern is far more often "this endpoint has probably always
+             behaved this way" than "this specific PR just introduced it". Only use
+             category "product" with confidence "high" when you have a SPECIFIC
+             causal link to THIS PR (its own diff touches a shared
+             validation/deserialization path, a dependency bump, a config change
+             plausibly affecting this behavior, etc.) -- never solely because the op
+             is unchanged and the response is wrong. Absent that causal link: use
+             "generator-gap" if the test's own assumption looks over-generalized
+             (assumes uniform behavior across operations that don't actually all
+             share it), or "unknown" (confidence "low") if you can't tell either way
+             -- and say explicitly in your summary that you could not establish this
+             PR caused it, so a maintainer should verify before treating it as a
+             regression. Getting this wrong pages a real person (hub-medic) for
+             something they didn't cause -- bias toward NOT paging, not toward
+             paging.
           5. Reconcile against the known-issue configs first — if the failure matches
              an existing knownIssue/knownProblemDetailShapeGaps entry, use its real
              category and note it is already tracked in your summary.
@@ -479,11 +497,22 @@ jobs:
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
           # product ALSO pings hub-medic — it's their pipeline (this PR) that
           # a confirmed regression implicates, same "whoever owns the broken
-          # thing" routing every AlwaysGreen variant we looked at uses.
+          # thing" routing every AlwaysGreen variant we looked at uses. BUT
+          # only at confidence "high" — the prompt's own rule #4 now requires
+          # a specific causal link to this PR before it may say "product" at
+          # high confidence; anything less means classify itself couldn't
+          # rule out a standing, pre-existing bug unrelated to this PR. A
+          # medium/low-confidence guess still isn't worth paging a human over
+          # (defense-in-depth alongside the prompt hardening, not a
+          # replacement for it — the LLM can still misjudge).
           case "$CATEGORY" in
             product)
               verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
-              ping="${hub_medic} ${ta_medic}"
+              if [ "$CONFIDENCE" = "high" ]; then
+                ping="${hub_medic} ${ta_medic}"
+              else
+                ping="${ta_medic}"
+              fi
               ;;
             generator-gap)
               verdict="Likely api-test-generator not yet handling a new/changed endpoint shape, not a hub bug (confidence: ${CONFIDENCE}). ${SUMMARY}"
