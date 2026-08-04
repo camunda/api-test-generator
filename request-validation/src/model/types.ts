@@ -104,6 +104,7 @@ export interface SpecModel {
  */
 export const SCENARIO_KINDS = [
   'missing-required',
+  'explicit-null-required',
   'missing-required-combo',
   'type-mismatch',
   'union',

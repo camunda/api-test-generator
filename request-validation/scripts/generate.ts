@@ -19,6 +19,7 @@ import { generateConstraintViolations } from '../src/analysis/constraintViolatio
 import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
+import { generateExplicitNullRequired } from '../src/analysis/explicitNullRequired.js';
 import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
@@ -258,6 +259,16 @@ async function main() {
         }),
       );
     }
+  }
+  // Explicit `null` for a required field, distinct from omitting it
+  // entirely (#500) — same target-field selection as missing-required.
+  if (wantKind('explicit-null-required')) {
+    scenarios.push(
+      ...generateExplicitNullRequired(model.operations, {
+        capPerOperation: opts.maxMissing,
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
   }
   if (opts.deep && wantKind('missing-required-combo')) {
     scenarios.push(
