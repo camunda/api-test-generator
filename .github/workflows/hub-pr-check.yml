@@ -255,6 +255,12 @@ jobs:
           REPORTS_DIR: ${{ github.workspace }}/test-results/e2e-camunda-hub
           SPEC_DIR: ${{ github.workspace }}/../camunda-hub/restapi/public-api/src/main/resources/openapi/v2
           SPEC_DIFF_FILE: ${{ github.workspace }}/spec-diff.txt
+          # The clone-hub-sibling action does a full clone, not a sparse/
+          # openapi-only one -- the agent runs as a real tool-using session
+          # (claude -p), so it can inspect this itself (git diff/log/grep)
+          # rather than being limited to the pre-computed SPEC_DIFF_FILE,
+          # which only ever covers the OpenAPI YAML.
+          HUB_REPO_DIR: ${{ github.workspace }}/../camunda-hub
           # From _hub-suite-run.yml's own coverage check — comma-separated,
           # empty if none. This is the ONE failure mode with no failing test
           # to read at all (a silent skip, not an assertion failure), so it
@@ -281,6 +287,13 @@ jobs:
             camunda-hub clone step failed; treat as unavailable, don't guess).
           - Spec diff (this PR's sha vs camunda-hub main), OpenAPI dir only: ${SPEC_DIFF_FILE}
             (empty file = this PR does not touch the API spec, or the diff step failed).
+          - Full camunda-hub checkout AT THIS PR's SHA: ${HUB_REPO_DIR} (the complete
+            repo, not just the spec dir -- may be absent under the same condition as
+            the spec dir above). SPEC_DIFF_FILE only ever covers the OpenAPI YAML;
+            for step 4 below, use this to inspect the PR's actual CODE changes
+            yourself, e.g. \`git -C ${HUB_REPO_DIR} diff origin/main -- PATH\`
+            (start with \`--stat\` against the whole repo to scope down before diffing
+            anything large).
           - Known-issue configs: configs/camunda-hub/positive-suppress.json and
             configs/camunda-hub/request-validation.json (their knownIssue /
             knownProblemDetailShapeGaps entries).
@@ -313,12 +326,18 @@ jobs:
              which. This especially applies to a broad/blanket-acceptance failure
              (e.g. a handler that accepts any malformed input regardless of shape) --
              that pattern is far more often "this endpoint has probably always
-             behaved this way" than "this specific PR just introduced it". Only use
-             category "product" with confidence "high" when you have a SPECIFIC
-             causal link to THIS PR (its own diff touches a shared
-             validation/deserialization path, a dependency bump, a config change
-             plausibly affecting this behavior, etc.) -- never solely because the op
-             is unchanged and the response is wrong. Absent that causal link: use
+             behaved this way" than "this specific PR just introduced it". To look
+             for that causal link, DO NOT rely on the spec diff alone -- it only
+             covers the OpenAPI YAML, not the actual implementation. Inspect the
+             PR's real code diff yourself in the full checkout (see Inputs above):
+             run a \`--stat\` diff against camunda-hub main first to see which files
+             changed at all, then look closer at anything touching this operation's
+             controller/handler, request-body deserialization, or shared
+             validation/config code. Only use category "product" with confidence
+             "high" when that code diff gives you a SPECIFIC causal link to THIS PR
+             -- never solely because the op is unchanged and the response is wrong,
+             and never from the spec diff alone (it can't show a code-only change).
+             Absent that causal link: use
              "generator-gap" if the test's own assumption looks over-generalized
              (assumes uniform behavior across operations that don't actually all
              share it), or "unknown" (confidence "low") if you can't tell either way
