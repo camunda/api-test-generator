@@ -47,7 +47,10 @@ import {
   findOffsetBranch,
   findPaginationPage,
 } from '../src/analysis/paginationShape.js';
-import { generateParamConstraintViolations } from '../src/analysis/paramConstraintViolations.js';
+import {
+  generateParamConstraintViolations,
+  isParamConstraintEligible,
+} from '../src/analysis/paramConstraintViolations.js';
 import {
   generateParamEnumViolation,
   generateParamMissing,
@@ -1084,21 +1087,11 @@ async function main() {
       applicable.add('param-type-mismatch');
     if (op.parameters.some((p) => Array.isArray(p.schema?.enum)))
       applicable.add('param-enum-violation');
-    // Same shape of approximation as param-type-mismatch/param-enum-violation
-    // above (checking declared constraint keywords, not re-running
-    // resolveParamSchema/buildViolations) — a path/query param declaring any
-    // constraint buildViolations() knows how to mutate.
-    if (
-      op.parameters.some(
-        (p) =>
-          (p.in === 'path' || p.in === 'query') &&
-          p.schema &&
-          (p.schema.pattern ||
-            typeof p.schema.minLength === 'number' ||
-            typeof p.schema.maxLength === 'number' ||
-            (Array.isArray(p.schema.enum) && p.schema.enum.length > 0)),
-      )
-    ) {
+    // param-constraint-violation reuses the exact eligibility check
+    // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
+    // which merges the allOf chain — a flat p.schema.* read misses
+    // constraints carried in an allOf branch, e.g. Camunda key types).
+    if (isParamConstraintEligible(op)) {
       applicable.add('param-constraint-violation');
     }
     // malformed-json-body (#499) needs only a JSON request body of ANY type

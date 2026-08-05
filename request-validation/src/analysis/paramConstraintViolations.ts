@@ -59,6 +59,29 @@ function buildViolations(
   return out;
 }
 
+/**
+ * Is `op` eligible for a param-constraint-violation scenario? Reuses
+ * `resolveParamSchema` (which merges the top-level `allOf` chain — Camunda
+ * key types carry pattern/maxLength inside an `allOf: [LongKey]` branch, a
+ * flat `p.schema.*` read misses them, undermining the coverage
+ * applicability signal per PR #516's review) and mirrors the same gates
+ * {@link buildViolations} checks, so the coverage script's applicability
+ * analysis can't drift from what this generator actually produces.
+ */
+export function isParamConstraintEligible(op: OperationModel): boolean {
+  return op.parameters.some((p) => {
+    if (p.in !== 'path' && p.in !== 'query') return false;
+    const r = resolveParamSchema(p);
+    if (!r) return false;
+    return (
+      !!r.pattern ||
+      (typeof r.minLength === 'number' && r.minLength > 0) ||
+      typeof r.maxLength === 'number' ||
+      !!r.enumValues?.length
+    );
+  });
+}
+
 function buildParams(
   path: string,
   overrides: Record<string, string>,

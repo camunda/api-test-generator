@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { SCENARIO_KINDS } from '../../request-validation/src/model/types.js';
 
@@ -20,6 +21,8 @@ import { SCENARIO_KINDS } from '../../request-validation/src/model/types.js';
  * condition looser/tighter than the real generator's". That half still
  * needs a human (or the per-operation diffs this session did by hand).
  */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 describe('request-validation: coverage applicability wiring', () => {
   it('every SCENARIO_KINDS entry has an applicable.add(...) call in generate.ts', () => {
     const src = readFileSync(
