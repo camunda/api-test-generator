@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { SCENARIO_KINDS } from '../../request-validation/src/model/types.js';
 
@@ -24,16 +25,39 @@ import { SCENARIO_KINDS } from '../../request-validation/src/model/types.js';
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Parses the real AST (rather than regex-scanning raw source text) so a
+ * commented-out `// applicable.add('kind')` line, or the string
+ * `applicable.add(...)` appearing inside an unrelated string literal,
+ * can't be mistaken for a live call — comments and string contents are
+ * not call expressions.
+ */
+function findWiredKinds(sourceText: string, fileName: string): Set<string> {
+  const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true);
+  const wired = new Set<string>();
+  function visit(node: ts.Node): void {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === 'applicable' &&
+      node.expression.name.text === 'add' &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      wired.add(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return wired;
+}
+
 describe('request-validation: coverage applicability wiring', () => {
   it('every SCENARIO_KINDS entry has an applicable.add(...) call in generate.ts', () => {
-    const src = readFileSync(
-      join(__dirname, '../../request-validation/scripts/generate.ts'),
-      'utf8',
-    );
-    const wired = new Set<string>();
-    for (const m of src.matchAll(/applicable\.add\(\s*['"]([a-z-]+)['"]\s*\)/g)) {
-      wired.add(m[1]);
-    }
+    const path = join(__dirname, '../../request-validation/scripts/generate.ts');
+    const src = readFileSync(path, 'utf8');
+    const wired = findWiredKinds(src, path);
     const unwired = SCENARIO_KINDS.filter((kind) => !wired.has(kind));
     expect(
       unwired,
