@@ -311,12 +311,16 @@ works for a kind if `applicable` is told when the kind applies.
 
 `SCENARIO_KINDS` (`request-validation/src/model/types.ts`) and the
 `applicable.add(...)` calls are two hand-maintained lists with nothing
-enforcing they stay in sync. #500/#511 found 10 kinds — including one
-introduced in that same PR — that were generated correctly but never wired
-into `applicable`, so a real regression in any of them could never surface
-as a coverage gap (see PR #516). This is a **class of bug**, not one-off
-oversights: it will recur every time a new kind is added unless the rule
-below is followed.
+enforcing they stay in sync. A past audit found 10 kinds — including one
+newly introduced at the time — that were generated correctly but never
+wired into `applicable`, so a real regression in any of them could never
+surface as a coverage gap. That same audit found one of the *existing*
+wired rules (`param-constraint-violation`) was itself wrong: it read a
+parameter's schema fields directly instead of resolving the `allOf` chain,
+silently undercounting every Camunda `*Key` path param. This is a **class
+of bug**, not one-off oversights: it will recur every time a new kind is
+added, or an eligibility condition is hand-approximated instead of reused,
+unless the rule below is followed.
 
 Whenever you add a new entry to `SCENARIO_KINDS` (i.e. a new generator under
 `request-validation/src/analysis/`):
@@ -327,11 +331,7 @@ Whenever you add a new entry to `SCENARIO_KINDS` (i.e. a new generator under
    operation — export that function from the generator's own file and
    import it in `generate.ts`, rather than re-deriving an approximate
    condition inline. This is what prevents the two lists drifting apart
-   again. (Where no single eligibility function exists to reuse — e.g.
-   `param-type-mismatch`/`param-enum-violation`/`param-constraint-violation`
-   — an inline approximation checking the same declared schema keywords the
-   generator checks is the established precedent; match that precision
-   level, don't invent a looser one.)
+   again, and what would have caught the `allOf` bug above immediately.
 3. `tests/request-validation/coverage-applicability-wiring.test.ts` asserts
    every `SCENARIO_KINDS` entry has an `applicable.add(...)` call — it will
    fail immediately if you skip step 1, but it cannot catch a wrong or
