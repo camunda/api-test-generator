@@ -81,7 +81,23 @@ while IFS= read -r group; do
   ops="$(jq -r '.entries | map(.operationId) | unique | join(", ")' <<<"$group")"
   branch="chore/hub-unskip-${issue_num}"
 
-  existing_pr="$(gh pr list --repo "$GEN_REPO" --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)"
+  # Checked BEFORE any removal/regenerate work (not just before the eventual
+  # `gh pr create`) — there is no point running the whole regenerate + test
+  # cycle only to discover at the end we have no way to open the PR. Also
+  # required for the dedupe lookup right below: without an explicit token,
+  # `gh pr list` has no ambient auth in this workflow's minimal-permissions
+  # GITHUB_TOKEN context, fails, and its `|| true` fallback would silently
+  # read as "no existing PR" even when one is open — reusing
+  # GH_TOKEN_GENERATOR here (same token the eventual PR creation needs) makes
+  # the dedupe check itself reliable, not just gated on it existing.
+  if [ -z "${GH_TOKEN_GENERATOR:-}" ]; then
+    echo "::warning::No GH_TOKEN_GENERATOR — cannot check for or open an unskip PR for ${url}."
+    add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" \
+      '{type: "aborted_no_token", url: $url, title: $title, operations: $ops}')"
+    continue
+  fi
+
+  existing_pr="$(GH_TOKEN="$GH_TOKEN_GENERATOR" gh pr list --repo "$GEN_REPO" --head "$branch" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true)"
   if [ -n "$existing_pr" ]; then
     echo "Blocker ${url} already has an open unskip PR: ${existing_pr}"
     add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg pr "$existing_pr" --arg ops "$ops" \
@@ -132,13 +148,8 @@ while IFS= read -r group; do
     continue
   fi
 
-  if [ -z "${GH_TOKEN_GENERATOR:-}" ]; then
-    echo "::warning::No GH_TOKEN_GENERATOR — cannot open the unskip PR for ${url}. Reverting local edit (will retry next run)."
-    git checkout -- "$POSITIVE_SUPPRESS" "$REQUEST_VALIDATION" 2>/dev/null || true
-    add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" \
-      '{type: "aborted_no_token", url: $url, title: $title, operations: $ops}')"
-    continue
-  fi
+  # GH_TOKEN_GENERATOR is already confirmed non-empty (checked before the
+  # dedupe lookup above, before any of this removal/regenerate work started).
 
   # --- Commit, push, open the draft PR --------------------------------------
   git config user.name "github-actions[bot]"

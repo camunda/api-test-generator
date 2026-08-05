@@ -12,9 +12,14 @@
 # token both current callers use). Optional: REPO (default
 # camunda/api-test-generator).
 #
-# Never fails the run: every step here is continue-on-error at the shell
-# level (the caller is expected to also wrap this in continue-on-error, but
-# this script degrades gracefully even without that).
+# GH_TOKEN is a hard requirement — there is nothing this script can do
+# without one, so a missing/empty token aborts immediately (`:?` below) via a
+# non-zero exit rather than silently no-op'ing; the caller is responsible for
+# only invoking this once a real token is available (both current callers
+# already gate on that). Past that point, every per-PR step degrades
+# gracefully instead of aborting: a malformed URL, an unresolvable branch, a
+# failed dispatch, or a failed comment all just move on to the next PR rather
+# than stopping the whole batch.
 set -uo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN (App/PAT with contents+PR write + workflow dispatch) required}"
