@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import {
+  type CsharpOperationMap,
   CsharpOperationMapSource,
   FallbackMappingSource,
 } from '../../materializer/src/csharp-sdk/sdk-mapping.js';
 
-const OPERATION_MAP: Record<string, { file: string; region: string }[]> = {
+const OPERATION_MAP: CsharpOperationMap = {
   activateJobs: [{ file: 'noop', region: 'ActivateJobsAsync' }],
   createProcessInstance: [{ file: 'noop', region: 'CreateProcessInstanceAsync' }],
   completeJob: [{ file: 'noop', region: 'CompleteJobAsync' }],
