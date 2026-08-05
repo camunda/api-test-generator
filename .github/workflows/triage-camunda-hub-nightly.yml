@@ -607,59 +607,15 @@ jobs:
           fi
           cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
 
-      # --- Validate any fix/suppress PR the agent opened -----------------------
-      # Mirrors the c8-orchestration-cluster-e2e-nightly-fix.yml reference this
-      # agent is modeled on: "after the PR is open, trigger the matching
-      # on-demand workflow and patch the PR body with the run URL." ci.yml's
-      # hub-invariants job already runs automatically on the PR (lint/typecheck/
-      # static regression invariants against the PINNED spec) — but that never
-      # starts a live Hub, so it cannot confirm the fix/suppression actually
-      # works. hub-ondemand-test.yml does exactly that (unpinned, live Hub,
-      # real Playwright run) but is workflow_dispatch-only — nothing triggers
-      # it automatically otherwise, so without this step a human has to
-      # remember to kick it off by hand before trusting the PR. Covers BOTH
-      # fix_pr_url (test-generation/coverage fixes) and suppress_pr_url
-      # (product-bug suppressions) — a suppress PR needs the same live-Hub
-      # proof that the operation is now correctly excluded.
-      # Deterministic, not agent-driven: dispatching a known workflow and
-      # patching a PR body with its run link is pure mechanics, no judgment
-      # involved — matches this whole PR's principle of using an agent only
-      # where interpretation is actually needed.
-      - name: Trigger on-demand validation for any opened fix/suppress PR
-        if: ${{ steps.reports.outputs.has_reports == 'true' }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ steps.qa-token-generator.outputs.token }}
-          REPO: camunda/api-test-generator
-        run: |
-          f="${GITHUB_WORKSPACE}/hub-triage.json"
-          [ -s "$f" ] || exit 0
-
-          # Every fix_pr_url AND suppress_pr_url the agent recorded, deduped
-          # (failures[] can carry either; unmapped_operations[] only fix_pr_url).
-          # Both are real api-test-generator PRs the agent opened — a
-          # suppress PR needs the same live-Hub proof a fix PR does (that the
-          # operation is now correctly suppressed, not that anything broke).
-          # hub-triage.json is written by an agent working from untrusted
-          # report content — the dispatch script below re-validates each URL
-          # before deriving anything from it.
-          urls=$(jq -r '
-            [(.failures // [] | .[]? | .fix_pr_url // empty),
-             (.failures // [] | .[]? | .suppress_pr_url // empty),
-             (.unmapped_operations // [] | .[]? | .fix_pr_url // empty)]
-            | map(select(type == "string" and length > 0))
-            | unique | .[]
-          ' "$f" 2>/dev/null || true)
-          if [ -z "$urls" ]; then
-            echo "No fix/suppress PRs to validate this run."
-            exit 0
-          fi
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::No api-test-generator token — cannot auto-dispatch on-demand validation for: $(echo "$urls" | tr '\n' ' ')"
-            exit 0
-          fi
-
-          printf '%s\n' "$urls" | bash .github/scripts/hub-dispatch-ondemand-validation.sh
+      # Any fix/suppress/unskip PR opened against api-test-generator already
+      # gets a real live-Hub check automatically: hub-pr-live-check.yml fires
+      # on every same-repo `pull_request` targeting main whose diff doesn't
+      # touch .github/** (exactly what these bot-opened PRs look like), and
+      # runs the same _hub-suite-run.yml reusable hub-ondemand-test.yml wraps
+      # — as a native GitHub Actions check, not a comment. A prior version of
+      # this workflow manually dispatched hub-ondemand-test.yml and commented
+      # the run link for the same purpose; that became redundant once
+      # hub-pr-live-check.yml shipped (#513) and has been removed.
 
       # No reports downloaded → write an inconclusive result so Slack announces it
       # (never a green digest). Mirrors the c8 "no false all-clear" rule.

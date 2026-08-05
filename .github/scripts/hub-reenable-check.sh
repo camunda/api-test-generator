@@ -174,10 +174,10 @@ operation(s) get their tests back: ${ops}." >/dev/null
     # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
     printf '%s\n' "$removed_ops" | sed '/^$/d' | sed 's/^/- `/; s/$/`/'
     echo
-    echo "This PR is a **draft** — it is not ready to merge on its own. A live-Hub"
-    echo "validation run is dispatched automatically (see the comment below); if"
-    echo "the upstream fix was only partial, that run will fail and someone should"
-    echo "investigate before merging."
+    echo "This PR is a **draft** — it is not ready to merge on its own. The native"
+    echo "\`Hub PR live check\` (see the Checks tab) runs automatically against a live"
+    echo "Hub; if the upstream fix was only partial, that check will fail and someone"
+    echo "should investigate before merging."
     echo
     echo "Closed blocker: ${url}"
     echo
@@ -205,10 +205,9 @@ operation(s) get their tests back: ${ops}." >/dev/null
   add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" --arg pr "$pr_url" \
     '{type: "opened", url: $url, title: $title, operations: $ops, pr_url: $pr}')"
 
-  # Same live-Hub validation every fix/suppress PR from the triage workflow
-  # gets — extracted so both callers share one hardened implementation.
-  printf '%s\n' "$pr_url" | GH_TOKEN="$GH_TOKEN_GENERATOR" REPO="$GEN_REPO" \
-    bash "${SCRIPT_DIR}/hub-dispatch-ondemand-validation.sh" || true
+  # No manual live-Hub validation dispatch needed here: hub-pr-live-check.yml
+  # already fires automatically on this PR (same-repo, targets main, touches
+  # only configs/camunda-hub/*.json — never .github/**) as a native check.
 
   git checkout main 2>/dev/null || true
 done < <(jq -c '.opScoped[]' <<<"$collected")

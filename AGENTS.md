@@ -516,6 +516,20 @@ pin" nudge (`npm run bump-spec-pin`). It intentionally depends on external state
 (upstream moves on its own), so it must not gate merges. Same fork/secret guard
 as the hub leg.
 
+The **Hub PR live check**
+([hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml), #513) closes
+the gap `ci.yml`'s `hub-invariants` leaves: that job only checks the **pinned**
+hub spec, never a live Hub. This workflow fires on every `pull_request`
+targeting `main` (a guard job skips real forks, Dependabot, and any PR whose
+diff touches `.github/**` — the same "don't let a PR's own modified workflow
+code execute with production secrets" concern the triage workflow's dispatch
+guard has) and calls `_hub-suite-run.yml` (the same reusable
+`hub-ondemand-test.yml` wraps) directly, so the result is a real **native**
+GitHub Actions check on the PR — no polling, no comment-posting, unlike the
+dispatch→poll→comment pattern used elsewhere for a workflow that can't be
+triggered any other way. It is a *visible* check only, not *blocking*, until
+added to branch protection's required checks.
+
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
@@ -555,14 +569,17 @@ App permission is needed). Before opening ANY PR, a deterministic step fetches
 every open `nightly-api-fix`-labelled PR's actual diff (not a self-reported tag)
 so the agent can skip an operation already being fixed/suppressed elsewhere,
 rather than opening a duplicate. Any PR the agent does open is automatically
-validated — a deterministic (non-agent) workflow step reads every `fix_pr_url`/
-`suppress_pr_url` from the triage result and dispatches
-[hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) against that
-branch (a live-Hub run; the `hub-invariants` job that runs automatically on
-the PR via `ci.yml` only checks static invariants against the pinned spec),
-then comments the run link on the PR — mirrors the "trigger the on-demand
-workflow + patch the PR" step from the c8-orchestration-cluster-e2e-nightly-fix.yml
-reference this agent is modeled on. It posts a triaged digest to
+validated: [hub-pr-live-check.yml](.github/workflows/hub-pr-live-check.yml)
+fires on every same-repo `pull_request` targeting `main` whose diff doesn't
+touch `.github/**` — exactly what these PRs look like — running a real
+live-Hub check natively (the `hub-invariants` job that also runs
+automatically on the PR via `ci.yml` only checks static invariants against
+the pinned spec, so this is genuinely additional signal, not a duplicate). An
+earlier version of this workflow manually dispatched
+[hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) and
+commented the run link for the same purpose; that became redundant once
+hub-pr-live-check.yml shipped (#513) and has been removed. It posts a
+triaged digest to
 `#camunda-hub-nightly-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
 at `secret/data/products/qa/ci/common`
 (agent) + [`slack-token`](.github/actions/slack-token) (Slack) +
@@ -602,10 +619,9 @@ reverts and reports instead of opening a broken PR. Entirely deterministic —
 no agent involved, unlike the triage flow above; detecting a closed issue and
 removing a JSON entry are pure mechanics. Same two-App-token split as the
 triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`
-for the PR), and any PR it opens gets the same automatic live-Hub validation
-dispatch via the shared `.github/scripts/hub-dispatch-ondemand-validation.sh`
-(extracted from the triage workflow's own equivalent step so the two don't
-carry duplicate copies of that hardened logic). Top-level `knownIssues[]`
+for the PR); no manual live-Hub validation dispatch is needed for any PR it
+opens, since `hub-pr-live-check.yml` already fires automatically on it (see
+the triage agent's own paragraph above for why). Top-level `knownIssues[]`
 entries (suite-wide, no `operationId`) get a Slack mention when closed but are
 never auto-acted on — there's nothing mechanical to remove for them. Silent
 (no Slack post) when there's nothing to report, matching spec-bump-check's

@@ -20,9 +20,10 @@
 # for the triage agent's own issue filing, which implies read, so #432's
 # stated "grant Issues: Read" prerequisite needed no new provisioning) and
 # GH_TOKEN_GENERATOR (contents+PR write on api-test-generator, to open the
-# draft PR). Live-Hub validation of any opened PR reuses
-# hub-dispatch-ondemand-validation.sh, the same script
-# triage-camunda-hub-nightly.yml uses for its own fix/suppress PRs.
+# draft PR). No manual live-Hub validation dispatch is needed for any PR this
+# workflow opens: hub-pr-live-check.yml already fires automatically on every
+# same-repo PR targeting main that doesn't touch .github/** — exactly what
+# these PRs look like — as a native GitHub Actions check.
 name: Hub known-issue re-enable check
 
 on:
