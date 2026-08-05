@@ -1086,6 +1086,22 @@ async function main() {
           applicable.add('missing-required');
           if (reqList.length > 1) applicable.add('missing-required-combo');
         }
+        // explicit-null-required (#500) is narrower than missing-required:
+        // JSON bodies only. `body` above is `op.requestBodySchema ||
+        // op.multipartSchema` — for a multipart-only op with its own
+        // `required` array, that would make `Array.isArray(body.required)`
+        // true even though explicitNullRequired.ts's own gate requires
+        // `op.requestBodySchema` specifically (never falls back to
+        // multipartSchema), so this checks that field directly instead of
+        // going through the merged `body`/`reqList` variables above.
+        if (
+          op.requestBodySchema?.type === 'object' &&
+          Array.isArray(op.requestBodySchema.required) &&
+          op.requestBodySchema.required.length &&
+          (!op.mediaTypes || op.mediaTypes.includes('application/json'))
+        ) {
+          applicable.add('explicit-null-required');
+        }
         applicable.add('type-mismatch');
         applicable.add('body-top-type-mismatch');
         applicable.add('additional-prop-general');

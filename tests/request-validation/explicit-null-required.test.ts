@@ -79,6 +79,29 @@ describe('request-validation: explicit-null-required generation (#500)', () => {
     expect(out[0].target).toBe('name');
   });
 
+  it('skips a required field whose schema allows null via a oneOf/anyOf branch', () => {
+    // The other common way JSON Schema/OAS 3.1 expresses nullability —
+    // typically when the nullable side is a $ref, which can't sit inside a
+    // `type` array directly.
+    const ops = [
+      op({
+        operationId: 'createThing',
+        path: '/things',
+        requiredProps: ['name', 'nullableRef'],
+        requestBodySchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            nullableRef: { oneOf: [{ type: 'object' }, { type: 'null' }] },
+          },
+        },
+      }),
+    ];
+    const out = generateExplicitNullRequired(ops, {});
+    expect(out).toHaveLength(1);
+    expect(out[0].target).toBe('name');
+  });
+
   it('emits nothing for an operation with no top-level required fields', () => {
     const ops = [
       op({
