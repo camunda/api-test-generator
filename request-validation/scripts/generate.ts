@@ -11,8 +11,12 @@ import {
   generateUniqueItemsViolations,
 } from '../src/analysis/advancedSchema.js';
 import { generateAllOfConflicts, generateAllOfMissingRequired } from '../src/analysis/allOf.js';
-import { generateAuthAbsent, generateAuthInvalid } from '../src/analysis/authAbsent.js';
-import { generateAuthDeny } from '../src/analysis/authDeny.js';
+import {
+  generateAuthAbsent,
+  generateAuthInvalid,
+  isAuthTargeted,
+} from '../src/analysis/authAbsent.js';
+import { generateAuthDeny, isAuthDenyEligible } from '../src/analysis/authDeny.js';
 import { generateBodyTopTypeMismatch, generateMissingBody } from '../src/analysis/bodyTopLevel.js';
 import { generateBodyTypeMismatch } from '../src/analysis/bodyTypeMismatch.js';
 import { generateConstraintViolations } from '../src/analysis/constraintViolations.js';
@@ -24,7 +28,7 @@ import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js'
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
 import { generateMultipartMissingRequired } from '../src/analysis/multipartMissingRequired.js';
-import { generateNotFoundFakeId } from '../src/analysis/notFoundFakeId.js';
+import { generateNotFoundFakeId, isNotFoundEligible } from '../src/analysis/notFoundFakeId.js';
 import {
   generateDiscriminatorStructureMismatch,
   generateOneOfCrossBleed,
@@ -33,9 +37,20 @@ import {
 import { generateOneOfAmbiguous } from '../src/analysis/oneOfAmbiguous.js';
 import { generateOneOfNoneMatch } from '../src/analysis/oneOfNoneMatch.js';
 import { generatePaginationCursorInvalid } from '../src/analysis/paginationCursor.js';
-import { generatePaginationLimitInvalid } from '../src/analysis/paginationLimit.js';
+import {
+  findPaginationLimitField,
+  generatePaginationLimitInvalid,
+} from '../src/analysis/paginationLimit.js';
 import { generatePaginationOffsetPastTotal } from '../src/analysis/paginationOffset.js';
-import { generateParamConstraintViolations } from '../src/analysis/paramConstraintViolations.js';
+import {
+  findCursorFields,
+  findOffsetBranch,
+  findPaginationPage,
+} from '../src/analysis/paginationShape.js';
+import {
+  generateParamConstraintViolations,
+  isParamConstraintEligible,
+} from '../src/analysis/paramConstraintViolations.js';
 import {
   generateParamEnumViolation,
   generateParamMissing,
@@ -48,7 +63,7 @@ import { emitQaTests } from '../src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
-import { shouldSkipForMultipart } from '../src/util/multipartSkip.js';
+import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
 
 interface CliOptions {
   only?: Set<string>;
@@ -1072,6 +1087,47 @@ async function main() {
       applicable.add('param-type-mismatch');
     if (op.parameters.some((p) => Array.isArray(p.schema?.enum)))
       applicable.add('param-enum-violation');
+    // param-constraint-violation reuses the exact eligibility check
+    // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
+    // which merges the allOf chain — a flat p.schema.* read misses
+    // constraints carried in an allOf branch, e.g. Camunda key types).
+    if (isParamConstraintEligible(op)) {
+      applicable.add('param-constraint-violation');
+    }
+    // malformed-json-body (#499) needs only a JSON request body of ANY type
+    // (malformedJsonBody.ts's own gate is just `!op.requestBodySchema`, not
+    // scoped to object bodies like the block below) — except multipart-only
+    // ops, which don't accept application/json at all (#499's own
+    // multipartSkip.ts fix, reused here rather than re-deriving
+    // hasMultipart && !hasJson inline).
+    if (op.requestBodySchema && !isMultipartOnly(op)) {
+      applicable.add('malformed-json-body');
+    }
+    // auth-absent/auth-invalid (#495) target the same operation set (shared
+    // isAuthTargeted — see its own doc comment for the two modes).
+    if (isAuthTargeted(op, { allSecured: rvConfig.authAbsentMode === 'all-secured' })) {
+      applicable.add('auth-absent');
+      applicable.add('auth-invalid');
+    }
+    // auth-deny (#462) — mode-dependent eligibility, same isAuthDenyEligible
+    // authDeny.ts's own generators call.
+    if (isAuthDenyEligible(op, { allSecured: rvConfig.authDenyMode === 'all-secured' })) {
+      applicable.add('auth-deny');
+    }
+    // not-found-fake-id (#381) — reuses the exact eligibility check
+    // notFoundFakeId.ts's own generator calls.
+    if (isNotFoundEligible(op)) {
+      applicable.add('not-found-fake-id');
+    }
+    // Pagination kinds (#501) — reuse the same shape-detection helpers their
+    // own generators call, so this can't drift from what actually generates.
+    const paginationPage = findPaginationPage(op);
+    if (paginationPage) {
+      if (findPaginationLimitField(op)) applicable.add('pagination-limit-invalid');
+      if (findOffsetBranch(paginationPage.branches)) applicable.add('pagination-offset-past-total');
+      if (findCursorFields(paginationPage.branches).length)
+        applicable.add('pagination-cursor-invalid');
+    }
     // Body-based applicability
     const body = op.requestBodySchema || op.multipartSchema;
     if (body) {
@@ -1105,6 +1161,12 @@ async function main() {
         applicable.add('type-mismatch');
         applicable.add('body-top-type-mismatch');
         applicable.add('additional-prop-general');
+        // additional-prop is narrower than -general: only when the schema
+        // itself declares additionalProperties: false (additionalProps.ts's
+        // own gate), unlike -general which fires for any object body.
+        if (op.requestBodySchema?.additionalProperties === false) {
+          applicable.add('additional-prop');
+        }
         if (f.hasNestedObject) applicable.add('nested-additional-prop');
       }
       if (f.hasEnums) applicable.add('enum-violation');

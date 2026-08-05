@@ -75,13 +75,34 @@ const SLICE: Record<string, Record<string, string>> = {
 // would be ambiguous with a missing endpoint on an older server.)
 const DENY_STATUS = 403;
 
+/**
+ * Is `op` eligible for an auth-deny scenario under the active mode? Shared by
+ * both generators below (and the coverage script's applicability analysis,
+ * which must never drift from what these actually generate) so there is one
+ * place that defines "eligible" per mode: {@link SLICE} membership in slice
+ * mode, the keyless/no-required-body/no-required-non-path-param check in
+ * all-secured mode (see the header doc comment above for why each of those
+ * three conditions is required).
+ */
+export function isAuthDenyEligible(op: OperationModel, opts: Opts): boolean {
+  if (opts.allSecured) {
+    return (
+      op.secured === true &&
+      !op.path.includes('{') &&
+      op.bodyRequired !== true &&
+      !op.parameters.some((p) => p.required && p.in !== 'path')
+    );
+  }
+  return !!SLICE[op.operationId];
+}
+
 export function generateAuthDeny(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   if (opts.allSecured) return generateAuthDenyAllSecured(ops, opts);
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
+    if (!isAuthDenyEligible(op, opts)) continue;
     const knownKeys = SLICE[op.operationId];
-    if (!knownKeys) continue;
     out.push({
       id: makeId([op.operationId, 'auth-deny']),
       operationId: op.operationId,
@@ -124,10 +145,7 @@ function generateAuthDenyAllSecured(ops: OperationModel[], opts: Opts): Validati
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (op.secured !== true) continue;
-    if (op.path.includes('{')) continue; // by-key ops → 404 before authz
-    if (op.bodyRequired === true) continue; // required body → 400 before authz
-    if (op.parameters.some((p) => p.required && p.in !== 'path')) continue; // required query/header/cookie → 400 before authz
+    if (!isAuthDenyEligible(op, opts)) continue;
     out.push({
       id: makeId([op.operationId, 'auth-deny']),
       operationId: op.operationId,

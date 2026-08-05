@@ -53,7 +53,7 @@ import type { OperationModel, SchemaFragment, ValidationScenario } from '../mode
 
 const TOP_LEVEL_FIELD_RE = /^[^.[\]]+$/;
 
-function isMultipartOnly(op: OperationModel): boolean {
+export function isMultipartOnly(op: OperationModel): boolean {
   const hasMultipart = !!op.mediaTypes?.includes('multipart/form-data');
   const hasJson = !!op.mediaTypes?.includes('application/json');
   return hasMultipart && !hasJson;
