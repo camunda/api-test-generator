@@ -22,7 +22,7 @@ jq -r '
   def line(item):
     item.url as $url | item.title as $title | (item.operations // "") as $ops |
     if item.type == "opened" then
-      "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (\"" + $title + "\") is closed — re-enabled: `" + $ops + "` → <" + item.pr_url + "|draft PR> (pending live-Hub validation)"
+      "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + $title + "_) is closed — re-enabled: `" + $ops + "` → <" + item.pr_url + "|draft PR> (pending live-Hub validation)"
     elif item.type == "already_in_flight" then
       "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed — `" + $ops + "` already has an open unskip PR: <" + item.pr_url + ">"
     elif item.type == "aborted_broke_checks" then
@@ -32,7 +32,7 @@ jq -r '
     elif item.type == "aborted_pr_create_failed" then
       "⚠️ <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed, but opening the unskip PR for `" + $ops + "` failed — see the workflow run log."
     elif item.type == "suite_wide_closed" then
-      "📋 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (\"" + (item.summary // "") + "\") is closed but has no specific operation(s) to auto-unskip — needs manual follow-up."
+      "📋 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + (item.summary // "") + "_) is closed but has no specific operation(s) to auto-unskip — needs manual follow-up."
     else
       "❓ Unrecognized summary item type: " + (item.type // "?")
     end;
