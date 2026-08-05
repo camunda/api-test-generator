@@ -26,6 +26,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SUMMARY_FILE="${SUMMARY_FILE:-/tmp/hub-reenable-summary.json}"
 summary_actions='[]' # accumulated as we go; each item: {type, url, title, ...}
+# A camunda-hub issue URL, and only that — a knownIssue.url pointing at any
+# other shape (a different repo entirely, a trailing slash, a query string)
+# must never be trusted downstream: `gh issue view <full-url> --repo X`
+# silently IGNORES --repo and resolves against whatever repo the URL itself
+# names, so a data-entry mistake (wrong repo, wrong issue) would otherwise
+# resolve successfully against the WRONG issue rather than failing loudly.
+HUB_ISSUE_URL_RE='^https://github\.com/camunda/camunda-hub/issues/[0-9]+$'
 
 add_summary() {
   # $1: a JSON object literal (already valid JSON) to append.
@@ -34,6 +41,13 @@ add_summary() {
 
 echo "== Collecting knownIssue entries =="
 collected="$(node "${SCRIPT_DIR}/hub-collect-known-issues.mjs" "$POSITIVE_SUPPRESS" "$REQUEST_VALIDATION")"
+collect_rc=$?
+if [ $collect_rc -ne 0 ] || ! jq empty <<<"$collected" 2>/dev/null; then
+  echo "::error::hub-collect-known-issues.mjs failed (exit ${collect_rc}) or produced non-JSON output — aborting without touching anything."
+  add_summary '{"type": "aborted_collection_failed"}'
+  echo "$summary_actions" > "$SUMMARY_FILE"
+  exit 1
+fi
 op_scoped_count=$(jq '.opScoped | length' <<<"$collected")
 suite_wide_count=$(jq '.suiteWide | length' <<<"$collected")
 echo "Op-scoped blockers: ${op_scoped_count}, suite-wide (no operationId): ${suite_wide_count}"
@@ -43,6 +57,10 @@ if [ "$suite_wide_count" -gt 0 ]; then
   while IFS= read -r item; do
     url=$(jq -r '.url' <<<"$item")
     summary=$(jq -r '.summary' <<<"$item")
+    if ! [[ "$url" =~ $HUB_ISSUE_URL_RE ]]; then
+      echo "::warning::Suite-wide knownIssue.url is not a well-formed camunda-hub issue URL, skipping: ${url}"
+      continue
+    fi
     if [ -z "${GH_TOKEN_HUB:-}" ]; then
       echo "No GH_TOKEN_HUB — skipping state check for suite-wide ${url}"
       continue
@@ -59,6 +77,11 @@ fi
 # --- Op-scoped blockers — the actionable path -------------------------------
 while IFS= read -r group; do
   url=$(jq -r '.url' <<<"$group")
+
+  if ! [[ "$url" =~ $HUB_ISSUE_URL_RE ]]; then
+    echo "::warning::knownIssue.url is not a well-formed camunda-hub issue URL, skipping: ${url}"
+    continue
+  fi
   issue_num="${url##*/}"
 
   if [ -z "${GH_TOKEN_HUB:-}" ]; then
