@@ -1,0 +1,165 @@
+# Scheduled, non-blocking check for #432: camunda-hub nightly coverage
+# statically skips operations blocked on known upstream issues (knownIssue
+# entries in configs/camunda-hub/{positive-suppress,request-validation}.json).
+# When the blocking issue closes, nothing tells anyone to re-enable the test
+# — coverage silently rots. This workflow detects a closed blocker and reacts:
+# removes the matching suppress/exclude entries, regenerates + runs a narrow
+# local guard, and — if that's clean — opens a draft PR (never auto-merged)
+# plus a Slack heads-up. If checks fail (the upstream fix was partial, or a
+# hardcoded invariant still expects the op suppressed), it reverts and reports
+# instead of opening a broken PR.
+#
+# Fully deterministic — no agent/LLM judgment anywhere (see AGENTS.md and
+# .github/scripts/hub-reenable-check.sh's header for why #432's original plan
+# to extend the nightly triage agent was reconsidered). Modeled on
+# spec-bump-check.yml's shape: schedule → resolve external state → route to a
+# PR or a Slack notice, non-spammy (silent when there's nothing to report).
+#
+# Two qa-processes App tokens, same split as triage-camunda-hub-nightly.yml:
+# GH_TOKEN_HUB (Issues:read on camunda-hub — it already has Issues:write there
+# for the triage agent's own issue filing, which implies read, so #432's
+# stated "grant Issues: Read" prerequisite needed no new provisioning) and
+# GH_TOKEN_GENERATOR (contents+PR write on api-test-generator, to open the
+# draft PR). Live-Hub validation of any opened PR reuses
+# hub-dispatch-ondemand-validation.sh, the same script
+# triage-camunda-hub-nightly.yml uses for its own fix/suppress PRs.
+name: Hub known-issue re-enable check
+
+on:
+  schedule:
+    # 04:00 UTC — after the 02:00 camunda-hub nightly and the 03:00
+    # spec-bump-check, so it never races either.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC → Vault, for both qa-processes App tokens + Slack
+
+concurrency:
+  group: hub-known-issue-reenable-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check closed blockers → unskip PR + Slack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          # Don't persist github.token — it's read-only here and its
+          # Authorization header would take precedence over the App-token URL
+          # the script sets before pushing (same reasoning as
+          # spec-bump-open-pr.sh's identical unset-then-set-url step).
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      # --- Two separately-scoped qa-processes App tokens ----------------------
+      - name: Generate qa-processes App token (camunda-hub issues)
+        id: qa-token-hub
+        continue-on-error: true
+        # Pinned SHA — same pin as triage-camunda-hub-nightly.yml /
+        # spec-bump-check.yml. Bump intentionally.
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+
+      - name: Generate qa-processes App token (api-test-generator PRs)
+        id: qa-token-generator
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+
+      - name: Fetch Slack bot token from Vault
+        id: slack
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      # --- The actual check ----------------------------------------------------
+      # Neither token being empty fails this step — the script degrades
+      # gracefully (skips state checks without GH_TOKEN_HUB, skips PR-opening
+      # without GH_TOKEN_GENERATOR, reverting any local edit either way) per
+      # #432's explicit graceful-degrade requirement.
+      - name: Run hub-reenable-check
+        id: reenable
+        env:
+          GH_TOKEN_HUB: ${{ steps.qa-token-hub.outputs.token }}
+          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          SUMMARY_FILE: ${{ github.workspace }}/hub-reenable-summary.json
+        run: bash .github/scripts/hub-reenable-check.sh
+
+      # --- Slack heads-up, only when there's something to report ---------------
+      - name: Build Slack message
+        id: slack-message
+        if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          text="$(bash .github/scripts/hub-reenable-format-slack.sh "${{ github.workspace }}/hub-reenable-summary.json")"
+          {
+            echo 'text<<EOF'
+            echo "$text"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack
+        if: >-
+          always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' &&
+          steps.slack-message.outcome == 'success' && steps.slack-message.outputs.text != ''
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "text": ${{ toJSON(steps.slack-message.outputs.text) }},
+              "mrkdwn": true
+            }
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Hub known-issue re-enable check"
+            echo ""
+            echo '```json'
+            cat "${{ github.workspace }}/hub-reenable-summary.json" 2>/dev/null || echo "[]"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
