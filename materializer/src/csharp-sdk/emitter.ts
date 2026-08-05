@@ -109,6 +109,7 @@ function buildSuiteSource(
   // `using` line and cascading CS0246s for every DTO type in every
   // generated file (confirmed via a real `dotnet build`).
   lines.push('using Camunda.Orchestration.Sdk;');
+  lines.push('using Camunda.Orchestration.RestSdk.Models;');
   lines.push('using Xunit;');
   lines.push('');
   lines.push('namespace CamundaIntegrationTests;');
