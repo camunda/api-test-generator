@@ -584,6 +584,33 @@ warning). `do-not-close` holds a PR across the daily reset; `dry_run` previews.
 Fix PRs must carry the `nightly-api-fix` label to be managed (the filed issues say
 so).
 
+The **hub known-issue re-enable check**
+([hub-known-issue-reenable-check.yml](.github/workflows/hub-known-issue-reenable-check.yml),
+#432) is a scheduled (04:00 UTC, after the nightly + spec-bump-check) +
+`workflow_dispatch` job that watches for a camunda-hub `knownIssue` blocker
+closing. Both suite configs' `knownIssue.url` entries (`positive-suppress.json`'s
+`suppress[]`, `request-validation.json`'s `excludeOperations[]`) are collected
+and checked via `gh issue view`; for each one that's now **closed**, it removes
+the matching entries, regenerates camunda-hub, runs a narrow local guard
+(`configs/camunda-hub/regression-invariants.test.ts` +
+`tests/codegen/known-issue-summary-consistency.test.ts`), and — only if that's
+clean — opens a **draft** PR (branch `chore/hub-unskip-<issue-number>`, label
+`nightly-api-fix`) plus a Slack heads-up to
+`#camunda-hub-nightly-test-results`. If the local guard fails (the upstream fix
+was partial, or a hardcoded invariant still expects the op suppressed), it
+reverts and reports instead of opening a broken PR. Entirely deterministic —
+no agent involved, unlike the triage flow above; detecting a closed issue and
+removing a JSON entry are pure mechanics. Same two-App-token split as the
+triage agent (`GH_TOKEN_HUB` for the issue-state check, `GH_TOKEN_GENERATOR`
+for the PR), and any PR it opens gets the same automatic live-Hub validation
+dispatch via the shared `.github/scripts/hub-dispatch-ondemand-validation.sh`
+(extracted from the triage workflow's own equivalent step so the two don't
+carry duplicate copies of that hardened logic). Top-level `knownIssues[]`
+entries (suite-wide, no `operationId`) get a Slack mention when closed but are
+never auto-acted on — there's nothing mechanical to remove for them. Silent
+(no Slack post) when there's nothing to report, matching spec-bump-check's
+non-spammy convention.
+
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
 (`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch
