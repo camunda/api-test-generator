@@ -9,13 +9,14 @@ import { SCENARIO_KINDS } from '../../request-validation/src/model/types.js';
  * structural `applicable` set (via a series of `applicable.add('<kind>')`
  * calls) that COVERAGE.json's `missingApplicableKinds` is measured against.
  * It is hand-maintained in parallel with `SCENARIO_KINDS` — nothing enforces
- * the two stay in sync, and #500/#511 found 10 kinds (including one from
- * that very PR) that were generated but never wired into `applicable`, so
- * `missingApplicableKinds` could never surface a real gap for them (see
- * `generate.ts`'s backfill loop right after the applicability block — it
- * silently covers any kind that IS generated regardless of whether an
- * explicit rule exists, so this drift is invisible unless a kind becomes
- * inapplicable-but-still-flagged-as-generated, i.e. exactly a real bug).
+ * the two stay in sync. A past audit found 10 kinds that were generated but
+ * never wired into `applicable`, so `missingApplicableKinds` could never
+ * surface a real gap for them: `generate.ts`'s backfill loop right after the
+ * applicability block adds any kind that IS generated to `applicable`
+ * regardless of whether an explicit rule exists, so a missing rule is
+ * invisible right up until a kind that genuinely IS applicable for some
+ * operation stops being generated there — i.e. exactly the real regression
+ * this wiring exists to catch.
  *
  * This only catches "never wired in at all" — not "wired in with a
  * condition looser/tighter than the real generator's". That half still
