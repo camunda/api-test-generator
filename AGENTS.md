@@ -300,6 +300,43 @@ Enumerate the contract dimensions that matter and check each one explicitly
 against the product's actual documented spec — not against this generator's
 own internal definition of "has a test."
 
+### Standing rule: every new request-validation scenario kind needs an applicability rule
+
+`request-validation/scripts/generate.ts` computes a per-operation
+`applicable` set via a series of `applicable.add('<kind>')` calls, compared
+against which kinds were actually generated to produce `COVERAGE.json`'s
+`missingApplicableKinds` — the tool's own signal for "this operation could
+have had this kind of negative test but didn't get one." That signal only
+works for a kind if `applicable` is told when the kind applies.
+
+`SCENARIO_KINDS` (`request-validation/src/model/types.ts`) and the
+`applicable.add(...)` calls are two hand-maintained lists with nothing
+enforcing they stay in sync. #500/#511 found 10 kinds — including one
+introduced in that same PR — that were generated correctly but never wired
+into `applicable`, so a real regression in any of them could never surface
+as a coverage gap (see PR #516). This is a **class of bug**, not one-off
+oversights: it will recur every time a new kind is added unless the rule
+below is followed.
+
+Whenever you add a new entry to `SCENARIO_KINDS` (i.e. a new generator under
+`request-validation/src/analysis/`):
+
+1. Add a matching `applicable.add('<kind>')` rule in `generate.ts`.
+2. The condition MUST call the exact eligibility function the new
+   generator itself uses to decide whether to emit a scenario for an
+   operation — export that function from the generator's own file and
+   import it in `generate.ts`, rather than re-deriving an approximate
+   condition inline. This is what prevents the two lists drifting apart
+   again. (Where no single eligibility function exists to reuse — e.g.
+   `param-type-mismatch`/`param-enum-violation`/`param-constraint-violation`
+   — an inline approximation checking the same declared schema keywords the
+   generator checks is the established precedent; match that precision
+   level, don't invent a looser one.)
+3. `tests/request-validation/coverage-applicability-wiring.test.ts` asserts
+   every `SCENARIO_KINDS` entry has an `applicable.add(...)` call — it will
+   fail immediately if you skip step 1, but it cannot catch a wrong or
+   over-broad condition in step 2. Verify that by hand.
+
 ### Standing rule for every bug fix to extractor or planner
 
 1. **Add a fixture demonstrating the bug BEFORE the fix.** The fixture
