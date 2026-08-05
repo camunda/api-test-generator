@@ -19,6 +19,7 @@ import { generateConstraintViolations } from '../src/analysis/constraintViolatio
 import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired.js';
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
+import { generateExplicitNullRequired } from '../src/analysis/explicitNullRequired.js';
 import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
@@ -258,6 +259,16 @@ async function main() {
         }),
       );
     }
+  }
+  // Explicit `null` for a required field, distinct from omitting it
+  // entirely (#500) — same target-field selection as missing-required.
+  if (wantKind('explicit-null-required')) {
+    scenarios.push(
+      ...generateExplicitNullRequired(model.operations, {
+        capPerOperation: opts.maxMissing,
+        onlyOperations: opts.onlyOperations,
+      }),
+    );
   }
   if (opts.deep && wantKind('missing-required-combo')) {
     scenarios.push(
@@ -1074,6 +1085,22 @@ async function main() {
         if (reqList.length) {
           applicable.add('missing-required');
           if (reqList.length > 1) applicable.add('missing-required-combo');
+        }
+        // explicit-null-required (#500) is narrower than missing-required:
+        // JSON bodies only. `body` above is `op.requestBodySchema ||
+        // op.multipartSchema` — for a multipart-only op with its own
+        // `required` array, that would make `Array.isArray(body.required)`
+        // true even though explicitNullRequired.ts's own gate requires
+        // `op.requestBodySchema` specifically (never falls back to
+        // multipartSchema), so this checks that field directly instead of
+        // going through the merged `body`/`reqList` variables above.
+        if (
+          op.requestBodySchema?.type === 'object' &&
+          Array.isArray(op.requestBodySchema.required) &&
+          op.requestBodySchema.required.length &&
+          (!op.mediaTypes || op.mediaTypes.includes('application/json'))
+        ) {
+          applicable.add('explicit-null-required');
         }
         applicable.add('type-mismatch');
         applicable.add('body-top-type-mismatch');
