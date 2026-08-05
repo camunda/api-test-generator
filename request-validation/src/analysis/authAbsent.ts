@@ -30,7 +30,7 @@ interface Opts {
  * `security: []` nor an anonymous `{}` alternative) — for APIs uniformly
  * authenticated via one global scheme (e.g. Hub's `security: [{ bearerAuth: [] }]`).
  */
-function isAuthTargeted(op: OperationModel, opts: Opts): boolean {
+export function isAuthTargeted(op: OperationModel, opts: Opts): boolean {
   if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) return false;
   return opts.allSecured ? op.secured === true : op.conditionalAuth === true;
 }
