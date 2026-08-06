@@ -1,15 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import {
-  type CsharpOperationMap,
   CsharpOperationMapSource,
   FallbackMappingSource,
 } from '../../materializer/src/csharp-sdk/sdk-mapping.js';
 
-const OPERATION_MAP: CsharpOperationMap = {
+const OPERATION_MAP = {
   activateJobs: [{ file: 'noop', region: 'ActivateJobsAsync' }],
   createProcessInstance: [{ file: 'noop', region: 'CreateProcessInstanceAsync' }],
   completeJob: [{ file: 'noop', region: 'CompleteJobAsync' }],
-};
+} as const;
 
 describe('C# SDK mapping fallback', () => {
   test('keeps PascalCase Async method names unchanged', () => {
