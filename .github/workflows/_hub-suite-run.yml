@@ -169,7 +169,23 @@ jobs:
             echo "::error::hub_registry=$REGISTRY set but REGISTRY_USERNAME/PASSWORD not provided."
             exit 1
           fi
-          printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
+          # Retry to absorb a transient registry blip ("Get https://…/v2/:
+          # net/http: request canceled while waiting for connection") — same
+          # reason the compose pull in docker/start-hub.sh retries. `timeout`
+          # bounds an attempt that hangs past docker's own client timeout.
+          # A credential/permission error is not retry-fixable, but it fails
+          # identically on every attempt, so the job still goes red.
+          login_attempts=0
+          until printf '%s' "$REGISTRY_PASSWORD" \
+            | timeout 60 docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin; do
+            login_attempts=$((login_attempts + 1))
+            if [ "$login_attempts" -ge 3 ]; then
+              echo "::error::docker login to '$REGISTRY' failed after ${login_attempts} attempts."
+              exit 1
+            fi
+            echo "docker login failed — retry ${login_attempts}/3 in $((login_attempts * 10))s..."
+            sleep $((login_attempts * 10))
+          done
 
       - name: Start Hub (prebuilt image)
         env:
@@ -187,6 +203,7 @@ jobs:
       # hub_ref (SKIP_BUNDLE unset), so the generated suite matches the ref under
       # test — no separate bundle step needed.
       - name: Generate + run positive + negative suites
+        id: suites
         env:
           STEPS: generate run
           RV_PROFILES: secured rbac
@@ -205,9 +222,13 @@ jobs:
       # later via the separate spec-bump tracking issue. `if: always()`: run
       # this even if the suite run above already failed for an unrelated
       # reason, so both signals surface together instead of one hiding the other.
+      # Gated on the suite step not being SKIPPED, though: if the job died before
+      # generate ever ran (registry login, Hub startup), coverage.json cannot
+      # exist and this would add a spurious second ::error:: that buries the real
+      # cause in the summary and misleads hub-pr-check's classify step.
       - name: Fail if any operation has no generated test coverage
         id: unmapped
-        if: always()
+        if: always() && steps.suites.conclusion != 'skipped'
         run: |
           set -euo pipefail
           # A read/parse failure (missing file, corrupt JSON) is NOT the same
