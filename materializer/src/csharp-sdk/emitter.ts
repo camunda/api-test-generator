@@ -8,19 +8,6 @@ import type {
 } from 'path-analyser/types';
 import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.js';
 
-const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
-  createDeployment: 'DeploymentRequest',
-  createProcessInstance: 'CreateProcessInstanceRequest',
-  searchProcessInstances: 'SearchProcessInstancesRequest',
-  activateJobs: 'ActivateJobsRequest',
-  searchJobs: 'JobSearchRequest',
-  completeJob: 'CompleteJobRequest',
-  cancelProcessInstance: 'CancelProcessInstanceRequest',
-  failJob: 'JobFailRequest',
-};
-
-const PATH_PARAM_RE = /\{([^}]+)\}/g;
-
 /**
  * A single operation-map entry as committed in
  * `csharp-sdk/examples/operation-map.json`. The SDK method to invoke is
@@ -194,7 +181,7 @@ function renderScenarioTest(
     const varName = `result${idx + 1}`;
     const requestVar = `request${idx + 1}`;
     const responseVar = `response${idx + 1}`;
-    const requestType = resolveRequestTypeName(step.operationId);
+    const requestType = `${toPascalCase(step.operationId)}Request`;
     const expectError = step.expect.status >= 400;
 
     if (step.bodyKind === 'multipart') {
@@ -326,9 +313,6 @@ function renderScenarioTest(
     body.push('      {');
 
     const requestParts = buildRequestParts(step);
-    if (requestParts.length > 0 && requestType === undefined) {
-      throw new Error(`No published C# request DTO mapping found for operationId ${step.operationId}`);
-    }
     if (expectError) {
       body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () => {');
       if (requestParts.length > 0) {
@@ -385,10 +369,12 @@ function renderScenarioTest(
 function buildRequestParts(step: RequestStep): string {
   const entries: string[] = [];
 
-  for (const name of derivePathParamNames(step.pathTemplate)) {
-    entries.push(
-      `          [${stringLiteral(name)}] = RequireBinding(ctx, ${stringLiteral(`${toCamelCase(name)}Var`)}),`,
-    );
+  if (step.pathParams?.length) {
+    for (const p of step.pathParams) {
+      entries.push(
+        `          [${stringLiteral(p.name)}] = RequireBinding(ctx, ${stringLiteral(p.var)}),`,
+      );
+    }
   }
 
   if (step.bodyKind === 'json' && step.bodyTemplate !== undefined) {
@@ -405,14 +391,6 @@ function buildRequestParts(step: RequestStep): string {
 
   if (entries.length === 0) return '';
   return `new Dictionary<string, object?>\n        {\n${entries.join('\n')}\n        }`;
-}
-
-function resolveRequestTypeName(operationId: string): string | undefined {
-  return CSHARP_REQUEST_TYPE_BY_OPERATION[operationId];
-}
-
-function derivePathParamNames(pathTemplate: string): string[] {
-  return [...pathTemplate.matchAll(PATH_PARAM_RE)].map((match) => match[1]);
 }
 
 function renderCsharpValue(value: unknown, indent = ''): string {
@@ -524,11 +502,6 @@ function stringLiteral(value: string): string {
 function toPascalCase(value: string): string {
   if (!value) return value;
   return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function toCamelCase(value: string): string {
-  if (!value) return value;
-  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function escapeQuotes(s: string): string {
