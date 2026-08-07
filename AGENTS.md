@@ -547,12 +547,16 @@ alert to `#camunda-hub-pr-e2e-results` states that verdict on failure.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check
-on the camunda-hub PR: `_hub-suite-run.yml` also exposes the generate+run
-step's own conclusion (`suites_conclusion`, independent of the job's
-aggregate result), and `report` downgrades the reported `state` back to
-`success` whenever the suite itself genuinely passed and a coverage gap was
-the *only* reason the job failed — a real test failure (whether or not a
-gap also coexists) still reports failure. Either way, the description is
+on the camunda-hub PR: `_hub-suite-run.yml` also exposes a `coverage_gap_only`
+output — "true" only when EVERY OTHER step in that job (the suite run
+itself, artifact upload, the run-summary composite action) concluded
+"success" and `unmapped_operations` is non-empty, so the coverage-check
+step is *provably* the sole reason the job failed, not just "the suite step
+happened to pass" (an unrelated later step, e.g. a flaky artifact upload,
+failing in the same run would NOT be a pure coverage gap). `report`
+downgrades the reported `state` back to `success` only when this is true —
+a real test failure, or any unrelated step failing independently, still
+reports failure. Either way, the description is
 annotated (`"<state> - coverage gap: <ops>"` — a plain ASCII hyphen, not an
 em dash, since this string is byte-sliced against GitHub's 140-char
 status-description cap and a multi-byte character sitting at the cut point

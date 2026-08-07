@@ -597,13 +597,13 @@ jobs:
           # Comma-separated, empty if none (see _hub-suite-run.yml's own
           # `unmapped` step) — operations with NO generated test at all.
           UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
-          # The generate+run step's OWN conclusion, independent of the
-          # overall job result — _hub-suite-run.yml's coverage-check step
-          # (#505) fails the job whenever UNMAPPED is non-empty even when
-          # the suite itself fully passed, so RESULT alone can't distinguish
-          # "a genuine test failure" from "the suite passed, only the
-          # coverage check flagged a gap."
-          SUITES_CONCLUSION: ${{ needs.run.outputs.suites_conclusion }}
+          # "true" only when the coverage-check step is PROVABLY the sole
+          # reason the job failed (every other step, including later ones
+          # like artifact upload / run-summary, also concluded "success") —
+          # see this output's own description in _hub-suite-run.yml for why
+          # a bare "did the suite step pass" check isn't precise enough on
+          # its own.
+          COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
         run: |
           set -euo pipefail
           # Map the run result to a commit-status state. cancelled/skipped map to
@@ -617,10 +617,10 @@ jobs:
 
           # #480: missing coverage alone must NOT be reported as a failing
           # check on the camunda-hub PR — only downgrade `state` when the
-          # suite itself genuinely passed and the sole reason the job failed
-          # is the coverage-check step; a real test failure alongside a
-          # coverage gap still reports failure.
-          if [ "$state" = "failure" ] && [ "$SUITES_CONCLUSION" = "success" ] && [ -n "$UNMAPPED" ]; then
+          # coverage-check step is provably the SOLE reason the job failed;
+          # a real test failure, or any unrelated step failing independently
+          # in the same run, still reports failure.
+          if [ "$state" = "failure" ] && [ "$COVERAGE_GAP_ONLY" = "true" ]; then
             state=success
           fi
 
@@ -692,24 +692,23 @@ jobs:
           # one, e.g. an unprovisioned App token, or there's nothing to link
           # because UNMAPPED is empty).
           ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
-          # #480 — see "Report status..." above. Whenever the suite itself
-          # genuinely passed and UNMAPPED is the sole reason this job
-          # failed, that run gets reported as "success" on the camunda-hub
+          # #480 — see "Report status..." above. Whenever COVERAGE_GAP_ONLY
+          # is true, that run gets reported as "success" on the camunda-hub
           # PR, not "failure" — the headline here must not contradict that
           # by shouting "Failed" for something we just decided isn't one.
-          SUITES_CONCLUSION: ${{ needs.run.outputs.suites_conclusion }}
+          COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
 
           # classify's own prompt (step 0) already guarantees CATEGORY ==
-          # "generator-gap" whenever SUITES_CONCLUSION == "success" and
-          # UNMAPPED is non-empty (there are no other failing tests for it
-          # to have classified as anything else) — so this condition and
-          # the "Report status..." step's downgrade-to-success condition can
-          # never disagree about which case they're in.
-          if [ "$SUITES_CONCLUSION" = "success" ] && [ -n "$UNMAPPED" ]; then
+          # "generator-gap" whenever the suite itself passed and UNMAPPED is
+          # non-empty (there are no other failing tests for it to have
+          # classified as anything else) — so this condition and the "Report
+          # status..." step's downgrade-to-success condition can never
+          # disagree about which case they're in.
+          if [ "$COVERAGE_GAP_ONLY" = "true" ]; then
             headline=":large_yellow_circle: *Coverage Gap on a camunda-hub PR* (suite itself passed — reported as success, not a failing check)"
           else
             headline=":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*"
@@ -773,8 +772,15 @@ jobs:
           # only when both exist (ISSUE_URL is empty if there's no gap, or
           # the tracker job's App token wasn't available this run).
           if [ -n "$UNMAPPED" ]; then
+            # UNMAPPED ultimately comes from the camunda-hub PR's own
+            # (untrusted) OpenAPI operationIds — Slack mrkdwn interprets
+            # `<...>` as a link/mention (e.g. a crafted operationId like
+            # `<!subteam^...>` could trigger a real ping), so escape Slack's
+            # three special characters before interpolating it into this
+            # message. `&` first, so escaping `<`/`>` doesn't get re-escaped.
+            unmapped_slack_safe=$(printf '%s' "$UNMAPPED" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
             verdict=$(printf '%s\n\n:warning: This run also has operation(s) with NO generated test at all: %s' \
-              "$verdict" "$UNMAPPED")
+              "$verdict" "$unmapped_slack_safe")
             if [ -n "$ISSUE_URL" ]; then
               verdict=$(printf '%s\n:bookmark_tabs: Tracked at %s' "$verdict" "$ISSUE_URL")
             fi
