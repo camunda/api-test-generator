@@ -553,9 +553,12 @@ aggregate result), and `report` downgrades the reported `state` back to
 `success` whenever the suite itself genuinely passed and a coverage gap was
 the *only* reason the job failed — a real test failure (whether or not a
 gap also coexists) still reports failure. Either way, the description is
-annotated (`"<state> — coverage gap: <ops>"`, truncated to GitHub's 140-char
-limit) whenever `unmapped_operations` is non-empty, so the two can never
-contradict each other. A `coverage-gap-tracker` job opens/updates a rolling
+annotated (`"<state> - coverage gap: <ops>"` — a plain ASCII hyphen, not an
+em dash, since this string is byte-sliced against GitHub's 140-char
+status-description cap and a multi-byte character sitting at the cut point
+could produce an invalid truncated sequence) whenever `unmapped_operations`
+is non-empty, so the two can never contradict each other. A
+`coverage-gap-tracker` job opens/updates a rolling
 **api-test-generator** issue (never camunda-hub — this repo's own backlog,
 no cross-repo trust concerns), one per camunda-hub PR (exact-title dedup,
 auto-closed if a later push clears the gap), labeled `missing-coverage`.

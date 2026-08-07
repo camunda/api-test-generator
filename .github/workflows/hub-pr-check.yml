@@ -621,11 +621,17 @@ jobs:
 
           # #480: distinguish a coverage gap from an unremarkable pass/fail
           # in the description text, using the FINAL (possibly downgraded)
-          # state above so the two never contradict each other.
+          # state above so the two never contradict each other. ASCII "-"
+          # deliberately, not an em dash: this string is byte-sliced below
+          # against GitHub's 140-char status-description cap, and a
+          # multi-byte UTF-8 character (an em dash is 3 bytes) sitting right
+          # at the cut point would produce an invalid, truncated byte
+          # sequence — plain ASCII throughout sidesteps that risk entirely
+          # regardless of the runner's locale.
           if [ -n "$UNMAPPED" ]; then
-            description="${state} — coverage gap: ${UNMAPPED}"
+            description="${state} - coverage gap: ${UNMAPPED}"
             # GitHub's commit-status `description` is capped at 140 characters
-            # — truncate rather than risk it being silently rejected/clipped
+            # - truncate rather than risk it being silently rejected/clipped
             # server-side for a long unmapped-operation list.
             if [ "${#description}" -gt 140 ]; then
               description="${description:0:137}..."
