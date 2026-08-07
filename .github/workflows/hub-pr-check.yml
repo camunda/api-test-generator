@@ -531,12 +531,17 @@ jobs:
           } > "$body_file"
 
           if [ -n "$existing" ]; then
-            gh issue edit "$existing" --repo "$repo" --body-file "$body_file" >/dev/null
+            gh issue edit "$existing" --repo "$repo" --body-file "$body_file" \
+              --add-label missing-coverage --add-label hub >/dev/null
             echo "Updated existing coverage-gap issue #${existing}."
             issue_url="https://github.com/${repo}/issues/${existing}"
           else
+            # "hub" alongside "missing-coverage" — same per-config label this
+            # repo already uses to tag camunda-hub-scoped issues/PRs (mirror
+            # "OCA" for the other config), so this tracker is filterable the
+            # same way any other hub-specific issue already is.
             issue_url=$(gh issue create --repo "$repo" --title "$title" \
-              --body-file "$body_file" --label missing-coverage)
+              --body-file "$body_file" --label missing-coverage --label hub)
             echo "Opened new coverage-gap issue: ${issue_url}"
           fi
           rm -f "$body_file"

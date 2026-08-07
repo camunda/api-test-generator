@@ -561,7 +561,9 @@ is non-empty, so the two can never contradict each other. A
 `coverage-gap-tracker` job opens/updates a rolling
 **api-test-generator** issue (never camunda-hub — this repo's own backlog,
 no cross-repo trust concerns), one per camunda-hub PR (exact-title dedup,
-auto-closed if a later push clears the gap), labeled `missing-coverage`.
+auto-closed if a later push clears the gap), labeled `missing-coverage` +
+`hub` (the same per-config label this repo already uses to tag
+camunda-hub-scoped issues/PRs, mirroring `OCA` for the other config).
 The internal Slack alert (gated on the job's real internal result, not the
 externally-reported one) softens its headline for a pure coverage gap
 (`:large_yellow_circle:`, not `:red_circle:`) to avoid contradicting the
