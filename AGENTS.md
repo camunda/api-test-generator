@@ -542,19 +542,25 @@ token for either repo) runs a Claude agent to distinguish a real hub
 regression from api-test-generator simply not yet modeling a new/changed
 endpoint shape (comparing the PR's spec diff against `main`), and a Slack
 alert to `#camunda-hub-pr-e2e-results` states that verdict on failure.
-`_hub-suite-run.yml`'s own coverage-check step (#505) already fails the run
-whenever an operation has zero generated test at all (a silent ontology
-gap) — so the commit status was never actually the "stays green" case #480
-originally worried about; the real gap #480 closes is that the generic
-`"Generated hub suite: failure"` description doesn't distinguish that from
-a genuine test failure. The description is now annotated
-(`"failure — coverage gap: <ops>"`, truncated to GitHub's 140-char
-status-description limit) whenever `unmapped_operations` is non-empty, and
-a `coverage-gap-tracker` job opens/updates a rolling **api-test-generator**
-issue (never camunda-hub — this repo's own backlog, no cross-repo trust
-concerns), one per camunda-hub PR (exact-title dedup, auto-closed if a
-later push clears the gap), labeled `missing-coverage`. The failure Slack
-alert names the exact unmapped op list and links that tracking issue.
+`_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
+an operation has zero generated test at all (a silent ontology gap) — but
+per #480, missing coverage alone must never be REPORTED as a failing check
+on the camunda-hub PR: `_hub-suite-run.yml` also exposes the generate+run
+step's own conclusion (`suites_conclusion`, independent of the job's
+aggregate result), and `report` downgrades the reported `state` back to
+`success` whenever the suite itself genuinely passed and a coverage gap was
+the *only* reason the job failed — a real test failure (whether or not a
+gap also coexists) still reports failure. Either way, the description is
+annotated (`"<state> — coverage gap: <ops>"`, truncated to GitHub's 140-char
+limit) whenever `unmapped_operations` is non-empty, so the two can never
+contradict each other. A `coverage-gap-tracker` job opens/updates a rolling
+**api-test-generator** issue (never camunda-hub — this repo's own backlog,
+no cross-repo trust concerns), one per camunda-hub PR (exact-title dedup,
+auto-closed if a later push clears the gap), labeled `missing-coverage`.
+The internal Slack alert (gated on the job's real internal result, not the
+externally-reported one) softens its headline for a pure coverage gap
+(`:large_yellow_circle:`, not `:red_circle:`) to avoid contradicting the
+"success" it just reported, and links the tracking issue.
 
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs

@@ -45,6 +45,20 @@ on:
           real regression apart from "the generator hasn't modelled this
           new/changed operation yet" — reads it from here instead.
         value: ${{ jobs.run.outputs.unmapped_operations }}
+      suites_conclusion:
+        description: >-
+          The generate+run step's own conclusion (success/failure/…),
+          independent of the overall job result. The "Fail if any operation
+          has no generated test coverage" step below deliberately fails this
+          JOB whenever unmapped_operations is non-empty (so a manual
+          hub-ondemand-test.yml run shows red, matching #505's intent) — but
+          a caller that wants to distinguish "the suite itself passed, only
+          the coverage-check step failed" from "there's a genuine test
+          failure" (hub-pr-check.yml, #480: a pure coverage gap must not be
+          REPORTED as a failing check on the camunda-hub PR) needs this
+          finer-grained signal, since the job's own aggregate result alone
+          can't tell the two apart.
+        value: ${{ jobs.run.outputs.suites_conclusion }}
     # Declared explicitly (not `inherit`) so the interface is least-privilege and
     # callers can't accidentally omit one. Used by the hub-clone-token action.
     secrets:
@@ -89,6 +103,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       unmapped_operations: ${{ steps.unmapped.outputs.unmapped }}
+      suites_conclusion: ${{ steps.suites.conclusion }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6

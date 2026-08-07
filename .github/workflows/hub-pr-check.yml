@@ -574,14 +574,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # Comma-separated, empty if none (see _hub-suite-run.yml's own
           # `unmapped` step) — operations with NO generated test at all.
-          # #505 already makes the run itself FAIL when this is non-empty
-          # (state below is therefore already "failure", never "success"),
-          # but the generic "Generated hub suite: failure" description
-          # doesn't distinguish that from a real test failure — #480
-          # annotates it here instead of changing `state` (which must stay
-          # purely a function of `RESULT`, since this pipeline is
-          # informational/non-required while reliability proves out, #462).
           UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          # The generate+run step's OWN conclusion, independent of the
+          # overall job result — _hub-suite-run.yml's coverage-check step
+          # (#505) fails the job whenever UNMAPPED is non-empty even when
+          # the suite itself fully passed, so RESULT alone can't distinguish
+          # "a genuine test failure" from "the suite passed, only the
+          # coverage check flagged a gap."
+          SUITES_CONCLUSION: ${{ needs.run.outputs.suites_conclusion }}
         run: |
           set -euo pipefail
           # Map the run result to a commit-status state. cancelled/skipped map to
@@ -593,10 +593,20 @@ jobs:
             *)       state=error ;;
           esac
 
-          # #480: distinguish "failed because of a coverage gap" from a real
-          # test failure in the description text (state itself is untouched).
-          if [ "$state" = "failure" ] && [ -n "$UNMAPPED" ]; then
-            description="failure — coverage gap: ${UNMAPPED}"
+          # #480: missing coverage alone must NOT be reported as a failing
+          # check on the camunda-hub PR — only downgrade `state` when the
+          # suite itself genuinely passed and the sole reason the job failed
+          # is the coverage-check step; a real test failure alongside a
+          # coverage gap still reports failure.
+          if [ "$state" = "failure" ] && [ "$SUITES_CONCLUSION" = "success" ] && [ -n "$UNMAPPED" ]; then
+            state=success
+          fi
+
+          # #480: distinguish a coverage gap from an unremarkable pass/fail
+          # in the description text, using the FINAL (possibly downgraded)
+          # state above so the two never contradict each other.
+          if [ -n "$UNMAPPED" ]; then
+            description="${state} — coverage gap: ${UNMAPPED}"
             # GitHub's commit-status `description` is capped at 140 characters
             # — truncate rather than risk it being silently rejected/clipped
             # server-side for a long unmapped-operation list.
@@ -627,9 +637,12 @@ jobs:
       # otherwise fall back to naming all three possibilities rather than
       # asserting the wrong one as fact.
       #
-      # Failure only — a genuine test failure (RESULT == "failure"), not
-      # cancelled/skipped/infra "error", which would misreport an operational
-      # condition as a regression.
+      # Gated on the internal job result (RESULT == "failure"), not the
+      # externally-REPORTED status — a pure coverage gap is reported as
+      # "success" on the camunda-hub PR (see "Report status..." above), but
+      # this internal Slack channel still gets a (milder-headlined) heads-up
+      # either way; only cancelled/skipped/infra "error" are excluded, which
+      # would misreport an operational condition as a regression.
       - name: Build Slack alert text
         id: msg
         if: always() && needs.run.result == 'failure'
@@ -651,10 +664,28 @@ jobs:
           # one, e.g. an unprovisioned App token, or there's nothing to link
           # because UNMAPPED is empty).
           ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
+          # #480 — see "Report status..." above. Whenever the suite itself
+          # genuinely passed and UNMAPPED is the sole reason this job
+          # failed, that run gets reported as "success" on the camunda-hub
+          # PR, not "failure" — the headline here must not contradict that
+          # by shouting "Failed" for something we just decided isn't one.
+          SUITES_CONCLUSION: ${{ needs.run.outputs.suites_conclusion }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
+
+          # classify's own prompt (step 0) already guarantees CATEGORY ==
+          # "generator-gap" whenever SUITES_CONCLUSION == "success" and
+          # UNMAPPED is non-empty (there are no other failing tests for it
+          # to have classified as anything else) — so this condition and
+          # the "Report status..." step's downgrade-to-success condition can
+          # never disagree about which case they're in.
+          if [ "$SUITES_CONCLUSION" = "success" ] && [ -n "$UNMAPPED" ]; then
+            headline=":large_yellow_circle: *Coverage Gap on a camunda-hub PR* (suite itself passed — reported as success, not a failing check)"
+          else
+            headline=":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*"
+          fi
           # product ALSO pings hub-medic — it's their pipeline (this PR) that
           # a confirmed regression implicates, same "whoever owns the broken
           # thing" routing every AlwaysGreen variant we looked at uses. BUT
@@ -747,8 +778,8 @@ jobs:
             source_line=$(printf 'camunda/camunda-hub @ %s (PR number unavailable)' "$sha_code")
           fi
 
-          text=$(printf ':red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: %s\n• Run: <%s|View failing tests>%s\n\n%s\n\n%s please take a look.' \
-            "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
+          text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s\n\n%s\n\n%s please take a look.' \
+            "$headline" "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
 
           # Random delimiter, not a fixed string like "SLACKMSG" — $SUMMARY is
           # agent-produced free text and must never be able to prematurely
