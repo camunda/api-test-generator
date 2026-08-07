@@ -53,6 +53,12 @@ jobs:
       source_sha: ${{ steps.v.outputs.source_sha }}
       caller_run_url: ${{ steps.caller.outputs.caller_run_url }}
       pr_number: ${{ steps.prnum.outputs.pr_number }}
+      # || 'false': if the lookup below never ran (empty pr_number, or the
+      # token mint failed/unprovisioned), this is empty, not "false" —
+      # default to "not draft" so a lookup failure degrades to the
+      # EXISTING behavior (still alerts) rather than silently dropping a
+      # real signal.
+      is_draft: ${{ steps.draft.outputs.is_draft || 'false' }}
     steps:
       - name: Validate source_sha is a 40-char hex commit SHA
         id: v
@@ -99,6 +105,50 @@ jobs:
             echo "pr_number=$N" >> "$GITHUB_OUTPUT"
           else
             echo "pr_number=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # #519: a draft camunda-hub PR failing the generated suite still gets
+      # the commit status (a passive, non-paging signal), but not the Slack
+      # alert — a WIP push isn't something to page a human over. Same
+      # qa-processes App + Vault wiring `report`'s status-token step already
+      # uses for camunda-hub (that token's confirmed grant there is Commit
+      # statuses:write; Pull requests:read is a separate, unconfirmed App
+      # permission — continue-on-error below, and the job output defaults
+      # to "not draft" on any failure, so an unprovisioned grant degrades to
+      # today's existing behavior rather than silently going quiet).
+      - name: Mint camunda-hub read token (qa-processes App)
+        id: draft-token
+        if: steps.prnum.outputs.pr_number != ''
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+
+      - name: Check whether the source camunda-hub PR is a draft
+        id: draft
+        if: steps.draft-token.outputs.token != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.draft-token.outputs.token }}
+          PR_NUMBER: ${{ steps.prnum.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          is_draft=$(gh pr view "$PR_NUMBER" --repo camunda/camunda-hub --json isDraft --jq .isDraft 2>/dev/null || echo "")
+          if [ "$is_draft" = "true" ]; then
+            echo "is_draft=true" >> "$GITHUB_OUTPUT"
+          else
+            # "false", or the lookup failed/returned nothing — either way,
+            # default to "not draft" (today's existing behavior: still alerts).
+            echo "is_draft=false" >> "$GITHUB_OUTPUT"
           fi
 
   run:
@@ -152,7 +202,12 @@ jobs:
     # — so without this, the condition below never actually runs the job.
     # Confirmed this is exactly what happened: every failing run to date
     # (including the real ones from 2026-08-02) shows this job with steps: [].
-    if: always() && needs.run.result == 'failure'
+    #
+    # #519: this job's ONLY consumer is the Slack alert text — for a draft
+    # camunda-hub PR, that alert is suppressed (see `report` below), so
+    # running classify for a failing draft push is pure wasted cost (a real
+    # Claude API call + a hub clone) with nothing to consume its output.
+    if: always() && needs.run.result == 'failure' && needs.validate.outputs.is_draft != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -670,10 +725,13 @@ jobs:
       # "success" on the camunda-hub PR (see "Report status..." above), but
       # this internal Slack channel still gets a (milder-headlined) heads-up
       # either way; only cancelled/skipped/infra "error" are excluded, which
-      # would misreport an operational condition as a regression.
+      # would misreport an operational condition as a regression. Also
+      # excludes drafts (#519) — a WIP push isn't something to page a human
+      # over; the commit status (unconditional, see "Report status..."
+      # above) still gives the author passive pass/fail feedback.
       - name: Build Slack alert text
         id: msg
-        if: always() && needs.run.result == 'failure'
+        if: always() && needs.run.result == 'failure' && needs.validate.outputs.is_draft != 'true'
         env:
           # Validated (digits-only) by the `validate` job — empty if the
           # dispatch payload's pr_number was missing/malformed.
@@ -828,7 +886,7 @@ jobs:
 
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
-        if: always() && needs.run.result == 'failure'
+        if: always() && needs.run.result == 'failure' && needs.validate.outputs.is_draft != 'true'
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -842,7 +900,10 @@ jobs:
       # agent-produced free text (SUMMARY), which manual string-building
       # can't safely guarantee is JSON-clean.
       - name: Notify Slack (generated hub suite failed on camunda-hub PR)
-        if: always() && needs.run.result == 'failure' && steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
         uses: slackapi/slack-github-action@v2
         with:

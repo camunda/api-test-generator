@@ -573,6 +573,16 @@ externally-reported one) softens its headline for a pure coverage gap
 (`:large_yellow_circle:`, not `:red_circle:`) to avoid contradicting the
 "success" it just reported, and links the tracking issue.
 
+`validate` also resolves whether the SOURCE camunda-hub PR is a **draft**
+(#519, `gh pr view --json isDraft`, same qa-processes App token pattern as
+`report`'s status-token — degrades to "not draft" on any lookup failure,
+so an unprovisioned grant is silent, not a regression). For a failing draft
+PR: the commit status still posts unconditionally (passive, non-paging
+feedback for the author), but `classify` and the Slack alert are both
+skipped — a WIP push failing isn't something to page a human over, and
+`classify`'s only consumer is that alert, so running it for a draft is
+pure wasted cost with nothing to read its output.
+
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift
