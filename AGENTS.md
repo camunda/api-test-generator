@@ -530,6 +530,27 @@ dispatch→poll→comment pattern used elsewhere for a workflow that can't be
 triggered any other way. It is a *visible* check only, not *blocking*, until
 added to branch protection's required checks.
 
+The **Hub PR check** ([hub-pr-check.yml](.github/workflows/hub-pr-check.yml), #462)
+is the mirror image, triggered *from* the other repo: a camunda-hub PR's own
+workflow sends a `repository_dispatch` (validated payload: `source_sha`,
+`pr_number`, `caller_run_url`) carrying its build's `pr-<sha>` image tag; this
+workflow runs the generated hub suite against that exact image and reports a
+commit status (`api-test-generator/hub-suite`) back onto the camunda-hub PR —
+informational/non-required while reliability proves out, not a required
+check. A best-effort, **read-only** `classify` job (mints no write-capable
+token for either repo) runs a Claude agent to distinguish a real hub
+regression from api-test-generator simply not yet modeling a new/changed
+endpoint shape (comparing the PR's spec diff against `main`), and a Slack
+alert to `#camunda-hub-pr-e2e-results` states that verdict on failure. Per
+#480: a **passing** run can still hide operations with zero generated test
+at all (a silent ontology gap, not a test failure) — the commit status stays
+`success` (this must never become merge-blocking as a side effect), but its
+description is annotated (`"success — coverage gap: <ops>"`, truncated to
+GitHub's 140-char status-description limit) and a separate Slack message
+pings `test-automation-medic` so it's actually noticed before merge, not
+just visible on hover. The existing failure-alert message also appends the
+same unmapped-operations line when both are true for the same run.
+
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift

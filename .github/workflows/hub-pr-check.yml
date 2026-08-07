@@ -464,6 +464,14 @@ jobs:
           SHA: ${{ needs.validate.outputs.source_sha }}
           RESULT: ${{ needs.run.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Comma-separated, empty if none (see _hub-suite-run.yml's own
+          # `unmapped` step) — operations with NO generated test at all (#480).
+          # This is a silent skip, not a test failure, so `state` deliberately
+          # still comes from `RESULT` alone below — surfaced only via the
+          # description text, so a coverage gap stays a purely additive,
+          # non-blocking signal (this pipeline is informational/non-required
+          # while reliability proves out, #462).
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
         run: |
           set -euo pipefail
           # Map the run result to a commit-status state. cancelled/skipped map to
@@ -474,12 +482,28 @@ jobs:
             failure) state=failure ;;
             *)       state=error ;;
           esac
+
+          # #480: "success" can still hide operations with zero generated test
+          # coverage (the ontology doesn't model them yet) — surface that in
+          # the description without touching `state`.
+          if [ "$state" = "success" ] && [ -n "$UNMAPPED" ]; then
+            description="success — coverage gap: ${UNMAPPED}"
+            # GitHub's commit-status `description` is capped at 140 characters
+            # — truncate rather than risk it being silently rejected/clipped
+            # server-side for a long unmapped-operation list.
+            if [ "${#description}" -gt 140 ]; then
+              description="${description:0:137}..."
+            fi
+          else
+            description="Generated hub suite: ${state}"
+          fi
+
           gh api -X POST "repos/camunda/camunda-hub/statuses/${SHA}" \
             -f state="$state" \
             -f target_url="$RUN_URL" \
             -f context="api-test-generator/hub-suite" \
-            -f description="Generated hub suite: ${state}" >/dev/null
-          echo "Reported '${state}' on camunda-hub@${SHA:0:12}"
+            -f description="$description" >/dev/null
+          echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
@@ -510,6 +534,10 @@ jobs:
           CATEGORY: ${{ needs.classify.outputs.category }}
           CONFIDENCE: ${{ needs.classify.outputs.confidence }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
+          # #480 — see the same var on "Report status..." above. A failing run
+          # can ALSO have unmapped operations; surfaced here too so this
+          # alert doesn't miss it just because something else already failed.
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
@@ -567,6 +595,14 @@ jobs:
               ;;
           esac
 
+          # #480: append regardless of category — a coverage gap is an
+          # independent fact about this run, not mutually exclusive with
+          # whatever caused the test failure above.
+          if [ -n "$UNMAPPED" ]; then
+            verdict=$(printf '%s\n\n:warning: This run also has operation(s) with NO generated test at all: %s' \
+              "$verdict" "$UNMAPPED")
+          fi
+
           # Built via printf %s placeholders, not a literal multi-line
           # string — this run: block is YAML-indented, and a bash string
           # spanning literal source lines would bake that indentation into
@@ -607,9 +643,15 @@ jobs:
             echo "${delim}"
           } >> "$GITHUB_OUTPUT"
 
+      # #480: also fetched for the coverage-gap-only case below (a green run
+      # that still has unmapped operations) — one shared token fetch for both
+      # Slack notifications this job can send.
       - name: Fetch Slack bot token from Vault
         id: slack-secrets
-        if: always() && needs.run.result == 'failure'
+        if: >-
+          always() &&
+          (needs.run.result == 'failure' ||
+           (needs.run.result == 'success' && needs.run.outputs.unmapped_operations != ''))
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -633,4 +675,63 @@ jobs:
             {
               "channel": "#camunda-hub-pr-e2e-results",
               "text": ${{ toJSON(steps.msg.outputs.text) }}
+            }
+
+      # #480: the exact silent-green case this issue is about — the suite
+      # passed (RESULT == success, so the commit status above stays "success"
+      # and does not block merge), but the coverage.json check found
+      # operation(s) with NO generated test at all. The status description
+      # above is easy to miss (most people only glance at the pass/fail
+      # icon); this makes it actually noticed before merge.
+      - name: Build coverage-gap Slack alert text
+        id: coverage-msg
+        if: always() && needs.run.result == 'success' && needs.run.outputs.unmapped_operations != ''
+        env:
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CALLER_RUN_URL: ${{ needs.validate.outputs.caller_run_url }}
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+        run: |
+          set -euo pipefail
+          ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
+
+          caller_line=""
+          if [ -n "$CALLER_RUN_URL" ]; then
+            caller_line=$(printf '\n• Triggered by: <%s|camunda-hub run>' "$CALLER_RUN_URL")
+          fi
+
+          sha_code="\`${SHA}\`"
+
+          if [ -n "$PR_NUMBER" ]; then
+            source_line=$(printf 'camunda/camunda-hub PR <https://github.com/camunda/camunda-hub/pull/%s|#%s> @ %s' \
+              "$PR_NUMBER" "$PR_NUMBER" "$sha_code")
+          else
+            source_line=$(printf 'camunda/camunda-hub @ %s (PR number unavailable)' "$sha_code")
+          fi
+
+          text=$(printf ':large_yellow_circle: *Green Hub Suite, But a Coverage Gap* on a camunda-hub PR\n\n• Source: %s\n• Run: <%s|View run>%s\n\nOperation(s) with NO generated test at all (api-test-generator does not yet model them): %s\n\nThis is not a test failure, so the PR shows a green check regardless.\n\n%s please take a look before merging.' \
+            "$source_line" "$RUN_URL" "$caller_line" "$UNMAPPED" "$ta_medic")
+
+          delim="SLACKMSG_$(openssl rand -hex 8 2>/dev/null || echo "${RANDOM}${RANDOM}")"
+          {
+            echo "text<<${delim}"
+            echo "$text"
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack (coverage gap on a green camunda-hub PR)
+        if: >-
+          always() && needs.run.result == 'success' &&
+          needs.run.outputs.unmapped_operations != '' &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-pr-e2e-results",
+              "text": ${{ toJSON(steps.coverage-msg.outputs.text) }}
             }
