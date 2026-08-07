@@ -530,6 +530,49 @@ dispatch→poll→comment pattern used elsewhere for a workflow that can't be
 triggered any other way. It is a *visible* check only, not *blocking*, until
 added to branch protection's required checks.
 
+The **Hub PR check** ([hub-pr-check.yml](.github/workflows/hub-pr-check.yml), #462)
+is the mirror image, triggered *from* the other repo: a camunda-hub PR's own
+workflow sends a `repository_dispatch` (validated payload: `source_sha`,
+`pr_number`, `caller_run_url`); this workflow derives the `pr-<source_sha>`
+image tag itself (never taken from the payload directly, so the image can't
+drift from the commit being reported on), runs the generated hub suite
+against that exact image, and reports a commit status
+(`api-test-generator/hub-suite`) back onto the camunda-hub PR —
+informational/non-required while reliability proves out, not a required
+check. A best-effort, **read-only** `classify` job (mints no write-capable
+token for either repo) runs a Claude agent to distinguish a real hub
+regression from api-test-generator simply not yet modeling a new/changed
+endpoint shape (comparing the PR's spec diff against `main`), and a Slack
+alert to `#camunda-hub-pr-e2e-results` states that verdict on failure.
+`_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
+an operation has zero generated test at all (a silent ontology gap) — but
+per #480, missing coverage alone must never be REPORTED as a failing check
+on the camunda-hub PR: `_hub-suite-run.yml` also exposes a `coverage_gap_only`
+output — "true" only when EVERY OTHER step in that job (the suite run
+itself, artifact upload, the run-summary composite action) concluded
+"success" and `unmapped_operations` is non-empty, so the coverage-check
+step is *provably* the sole reason the job failed, not just "the suite step
+happened to pass" (an unrelated later step, e.g. a flaky artifact upload,
+failing in the same run would NOT be a pure coverage gap). `report`
+downgrades the reported `state` back to `success` only when this is true —
+a real test failure, or any unrelated step failing independently, still
+reports failure. Either way, the description is
+annotated (`"<state> - coverage gap: <ops>"` — a plain ASCII hyphen, not an
+em dash, since this string is byte-sliced against GitHub's 140-char
+status-description cap and a multi-byte character sitting at the cut point
+could produce an invalid truncated sequence) whenever `unmapped_operations`
+is non-empty, so the two can never contradict each other. A
+`coverage-gap-tracker` job opens/updates a rolling
+**api-test-generator** issue (never camunda-hub — this repo's own backlog,
+no cross-repo trust concerns), one per camunda-hub PR (exact-title dedup,
+auto-closed if a later push clears the gap), labeled `missing-coverage` +
+`hub` (the same per-config label this repo already uses to tag
+camunda-hub-scoped issues/PRs, mirroring `OCA` for the other config).
+The internal Slack alert (gated on the job's real internal result, not the
+externally-reported one) softens its headline for a pure coverage gap
+(`:large_yellow_circle:`, not `:red_circle:`) to avoid contradicting the
+"success" it just reported, and links the tracking issue.
+
 The **nightly** ([nightly-camunda-hub.yml](.github/workflows/nightly-camunda-hub.yml))
 is the complementary hub leg: it clones `camunda-hub@main` **unpinned** and runs
 the positive + negative suites against a **live Hub** — catching upstream drift

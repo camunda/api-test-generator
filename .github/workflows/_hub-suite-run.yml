@@ -45,6 +45,34 @@ on:
           real regression apart from "the generator hasn't modelled this
           new/changed operation yet" — reads it from here instead.
         value: ${{ jobs.run.outputs.unmapped_operations }}
+      unmapped_checked:
+        description: >-
+          "true" if coverage.json was successfully read and parsed this run
+          (regardless of whether unmapped_operations came back empty or
+          not), "false" if that read/parse itself failed. An empty
+          unmapped_operations is ambiguous on its own — it means EITHER
+          "confirmed zero unmapped operations" OR "couldn't check at all" —
+          so a caller that treats empty as "gap cleared" (e.g.
+          hub-pr-check.yml's coverage-gap-tracker, auto-closing a tracking
+          issue) must check this first to avoid acting on unverified data.
+        value: ${{ jobs.run.outputs.unmapped_checked }}
+      coverage_gap_only:
+        description: >-
+          "true" only when EVERY step in this job other than the coverage
+          check itself concluded "success" AND unmapped_operations is
+          non-empty — i.e. the coverage-check step (which deliberately fails
+          this JOB whenever unmapped_operations is non-empty, so a manual
+          hub-ondemand-test.yml run shows red, matching #505's intent) is
+          PROVABLY the sole reason the job failed, not e.g. the suite itself
+          failing, or an unrelated later step (artifact upload, run-summary
+          composite action) failing independently in the same run. A caller
+          that wants to report success on the camunda-hub PR for a pure
+          coverage gap (hub-pr-check.yml, #480: missing coverage alone must
+          not be REPORTED as a failing check) needs this exact, provable
+          signal — checking the suite step's own conclusion in isolation
+          isn't enough, since a later step can still fail independently
+          after the suite itself has already passed.
+        value: ${{ jobs.run.outputs.coverage_gap_only }}
     # Declared explicitly (not `inherit`) so the interface is least-privilege and
     # callers can't accidentally omit one. Used by the hub-clone-token action.
     secrets:
@@ -89,6 +117,22 @@ jobs:
     timeout-minutes: 25
     outputs:
       unmapped_operations: ${{ steps.unmapped.outputs.unmapped }}
+      # || 'false': if the "unmapped" step never ran at all (its own `if:`
+      # requires steps.suites.conclusion != 'skipped'), its output is EMPTY,
+      # not "false" — defaulting here keeps the output contract a clean
+      # true/false rather than forcing every consumer to also handle a
+      # third, implicit "empty" state.
+      unmapped_checked: ${{ steps.unmapped.outputs.unmapped_checked || 'false' }}
+      # Evaluated once the job completes, so this can safely reference every
+      # later step's conclusion regardless of textual position above (same
+      # as unmapped_operations/unmapped_checked already do). "success" ==
+      # (a boolean) stringifies to the literal "true"/"false" a caller can
+      # compare against directly.
+      coverage_gap_only: >-
+        ${{ steps.suites.conclusion == 'success' &&
+            steps.unmapped.outputs.unmapped != '' &&
+            steps.upload.conclusion == 'success' &&
+            steps.summary.conclusion == 'success' }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -237,22 +281,46 @@ jobs:
           # when coverage.json was missing/broken (e.g. an earlier crash). This
           # step's whole point is to be a trustworthy gate, so a read/parse
           # failure now fails loudly and distinctly instead.
+          # operationIds ultimately come from the camunda-hub PR's own
+          # (untrusted) OpenAPI spec — sanitize before joining, so a crafted
+          # operationId can't: (1) inject a literal newline into this
+          # single-line output (every downstream consumer — hub-pr-check.yml's
+          # commit-status description, Slack messages, the coverage-gap-
+          # tracker issue body — assumes this is one line), or (2) carry a
+          # non-ASCII/multi-byte character into the commit-status description,
+          # which is byte-sliced against GitHub's 140-char cap (a multi-byte
+          # char landing at the cut point would produce an invalid truncated
+          # sequence regardless of the ASCII delimiter fix around it).
+          # encode("ascii", "replace") maps any non-ASCII byte to "?" rather
+          # than dropping it silently, so an odd operationId is still visible
+          # as "something was here" instead of vanishing.
           unmapped_script='
-          import json, sys
+          import json, re, sys
           try:
               with open("generated/camunda-hub/playwright/coverage.json") as f:
                   data = json.load(f)
           except Exception as e:
               print(f"ERROR: {e}", file=sys.stderr)
               sys.exit(2)
-          print(", ".join(data.get("summary", {}).get("unmappedOperations", [])))
+          ops = data.get("summary", {}).get("unmappedOperations", [])
+          def clean(op):
+              s = re.sub(r"[\r\n\t]+", " ", str(op)).strip()
+              return s.encode("ascii", "replace").decode("ascii")
+          print(", ".join(clean(op) for op in ops))
           '
           if ! unmapped="$(python3 -c "$unmapped_script")"; then
             echo "::error::Could not read/parse generated/camunda-hub/playwright/coverage.json — treating this as a coverage-check failure rather than silently assuming there are no unmapped operations."
             echo "unmapped=" >> "$GITHUB_OUTPUT"
+            # Distinct from "confirmed zero unmapped operations" below — a
+            # caller (hub-pr-check.yml's coverage-gap-tracker) that sees an
+            # empty `unmapped` must be able to tell "verified clean" apart
+            # from "couldn't verify at all," so it doesn't e.g. auto-close a
+            # still-relevant tracking issue on unverified data.
+            echo "unmapped_checked=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
           echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+          echo "unmapped_checked=true" >> "$GITHUB_OUTPUT"
           if [ -n "$unmapped" ]; then
             echo "::error::Coverage gap: operation(s) with no generated test at all: ${unmapped}. This is not a Playwright failure — the generator's ontology/scenario-templates don't model this operation yet (see AGENTS.md → \"Coverage has two axes\")."
             exit 1
@@ -264,6 +332,7 @@ jobs:
         run: ./docker/start-hub.sh stop || true
 
       - name: Upload Playwright reports
+        id: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -272,6 +341,7 @@ jobs:
           retention-days: 14
 
       - name: Write results to run summary
+        id: summary
         if: always()
         uses: ./.github/actions/hub-run-summary
         with:

@@ -417,9 +417,139 @@ jobs:
             echo "summary=${summary}"
           } >> "$GITHUB_OUTPUT"
 
+  # #480: when the generated hub suite fails BECAUSE of an unmapped
+  # operation (the ontology doesn't model a new/changed endpoint yet — a
+  # real generator gap, not a hub regression; see _hub-suite-run.yml's own
+  # "Fail if any operation has no generated test coverage" step, #505, which
+  # is what makes needs.run.result == 'failure' whenever unmapped_operations
+  # is non-empty), open/update a rolling tracking issue on api-test-generator
+  # itself — never camunda-hub, this repo's own backlog, zero cross-repo
+  # trust concerns (unlike opening anything on the untrusted camunda-hub
+  # side). One issue per camunda-hub PR (exact-title dedup, same idiom
+  # spec-bump-common.sh's find_rolling_issue already uses), kept in sync
+  # across repeated pushes to the same PR (#514: a PR can trigger a dozen+
+  # runs), and auto-closed if a later push clears the gap.
+  coverage-gap-tracker:
+    name: Track coverage gap as an api-test-generator issue
+    needs: [validate, run]
+    if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != ''
+    runs-on: ubuntu-latest
+    outputs:
+      issue_url: ${{ steps.gap-issue.outputs.issue_url }}
+    steps:
+      # Same App + Vault wiring the nightly triage flow already uses for its
+      # own api-test-generator fix/suppress PRs (contents+PR write) — Issues:
+      # write on this SAME repo needs no separate grant beyond what that App
+      # already has here. continue-on-error: an unprovisioned/unreachable
+      # App just skips tracking rather than failing the check.
+      - name: Mint qa-processes App token (api-test-generator issues)
+        id: gap-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+
+      - name: Ensure missing-coverage label exists
+        if: steps.gap-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.gap-token.outputs.token }}
+        run: |
+          gh label create missing-coverage --repo camunda/api-test-generator --color FBCA04 \
+            --description "Operation(s) with zero generated test found by hub-pr-check.yml (#480)" 2>/dev/null || true
+
+      - name: Open/update/close the coverage-gap tracking issue
+        id: gap-issue
+        if: steps.gap-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.gap-token.outputs.token }}
+          # Digits-only, validated by the `validate` job — this job's own
+          # `if:` already requires it non-empty.
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          # "true" only if coverage.json was actually read/parsed this run —
+          # an empty UNMAPPED is ambiguous on its own (see this output's own
+          # description in _hub-suite-run.yml): it means EITHER "confirmed
+          # zero unmapped operations" OR "the check itself crashed." Without
+          # this, a crashed run would auto-close a still-relevant tracking
+          # issue on unverified data.
+          UNMAPPED_CHECKED: ${{ needs.run.outputs.unmapped_checked }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          repo=camunda/api-test-generator
+          title="[hub-pr-check] Coverage gap on camunda-hub#${PR_NUMBER}"
+
+          # Exact-title match, same dedup idiom spec-bump-common.sh's
+          # find_rolling_issue already uses — selecting the first match
+          # inside jq (not `| head -1`) avoids a SIGPIPE-under-pipefail abort.
+          existing=$(gh issue list --repo "$repo" --state open \
+            --search "in:title \"${title}\"" --json number,title \
+            --jq "[.[] | select(.title == \"${title}\") | .number] | first // empty")
+
+          if [ -z "$UNMAPPED" ]; then
+            if [ "$UNMAPPED_CHECKED" != "true" ]; then
+              # The coverage check itself didn't complete this run (a
+              # read/parse crash, or the suite step was skipped before
+              # generate ever ran) — leave any existing tracker untouched
+              # rather than risk auto-closing it on unverified data.
+              echo "::warning::Coverage check did not complete successfully this run — leaving any existing coverage-gap issue untouched (not auto-closing on unverified data)."
+              echo "issue_url=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Confirmed clean — gap cleared on this push, close a
+            # previously-open tracker.
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --repo "$repo" \
+                --comment "Coverage gap cleared as of the latest push to camunda-hub#${PR_NUMBER} (run: ${RUN_URL})." >/dev/null
+              echo "Closed cleared coverage-gap issue #${existing}."
+            fi
+            echo "issue_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          {
+            echo "Tracks a coverage gap detected by \`hub-pr-check.yml\` on camunda/camunda-hub PR #${PR_NUMBER}."
+            echo
+            echo "**Operation(s) with NO generated test at all** (api-test-generator's ontology/scenario-templates don't model them yet):"
+            # shellcheck disable=SC2016  # literal backticks for markdown, no expansion wanted
+            printf '%s\n' "$UNMAPPED" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed '/^$/d' | sed 's/^/- `/; s/$/`/'
+            echo
+            echo "camunda-hub PR: https://github.com/camunda/camunda-hub/pull/${PR_NUMBER}"
+            echo "Latest run: ${RUN_URL}"
+            echo
+            echo "🤖 Opened/updated automatically by \`hub-pr-check.yml\` (#480). Auto-closes if a later push to the camunda-hub PR clears the gap; otherwise stays open until a human models the operation(s) above."
+          } > "$body_file"
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$repo" --body-file "$body_file" \
+              --add-label missing-coverage --add-label hub >/dev/null
+            echo "Updated existing coverage-gap issue #${existing}."
+            issue_url="https://github.com/${repo}/issues/${existing}"
+          else
+            # "hub" alongside "missing-coverage" — same per-config label this
+            # repo already uses to tag camunda-hub-scoped issues/PRs (mirror
+            # "OCA" for the other config), so this tracker is filterable the
+            # same way any other hub-specific issue already is.
+            issue_url=$(gh issue create --repo "$repo" --title "$title" \
+              --body-file "$body_file" --label missing-coverage --label hub)
+            echo "Opened new coverage-gap issue: ${issue_url}"
+          fi
+          rm -f "$body_file"
+          echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
+
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
-    needs: [validate, run, classify]
+    needs: [validate, run, classify, coverage-gap-tracker]
     # Report whenever the SHA was valid (whatever the run result). If validate
     # failed there's no real commit to post a status on, so skip.
     if: always() && needs.validate.result == 'success'
@@ -464,6 +594,16 @@ jobs:
           SHA: ${{ needs.validate.outputs.source_sha }}
           RESULT: ${{ needs.run.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Comma-separated, empty if none (see _hub-suite-run.yml's own
+          # `unmapped` step) — operations with NO generated test at all.
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          # "true" only when the coverage-check step is PROVABLY the sole
+          # reason the job failed (every other step, including later ones
+          # like artifact upload / run-summary, also concluded "success") —
+          # see this output's own description in _hub-suite-run.yml for why
+          # a bare "did the suite step pass" check isn't precise enough on
+          # its own.
+          COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
         run: |
           set -euo pipefail
           # Map the run result to a commit-status state. cancelled/skipped map to
@@ -474,12 +614,43 @@ jobs:
             failure) state=failure ;;
             *)       state=error ;;
           esac
+
+          # #480: missing coverage alone must NOT be reported as a failing
+          # check on the camunda-hub PR — only downgrade `state` when the
+          # coverage-check step is provably the SOLE reason the job failed;
+          # a real test failure, or any unrelated step failing independently
+          # in the same run, still reports failure.
+          if [ "$state" = "failure" ] && [ "$COVERAGE_GAP_ONLY" = "true" ]; then
+            state=success
+          fi
+
+          # #480: distinguish a coverage gap from an unremarkable pass/fail
+          # in the description text, using the FINAL (possibly downgraded)
+          # state above so the two never contradict each other. ASCII "-"
+          # deliberately, not an em dash: this string is byte-sliced below
+          # against GitHub's 140-char status-description cap, and a
+          # multi-byte UTF-8 character (an em dash is 3 bytes) sitting right
+          # at the cut point would produce an invalid, truncated byte
+          # sequence — plain ASCII throughout sidesteps that risk entirely
+          # regardless of the runner's locale.
+          if [ -n "$UNMAPPED" ]; then
+            description="${state} - coverage gap: ${UNMAPPED}"
+            # GitHub's commit-status `description` is capped at 140 characters
+            # - truncate rather than risk it being silently rejected/clipped
+            # server-side for a long unmapped-operation list.
+            if [ "${#description}" -gt 140 ]; then
+              description="${description:0:137}..."
+            fi
+          else
+            description="Generated hub suite: ${state}"
+          fi
+
           gh api -X POST "repos/camunda/camunda-hub/statuses/${SHA}" \
             -f state="$state" \
             -f target_url="$RUN_URL" \
             -f context="api-test-generator/hub-suite" \
-            -f description="Generated hub suite: ${state}" >/dev/null
-          echo "Reported '${state}' on camunda-hub@${SHA:0:12}"
+            -f description="$description" >/dev/null
+          echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
@@ -494,9 +665,12 @@ jobs:
       # otherwise fall back to naming all three possibilities rather than
       # asserting the wrong one as fact.
       #
-      # Failure only — a genuine test failure (RESULT == "failure"), not
-      # cancelled/skipped/infra "error", which would misreport an operational
-      # condition as a regression.
+      # Gated on the internal job result (RESULT == "failure"), not the
+      # externally-REPORTED status — a pure coverage gap is reported as
+      # "success" on the camunda-hub PR (see "Report status..." above), but
+      # this internal Slack channel still gets a (milder-headlined) heads-up
+      # either way; only cancelled/skipped/infra "error" are excluded, which
+      # would misreport an operational condition as a regression.
       - name: Build Slack alert text
         id: msg
         if: always() && needs.run.result == 'failure'
@@ -510,10 +684,35 @@ jobs:
           CATEGORY: ${{ needs.classify.outputs.category }}
           CONFIDENCE: ${{ needs.classify.outputs.confidence }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
+          # #480 — see the same var on "Report status..." above. Surfaced
+          # here too so the alert names the exact op list, not just whatever
+          # classify's free-text SUMMARY happened to mention.
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          # The coverage-gap-tracker job's issue (empty if it couldn't open
+          # one, e.g. an unprovisioned App token, or there's nothing to link
+          # because UNMAPPED is empty).
+          ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
+          # #480 — see "Report status..." above. Whenever COVERAGE_GAP_ONLY
+          # is true, that run gets reported as "success" on the camunda-hub
+          # PR, not "failure" — the headline here must not contradict that
+          # by shouting "Failed" for something we just decided isn't one.
+          COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
+
+          # classify's own prompt (step 0) already guarantees CATEGORY ==
+          # "generator-gap" whenever the suite itself passed and UNMAPPED is
+          # non-empty (there are no other failing tests for it to have
+          # classified as anything else) — so this condition and the "Report
+          # status..." step's downgrade-to-success condition can never
+          # disagree about which case they're in.
+          if [ "$COVERAGE_GAP_ONLY" = "true" ]; then
+            headline=":large_yellow_circle: *Coverage Gap on a camunda-hub PR* (suite itself passed — reported as success, not a failing check)"
+          else
+            headline=":red_circle: *Generated Hub Suite Failed on a camunda-hub PR*"
+          fi
           # product ALSO pings hub-medic — it's their pipeline (this PR) that
           # a confirmed regression implicates, same "whoever owns the broken
           # thing" routing every AlwaysGreen variant we looked at uses. BUT
@@ -567,6 +766,26 @@ jobs:
               ;;
           esac
 
+          # #480: append regardless of category — a coverage gap is an
+          # independent fact about this run, not mutually exclusive with
+          # whatever caused the test failure above. Link the tracking issue
+          # only when both exist (ISSUE_URL is empty if there's no gap, or
+          # the tracker job's App token wasn't available this run).
+          if [ -n "$UNMAPPED" ]; then
+            # UNMAPPED ultimately comes from the camunda-hub PR's own
+            # (untrusted) OpenAPI operationIds — Slack mrkdwn interprets
+            # `<...>` as a link/mention (e.g. a crafted operationId like
+            # `<!subteam^...>` could trigger a real ping), so escape Slack's
+            # three special characters before interpolating it into this
+            # message. `&` first, so escaping `<`/`>` doesn't get re-escaped.
+            unmapped_slack_safe=$(printf '%s' "$UNMAPPED" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            verdict=$(printf '%s\n\n:warning: This run also has operation(s) with NO generated test at all: %s' \
+              "$verdict" "$unmapped_slack_safe")
+            if [ -n "$ISSUE_URL" ]; then
+              verdict=$(printf '%s\n:bookmark_tabs: Tracked at %s' "$verdict" "$ISSUE_URL")
+            fi
+          fi
+
           # Built via printf %s placeholders, not a literal multi-line
           # string — this run: block is YAML-indented, and a bash string
           # spanning literal source lines would bake that indentation into
@@ -593,8 +812,8 @@ jobs:
             source_line=$(printf 'camunda/camunda-hub @ %s (PR number unavailable)' "$sha_code")
           fi
 
-          text=$(printf ':red_circle: *Generated Hub Suite Failed on a camunda-hub PR*\n\n• Source: %s\n• Run: <%s|View failing tests>%s\n\n%s\n\n%s please take a look.' \
-            "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
+          text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s\n\n%s\n\n%s please take a look.' \
+            "$headline" "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
 
           # Random delimiter, not a fixed string like "SLACKMSG" — $SUMMARY is
           # agent-produced free text and must never be able to prematurely
