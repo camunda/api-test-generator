@@ -45,6 +45,17 @@ on:
           real regression apart from "the generator hasn't modelled this
           new/changed operation yet" — reads it from here instead.
         value: ${{ jobs.run.outputs.unmapped_operations }}
+      unmapped_checked:
+        description: >-
+          "true" if coverage.json was successfully read and parsed this run
+          (regardless of whether unmapped_operations came back empty or
+          not), "false" if that read/parse itself failed. An empty
+          unmapped_operations is ambiguous on its own — it means EITHER
+          "confirmed zero unmapped operations" OR "couldn't check at all" —
+          so a caller that treats empty as "gap cleared" (e.g.
+          hub-pr-check.yml's coverage-gap-tracker, auto-closing a tracking
+          issue) must check this first to avoid acting on unverified data.
+        value: ${{ jobs.run.outputs.unmapped_checked }}
       suites_conclusion:
         description: >-
           The generate+run step's own conclusion (success/failure/…),
@@ -103,6 +114,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       unmapped_operations: ${{ steps.unmapped.outputs.unmapped }}
+      unmapped_checked: ${{ steps.unmapped.outputs.unmapped_checked }}
       suites_conclusion: ${{ steps.suites.conclusion }}
     steps:
       - name: Checkout api-test-generator
@@ -252,22 +264,38 @@ jobs:
           # when coverage.json was missing/broken (e.g. an earlier crash). This
           # step's whole point is to be a trustworthy gate, so a read/parse
           # failure now fails loudly and distinctly instead.
+          # operationIds ultimately come from the camunda-hub PR's own
+          # (untrusted) OpenAPI spec — strip any embedded control character
+          # (newline/CR/tab) before joining, so a crafted operationId can't
+          # inject a literal newline into this single-line output (every
+          # downstream consumer — hub-pr-check.yml's commit-status
+          # description, Slack messages, the coverage-gap-tracker issue body
+          # — assumes this is one line).
           unmapped_script='
-          import json, sys
+          import json, re, sys
           try:
               with open("generated/camunda-hub/playwright/coverage.json") as f:
                   data = json.load(f)
           except Exception as e:
               print(f"ERROR: {e}", file=sys.stderr)
               sys.exit(2)
-          print(", ".join(data.get("summary", {}).get("unmappedOperations", [])))
+          ops = data.get("summary", {}).get("unmappedOperations", [])
+          clean = (re.sub(r"[\r\n\t]+", " ", str(op)).strip() for op in ops)
+          print(", ".join(clean))
           '
           if ! unmapped="$(python3 -c "$unmapped_script")"; then
             echo "::error::Could not read/parse generated/camunda-hub/playwright/coverage.json — treating this as a coverage-check failure rather than silently assuming there are no unmapped operations."
             echo "unmapped=" >> "$GITHUB_OUTPUT"
+            # Distinct from "confirmed zero unmapped operations" below — a
+            # caller (hub-pr-check.yml's coverage-gap-tracker) that sees an
+            # empty `unmapped` must be able to tell "verified clean" apart
+            # from "couldn't verify at all," so it doesn't e.g. auto-close a
+            # still-relevant tracking issue on unverified data.
+            echo "unmapped_checked=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
           echo "unmapped=${unmapped}" >> "$GITHUB_OUTPUT"
+          echo "unmapped_checked=true" >> "$GITHUB_OUTPUT"
           if [ -n "$unmapped" ]; then
             echo "::error::Coverage gap: operation(s) with no generated test at all: ${unmapped}. This is not a Playwright failure — the generator's ontology/scenario-templates don't model this operation yet (see AGENTS.md → \"Coverage has two axes\")."
             exit 1

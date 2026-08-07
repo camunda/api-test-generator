@@ -475,6 +475,13 @@ jobs:
           # `if:` already requires it non-empty.
           PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
           UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          # "true" only if coverage.json was actually read/parsed this run —
+          # an empty UNMAPPED is ambiguous on its own (see this output's own
+          # description in _hub-suite-run.yml): it means EITHER "confirmed
+          # zero unmapped operations" OR "the check itself crashed." Without
+          # this, a crashed run would auto-close a still-relevant tracking
+          # issue on unverified data.
+          UNMAPPED_CHECKED: ${{ needs.run.outputs.unmapped_checked }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -489,7 +496,17 @@ jobs:
             --jq "[.[] | select(.title == \"${title}\") | .number] | first // empty")
 
           if [ -z "$UNMAPPED" ]; then
-            # Gap cleared on this push — close a previously-open tracker.
+            if [ "$UNMAPPED_CHECKED" != "true" ]; then
+              # The coverage check itself didn't complete this run (a
+              # read/parse crash, or the suite step was skipped before
+              # generate ever ran) — leave any existing tracker untouched
+              # rather than risk auto-closing it on unverified data.
+              echo "::warning::Coverage check did not complete successfully this run — leaving any existing coverage-gap issue untouched (not auto-closing on unverified data)."
+              echo "issue_url=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Confirmed clean — gap cleared on this push, close a
+            # previously-open tracker.
             if [ -n "$existing" ]; then
               gh issue close "$existing" --repo "$repo" \
                 --comment "Coverage gap cleared as of the latest push to camunda-hub#${PR_NUMBER} (run: ${RUN_URL})." >/dev/null

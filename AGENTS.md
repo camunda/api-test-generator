@@ -533,9 +533,11 @@ added to branch protection's required checks.
 The **Hub PR check** ([hub-pr-check.yml](.github/workflows/hub-pr-check.yml), #462)
 is the mirror image, triggered *from* the other repo: a camunda-hub PR's own
 workflow sends a `repository_dispatch` (validated payload: `source_sha`,
-`pr_number`, `caller_run_url`) carrying its build's `pr-<sha>` image tag; this
-workflow runs the generated hub suite against that exact image and reports a
-commit status (`api-test-generator/hub-suite`) back onto the camunda-hub PR —
+`pr_number`, `caller_run_url`); this workflow derives the `pr-<source_sha>`
+image tag itself (never taken from the payload directly, so the image can't
+drift from the commit being reported on), runs the generated hub suite
+against that exact image, and reports a commit status
+(`api-test-generator/hub-suite`) back onto the camunda-hub PR —
 informational/non-required while reliability proves out, not a required
 check. A best-effort, **read-only** `classify` job (mints no write-capable
 token for either repo) runs a Claude agent to distinguish a real hub
