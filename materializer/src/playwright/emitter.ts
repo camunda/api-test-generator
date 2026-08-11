@@ -363,11 +363,15 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // role-only suite (every step role-matched) can still reference
   // authHeaders()/attachEvidenceOnFailure() in its final output if any used
   // role's template does this. Detected statically (template source
-  // contains the tag) since imports are decided before any step is
-  // rendered, so the actual rendered output isn't available yet.
+  // matches the actual Mustache interpolation tag) since imports are
+  // decided before any step is rendered, so the actual rendered output
+  // isn't available yet. Matches the tag specifically — not a bare
+  // substring — so a comment or unrelated prose mentioning "defaultRender"
+  // can't false-positive into unused (lint-failing) imports.
+  const DEFAULT_RENDER_TAG_RE = /\{\{\{?\s*defaultRender\s*\}?\}\}/;
   const anyRoleUsesDefaultRender = collection.scenarios.some((s) =>
     (s.requestPlan ?? []).some((step) =>
-      Boolean(findRoleForStep(step)?.bundle.callSiteTemplate.includes('defaultRender')),
+      Boolean(findRoleForStep(step)?.bundle.callSiteTemplate.match(DEFAULT_RENDER_TAG_RE)),
     ),
   );
   // authHeaders is used in inline request steps, awaitEventually witness

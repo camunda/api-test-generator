@@ -117,6 +117,31 @@ describe('emitter: evidence capture emission', () => {
     expect(file.content).toContain("import { attachEvidenceOnFailure } from './support/evidence';");
     expect(file.content).toContain('await attachEvidenceOnFailure(testInfo, resp1, {');
   });
+
+  test('a role whose call-site.tmpl only mentions "defaultRender" in a comment does NOT gain unused imports', async () => {
+    // A bare substring match on "defaultRender" would false-positive here —
+    // this role's own helper does everything itself and never actually
+    // interpolates the {{{defaultRender}}} tag, so the suite must not gain
+    // authHeaders/attachEvidenceOnFailure imports it never references
+    // (which would otherwise fail lint:generated's unused-import check).
+    // biome-ignore lint/plugin: minimal test fixture; LoadedRoleBundle has more fields than this test needs.
+    const roleBundle = {
+      role: 'ownHandlerRole',
+      roleName: 'ownHandlerRole',
+      dir: '/unused/roles/ownHandlerRole',
+      callSiteTemplatePath: '/unused/roles/ownHandlerRole/call-site.tmpl',
+      callSiteTemplate:
+        '{{! this role does not use defaultRender at all }}\nconst {{{respVar}}} = await myOwnHelper();',
+    } as unknown as import('../../materializer/src/playwright/roleRenderer.ts').LoadedRoleBundle;
+    const [file] = await PlaywrightEmitter.emit(COLLECTION_INLINE_STEP, {
+      ...ctxBase(),
+      getRoleForOperation: (opId: string) =>
+        opId === 'createWidget' ? 'ownHandlerRole' : undefined,
+      roleBundles: new Map([['ownHandlerRole', roleBundle]]),
+    });
+    expect(file.content).not.toContain('authHeaders');
+    expect(file.content).not.toContain('attachEvidenceOnFailure');
+  });
 });
 
 describe('attachEvidenceOnFailure runtime behavior', () => {
