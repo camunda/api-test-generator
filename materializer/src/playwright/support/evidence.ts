@@ -18,7 +18,13 @@ interface ApiResponseLike {
   headers(): Record<string, string>;
 }
 
-/** Context captured for a failing assertion so the attached evidence is self-explanatory. */
+/**
+ * Context captured for a failing assertion so the attached evidence is
+ * self-explanatory. `headers` are the actual request headers sent (e.g.
+ * `authHeaders()`'s `Authorization: Bearer <token>`) — never attached by
+ * value (see `attachEvidenceOnFailure`'s redaction), only by name, so a
+ * real credential can never end up in a Playwright report/artifact.
+ */
 export interface EvidenceContext {
   operationId: string;
   method: string;
@@ -84,13 +90,19 @@ export async function attachEvidenceOnFailure(
     // Response body may already be consumed; attach whatever was captured.
   }
 
+  // Attach header NAMES only, never values — `ctx.headers` carries the real
+  // Authorization bearer token sent to the server, and this artifact is
+  // embedded (base64) in the JSON reporter / HTML report, which can end up
+  // in uploaded CI artifacts. The negative suite's own request.json omits
+  // headers entirely for the same reason; naming (not valuing) them keeps
+  // the "was auth even sent" debugging signal without the leak.
   const requestArtifact = JSON.stringify(
     {
       operationId: ctx.operationId,
       method: ctx.method,
       url: ctx.url,
       expectedStatus: ctx.expectedStatus,
-      headers: ctx.headers,
+      headerNames: ctx.headers ? Object.keys(ctx.headers) : undefined,
       body: ctx.body,
     },
     null,
