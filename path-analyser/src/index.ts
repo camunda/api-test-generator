@@ -1763,23 +1763,26 @@ export function buildRequestBodyFromCanonical(
         );
       }
       const fileRef = regHit.ref;
-      // Bind jobType from the chosen fixture for later use in the request
-      // body (`activateJobs.type`, `completeJob`/`failJob`/`throwJobError`
-      // path params, etc.). After #164 the SOLE source is
-      // `providesValues.JobType[0]` (declared on the bpmnProcess fixture
-      // alongside ElementId). The legacy `parameters.jobType` field and
-      // its `??`-fallback reader are gone.
+      // Seed scenario bindings from the chosen fixture's providesValues.
+      // Each entry maps a semantic-type name (e.g. "JobType", "MessageName")
+      // to its concrete model-derived value(s); we select index-0 and bind
+      // as `<camelCase(type)>Var`. Generalises the former JobType-only block
+      // to cover MessageName, CorrelationKey, and any future modelDerived
+      // semantic whose value is baked into the fixture. See #305.
       //
       // The `jobType` → `type` mapping special-case elsewhere in
       // `buildRequestBodyFromCanonical` (pairing the semantically-named
       // `jobType` binding with the spec-named `type` field) is
       // intentionally left in place — that's a separate architectural
       // cleanup tracked by #162 PR 3 (unified dispatch).
-      const jobTypeValue = regHit?.providesValues?.JobType?.[0];
-      if (jobTypeValue !== undefined) {
-        const varName = 'jobTypeVar';
-        scenario.bindings ||= {};
-        if (!scenario.bindings[varName]) scenario.bindings[varName] = jobTypeValue;
+      if (regHit?.providesValues) {
+        for (const [semanticType, values] of Object.entries(regHit.providesValues)) {
+          if (values?.[0] !== undefined) {
+            const varName = `${camelCase(semanticType)}Var`;
+            scenario.bindings ||= {};
+            if (!scenario.bindings[varName]) scenario.bindings[varName] = values[0];
+          }
+        }
       }
       // #172: fulfill modelDerived variant placeholders from the chosen
       // deploy fixture. The variant generator installs a synthetic

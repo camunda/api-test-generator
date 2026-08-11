@@ -163,6 +163,7 @@
     {
       "operationId": "searchMessageSubscriptions",
       "requires": [
+        "ProcessInstanceExists",
         "ModelEmitsMessageSubscription"
       ]
     },
