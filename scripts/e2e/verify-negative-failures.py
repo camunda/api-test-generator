@@ -45,6 +45,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 # Same-directory import — curl_compare.py is a plain script, not a package,
 # but Python resolves this fine since both files live in scripts/e2e/. Reuses
@@ -121,6 +122,21 @@ def extract_context(result):
     return {"request": req, "response": resp}
 
 
+def rebase_url(original_url: str, base_url: str) -> str:
+    """Replace original_url's scheme+host with base_url's scheme+host,
+    keeping the captured path+query unchanged. buildUrl()'s own path
+    structure (/v2/...) is identical between the original nightly run and
+    this replay — same generator, same spec — but the ORIGINAL Hub is
+    already stopped by the time this runs, and this replay's freshly-
+    started Hub isn't guaranteed to land on the same host/port. Re-basing
+    only the host, never the path, is what lets --base-url actually matter
+    instead of silently trusting whatever host the original run happened to
+    use."""
+    new = urlsplit(base_url)
+    orig = urlsplit(original_url)
+    return urlunsplit((new.scheme, new.netloc, orig.path, orig.query, orig.fragment))
+
+
 AUTH_INVALID_HEADER = "Authorization: Bearer invalid-token"
 
 
@@ -195,10 +211,14 @@ def main():
         kind = req.get("scenarioKind", "?")
         key = f"{op}::{kind}::{f.get('title', '?')}"
         method = req.get("method")
-        url = req.get("url")
+        captured_url = req.get("url")
         expected = req.get("expectedStatus")
-        if not (method and url and expected is not None):
+        if not (method and captured_url and expected is not None):
             continue
+        # Re-host onto THIS run's fresh Hub — the nightly's own Hub (where
+        # captured_url's host/port came from) is already stopped, and this
+        # replay's Hub isn't guaranteed to share it.
+        url = rebase_url(captured_url, args.base_url)
 
         # This tool only re-verifies a STATUS-code contradiction. A body-
         # SHAPE-only failure (status already matched expected; the

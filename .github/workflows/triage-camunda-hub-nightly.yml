@@ -191,35 +191,14 @@ jobs:
             echo "has_negative_failures=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Same App + Vault wiring as the "Mint camunda-hub clone token" step
-      # below (for the agent's own workspace) — a separate token/clone
-      # because this one starts a real Hub Docker container from it, an
-      # entirely different purpose from the agent's read-only source clone.
-      # continue-on-error: a failure anywhere in this verification chain
+      # No camunda-hub clone needed here: HUB_MODE=prebuilt (the "Start Hub"
+      # step below) runs a published DOCKER IMAGE, not a source build —
+      # docker/start-hub.sh's own source-build path is the only one that
+      # touches the ../camunda-hub sibling (for `make`/a JDK/the local-bundle
+      # spec source), and that path is never taken here. continue-on-error
+      # on every step below: a failure anywhere in this verification chain
       # must degrade to "no verification data" (handled by the guidance doc
       # below), never fail the whole triage run.
-      - name: Mint camunda-hub clone token (live verification)
-        id: verify-hub-token
-        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
-        continue-on-error: true
-        uses: ./.github/actions/hub-clone-token
-        with:
-          vault-url: ${{ secrets.VAULT_ADDR }}
-          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
-          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
-          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
-
-      # main, unpinned — matches the nightly's own "clones camunda-hub@main
-      # unpinned" convention (this is re-verifying against CURRENT hub, not
-      # whatever SHA the nightly happened to test against hours ago).
-      - name: Clone camunda-hub main (sibling, for live verification)
-        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' && steps.verify-hub-token.outputs.token != '' }}
-        continue-on-error: true
-        uses: ./.github/actions/clone-hub-sibling
-        with:
-          token: ${{ steps.verify-hub-token.outputs.token }}
-          ref: main
-
       - name: Setup Python (for live verification)
         if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
         uses: actions/setup-python@v6
