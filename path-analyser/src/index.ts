@@ -1560,12 +1560,18 @@ export function buildRequestBodyFromCanonical(
             ),
           )
         : undefined;
+    const omitWhenUnboundFields = new Set(
+      (graph.domain?.globalContextSeeds ?? [])
+        .filter((s) => s.omitWhenUnbound)
+        .map((s) => s.fieldName),
+    );
     for (const f of nodes.filter(
       (n) => !n.required && !n.path.includes('[]') && !n.path.includes('.'),
     )) {
       const leaf = f.path.split('.').pop() ?? '';
       if (allowedFields && !allowedFields.has(leaf)) continue;
       if (variantLeafNames?.has(leaf)) continue;
+      if (omitWhenUnboundFields.has(leaf)) continue;
       const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
       if (!template[leaf]) {
         if (scenario.bindings?.[varBase]) {

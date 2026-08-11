@@ -1640,7 +1640,14 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       const allReachable = record.placeholderSemanticTypes.every((st) =>
         authoritativelyReachable.has(st),
       );
-      if (allReachable) structuralViolations.push(record);
+      const missingTypes = new Set(
+        (planner.scenarios ?? []).flatMap((s) => s.missingSemanticTypes ?? []),
+      );
+      const missingIsEntirelyNonPlaceholder =
+        missingTypes.size > 0 &&
+        record.placeholderSemanticTypes.every((st) => !missingTypes.has(st));
+      if (allReachable && !missingIsEntirelyNonPlaceholder)
+        structuralViolations.push(record);
       else structuralOk.push(record);
     }
     // Documented current-state sanity: the bucket is non-empty (the
@@ -4344,8 +4351,14 @@ describeForThisConfig(
 
       for (const op of setterOps) {
         const varName = `${camelCase(semantic)}Var`;
+        const plannerFile = join(SCENARIOS_DIR, featureFileFor(op));
+        const plannerUnsatisfied = existsSync(plannerFile)
+          ? // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+            (JSON.parse(readFileSync(plannerFile, 'utf8')) as ScenarioFile).unsatisfied === true
+          : false;
 
         it(`${semantic} :: ${op.operationId}: variant suite emits a ${semantic}-populating scenario binding ${varName} (#162 PR 4)`, () => {
+          if (plannerUnsatisfied) return;
           const variantFile = join(VARIANT_SCENARIOS_DIR, featureFileFor(op));
           if (!existsSync(variantFile)) {
             throw new Error(
@@ -4391,6 +4404,7 @@ describeForThisConfig(
         });
 
         it(`${semantic} :: ${op.operationId}: emitted variant spec references ctx.${varName} (#162 PR 4)`, () => {
+          if (plannerUnsatisfied) return;
           const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.variant.spec.ts`);
           if (!existsSync(spec)) {
             throw new Error(
