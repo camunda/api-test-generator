@@ -65,7 +65,11 @@ jobs:
   triage:
     name: Download reports → workspace → Claude triage → Slack
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30 -> 45: #482's live curl-replay verification adds a full Hub pull +
+    # boot (up to 10 min per wait-for-hub's own default timeout) on any
+    # night with negative-suite failures, on top of everything this job
+    # already does.
+    timeout-minutes: 45
     # workflow_run has no branch/origin filter by itself — it fires after ANY
     # completed run of a workflow with this name, including one dispatched
     # (nightly-camunda-hub.yml has workflow_dispatch: {}, unrestricted) against
@@ -153,6 +157,115 @@ jobs:
             echo "has_reports=false" >> "$GITHUB_OUTPUT"
             echo "::warning::No pw-*.json or pw-*.junit.xml reports found (download outcome: ${{ steps.download.outcome }}). Reporting as inconclusive."
           fi
+
+      # --- #482: live curl-replay verification of negative-suite failures ----
+      # Before the agent ever classifies a failure as a genuine product bug,
+      # give it one more piece of evidence: does the exact same request still
+      # get the same (wrong) response RIGHT NOW, against a fresh Hub — or has
+      # it since been fixed / was it flaky? Runs for EVERY negative-suite
+      # failure (not just eventual "looks like a product bug" candidates —
+      # nothing here knows which ones look like bugs yet, that's the agent's
+      # job), against ONE freshly-started Hub, so the live-Hub cost is
+      # bounded to once per night regardless of how many candidates appear.
+      #
+      # Positive-suite failures aren't covered — materializer/templates has
+      # no evidence-capture mechanism at all (unlike request-validation's
+      # request.json/response.json testInfo.attach()ments), so there is
+      # nothing to reconstruct a request from there yet. Tracked as a
+      # follow-up once that instrumentation exists.
+      - name: Check for negative-suite failures worth verifying
+        id: neg-failures
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        run: |
+          set -euo pipefail
+          count=0
+          for f in "${REPORTS_DIR}/pw-secured.json" "${REPORTS_DIR}/pw-rbac.json"; do
+            [ -f "$f" ] || continue
+            n=$(jq -r '.stats.unexpected // 0' "$f" 2>/dev/null || echo 0)
+            count=$((count + n))
+          done
+          echo "Negative-suite unexpected-result count: ${count}"
+          if [ "$count" -gt 0 ]; then
+            echo "has_negative_failures=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_negative_failures=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Same App + Vault wiring as the "Mint camunda-hub clone token" step
+      # below (for the agent's own workspace) — a separate token/clone
+      # because this one starts a real Hub Docker container from it, an
+      # entirely different purpose from the agent's read-only source clone.
+      # continue-on-error: a failure anywhere in this verification chain
+      # must degrade to "no verification data" (handled by the guidance doc
+      # below), never fail the whole triage run.
+      - name: Mint camunda-hub clone token (live verification)
+        id: verify-hub-token
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        continue-on-error: true
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      # main, unpinned — matches the nightly's own "clones camunda-hub@main
+      # unpinned" convention (this is re-verifying against CURRENT hub, not
+      # whatever SHA the nightly happened to test against hours ago).
+      - name: Clone camunda-hub main (sibling, for live verification)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' && steps.verify-hub-token.outputs.token != '' }}
+        continue-on-error: true
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.verify-hub-token.outputs.token }}
+          ref: main
+
+      - name: Setup Python (for live verification)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      # Public image, no registry login needed (unlike hub-pr-check.yml's
+      # private pr-<sha> image) — same defaults hub-ondemand-test.yml uses.
+      - name: Start Hub (prebuilt image, for live verification)
+        id: verify-hub-start
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        continue-on-error: true
+        env:
+          HUB_MODE: prebuilt
+          HUB_IMAGE: camunda/hub:SNAPSHOT
+        run: ./docker/start-hub.sh start
+
+      - name: Wait for Hub to be ready (live verification)
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' && steps.verify-hub-start.outcome == 'success' }}
+        continue-on-error: true
+        uses: ./.github/actions/wait-for-hub
+        with:
+          url: http://localhost:8088/api/v2/
+
+      - name: Run curl-replay verification
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.neg-failures.outputs.has_negative_failures == 'true' }}
+        continue-on-error: true
+        run: |
+          python3 scripts/e2e/verify-negative-failures.py \
+            --reports-dir "${REPORTS_DIR}" \
+            --base-url http://localhost:8088/api \
+            --kc-url http://localhost:18080/auth/realms/camunda-platform/protocol/openid-connect/token \
+            --out "${GITHUB_WORKSPACE}/curl-verification.json"
+
+      # Runs regardless of which prior step failed/was skipped — the agent's
+      # guidance treats a missing/empty file as "verification unavailable,"
+      # so this just guarantees the path always exists to read.
+      - name: Ensure curl-verification.json exists
+        if: always()
+        run: |
+          f="${GITHUB_WORKSPACE}/curl-verification.json"
+          [ -s "$f" ] || echo '{}' > "$f"
+
+      - name: Stop Hub (live verification)
+        if: ${{ always() && steps.verify-hub-start.outcome == 'success' }}
+        run: ./docker/start-hub.sh stop || true
 
       # --- Secrets from Vault (GitHub OIDC/JWT) -------------------------------
       # Anthropic key + a GitHub PAT, from the SAME Vault KV path this repo's
@@ -509,6 +622,13 @@ jobs:
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           OPEN_FIX_PRS_FILE: ${{ github.workspace }}/open-fix-prs.json
+          # #482 — always exists (the "Ensure curl-verification.json exists"
+          # step above guarantees it), but may be "{}" if there were no
+          # negative-suite failures, the Hub never came up, or the script
+          # itself errored. Treat a missing key the same as an empty file:
+          # verification unavailable for that test, fall back to
+          # single-observation judgment (see the guidance's own section).
+          CURL_VERIFICATION_FILE: ${{ github.workspace }}/curl-verification.json
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
           # Two separately-scoped tokens — see "Configure git credentials" above
           # and the guidance's Role section for which one is valid where.
@@ -541,9 +661,12 @@ jobs:
 
           Inputs:
           - The downloaded nightly reports are at: ${REPORTS_DIR}
-            (pw-positive.{json,junit.xml}, pw-secured.*, pw-rbac.*, pw-*/index.html HTML reports with
-            traces/screenshots for failing tests, and coverage.json — check its
-            summary.unmappedOperations EVERY run, independent of suite pass/fail, per the guidance).
+            (pw-positive.{json,junit.xml}, pw-secured.*, pw-rbac.*, pw-*/index.html HTML reports, and
+            coverage.json — check its summary.unmappedOperations EVERY run, independent of suite
+            pass/fail, per the guidance). NOTE: there is no Playwright trace (trace capture is off in
+            both suite configs) — the request/response evidence for a negative-suite failure is its
+            request.json/response.json attachment; a positive-suite failure has no such attachment,
+            recover what you can from the HTML report's own error message instead.
           - OpenAPI spec: ${ws_dir}/camunda-hub/restapi/public-api/src/main/resources/openapi/v2/*.yaml
           - Suite configs (known issues): ${ws_dir}/api-test-generator/configs/camunda-hub/positive-suppress.json
             and request-validation.json
@@ -553,6 +676,17 @@ jobs:
             anywhere in one of these diffs (a substring match, e.g. as a JSON key in
             positive-suppress.json or a comment); if so, that operation is already being
             fixed elsewhere.
+          - Live curl-replay verification results (#482), negative-suite failures only, may be "{}"
+            (no negative-suite failures, or verification itself was unavailable that night):
+            ${CURL_VERIFICATION_FILE} — keyed by "<operationId>::<scenarioKind>::<test title>", each
+            entry \`{ confirmed: true|false|null, curlStatus, expectedStatus, curlBody, error }\`.
+            confirmed:true means the exact same request STILL gets the wrong response right now
+            against a fresh Hub; confirmed:false means it no longer reproduces (treat as unconfirmed/
+            flaky, per the guidance's "when in doubt, report-only" rule — do not file); confirmed:null
+            means it could not be checked (see its error field — e.g. a body-shape-only failure this
+            tool doesn't re-verify, or no deny token available) — fall back to your own single-
+            observation judgment as before. See the guidance's "Filing a product-bug issue" section
+            for exactly where this plugs in.
           - NOTE: the generated *.spec.ts files are gitignored and NOT present here — recover what
             each test asserted from the report's request/response attachment + assertion error, not
             from source.
@@ -561,7 +695,8 @@ jobs:
           1. Parse both suites' JSON/JUnit and enumerate every failing test (positive + negative).
           2. Check coverage.json's summary.unmappedOperations regardless of suite results — these
              never show up as failing tests, so they're easy to miss on an all-green night.
-          3. For each test failure: read its trace/screenshot/response in the HTML report to see the
+          3. For each test failure: read its request/response attachment (negative suite) or the HTML
+             report's own error message (positive suite — no attachment exists there) to see the
              actual request+response+assertion, then resolve the operation in the OpenAPI v2 spec.
           4. Classify each as product / infrastructure / flakiness with evidence. A "product" bug
              REQUIRES the response to CONTRADICT the spec (mind the 400→404→403 precedence quirk
@@ -571,7 +706,19 @@ jobs:
           5. Reconcile against the knownIssue entries before calling anything a NEW bug.
           6. For each PRODUCT bug (response contradicts spec) that is NOT already-known: search recent
              camunda-hub main commits for a related change. If a related commit explains it → action
-             "skip" (record the commit). If not → compute the fingerprint, dedup by the
+             "skip" (record the commit). If not, and this is a NEGATIVE-suite failure, look up its
+             entry in ${CURL_VERIFICATION_FILE} (#482) BEFORE filing — key
+             "<operationId>::<scenarioKind>::<test title>":
+               - confirmed:true → proceed to file, and include the curl exchange (status + body) from
+                 curlStatus/curlBody as extra evidence in the issue body.
+               - confirmed:false → do NOT file. It no longer reproduces against a fresh Hub right now —
+                 treat as unconfirmed/flaky (category unchanged, action "report-only", note in your
+                 reasoning that a live re-check no longer reproduced it).
+               - confirmed:null, or no entry at all (positive-suite failure, or verification was
+                 unavailable that night) → fall back to filing on your own single-observation judgment
+                 as before, and say so explicitly in the issue/summary (so it's visible that live
+                 re-verification was attempted but inconclusive, not silently skipped).
+             Once past that check: compute the fingerprint, dedup by the
              \`nightly-api-triage fp=<fp>\` marker (then by symptom), and either link the existing issue
              or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
              (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
