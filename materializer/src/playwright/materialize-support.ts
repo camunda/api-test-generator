@@ -18,8 +18,8 @@
 //                          and the legacy `emitPlaywrightSuite` entrypoint
 //                          share the same template-discovery logic.
 //   * support/ — runtime helpers (env.ts, recorder.ts, seeding.ts,
-//                fixtures.ts, seed-rules.json, await-eventually.ts).
-//                Sources:
+//                fixtures.ts, seed-rules.json, await-eventually.ts,
+//                evidence.ts). Sources:
 //                materializer/src/playwright/support/, staged into
 //                dist/src/playwright/support-templates/ at
 //                build time.
@@ -49,6 +49,7 @@ export const SUPPORT_TEMPLATE_FILES = [
   'fixtures.ts',
   'seed-rules.json',
   'await-eventually.ts',
+  'evidence.ts',
 ] as const;
 
 /** Files copied directly into <outDir>/ (project root scaffolding). */
@@ -105,7 +106,7 @@ function defaultProjectTemplatesDir(): string {
 /**
  * Copy the runtime support templates into `<outDir>/support/` so the emitted
  * Playwright suite has the helper modules it imports (env.ts, recorder.ts,
- * seeding.ts, fixtures.ts, seed-rules.json, await-eventually.ts).
+ * seeding.ts, fixtures.ts, seed-rules.json, await-eventually.ts, evidence.ts).
  *
  * Idempotent: safe to call multiple times per emit run. Project-root
  * scaffolding (package.json, playwright.config.ts, tsconfig.json,

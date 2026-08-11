@@ -404,6 +404,12 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   if (needsAwaitEventually) {
     lines.push("import { awaitEventually } from './support/await-eventually';");
   }
+  // attachEvidenceOnFailure is emitted by renderInlineStepLines/renderEventualWait
+  // (inline request steps, witness waits) and the validateResponse try/catch
+  // wrap below — import whenever any of those code paths are present.
+  if (hasInlineRequestStep || needsAwaitEventually || needsValidation) {
+    lines.push("import { attachEvidenceOnFailure } from './support/evidence';");
+  }
   lines.push('');
   lines.push(`initSpecSalt(${JSON.stringify(suiteName)});`);
   if (needsValidation) {
@@ -443,7 +449,7 @@ function renderScenarioTest(
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
-  body.push(`test('${title}', async ({ request }) => {`);
+  body.push(`test('${title}', async ({ request }, testInfo) => {`);
   if (s.description) {
     const desc = String(s.description).trim();
     // Wrap long description lines at ~100 chars for readability
@@ -633,9 +639,22 @@ function renderScenarioTest(
       // double-quoted (no mixed single/double quotes) and any special characters
       // in the path template are correctly escaped.
       const routeSpec = `{ path: ${JSON.stringify(step.pathTemplate)}, method: ${JSON.stringify(step.method.toUpperCase())}, status: ${JSON.stringify(String(step.expect.status))} }`;
+      // Wrapped so a shape-validation failure still attaches request/response
+      // evidence before re-throwing — validateResponse itself only throws a
+      // bare Error (no structured payload), so evidence must come from
+      // `${varName}` directly. Uses `.url()` rather than a hoisted `url`
+      // const since this runs for role-bound steps too, which don't
+      // necessarily declare one.
+      body.push(`    try {`);
       body.push(
-        `    await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
+        `      await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );
+      body.push(`    } catch (e) {`);
+      body.push(
+        `      await attachEvidenceOnFailure(testInfo, ${varName}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.method.toUpperCase())}, url: ${varName}.url(), expectedStatus: ${step.expect.status} }, String(e));`,
+      );
+      body.push(`      throw e;`);
+      body.push(`    }`);
     }
     // Extraction. `extractInto` is the vendored helper from support/seeding.ts;
     // it skips the assignment when the value is `undefined` so seeded bindings
