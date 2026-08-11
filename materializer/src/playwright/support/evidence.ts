@@ -128,11 +128,14 @@ export async function attachEvidenceOnFailure(
   // attachments, so each KB here costs ~1.33 KB on disk.
   const cappedBodyText = capString(bodyText, MAX_ATTACHMENT_BODY_BYTES);
   const parsedBody = parseJsonBody(cappedBodyText.value);
+  // Same redaction as the request side, and for the same reason: a gateway
+  // response can carry a credential-bearing header (e.g. Set-Cookie), which
+  // would otherwise be embedded by value in this artifact.
   const responseArtifact = JSON.stringify(
     {
       status: actual,
       statusText: res.statusText(),
-      headers: res.headers(),
+      headerNames: Object.keys(res.headers()),
       body: parsedBody.parsed ? parsedBody.value : cappedBodyText.value,
       bodyTruncated: cappedBodyText.truncated || undefined,
       bodyOriginalBytes: cappedBodyText.truncated ? cappedBodyText.originalBytes : undefined,

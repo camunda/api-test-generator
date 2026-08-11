@@ -92,6 +92,31 @@ describe('emitter: evidence capture emission', () => {
     // the role-bound-only `{ url: resp.url() }` minimal shape.
     expect(file.content).toContain('String(e)');
   });
+
+  test('a role-only suite whose call-site.tmpl uses the {{{defaultRender}}} wrap pattern still imports authHeaders/attachEvidenceOnFailure', async () => {
+    // Every step in this collection matches the role, so the old
+    // `hasInlineRequestStep` (true only when at least one step has NO role
+    // match) would be false here — yet the role's own template splices in
+    // the default inline render, which calls both authHeaders() and
+    // attachEvidenceOnFailure(). Without accounting for the wrap pattern,
+    // this would emit a reference to both without importing either.
+    // biome-ignore lint/plugin: minimal test fixture; LoadedRoleBundle has more fields than this wrap-pattern test needs.
+    const roleBundle = {
+      role: 'wrapRole',
+      roleName: 'wrapRole',
+      dir: '/unused/roles/wrapRole',
+      callSiteTemplatePath: '/unused/roles/wrapRole/call-site.tmpl',
+      callSiteTemplate: '{{{defaultRender}}}',
+    } as unknown as import('../../materializer/src/playwright/roleRenderer.ts').LoadedRoleBundle;
+    const [file] = await PlaywrightEmitter.emit(COLLECTION_INLINE_STEP, {
+      ...ctxBase(),
+      getRoleForOperation: (opId: string) => (opId === 'createWidget' ? 'wrapRole' : undefined),
+      roleBundles: new Map([['wrapRole', roleBundle]]),
+    });
+    expect(file.content).toContain("import { buildBaseUrl, authHeaders } from './support/env';");
+    expect(file.content).toContain("import { attachEvidenceOnFailure } from './support/evidence';");
+    expect(file.content).toContain('await attachEvidenceOnFailure(testInfo, resp1, {');
+  });
 });
 
 describe('attachEvidenceOnFailure runtime behavior', () => {
@@ -170,7 +195,7 @@ describe('attachEvidenceOnFailure runtime behavior', () => {
     expect(resp.shapeError).toContain('shape mismatched');
   });
 
-  test('never attaches header values, only header names', async () => {
+  test('never attaches REQUEST header values, only header names', async () => {
     const { testInfo, attached } = makeTestInfo();
     await attachEvidenceOnFailure(testInfo, makeRes({ status: 500 }), {
       operationId: 'op',
@@ -187,6 +212,19 @@ describe('attachEvidenceOnFailure runtime behavior', () => {
     expect(wholeArtifact).not.toContain('marker-secret-cookie');
     const req = JSON.parse(attached[0].body);
     expect(req.headerNames).toEqual(['Authorization', 'Cookie']);
+  });
+
+  test('never attaches RESPONSE header values, only header names (e.g. Set-Cookie)', async () => {
+    const { testInfo, attached } = makeTestInfo();
+    await attachEvidenceOnFailure(
+      testInfo,
+      makeRes({ status: 500, headers: { 'set-cookie': 'session=marker-secret-response-cookie' } }),
+      { operationId: 'op', method: 'GET', url: 'http://x', expectedStatus: 200 },
+    );
+    const wholeArtifact = attached.map((a) => a.body).join('\n');
+    expect(wholeArtifact).not.toContain('marker-secret-response-cookie');
+    const resp = JSON.parse(attached[1].body);
+    expect(resp.headerNames).toEqual(['set-cookie']);
   });
 
   test('preserves a literal JSON null response body (not the string "null")', async () => {

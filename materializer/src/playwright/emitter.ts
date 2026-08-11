@@ -357,12 +357,26 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
       (step) => step.bodyKind === 'multipart' && !!step.multipartTemplate && !findRoleForStep(step),
     ),
   );
-  // authHeaders is used in inline request steps and awaitEventually witness
-  // blocks. Role helpers call authHeaders internally, so role-only suites
-  // don't need this import.
-  const hasInlineRequestStep = collection.scenarios.some((s) =>
-    (s.requestPlan ?? []).some((step) => !findRoleForStep(step)),
+  // A role's call-site.tmpl MAY interpolate {{{defaultRender}}} (the "wrap
+  // pattern" from ROLES.md) to splice in the exact same inline code
+  // renderInlineStepLines would have produced for a non-role step — so a
+  // role-only suite (every step role-matched) can still reference
+  // authHeaders()/attachEvidenceOnFailure() in its final output if any used
+  // role's template does this. Detected statically (template source
+  // contains the tag) since imports are decided before any step is
+  // rendered, so the actual rendered output isn't available yet.
+  const anyRoleUsesDefaultRender = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some((step) =>
+      Boolean(findRoleForStep(step)?.bundle.callSiteTemplate.includes('defaultRender')),
+    ),
   );
+  // authHeaders is used in inline request steps, awaitEventually witness
+  // blocks, and any wrap-pattern role's defaultRender. Role helpers that
+  // don't use the wrap pattern call authHeaders internally, so a role-only
+  // suite with no wrap-pattern role doesn't need this import.
+  const hasInlineRequestStep =
+    anyRoleUsesDefaultRender ||
+    collection.scenarios.some((s) => (s.requestPlan ?? []).some((step) => !findRoleForStep(step)));
   if (hasInlineRequestStep || needsAwaitEventually) {
     lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   } else {
