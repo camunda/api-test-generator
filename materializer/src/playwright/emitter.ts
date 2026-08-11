@@ -642,16 +642,37 @@ function renderScenarioTest(
       // Wrapped so a shape-validation failure still attaches request/response
       // evidence before re-throwing — validateResponse itself only throws a
       // bare Error (no structured payload), so evidence must come from
-      // `${varName}` directly. Uses `.url()` rather than a hoisted `url`
-      // const since this runs for role-bound steps too, which don't
-      // necessarily declare one.
+      // `${varName}` directly. Role-bound steps don't declare a `url`/
+      // `headers`/body local (the role helper owns those internally), so
+      // fall back to `.url()` and omit headers/body only in that case; for
+      // inline steps the locals `renderInlineStepLines` already declared in
+      // this same test.step scope are reused for full evidence.
+      const bodyVar = `body${idx + 1}`;
+      const hasBodyVar =
+        (step.bodyKind === 'json' && step.bodyTemplate) ||
+        (step.bodyKind === 'multipart' && step.multipartTemplate);
+      const evidenceCtxFields = roleMatch
+        ? [
+            `operationId: ${JSON.stringify(step.operationId)}`,
+            `method: ${JSON.stringify(step.method.toUpperCase())}`,
+            `url: ${varName}.url()`,
+            `expectedStatus: ${step.expect.status}`,
+          ]
+        : [
+            `operationId: ${JSON.stringify(step.operationId)}`,
+            `method: ${JSON.stringify(step.method.toUpperCase())}`,
+            'url',
+            'headers',
+            `body: ${hasBodyVar ? bodyVar : 'undefined'}`,
+            `expectedStatus: ${step.expect.status}`,
+          ];
       body.push(`    try {`);
       body.push(
         `      await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );
       body.push(`    } catch (e) {`);
       body.push(
-        `      await attachEvidenceOnFailure(testInfo, ${varName}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.method.toUpperCase())}, url: ${varName}.url(), expectedStatus: ${step.expect.status} }, String(e));`,
+        `      await attachEvidenceOnFailure(testInfo, ${varName}, { ${evidenceCtxFields.join(', ')} }, String(e));`,
       );
       body.push(`      throw e;`);
       body.push(`    }`);

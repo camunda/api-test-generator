@@ -208,7 +208,10 @@ export function renderInlineStepLines({
   lines.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
   lines.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
   lines.push(`    }`);
-  const evidenceBody = step.bodyKind === 'json' && step.bodyTemplate ? bodyVar : 'undefined';
+  const hasBodyVar =
+    (step.bodyKind === 'json' && step.bodyTemplate) ||
+    (step.bodyKind === 'multipart' && step.multipartTemplate);
+  const evidenceBody = hasBodyVar ? bodyVar : 'undefined';
   lines.push(
     `    await attachEvidenceOnFailure(testInfo, ${varName}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.method.toUpperCase())}, url, headers, body: ${evidenceBody}, expectedStatus: ${step.expect.status} });`,
   );
