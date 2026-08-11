@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { attachEvidenceOnFailure } from '../../materializer/src/playwright/support/evidence.ts';
 import { PlaywrightEmitter } from '../../materializer/src/playwright/emitter.ts';
+import { attachEvidenceOnFailure } from '../../materializer/src/playwright/support/evidence.ts';
 import type { EndpointScenarioCollection } from '../../path-analyser/src/types.ts';
 
 // Class-scoped guard (#527/#528): evidence capture is cross-cutting codegen
@@ -16,6 +16,7 @@ function ctxBase() {
     mode: 'feature' as const,
     configName: 'test',
     resolveConfigPath: (rel: string) => `/unused/${rel}`,
+    emitterConfig: {},
   };
 }
 
@@ -94,7 +95,14 @@ describe('emitter: evidence capture emission', () => {
 });
 
 describe('attachEvidenceOnFailure runtime behavior', () => {
-  function makeRes(overrides: Partial<{ status: number; statusText: string; text: string; headers: Record<string, string> }>) {
+  function makeRes(
+    overrides: Partial<{
+      status: number;
+      statusText: string;
+      text: string;
+      headers: Record<string, string>;
+    }>,
+  ) {
     const status = overrides.status ?? 200;
     const statusText = overrides.statusText ?? 'OK';
     const text = overrides.text ?? '';
@@ -109,10 +117,13 @@ describe('attachEvidenceOnFailure runtime behavior', () => {
 
   function makeTestInfo() {
     const attached: { name: string; body: string }[] = [];
-    return {
-      testInfo: { attach: async (name: string, opts: { body: string }) => { attached.push({ name, body: opts.body }); } },
-      attached,
-    };
+    // biome-ignore lint/plugin: minimal test fake for Playwright's TestInfo; only attach() (which attachEvidenceOnFailure calls) is implemented.
+    const testInfo = {
+      attach: async (name: string, opts: { body: string }) => {
+        attached.push({ name, body: opts.body });
+      },
+    } as unknown as import('@playwright/test').TestInfo;
+    return { testInfo, attached };
   }
 
   test('does not attach anything when the status matches and there is no shapeError', async () => {
@@ -164,7 +175,10 @@ describe('attachEvidenceOnFailure runtime behavior', () => {
       operationId: 'op',
       method: 'POST',
       url: 'http://x',
-      headers: { Authorization: 'Bearer marker-secret-value', Cookie: 'session=marker-secret-cookie' },
+      headers: {
+        Authorization: 'Bearer marker-secret-value',
+        Cookie: 'session=marker-secret-cookie',
+      },
       expectedStatus: 200,
     });
     const wholeArtifact = attached.map((a) => a.body).join('\n');
