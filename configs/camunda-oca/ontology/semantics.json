@@ -113,8 +113,20 @@
     },
     {
       "name": "MessageSubscriptionKey",
-      "kind": "serverEmergent",
-      "$comment": "Server-minted lifecycle key for a message subscription. Subscriptions emerge when a deployed process reaches a message catch event \u2014 no direct create API. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
+      "kind": "runtimeEmission",
+      "emittedBy": {
+        "predecessor": "ProcessInstanceExists",
+        "guardedBy": [
+          "ModelEmitsMessageSubscription"
+        ]
+      },
+      "discoveredVia": {
+        "operationId": "searchMessageSubscriptions",
+        "filterBy": "processInstanceKey",
+        "extractKey": "messageSubscriptionKey",
+        "consistency": "eventual"
+      },
+      "$comment": "Server-minted lifecycle key for a message subscription. Emitted after a deployment whose BPMN contains an intermediate message catch event (ModelEmitsMessageSubscription) reaches that element during a process instance run. Discovered via searchMessageSubscriptions filtered by processInstanceKey; eventually consistent (await-eventually). Promoted from serverEmergent per #305."
     },
     {
       "name": "IncidentKey",
@@ -200,6 +212,16 @@
     {
       "name": "ModelHasCancellationBlocker",
       "parameter": "cancellationBlockerJobType",
+      "producedBy": [
+        "createDeployment"
+      ],
+      "dependsOn": [
+        "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "name": "ModelEmitsMessageSubscription",
+      "parameter": "messageSubscriptionElementId",
       "producedBy": [
         "createDeployment"
       ],

@@ -62,6 +62,32 @@
       ]
     },
     {
+      "kind": "bpmnProcess",
+      "path": "bpmn/service-message-catch.bpmn",
+      "description": "BPMN process with a service task (zeebe:taskDefinition type sampleJobWithMessage) and a boundary message catch event. Provides both ModelHasServiceTaskType and ModelEmitsMessageSubscription. Selected for chains that require both job activation and message subscription data (e.g. activateJobs + searchMessageSubscriptions). See #305.",
+      "providesStates": ["ModelHasServiceTaskType", "ModelEmitsMessageSubscription"],
+      "providesValues": {
+        "JobType": ["sampleJobWithMessage"]
+      },
+      "providesElements": [
+        { "id": "StartEvent_1", "type": "startEvent" },
+        { "id": "Activity_04lr7k1", "type": "serviceTask" },
+        { "id": "Event_1aoilzw", "type": "boundaryEvent" },
+        { "id": "Event_0jglhm1", "type": "endEvent" }
+      ]
+    },
+    {
+      "kind": "bpmnProcess",
+      "path": "bpmn/message-catch-event.bpmn",
+      "description": "BPMN process with an intermediate message catch event referencing a named message (Message_1j9t80c). When a process instance is created, the token reaches the catch event and the engine creates a message subscription deterministically (the instance blocks waiting for the message). Selected for chains whose consumer ops require ModelEmitsMessageSubscription (e.g. searchMessageSubscriptions discovered via processInstanceKey). See #305.",
+      "providesStates": ["ModelEmitsMessageSubscription"],
+      "providesElements": [
+        { "id": "StartEvent_1", "type": "startEvent" },
+        { "id": "CatchEvent_1", "type": "intermediateCatchEvent" },
+        { "id": "EndEvent_1", "type": "endEvent" }
+      ]
+    },
+    {
       "kind": "form",
       "path": "forms/simple.form",
       "description": "Minimal Camunda form JSON"

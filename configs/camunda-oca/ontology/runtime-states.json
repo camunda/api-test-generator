@@ -148,6 +148,12 @@
       "requires": [
         "ProcessDefinitionDeployed"
       ]
+    },
+    {
+      "operationId": "searchMessageSubscriptions",
+      "requires": [
+        "ModelEmitsMessageSubscription"
+      ]
     }
   ]
 }
