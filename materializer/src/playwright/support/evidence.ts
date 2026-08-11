@@ -53,12 +53,16 @@ function capString(
   return { value: buf.toString('utf8'), truncated: true, originalBytes };
 }
 
-function tryParseJson(s: string): unknown | undefined {
-  if (!s) return undefined;
+// Returns a `parsed` flag alongside the value — a bare `unknown | undefined`
+// return couldn't distinguish "successfully parsed to the literal JSON value
+// `null`" from "failed to parse", so a caller using `?? fallback` would wrongly
+// discard a genuine `null` body and substitute the fallback instead.
+function parseJsonBody(s: string): { parsed: boolean; value: unknown } {
+  if (!s) return { parsed: false, value: undefined };
   try {
-    return JSON.parse(s);
+    return { parsed: true, value: JSON.parse(s) };
   } catch {
-    return undefined;
+    return { parsed: false, value: undefined };
   }
 }
 
@@ -112,12 +116,13 @@ export async function attachEvidenceOnFailure(
   // test-results.json / the HTML report. The JSON reporter base64-encodes
   // attachments, so each KB here costs ~1.33 KB on disk.
   const cappedBodyText = capString(bodyText, MAX_ATTACHMENT_BODY_BYTES);
+  const parsedBody = parseJsonBody(cappedBodyText.value);
   const responseArtifact = JSON.stringify(
     {
       status: actual,
       statusText: res.statusText(),
       headers: res.headers(),
-      body: tryParseJson(cappedBodyText.value) ?? cappedBodyText.value,
+      body: parsedBody.parsed ? parsedBody.value : cappedBodyText.value,
       bodyTruncated: cappedBodyText.truncated || undefined,
       bodyOriginalBytes: cappedBodyText.truncated ? cappedBodyText.originalBytes : undefined,
       shapeError,
