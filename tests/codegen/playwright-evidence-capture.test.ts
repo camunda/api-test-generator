@@ -117,12 +117,13 @@ describe('attachEvidenceOnFailure runtime behavior', () => {
 
   function makeTestInfo() {
     const attached: { name: string; body: string }[] = [];
-    // biome-ignore lint/plugin: minimal test fake for Playwright's TestInfo; only attach() (which attachEvidenceOnFailure calls) is implemented.
+    // attachEvidenceOnFailure's testInfo param is the minimal
+    // AttachableTestInfo (only attach()), so no cast is needed here.
     const testInfo = {
       attach: async (name: string, opts: { body: string }) => {
         attached.push({ name, body: opts.body });
       },
-    } as unknown as import('@playwright/test').TestInfo;
+    };
     return { testInfo, attached };
   }
 

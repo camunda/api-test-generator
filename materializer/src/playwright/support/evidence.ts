@@ -1,6 +1,17 @@
 import type { TestInfo } from '@playwright/test';
 
 /**
+ * Structural subset of Playwright's `TestInfo` — only `attach()` is used
+ * here, so that's all this accepts. Matches the same minimal-surface
+ * principle as `ApiResponseLike` below: a test fake only needs to implement
+ * `attach()`, not TestInfo's other ~30 members, and it can do so without an
+ * `as unknown as TestInfo` cast.
+ */
+interface AttachableTestInfo {
+  attach: TestInfo['attach'];
+}
+
+/**
  * Structural subset of Playwright's `APIResponse` — deliberately not
  * imported from '@playwright/test'. Role helpers (e.g.
  * support/deploymentGateway.ts's `deploy()`) return their own
@@ -78,7 +89,7 @@ function parseJsonBody(s: string): { parsed: boolean; value: unknown } {
  * assertions.
  */
 export async function attachEvidenceOnFailure(
-  testInfo: TestInfo,
+  testInfo: AttachableTestInfo,
   res: ApiResponseLike,
   ctx: EvidenceContext,
   shapeError?: string,
