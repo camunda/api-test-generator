@@ -85,6 +85,16 @@
       "$comment": "zeebe:taskDefinition type is encoded in the BPMN model on each service-task element. Read out-of-band from the chosen fixture's providesValues. Subsumes the pre-#162 ad-hoc `parameters.jobType` handling in the registry."
     },
     {
+      "name": "MessageName",
+      "kind": "modelDerived",
+      "$comment": "The bpmn:message/@name value from the deployed BPMN model. Used by correlateMessage and publishMessage to target the correct message subscription. Resolved from the fixture's providesValues.MessageName at plan time. See #305."
+    },
+    {
+      "name": "CorrelationKey",
+      "kind": "modelDerived",
+      "$comment": "The zeebe:subscription/@correlationKey result from the deployed BPMN model. Used by correlateMessage to match the correct message subscription. Resolved from the fixture's providesValues.CorrelationKey at plan time. See #305."
+    },
+    {
       "name": "Tag",
       "kind": "attribute",
       "clientMinted": true,

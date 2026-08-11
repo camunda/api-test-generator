@@ -67,7 +67,9 @@
       "description": "BPMN process with a service task (zeebe:taskDefinition type sampleJobWithMessage) and a boundary message catch event. Provides both ModelHasServiceTaskType and ModelEmitsMessageSubscription. Selected for chains that require both job activation and message subscription data (e.g. activateJobs + searchMessageSubscriptions). See #305.",
       "providesStates": ["ModelHasServiceTaskType", "ModelEmitsMessageSubscription"],
       "providesValues": {
-        "JobType": ["sampleJobWithMessage"]
+        "JobType": ["sampleJobWithMessage"],
+        "MessageName": ["Message_2jcp7c1"],
+        "CorrelationKey": ["45646"]
       },
       "providesElements": [
         { "id": "StartEvent_1", "type": "startEvent" },
@@ -81,6 +83,10 @@
       "path": "bpmn/message-catch-event.bpmn",
       "description": "BPMN process with an intermediate message catch event referencing a named message (Message_1j9t80c). When a process instance is created, the token reaches the catch event and the engine creates a message subscription deterministically (the instance blocks waiting for the message). Selected for chains whose consumer ops require ModelEmitsMessageSubscription (e.g. searchMessageSubscriptions discovered via processInstanceKey). See #305.",
       "providesStates": ["ModelEmitsMessageSubscription"],
+      "providesValues": {
+        "MessageName": ["Message_1j9t80c"],
+        "CorrelationKey": ["12312"]
+      },
       "providesElements": [
         { "id": "StartEvent_1", "type": "startEvent" },
         { "id": "CatchEvent_1", "type": "intermediateCatchEvent" },
