@@ -592,7 +592,10 @@ The **nightly triage agent**
 ([triage-camunda-hub-nightly.yml](.github/workflows/triage-camunda-hub-nightly.yml))
 is the nightly's downstream companion: a `workflow_run` job that fires when the
 nightly completes, downloads its `camunda-hub-nightly-reports` artifact
-(JSON/JUnit + HTML report + traces/screenshots + `coverage.json`), and runs a
+(JSON/JUnit + HTML report + `coverage.json` — no trace/screenshots, capture
+is off in both suite configs; the negative suite's `request.json`/
+`response.json` `testInfo.attach()`ments are the real evidence, embedded
+inline in the JSON reporter's own output), and runs a
 **Claude Code** triage agent inside a 3-repo
 [`workspace-cli`](https://github.com/camunda/workspace-cli) workspace
 (`api-test-generator`, `camunda-docs`, `camunda-hub` @ `main` — manifest +
@@ -631,7 +634,22 @@ the pinned spec, so this is genuinely additional signal, not a duplicate). An
 earlier version of this workflow manually dispatched
 [hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml) and
 commented the run link for the same purpose; that became redundant once
-hub-pr-live-check.yml shipped (#513) and has been removed. It posts a
+hub-pr-live-check.yml shipped (#513) and has been removed.
+
+Before filing a genuinely NEW (not already-known) product bug, #482 adds a
+live re-check: a step earlier in the same job spins up ONE fresh, separate
+Hub (only when there's at least one negative-suite failure — no cost
+otherwise) and replays every negative-suite failure's exact request via curl
+([scripts/e2e/verify-negative-failures.py](scripts/e2e/verify-negative-failures.py),
+reusing [curl_compare.py](scripts/e2e/curl_compare.py)'s `run_curl` and
+reconstructing auth headers from a closed mapping keyed on `scenarioKind`
+that mirrors `request-validation/src/emit/qaEmitter.ts`'s own header-builder
+selection — no source/emitter change needed), writing `curl-verification.json`
+for the agent to read as one more input. A candidate that no longer
+reproduces (`confirmed: false`) is never filed — treated as flakiness
+instead; one that still does (`confirmed: true`) gets filed with the fresh
+curl exchange as extra evidence. Positive-suite failures aren't covered —
+there's no evidence-capture mechanism there yet to replay from. It posts a
 triaged digest to
 `#camunda-hub-nightly-test-results` via the same Slack bot. Auth: `CLAUDE_API_KEY`
 at `secret/data/products/qa/ci/common`
