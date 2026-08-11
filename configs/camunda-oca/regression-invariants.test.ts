@@ -1646,8 +1646,7 @@ describeForThisConfig('bundled-spec invariants: planner output', () => {
       const missingIsEntirelyNonPlaceholder =
         missingTypes.size > 0 &&
         record.placeholderSemanticTypes.every((st) => !missingTypes.has(st));
-      if (allReachable && !missingIsEntirelyNonPlaceholder)
-        structuralViolations.push(record);
+      if (allReachable && !missingIsEntirelyNonPlaceholder) structuralViolations.push(record);
       else structuralOk.push(record);
     }
     // Documented current-state sanity: the bucket is non-empty (the
