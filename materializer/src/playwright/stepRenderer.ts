@@ -164,8 +164,9 @@ export function renderInlineStepLines({
     );
     lines.push(`    const ${bodyVar} = ${tpl};`);
   }
+  lines.push(`    const headers = await authHeaders();`);
   const opts: string[] = [];
-  opts.push('headers: await authHeaders()');
+  opts.push('headers');
   if (step.bodyKind === 'json' && step.bodyTemplate) opts.push(`data: ${bodyVar}`);
   if (step.bodyKind === 'multipart' && step.multipartTemplate) {
     lines.push(
@@ -207,6 +208,13 @@ export function renderInlineStepLines({
   lines.push(`    if (${varName}.status() !== ${step.expect.status}) {`);
   lines.push(`      try { console.error('Response body:', await ${varName}.text()); } catch {}`);
   lines.push(`    }`);
+  const hasBodyVar =
+    (step.bodyKind === 'json' && step.bodyTemplate) ||
+    (step.bodyKind === 'multipart' && step.multipartTemplate);
+  const evidenceBody = hasBodyVar ? bodyVar : 'undefined';
+  lines.push(
+    `    await attachEvidenceOnFailure(testInfo, ${varName}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.method.toUpperCase())}, url, headers, body: ${evidenceBody}, expectedStatus: ${step.expect.status} });`,
+  );
   lines.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
   return lines;
 }
@@ -228,6 +236,7 @@ export function renderEventualWait(wait: EventualWaitSpec, idx: number): string[
   out.push(`  // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
   out.push(`  {`);
   out.push(`    const witnessUrl = baseUrl + ${buildUrlExpression(w.pathTemplate)};`);
+  out.push(`    const headers = await authHeaders();`);
   const optionFields: string[] = [
     `method: '${w.method.toUpperCase()}'`,
     `operationId: '${w.operationId}'`,
@@ -242,7 +251,7 @@ export function renderEventualWait(wait: EventualWaitSpec, idx: number): string[
       }`);
   const method = w.method.toLowerCase();
   out.push(`    const ${respVar} = await awaitEventually(`);
-  out.push(`      async () => request.${method}(witnessUrl, { headers: await authHeaders() }),`);
+  out.push(`      async () => request.${method}(witnessUrl, { headers }),`);
   out.push(`      {`);
   for (let i = 0; i < optionFields.length; i++) {
     const sep = i === optionFields.length - 1 ? '' : ',';
@@ -255,6 +264,9 @@ export function renderEventualWait(wait: EventualWaitSpec, idx: number): string[
     `      try { console.error('Witness response body:', await ${respVar}.text()); } catch {}`,
   );
   out.push(`    }`);
+  out.push(
+    `    await attachEvidenceOnFailure(testInfo, ${respVar}, { operationId: ${JSON.stringify(w.operationId)}, method: ${JSON.stringify(w.method.toUpperCase())}, url: witnessUrl, headers, expectedStatus: 200 });`,
+  );
   out.push(`    expect(${respVar}.status()).toBe(200);`);
   out.push(`  }`);
   return out;

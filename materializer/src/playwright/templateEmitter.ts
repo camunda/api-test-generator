@@ -301,6 +301,7 @@ function renderLifecycleSuite(
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
   lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  lines.push("import { attachEvidenceOnFailure } from '../../support/evidence';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
   lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
@@ -315,7 +316,7 @@ function renderLifecycleSuite(
   lines.push('');
   lines.push(`test.describe('${file.subjectName} lifecycle', () => {`);
   lines.push(
-    `  test('establish ${file.subjectName}, observe present, revoke, observe absent', async ({ request }) => {`,
+    `  test('establish ${file.subjectName}, observe present, revoke, observe absent', async ({ request }, testInfo) => {`,
   );
   lines.push('    const baseUrl = buildBaseUrl();');
   lines.push('    const ctx: Record<string, unknown> = {};');
@@ -467,6 +468,7 @@ function renderRestoreLifecycleSuite(
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
   lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  lines.push("import { attachEvidenceOnFailure } from '../../support/evidence';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
   lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
@@ -481,7 +483,7 @@ function renderRestoreLifecycleSuite(
   lines.push('');
   lines.push(`test.describe('${file.subjectName} restore lifecycle', () => {`);
   lines.push(
-    `  test('establish ${file.subjectName}, soft-delete, restore, observe present', async ({ request }) => {`,
+    `  test('establish ${file.subjectName}, soft-delete, restore, observe present', async ({ request }, testInfo) => {`,
   );
   lines.push('    const baseUrl = buildBaseUrl();');
   lines.push('    const ctx: Record<string, unknown> = {};');
@@ -648,9 +650,10 @@ function appendObserveByIdStatusStep(
 
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
   lines.push(`      const url = baseUrl + ${urlExpr};`);
+  lines.push(`      const headers = await authHeaders();`);
   if (wrap) {
     lines.push(`      const ${respVar} = await awaitEventually(`);
-    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        async () => request.${method}(url, { headers }),`);
     lines.push(`        {`);
     lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
     lines.push(`          operationId: '${step.operationId}',`);
@@ -658,13 +661,14 @@ function appendObserveByIdStatusStep(
     lines.push(`        },`);
     lines.push(`      );`);
   } else {
-    lines.push(
-      `      const ${respVar} = await request.${method}(url, { headers: await authHeaders() });`,
-    );
+    lines.push(`      const ${respVar} = await request.${method}(url, { headers });`);
   }
   lines.push(`      if (${respVar}.status() !== ${expectedStatus}) {`);
   lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
   lines.push('      }');
+  lines.push(
+    `      await attachEvidenceOnFailure(testInfo, ${respVar}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.requestPlan.method.toUpperCase())}, url, headers, expectedStatus: ${expectedStatus} });`,
+  );
   lines.push(`      expect(${respVar}.status()).toBe(${expectedStatus});`);
   lines.push('    });');
 }
@@ -932,6 +936,7 @@ function renderReadBackSuite(
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
   lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  lines.push("import { attachEvidenceOnFailure } from '../../support/evidence';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
   lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
@@ -946,7 +951,7 @@ function renderReadBackSuite(
   lines.push('');
   lines.push(`test.describe('${file.subjectName} read-back', () => {`);
   lines.push(
-    `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }) => {`,
+    `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }, testInfo) => {`,
   );
   lines.push('    const baseUrl = buildBaseUrl();');
   lines.push('    const ctx: Record<string, unknown> = {};');
@@ -1023,8 +1028,9 @@ function appendObserveFieldEqualsStep(
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
   if (isEC) {
     lines.push(`      const url = baseUrl + ${urlExpr};`);
+    lines.push(`      const headers = await authHeaders();`);
     lines.push(`      const ${respVar} = await awaitEventually(`);
-    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        async () => request.${method}(url, { headers }),`);
     lines.push(`        {`);
     lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
     lines.push(`          operationId: '${step.operationId}',`);
@@ -1044,6 +1050,9 @@ function appendObserveFieldEqualsStep(
   lines.push(`      if (${respVar}.status() !== 200) {`);
   lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
   lines.push('      }');
+  lines.push(
+    `      await attachEvidenceOnFailure(testInfo, ${respVar}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.requestPlan.method.toUpperCase())}, url, headers, expectedStatus: 200 });`,
+  );
   lines.push(`      expect(${respVar}.status()).toBe(200);`);
   lines.push(`      const __body = await ${respVar}.json();`);
   for (const f of step.assertion.fields) {
@@ -1121,6 +1130,7 @@ function renderStateTransitionSuite(
   const lines: string[] = [];
   lines.push("import { expect, test } from '@playwright/test';");
   lines.push("import { authHeaders, buildBaseUrl } from '../../support/env';");
+  lines.push("import { attachEvidenceOnFailure } from '../../support/evidence';");
   const seedingImports = ['initSpecSalt', 'seedBinding'];
   if (needsExtractInto) seedingImports.push('extractInto');
   lines.push(`import { ${seedingImports.join(', ')} } from '../../support/seeding';`);
@@ -1136,7 +1146,7 @@ function renderStateTransitionSuite(
   const fromTo = `${observe.assertion.fromState} → ${observe.assertion.expectedState}`;
   lines.push(`test.describe('${file.subjectName} state transition (${fromTo})', () => {`);
   lines.push(
-    `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }) => {`,
+    `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }, testInfo) => {`,
   );
   lines.push('    const baseUrl = buildBaseUrl();');
   lines.push('    const ctx: Record<string, unknown> = {};');
@@ -1208,8 +1218,9 @@ function appendObserveStateEqualsStep(
   lines.push(`    await test.step('${escapeQuotes(label)}', async () => {`);
   if (isEC) {
     lines.push(`      const url = baseUrl + ${urlExpr};`);
+    lines.push(`      const headers = await authHeaders();`);
     lines.push(`      const ${respVar} = await awaitEventually(`);
-    lines.push(`        async () => request.${method}(url, { headers: await authHeaders() }),`);
+    lines.push(`        async () => request.${method}(url, { headers }),`);
     lines.push(`        {`);
     lines.push(`          method: '${step.requestPlan.method.toUpperCase()}',`);
     lines.push(`          operationId: '${step.operationId}',`);
@@ -1229,6 +1240,9 @@ function appendObserveStateEqualsStep(
   lines.push(`      if (${respVar}.status() !== 200) {`);
   lines.push(`        try { console.error('Response body:', await ${respVar}.text()); } catch {}`);
   lines.push('      }');
+  lines.push(
+    `      await attachEvidenceOnFailure(testInfo, ${respVar}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.requestPlan.method.toUpperCase())}, url, headers, expectedStatus: 200 });`,
+  );
   lines.push(`      expect(${respVar}.status()).toBe(200);`);
   lines.push(`      const __body = await ${respVar}.json();`);
   const accessExpr = buildOptionalAccessChain(

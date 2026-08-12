@@ -357,12 +357,30 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
       (step) => step.bodyKind === 'multipart' && !!step.multipartTemplate && !findRoleForStep(step),
     ),
   );
-  // authHeaders is used in inline request steps and awaitEventually witness
-  // blocks. Role helpers call authHeaders internally, so role-only suites
-  // don't need this import.
-  const hasInlineRequestStep = collection.scenarios.some((s) =>
-    (s.requestPlan ?? []).some((step) => !findRoleForStep(step)),
+  // A role's call-site.tmpl MAY interpolate {{{defaultRender}}} (the "wrap
+  // pattern" from ROLES.md) to splice in the exact same inline code
+  // renderInlineStepLines would have produced for a non-role step — so a
+  // role-only suite (every step role-matched) can still reference
+  // authHeaders()/attachEvidenceOnFailure() in its final output if any used
+  // role's template does this. Detected statically (template source
+  // matches the actual Mustache interpolation tag) since imports are
+  // decided before any step is rendered, so the actual rendered output
+  // isn't available yet. Matches the tag specifically — not a bare
+  // substring — so a comment or unrelated prose mentioning "defaultRender"
+  // can't false-positive into unused (lint-failing) imports.
+  const DEFAULT_RENDER_TAG_RE = /\{\{\{?\s*defaultRender\s*\}?\}\}/;
+  const anyRoleUsesDefaultRender = collection.scenarios.some((s) =>
+    (s.requestPlan ?? []).some((step) =>
+      Boolean(findRoleForStep(step)?.bundle.callSiteTemplate.match(DEFAULT_RENDER_TAG_RE)),
+    ),
   );
+  // authHeaders is used in inline request steps, awaitEventually witness
+  // blocks, and any wrap-pattern role's defaultRender. Role helpers that
+  // don't use the wrap pattern call authHeaders internally, so a role-only
+  // suite with no wrap-pattern role doesn't need this import.
+  const hasInlineRequestStep =
+    anyRoleUsesDefaultRender ||
+    collection.scenarios.some((s) => (s.requestPlan ?? []).some((step) => !findRoleForStep(step)));
   if (hasInlineRequestStep || needsAwaitEventually) {
     lines.push("import { buildBaseUrl, authHeaders } from './support/env';");
   } else {
@@ -404,6 +422,12 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   if (needsAwaitEventually) {
     lines.push("import { awaitEventually } from './support/await-eventually';");
   }
+  // attachEvidenceOnFailure is emitted by renderInlineStepLines/renderEventualWait
+  // (inline request steps, witness waits) and the validateResponse try/catch
+  // wrap below — import whenever any of those code paths are present.
+  if (hasInlineRequestStep || needsAwaitEventually || needsValidation) {
+    lines.push("import { attachEvidenceOnFailure } from './support/evidence';");
+  }
   lines.push('');
   lines.push(`initSpecSalt(${JSON.stringify(suiteName)});`);
   if (needsValidation) {
@@ -443,7 +467,7 @@ function renderScenarioTest(
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const body: string[] = [];
-  body.push(`test('${title}', async ({ request }) => {`);
+  body.push(`test('${title}', async ({ request }, testInfo) => {`);
   if (s.description) {
     const desc = String(s.description).trim();
     // Wrap long description lines at ~100 chars for readability
@@ -633,9 +657,43 @@ function renderScenarioTest(
       // double-quoted (no mixed single/double quotes) and any special characters
       // in the path template are correctly escaped.
       const routeSpec = `{ path: ${JSON.stringify(step.pathTemplate)}, method: ${JSON.stringify(step.method.toUpperCase())}, status: ${JSON.stringify(String(step.expect.status))} }`;
+      // Wrapped so a shape-validation failure still attaches request/response
+      // evidence before re-throwing — validateResponse itself only throws a
+      // bare Error (no structured payload), so evidence must come from
+      // `${varName}` directly. Role-bound steps don't declare a `url`/
+      // `headers`/body local (the role helper owns those internally), so
+      // fall back to `.url()` and omit headers/body only in that case; for
+      // inline steps the locals `renderInlineStepLines` already declared in
+      // this same test.step scope are reused for full evidence.
+      const bodyVar = `body${idx + 1}`;
+      const hasBodyVar =
+        (step.bodyKind === 'json' && step.bodyTemplate) ||
+        (step.bodyKind === 'multipart' && step.multipartTemplate);
+      const evidenceCtxFields = roleMatch
+        ? [
+            `operationId: ${JSON.stringify(step.operationId)}`,
+            `method: ${JSON.stringify(step.method.toUpperCase())}`,
+            `url: ${varName}.url()`,
+            `expectedStatus: ${step.expect.status}`,
+          ]
+        : [
+            `operationId: ${JSON.stringify(step.operationId)}`,
+            `method: ${JSON.stringify(step.method.toUpperCase())}`,
+            'url',
+            'headers',
+            `body: ${hasBodyVar ? bodyVar : 'undefined'}`,
+            `expectedStatus: ${step.expect.status}`,
+          ];
+      body.push(`    try {`);
       body.push(
-        `    await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
+        `      await validateResponse(${routeSpec}, ${varName}, { responsesFilePath: __responsesFile });`,
       );
+      body.push(`    } catch (e) {`);
+      body.push(
+        `      await attachEvidenceOnFailure(testInfo, ${varName}, { ${evidenceCtxFields.join(', ')} }, String(e));`,
+      );
+      body.push(`      throw e;`);
+      body.push(`    }`);
     }
     // Extraction. `extractInto` is the vendored helper from support/seeding.ts;
     // it skips the assignment when the value is `undefined` so seeded bindings
