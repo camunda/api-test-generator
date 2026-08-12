@@ -110,23 +110,23 @@ jobs:
         ## Hub PR live check — #${{ github.event.pull_request.number }}
         `${{ github.event.pull_request.head.sha }}` against camunda-hub main / camunda/hub:SNAPSHOT
 
-  # The actual required-status-check job. Always runs (even if `run` was
-  # skipped by the guard, e.g. a PR touching .github/**) and just reports
-  # `run`'s result under a name stable regardless of the reusable
-  # workflow's own internal job name. `skipped` counts as passing — same
-  # semantics the guard's own skip path already relied on before this job
-  # existed (see every prior PR's "Live Hub suite | skipped" check-run).
+  # The actual required-status-check job. Reports `run`'s result under a
+  # name stable regardless of the reusable workflow's own internal job
+  # name. Deliberately SKIPS ITSELF (rather than running and exiting 0)
+  # when `run` was itself skipped by the guard (e.g. a PR touching
+  # .github/**) — this job's own check-run conclusion then shows
+  # `skipped`, preserving the exact same UI-visible distinction every
+  # prior PR's "Live Hub suite | skipped" already relied on, instead of
+  # collapsing "guarded/never ran" and "ran for real" into the same
+  # `success` conclusion.
   live-hub-suite:
     name: Live Hub suite
     needs: run
-    if: always()
+    if: always() && needs.run.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
-      - name: Report aggregate result
+      - name: Fail if the underlying hub-suite job didn't succeed
         run: |
           result="${{ needs.run.result }}"
           echo "Underlying hub-suite job result: $result"
-          case "$result" in
-            success|skipped) exit 0 ;;
-            *) exit 1 ;;
-          esac
+          [ "$result" = "success" ]
