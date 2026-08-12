@@ -4352,10 +4352,14 @@ describeForThisConfig(
       for (const op of setterOps) {
         const varName = `${camelCase(semantic)}Var`;
         const plannerFile = join(SCENARIOS_DIR, featureFileFor(op));
-        const plannerUnsatisfied = existsSync(plannerFile)
-          ? // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-            (JSON.parse(readFileSync(plannerFile, 'utf8')) as ScenarioFile).unsatisfied === true
-          : false;
+        if (!existsSync(plannerFile)) {
+          throw new Error(
+            `Missing planner scenario file for setter operation ${op.operationId}: expected ${featureFileFor(op)} in ${SCENARIOS_DIR} — run 'npm run pipeline'`,
+          );
+        }
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const plannerUnsatisfied =
+          (JSON.parse(readFileSync(plannerFile, 'utf8')) as ScenarioFile).unsatisfied === true;
 
         it(`${semantic} :: ${op.operationId}: variant suite emits a ${semantic}-populating scenario binding ${varName} (#162 PR 4)`, () => {
           if (plannerUnsatisfied) return;
