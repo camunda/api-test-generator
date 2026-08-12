@@ -159,6 +159,11 @@
       "name": "ScopeKey",
       "kind": "serverEmergent",
       "$comment": "Server-minted key identifying the scope (process instance / element instance) a variable lives in. Same lifecycle as VariableKey \u2014 managed by process execution, never directly minted via a client API. Search-filter input only. See #162 PR 5."
+    },
+    {
+      "name": "AgentDefinitionKey",
+      "kind": "serverEmergent",
+      "$comment": "Interim: server-minted lifecycle key for an agent definition. Agent definitions emerge as a side-effect of deploying a BPMN process with an AI Agent Connector element \u2014 no direct create API returns this key with provider:true. Search-filter input only; planner mints a deterministic placeholder. Remove this entry and replace with a witnesses-based classification once upstream adds x-semantic-provider on DeploymentAgentDefinitionResult."
     }
   ],
   "capabilities": [
