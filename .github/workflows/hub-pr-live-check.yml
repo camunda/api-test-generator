@@ -76,7 +76,19 @@ jobs:
           fi
 
   run:
-    name: Live Hub suite
+    # NOT named "Live Hub suite" — a job that calls a reusable workflow via
+    # `uses:` gets its check-run reported under the COMPOSITE name
+    # "<this job's name> / <reusable workflow's own job name>" (here,
+    # _hub-suite-run.yml's job is named "Generate + run hub suites
+    # (${{ inputs.hub_ref }})"), never the bare name alone. Branch
+    # protection's required status check is the exact string "Live Hub
+    # suite" — if this job carried that name directly, the composite name
+    # it actually reports under would never match, permanently blocking
+    # merge on every PR that reaches this job (rather than being skipped
+    # by the guard above). The `live-hub-suite` job below is the one that
+    # actually carries the required name, decoupled from whatever this job
+    # (or the reusable workflow it calls) is internally called.
+    name: Run hub suite (internal)
     needs: guard
     if: needs.guard.outputs.proceed == 'true'
     permissions:
@@ -97,3 +109,24 @@ jobs:
       summary_heading: |
         ## Hub PR live check — #${{ github.event.pull_request.number }}
         `${{ github.event.pull_request.head.sha }}` against camunda-hub main / camunda/hub:SNAPSHOT
+
+  # The actual required-status-check job. Reports `run`'s result under a
+  # name stable regardless of the reusable workflow's own internal job
+  # name. Deliberately SKIPS ITSELF (rather than running and exiting 0)
+  # when `run` was itself skipped by the guard (e.g. a PR touching
+  # .github/**) — this job's own check-run conclusion then shows
+  # `skipped`, preserving the exact same UI-visible distinction every
+  # prior PR's "Live Hub suite | skipped" already relied on, instead of
+  # collapsing "guarded/never ran" and "ran for real" into the same
+  # `success` conclusion.
+  live-hub-suite:
+    name: Live Hub suite
+    needs: run
+    if: always() && needs.run.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if the underlying hub-suite job didn't succeed
+        run: |
+          result="${{ needs.run.result }}"
+          echo "Underlying hub-suite job result: $result"
+          [ "$result" = "success" ]
