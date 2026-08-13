@@ -4271,6 +4271,32 @@ describeForThisConfig(
     // meaningful (a setter step inserted before the filter step that
     // tags an entity, with the same minted value threaded through).
     // Tracked in #168 (the deferred follow-up to #162 PR 2).
+    //
+    // Suite partition by required-ness. A setter leaf's owning suite is
+    // decided by whether the body field is REQUIRED:
+    //
+    //   - OPTIONAL leaf → the VARIANT suite. The populated-vs-omitted
+    //     axis is exactly what a variant exercises, and the variant
+    //     contract is optional-only end to end:
+    //     `graphLoader.deriveOptionalSubShapes` skips `required === true`,
+    //     `path-analyser/src/index.ts` gates variant emission on
+    //     `op.optionalSubShapes?.length`, and
+    //     `generateOptionalSubShapeVariants` skips any leaf already in
+    //     `requires.required`. The sibling PR-4 invariant
+    //     ('variant suite covers every flat top-level optional...')
+    //     encodes the same filter with `if (e.required) continue`.
+    //
+    //   - REQUIRED leaf → the FEATURE (base) suite. A required field has
+    //     no populated-vs-omitted axis: omitting it is an invalid
+    //     request, so the base scenario must always populate it and the
+    //     planner mints the value at plan time (the missing-gate
+    //     exemption in `scenarioGenerator.generateScenariosForEndpoint`).
+    //     Demanding a variant here would ask the generator to emit a
+    //     near-duplicate of the base spec.
+    //
+    // The bundled camunda-oca spec's first required setter leaf is
+    // `assignProcessInstanceBusinessId.businessId` (`BusinessId`), added
+    // in spec version 8.10.
 
     interface SemanticTypeDecl {
       kind?: string;
@@ -4302,12 +4328,23 @@ describeForThisConfig(
       return !fieldPath.startsWith('filter.') && !fieldPath.startsWith('filter[');
     }
 
-    function setterOpsFor(semantic: string): OperationNode[] {
+    // Setter ops split by the required-ness of the setter leaf (see the
+    // suite-partition note above). An op that declares the semantic at
+    // BOTH a required and an optional non-filter path lands in both
+    // buckets — each leaf is owned by its own suite.
+    function setterOpsFor(semantic: string, required: boolean): OperationNode[] {
       const graph = loadGraph();
       const ops: OperationNode[] = [];
       for (const op of graph.operations) {
         const leaves = op.requestBodySemanticTypes ?? [];
-        if (leaves.some((l) => l.semanticType === semantic && isSetterPath(l.fieldPath))) {
+        if (
+          leaves.some(
+            (l) =>
+              l.semanticType === semantic &&
+              isSetterPath(l.fieldPath) &&
+              Boolean(l.required) === required,
+          )
+        ) {
           ops.push(op);
         }
       }
@@ -4333,18 +4370,18 @@ describeForThisConfig(
     });
 
     for (const semantic of ATTRIBUTE_SEMANTICS) {
-      const setterOps = setterOpsFor(semantic);
+      const optionalSetterOps = setterOpsFor(semantic, false);
+      const requiredSetterOps = setterOpsFor(semantic, true);
+      const varName = `${camelCase(semantic)}Var`;
 
       it(`${semantic}: at least one setter operation declares the semantic at a top-level body path`, () => {
         expect(
-          setterOps.length,
+          optionalSetterOps.length + requiredSetterOps.length,
           `expected at least one operation accepting ${semantic} at a non-filter body path`,
         ).toBeGreaterThan(0);
       });
 
-      for (const op of setterOps) {
-        const varName = `${camelCase(semantic)}Var`;
-
+      for (const op of optionalSetterOps) {
         it(`${semantic} :: ${op.operationId}: variant suite emits a ${semantic}-populating scenario binding ${varName} (#162 PR 4)`, () => {
           const variantFile = join(VARIANT_SCENARIOS_DIR, featureFileFor(op));
           if (!existsSync(variantFile)) {
@@ -4406,6 +4443,52 @@ describeForThisConfig(
           expect(
             src.includes(`ctx.${varName}`),
             `${op.operationId} variant spec: body must reference ctx.${varName}`,
+          ).toBe(true);
+        });
+      }
+
+      // Required setter leaves — owned by the FEATURE (base) suite. See
+      // the suite-partition note at the top of this block. These two
+      // assertions are the required-leaf mirror of the variant pair
+      // above, so coverage of a clientMintedAttribute setter site is
+      // asserted regardless of which suite owns it.
+      for (const op of requiredSetterOps) {
+        it(`${semantic} :: ${op.operationId}: feature suite binds ${varName} for the REQUIRED setter leaf (#162 PR 2)`, () => {
+          const featureFile = join(FEATURE_SCENARIOS_DIR, featureFileFor(op));
+          if (!existsSync(featureFile)) {
+            throw new Error(
+              `expected feature-output JSON not found: ${featureFileFor(op)} — run 'npm run testsuite:generate'`,
+            );
+          }
+          // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+          const parsed = JSON.parse(readFileSync(featureFile, 'utf8')) as {
+            scenarios: Array<{ bindings?: Record<string, string> }>;
+          };
+          const scenario = parsed.scenarios.find((s) => s.bindings?.[varName] !== undefined);
+          expect(
+            scenario,
+            `${op.operationId}: expected a feature scenario binding ${varName} — a REQUIRED ${semantic} body leaf must be populated by the base scenario, not deferred to a variant`,
+          ).toBeDefined();
+          // The value is deliberately unasserted. The planner mints
+          // `fc:cma:<sem>:<suffix>` at plan time, but the materializer's
+          // #320 unique-seeding rule legitimately replaces a deterministic
+          // literal with `seedBinding(name, { unique: true })` when a step
+          // in the chain declares HTTP 409 — which every uniqueness-
+          // enforced setter (BusinessId) does. Asserting the literal would
+          // couple this invariant to that override.
+        });
+
+        it(`${semantic} :: ${op.operationId}: emitted feature spec references ctx.${varName} (#162 PR 2)`, () => {
+          const spec = join(GENERATED_TESTS_DIR, `${op.operationId}.feature.spec.ts`);
+          if (!existsSync(spec)) {
+            throw new Error(
+              `expected emitted spec not found: ${op.operationId}.feature.spec.ts — run 'npm run testsuite:generate'`,
+            );
+          }
+          const src = readFileSync(spec, 'utf8');
+          expect(
+            src.includes(`ctx.${varName}`),
+            `${op.operationId} feature spec: body must reference ctx.${varName}`,
           ).toBe(true);
         });
       }

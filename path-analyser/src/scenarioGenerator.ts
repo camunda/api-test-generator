@@ -216,9 +216,37 @@ export function generateScenariosForEndpoint(
   // chains it and this block is a no-op.
   const externalEntitySites: string[] = [];
   const externalBindings: Record<string, string> = {};
+  // #162: a `clientMintedAttribute` semantic (ABox `kind: 'attribute'` +
+  // `clientMinted: true`, e.g. Tag / BusinessId) has no producer and no
+  // establisher BY DESIGN — no endpoint returns it and no
+  // `x-semantic-establishes` annotation mints it. The planner IS the
+  // authoritative source: `bindSemanticInput` synthesises a deterministic
+  // `fc:cma:<sem>:<suffix>` token for it.
+  //
+  // Handled here rather than in the static-missing gate above because the
+  // satisfaction mechanism is a seeded binding (like `externalEntitySites`),
+  // not a BFS-scheduled op (like the `runtimeEmission` injection branch).
+  //
+  // This only fires for REQUIRED leaves — optional ones never enter
+  // `initialNeeded` and are owned by the variant suite
+  // (`generateOptionalSubShapeVariants`). The bundled camunda-oca spec's
+  // first required case is `assignProcessInstanceBusinessId.businessId`
+  // (`BusinessId`), added in spec version 8.10; before that every
+  // Tag/BusinessId body leaf was optional and this path was unexercised.
+  const clientMintedAttributeSites: string[] = [];
+  const clientMintedBindings: Record<string, string> = {};
   if (missing.length > 0) {
     const stillMissing: string[] = [];
     for (const st of missing) {
+      // Tier-1 ABox declarations beat the Tier-2 graph-index and
+      // external-entity checks below (see the precedence contract in
+      // `bindSemanticInput.classifySemantic`), so this branch runs first.
+      const bound = bindSemanticInput({ semantic: st, operationId: endpointOpId, graph });
+      if (bound.classification === 'clientMintedAttribute') {
+        clientMintedBindings[bound.varName] = bound.value;
+        clientMintedAttributeSites.push(st);
+        continue;
+      }
       // Per-tuple `acceptsExternal: true` only applies on edge
       // establishers. Look it up via the endpoint's own `establishes`.
       const isEdgeEstablisher =
@@ -260,23 +288,29 @@ export function generateScenariosForEndpoint(
       }
     }
     // Replace the missing list with whatever the fallback could not
-    // cover. If every missing semantic was external-mintable, the
-    // unsatisfied branch below MUST NOT fire.
+    // cover. If every missing semantic was external-mintable or
+    // client-minted, the unsatisfied branch below MUST NOT fire.
     missing.length = 0;
     missing.push(...stillMissing);
   }
 
-  // BFS planning state subtracts the external-mintable semantics from
+  // BFS planning state subtracts the planner-minted semantics from
   // `initialNeeded` because they are pre-satisfied by the seeded
   // bindings. `initialNeeded` itself stays immutable so downstream
   // reporting (`satisfiedSemanticTypes`) still reflects everything
   // the endpoint required — a scenario that satisfied a need via
   // external mint is not the same as a scenario that did not need
   // it. See PR #140 reviewer thread on initialNeeded mutation.
+  //
+  // Subtracting `clientMintedAttributeSites` is load-bearing, not
+  // cosmetic: nothing in the graph can ever produce such a semantic, so
+  // leaving it in the BFS `needed` set would mean no chain ever completes
+  // and the endpoint would silently degrade to `{ scenarios: [] }`.
+  const plannerMintedSites = [...externalEntitySites, ...clientMintedAttributeSites];
   const planningNeeded =
-    externalEntitySites.length === 0
+    plannerMintedSites.length === 0
       ? initialNeeded
-      : new Set([...initialNeeded].filter((s) => !externalEntitySites.includes(s)));
+      : new Set([...initialNeeded].filter((s) => !plannerMintedSites.includes(s)));
 
   const scenarios: EndpointScenario[] = [];
   const max = opts.maxChainAlternatives;
@@ -309,7 +343,7 @@ export function generateScenariosForEndpoint(
     // wrongly rejected. Externally-minted semantics are satisfied
     // by the seeded binding the same way establisher-minted
     // semantics are.
-    produced: new Set(externalEntitySites),
+    produced: new Set(plannerMintedSites),
     needed: new Set(planningNeeded),
     domainStates: new Set(),
     ops: [],
@@ -318,11 +352,15 @@ export function generateScenariosForEndpoint(
     providerList: {},
     artifactsApplied: [],
     // Issue #134: pre-seed bindingsDraft with the client-minted IDs
-    // synthesised for every bimodal `acceptsExternal` fallback above.
-    // The body builder and URL emitter look up by the same key
-    // (`${camelLower(name)}Var`), so the seeded value flows through
-    // without any per-step override.
-    bindingsDraft: Object.keys(externalBindings).length ? { ...externalBindings } : undefined,
+    // synthesised for every bimodal `acceptsExternal` fallback above,
+    // plus (#162) the `fc:cma:` tokens minted for required
+    // clientMintedAttribute body leaves. The body builder and URL
+    // emitter look up by the same key (`${camelLower(name)}Var`), so the
+    // seeded value flows through without any per-step override.
+    bindingsDraft:
+      Object.keys(externalBindings).length || Object.keys(clientMintedBindings).length
+        ? { ...externalBindings, ...clientMintedBindings }
+        : undefined,
   };
 
   const queue: State[] = [initial];

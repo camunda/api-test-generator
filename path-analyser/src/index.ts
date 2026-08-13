@@ -2,6 +2,7 @@ import fsSync from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { classifySemantic } from './bindSemanticInput.js';
 import { buildCanonicalShapes } from './canonicalSchemas.js';
 import {
   getActiveConfigDir,
@@ -772,6 +773,33 @@ function buildRequestPlan(
         for (const entry of responseEntries) {
           const bind = `${camelCase(entry.semanticType)}Var`;
           if (existingBinds.has(bind)) continue;
+          // Never extract over a clientMintedAttribute binding the
+          // planner already pinned to a concrete value. The planner IS
+          // the authoritative source for that classification, and a
+          // producer step's echo of the same field is `nullable: true`
+          // whenever the producer did not itself set it. `extractInto`
+          // guards only `undefined`, so an echoed `null` would clobber
+          // the minted value and the consuming step would send `null`
+          // for a field the planner had already satisfied.
+          //
+          // Concrete case: `createProcessInstance` echoes a nullable
+          // `businessId` (null when creation set none) and
+          // `assignProcessInstanceBusinessId` REQUIRES `businessId` —
+          // extracting the echo turned a valid mint into a 400.
+          //
+          // Deliberately scoped to `clientMintedAttribute`, NOT to every
+          // literal binding: producer-bound synthetic fallbacks (e.g. a
+          // variant's `processDefinitionKey_<suffix>` placeholder) are
+          // literals that the real producer extract is SUPPOSED to
+          // overwrite. Suppressing those would strand a fake key.
+          const pinned = scenario.bindings?.[bind];
+          if (
+            pinned !== undefined &&
+            pinned !== PENDING_BINDING &&
+            classifySemantic(entry.semanticType, graph) === 'clientMintedAttribute'
+          ) {
+            continue;
+          }
           // semantic-graph-extractor emits array item paths with `[]`
           // markers (schema-analyzer.ts: `${fieldPath}[]`). The Playwright
           // emitter's accessor builder expects numeric indices, so
