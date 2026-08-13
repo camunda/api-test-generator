@@ -32,6 +32,24 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+const SEARCH_JOBS_REQUEST_STEP: RequestStep = {
+  operationId: 'searchJobs',
+  method: 'POST',
+  pathTemplate: '/jobs/search',
+  bodyKind: 'json',
+  bodyTemplate: {
+    worker: 'test-worker',
+  },
+  expect: { status: 200 },
+};
+
+const CREATE_PROCESS_INSTANCE_REQUEST_STEP: RequestStep = {
+  operationId: 'createProcessInstance',
+  method: 'POST',
+  pathTemplate: '/process-instances',
+  expect: { status: 400 },
+};
+
 // Mirrors the committed csharp-sdk/examples/operation-map.json shape:
 // operationId -> ordered SDK references, each with a `region` (the method name).
 const OPERATION_MAP: CsharpOperationMap = {
@@ -77,6 +95,63 @@ describe('C# SDK Emitter', () => {
 
     expect(files[0].content).toContain('await Client.CreateProcessInstanceAsync(');
     expect(files[0].content).not.toContain('[object Object]');
+  });
+
+  test('uses the published request DTO name instead of the mechanical operationId name', async () => {
+    const emitter = createCsharpEmitter({});
+    const jobsCollection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'job search',
+          description: 'Search jobs',
+          operations: [{ operationId: 'searchJobs', method: 'POST', path: '/jobs/search' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [SEARCH_JOBS_REQUEST_STEP],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(jobsCollection, EMIT_CTX);
+
+    expect(files[0].content).toContain('BuildRequest<JobSearchRequest>(');
+    expect(files[0].content).not.toContain('BuildRequest<SearchJobsRequest>(');
+  });
+
+  test('derives request path parameters from the path template when step.pathParams is absent', async () => {
+    const emitter = createCsharpEmitter({});
+    const requestWithPathParam: EndpointScenarioCollection = {
+      endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'job search',
+          description: 'Search jobs with a path placeholder',
+          operations: [
+            { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              ...SEARCH_JOBS_REQUEST_STEP,
+              pathTemplate: '/jobs/{jobKey}/search',
+              pathParams: undefined,
+            },
+          ],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(requestWithPathParam, EMIT_CTX);
+
+    expect(files[0].content).toContain('["jobKey"] = RequireBinding(ctx, "jobKeyVar")');
   });
 
   test('feature and variant suites for the same operationId emit distinct C# class names', async () => {
@@ -137,12 +212,7 @@ describe('C# SDK Emitter', () => {
       scenarios: [
         {
           ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...SAMPLE_COLLECTION.scenarios[0].requestPlan[0],
-              expect: { status: 400 },
-            } satisfies RequestStep,
-          ],
+          requestPlan: [{ ...CREATE_PROCESS_INSTANCE_REQUEST_STEP }],
         },
       ],
     };
