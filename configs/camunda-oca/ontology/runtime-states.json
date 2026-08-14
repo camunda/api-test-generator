@@ -178,7 +178,7 @@
       ],
       "valueBindings": {
         "request.name": "ModelEmitsMessageSubscription.messageName",
-        "request.correlationKey": "ModelEmitsMessageSubscription.correlationKey"
+        "request.correlationKey": "semantic:CorrelationKey"
       }
     },
     {

@@ -231,7 +231,7 @@
     },
     {
       "name": "ModelEmitsMessageSubscription",
-      "parameter": "messageSubscriptionElementId",
+      "parameter": "messageName",
       "producedBy": [
         "createDeployment"
       ],

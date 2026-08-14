@@ -64,7 +64,7 @@
     {
       "kind": "bpmnProcess",
       "path": "bpmn/service-message-catch.bpmn",
-      "description": "BPMN process with a service task (zeebe:taskDefinition type sampleJobWithMessage) and a boundary message catch event. Provides both ModelHasServiceTaskType and ModelEmitsMessageSubscription. Selected for chains that require both job activation and message subscription data (e.g. activateJobs + searchMessageSubscriptions). See #305.",
+      "description": "BPMN process with a service task (zeebe:taskDefinition type sampleJobWithMessage) and a NON-INTERRUPTING boundary message catch event (cancelActivity=\"false\"). Provides both ModelHasServiceTaskType and ModelEmitsMessageSubscription. Selected for chains that require both job activation and message subscription data (e.g. activateJobs + searchMessageSubscriptions). The boundary event must stay non-interrupting: chains exist that correlate the message and THEN act on the job (completeJob's variant chain runs activateJobs -> correlateMessage -> searchCorrelatedMessageSubscriptions -> completeJob), and an interrupting boundary event cancels the service task on correlation, terminating the job so completeJob returns 404. See #305.",
       "providesStates": ["ModelHasServiceTaskType", "ModelEmitsMessageSubscription"],
       "providesValues": {
         "JobType": ["sampleJobWithMessage"],

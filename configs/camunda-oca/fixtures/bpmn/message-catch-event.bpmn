@@ -16,11 +16,6 @@
       <bpmn:incoming>Flow_to_end</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
-  <bpmn:message id="Message_1" name="sampleMessage">
-    <bpmn:extensionElements>
-      <zeebe:subscription correlationKey="=12312" />
-    </bpmn:extensionElements>
-  </bpmn:message>
   <bpmn:message id="Message_1j9t80c" name="Message_1j9t80c">
     <bpmn:extensionElements>
       <zeebe:subscription correlationKey="=12312" />

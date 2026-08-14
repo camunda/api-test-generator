@@ -7697,18 +7697,6 @@ describeForThisConfig(
 describeForThisConfig(
   'bundled-spec invariants: optional semantic-typed body fields are variant-suite-only (#247)',
   () => {
-    interface BodySemanticLeaf {
-      semanticType: string;
-      fieldPath: string;
-      required: boolean;
-    }
-    interface GraphOpEntry {
-      operationId: string;
-      requestBodySemanticTypes?: BodySemanticLeaf[];
-    }
-    interface GraphDoc {
-      operations: GraphOpEntry[];
-    }
     interface PlanStep {
       operationId: string;
       bodyKind?: string;
@@ -7745,8 +7733,7 @@ describeForThisConfig(
     // annotation is OPTIONAL. Mirrors the planner's own grouping: strip a
     // trailing `[]`, skip nested paths and `$`-prefixed operator pseudo-fields,
     // and treat a single required annotation at the path as justification.
-    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
-    const graph = JSON.parse(readFileSync(GRAPH_PATH, 'utf8')) as GraphDoc;
+    const graph = loadGraph();
     const optionalOnlyByOp = new Map<string, Set<string>>();
     for (const op of graph.operations) {
       const anyRequiredByField = new Map<string, boolean>();
@@ -7785,6 +7772,16 @@ describeForThisConfig(
     // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
     const requestDefaults = JSON.parse(readFileSync(defaultsPath, 'utf8')) as RequestDefaultsFile;
     const globalDefaultKeys = new Set(Object.keys(requestDefaults.global ?? {}));
+    // Pre-indexed per-operation default keys. Built once here rather than
+    // re-derived per body field: the scan below is a triple-nested loop over
+    // every scenario in all three output dirs, so an `Object.keys()` inside it
+    // allocates an array per field for no benefit.
+    const opDefaultKeysByOp = new Map<string, Set<string>>(
+      Object.entries(requestDefaults.operations ?? {}).map(([opId, defaults]) => [
+        opId,
+        new Set(Object.keys(defaults ?? {})),
+      ]),
+    );
 
     interface Offender {
       dir: string;
@@ -7820,6 +7817,9 @@ describeForThisConfig(
             const optionalOnly = optionalOnlyByOp.get(step.operationId);
             if (!optionalOnly?.size) continue;
             const isFinal = i === steps.length - 1;
+            // Resolved once per step — both are per-operation, not per-field.
+            const declaredFields = declaredFieldsByOp.get(step.operationId);
+            const opDefaultKeys = opDefaultKeysByOp.get(step.operationId);
             for (const [field, value] of Object.entries(body)) {
               if (!optionalOnly.has(field)) continue;
               if (typeof value !== 'string' || !PLACEHOLDER_RE.test(value)) continue;
@@ -7829,12 +7829,9 @@ describeForThisConfig(
                 continue;
               }
               // 2 — explicit ABox operator intent.
-              if (declaredFieldsByOp.get(step.operationId)?.has(field)) continue;
+              if (declaredFields?.has(field)) continue;
               // 3 — explicit per-config request defaults.
-              const opDefaultKeys = Object.keys(
-                requestDefaults.operations?.[step.operationId] ?? {},
-              );
-              if (globalDefaultKeys.has(field) || opDefaultKeys.includes(field)) continue;
+              if (globalDefaultKeys.has(field) || opDefaultKeys?.has(field)) continue;
               offenders.push({
                 dir: dirLabel,
                 file: f,
