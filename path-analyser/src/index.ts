@@ -1588,6 +1588,34 @@ export function buildRequestBodyFromCanonical(
             ),
           )
         : undefined;
+    // #247 — a top-level field whose ONLY semantic-type annotations are OPTIONAL
+    // is owned by the variant suite (`generateOptionalSubShapeVariants`, injected
+    // into the final body by `mergePopulatesSubShapeIntoFinalBody` AFTER this
+    // pass). The fill binding below is derived from the field's own leaf name
+    // (`tenantId` → `tenantIdVar`), so populating it here merely because some
+    // OTHER step in the chain minted a same-named binding couples an operation's
+    // body shape to unrelated prerequisites: once the ABox gave correlateMessage a
+    // chain, createDeployment's multipart `globalContextSeeds` binding leaked
+    // `tenantId` into correlateMessage's feature-BASE body. Mirrors the
+    // clientMintedAttribute exclusion in `semanticFallback` above, which drops the
+    // same class of optional population for the same reason.
+    const optionalOnlySemanticTopLevel = new Set<string>();
+    {
+      const anyRequiredByField = new Map<string, boolean>();
+      for (const entry of graph.operations[opId]?.requestBodySemantics ?? []) {
+        const fieldPath = entry.fieldPath.replace(/\[\]$/, '');
+        // Nested paths are already out of this loop's scope; `$`-prefixed
+        // segments are filter operator pseudo-fields, not real body leaves.
+        if (fieldPath.includes('.') || fieldPath.startsWith('$')) continue;
+        anyRequiredByField.set(
+          fieldPath,
+          (anyRequiredByField.get(fieldPath) ?? false) || entry.required,
+        );
+      }
+      for (const [fieldPath, anyRequired] of anyRequiredByField) {
+        if (!anyRequired) optionalOnlySemanticTopLevel.add(fieldPath);
+      }
+    }
     for (const f of nodes.filter(
       (n) => !n.required && !n.path.includes('[]') && !n.path.includes('.'),
     )) {
@@ -1596,7 +1624,13 @@ export function buildRequestBodyFromCanonical(
       if (variantLeafNames?.has(leaf)) continue;
       const varBase = `${camelCase(bindingMap[f.path] || leaf || 'value')}Var`;
       if (!template[leaf]) {
-        if (scenario.bindings?.[varBase]) {
+        // An explicit ABox `request.<field>` valueBinding is operator intent, not
+        // a name collision, so it keeps its fill (and is re-applied by the
+        // "ensure all domain request.* bindings are present" pass below).
+        // `defaults` stays reachable either way — request-defaults.json is
+        // explicit per-config configuration.
+        const suppressBindingFill = !bindingMap[f.path] && optionalOnlySemanticTopLevel.has(leaf);
+        if (!suppressBindingFill && scenario.bindings?.[varBase]) {
           template[leaf] = `${'${'}${varBase}}`;
         } else if (defaults && Object.hasOwn(defaults, leaf)) {
           template[leaf] = defaults[leaf];
@@ -1763,23 +1797,26 @@ export function buildRequestBodyFromCanonical(
         );
       }
       const fileRef = regHit.ref;
-      // Bind jobType from the chosen fixture for later use in the request
-      // body (`activateJobs.type`, `completeJob`/`failJob`/`throwJobError`
-      // path params, etc.). After #164 the SOLE source is
-      // `providesValues.JobType[0]` (declared on the bpmnProcess fixture
-      // alongside ElementId). The legacy `parameters.jobType` field and
-      // its `??`-fallback reader are gone.
+      // Seed scenario bindings from the chosen fixture's providesValues.
+      // Each entry maps a semantic-type name (e.g. "JobType", "MessageName")
+      // to its concrete model-derived value(s); we select index-0 and bind
+      // as `<camelCase(type)>Var`. Generalises the former JobType-only block
+      // to cover MessageName, CorrelationKey, and any future modelDerived
+      // semantic whose value is baked into the fixture. See #305.
       //
       // The `jobType` → `type` mapping special-case elsewhere in
       // `buildRequestBodyFromCanonical` (pairing the semantically-named
       // `jobType` binding with the spec-named `type` field) is
       // intentionally left in place — that's a separate architectural
       // cleanup tracked by #162 PR 3 (unified dispatch).
-      const jobTypeValue = regHit?.providesValues?.JobType?.[0];
-      if (jobTypeValue !== undefined) {
-        const varName = 'jobTypeVar';
-        scenario.bindings ||= {};
-        if (!scenario.bindings[varName]) scenario.bindings[varName] = jobTypeValue;
+      if (regHit?.providesValues) {
+        for (const [semanticType, values] of Object.entries(regHit.providesValues)) {
+          if (values?.[0] !== undefined) {
+            const varName = `${camelCase(semanticType)}Var`;
+            scenario.bindings ||= {};
+            if (!scenario.bindings[varName]) scenario.bindings[varName] = values[0];
+          }
+        }
       }
       // #172: fulfill modelDerived variant placeholders from the chosen
       // deploy fixture. The variant generator installs a synthetic

@@ -72,6 +72,17 @@
       "producedBy": [
         "createDeployment"
       ]
+    },
+    {
+      "name": "MessageCorrelationExists",
+      "parameter": "messageKey",
+      "producedBy": [
+        "correlateMessage"
+      ],
+      "requires": [
+        "ProcessInstanceExists",
+        "ModelEmitsMessageSubscription"
+      ]
     }
   ],
   "operationRequirements": [
@@ -147,6 +158,33 @@
       "operationId": "searchProcessDefinitions",
       "requires": [
         "ProcessDefinitionDeployed"
+      ]
+    },
+    {
+      "operationId": "searchMessageSubscriptions",
+      "requires": [
+        "ProcessInstanceExists",
+        "ModelEmitsMessageSubscription"
+      ]
+    },
+    {
+      "operationId": "correlateMessage",
+      "requires": [
+        "ProcessInstanceExists",
+        "ModelEmitsMessageSubscription"
+      ],
+      "produces": [
+        "MessageCorrelationExists"
+      ],
+      "valueBindings": {
+        "request.name": "ModelEmitsMessageSubscription.messageName",
+        "request.correlationKey": "semantic:CorrelationKey"
+      }
+    },
+    {
+      "operationId": "searchCorrelatedMessageSubscriptions",
+      "requires": [
+        "MessageCorrelationExists"
       ]
     }
   ]

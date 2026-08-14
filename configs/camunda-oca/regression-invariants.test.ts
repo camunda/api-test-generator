@@ -7667,6 +7667,219 @@ describeForThisConfig(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Optional semantic-typed body fields are variant-suite-only (#247)
+// ---------------------------------------------------------------------------
+//
+// Companion to the feature-base guard above, which only inspects the FINAL
+// step of `variantKey: "base"` feature scenarios. The defect class is wider
+// than that window: `buildRequestBodyFromCanonical`'s optional-fill pass
+// derives its binding from the field's own leaf name (`tenantId` →
+// `tenantIdVar`), so ANY step — prerequisite or endpoint, in any suite —
+// picks up an optional field the moment some unrelated step in the chain
+// mints a same-named binding. That is how createDeployment's multipart
+// `globalContextSeeds` binding leaked `tenantId` into correlateMessage's
+// body across the feature, variant, and planner outputs at once.
+//
+// Post-fix contract: a top-level field whose only `requestBodySemanticTypes`
+// annotations are OPTIONAL may carry a `${binding}` placeholder only when
+//   1. the step is the scenario's FINAL step and the field is one of the
+//      scenario's `populatesSubShape` subject leaves (the variant suite's own
+//      coverage, injected by `mergePopulatesSubShapeIntoFinalBody`), or
+//   2. the operation declares an explicit `valueBindings["request.<field>"]`
+//      entry in the runtime-states ABox (operator intent), or
+//   3. the field has a `request-defaults.json` entry (explicit config).
+// Anything else is an opportunistic name-collision fill.
+//
+// The assertion targets `${…}` placeholders specifically because that is the
+// exact shape the gated code path emits — `request-defaults` values are
+// literals and never match.
+describeForThisConfig(
+  'bundled-spec invariants: optional semantic-typed body fields are variant-suite-only (#247)',
+  () => {
+    interface PlanStep {
+      operationId: string;
+      bodyKind?: string;
+      bodyTemplate?: unknown;
+    }
+    interface WalkedScenario {
+      id: string;
+      variantKey?: string;
+      populatesSubShape?: { leafPaths?: string[] };
+      requestPlan?: PlanStep[];
+    }
+    interface WalkedScenarioFile {
+      scenarios?: WalkedScenario[];
+    }
+    interface RuntimeStatesAbox {
+      operationRequirements?: { operationId?: string; valueBindings?: Record<string, string> }[];
+    }
+    interface RequestDefaultsFile {
+      global?: Record<string, unknown>;
+      operations?: Record<string, Record<string, unknown>>;
+    }
+
+    const PLACEHOLDER_RE = /^\$\{[A-Za-z_$][\w$]*\}$/;
+
+    for (const dir of [SCENARIOS_DIR, FEATURE_SCENARIOS_DIR, VARIANT_SCENARIOS_DIR]) {
+      if (!existsSync(dir)) {
+        throw new Error(
+          `Scenario output directory not found at ${dir}. Run 'npm run pipeline' first.`,
+        );
+      }
+    }
+
+    // Per-operation set of top-level body fields whose every semantic-type
+    // annotation is OPTIONAL. Mirrors the planner's own grouping: strip a
+    // trailing `[]`, skip nested paths and `$`-prefixed operator pseudo-fields,
+    // and treat a single required annotation at the path as justification.
+    const graph = loadGraph();
+    const optionalOnlyByOp = new Map<string, Set<string>>();
+    for (const op of graph.operations) {
+      const anyRequiredByField = new Map<string, boolean>();
+      for (const leaf of op.requestBodySemanticTypes ?? []) {
+        if (typeof leaf.fieldPath !== 'string') continue;
+        const fieldPath = leaf.fieldPath.replace(/\[\]$/, '');
+        if (fieldPath.includes('.') || fieldPath.startsWith('$')) continue;
+        anyRequiredByField.set(
+          fieldPath,
+          (anyRequiredByField.get(fieldPath) ?? false) || leaf.required === true,
+        );
+      }
+      const optionalOnly = new Set<string>();
+      for (const [fieldPath, anyRequired] of anyRequiredByField) {
+        if (!anyRequired) optionalOnly.add(fieldPath);
+      }
+      if (optionalOnly.size) optionalOnlyByOp.set(op.operationId, optionalOnly);
+    }
+
+    // Allow-rule 2: explicit ABox `request.<field>` valueBindings.
+    const aboxPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'ontology', 'runtime-states.json');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const abox = JSON.parse(readFileSync(aboxPath, 'utf8')) as RuntimeStatesAbox;
+    const declaredFieldsByOp = new Map<string, Set<string>>();
+    for (const entry of abox.operationRequirements ?? []) {
+      if (!entry.operationId) continue;
+      const fields = declaredFieldsByOp.get(entry.operationId) ?? new Set<string>();
+      for (const key of Object.keys(entry.valueBindings ?? {})) {
+        if (key.startsWith('request.')) fields.add(key.slice('request.'.length));
+      }
+      declaredFieldsByOp.set(entry.operationId, fields);
+    }
+
+    // Allow-rule 3: explicit request-defaults entries (global or per-operation).
+    const defaultsPath = join(REPO_ROOT, 'configs', CONFIG_NAME, 'request-defaults.json');
+    // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+    const requestDefaults = JSON.parse(readFileSync(defaultsPath, 'utf8')) as RequestDefaultsFile;
+    const globalDefaultKeys = new Set(Object.keys(requestDefaults.global ?? {}));
+    // Pre-indexed per-operation default keys. Built once here rather than
+    // re-derived per body field: the scan below is a triple-nested loop over
+    // every scenario in all three output dirs, so an `Object.keys()` inside it
+    // allocates an array per field for no benefit.
+    const opDefaultKeysByOp = new Map<string, Set<string>>(
+      Object.entries(requestDefaults.operations ?? {}).map(([opId, defaults]) => [
+        opId,
+        new Set(Object.keys(defaults ?? {})),
+      ]),
+    );
+
+    interface Offender {
+      dir: string;
+      file: string;
+      scenarioId: string;
+      operationId: string;
+      field: string;
+    }
+    const offenders: Offender[] = [];
+    // Non-vacuity counter: legitimate allow-rule-1 occurrences (a variant
+    // populating its OWN optional semantic leaf).
+    let subjectLeafHits = 0;
+
+    for (const [dirLabel, dir] of [
+      ['scenarios', SCENARIOS_DIR],
+      ['feature-output', FEATURE_SCENARIOS_DIR],
+      ['variant-output', VARIANT_SCENARIOS_DIR],
+    ] as const) {
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith('-scenarios.json')) continue;
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const parsed = JSON.parse(readFileSync(join(dir, f), 'utf8')) as WalkedScenarioFile;
+        for (const scenario of parsed.scenarios ?? []) {
+          const steps = scenario.requestPlan ?? [];
+          const subjectLeaves = new Set(
+            (scenario.populatesSubShape?.leafPaths ?? []).map((p) => p.replace(/\[\]$/, '')),
+          );
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            if (step.bodyKind !== 'json') continue;
+            const body = step.bodyTemplate;
+            if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+            const optionalOnly = optionalOnlyByOp.get(step.operationId);
+            if (!optionalOnly?.size) continue;
+            const isFinal = i === steps.length - 1;
+            // Resolved once per step — both are per-operation, not per-field.
+            const declaredFields = declaredFieldsByOp.get(step.operationId);
+            const opDefaultKeys = opDefaultKeysByOp.get(step.operationId);
+            for (const [field, value] of Object.entries(body)) {
+              if (!optionalOnly.has(field)) continue;
+              if (typeof value !== 'string' || !PLACEHOLDER_RE.test(value)) continue;
+              // 1 — the variant suite's own subject leaf on the endpoint step.
+              if (isFinal && subjectLeaves.has(field)) {
+                subjectLeafHits++;
+                continue;
+              }
+              // 2 — explicit ABox operator intent.
+              if (declaredFields?.has(field)) continue;
+              // 3 — explicit per-config request defaults.
+              if (globalDefaultKeys.has(field) || opDefaultKeys?.has(field)) continue;
+              offenders.push({
+                dir: dirLabel,
+                file: f,
+                scenarioId: scenario.id,
+                operationId: step.operationId,
+                field,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    it('no scenario step fills an optional semantic-typed top-level field from a same-named chain binding', () => {
+      expect(
+        offenders,
+        `Found ${offenders.length} scenario steps whose bodyTemplate carries a \`\${binding}\` ` +
+          `in a top-level field backed only by OPTIONAL semantic-typed leaves. Optional ` +
+          `semantic population is owned by the variant suite ` +
+          `(\`generateOptionalSubShapeVariants\` + \`mergePopulatesSubShapeIntoFinalBody\`); a ` +
+          `fill here means \`buildRequestBodyFromCanonical\`'s optional-fill pass matched the ` +
+          `field's leaf name against a binding minted by an unrelated step in the chain. ` +
+          `Declare an ABox \`valueBindings["request.<field>"]\` entry if the population is ` +
+          `intentional. Offenders:\n${offenders
+            .map(
+              (o) =>
+                `  - ${o.dir}/${o.file} :: ${o.scenarioId} (${o.operationId}) :: field "${o.field}"`,
+            )
+            .join('\n')}`,
+      ).toEqual([]);
+    });
+
+    it('the walk actually reaches optional semantic-typed fields (non-vacuity floor)', () => {
+      // Mirrors the `multipartFieldHits` floor of the #342 suite: the guard
+      // above passes trivially if the walk never sees an optional semantic
+      // field at all (renamed output dirs, a changed `populatesSubShape`
+      // shape, or a spec that dropped every optional annotation). At least one
+      // variant must be exercising its own optional semantic leaf.
+      expect(
+        subjectLeafHits,
+        'expected ≥1 variant scenario whose FINAL step populates its own optional ' +
+          'semantic-typed top-level leaf (allow-rule 1). Zero matches means the scan never ' +
+          'reached the fields this invariant governs, so the offender check is vacuous.',
+      ).toBeGreaterThan(0);
+    });
+  },
+);
+
 describeForThisConfig(
   'bundled-spec invariants: response extract autoderivation parity (#251)',
   () => {
