@@ -5,14 +5,6 @@ import {
 } from '../../materializer/src/csharp-sdk/emitter.js';
 import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
 
-const BASE_REQUEST_STEP = {
-  operationId: 'createProcessInstance',
-  method: 'POST',
-  pathTemplate: '/process-instances',
-  pathParams: [],
-  expect: { status: 200 },
-} satisfies RequestStep;
-
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   endpoint: { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
   requiredSemanticTypes: [],
@@ -27,9 +19,35 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
       ],
       producedSemanticTypes: [],
       satisfiedSemanticTypes: [],
-      requestPlan: [BASE_REQUEST_STEP],
+      requestPlan: [
+        {
+          operationId: 'createProcessInstance',
+          method: 'POST',
+          pathTemplate: '/process-instances',
+          pathParams: [],
+          expect: { status: 200 },
+        } satisfies RequestStep,
+      ],
     },
   ],
+};
+
+const SEARCH_JOBS_REQUEST_STEP: RequestStep = {
+  operationId: 'searchJobs',
+  method: 'POST',
+  pathTemplate: '/jobs/search',
+  bodyKind: 'json',
+  bodyTemplate: {
+    worker: 'test-worker',
+  },
+  expect: { status: 200 },
+};
+
+const CREATE_PROCESS_INSTANCE_REQUEST_STEP: RequestStep = {
+  operationId: 'createProcessInstance',
+  method: 'POST',
+  pathTemplate: '/process-instances',
+  expect: { status: 400 },
 };
 
 // Mirrors the committed csharp-sdk/examples/operation-map.json shape:
@@ -40,6 +58,13 @@ const OPERATION_MAP: CsharpOperationMap = {
       file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
       region: 'CreateProcessInstanceAsync',
       label: 'Create process instance',
+    },
+  ],
+  searchJobs: [
+    {
+      file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+      region: 'SearchJobsAsync',
+      label: 'Search jobs',
     },
   ],
 };
@@ -71,12 +96,68 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('[object Object]');
   });
 
-  test('falls back to PascalCase+Async when the operation is absent from the map', async () => {
+  test('throws when the operation is absent from the published C# SDK map', async () => {
     const emitter = createCsharpEmitter({});
-    const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+    await expect(emitter.emit(SAMPLE_COLLECTION, EMIT_CTX)).rejects.toThrow(
+      'No published C# SDK method mapping found for operationId createProcessInstance',
+    );
+  });
 
-    expect(files[0].content).toContain('await Client.CreateProcessInstanceAsync(');
-    expect(files[0].content).not.toContain('[object Object]');
+  test('uses the published request DTO name instead of the mechanical operationId name', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const jobsCollection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'job search',
+          description: 'Search jobs',
+          operations: [{ operationId: 'searchJobs', method: 'POST', path: '/jobs/search' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [SEARCH_JOBS_REQUEST_STEP],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(jobsCollection, EMIT_CTX);
+
+    expect(files[0].content).toContain('BuildRequest<JobSearchQuery>(');
+    expect(files[0].content).not.toContain('BuildRequest<SearchJobsRequest>(');
+  });
+
+  test('derives request path parameters from the path template when step.pathParams is absent', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const requestWithPathParam: EndpointScenarioCollection = {
+      endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'job search',
+          description: 'Search jobs with a path placeholder',
+          operations: [
+            { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              ...SEARCH_JOBS_REQUEST_STEP,
+              pathTemplate: '/jobs/{jobKey}/search',
+              pathParams: undefined,
+            },
+          ],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(requestWithPathParam, EMIT_CTX);
+
+    expect(files[0].content).toContain('["jobKey"] = RequireBinding(ctx, "jobKeyVar")');
   });
 
   test('feature and variant suites for the same operationId emit distinct C# class names', async () => {
@@ -104,7 +185,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('renders the RANDOM placeholder through the seeding helper instead of ctx["RANDOM"]', async () => {
-    const emitter = createCsharpEmitter({});
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const randomCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
@@ -123,39 +204,28 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('ctx["RANDOM"]');
   });
 
-  test('does not import the local-only RestSdk.Models namespace for generated request types', async () => {
-    // The real Camunda.Orchestration.Sdk NuGet package is a single flat
-    // namespace; RestSdk.Models only exists in this repo's local vendored
-    // reference client and doesn't resolve against the published package
-    // (confirmed via a real `dotnet build` against the restored package).
-    const emitter = createCsharpEmitter({});
+  test('does not import the obsolete RestSdk.Models namespace', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
 
-    expect(files[0].content).toContain('using Camunda.Orchestration.Sdk;');
-    expect(files[0].content).not.toContain('Camunda.Orchestration.RestSdk');
+    expect(files[0].content).not.toContain('using Camunda.Orchestration.RestSdk.Models;');
   });
 
-  test('uses HttpRequestException for generated error-path assertions', async () => {
-    const emitter = createCsharpEmitter({});
+  test('uses CamundaSdkException for generated error-path assertions', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const errorCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
         {
           ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...BASE_REQUEST_STEP,
-              expect: { status: 400 },
-            } satisfies RequestStep,
-          ],
+          requestPlan: [{ ...CREATE_PROCESS_INSTANCE_REQUEST_STEP }],
         },
       ],
     };
 
     const files = await emitter.emit(errorCollection, EMIT_CTX);
 
-    expect(files[0].content).toContain('Assert.ThrowsAsync<HttpRequestException>');
-    expect(files[0].content).toContain('(int?)ex.StatusCode');
-    expect(files[0].content).not.toContain('CamundaSdkException');
+    expect(files[0].content).toContain('Assert.ThrowsAnyAsync<CamundaSdkException>');
+    expect(files[0].content).toContain('(int?)ex.Status');
   });
 });

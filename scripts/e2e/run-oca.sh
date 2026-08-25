@@ -79,8 +79,13 @@ fi
 # ====================== 2. RUN: positive =============================
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
-  API_BASE_URL="${CORE_URL}/v2" ${BEARER_TOKEN:+BEARER_TOKEN="$BEARER_TOKEN"} CONFIG="$CONFIG" \
-    npx playwright test -c path-analyser/playwright.config.ts --reporter=list || true
+  if [ -n "${BEARER_TOKEN:-}" ]; then
+    API_BASE_URL="${CORE_URL}/v2" BEARER_TOKEN="$BEARER_TOKEN" CONFIG="$CONFIG" \
+      npx playwright test -c path-analyser/playwright.config.ts --reporter=list || true
+  else
+    API_BASE_URL="${CORE_URL}/v2" CONFIG="$CONFIG" \
+      npx playwright test -c path-analyser/playwright.config.ts --reporter=list || true
+  fi
 fi
 
 # request-validation Playwright run → JSON report per profile

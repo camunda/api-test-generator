@@ -8,6 +8,18 @@ import type {
 } from 'path-analyser/types';
 import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.js';
 
+const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
+  createDeployment: 'DeploymentRequest',
+  searchProcessInstances: 'ProcessInstanceSearchQuery',
+  activateJobs: 'JobActivationRequest',
+  searchJobs: 'JobSearchQuery',
+  completeJob: 'JobCompletionRequest',
+  cancelProcessInstance: 'CancelProcessInstanceRequest',
+  failJob: 'JobFailRequest',
+};
+
+const PATH_PARAM_RE = /\{([^}]+)\}/g;
+
 /**
  * A single operation-map entry as committed in
  * `csharp-sdk/examples/operation-map.json`. The SDK method to invoke is
@@ -100,14 +112,6 @@ function buildSuiteSource(
   lines.push('using System.IO;');
   lines.push('using System.Net.Http;');
   lines.push('using System.Threading.Tasks;');
-  // The real Camunda.Orchestration.Sdk NuGet package is a single flat
-  // namespace (client + request/response DTOs together) — there is no
-  // separate RestSdk.Models namespace in the published package. That
-  // namespace only exists in this repo's local vendored reference client
-  // under csharp-sdk/src/Camunda.Orchestration.RestSdk/, which generated
-  // suites do not reference. Importing it here causes CS0234 on the
-  // `using` line and cascading CS0246s for every DTO type in every
-  // generated file (confirmed via a real `dotnet build`).
   lines.push('using Camunda.Orchestration.Sdk;');
   lines.push('using Xunit;');
   lines.push('');
@@ -185,10 +189,13 @@ function renderScenarioTest(
   const requestPlan = s.requestPlan;
   requestPlan.forEach((step: RequestStep, idx: number) => {
     const method = mapping.resolveMethod(step.operationId);
+    if (method === undefined) {
+      throw new Error(`No published C# SDK method mapping found for operationId ${step.operationId}`);
+    }
     const varName = `result${idx + 1}`;
     const requestVar = `request${idx + 1}`;
     const responseVar = `response${idx + 1}`;
-    const requestType = `${toPascalCase(step.operationId)}Request`;
+    const requestType = resolveRequestTypeName(step);
     const expectError = step.expect.status >= 400;
 
     if (step.bodyKind === 'multipart') {
@@ -228,7 +235,7 @@ function renderScenarioTest(
       const documentFileField = step.operationId === 'createDocuments' ? 'files' : 'file';
 
       if (expectError) {
-        body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () =>');
+        body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () =>');
         body.push('        {');
         if (method === 'DeployResourcesFromFilesAsync') {
           const resources = multipart.files.resources;
@@ -255,7 +262,7 @@ function renderScenarioTest(
           body.push(`          await Client.${method}(content${idx + 1});`);
         }
         body.push('        });');
-        body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.StatusCode);`);
+        body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
         body.push('      }');
         return;
       }
@@ -320,22 +327,32 @@ function renderScenarioTest(
     body.push('      {');
 
     const requestParts = buildRequestParts(step);
+    const shouldPassEmptyRequest = requestParts.length === 0 && requestType !== undefined;
+    if (requestParts.length > 0 && requestType === undefined) {
+      throw new Error(`No published C# request DTO mapping found for operationId ${step.operationId}`);
+    }
     if (expectError) {
-      body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () => {');
+      body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () => {');
       if (requestParts.length > 0) {
         body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
+        body.push(`          await Client.${method}(${requestVar});`);
+      } else if (shouldPassEmptyRequest) {
+        body.push(`          var ${requestVar} = new ${requestType}();`);
         body.push(`          await Client.${method}(${requestVar});`);
       } else {
         body.push(`          await Client.${method}();`);
       }
       body.push('        });');
-      body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.StatusCode);`);
+      body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
       body.push('      }');
       return;
     }
 
     if (requestParts.length > 0) {
       body.push(`        var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
+      body.push(`        var ${varName} = await Client.${method}(${requestVar});`);
+    } else if (shouldPassEmptyRequest) {
+      body.push(`        var ${requestVar} = new ${requestType}();`);
       body.push(`        var ${varName} = await Client.${method}(${requestVar});`);
     } else {
       body.push(`        var ${varName} = await Client.${method}();`);
@@ -376,12 +393,10 @@ function renderScenarioTest(
 function buildRequestParts(step: RequestStep): string {
   const entries: string[] = [];
 
-  if (step.pathParams?.length) {
-    for (const p of step.pathParams) {
-      entries.push(
-        `          [${stringLiteral(p.name)}] = RequireBinding(ctx, ${stringLiteral(p.var)}),`,
-      );
-    }
+  for (const name of derivePathParamNames(step.pathTemplate)) {
+    entries.push(
+      `          [${stringLiteral(name)}] = RequireBinding(ctx, ${stringLiteral(`${toCamelCase(name)}Var`)}),`,
+    );
   }
 
   if (step.bodyKind === 'json' && step.bodyTemplate !== undefined) {
@@ -398,6 +413,21 @@ function buildRequestParts(step: RequestStep): string {
 
   if (entries.length === 0) return '';
   return `new Dictionary<string, object?>\n        {\n${entries.join('\n')}\n        }`;
+}
+
+function resolveRequestTypeName(step: RequestStep): string | undefined {
+  if (step.operationId === 'createProcessInstance') {
+    const body = step.bodyTemplate;
+    if (isRecord(body) && 'processDefinitionKey' in body) {
+      return 'ProcessInstanceCreationInstructionByKey';
+    }
+    return 'ProcessInstanceCreationInstructionById';
+  }
+  return CSHARP_REQUEST_TYPE_BY_OPERATION[step.operationId];
+}
+
+function derivePathParamNames(pathTemplate: string): string[] {
+  return [...pathTemplate.matchAll(PATH_PARAM_RE)].map((match) => match[1]);
 }
 
 function renderCsharpValue(value: unknown, indent = ''): string {
@@ -509,6 +539,11 @@ function stringLiteral(value: string): string {
 function toPascalCase(value: string): string {
   if (!value) return value;
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function toCamelCase(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function escapeQuotes(s: string): string {

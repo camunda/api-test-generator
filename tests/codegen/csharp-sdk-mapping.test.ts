@@ -4,11 +4,11 @@ import {
   FallbackMappingSource,
 } from '../../materializer/src/csharp-sdk/sdk-mapping.js';
 
-const OPERATION_MAP: Record<string, { file: string; region: string }[]> = {
+const OPERATION_MAP = {
   activateJobs: [{ file: 'noop', region: 'ActivateJobsAsync' }],
   createProcessInstance: [{ file: 'noop', region: 'CreateProcessInstanceAsync' }],
   completeJob: [{ file: 'noop', region: 'CompleteJobAsync' }],
-};
+} as const;
 
 describe('C# SDK mapping fallback', () => {
   test('keeps PascalCase Async method names unchanged', () => {
@@ -35,9 +35,9 @@ describe('C# SDK operation map source', () => {
     expect(mapping.resolveMethod('completeJob')).toBe('CompleteJobAsync');
   });
 
-  test('falls back for unmapped operation ids', () => {
+  test('returns undefined for unmapped operation ids', () => {
     const mapping = new CsharpOperationMapSource(OPERATION_MAP);
 
-    expect(mapping.resolveMethod('searchUsers')).toBe('SearchUsersAsync');
+    expect(mapping.resolveMethod('searchUsers')).toBeUndefined();
   });
 });
