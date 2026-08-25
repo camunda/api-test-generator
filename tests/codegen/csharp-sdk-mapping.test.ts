@@ -35,9 +35,9 @@ describe('C# SDK operation map source', () => {
     expect(mapping.resolveMethod('completeJob')).toBe('CompleteJobAsync');
   });
 
-  test('falls back for unmapped operation ids', () => {
+  test('returns undefined for unmapped operation ids', () => {
     const mapping = new CsharpOperationMapSource(OPERATION_MAP);
 
-    expect(mapping.resolveMethod('searchUsers')).toBe('SearchUsersAsync');
+    expect(mapping.resolveMethod('searchUsers')).toBeUndefined();
   });
 });

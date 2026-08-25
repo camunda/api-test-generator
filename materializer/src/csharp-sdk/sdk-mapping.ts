@@ -7,7 +7,7 @@
  * is absent, every operation maps to a default (toPascalCase(opId) + 'Async').
  */
 export interface SdkMappingSource {
-  resolveMethod(operationId: string): string;
+  resolveMethod(operationId: string): string | undefined;
 }
 
 export interface CsharpOperationMapEntry {
@@ -30,11 +30,9 @@ function isCsharpOperationMapEntry(value: unknown): value is CsharpOperationMapE
 
 export class CsharpOperationMapSource implements SdkMappingSource {
   private readonly methodByOpId: Map<string, string>;
-  private readonly fallback: FallbackMappingSource;
 
   constructor(mapping?: CsharpOperationMap) {
     this.methodByOpId = new Map<string, string>();
-    this.fallback = new FallbackMappingSource();
     if (mapping) {
       for (const [opId, entries] of Object.entries(mapping)) {
         const first = entries?.[0];
@@ -43,8 +41,8 @@ export class CsharpOperationMapSource implements SdkMappingSource {
     }
   }
 
-  resolveMethod(operationId: string): string {
-    return this.methodByOpId.get(operationId) ?? this.fallback.resolveMethod(operationId);
+  resolveMethod(operationId: string): string | undefined {
+    return this.methodByOpId.get(operationId);
   }
 }
 
