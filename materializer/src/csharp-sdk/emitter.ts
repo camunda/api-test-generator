@@ -10,11 +10,10 @@ import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.j
 
 const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   createDeployment: 'DeploymentRequest',
-  createProcessInstance: 'CreateProcessInstanceRequest',
-  searchProcessInstances: 'SearchProcessInstancesRequest',
-  activateJobs: 'ActivateJobsRequest',
-  searchJobs: 'JobSearchRequest',
-  completeJob: 'CompleteJobRequest',
+  searchProcessInstances: 'ProcessInstanceSearchQuery',
+  activateJobs: 'JobActivationRequest',
+  searchJobs: 'JobSearchQuery',
+  completeJob: 'JobCompletionRequest',
   cancelProcessInstance: 'CancelProcessInstanceRequest',
   failJob: 'JobFailRequest',
 };
@@ -114,7 +113,6 @@ function buildSuiteSource(
   lines.push('using System.Net.Http;');
   lines.push('using System.Threading.Tasks;');
   lines.push('using Camunda.Orchestration.Sdk;');
-  lines.push('using Camunda.Orchestration.RestSdk.Models;');
   lines.push('using Xunit;');
   lines.push('');
   lines.push('namespace CamundaIntegrationTests;');
@@ -191,10 +189,13 @@ function renderScenarioTest(
   const requestPlan = s.requestPlan;
   requestPlan.forEach((step: RequestStep, idx: number) => {
     const method = mapping.resolveMethod(step.operationId);
+    if (method === undefined) {
+      throw new Error(`No published C# SDK method mapping found for operationId ${step.operationId}`);
+    }
     const varName = `result${idx + 1}`;
     const requestVar = `request${idx + 1}`;
     const responseVar = `response${idx + 1}`;
-    const requestType = resolveRequestTypeName(step.operationId);
+    const requestType = resolveRequestTypeName(step);
     const expectError = step.expect.status >= 400;
 
     if (step.bodyKind === 'multipart') {
@@ -234,7 +235,7 @@ function renderScenarioTest(
       const documentFileField = step.operationId === 'createDocuments' ? 'files' : 'file';
 
       if (expectError) {
-        body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () =>');
+        body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () =>');
         body.push('        {');
         if (method === 'DeployResourcesFromFilesAsync') {
           const resources = multipart.files.resources;
@@ -261,7 +262,7 @@ function renderScenarioTest(
           body.push(`          await Client.${method}(content${idx + 1});`);
         }
         body.push('        });');
-        body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.StatusCode);`);
+        body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
         body.push('      }');
         return;
       }
@@ -326,25 +327,32 @@ function renderScenarioTest(
     body.push('      {');
 
     const requestParts = buildRequestParts(step);
+    const shouldPassEmptyRequest = requestParts.length === 0 && requestType !== undefined;
     if (requestParts.length > 0 && requestType === undefined) {
       throw new Error(`No published C# request DTO mapping found for operationId ${step.operationId}`);
     }
     if (expectError) {
-      body.push('        var ex = await Assert.ThrowsAsync<HttpRequestException>(async () => {');
+      body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () => {');
       if (requestParts.length > 0) {
         body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
+        body.push(`          await Client.${method}(${requestVar});`);
+      } else if (shouldPassEmptyRequest) {
+        body.push(`          var ${requestVar} = new ${requestType}();`);
         body.push(`          await Client.${method}(${requestVar});`);
       } else {
         body.push(`          await Client.${method}();`);
       }
       body.push('        });');
-      body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.StatusCode);`);
+      body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
       body.push('      }');
       return;
     }
 
     if (requestParts.length > 0) {
       body.push(`        var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
+      body.push(`        var ${varName} = await Client.${method}(${requestVar});`);
+    } else if (shouldPassEmptyRequest) {
+      body.push(`        var ${requestVar} = new ${requestType}();`);
       body.push(`        var ${varName} = await Client.${method}(${requestVar});`);
     } else {
       body.push(`        var ${varName} = await Client.${method}();`);
@@ -407,8 +415,15 @@ function buildRequestParts(step: RequestStep): string {
   return `new Dictionary<string, object?>\n        {\n${entries.join('\n')}\n        }`;
 }
 
-function resolveRequestTypeName(operationId: string): string | undefined {
-  return CSHARP_REQUEST_TYPE_BY_OPERATION[operationId];
+function resolveRequestTypeName(step: RequestStep): string | undefined {
+  if (step.operationId === 'createProcessInstance') {
+    const body = step.bodyTemplate;
+    if (isRecord(body) && 'processDefinitionKey' in body) {
+      return 'ProcessInstanceCreationInstructionByKey';
+    }
+    return 'ProcessInstanceCreationInstructionById';
+  }
+  return CSHARP_REQUEST_TYPE_BY_OPERATION[step.operationId];
 }
 
 function derivePathParamNames(pathTemplate: string): string[] {

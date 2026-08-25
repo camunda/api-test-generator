@@ -60,6 +60,13 @@ const OPERATION_MAP: CsharpOperationMap = {
       label: 'Create process instance',
     },
   ],
+  searchJobs: [
+    {
+      file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+      region: 'SearchJobsAsync',
+      label: 'Search jobs',
+    },
+  ],
 };
 
 const EMIT_CTX = {
@@ -89,16 +96,15 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('[object Object]');
   });
 
-  test('falls back to PascalCase+Async when the operation is absent from the map', async () => {
+  test('throws when the operation is absent from the published C# SDK map', async () => {
     const emitter = createCsharpEmitter({});
-    const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
-
-    expect(files[0].content).toContain('await Client.CreateProcessInstanceAsync(');
-    expect(files[0].content).not.toContain('[object Object]');
+    await expect(emitter.emit(SAMPLE_COLLECTION, EMIT_CTX)).rejects.toThrow(
+      'No published C# SDK method mapping found for operationId createProcessInstance',
+    );
   });
 
   test('uses the published request DTO name instead of the mechanical operationId name', async () => {
-    const emitter = createCsharpEmitter({});
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const jobsCollection: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
       requiredSemanticTypes: [],
@@ -118,12 +124,12 @@ describe('C# SDK Emitter', () => {
 
     const files = await emitter.emit(jobsCollection, EMIT_CTX);
 
-    expect(files[0].content).toContain('BuildRequest<JobSearchRequest>(');
+    expect(files[0].content).toContain('BuildRequest<JobSearchQuery>(');
     expect(files[0].content).not.toContain('BuildRequest<SearchJobsRequest>(');
   });
 
   test('derives request path parameters from the path template when step.pathParams is absent', async () => {
-    const emitter = createCsharpEmitter({});
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const requestWithPathParam: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
       requiredSemanticTypes: [],
@@ -179,7 +185,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('renders the RANDOM placeholder through the seeding helper instead of ctx["RANDOM"]', async () => {
-    const emitter = createCsharpEmitter({});
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const randomCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
@@ -198,15 +204,15 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('ctx["RANDOM"]');
   });
 
-  test('imports the RestSdk.Models namespace for generated request types', async () => {
-    const emitter = createCsharpEmitter({});
+  test('does not import the obsolete RestSdk.Models namespace', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
 
-    expect(files[0].content).toContain('using Camunda.Orchestration.RestSdk.Models;');
+    expect(files[0].content).not.toContain('using Camunda.Orchestration.RestSdk.Models;');
   });
 
-  test('uses HttpRequestException for generated error-path assertions', async () => {
-    const emitter = createCsharpEmitter({});
+  test('uses CamundaSdkException for generated error-path assertions', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
     const errorCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
@@ -219,8 +225,7 @@ describe('C# SDK Emitter', () => {
 
     const files = await emitter.emit(errorCollection, EMIT_CTX);
 
-    expect(files[0].content).toContain('Assert.ThrowsAsync<HttpRequestException>');
-    expect(files[0].content).toContain('(int?)ex.StatusCode');
-    expect(files[0].content).not.toContain('CamundaSdkException');
+    expect(files[0].content).toContain('Assert.ThrowsAnyAsync<CamundaSdkException>');
+    expect(files[0].content).toContain('(int?)ex.Status');
   });
 });
