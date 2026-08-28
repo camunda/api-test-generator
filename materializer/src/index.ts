@@ -36,7 +36,7 @@ import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js
 import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
-import { materializeSdkSupport } from './js-sdk/materialize-support.js';
+import { materializeSdkFixtures, materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter, readClientMintedFixtures } from './playwright/emitter.js';
 import {
@@ -589,6 +589,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
   }
   if (emitter.id === 'js-sdk') {
     await materializeSdkSupport(outDir);
+    await materializeSdkFixtures(outDir);
   }
   if (emitter.id === 'python-sdk') {
     await materializePythonSupport(outDir);
