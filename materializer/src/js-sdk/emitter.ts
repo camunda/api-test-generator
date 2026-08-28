@@ -17,7 +17,11 @@ import type {
 import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
 import { camelCase } from '../playwright/stepRenderer.js';
 import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
-import { renderJavaScriptBody } from './sdk-mapping.js';
+import {
+  containsJavaScriptFixtureMarker,
+  renderJavaScriptBody,
+  renderJavaScriptMultipartBody,
+} from './sdk-mapping.js';
 
 // Regenerate via `npm run js-sdk:dump-methods --workspace materializer`
 // whenever the @camunda8/sdk devDependency is bumped.
@@ -122,8 +126,20 @@ export function renderJsSuite(
   const needsSeeding = collection.scenarios.some(
     (scenario) => computeScenarioSeedLines(scenario, '').length > 0,
   );
+  const needsFixtures = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) =>
+      containsJavaScriptFixtureMarker(
+        step.bodyKind === 'multipart'
+          ? (step.multipartTemplate ?? step.bodyTemplate)
+          : step.bodyTemplate,
+      ),
+    ),
+  );
   if (needsSeeding) {
     lines.push("import { initSpecSalt, seedBinding } from '../support/seeding';");
+  }
+  if (needsFixtures) {
+    lines.push("import { resolveFixture } from '../support/fixtures';");
   }
   lines.push('');
   if (needsSeeding) {
@@ -285,7 +301,10 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
       ? (step.multipartTemplate ?? step.bodyTemplate)
       : step.bodyTemplate;
   if (payloadTemplate) {
-    const bodyExpr = renderJavaScriptBody(payloadTemplate, {});
+    const bodyExpr =
+      step.bodyKind === 'multipart'
+        ? renderJavaScriptMultipartBody(payloadTemplate)
+        : renderJavaScriptBody(payloadTemplate, {});
     lines.push(`      const body${stepNum} = ${bodyExpr};`);
   }
 
@@ -307,7 +326,7 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
   // bound method's declared arity at runtime, so this adapts automatically
   // as the upstream SDK adds/removes eventually-consistent operations.
   lines.push(
-    `      const consistency${stepNum} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 0 } } : undefined;`,
+    `      const consistency${stepNum} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;`,
   );
   // .bind(client) preserves the `this` binding the real SDK's generated
   // methods rely on internally (e.g. accessing `this._client`) — without

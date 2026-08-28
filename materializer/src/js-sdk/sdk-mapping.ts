@@ -1,124 +1,8 @@
 /**
- * JavaScript SDK operation map loading and source code generation.
+ * JavaScript SDK request body source code generation.
  *
- * The JavaScript SDK operation-map.json maps OpenAPI operationId → SDK method name.
- * This module loads it and provides JavaScript-specific utilities for rendering
- * test code (string escaping, URL expressions with template literals, body substitution).
+ * This module provides JavaScript-specific utilities for rendering request bodies.
  */
-
-/**
- * Queryable wrapper around the operation map, providing methods to look up
- * SDK references and validate coverage.
- */
-export class OperationMapJsonSource {
-  private readonly map: Record<string, string>;
-
-  constructor(data: Record<string, string>) {
-    this.map = data;
-  }
-
-  /**
-   * Factory method to create an operation map from JSON string.
-   * Validates that the map is a plain object with string values.
-   *
-   * @param jsonString JSON string containing the operation map
-   * @returns OperationMapJsonSource instance
-   * @throws Error if JSON is invalid or structure is wrong
-   */
-  static fromJson(jsonString: string): OperationMapJsonSource {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(jsonString);
-    } catch (e) {
-      throw new Error(
-        `Failed to parse JavaScript SDK operation-map.json: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-
-    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-      throw new Error('JavaScript SDK operation-map.json must be a JSON object');
-    }
-
-    // biome-ignore lint/plugin: runtime contract boundary — parsed JSON validated as a plain object above
-    const map = raw as Record<string, string>;
-    return new OperationMapJsonSource(map);
-  }
-
-  /**
-   * Look up the SDK method name for an operation by its OpenAPI operationId.
-   * Returns undefined if the operation is not in the map.
-   */
-  lookup(operationId: string): string | undefined {
-    const entry = this.map[operationId];
-    return typeof entry === 'string' ? entry : undefined;
-  }
-
-  /**
-   * Get all operation IDs in the map.
-   */
-  operationIds(): string[] {
-    return Object.keys(this.map);
-  }
-
-  /**
-   * Check if an operation is mapped in the SDK.
-   */
-  has(operationId: string): boolean {
-    return operationId in this.map;
-  }
-}
-
-/**
- * Render a JavaScript string literal with proper escaping.
- * Handles single quotes, backticks, backslashes, and special characters.
- *
- * Uses single quotes as the outer delimiter and escapes internal single quotes
- * with backslashes.
- *
- * @example
- * toJavaScriptLiteral("hello's world") → "hello\\'s world"
- */
-export function toJavaScriptLiteral(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\') // backslash
-    .replace(/'/g, "\\'") // single quote
-    .replace(/\n/g, '\\n') // newline
-    .replace(/\r/g, '\\r') // carriage return
-    .replace(/\t/g, '\\t'); // tab
-}
-
-/**
- * Build a JavaScript template literal expression for a path with parameter substitution.
- *
- * Converts OpenAPI path parameters (in curly braces) to template literal syntax
- * with context variable lookups. Provides fallback to the original parameter name
- * if the binding is missing.
- *
- * @example
- * buildJavaScriptUrlExpression('/tasks/{taskId}')
- * → "`/tasks/${ctx['taskId'] ?? '{taskId}'}`"
- *
- * @param pathTemplate OpenAPI-style path with {paramName} placeholders
- * @param pathParams Optional path-param mappings from the planner
- * @returns JavaScript template literal expression
- */
-export function buildJavaScriptUrlExpression(
-  pathTemplate: string,
-  pathParams?: { name: string; var: string }[],
-): string {
-  const nameToVar = new Map<string, string>();
-  for (const param of pathParams ?? []) {
-    nameToVar.set(param.name, param.var);
-  }
-
-  const result = pathTemplate.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
-    const varName = nameToVar.get(paramName) ?? paramName;
-    return `\${ctx['${varName}'] ?? '{${paramName}}'}`;
-  });
-
-  return `\`${result}\``;
-}
-
 /**
  * Render a request body as a JavaScript object, substituting placeholder variables.
  *
@@ -139,14 +23,68 @@ export function renderJavaScriptBody(
 ): string {
   if (!bodyTemplate) return '{}';
 
-  const json = JSON.stringify(bodyTemplate, null, 2);
-  let result = json;
+  function render(value: unknown, indent: string): string {
+    if (typeof value === 'string') {
+      const fileMatch = value.match(/^@@FILE:(.+)$/);
+      if (fileMatch) return `await resolveFixture(${JSON.stringify(fileMatch[1])})`;
+      const bindingMatch = value.match(/^\\?\$\{([^}]+)\}$/);
+      if (bindingMatch) return `ctx['${bindingMatch[1]}']`;
+      return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return '[]';
+      const childIndent = `${indent}  `;
+      return `[\n${value.map((item) => `${childIndent}${render(item, childIndent)}`).join(',\n')}\n${indent}]`;
+    }
+    if (typeof value === 'object' && value !== null) {
+      const entries = Object.entries(value);
+      if (entries.length === 0) return '{}';
+      const childIndent = `${indent}  `;
+      return `{\n${entries
+        .map(([key, item]) => `${childIndent}${JSON.stringify(key)}: ${render(item, childIndent)}`)
+        .join(',\n')}\n${indent}}`;
+    }
+    return JSON.stringify(value);
+  }
 
-  // Replace "${varName}" or "\${varName}" placeholders with ctx['varName']
-  // Only match placeholders that are entire string values (Commit 7082e67 pattern from Python)
-  result = result.replace(/"\\?\$\{([^}]+)\}"/g, (_match, varName: string) => {
-    return `ctx['${varName}']`;
-  });
+  return render(bodyTemplate, '');
+}
 
-  return result;
+export function renderJavaScriptMultipartBody(template: unknown): string {
+  if (typeof template !== 'object' || template === null || Array.isArray(template)) return '{}';
+  const fields =
+    'fields' in template && typeof template.fields === 'object' && template.fields !== null
+      ? template.fields
+      : {};
+  const files =
+    'files' in template && typeof template.files === 'object' && template.files !== null
+      ? template.files
+      : {};
+  const entries = [
+    ...Object.entries(fields).map(
+      ([key, value]) => `${JSON.stringify(key)}: ${renderJavaScriptBody(value)}`,
+    ),
+    ...Object.entries(files).map(([key, value]) => {
+      const values = Array.isArray(value) ? value : [value];
+      const rendered = values.map((item) => {
+        if (typeof item === 'string' && item.startsWith('@@FILE:')) {
+          const relativePath = item.slice('@@FILE:'.length);
+          const fileName = relativePath.split('/').pop() ?? relativePath;
+          return `new File([await resolveFixture(${JSON.stringify(relativePath)})], ${JSON.stringify(fileName)})`;
+        }
+        return renderJavaScriptBody(item);
+      });
+      return `${JSON.stringify(key)}: [${rendered.join(', ')}]`;
+    }),
+  ];
+  return `{\n${entries.map((entry) => `  ${entry}`).join(',\n')}\n}`;
+}
+
+export function containsJavaScriptFixtureMarker(value: unknown): boolean {
+  if (typeof value === 'string') return value.startsWith('@@FILE:');
+  if (Array.isArray(value)) return value.some(containsJavaScriptFixtureMarker);
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some(containsJavaScriptFixtureMarker);
+  }
+  return false;
 }

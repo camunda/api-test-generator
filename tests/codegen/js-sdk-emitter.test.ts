@@ -135,6 +135,36 @@ const PENDING_BINDING_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+const FIXTURE_BODY_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'deployment fixture',
+      description: 'Deploy a BPMN resource from a fixture file',
+      operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      requestPlan: [
+        {
+          operationId: 'createDeployment',
+          method: 'POST',
+          pathTemplate: '/deployments',
+          expect: { status: 200 },
+          bodyTemplate: {
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner placeholder in a test fixture
+            fields: { tenantId: '${tenantIdVar}' },
+            files: { resources: '@@FILE:bpmn/service-task.bpmn' },
+          },
+          bodyKind: 'multipart',
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
     const emitter = createJsSdkEmitter();
@@ -204,5 +234,23 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).toContain("groupId: ctx['groupIdVar'],");
     expect(output).toContain("clientId: ctx['clientIdVar'],");
     expect(output).not.toContain('const input1 = {\n      };');
+  });
+
+  test('resolves nested @@FILE body markers through the generated fixture helper', () => {
+    const output = renderJsSuite(FIXTURE_BODY_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("import { resolveFixture } from '../support/fixtures';");
+    expect(output).toContain(
+      '"resources": [new File([await resolveFixture("bpmn/service-task.bpmn")], "service-task.bpmn")]',
+    );
+    expect(output).toContain('"tenantId": ctx[\'tenantIdVar\']');
+    expect(output).not.toContain('@@FILE:bpmn/service-task.bpmn');
+  });
+
+  test('uses a non-zero consistency wait budget for SDK methods requiring consistency', () => {
+    const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain('waitUpToMs: 5000');
+    expect(output).not.toContain('waitUpToMs: 0');
   });
 });

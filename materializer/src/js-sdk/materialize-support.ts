@@ -5,9 +5,45 @@
  * This includes `package.json`, `tsconfig.json`, Vitest configuration, and README.
  */
 
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { EmittedFile } from '@camunda8/emitter-sdk';
+import { getActiveConfigDir } from 'path-analyser/configResolver';
+
+export const JS_SDK_FIXTURES_DIR_NAME = 'fixtures';
+
+function defaultFixturesSourceDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(path.join(dir, 'configs.json'))) {
+      return path.join(getActiveConfigDir(dir), JS_SDK_FIXTURES_DIR_NAME);
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Could not locate repo root for JS SDK fixtures from ${here}.`);
+}
+
+const FIXTURE_SUPPORT = `import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export async function resolveFixture(relativePath: string): Promise<Buffer> {
+  if (!relativePath || path.isAbsolute(relativePath) || relativePath.includes('..')) {
+    throw new Error('Invalid fixture path: ' + relativePath);
+  }
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const fixturePath = path.resolve(here, '..', 'fixtures', relativePath);
+  try {
+    return await fs.readFile(fixturePath);
+  } catch (error) {
+    throw new Error('Fixture not found: ' + relativePath, { cause: error });
+  }
+}
+`;
 
 /**
  * Materialize JavaScript SDK support files into the output directory.
@@ -22,6 +58,25 @@ export async function materializeSdkSupport(outDir: string): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, file.content, 'utf8');
   }
+  await fs.writeFile(path.join(outDir, 'support', 'fixtures.ts'), FIXTURE_SUPPORT, 'utf8');
+}
+
+export async function materializeSdkFixtures(
+  outDir: string,
+  fixturesSourceDir: string = defaultFixturesSourceDir(),
+): Promise<string> {
+  const destination = path.join(outDir, JS_SDK_FIXTURES_DIR_NAME);
+  await fs.rm(destination, { recursive: true, force: true });
+  await fs.mkdir(destination, { recursive: true });
+  try {
+    await fs.cp(fixturesSourceDir, destination, { recursive: true });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return destination;
+    }
+    throw error;
+  }
+  return destination;
 }
 
 /**
