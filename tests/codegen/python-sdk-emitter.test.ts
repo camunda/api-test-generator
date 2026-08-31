@@ -110,7 +110,9 @@ describe('Python SDK Emitter', () => {
       expect(output).toContain('@pytest.mark.asyncio');
       // #<naming-fix>: prefixed with the scenario's own id (unique within a
       // collection) so scenarios sharing a display name don't collide.
-      expect(output).toContain('async def test_sc1_happy_path(ctx: TestContext)');
+      expect(output).toContain(
+        'async def test_sc1_happy_path(ctx: TestContext, client: httpx.AsyncClient)',
+      );
       expect(output).toContain('Step 1: createWidget');
     });
 
@@ -195,7 +197,19 @@ describe('Python SDK Emitter', () => {
 
     test('test functions accept ctx parameter', () => {
       const output = renderPythonSuite(SAMPLE_COLLECTION);
-      expect(output).toContain('(ctx: TestContext)');
+      expect(output).toContain('(ctx: TestContext, client: httpx.AsyncClient)');
+    });
+
+    test('integration mode injects the shared httpx client fixture', () => {
+      const output = renderPythonSuite(SAMPLE_COLLECTION);
+      expect(output).toContain('(ctx: TestContext, client: httpx.AsyncClient)');
+    });
+
+    test('integration mode never seeds client mocks inside generated tests', () => {
+      const output = renderPythonSuite(SAMPLE_COLLECTION);
+      expect(output).not.toContain('client = AsyncMock()');
+      expect(output).not.toContain('.return_value =');
+      expect(output).not.toContain('.side_effect = RuntimeError');
     });
 
     test('test functions include operation steps', () => {
@@ -236,8 +250,8 @@ describe('Python SDK Emitter', () => {
       // matching whatever ctx.set(...) would use for the same binding.
       expect(output).toContain("url_1 = f'/widgets/{ctx.get('widgetKeyVar') or 'widgetKey'}'");
       expect(output).toContain("body_1 = {'enabled': True, 'archived': False, 'owner': None}");
-      expect(output).toContain('response_1 = await client.create_widget(');
-      expect(output).toContain("assert response_1['status'] == 201");
+      expect(output).toContain('response_1 = await client.post(');
+      expect(output).toContain('assert response_1.status_code == 201');
       expect(output).not.toContain('placeholderOp');
       expect(output).not.toContain('pass  # TODO: implement');
     });
@@ -269,7 +283,9 @@ describe('Python SDK Emitter', () => {
       };
 
       const output = renderPythonSuite(collection);
-      expect(output).toContain('async def test_sc1_createprocessinstance_bpmn_1(ctx: TestContext)');
+      expect(output).toContain(
+        'async def test_sc1_createprocessinstance_bpmn_1(ctx: TestContext, client: httpx.AsyncClient)',
+      );
       expect(output).not.toMatch(/async def test_\S*[^\w\s(].*\(/);
     });
 
@@ -283,8 +299,12 @@ describe('Python SDK Emitter', () => {
       };
 
       const output = renderPythonSuite(collection);
-      expect(output).toContain('async def test_sc1_duplicate_name(ctx: TestContext)');
-      expect(output).toContain('async def test_sc2_duplicate_name(ctx: TestContext)');
+      expect(output).toContain(
+        'async def test_sc1_duplicate_name(ctx: TestContext, client: httpx.AsyncClient)',
+      );
+      expect(output).toContain(
+        'async def test_sc2_duplicate_name(ctx: TestContext, client: httpx.AsyncClient)',
+      );
     });
   });
 
@@ -353,8 +373,8 @@ describe('Python SDK Emitter', () => {
   // array of { file, region, label } (see csharp-sdk/examples/operation-map.json
   // for the reference format shared across emitters), not a single
   // { package, method, qualifiedName } object.
-  describe('operation map resolution (#354)', () => {
-    test('resolves the SDK method name from the real op-map shape (array of {file,region,label})', () => {
+  describe('HTTP method emission', () => {
+    test('uses the request step HTTP method when rendering client calls', () => {
       const operationMap = createOperationMapSourceFromJson(
         JSON.stringify({
           createWidget: [
@@ -364,13 +384,13 @@ describe('Python SDK Emitter', () => {
       );
 
       const output = renderPythonSuite(SAMPLE_COLLECTION, { operationMap });
-      expect(output).toContain('await client.create_widget_via_sdk(');
+      expect(output).toContain('await client.post(');
     });
 
-    test('falls back to snake_case(operationId) when the operation is not in the map', () => {
+    test('renders expected status assertions against real HTTP responses', () => {
       const operationMap = createOperationMapSourceFromJson(JSON.stringify({}));
       const output = renderPythonSuite(SAMPLE_COLLECTION, { operationMap });
-      expect(output).toContain('await client.create_widget(');
+      expect(output).toContain('assert response_1.status_code == 201');
     });
   });
 
