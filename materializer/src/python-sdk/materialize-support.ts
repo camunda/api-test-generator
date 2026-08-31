@@ -84,7 +84,7 @@ warn_unused_ignores = true
       relativePath: 'README.md',
       content: `# Camunda Python SDK Tests
 
-Auto-generated test suite for the Camunda REST API using the Python SDK.
+Auto-generated integration test suite for the Camunda REST API.
 
 ## Setup
 
@@ -112,6 +112,19 @@ Run with specific markers:
 
 \`\`\`bash
 poetry run pytest -m asyncio -v
+\`\`\`
+
+## Runtime Configuration
+
+The generated tests execute real HTTP calls through \`httpx.AsyncClient\`.
+
+- \`CAMUNDA_BASE_URL\` (default: \`http://localhost:8080/v2\`)
+- \`CAMUNDA_TIMEOUT_SECONDS\` (default: \`30\`)
+
+Example:
+
+\`\`\`bash
+CAMUNDA_BASE_URL=http://localhost:8080/v2 CAMUNDA_TIMEOUT_SECONDS=60 poetry run pytest -v
 \`\`\`
 
 ## Test Structure
@@ -162,6 +175,7 @@ Pytest configuration and fixtures for Camunda SDK tests.
 """
 
 import pytest
+import os
 from typing import Any, Dict, AsyncGenerator
 import httpx
 
@@ -234,9 +248,12 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     Yields:
         An httpx AsyncClient configured for the test environment
     """
+    base_url = os.getenv("CAMUNDA_BASE_URL", "http://localhost:8080/v2")
+    timeout_seconds = float(os.getenv("CAMUNDA_TIMEOUT_SECONDS", "30"))
+
     async with httpx.AsyncClient(
-        base_url="http://localhost:8080/v2",
-        timeout=30.0,
+        base_url=base_url,
+        timeout=timeout_seconds,
     ) as client:
         yield client
 `,
