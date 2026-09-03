@@ -1,65 +1,1293 @@
 {
-	"createDeployment": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "CreateDeploymentAsync",
-			"label": "Deploy resources"
-		}
-	],
-	"createProcessInstance": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "CreateProcessInstanceAsync",
-			"label": "Create process instance"
-		}
-	],
-	"searchProcessInstances": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "SearchProcessInstancesAsync",
-			"label": "Search process instances"
-		}
-	],
-	"activateJobs": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "ActivateJobsAsync",
-			"label": "Activate jobs"
-		}
-	],
-	"completeJob": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "CompleteJobAsync",
-			"label": "Complete job"
-		}
-	],
-	"cancelProcessInstance": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "CancelProcessInstanceAsync",
-			"label": "Cancel process instance"
-		}
-	],
-	"getProcessInstance": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "GetProcessInstanceAsync",
-			"label": "Get process instance"
-		}
-	],
-	"searchJobs": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "SearchJobsAsync",
-			"label": "Search jobs"
-		}
-	],
-	"failJob": [
-		{
-			"file": "src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs",
-			"region": "FailJobAsync",
-			"label": "Fail job"
-		}
-	]
+  "getTopology": [
+    {
+      "file": "Client.cs",
+      "region": "GetTopologyAsync",
+      "label": "Get cluster topology"
+    }
+  ],
+  "createProcessInstance": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "CreateProcessInstanceAsync",
+      "label": "By ID"
+    },
+    {
+      "file": "ProcessInstance.cs",
+      "region": "CreateProcessInstanceAsync",
+      "label": "By key"
+    }
+  ],
+  "getProcessInstance": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "GetProcessInstanceAsync",
+      "label": "Get a process instance"
+    }
+  ],
+  "searchProcessInstances": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "SearchProcessInstancesAsync",
+      "label": "Search process instances"
+    }
+  ],
+  "cancelProcessInstance": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "CancelProcessInstanceAsync",
+      "label": "Cancel a process instance"
+    }
+  ],
+  "deleteProcessInstance": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "DeleteProcessInstanceAsync",
+      "label": "Delete a process instance"
+    }
+  ],
+  "migrateProcessInstance": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "MigrateProcessInstanceAsync",
+      "label": "Migrate a process instance"
+    }
+  ],
+  "modifyProcessInstance": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "ModifyProcessInstanceAsync",
+      "label": "Modify a process instance"
+    }
+  ],
+  "getProcessInstanceStatistics": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "GetProcessInstanceStatisticsAsync",
+      "label": "Get process instance statistics"
+    }
+  ],
+  "getProcessInstanceSequenceFlows": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "GetProcessInstanceSequenceFlowsAsync",
+      "label": "Get process instance sequence flows"
+    }
+  ],
+  "getProcessInstanceCallHierarchy": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "GetProcessInstanceCallHierarchyAsync",
+      "label": "Get process instance call hierarchy"
+    }
+  ],
+  "searchProcessInstanceIncidents": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "SearchProcessInstanceIncidentsAsync",
+      "label": "Search process instance incidents"
+    }
+  ],
+  "resolveProcessInstanceIncidents": [
+    {
+      "file": "ProcessInstance.cs",
+      "region": "ResolveProcessInstanceIncidentsAsync",
+      "label": "Resolve process instance incidents"
+    }
+  ],
+  "getProcessDefinition": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetProcessDefinitionAsync",
+      "label": "Get a process definition"
+    }
+  ],
+  "getProcessDefinitionXML": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetProcessDefinitionXmlAsync",
+      "label": "Get process definition XML"
+    }
+  ],
+  "searchProcessDefinitions": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "SearchProcessDefinitionsAsync",
+      "label": "Search process definitions"
+    }
+  ],
+  "getProcessDefinitionStatistics": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetProcessDefinitionStatisticsAsync",
+      "label": "Get process definition element statistics"
+    }
+  ],
+  "getProcessDefinitionInstanceStatistics": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetProcessDefinitionInstanceStatisticsAsync",
+      "label": "Get process definition instance statistics"
+    }
+  ],
+  "getProcessDefinitionInstanceVersionStatistics": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetProcessDefinitionInstanceVersionStatisticsAsync",
+      "label": "Get version statistics"
+    }
+  ],
+  "getProcessDefinitionMessageSubscriptionStatistics": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetProcessDefinitionMessageSubscriptionStatisticsAsync",
+      "label": "Get message subscription statistics"
+    }
+  ],
+  "getStartProcessForm": [
+    {
+      "file": "ProcessDefinition.cs",
+      "region": "GetStartProcessFormAsync",
+      "label": "Get start process form"
+    }
+  ],
+  "createDeployment": [
+    {
+      "file": "Deployment.cs",
+      "region": "DeployResourcesFromFilesAsync",
+      "label": "Deploy resources from files"
+    }
+  ],
+  "deleteResource": [
+    {
+      "file": "Deployment.cs",
+      "region": "DeleteResourceAsync",
+      "label": "Delete a resource"
+    }
+  ],
+  "getResource": [
+    {
+      "file": "Admin.cs",
+      "region": "GetResourceAsync",
+      "label": "Get a resource"
+    }
+  ],
+  "getResourceContent": [
+    {
+      "file": "Admin.cs",
+      "region": "GetResourceContentAsync",
+      "label": "Get resource content"
+    }
+  ],
+  "evaluateDecision": [
+    {
+      "file": "Decision.cs",
+      "region": "EvaluateDecisionAsync",
+      "label": "By ID"
+    },
+    {
+      "file": "Decision.cs",
+      "region": "EvaluateDecisionAsync",
+      "label": "By key"
+    }
+  ],
+  "getDecisionDefinition": [
+    {
+      "file": "Decision.cs",
+      "region": "GetDecisionDefinitionAsync",
+      "label": "Get a decision definition"
+    }
+  ],
+  "getDecisionDefinitionXML": [
+    {
+      "file": "Decision.cs",
+      "region": "GetDecisionDefinitionXmlAsync",
+      "label": "Get decision definition XML"
+    }
+  ],
+  "searchDecisionDefinitions": [
+    {
+      "file": "Decision.cs",
+      "region": "SearchDecisionDefinitionsAsync",
+      "label": "Search decision definitions"
+    }
+  ],
+  "getDecisionInstance": [
+    {
+      "file": "Decision.cs",
+      "region": "GetDecisionInstanceAsync",
+      "label": "Get a decision instance"
+    }
+  ],
+  "searchDecisionInstances": [
+    {
+      "file": "Decision.cs",
+      "region": "SearchDecisionInstancesAsync",
+      "label": "Search decision instances"
+    }
+  ],
+  "deleteDecisionInstance": [
+    {
+      "file": "Decision.cs",
+      "region": "DeleteDecisionInstanceAsync",
+      "label": "Delete a decision instance"
+    }
+  ],
+  "getDecisionRequirements": [
+    {
+      "file": "Decision.cs",
+      "region": "GetDecisionRequirementsAsync",
+      "label": "Get decision requirements"
+    }
+  ],
+  "getDecisionRequirementsXML": [
+    {
+      "file": "Decision.cs",
+      "region": "GetDecisionRequirementsXmlAsync",
+      "label": "Get decision requirements XML"
+    }
+  ],
+  "searchDecisionRequirements": [
+    {
+      "file": "Decision.cs",
+      "region": "SearchDecisionRequirementsAsync",
+      "label": "Search decision requirements"
+    }
+  ],
+  "assignUserTask": [
+    {
+      "file": "UserTask.cs",
+      "region": "AssignUserTaskAsync",
+      "label": "Assign a user task"
+    }
+  ],
+  "completeUserTask": [
+    {
+      "file": "UserTask.cs",
+      "region": "CompleteUserTaskAsync",
+      "label": "Complete a user task"
+    }
+  ],
+  "unassignUserTask": [
+    {
+      "file": "UserTask.cs",
+      "region": "UnassignUserTaskAsync",
+      "label": "Unassign a user task"
+    }
+  ],
+  "getUserTask": [
+    {
+      "file": "UserTask.cs",
+      "region": "GetUserTaskAsync",
+      "label": "Get a user task"
+    }
+  ],
+  "updateUserTask": [
+    {
+      "file": "UserTask.cs",
+      "region": "UpdateUserTaskAsync",
+      "label": "Update a user task"
+    }
+  ],
+  "getUserTaskForm": [
+    {
+      "file": "UserTask.cs",
+      "region": "GetUserTaskFormAsync",
+      "label": "Get a user task form"
+    }
+  ],
+  "searchUserTasks": [
+    {
+      "file": "UserTask.cs",
+      "region": "SearchUserTasksAsync",
+      "label": "Search user tasks"
+    }
+  ],
+  "searchUserTaskVariables": [
+    {
+      "file": "UserTask.cs",
+      "region": "SearchUserTaskVariablesAsync",
+      "label": "Search user task variables"
+    }
+  ],
+  "searchUserTaskAuditLogs": [
+    {
+      "file": "UserTask.cs",
+      "region": "SearchUserTaskAuditLogsAsync",
+      "label": "Search user task audit logs"
+    }
+  ],
+  "activateJobs": [
+    {
+      "file": "Job.cs",
+      "region": "ActivateJobsAsync",
+      "label": "Activate and process jobs"
+    }
+  ],
+  "completeJob": [
+    {
+      "file": "Job.cs",
+      "region": "CompleteJobAsync",
+      "label": "Complete a job"
+    }
+  ],
+  "failJob": [
+    {
+      "file": "Job.cs",
+      "region": "FailJobAsync",
+      "label": "Fail a job with retry"
+    }
+  ],
+  "throwJobError": [
+    {
+      "file": "Job.cs",
+      "region": "ThrowJobErrorAsync",
+      "label": "Throw a job error"
+    }
+  ],
+  "updateJob": [
+    {
+      "file": "Job.cs",
+      "region": "UpdateJobAsync",
+      "label": "Update a job"
+    }
+  ],
+  "searchJobs": [
+    {
+      "file": "Job.cs",
+      "region": "SearchJobsAsync",
+      "label": "Search jobs"
+    }
+  ],
+  "correlateMessage": [
+    {
+      "file": "MessageSignal.cs",
+      "region": "CorrelateMessageAsync",
+      "label": "Correlate a message"
+    }
+  ],
+  "publishMessage": [
+    {
+      "file": "MessageSignal.cs",
+      "region": "PublishMessageAsync",
+      "label": "Publish a message"
+    }
+  ],
+  "broadcastSignal": [
+    {
+      "file": "MessageSignal.cs",
+      "region": "BroadcastSignalAsync",
+      "label": "Broadcast a signal"
+    }
+  ],
+  "searchMessageSubscriptions": [
+    {
+      "file": "MessageSignal.cs",
+      "region": "SearchMessageSubscriptionsAsync",
+      "label": "Search message subscriptions"
+    }
+  ],
+  "searchCorrelatedMessageSubscriptions": [
+    {
+      "file": "MessageSignal.cs",
+      "region": "SearchCorrelatedMessageSubscriptionsAsync",
+      "label": "Search correlated message subscriptions"
+    }
+  ],
+  "getIncident": [
+    {
+      "file": "Incident.cs",
+      "region": "GetIncidentAsync",
+      "label": "Get an incident"
+    }
+  ],
+  "resolveIncident": [
+    {
+      "file": "Incident.cs",
+      "region": "ResolveIncidentAsync",
+      "label": "Resolve an incident"
+    }
+  ],
+  "searchIncidents": [
+    {
+      "file": "Incident.cs",
+      "region": "SearchIncidentsAsync",
+      "label": "Search incidents"
+    }
+  ],
+  "createAuthorization": [
+    {
+      "file": "Authorization.cs",
+      "region": "CreateAuthorizationAsync",
+      "label": "Create an authorization"
+    }
+  ],
+  "getAuthorization": [
+    {
+      "file": "Authorization.cs",
+      "region": "GetAuthorizationAsync",
+      "label": "Get an authorization"
+    }
+  ],
+  "searchAuthorizations": [
+    {
+      "file": "Authorization.cs",
+      "region": "SearchAuthorizationsAsync",
+      "label": "Search authorizations"
+    }
+  ],
+  "updateAuthorization": [
+    {
+      "file": "Authorization.cs",
+      "region": "UpdateAuthorizationAsync",
+      "label": "Update an authorization"
+    }
+  ],
+  "deleteAuthorization": [
+    {
+      "file": "Authorization.cs",
+      "region": "DeleteAuthorizationAsync",
+      "label": "Delete an authorization"
+    }
+  ],
+  "getAuthentication": [
+    {
+      "file": "Authorization.cs",
+      "region": "GetAuthenticationAsync",
+      "label": "Get authentication info"
+    }
+  ],
+  "createUser": [
+    {
+      "file": "User.cs",
+      "region": "CreateUserAsync",
+      "label": "Create a user"
+    }
+  ],
+  "createAdminUser": [
+    {
+      "file": "User.cs",
+      "region": "CreateAdminUserAsync",
+      "label": "Create an admin user"
+    }
+  ],
+  "getUser": [
+    {
+      "file": "User.cs",
+      "region": "GetUserAsync",
+      "label": "Get a user"
+    }
+  ],
+  "searchUsers": [
+    {
+      "file": "User.cs",
+      "region": "SearchUsersAsync",
+      "label": "Search users"
+    }
+  ],
+  "updateUser": [
+    {
+      "file": "User.cs",
+      "region": "UpdateUserAsync",
+      "label": "Update a user"
+    }
+  ],
+  "deleteUser": [
+    {
+      "file": "User.cs",
+      "region": "DeleteUserAsync",
+      "label": "Delete a user"
+    }
+  ],
+  "createGroup": [
+    {
+      "file": "Group.cs",
+      "region": "CreateGroupAsync",
+      "label": "Create a group"
+    }
+  ],
+  "getGroup": [
+    {
+      "file": "Group.cs",
+      "region": "GetGroupAsync",
+      "label": "Get a group"
+    }
+  ],
+  "searchGroups": [
+    {
+      "file": "Group.cs",
+      "region": "SearchGroupsAsync",
+      "label": "Search groups"
+    }
+  ],
+  "updateGroup": [
+    {
+      "file": "Group.cs",
+      "region": "UpdateGroupAsync",
+      "label": "Update a group"
+    }
+  ],
+  "deleteGroup": [
+    {
+      "file": "Group.cs",
+      "region": "DeleteGroupAsync",
+      "label": "Delete a group"
+    }
+  ],
+  "assignUserToGroup": [
+    {
+      "file": "Group.cs",
+      "region": "AssignUserToGroupAsync",
+      "label": "Assign a user to a group"
+    }
+  ],
+  "unassignUserFromGroup": [
+    {
+      "file": "Group.cs",
+      "region": "UnassignUserFromGroupAsync",
+      "label": "Unassign a user from a group"
+    }
+  ],
+  "assignClientToGroup": [
+    {
+      "file": "Group.cs",
+      "region": "AssignClientToGroupAsync",
+      "label": "Assign a client to a group"
+    }
+  ],
+  "unassignClientFromGroup": [
+    {
+      "file": "Group.cs",
+      "region": "UnassignClientFromGroupAsync",
+      "label": "Unassign a client from a group"
+    }
+  ],
+  "assignMappingRuleToGroup": [
+    {
+      "file": "Group.cs",
+      "region": "AssignMappingRuleToGroupAsync",
+      "label": "Assign a mapping rule to a group"
+    }
+  ],
+  "unassignMappingRuleFromGroup": [
+    {
+      "file": "Group.cs",
+      "region": "UnassignMappingRuleFromGroupAsync",
+      "label": "Unassign a mapping rule from a group"
+    }
+  ],
+  "searchUsersForGroup": [
+    {
+      "file": "Group.cs",
+      "region": "SearchUsersForGroupAsync",
+      "label": "Search users in a group"
+    }
+  ],
+  "searchClientsForGroup": [
+    {
+      "file": "Group.cs",
+      "region": "SearchClientsForGroupAsync",
+      "label": "Search clients in a group"
+    }
+  ],
+  "searchRolesForGroup": [
+    {
+      "file": "Group.cs",
+      "region": "SearchRolesForGroupAsync",
+      "label": "Search roles for a group"
+    }
+  ],
+  "searchMappingRulesForGroup": [
+    {
+      "file": "Group.cs",
+      "region": "SearchMappingRulesForGroupAsync",
+      "label": "Search mapping rules for a group"
+    }
+  ],
+  "createRole": [
+    {
+      "file": "Role.cs",
+      "region": "CreateRoleAsync",
+      "label": "Create a role"
+    }
+  ],
+  "getRole": [
+    {
+      "file": "Role.cs",
+      "region": "GetRoleAsync",
+      "label": "Get a role"
+    }
+  ],
+  "searchRoles": [
+    {
+      "file": "Role.cs",
+      "region": "SearchRolesAsync",
+      "label": "Search roles"
+    }
+  ],
+  "updateRole": [
+    {
+      "file": "Role.cs",
+      "region": "UpdateRoleAsync",
+      "label": "Update a role"
+    }
+  ],
+  "deleteRole": [
+    {
+      "file": "Role.cs",
+      "region": "DeleteRoleAsync",
+      "label": "Delete a role"
+    }
+  ],
+  "assignRoleToUser": [
+    {
+      "file": "Role.cs",
+      "region": "AssignRoleToUserAsync",
+      "label": "Assign a role to a user"
+    }
+  ],
+  "unassignRoleFromUser": [
+    {
+      "file": "Role.cs",
+      "region": "UnassignRoleFromUserAsync",
+      "label": "Unassign a role from a user"
+    }
+  ],
+  "assignRoleToGroup": [
+    {
+      "file": "Role.cs",
+      "region": "AssignRoleToGroupAsync",
+      "label": "Assign a role to a group"
+    }
+  ],
+  "unassignRoleFromGroup": [
+    {
+      "file": "Role.cs",
+      "region": "UnassignRoleFromGroupAsync",
+      "label": "Unassign a role from a group"
+    }
+  ],
+  "assignRoleToClient": [
+    {
+      "file": "Role.cs",
+      "region": "AssignRoleToClientAsync",
+      "label": "Assign a role to a client"
+    }
+  ],
+  "unassignRoleFromClient": [
+    {
+      "file": "Role.cs",
+      "region": "UnassignRoleFromClientAsync",
+      "label": "Unassign a role from a client"
+    }
+  ],
+  "assignRoleToMappingRule": [
+    {
+      "file": "Role.cs",
+      "region": "AssignRoleToMappingRuleAsync",
+      "label": "Assign a role to a mapping rule"
+    }
+  ],
+  "unassignRoleFromMappingRule": [
+    {
+      "file": "Role.cs",
+      "region": "UnassignRoleFromMappingRuleAsync",
+      "label": "Unassign a role from a mapping rule"
+    }
+  ],
+  "searchUsersForRole": [
+    {
+      "file": "Role.cs",
+      "region": "SearchUsersForRoleAsync",
+      "label": "Search users for a role"
+    }
+  ],
+  "searchGroupsForRole": [
+    {
+      "file": "Role.cs",
+      "region": "SearchGroupsForRoleAsync",
+      "label": "Search groups for a role"
+    }
+  ],
+  "searchClientsForRole": [
+    {
+      "file": "Role.cs",
+      "region": "SearchClientsForRoleAsync",
+      "label": "Search clients for a role"
+    }
+  ],
+  "searchMappingRulesForRole": [
+    {
+      "file": "Role.cs",
+      "region": "SearchMappingRulesForRoleAsync",
+      "label": "Search mapping rules for a role"
+    }
+  ],
+  "createTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "CreateTenantAsync",
+      "label": "Create a tenant"
+    }
+  ],
+  "getTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "GetTenantAsync",
+      "label": "Get a tenant"
+    }
+  ],
+  "searchTenants": [
+    {
+      "file": "Tenant.cs",
+      "region": "SearchTenantsAsync",
+      "label": "Search tenants"
+    }
+  ],
+  "updateTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "UpdateTenantAsync",
+      "label": "Update a tenant"
+    }
+  ],
+  "deleteTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "DeleteTenantAsync",
+      "label": "Delete a tenant"
+    }
+  ],
+  "assignUserToTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "AssignUserToTenantAsync",
+      "label": "Assign a user to a tenant"
+    }
+  ],
+  "unassignUserFromTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "UnassignUserFromTenantAsync",
+      "label": "Unassign a user from a tenant"
+    }
+  ],
+  "assignGroupToTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "AssignGroupToTenantAsync",
+      "label": "Assign a group to a tenant"
+    }
+  ],
+  "unassignGroupFromTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "UnassignGroupFromTenantAsync",
+      "label": "Unassign a group from a tenant"
+    }
+  ],
+  "assignRoleToTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "AssignRoleToTenantAsync",
+      "label": "Assign a role to a tenant"
+    }
+  ],
+  "unassignRoleFromTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "UnassignRoleFromTenantAsync",
+      "label": "Unassign a role from a tenant"
+    }
+  ],
+  "assignClientToTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "AssignClientToTenantAsync",
+      "label": "Assign a client to a tenant"
+    }
+  ],
+  "unassignClientFromTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "UnassignClientFromTenantAsync",
+      "label": "Unassign a client from a tenant"
+    }
+  ],
+  "assignMappingRuleToTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "AssignMappingRuleToTenantAsync",
+      "label": "Assign a mapping rule to a tenant"
+    }
+  ],
+  "unassignMappingRuleFromTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "UnassignMappingRuleFromTenantAsync",
+      "label": "Unassign a mapping rule from a tenant"
+    }
+  ],
+  "searchUsersForTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "SearchUsersForTenantAsync",
+      "label": "Search users for a tenant"
+    }
+  ],
+  "searchClientsForTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "SearchClientsForTenantAsync",
+      "label": "Search clients for a tenant"
+    }
+  ],
+  "searchGroupIdsForTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "SearchGroupIdsForTenantAsync",
+      "label": "Search groups for a tenant"
+    }
+  ],
+  "searchRolesForTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "SearchRolesForTenantAsync",
+      "label": "Search roles for a tenant"
+    }
+  ],
+  "searchMappingRulesForTenant": [
+    {
+      "file": "Tenant.cs",
+      "region": "SearchMappingRulesForTenantAsync",
+      "label": "Search mapping rules for a tenant"
+    }
+  ],
+  "createMappingRule": [
+    {
+      "file": "MappingRule.cs",
+      "region": "CreateMappingRuleAsync",
+      "label": "Create a mapping rule"
+    }
+  ],
+  "getMappingRule": [
+    {
+      "file": "MappingRule.cs",
+      "region": "GetMappingRuleAsync",
+      "label": "Get a mapping rule"
+    }
+  ],
+  "searchMappingRule": [
+    {
+      "file": "MappingRule.cs",
+      "region": "SearchMappingRuleAsync",
+      "label": "Search mapping rules"
+    }
+  ],
+  "updateMappingRule": [
+    {
+      "file": "MappingRule.cs",
+      "region": "UpdateMappingRuleAsync",
+      "label": "Update a mapping rule"
+    }
+  ],
+  "deleteMappingRule": [
+    {
+      "file": "MappingRule.cs",
+      "region": "DeleteMappingRuleAsync",
+      "label": "Delete a mapping rule"
+    }
+  ],
+  "getBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "GetBatchOperationAsync",
+      "label": "Get a batch operation"
+    }
+  ],
+  "searchBatchOperations": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "SearchBatchOperationsAsync",
+      "label": "Search batch operations"
+    }
+  ],
+  "searchBatchOperationItems": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "SearchBatchOperationItemsAsync",
+      "label": "Search batch operation items"
+    }
+  ],
+  "cancelBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "CancelBatchOperationAsync",
+      "label": "Cancel a batch operation"
+    }
+  ],
+  "suspendBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "SuspendBatchOperationAsync",
+      "label": "Suspend a batch operation"
+    }
+  ],
+  "resumeBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "ResumeBatchOperationAsync",
+      "label": "Resume a batch operation"
+    }
+  ],
+  "cancelProcessInstancesBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "CancelProcessInstancesBatchOperationAsync",
+      "label": "Cancel process instances in batch"
+    }
+  ],
+  "deleteProcessInstancesBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "DeleteProcessInstancesBatchOperationAsync",
+      "label": "Delete process instances in batch"
+    }
+  ],
+  "migrateProcessInstancesBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "MigrateProcessInstancesBatchOperationAsync",
+      "label": "Migrate process instances in batch"
+    }
+  ],
+  "modifyProcessInstancesBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "ModifyProcessInstancesBatchOperationAsync",
+      "label": "Modify process instances in batch"
+    }
+  ],
+  "resolveIncidentsBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "ResolveIncidentsBatchOperationAsync",
+      "label": "Resolve incidents in batch"
+    }
+  ],
+  "deleteDecisionInstancesBatchOperation": [
+    {
+      "file": "BatchOperation.cs",
+      "region": "DeleteDecisionInstancesBatchOperationAsync",
+      "label": "Delete decision instances in batch"
+    }
+  ],
+  "getVariable": [
+    {
+      "file": "VariableElement.cs",
+      "region": "GetVariableAsync",
+      "label": "Get a variable"
+    }
+  ],
+  "searchVariables": [
+    {
+      "file": "VariableElement.cs",
+      "region": "SearchVariablesAsync",
+      "label": "Search variables"
+    }
+  ],
+  "getElementInstance": [
+    {
+      "file": "VariableElement.cs",
+      "region": "GetElementInstanceAsync",
+      "label": "Get an element instance"
+    }
+  ],
+  "searchElementInstances": [
+    {
+      "file": "VariableElement.cs",
+      "region": "SearchElementInstancesAsync",
+      "label": "Search element instances"
+    }
+  ],
+  "searchElementInstanceIncidents": [
+    {
+      "file": "VariableElement.cs",
+      "region": "SearchElementInstanceIncidentsAsync",
+      "label": "Search element instance incidents"
+    }
+  ],
+  "createElementInstanceVariables": [
+    {
+      "file": "VariableElement.cs",
+      "region": "CreateElementInstanceVariablesAsync",
+      "label": "Create element instance variables"
+    }
+  ],
+  "activateAdHocSubProcessActivities": [
+    {
+      "file": "VariableElement.cs",
+      "region": "ActivateAdHocSubProcessActivitiesAsync",
+      "label": "Activate ad-hoc sub-process activities"
+    }
+  ],
+  "createDocumentLink": [
+    {
+      "file": "Document.cs",
+      "region": "CreateDocumentLinkAsync",
+      "label": "Create a document link"
+    }
+  ],
+  "deleteDocument": [
+    {
+      "file": "Document.cs",
+      "region": "DeleteDocumentAsync",
+      "label": "Delete a document"
+    }
+  ],
+  "createDocument": [
+    {
+      "file": "Document.cs",
+      "region": "CreateDocumentAsync",
+      "label": "Upload a document"
+    }
+  ],
+  "createDocuments": [
+    {
+      "file": "Document.cs",
+      "region": "CreateDocumentsAsync",
+      "label": "Upload multiple documents"
+    }
+  ],
+  "getDocument": [
+    {
+      "file": "Document.cs",
+      "region": "GetDocumentAsync",
+      "label": "Download a document"
+    }
+  ],
+  "getGlobalClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "GetGlobalClusterVariableAsync",
+      "label": "Get a global cluster variable"
+    }
+  ],
+  "createGlobalClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "CreateGlobalClusterVariableAsync",
+      "label": "Create a global cluster variable"
+    }
+  ],
+  "updateGlobalClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "UpdateGlobalClusterVariableAsync",
+      "label": "Update a global cluster variable"
+    }
+  ],
+  "deleteGlobalClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "DeleteGlobalClusterVariableAsync",
+      "label": "Delete a global cluster variable"
+    }
+  ],
+  "getTenantClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "GetTenantClusterVariableAsync",
+      "label": "Get a tenant cluster variable"
+    }
+  ],
+  "createTenantClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "CreateTenantClusterVariableAsync",
+      "label": "Create a tenant cluster variable"
+    }
+  ],
+  "updateTenantClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "UpdateTenantClusterVariableAsync",
+      "label": "Update a tenant cluster variable"
+    }
+  ],
+  "deleteTenantClusterVariable": [
+    {
+      "file": "Admin.cs",
+      "region": "DeleteTenantClusterVariableAsync",
+      "label": "Delete a tenant cluster variable"
+    }
+  ],
+  "searchClusterVariables": [
+    {
+      "file": "Admin.cs",
+      "region": "SearchClusterVariablesAsync",
+      "label": "Search cluster variables"
+    }
+  ],
+  "createGlobalTaskListener": [
+    {
+      "file": "Admin.cs",
+      "region": "CreateGlobalTaskListenerAsync",
+      "label": "Create a global task listener"
+    }
+  ],
+  "getGlobalTaskListener": [
+    {
+      "file": "Admin.cs",
+      "region": "GetGlobalTaskListenerAsync",
+      "label": "Get a global task listener"
+    }
+  ],
+  "updateGlobalTaskListener": [
+    {
+      "file": "Admin.cs",
+      "region": "UpdateGlobalTaskListenerAsync",
+      "label": "Update a global task listener"
+    }
+  ],
+  "deleteGlobalTaskListener": [
+    {
+      "file": "Admin.cs",
+      "region": "DeleteGlobalTaskListenerAsync",
+      "label": "Delete a global task listener"
+    }
+  ],
+  "searchGlobalTaskListeners": [
+    {
+      "file": "Admin.cs",
+      "region": "SearchGlobalTaskListenersAsync",
+      "label": "Search global task listeners"
+    }
+  ],
+  "getLicense": [
+    {
+      "file": "Admin.cs",
+      "region": "GetLicenseAsync",
+      "label": "Get license information"
+    }
+  ],
+  "getSystemConfiguration": [
+    {
+      "file": "Admin.cs",
+      "region": "GetSystemConfigurationAsync",
+      "label": "Get system configuration"
+    }
+  ],
+  "getStatus": [
+    {
+      "file": "Admin.cs",
+      "region": "GetStatusAsync",
+      "label": "Check cluster status"
+    }
+  ],
+  "pinClock": [
+    {
+      "file": "Admin.cs",
+      "region": "PinClockAsync",
+      "label": "Pin the cluster clock"
+    }
+  ],
+  "resetClock": [
+    {
+      "file": "Admin.cs",
+      "region": "ResetClockAsync",
+      "label": "Reset the cluster clock"
+    }
+  ],
+  "evaluateConditionals": [
+    {
+      "file": "Admin.cs",
+      "region": "EvaluateConditionalsAsync",
+      "label": "Evaluate conditionals"
+    }
+  ],
+  "evaluateExpression": [
+    {
+      "file": "Admin.cs",
+      "region": "EvaluateExpressionAsync",
+      "label": "Evaluate an expression"
+    }
+  ],
+  "getUsageMetrics": [
+    {
+      "file": "Admin.cs",
+      "region": "GetUsageMetricsAsync",
+      "label": "Get usage metrics"
+    }
+  ],
+  "getAuditLog": [
+    {
+      "file": "Admin.cs",
+      "region": "GetAuditLogAsync",
+      "label": "Get an audit log entry"
+    }
+  ],
+  "searchAuditLogs": [
+    {
+      "file": "Admin.cs",
+      "region": "SearchAuditLogsAsync",
+      "label": "Search audit logs"
+    }
+  ],
+  "getProcessInstanceStatisticsByError": [
+    {
+      "file": "Admin.cs",
+      "region": "GetProcessInstanceStatisticsByErrorAsync",
+      "label": "Get instance statistics by error"
+    }
+  ],
+  "getProcessInstanceStatisticsByDefinition": [
+    {
+      "file": "Admin.cs",
+      "region": "GetProcessInstanceStatisticsByDefinitionAsync",
+      "label": "Get instance statistics by definition"
+    }
+  ],
+  "getJobErrorStatistics": [
+    {
+      "file": "Admin.cs",
+      "region": "GetJobErrorStatisticsAsync",
+      "label": "Get job error statistics"
+    }
+  ],
+  "getJobTimeSeriesStatistics": [
+    {
+      "file": "Admin.cs",
+      "region": "GetJobTimeSeriesStatisticsAsync",
+      "label": "Get job time series statistics"
+    }
+  ],
+  "getJobTypeStatistics": [
+    {
+      "file": "Admin.cs",
+      "region": "GetJobTypeStatisticsAsync",
+      "label": "Get job type statistics"
+    }
+  ],
+  "getJobWorkerStatistics": [
+    {
+      "file": "Admin.cs",
+      "region": "GetJobWorkerStatisticsAsync",
+      "label": "Get job worker statistics"
+    }
+  ],
+  "getGlobalJobStatistics": [
+    {
+      "file": "Admin.cs",
+      "region": "GetGlobalJobStatisticsAsync",
+      "label": "Get global job statistics"
+    }
+  ],
+  "searchUserTaskEffectiveVariables": [
+    {
+      "file": "UserTask.cs",
+      "region": "SearchUserTaskEffectiveVariablesAsync",
+      "label": "Search user task effective variables"
+    }
+  ]
 }
