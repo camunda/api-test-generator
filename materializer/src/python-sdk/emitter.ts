@@ -4,7 +4,11 @@
  */
 
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
-import type { EndpointScenario, EndpointScenarioCollection, RequestStep } from 'path-analyser/types';
+import type {
+  EndpointScenario,
+  EndpointScenarioCollection,
+  RequestStep,
+} from 'path-analyser/types';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
 function toSnakeCase(value: string): string {
@@ -157,7 +161,7 @@ export function createPythonSdkEmitter(
  */
 export function renderPythonSuite(
   collection: EndpointScenarioCollection,
-  opts: {
+  _opts: {
     operationMap?: OperationMapSource;
   } = {},
 ): string {
@@ -170,8 +174,8 @@ export function renderPythonSuite(
   lines.push('"""');
   lines.push('');
   lines.push('import pytest');
+  lines.push('import httpx');
   lines.push('from typing import Any, Dict');
-  lines.push('from unittest.mock import AsyncMock');
   lines.push('');
 
   // Test context setup
@@ -222,14 +226,13 @@ export function renderPythonSuite(
   for (const scenario of collection.scenarios) {
     const testName = toPythonTestName(scenario);
     lines.push(`@pytest.mark.asyncio`);
-    lines.push(`async def test_${testName}(ctx: TestContext) -> None:`);
+    lines.push(`async def test_${testName}(ctx: TestContext, client: httpx.AsyncClient) -> None:`);
     lines.push(`    """`);
     lines.push(`    ${scenario.name || scenario.id}`);
     if (scenario.description) {
       lines.push(`    ${scenario.description}`);
     }
     lines.push(`    """`);
-    lines.push('    client = AsyncMock()');
 
     const bindings = scenario.bindings ?? {};
     for (const [key, value] of Object.entries(bindings)) {
@@ -239,7 +242,7 @@ export function renderPythonSuite(
 
     const requestPlan = scenario.requestPlan ?? [];
     for (let i = 0; i < requestPlan.length; i++) {
-      renderPythonRequestStep(lines, requestPlan[i], i, opts.operationMap);
+      renderPythonRequestStep(lines, requestPlan[i], i);
     }
 
     if (requestPlan.length === 0) {
@@ -252,23 +255,11 @@ export function renderPythonSuite(
   return lines.join('\n');
 }
 
-function resolvePythonMethodName(operationId: string, operationMap?: OperationMapSource): string {
-  const entry = operationMap?.lookup(operationId);
-  if (entry && entry.region.length > 0) {
-    return entry.region;
-  }
-  return toSnakeCase(operationId);
-}
-
-function renderPythonRequestStep(
-  lines: string[],
-  step: RequestStep,
-  index: number,
-  operationMap?: OperationMapSource,
-): void {
+function renderPythonRequestStep(lines: string[], step: RequestStep, index: number): void {
   const stepNum = index + 1;
   const responseVar = `response_${stepNum}`;
-  const methodName = resolvePythonMethodName(step.operationId, operationMap);
+  const methodName = step.method.toLowerCase();
+  const responseDataVar = `response_data_${stepNum}`;
   const payloadTemplate =
     step.bodyKind === 'multipart'
       ? (step.multipartTemplate ?? step.bodyTemplate)
@@ -280,43 +271,32 @@ function renderPythonRequestStep(
   if (step.pathTemplate) {
     const urlExpr = buildPythonUrlExpression(step.pathTemplate, step.pathParams);
     lines.push(`    url_${stepNum} = ${urlExpr}`);
-    requestArgs.push(`path=url_${stepNum}`);
+    requestArgs.push(`url_${stepNum}`);
   }
 
   if (payloadTemplate !== undefined) {
     const bodyExpr = renderPythonBody(payloadTemplate, {});
     lines.push(`    body_${stepNum} = ${bodyExpr}`);
-    const payloadKey = step.bodyKind === 'multipart' ? 'multipart' : 'body';
+    const payloadKey = step.bodyKind === 'multipart' ? 'files' : 'json';
     requestArgs.push(`${payloadKey}=body_${stepNum}`);
   }
 
-  if (step.expect.status >= 400) {
-    lines.push(
-      `    client.${methodName}.side_effect = RuntimeError('Expected ${step.expect.status}')`,
-    );
-    lines.push('    with pytest.raises(RuntimeError):');
-    lines.push(`        await client.${methodName}(`);
-    for (const arg of requestArgs) {
-      lines.push(`            ${arg},`);
-    }
-    lines.push('        )');
-    return;
-  }
-
-  lines.push(
-    `    client.${methodName}.return_value = {'status': ${step.expect.status}, 'data': {}}`,
-  );
   lines.push(`    ${responseVar} = await client.${methodName}(`);
   for (const arg of requestArgs) {
     lines.push(`        ${arg},`);
   }
   lines.push('    )');
-  lines.push(`    assert ${responseVar}['status'] == ${step.expect.status}`);
+  lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}`);
 
   if (step.extract && step.extract.length > 0) {
+    lines.push(`    ${responseDataVar}: Any = None`);
+    lines.push('    try:');
+    lines.push(`        ${responseDataVar} = ${responseVar}.json()`);
+    lines.push('    except ValueError:');
+    lines.push('        pass');
     for (const extract of step.extract) {
       lines.push(
-        `    ctx.set('${extract.bind}', get_nested_value(${responseVar}.get('data'), '${extract.fieldPath}'))`,
+        `    ctx.set('${extract.bind}', get_nested_value(${responseDataVar}, '${extract.fieldPath}'))`,
       );
     }
   }
