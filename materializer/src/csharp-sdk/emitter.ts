@@ -190,7 +190,9 @@ function renderScenarioTest(
   requestPlan.forEach((step: RequestStep, idx: number) => {
     const method = mapping.resolveMethod(step.operationId);
     if (method === undefined) {
-      throw new Error(`No published C# SDK method mapping found for operationId ${step.operationId}`);
+      throw new Error(
+        `No published C# SDK method mapping found for operationId ${step.operationId}`,
+      );
     }
     const varName = `result${idx + 1}`;
     const requestVar = `request${idx + 1}`;
@@ -242,7 +244,7 @@ function renderScenarioTest(
           const filesExpr = renderFileArray(resources);
           const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
           body.push(`          var resourceFiles = ${filesExpr};`);
-          body.push(`          await Client.${method}(resourceFiles, ${tenantExpr});`);
+          body.push(`          ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`)};`);
         } else if (emptyDocumentFiles) {
           body.push(`          using var content${idx + 1} = new MultipartFormDataContent();`);
           body.push(
@@ -254,12 +256,12 @@ function renderScenarioTest(
             `            content${idx + 1}.Add(new StringContent(Convert.ToString(field.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty), field.Key);`,
           );
           body.push(`          }`);
-          body.push(`          await Client.${method}(content${idx + 1});`);
+          body.push(`          ${renderClientCall(method, step, `content${idx + 1}`)};`);
         } else {
           body.push(
             `          using var content${idx + 1} = BuildMultipart(${fieldsVar}, ${filesVar});`,
           );
-          body.push(`          await Client.${method}(content${idx + 1});`);
+          body.push(`          ${renderClientCall(method, step, `content${idx + 1}`)};`);
         }
         body.push('        });');
         body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
@@ -273,7 +275,7 @@ function renderScenarioTest(
         const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
         body.push(`        var resourceFiles = ${filesExpr};`);
         body.push(
-          `        var result${idx + 1} = await Client.${method}(resourceFiles, ${tenantExpr});`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`)};`,
         );
       } else if (emptyDocumentFiles) {
         body.push(`        using var content${idx + 1} = new MultipartFormDataContent();`);
@@ -286,12 +288,16 @@ function renderScenarioTest(
           `          content${idx + 1}.Add(new StringContent(Convert.ToString(field.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty), field.Key);`,
         );
         body.push(`        }`);
-        body.push(`        var result${idx + 1} = await Client.${method}(content${idx + 1});`);
+        body.push(
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`)};`,
+        );
       } else {
         body.push(
           `        using var content${idx + 1} = BuildMultipart(${fieldsVar}, ${filesVar});`,
         );
-        body.push(`        var result${idx + 1} = await Client.${method}(content${idx + 1});`);
+        body.push(
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`)};`,
+        );
       }
 
       body.push(`        AssertExpectedStatus(result${idx + 1}, ${step.expect.status});`);
@@ -329,18 +335,20 @@ function renderScenarioTest(
     const requestParts = buildRequestParts(step);
     const shouldPassEmptyRequest = requestParts.length === 0 && requestType !== undefined;
     if (requestParts.length > 0 && requestType === undefined) {
-      throw new Error(`No published C# request DTO mapping found for operationId ${step.operationId}`);
+      throw new Error(
+        `No published C# request DTO mapping found for operationId ${step.operationId}`,
+      );
     }
     if (expectError) {
       body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () => {');
       if (requestParts.length > 0) {
         body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
-        body.push(`          await Client.${method}(${requestVar});`);
+        body.push(`          ${renderClientCall(method, step, requestVar)};`);
       } else if (shouldPassEmptyRequest) {
         body.push(`          var ${requestVar} = new ${requestType}();`);
-        body.push(`          await Client.${method}(${requestVar});`);
+        body.push(`          ${renderClientCall(method, step, requestVar)};`);
       } else {
-        body.push(`          await Client.${method}();`);
+        body.push(`          ${renderClientCall(method, step)};`);
       }
       body.push('        });');
       body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
@@ -350,12 +358,12 @@ function renderScenarioTest(
 
     if (requestParts.length > 0) {
       body.push(`        var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
-      body.push(`        var ${varName} = await Client.${method}(${requestVar});`);
+      body.push(`        var ${varName} = await ${renderClientCall(method, step, requestVar)};`);
     } else if (shouldPassEmptyRequest) {
       body.push(`        var ${requestVar} = new ${requestType}();`);
-      body.push(`        var ${varName} = await Client.${method}(${requestVar});`);
+      body.push(`        var ${varName} = await ${renderClientCall(method, step, requestVar)};`);
     } else {
-      body.push(`        var ${varName} = await Client.${method}();`);
+      body.push(`        var ${varName} = await ${renderClientCall(method, step)};`);
     }
 
     body.push(`        AssertExpectedStatus(${varName}, ${step.expect.status});`);
@@ -393,12 +401,6 @@ function renderScenarioTest(
 function buildRequestParts(step: RequestStep): string {
   const entries: string[] = [];
 
-  for (const name of derivePathParamNames(step.pathTemplate)) {
-    entries.push(
-      `          [${stringLiteral(name)}] = RequireBinding(ctx, ${stringLiteral(`${toCamelCase(name)}Var`)}),`,
-    );
-  }
-
   if (step.bodyKind === 'json' && step.bodyTemplate !== undefined) {
     if (isRecord(step.bodyTemplate)) {
       for (const [k, v] of Object.entries(step.bodyTemplate)) {
@@ -413,6 +415,14 @@ function buildRequestParts(step: RequestStep): string {
 
   if (entries.length === 0) return '';
   return `new Dictionary<string, object?>\n        {\n${entries.join('\n')}\n        }`;
+}
+
+function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
+  const argumentsList = derivePathParamNames(step.pathTemplate).map(
+    (name) => `RequireBinding(ctx, ${stringLiteral(`${toCamelCase(name)}Var`)})`,
+  );
+  if (requestExpression !== undefined) argumentsList.push(requestExpression);
+  return `Client.${method}(${argumentsList.join(', ')})`;
 }
 
 function resolveRequestTypeName(step: RequestStep): string | undefined {

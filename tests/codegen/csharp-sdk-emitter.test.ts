@@ -67,6 +67,13 @@ const OPERATION_MAP: CsharpOperationMap = {
       label: 'Search jobs',
     },
   ],
+  cancelProcessInstance: [
+    {
+      file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+      region: 'CancelProcessInstanceAsync',
+      label: 'Cancel process instance',
+    },
+  ],
 };
 
 const EMIT_CTX = {
@@ -157,7 +164,56 @@ describe('C# SDK Emitter', () => {
 
     const files = await emitter.emit(requestWithPathParam, EMIT_CTX);
 
-    expect(files[0].content).toContain('["jobKey"] = RequireBinding(ctx, "jobKeyVar")');
+    expect(files[0].content).toContain(
+      'await Client.SearchJobsAsync(RequireBinding(ctx, "jobKeyVar"), request1);',
+    );
+    expect(files[0].content).not.toContain('["jobKey"] = RequireBinding(ctx, "jobKeyVar")');
+  });
+
+  test('passes path parameters before the request body to SDK methods', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const collection: EndpointScenarioCollection = {
+      endpoint: {
+        operationId: 'cancelProcessInstance',
+        method: 'POST',
+        path: '/process-instances/{processInstanceKey}/cancellation',
+      },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'cancel process instance',
+          description: 'Cancel a process instance',
+          operations: [
+            {
+              operationId: 'cancelProcessInstance',
+              method: 'POST',
+              path: '/process-instances/{processInstanceKey}/cancellation',
+            },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'cancelProcessInstance',
+              method: 'POST',
+              pathTemplate: '/process-instances/{processInstanceKey}/cancellation',
+              pathParams: undefined,
+              bodyKind: 'json',
+              bodyTemplate: { operationReference: 'cancel-process' },
+              expect: { status: 204 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(collection, EMIT_CTX);
+
+    expect(files[0].content).toContain(
+      'await Client.CancelProcessInstanceAsync(RequireBinding(ctx, "processInstanceKeyVar"), request1);',
+    );
   });
 
   test('feature and variant suites for the same operationId emit distinct C# class names', async () => {
