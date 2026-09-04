@@ -18,7 +18,7 @@ on:
         default: unsecured
       camunda_image_tag:
         description: 'camunda/camunda image tag to run'
-        default: 8.10-SNAPSHOT
+        default: 8.9-SNAPSHOT
 
 # One run per branch; a new dispatch cancels an in-flight one for the same ref.
 concurrency:
