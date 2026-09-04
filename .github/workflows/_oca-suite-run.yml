@@ -120,7 +120,7 @@ jobs:
       # with no way to tell why.
       - name: Dump camunda-engine logs on failure
         if: failure()
-        run: docker compose ${{ steps.compose.outputs.files }} logs --no-color camunda || true
+        run: docker compose ${{ steps.compose.outputs.files }} logs --no-color --tail 150 camunda || true
 
       - name: Stop camunda-oca
         if: always()
