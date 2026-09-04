@@ -11,6 +11,10 @@ import type {
 } from 'path-analyser/types';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function toSnakeCase(value: string): string {
   return value
     .replace(/([A-Z])/g, '_$1')
@@ -175,6 +179,20 @@ export function renderPythonSuite(
   lines.push('');
   lines.push('import pytest');
   lines.push('import httpx');
+  const hasMultipartStep = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some(
+      (step) => step.bodyKind === 'multipart' && step.multipartTemplate !== undefined,
+    ),
+  );
+  const hasSeedBindings = collection.scenarios.some(
+    (scenario) => (scenario.seedBindings ?? []).length > 0,
+  );
+  if (hasMultipartStep) {
+    lines.push('from support.fixtures import resolve_fixture');
+  }
+  if (hasSeedBindings) {
+    lines.push('from support.seeding import init_spec_salt, seed_binding');
+  }
   lines.push('from typing import Any, Dict');
   lines.push('');
 
@@ -221,6 +239,10 @@ export function renderPythonSuite(
   lines.push('        return None');
   lines.push('    return current');
   lines.push('');
+  if (hasSeedBindings) {
+    lines.push(`init_spec_salt('${collection.endpoint.operationId}')`);
+    lines.push('');
+  }
 
   // Test scenarios
   for (const scenario of collection.scenarios) {
@@ -238,6 +260,12 @@ export function renderPythonSuite(
     for (const [key, value] of Object.entries(bindings)) {
       if (value === '__PENDING__') continue;
       lines.push(`    ctx.set('${key}', ${renderPythonValue(value)})`);
+    }
+
+    for (const seedName of scenario.seedBindings ?? []) {
+      lines.push(
+        `    ctx.set('${seedName}', ctx.get('${seedName}') if ctx.get('${seedName}') is not None else seed_binding('${seedName}'))`,
+      );
     }
 
     const requestPlan = scenario.requestPlan ?? [];
@@ -275,10 +303,22 @@ function renderPythonRequestStep(lines: string[], step: RequestStep, index: numb
   }
 
   if (payloadTemplate !== undefined) {
-    const bodyExpr = renderPythonBody(payloadTemplate, {});
-    lines.push(`    body_${stepNum} = ${bodyExpr}`);
-    const payloadKey = step.bodyKind === 'multipart' ? 'files' : 'json';
-    requestArgs.push(`${payloadKey}=body_${stepNum}`);
+    if (step.bodyKind === 'multipart' && isRecord(payloadTemplate)) {
+      const fieldsTemplate = payloadTemplate.fields;
+      const filesTemplate = payloadTemplate.files;
+      if (fieldsTemplate !== undefined) {
+        lines.push(`    data_${stepNum} = ${renderPythonValue(fieldsTemplate)}`);
+        requestArgs.push(`data=data_${stepNum}`);
+      }
+      if (filesTemplate !== undefined) {
+        lines.push(`    files_${stepNum} = ${renderPythonMultipartFiles(filesTemplate)}`);
+        requestArgs.push(`files=files_${stepNum}`);
+      }
+    } else {
+      const bodyExpr = renderPythonBody(payloadTemplate, {});
+      lines.push(`    body_${stepNum} = ${bodyExpr}`);
+      requestArgs.push(`json=body_${stepNum}`);
+    }
   }
 
   lines.push(`    ${responseVar} = await client.${methodName}(`);
@@ -300,4 +340,19 @@ function renderPythonRequestStep(lines: string[], step: RequestStep, index: numb
       );
     }
   }
+}
+
+function renderPythonMultipartFiles(filesTemplate: unknown): string {
+  if (!isRecord(filesTemplate)) {
+    return renderPythonValue(filesTemplate);
+  }
+  const entries = Object.entries(filesTemplate).map(([key, value]) => {
+    if (typeof value === 'string' && value.startsWith('@@FILE:')) {
+      const fixturePath = value.slice('@@FILE:'.length);
+      const filename = fixturePath.split('/').pop() || key;
+      return `'${key}': (${renderPythonStringLiteral(filename)}, resolve_fixture('${fixturePath}'))`;
+    }
+    return `'${key}': ${renderPythonValue(value)}`;
+  });
+  return `{${entries.join(', ')}}`;
 }
