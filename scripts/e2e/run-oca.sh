@@ -33,6 +33,11 @@ RV_PROFILES="${RV_PROFILES:-unsecured}"
 STEPS="${STEPS:-generate run curl}"
 RV_DIR="generated/${CONFIG}/request-validation"
 OUT="test-results/e2e-${CONFIG}"; mkdir -p "$OUT"
+# Reporter env vars (PLAYWRIGHT_*_OUTPUT_FILE/_DIR) are resolved by Playwright
+# relative to the config's own directory, not cwd — so every path handed to
+# them below must be absolute or the reports land outside $OUT and dodge the
+# artifact upload + summarize step.
+ABS_OUT="$(cd "$OUT" && pwd)"
 
 step() { case " $STEPS " in *" $1 "*) return 0;; *) return 1;; esac; }
 
@@ -77,13 +82,33 @@ if step generate; then
 fi
 
 # ====================== 2. RUN: positive =============================
+# Playwright is the GATE (same as run_rv below): a non-zero exit (any spec
+# failed) sets PW_FAIL, which fails the script at the end unless E2E_SOFT=1.
+# The html/json/junit reporters still write their output on failure.
 if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   echo "── run: positive lifecycle suite ────────"
-  API_BASE_URL="${CORE_URL}/v2" ${BEARER_TOKEN:+BEARER_TOKEN="$BEARER_TOKEN"} CONFIG="$CONFIG" \
-    npx playwright test -c path-analyser/playwright.config.ts --reporter=list || true
+  pos_err="$ABS_OUT/pw-positive.stderr.log"
+  if API_BASE_URL="${CORE_URL}/v2" ${BEARER_TOKEN:+BEARER_TOKEN="$BEARER_TOKEN"} CONFIG="$CONFIG" \
+    PLAYWRIGHT_HTML_REPORT="$ABS_OUT/pw-positive" \
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$ABS_OUT/pw-positive.json" \
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$ABS_OUT/pw-positive.junit.xml" \
+    npx playwright test -c path-analyser/playwright.config.ts 2>"$pos_err"; then
+    echo "  ✓ Playwright passed: positive"
+  else
+    PW_FAIL=1
+    echo "  ✗ Playwright reported test failures in the positive suite"
+    if [ -s "$pos_err" ]; then
+      echo "  ── playwright stderr (tail) ──────────────"
+      tail -n 30 "$pos_err" | sed 's/^/    /'
+    fi
+  fi
 fi
 
-# request-validation Playwright run → JSON report per profile
+# request-validation Playwright run, per profile. The generated config
+# already declares list+json+html+junit reporters (see
+# request-validation/templates/playwright.config.ts) — redirect their outputs
+# via env vars instead of `--reporter=json`, which would override that whole
+# list and silently drop the html/junit reports.
 run_rv() { # profile
   local p="$1" cfg="$RV_DIR/$1/playwright.config.ts"
   [ -f "$cfg" ] || { echo "  ⚠ profile '$p' not generated — skipping"; return; }
@@ -95,9 +120,28 @@ run_rv() { # profile
   if [ -n "$OCA_USER" ] && [ -n "$OCA_PASS" ]; then
     basic=(CAMUNDA_BASIC_AUTH_USER="$OCA_USER" CAMUNDA_BASIC_AUTH_PASSWORD="$OCA_PASS")
   fi
-  env CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
+  # Playwright is the GATE: a non-zero exit (any spec assertion failed) sets
+  # PW_FAIL, which fails the script at the end (see bottom) unless E2E_SOFT=1.
+  # Capture stderr to a per-profile log (kept alongside the reports) rather
+  # than discarding it — per-test failures go to stdout via the `list`
+  # reporter, but a crash before reporting (config/runtime error) only
+  # surfaces on stderr.
+  local pw_err="$ABS_OUT/pw-$p.stderr.log"
+  if env CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
     ${basic[@]+"${basic[@]}"} \
-    npx playwright test -c "$cfg" --reporter=json > "$OUT/pw-$p.json" 2>/dev/null || true
+    PLAYWRIGHT_JSON_OUTPUT_FILE="$ABS_OUT/pw-$p.json" \
+    PLAYWRIGHT_HTML_OUTPUT_DIR="$ABS_OUT/pw-$p" \
+    PLAYWRIGHT_JUNIT_OUTPUT_FILE="$ABS_OUT/pw-$p.junit.xml" \
+    npx playwright test -c "$cfg" 2>"$pw_err"; then
+    echo "  ✓ Playwright passed: $p"
+  else
+    PW_FAIL=1
+    echo "  ✗ Playwright reported test failures in profile '$p'"
+    if [ -s "$pw_err" ]; then
+      echo "  ── playwright stderr (tail) ──────────────"
+      tail -n 30 "$pw_err" | sed 's/^/    /'
+    fi
+  fi
 }
 
 # ================== 2+3. RUN + CURL-COMPARE (per profile) ============
@@ -116,6 +160,10 @@ for p in $RV_PROFILES; do
   fi
 done
 echo "▶ done. Playwright reports + curl-compare output under $OUT/"
-if [ -n "${RV_FAIL:-}" ] && [ -z "${E2E_SOFT:-}" ]; then
-  echo "✗ curl/expected mismatches detected (set E2E_SOFT=1 to treat as non-fatal)"; exit 1
+# Gate on both signals: PW_FAIL (an actual Playwright test failure, positive
+# or request-validation) and RV_FAIL (a curl/expected mismatch found by the
+# independent curl oracle). E2E_SOFT=1 keeps the run green on either (monitoring-only mode).
+if { [ -n "${PW_FAIL:-}" ] || [ -n "${RV_FAIL:-}" ]; } && [ -z "${E2E_SOFT:-}" ]; then
+  echo "✗ failures detected (Playwright: ${PW_FAIL:-0}, curl mismatches: ${RV_FAIL:-0}) — set E2E_SOFT=1 to treat as non-fatal"
+  exit 1
 fi

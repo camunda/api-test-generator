@@ -1,0 +1,42 @@
+# description: Nightly API test run for camunda-oca — positive (lifecycle) +
+#              request-validation (negative) suites against a live, unsecured
+#              camunda-oca (Camunda 8 REST API) cluster. Clones the pinned
+#              camunda/camunda OpenAPI spec, starts the cluster via
+#              docker/docker-compose.yml, regenerates + runs both suites, and
+#              posts a grouped failure breakdown to the run summary.
+#
+#              GATING IS STRICT, by design: any test failure fails this run,
+#              the same as nightly-camunda-hub.yml. That means this nightly is
+#              red from its first run and stays red for as long as the
+#              API-side request-validation groups from #538 carry
+#              `knownIssues` labels rather than exclusions. Do NOT "fix" that
+#              red by excluding the failing tests — the failure COUNT is the
+#              signal, not the badge. A steady count means nothing regressed;
+#              a change means something did, and the step summary names the
+#              group. The generator-side re-baseline that actually resolves
+#              these failures is tracked separately and is out of scope here.
+# type: CI
+# owner: @camunda/test-automation-team
+---
+name: Nightly — camunda-oca API tests
+
+on:
+  schedule:
+    # 03:00 UTC nightly — offset from nightly-camunda-hub.yml's 02:00 slot.
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Don't pile up overlapping nightly runs.
+concurrency:
+  group: nightly-camunda-oca
+  cancel-in-progress: true
+
+jobs:
+  nightly-oca:
+    name: Generate → run → report (positive + request-validation)
+    uses: ./.github/workflows/_oca-suite-run.yml
+    with:
+      summary_heading: '## Nightly — camunda-oca API tests'

@@ -1,0 +1,38 @@
+# On-demand camunda-oca test harness (#539).
+#
+# Runs the full camunda-oca generate → live-run against ANY branch of this
+# repo, without waiting for the scheduled nightly. Dispatch it with the
+# profile + image tag you want (gh workflow run oca-ondemand-test.yml --ref
+# <branch>, or the Actions UI "Run workflow" branch picker).
+#
+# It's a TEST TOOL, not a monitor: results go to the run summary + uploaded
+# reports only — no Slack, no TestRail. The run body itself lives in the
+# reusable _oca-suite-run.yml (shared with the nightly).
+name: OCA on-demand test
+
+on:
+  workflow_dispatch:
+    inputs:
+      rv_profiles:
+        description: 'Space-separated request-validation profiles to run'
+        default: unsecured
+      camunda_image_tag:
+        description: 'camunda/camunda image tag to run'
+        default: 8.10-SNAPSHOT
+
+# One run per branch; a new dispatch cancels an in-flight one for the same ref.
+concurrency:
+  group: oca-ondemand-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_oca-suite-run.yml
+    with:
+      rv_profiles: ${{ inputs.rv_profiles }}
+      camunda_image_tag: ${{ inputs.camunda_image_tag }}
+      summary_heading: |
+        ## OCA on-demand test — `${{ github.ref_name }}`
+        profiles: `${{ inputs.rv_profiles }}` · image: `camunda/camunda:${{ inputs.camunda_image_tag }}`
