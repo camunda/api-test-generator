@@ -186,23 +186,6 @@
       "name": "AgentDefinitionKey",
       "kind": "serverEmergent",
       "$comment": "Interim: server-minted lifecycle key for an agent definition. Agent definitions emerge as a side-effect of deploying a BPMN process with an AI Agent Connector element \u2014 no direct create API returns this key with provider:true. Search-filter input only; planner mints a deterministic placeholder. Remove this entry and replace with a witnesses-based classification once upstream adds x-semantic-provider on DeploymentAgentDefinitionResult."
-    },
-    {
-      "name": "HistoryItemId",
-      "kind": "attribute",
-      "clientMinted": true,
-      "$comment": "Client-minted identifier for a history item. Like other client-minted attributes, no producer endpoint exists; the client provides this value when creating the history item."
-    },
-    {
-      "name": "LoopIterationId",
-      "kind": "attribute",
-      "clientMinted": true,
-      "$comment": "A client-provided sequential integer identifying a loop iteration: one pass through an AI agent's loop, during which the model reasons, selects tools, evaluates the result, and decides whether to continue."
-    },
-    {
-      "name": "AgentHistoryItemKey",
-      "kind": "serverEmergent",
-      "$comment": "System-generated key for an agent history item. Managed by the system and not directly minted by the client."
     }
   ],
   "capabilities": [
