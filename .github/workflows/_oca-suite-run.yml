@@ -1,0 +1,144 @@
+# Reusable camunda-oca suite run (workflow_call). The shared body behind every
+# "generate the OCA suite + run it against a live camunda-oca cluster" entry
+# point — the nightly (nightly-camunda-oca.yml) and the on-demand test
+# (oca-ondemand-test.yml) both call it, so the orchestration lives in ONE
+# place (#539).
+#
+# Much smaller than _hub-suite-run.yml: OCA needs no Keycloak, no Vault, no
+# OIDC and no Slack app — the spec comes straight from the public
+# camunda/camunda repo via the existing pinned-spec flow (same as ci.yml's
+# `regression` job), and the cluster is a single container with its own
+# compose healthcheck.
+name: _oca-suite-run
+
+on:
+  workflow_call:
+    inputs:
+      summary_heading:
+        description: Markdown heading block for the run summary.
+        type: string
+        required: true
+      rv_profiles:
+        description: Space-separated request-validation profiles to run (RV_PROFILES).
+        type: string
+        default: unsecured
+      camunda_image_tag:
+        description: camunda/camunda image tag to run (sets CAMUNDA_VERSION).
+        type: string
+        default: 8.10-SNAPSHOT
+
+permissions:
+  contents: read
+
+env:
+  CONFIG: camunda-oca
+  CORE_URL: http://localhost:8080
+
+jobs:
+  run:
+    name: Generate + run OCA suites (${{ inputs.rv_profiles }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # camunda-oca's spec comes straight from the public camunda/camunda repo
+      # (no clone token needed) — same pinned-spec flow as ci.yml's
+      # `regression` job. run-oca.sh never fetches the spec itself and the
+      # bundled spec isn't checked into git, so this has to happen first.
+      - name: Read pinned spec ref
+        id: pin
+        run: |
+          spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
+          echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"
+          echo "Pinned camunda-oca specRef: ${spec_ref}"
+
+      - name: Fetch pinned OpenAPI spec
+        env:
+          SPEC_REF: ${{ steps.pin.outputs.spec_ref }}
+        run: npm run fetch-spec:ref
+
+      # docker/docker-compose.yml already declares a healthcheck against
+      # /actuator/health/status — `--wait` blocks on it instead of a custom
+      # polling script (unlike Hub, which has no compose healthcheck of its
+      # own and needs the wait-for-hub action).
+      - name: Start camunda-oca
+        env:
+          CAMUNDA_VERSION: ${{ inputs.camunda_image_tag }}
+        run: docker compose -f docker/docker-compose.yml up -d --wait
+
+      # Generate + run the positive (lifecycle) suite and every requested
+      # request-validation profile. Gating is strict: run-oca.sh fails on any
+      # Playwright test failure (positive or request-validation) — matching
+      # the Hub nightly's "any failure fails the run".
+      - name: Generate + run positive + request-validation suites
+        id: suites
+        env:
+          RV_PROFILES: ${{ inputs.rv_profiles }}
+          STEPS: 'generate run'
+        run: ./scripts/e2e/run-oca.sh
+
+      - name: Stop camunda-oca
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v || true
+
+      # Grouped failure breakdown per profile (actual HTTP status / scenario
+      # kind / operationId), same analyser the generated suite's own `npm run
+      # summarize` uses — see request-validation/templates/scripts/summarize-failures.mjs.
+      - name: Write failure breakdown to run summary
+        if: always()
+        env:
+          RV_PROFILES: ${{ inputs.rv_profiles }}
+          HEADING: ${{ inputs.summary_heading }}
+        run: |
+          out="test-results/e2e-${CONFIG}"
+          {
+            printf '%s\n' "$HEADING"
+            echo ""
+            echo "### Positive (lifecycle)"
+            if [ -f "$out/pw-positive.json" ]; then
+              echo '```text'
+              node request-validation/templates/scripts/summarize-failures.mjs "$out/pw-positive.json"
+              echo '```'
+            else
+              echo "- no report — the suite may not have run (SKIP_POSITIVE?) or crashed before writing results"
+            fi
+            echo ""
+            echo "### Request-validation"
+            for p in $RV_PROFILES; do
+              echo "#### profile: $p"
+              if [ -f "$out/pw-$p.json" ]; then
+                echo '```text'
+                node request-validation/templates/scripts/summarize-failures.mjs "$out/pw-$p.json"
+                echo '```'
+              else
+                echo "- no report for profile '$p' — the suite may not have generated or crashed before writing results"
+              fi
+              echo ""
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload OCA suite reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oca-suite-reports
+          path: test-results/e2e-camunda-oca/
+          retention-days: 14
