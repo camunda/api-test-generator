@@ -212,6 +212,69 @@ describe('Python SDK Emitter', () => {
       expect(output).not.toContain('.side_effect = RuntimeError');
     });
 
+    test('multipart steps resolve @@FILE fixtures instead of nesting file dicts', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                bodyKind: 'multipart',
+                multipartTemplate: {
+                  fields: { tenantId: 'tenant-1' },
+                  files: { resources: '@@FILE:deployments/process.bpmn' },
+                },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+      expect(output).toContain('from support.fixtures import resolve_fixture');
+      expect(output).toContain("resolve_fixture('deployments/process.bpmn')");
+      expect(output).not.toContain("'files': {'resources': '@@FILE:deployments/process.bpmn'}");
+      expect(output).not.toContain('files=body_1');
+    });
+
+    test('seedBindings emit a seed prologue for pending prerequisite inputs', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            bindings: { passwordVar: '__PENDING__' },
+            seedBindings: ['passwordVar'],
+            requestPlan: [
+              {
+                operationId: 'createUser',
+                method: 'POST',
+                pathTemplate: '/users',
+                bodyKind: 'json',
+                bodyTemplate: { password: `${'${'}passwordVar}` },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+      expect(output).toContain('from support.seeding import init_spec_salt, seed_binding');
+      expect(output).toContain("init_spec_salt('createWidget')");
+      expect(output).toContain(
+        "ctx.set('passwordVar', ctx.get('passwordVar') if ctx.get('passwordVar') is not None else seed_binding('passwordVar'))",
+      );
+      expect(output).toContain("'password': ctx.get('passwordVar')");
+    });
+
     test('test functions include operation steps', () => {
       const output = renderPythonSuite(SAMPLE_COLLECTION);
       expect(output).toContain('# Step 1: createWidget');
