@@ -75,6 +75,24 @@ jobs:
           SPEC_REF: ${{ steps.pin.outputs.spec_ref }}
         run: npm run fetch-spec:ref
 
+      # Camunda 8.10 made the RDBMS datasource bootstrap read exclusively from the
+      # Unified Configuration namespace (camunda.data.secondary-storage.rdbms.*),
+      # with no fallback to the legacy CAMUNDA_DATABASE_* vars the base compose file
+      # sets for 8.9 — see docker/docker-compose.rdbms-unified-config.yml for the
+      # full explanation. Layer that overlay in for anything that isn't 8.9.x.
+      - name: Select compose files for camunda_image_tag
+        id: compose
+        env:
+          CAMUNDA_VERSION: ${{ inputs.camunda_image_tag }}
+        run: |
+          files='-f docker/docker-compose.yml'
+          case "$CAMUNDA_VERSION" in
+            8.9*) ;;
+            *) files="$files -f docker/docker-compose.rdbms-unified-config.yml" ;;
+          esac
+          echo "files=${files}" >> "$GITHUB_OUTPUT"
+          echo "Compose files for camunda_image_tag=${CAMUNDA_VERSION}: ${files}"
+
       # docker/docker-compose.yml already declares a healthcheck against
       # /actuator/health/status — `--wait` blocks on it instead of a custom
       # polling script (unlike Hub, which has no compose healthcheck of its
@@ -82,7 +100,7 @@ jobs:
       - name: Start camunda-oca
         env:
           CAMUNDA_VERSION: ${{ inputs.camunda_image_tag }}
-        run: docker compose -f docker/docker-compose.yml up -d --wait
+        run: docker compose ${{ steps.compose.outputs.files }} up -d --wait
 
       # Generate + run the positive (lifecycle) suite and every requested
       # request-validation profile. Gating is strict: run-oca.sh fails on any
@@ -102,11 +120,11 @@ jobs:
       # with no way to tell why.
       - name: Dump camunda-engine logs on failure
         if: failure()
-        run: docker compose -f docker/docker-compose.yml logs --no-color camunda || true
+        run: docker compose ${{ steps.compose.outputs.files }} logs --no-color camunda || true
 
       - name: Stop camunda-oca
         if: always()
-        run: docker compose -f docker/docker-compose.yml down -v || true
+        run: docker compose ${{ steps.compose.outputs.files }} down -v || true
 
       # Grouped failure breakdown per profile (actual HTTP status / scenario
       # kind / operationId), same analyser the generated suite's own `npm run

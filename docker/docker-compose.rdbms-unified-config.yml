@@ -1,0 +1,32 @@
+# RDBMS Unified-Configuration overlay for Camunda 8.10+ (api-test-generator #539 follow-up).
+#
+# Camunda 8.10 made the RDBMS secondary-storage bootstrap "physical-tenant"-aware
+# (camunda/product-hub#3067): the datasource is now built exclusively from
+# camunda.data.secondary-storage.rdbms.* (the "Unified Configuration" namespace), with
+# no fallback to the legacy CAMUNDA_DATABASE_* vars docker-compose.yml sets for 8.9 —
+# and 'rdbms' became a reserved, auto-provisioned exporter, so
+# ZEEBE_BROKER_EXPORTERS_RDBMS_* is silently ignored too (logged as a warning, not an
+# error). Without this overlay, camunda 8.10+ crashes on startup:
+#   IllegalArgumentException: 'url' must start with "jdbc"
+# (org.springframework.boot.jdbc.DatabaseDriver.fromJdbcUrl, via
+# io.camunda.application.commons.rdbms.RdbmsDataSources.buildDataSource) — the
+# datasource's url falls back to its inherited Elasticsearch-shaped default
+# ("http://localhost:9200") because CAMUNDA_DATABASE_URL is never read at all.
+#
+# Layer this on top of the base file for any camunda_image_tag that isn't 8.9.x — see
+# the version branch in _oca-suite-run.yml's "Start camunda-oca" step:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.rdbms-unified-config.yml up -d --wait
+#
+# Values mirror the base file's legacy settings exactly (same H2 URL, same fast
+# flush/cleanup intervals this suite relies on for quick test-data visibility) — only
+# the property names moved.
+services:
+  camunda:
+    environment:
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_URL: 'jdbc:h2:mem:cpt;DB_CLOSE_DELAY=-1;MODE=PostgreSQL'
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_USERNAME: 'sa'
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_PASSWORD: ''
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_FLUSH_INTERVAL: 'PT0S'
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_HISTORY_DEFAULT_HISTORY_TTL: 'PT2S'
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_HISTORY_MIN_HISTORY_CLEANUP_INTERVAL: 'PT2S'
+      CAMUNDA_DATA_SECONDARY_STORAGE_RDBMS_HISTORY_MAX_HISTORY_CLEANUP_INTERVAL: 'PT5S'
