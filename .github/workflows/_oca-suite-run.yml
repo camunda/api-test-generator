@@ -25,7 +25,7 @@ on:
       camunda_image_tag:
         description: camunda/camunda image tag to run (sets CAMUNDA_VERSION).
         type: string
-        default: 8.10-SNAPSHOT
+        default: 8.9-SNAPSHOT
 
 permissions:
   contents: read
@@ -94,6 +94,15 @@ jobs:
           RV_PROFILES: ${{ inputs.rv_profiles }}
           STEPS: 'generate run'
         run: ./scripts/e2e/run-oca.sh
+
+      # docker compose up -d runs detached, so the container's own stdout/
+      # stderr (the actual Spring Boot / Zeebe startup exception, if that's
+      # why it failed) never appears anywhere else in this log — without this,
+      # a startup crash shows only as "container camunda-engine exited (255)"
+      # with no way to tell why.
+      - name: Dump camunda-engine logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.yml logs --no-color camunda || true
 
       - name: Stop camunda-oca
         if: always()
