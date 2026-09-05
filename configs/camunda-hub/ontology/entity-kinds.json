@@ -19,7 +19,8 @@
       "establishedBy": "createWorkspace",
       "observableVia": "getWorkspace",
       "revokedBy": "deleteWorkspace",
-      "description": "A workspace entity, identified by its server-minted workspaceKey. Established via createWorkspace (POST /workspaces), observed via getWorkspace, revoked via deleteWorkspace."
+      "restorableVia": "restoreWorkspace",
+      "description": "A workspace entity, identified by its server-minted workspaceKey. Established via createWorkspace (POST /workspaces), observed via getWorkspace, revoked via deleteWorkspace (a soft-delete). restoreWorkspace (POST /workspaces/{workspaceKey}/restoration) restores a soft-deleted workspace — the RestoreLifecycle template (#426) drives create → soft-delete → restore so restore is exercised against a recently-deleted workspace rather than a live one (which 404s)."
     },
     {
       "@type": "EntityKind",
@@ -29,7 +30,8 @@
       "establishedBy": "createProject",
       "observableVia": "getProject",
       "revokedBy": "deleteProject",
-      "description": "A project (process application) entity, identified by its server-minted projectKey. Established via createProject (POST /projects), observed via getProject, revoked via deleteProject."
+      "restorableVia": "restoreProject",
+      "description": "A project (process application) entity, identified by its server-minted projectKey. Established via createProject (POST /projects), observed via getProject, revoked via deleteProject (a soft-delete). restoreProject (POST /projects/{projectKey}/restoration) restores a soft-deleted project — the RestoreLifecycle template (#426) drives create → soft-delete → restore so restore is exercised against a recently-deleted project rather than a live one (which 404s)."
     },
     {
       "@type": "EntityKind",
@@ -50,7 +52,8 @@
       "establishedBy": "createFolder",
       "observableVia": "getFolder",
       "revokedBy": "deleteFolder",
-      "description": "A folder entity, identified by its server-minted folderKey. Established via createFolder (POST /folders), observed via getFolder, revoked via deleteFolder."
+      "restorableVia": "restoreFolder",
+      "description": "A folder entity, identified by its server-minted folderKey. Established via createFolder (POST /folders), observed via getFolder, revoked via deleteFolder (a soft-delete). restoreFolder (POST /folders/{folderKey}/restoration) restores a soft-deleted folder — the RestoreLifecycle template (#426) drives create → soft-delete → restore so restore is exercised against a recently-deleted folder rather than a live one (which 404s)."
     }
   ]
 }
