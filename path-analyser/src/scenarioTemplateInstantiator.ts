@@ -1337,7 +1337,7 @@ export function instantiateAllTemplates(
         if (
           tpl.name === 'RestoreLifecycle' &&
           typeof kind.restorableVia === 'string' &&
-          !graph.operations[kind.restorableVia]
+          !Object.hasOwn(graph.operations, kind.restorableVia)
         )
           continue;
         const compiled =
