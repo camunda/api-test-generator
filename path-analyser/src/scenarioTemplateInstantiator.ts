@@ -1326,6 +1326,20 @@ export function instantiateAllTemplates(
         // skip for the rest — the template applies to the whole ABox but the
         // restore transition is opt-in per kind, not a schema error.
         if (tpl.name === 'RestoreLifecycle' && typeof kind.restorableVia !== 'string') continue;
+        // A kind may declare restorableVia ahead of the operation actually
+        // landing in the bundled spec (e.g. the restore endpoint ships in an
+        // upstream PR before merge). Silent skip rather than a hard error —
+        // graph.operations is the source of truth for "does this spec
+        // snapshot have the op at all"; if it doesn't, there is nothing to
+        // compile yet and no per-endpoint scenario exists to suppress
+        // either. Once the op lands upstream this starts compiling with no
+        // further change here.
+        if (
+          tpl.name === 'RestoreLifecycle' &&
+          typeof kind.restorableVia === 'string' &&
+          !graph.operations[kind.restorableVia]
+        )
+          continue;
         const compiled =
           tpl.name === 'RestoreLifecycle'
             ? compileRestoreLifecycle(tpl, kind, graph, canonical)
