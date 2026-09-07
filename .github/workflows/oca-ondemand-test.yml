@@ -19,6 +19,9 @@ on:
       camunda_image_tag:
         description: 'camunda/camunda image tag to run'
         default: 8.9-SNAPSHOT
+      spec_ref:
+        description: 'camunda/camunda ref (branch/tag/SHA) to fetch the OpenAPI spec from — empty uses the pinned spec'
+        default: ''
 
 # One run per branch; a new dispatch cancels an in-flight one for the same ref.
 concurrency:
@@ -33,6 +36,10 @@ jobs:
     with:
       rv_profiles: ${{ inputs.rv_profiles }}
       camunda_image_tag: ${{ inputs.camunda_image_tag }}
+      spec_ref: ${{ inputs.spec_ref }}
+      # _oca-suite-run.yml prints the actually-resolved spec ref itself
+      # (a whitespace-only spec_ref input falls back to the pin, which this
+      # heading — composed before that resolution runs — can't reflect).
       summary_heading: |
         ## OCA on-demand test — `${{ github.ref_name }}`
         profiles: `${{ inputs.rv_profiles }}` · image: `camunda/camunda:${{ inputs.camunda_image_tag }}`
