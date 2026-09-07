@@ -1,13 +1,19 @@
 # description: Nightly API test run for camunda-oca — positive (lifecycle) +
 #              request-validation (negative) suites against a live, unsecured
-#              camunda-oca (Camunda 8 REST API) cluster. Clones the pinned
-#              camunda/camunda OpenAPI spec, starts the cluster via
-#              docker/docker-compose.yml, regenerates + runs both suites, and
-#              posts a grouped failure breakdown to the run summary.
+#              camunda-oca (Camunda 8 REST API) cluster. Runs as a matrix, one
+#              leg per camunda/camunda branch: the frozen, hash-verified pin
+#              (pinned-8.9, camunda_image_tag=8.9-SNAPSHOT — this is #540's
+#              recorded baseline and MUST stay on the pin, not live
+#              stable/8.9), plus three live-branch-tracking legs (main,
+#              stable/8.10, stable/8.9) that fetch the OpenAPI spec straight
+#              from that branch's current tip. Each leg starts
+#              docker/docker-compose.yml against the matching Docker image
+#              tag, regenerates + runs both suites, and posts its own grouped
+#              failure breakdown to the run summary.
 #
-#              GATING IS STRICT, by design: any test failure fails this run,
-#              the same as nightly-camunda-hub.yml. That means this nightly is
-#              red from its first run and stays red for as long as the
+#              GATING IS STRICT, by design: any test failure fails a leg, the
+#              same as nightly-camunda-hub.yml. That means the pinned-8.9 leg
+#              is red from its first run and stays red for as long as the
 #              API-side request-validation groups from #538 carry
 #              `knownIssues` labels rather than exclusions. Do NOT "fix" that
 #              red by excluding the failing tests — the failure COUNT is the
@@ -15,6 +21,9 @@
 #              a change means something did, and the step summary names the
 #              group. The generator-side re-baseline that actually resolves
 #              these failures is tracked separately and is out of scope here.
+#              The three live legs are expected to move over time as their
+#              branches do — that's the point of them; only pinned-8.9 is held
+#              to a steady-count expectation.
 # type: CI
 # owner: @camunda/test-automation-team
 ---
@@ -29,14 +38,36 @@ on:
 permissions:
   contents: read
 
-# Don't pile up overlapping nightly runs.
+# Don't pile up overlapping nightly runs — covers the whole matrix as one unit.
 concurrency:
   group: nightly-camunda-oca
   cancel-in-progress: true
 
 jobs:
   nightly-oca:
-    name: Generate → run → report (positive + request-validation)
+    name: Generate → run → report (${{ matrix.name }})
     uses: ./.github/workflows/_oca-suite-run.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # #540's recorded baseline (578/1906 request-validation failures,
+          # reproduced identically night over night). Stay on the frozen pin,
+          # not live stable/8.9 — see the header comment above.
+          - name: pinned-8.9
+            camunda_image_tag: 8.9-SNAPSHOT
+            spec_ref: ''
+          - name: main
+            camunda_image_tag: SNAPSHOT
+            spec_ref: main
+          - name: stable-8.10
+            camunda_image_tag: 8.10-SNAPSHOT
+            spec_ref: stable/8.10
+          - name: stable-8.9
+            camunda_image_tag: 8.9-SNAPSHOT
+            spec_ref: stable/8.9
     with:
-      summary_heading: '## Nightly — camunda-oca API tests'
+      camunda_image_tag: ${{ matrix.camunda_image_tag }}
+      spec_ref: ${{ matrix.spec_ref }}
+      artifact_name: oca-suite-reports-${{ matrix.name }}
+      summary_heading: '## Nightly — camunda-oca API tests (${{ matrix.name }})'
