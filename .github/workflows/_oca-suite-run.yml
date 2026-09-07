@@ -83,16 +83,24 @@ jobs:
         env:
           OVERRIDE_SPEC_REF: ${{ inputs.spec_ref }}
         run: |
-          if [ -n "$OVERRIDE_SPEC_REF" ]; then
+          # A workflow_dispatch text input can't be trimmed at the YAML
+          # level, so a stray space (or newline) here would otherwise take
+          # the override branch below and fail confusingly downstream —
+          # fetch-spec.ts trims SPEC_REF to empty and hard-fails — instead of
+          # falling back to the pin as documented ("empty uses the pinned
+          # spec"). Trim first so whitespace-only counts as empty.
+          trimmed_ref="${OVERRIDE_SPEC_REF#"${OVERRIDE_SPEC_REF%%[![:space:]]*}"}"
+          trimmed_ref="${trimmed_ref%"${trimmed_ref##*[![:space:]]}"}"
+          if [ -n "$trimmed_ref" ]; then
             # spec_ref is a workflow_dispatch user input, so a newline in it
             # would let `echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"`
             # define arbitrary extra step outputs. A git ref can't legitimately
             # contain one, so reject it instead of writing it through.
-            if [[ "$OVERRIDE_SPEC_REF" == *$'\n'* ]]; then
+            if [[ "$trimmed_ref" == *$'\n'* ]]; then
               echo "::error::spec_ref must be a single-line git ref (branch/tag/SHA); got a multi-line value" >&2
               exit 1
             fi
-            spec_ref="$OVERRIDE_SPEC_REF"
+            spec_ref="$trimmed_ref"
             echo "Using override camunda-oca specRef: ${spec_ref}"
           else
             spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
