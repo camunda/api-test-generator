@@ -99,7 +99,7 @@ jobs:
             # parsing/log rendering. A git ref can't legitimately contain
             # either, so reject it instead of writing it through.
             if [[ "$trimmed_ref" == *[$'\n\r']* ]]; then
-              echo "::error::spec_ref must be a single-line git ref (branch/tag/SHA); got a value containing a newline or carriage return" >&2
+              echo "::error::spec_ref must be a single-line git ref (branch/tag/SHA); got a value containing a newline or carriage return"
               exit 1
             fi
             spec_ref="$trimmed_ref"
