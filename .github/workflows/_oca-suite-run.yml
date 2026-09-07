@@ -26,6 +26,12 @@ on:
         description: camunda/camunda image tag to run (sets CAMUNDA_VERSION).
         type: string
         default: 8.9-SNAPSHOT
+      spec_ref:
+        description: >-
+          camunda/camunda ref (branch/tag/SHA) to fetch the OpenAPI spec
+          from. Empty uses the pinned spec (configs/camunda-oca/spec-pin.json).
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -63,14 +69,30 @@ jobs:
       # (no clone token needed) — same pinned-spec flow as ci.yml's
       # `regression` job. run-oca.sh never fetches the spec itself and the
       # bundled spec isn't checked into git, so this has to happen first.
-      - name: Read pinned spec ref
+      #
+      # `inputs.spec_ref` lets an on-demand run fetch the spec from an
+      # arbitrary branch/tag/SHA instead of the pin — e.g. to test a
+      # camunda_image_tag against the spec that actually shipped with it
+      # (`stable/8.10`) rather than the nightly's fixed, hash-verified pin.
+      # camunda-schema-bundler's --ref already accepts any git ref, so no
+      # change is needed downstream; only the nightly's hash-drift check
+      # (tests/regression/spec-pin.setup.ts) requires the pin's exact SHA,
+      # and that check isn't part of this job.
+      - name: Resolve spec ref
         id: pin
+        env:
+          OVERRIDE_SPEC_REF: ${{ inputs.spec_ref }}
         run: |
-          spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
+          if [ -n "$OVERRIDE_SPEC_REF" ]; then
+            spec_ref="$OVERRIDE_SPEC_REF"
+            echo "Using override camunda-oca specRef: ${spec_ref}"
+          else
+            spec_ref=$(node -e "console.log(JSON.parse(require('fs').readFileSync('configs/camunda-oca/spec-pin.json','utf8')).specRef)")
+            echo "Using pinned camunda-oca specRef: ${spec_ref}"
+          fi
           echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"
-          echo "Pinned camunda-oca specRef: ${spec_ref}"
 
-      - name: Fetch pinned OpenAPI spec
+      - name: Fetch OpenAPI spec
         env:
           SPEC_REF: ${{ steps.pin.outputs.spec_ref }}
         run: npm run fetch-spec:ref
