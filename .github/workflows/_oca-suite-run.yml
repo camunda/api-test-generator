@@ -92,12 +92,14 @@ jobs:
           trimmed_ref="${OVERRIDE_SPEC_REF#"${OVERRIDE_SPEC_REF%%[![:space:]]*}"}"
           trimmed_ref="${trimmed_ref%"${trimmed_ref##*[![:space:]]}"}"
           if [ -n "$trimmed_ref" ]; then
-            # spec_ref is a workflow_dispatch user input, so a newline in it
-            # would let `echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"`
-            # define arbitrary extra step outputs. A git ref can't legitimately
-            # contain one, so reject it instead of writing it through.
-            if [[ "$trimmed_ref" == *$'\n'* ]]; then
-              echo "::error::spec_ref must be a single-line git ref (branch/tag/SHA); got a multi-line value" >&2
+            # spec_ref is a workflow_dispatch user input, so a newline (or
+            # CR, e.g. from a pasted CRLF value) in it would let
+            # `echo "spec_ref=${spec_ref}" >> "$GITHUB_OUTPUT"` define
+            # arbitrary extra step outputs, or otherwise confuse output
+            # parsing/log rendering. A git ref can't legitimately contain
+            # either, so reject it instead of writing it through.
+            if [[ "$trimmed_ref" == *[$'\n\r']* ]]; then
+              echo "::error::spec_ref must be a single-line git ref (branch/tag/SHA); got a value containing a newline or carriage return" >&2
               exit 1
             fi
             spec_ref="$trimmed_ref"
@@ -172,10 +174,12 @@ jobs:
         env:
           RV_PROFILES: ${{ inputs.rv_profiles }}
           HEADING: ${{ inputs.summary_heading }}
+          SPEC_REF_USED: ${{ steps.pin.outputs.spec_ref }}
         run: |
           out="test-results/e2e-${CONFIG}"
           {
             printf '%s\n' "$HEADING"
+            echo "spec ref used: \`${SPEC_REF_USED}\`"
             echo ""
             echo "### Positive (lifecycle)"
             if [ -f "$out/pw-positive.json" ]; then

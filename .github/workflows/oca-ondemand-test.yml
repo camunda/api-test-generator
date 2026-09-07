@@ -37,6 +37,9 @@ jobs:
       rv_profiles: ${{ inputs.rv_profiles }}
       camunda_image_tag: ${{ inputs.camunda_image_tag }}
       spec_ref: ${{ inputs.spec_ref }}
+      # _oca-suite-run.yml prints the actually-resolved spec ref itself
+      # (a whitespace-only spec_ref input falls back to the pin, which this
+      # heading — composed before that resolution runs — can't reflect).
       summary_heading: |
         ## OCA on-demand test — `${{ github.ref_name }}`
-        profiles: `${{ inputs.rv_profiles }}` · image: `camunda/camunda:${{ inputs.camunda_image_tag }}` · spec: `${{ inputs.spec_ref != '' && inputs.spec_ref || 'pinned' }}`
+        profiles: `${{ inputs.rv_profiles }}` · image: `camunda/camunda:${{ inputs.camunda_image_tag }}`
