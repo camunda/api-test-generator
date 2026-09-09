@@ -52,21 +52,26 @@ export function buildUrlExpression(pathTemplate: string): string {
  * Every emitted test hoists exactly ONE `baseUrl` for all of its steps
  * (`renderInlineStepLines` and friends all reference that single variable),
  * so this only works while a scenario never mixes operations with
- * different overrides. Nothing in the current spec does — cluster-admin
- * operations take no producers and are consumed by nothing downstream, so
- * they only ever appear as a scenario's sole step — but if a future spec
- * change did mix them, silently picking one base would send some of the
- * scenario's requests to the wrong host. Fail loudly instead.
+ * different overrides — including a mix of "has an override" and "uses the
+ * default base": picking the override for the whole test would send the
+ * default-base steps to the wrong host just as surely as picking between
+ * two different overrides would. Nothing in the current spec does —
+ * cluster-admin operations take no producers and are consumed by nothing
+ * downstream, so they only ever appear as a scenario's sole step — but if a
+ * future spec change did mix them, silently picking one base would send
+ * some of the scenario's requests to the wrong host. Fail loudly instead.
  */
 export function resolveScenarioServerOverride(
   operations: readonly { serverOverride?: string }[],
 ): string | undefined {
-  const overrides = new Set(
-    operations.map((o) => o.serverOverride).filter((v): v is string => !!v),
-  );
-  if (overrides.size > 1) {
+  const withOverride = operations.filter((o) => !!o.serverOverride);
+  const withoutOverride = operations.filter((o) => !o.serverOverride);
+  const overrides = new Set(withOverride.map((o) => o.serverOverride));
+  if (overrides.size > 1 || (overrides.size === 1 && withoutOverride.length > 0)) {
+    const labels = [...overrides];
+    if (withoutOverride.length > 0) labels.push('<default>');
     throw new Error(
-      `Scenario mixes operations with different server overrides (${[...overrides].join(', ')}) — ` +
+      `Scenario mixes operations with different server overrides (${labels.join(', ')}) — ` +
         'per-step base-URL resolution is not implemented; every request in one emitted test ' +
         'currently shares a single baseUrl.',
     );

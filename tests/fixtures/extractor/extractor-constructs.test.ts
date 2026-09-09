@@ -41,6 +41,13 @@ function extractParametersFor(spec: OpenAPISpec, opId: string) {
   return op.parameters;
 }
 
+function extractServerOverrideFor(spec: OpenAPISpec, opId: string): string | undefined {
+  const ops = new SchemaAnalyzer().extractOperations(spec);
+  const op = ops.find((o) => o.operationId === opId);
+  if (!op) throw new Error(`fixture: operation ${opId} not present in extracted spec`);
+  return op.serverOverride;
+}
+
 // ---------------------------------------------------------------------------
 // Fixture #31 — optional ancestor demotes a leaf to optional.
 //
@@ -516,6 +523,68 @@ describe('extractor construct fixtures', () => {
       expect(params.map((p) => [p.name, p.location, p.semanticType])).toEqual([
         ['thingKey', 'path', 'ThingKey'],
       ]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fixture — per-path-item / per-operation `servers` override.
+  //
+  // The Orchestration Cluster REST API's cluster-admin operations are served
+  // outside the document's `/v2` base, so their path item overrides `servers`
+  // to a bare `{schema}://{host}:{port}`. The extractor must surface that
+  // override as `Operation.serverOverride` — without it, the generator has
+  // no way to know these paths need a different base than every other
+  // operation, and double-prefixes `/v2` onto an already-absolute path.
+  // -------------------------------------------------------------------------
+  describe('servers override (path-item and operation-level)', () => {
+    const CLUSTER_ADMIN_SERVER = '{schema}://{host}:{port}';
+
+    it('has no serverOverride when neither the operation nor its path item declares servers', () => {
+      const spec: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-no-override', version: '0.0.0' },
+        paths: {
+          '/things': {
+            get: { operationId: 'listThings', responses: { '200': { description: 'ok' } } },
+          },
+        },
+      };
+      expect(extractServerOverrideFor(spec, 'listThings')).toBeUndefined();
+    });
+
+    it('surfaces a path-item-level servers override as serverOverride', () => {
+      const spec: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-path-item-override', version: '0.0.0' },
+        paths: {
+          '/cluster/v2/status': {
+            servers: [{ url: CLUSTER_ADMIN_SERVER }],
+            get: { operationId: 'getClusterStatus', responses: { '200': { description: 'ok' } } },
+          },
+        },
+      };
+      expect(extractServerOverrideFor(spec, 'getClusterStatus')).toBe(CLUSTER_ADMIN_SERVER);
+    });
+
+    it("prefers an operation-level servers override over the path item's", () => {
+      const OPERATION_LEVEL_SERVER = '{schema}://{host}:{port}/operation-level';
+      const spec: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-operation-level-override', version: '0.0.0' },
+        paths: {
+          '/cluster/v2/mode': {
+            servers: [{ url: CLUSTER_ADMIN_SERVER }],
+            patch: {
+              operationId: 'changeClusterModeAsClusterAdmin',
+              servers: [{ url: OPERATION_LEVEL_SERVER }],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+      expect(extractServerOverrideFor(spec, 'changeClusterModeAsClusterAdmin')).toBe(
+        OPERATION_LEVEL_SERVER,
+      );
     });
   });
 });
