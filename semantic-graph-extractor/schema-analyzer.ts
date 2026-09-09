@@ -127,7 +127,13 @@ export class SchemaAnalyzer {
       for (const method of methods) {
         const operation = pathItem[method];
         if (operation) {
-          const extractedOp = this.extractOperation(method, path, operation, spec, pathItem.servers);
+          const extractedOp = this.extractOperation(
+            method,
+            path,
+            operation,
+            spec,
+            pathItem.servers,
+          );
           if (extractedOp) {
             operations.push(extractedOp);
           }
