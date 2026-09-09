@@ -153,6 +153,24 @@ function buildFile(
         'mode (--no-standalone / --qa-import-depth).',
     );
   }
+  // A serverOverride operation (e.g. a cluster-admin op) emits a 4-arg
+  // buildUrl(..., true) call. The vendored standalone http.ts's buildUrl
+  // accepts that 4th (useRoot) param; the external legacy utils/http module
+  // is not controlled by this repo and its arity can't be verified here.
+  // Same guard shape as auth-deny/pagination-offset-past-total above,
+  // rather than silently emitting a call the legacy module may not
+  // support and reintroducing the double-/v2 bug in legacy mode with no
+  // error at generation time (#564 review).
+  const usesServerOverride = scenarios.some(
+    (s) => serverOverridesByOperationId?.[s.operationId] !== undefined,
+  );
+  if (usesServerOverride && !standalone) {
+    throw new Error(
+      'serverOverride scenarios (e.g. cluster-admin operations) require the standalone support ' +
+        "module (buildUrl's useRoot param); they are not supported in legacy QA-tree mode " +
+        '(--no-standalone / --qa-import-depth).',
+    );
+  }
   const usesAuthHeaders = scenarios.some(
     (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding === 'multipart',
   );

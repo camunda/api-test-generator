@@ -650,7 +650,7 @@ describe('extractor construct fixtures', () => {
       );
     });
 
-    it('throws for an override with a query or fragment, even without a path segment', () => {
+    it('throws for an override with a query, even without a path segment', () => {
       const specWithQuery: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-query-override', version: '0.0.0' },
@@ -665,6 +665,40 @@ describe('extractor construct fixtures', () => {
       expect(() => extractServerOverrideFor(specWithQuery, 'getClusterStatus')).toThrow(
         /unsupported servers override/,
       );
+    });
+
+    it('throws for an override with a fragment, even without a path segment', () => {
+      const specWithFragment: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-fragment-override', version: '0.0.0' },
+        servers: [{ url: 'http://host:8080/v2' }],
+        paths: {
+          '/cluster/v2/status': {
+            servers: [{ url: 'http://host:8080#frag' }],
+            get: { operationId: 'getClusterStatus', responses: { '200': { description: 'ok' } } },
+          },
+        },
+      };
+      expect(() => extractServerOverrideFor(specWithFragment, 'getClusterStatus')).toThrow(
+        /unsupported servers override/,
+      );
+    });
+
+    it('throws for an override that changes the authority (different host/port)', () => {
+      const specWithDifferentAuthority: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-different-authority-override', version: '0.0.0' },
+        servers: [{ url: DOCUMENT_ROOT }],
+        paths: {
+          '/cluster/v2/status': {
+            servers: [{ url: '{schema}://{host}:{otherPort}' }],
+            get: { operationId: 'getClusterStatus', responses: { '200': { description: 'ok' } } },
+          },
+        },
+      };
+      expect(() =>
+        extractServerOverrideFor(specWithDifferentAuthority, 'getClusterStatus'),
+      ).toThrow(/unsupported servers override/);
     });
   });
 });
