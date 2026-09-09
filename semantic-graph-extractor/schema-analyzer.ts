@@ -19,6 +19,7 @@ import {
   type Schema,
   type SemanticType,
   type SemanticTypeReference,
+  type ServerObject,
   type ValidationConstraint,
 } from './types';
 
@@ -126,7 +127,7 @@ export class SchemaAnalyzer {
       for (const method of methods) {
         const operation = pathItem[method];
         if (operation) {
-          const extractedOp = this.extractOperation(method, path, operation, spec);
+          const extractedOp = this.extractOperation(method, path, operation, spec, pathItem.servers);
           if (extractedOp) {
             operations.push(extractedOp);
           }
@@ -145,6 +146,7 @@ export class SchemaAnalyzer {
     path: string,
     operation: OperationObject,
     spec: OpenAPISpec,
+    pathServers?: ServerObject[],
   ): Operation | null {
     if (!operation.operationId) {
       console.warn(`Operation ${method.toUpperCase()} ${path} has no operationId, skipping`);
@@ -307,6 +309,14 @@ export class SchemaAnalyzer {
       }
     }
 
+    // OpenAPI `servers` precedence: operation-level overrides path-item-level,
+    // which overrides the document root (never consulted here — its absence
+    // at both levels above simply means "use the default base"). Only the
+    // Orchestration Cluster REST API's cluster-admin operations set this
+    // today, to drop the document's `/v2` base (camunda/camunda's
+    // cluster-admin.yaml).
+    const serverOverride = (operation.servers ?? pathServers)?.[0]?.url;
+
     return {
       operationId: operation.operationId,
       method: method.toUpperCase(),
@@ -325,6 +335,7 @@ export class SchemaAnalyzer {
       conditionalIdempotency,
       establishes,
       responseLeafPaths,
+      serverOverride,
     };
   }
 

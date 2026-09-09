@@ -42,6 +42,38 @@ export function buildUrlExpression(pathTemplate: string): string {
   );
 }
 
+/**
+ * Decide whether an emitted test's single `baseUrl` constant should resolve
+ * against the API root instead of the runtime's default base — e.g. the
+ * Orchestration Cluster REST API's cluster-admin operations, served at
+ * `{host}:{port}/cluster/v2/...` outside the default `/v2` base (see
+ * `OperationRef.serverOverride`).
+ *
+ * Every emitted test hoists exactly ONE `baseUrl` for all of its steps
+ * (`renderInlineStepLines` and friends all reference that single variable),
+ * so this only works while a scenario never mixes operations with
+ * different overrides. Nothing in the current spec does — cluster-admin
+ * operations take no producers and are consumed by nothing downstream, so
+ * they only ever appear as a scenario's sole step — but if a future spec
+ * change did mix them, silently picking one base would send some of the
+ * scenario's requests to the wrong host. Fail loudly instead.
+ */
+export function resolveScenarioServerOverride(
+  operations: readonly { serverOverride?: string }[],
+): string | undefined {
+  const overrides = new Set(
+    operations.map((o) => o.serverOverride).filter((v): v is string => !!v),
+  );
+  if (overrides.size > 1) {
+    throw new Error(
+      `Scenario mixes operations with different server overrides (${[...overrides].join(', ')}) — ` +
+        'per-step base-URL resolution is not implemented; every request in one emitted test ' +
+        'currently shares a single baseUrl.',
+    );
+  }
+  return overrides.size === 1 ? [...overrides][0] : undefined;
+}
+
 export function camelCase(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }

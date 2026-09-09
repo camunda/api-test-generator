@@ -665,6 +665,7 @@ function buildRequestPlan(
       operationId: opRef.operationId,
       method: opRef.method,
       pathTemplate: opRef.path,
+      serverOverride: opRef.serverOverride,
       expect: {
         status: determineExpectedStatus(
           scenario,

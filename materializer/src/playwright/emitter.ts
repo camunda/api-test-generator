@@ -26,6 +26,7 @@ import {
   escapeQuotes,
   renderEventualWait,
   renderInlineStepLines,
+  resolveScenarioServerOverride,
   stepNeedsAwaitForOp,
   toOptionalAccessor,
 } from './stepRenderer.js';
@@ -485,7 +486,8 @@ function renderScenarioTest(
     if (line) wrapped.push(line.trim());
     for (const l of wrapped) body.push(`  // ${l}`);
   }
-  body.push(`  const baseUrl = buildBaseUrl();`);
+  const serverOverride = resolveScenarioServerOverride(s.operations);
+  body.push(`  const baseUrl = buildBaseUrl(${!!serverOverride});`);
   // `unknown` (not `any`) keeps the emitted suite biome-clean while still
   // accepting the wide value space we shovel through ctx (string ids,
   // numeric keys, structured response payloads). Reads from ctx flow into

@@ -13,6 +13,7 @@ import {
   reindent,
   renderEventualWait,
   renderInlineStepLines,
+  resolveScenarioServerOverride,
   stepNeedsAwaitForOp,
   toOptionalAccessor,
 } from './stepRenderer.js';
@@ -318,7 +319,8 @@ function renderLifecycleSuite(
   lines.push(
     `  test('establish ${file.subjectName}, observe present, revoke, observe absent', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   // Canonical seeding: literals → planner seedBindings → universal
@@ -485,7 +487,8 @@ function renderRestoreLifecycleSuite(
   lines.push(
     `  test('establish ${file.subjectName}, soft-delete, restore, observe present', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
   lines.push(
     ...emitCtxSeeding({
@@ -953,7 +956,8 @@ function renderReadBackSuite(
   lines.push(
     `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   lines.push(
@@ -1148,7 +1152,8 @@ function renderStateTransitionSuite(
   lines.push(
     `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   lines.push(

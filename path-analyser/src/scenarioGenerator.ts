@@ -1170,12 +1170,14 @@ function toRef(op: {
   method: string;
   path: string;
   eventuallyConsistent?: boolean;
+  serverOverride?: string;
 }): OperationRef {
   return {
     operationId: op.operationId,
     method: op.method,
     path: op.path,
     eventuallyConsistent: op.eventuallyConsistent,
+    serverOverride: op.serverOverride,
   };
 }
 
