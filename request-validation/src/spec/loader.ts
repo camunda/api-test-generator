@@ -220,11 +220,21 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         }
       }
       const { responseCodes, successIsCollection } = extractResponseInfo(op);
+      // OpenAPI `servers` precedence: operation-level overrides path-item-
+      // level, which overrides the document root (never consulted here — its
+      // absence at both levels above simply means "use the default base").
+      // Only the Orchestration Cluster REST API's cluster-admin operations
+      // set this today, to drop the document's `/v2` base (camunda/camunda's
+      // cluster-admin.yaml).
+      const opServers = isSchemaFragmentArray(op.servers) ? op.servers : undefined;
+      const pathLevelServers = isSchemaFragmentArray(methods.servers) ? methods.servers : undefined;
+      const serverOverride = asString((opServers ?? pathLevelServers)?.[0]?.url);
       operations.push({
         operationId,
         method,
         path: p,
         tags: isStringArray(op.tags) ? op.tags : [],
+        serverOverride,
         requestBodySchema,
         bodyRequired,
         requiredProps,

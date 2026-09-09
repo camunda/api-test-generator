@@ -176,6 +176,13 @@ async function main() {
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
   const model = await loadSpec(specPath);
+  // Looked up per-scenario by qaEmitter's renderScenario (by operationId)
+  // rather than carried on ValidationScenario itself — see
+  // EmitOpts.serverOverridesByOperationId's doc comment.
+  const serverOverridesByOperationId: Record<string, string> = {};
+  for (const op of model.operations) {
+    if (op.serverOverride) serverOverridesByOperationId[op.operationId] = op.serverOverride;
+  }
   // #419 — drop config-excluded operations up front so every generator skips
   // them (blocked-upstream ops whose negative tests can't reach their target,
   // e.g. Hub updateVersion/restoreVersion per camunda-hub#25801). One filter
@@ -870,6 +877,7 @@ async function main() {
       resourceFixtures: rvConfig.resourceFixtures,
       pathResourceFixtures: rvConfig.pathResourceFixtures,
       problemDetailShapeSkipKinds,
+      serverOverridesByOperationId,
     });
   }
   console.log('[generate] Summary:', {
