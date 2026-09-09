@@ -137,31 +137,21 @@ function buildParameter(raw: unknown): ParameterModel | undefined {
 }
 
 /**
- * A `servers[].url` this codebase knows how to route: a bare
- * `scheme://host[:port]` authority — or the equivalent OpenAPI Server
- * Variable template, e.g. `{schema}://{host}:{port}` — with no additional
- * path segments. `buildUrl`'s `useRoot` parameter only ever means "use the
- * bare API root instead of the default `/v2` base", never "use this
- * literal path suffix" — so accepting an override with a path suffix (or
- * any other shape) would silently misroute requests (PR #564 review). The
- * one override in the wild today — the Orchestration Cluster REST API's
- * cluster-admin operations — is exactly this shape.
- */
-export function isBareRootServerUrl(url: string): boolean {
-  const authority = url.split('://')[1];
-  return authority !== undefined && !authority.includes('/');
-}
-
-/**
  * Resolve the effective `serverOverride` for an operation/path-item pair.
  *
- * `undefined` when neither declares `servers`, or when the declared value
- * is byte-identical to the document root's own `servers[0].url` — a
- * redundant restatement, not an actual override, and must not flip
- * base-URL selection for an operation that behaves just like every other
- * one. Throws when a genuine override doesn't match the only shape this
- * codebase can route (see `isBareRootServerUrl`) — silently ignoring or
- * truncating it would misroute requests instead of failing loudly.
+ * The only override this codebase can route today is the document's own
+ * root server with its version segment stripped — the Orchestration
+ * Cluster REST API's cluster-admin operations declare exactly
+ * `{schema}://{host}:{port}` where the document root is
+ * `{schema}://{host}:{port}/v2` (`buildUrl`'s `useRoot` parameter resolves
+ * against `credentials.baseUrl`, not the raw override string, so an
+ * override that changed the authority, added a query/fragment, or used any
+ * other path suffix would be silently misrouted if accepted — PR #564
+ * review). `undefined` when the operation/path-item declares no `servers`
+ * at all, or when it merely restates the document root verbatim (not an
+ * override at all — must not flip base-URL selection for an operation that
+ * behaves like every other one). Throws for anything else, rather than
+ * silently truncating or misrouting.
  */
 export function resolveServerOverride(
   operationId: string,
@@ -169,11 +159,13 @@ export function resolveServerOverride(
   documentRootUrl: string | undefined,
 ): string | undefined {
   if (raw === undefined || raw === documentRootUrl) return undefined;
-  if (!isBareRootServerUrl(raw)) {
+  const rootWithVersionStripped = documentRootUrl?.replace(/\/v2\/?$/, '');
+  if (raw !== rootWithVersionStripped) {
     throw new Error(
       `${operationId}: unsupported servers override "${raw}" — this codebase only knows how to ` +
-        'route a bare-root override (no path segments, e.g. "{schema}://{host}:{port}"); extend ' +
-        "buildUrl's useRoot handling before adding a differently-shaped one.",
+        `route the document root with its version segment stripped (expected ` +
+        `${JSON.stringify(rootWithVersionStripped ?? null)}); extend buildUrl's useRoot handling ` +
+        'before adding a differently-shaped override.',
     );
   }
   return raw;

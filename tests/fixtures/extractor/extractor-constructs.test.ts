@@ -537,12 +537,16 @@ describe('extractor construct fixtures', () => {
   // operation, and double-prefixes `/v2` onto an already-absolute path.
   // -------------------------------------------------------------------------
   describe('servers override (path-item and operation-level)', () => {
-    const CLUSTER_ADMIN_SERVER = '{schema}://{host}:{port}';
+    // The only override this codebase can route: the document root with its
+    // version segment stripped (see resolveServerOverride's doc comment).
+    const ROOT_AUTHORITY = '{schema}://{host}:{port}';
+    const DOCUMENT_ROOT = `${ROOT_AUTHORITY}/v2`;
 
     it('has no serverOverride when neither the operation nor its path item declares servers', () => {
       const spec: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-no-override', version: '0.0.0' },
+        servers: [{ url: DOCUMENT_ROOT }],
         paths: {
           '/things': {
             get: { operationId: 'listThings', responses: { '200': { description: 'ok' } } },
@@ -556,38 +560,39 @@ describe('extractor construct fixtures', () => {
       const spec: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-path-item-override', version: '0.0.0' },
+        servers: [{ url: DOCUMENT_ROOT }],
         paths: {
           '/cluster/v2/status': {
-            servers: [{ url: CLUSTER_ADMIN_SERVER }],
+            servers: [{ url: ROOT_AUTHORITY }],
             get: { operationId: 'getClusterStatus', responses: { '200': { description: 'ok' } } },
           },
         },
       };
-      expect(extractServerOverrideFor(spec, 'getClusterStatus')).toBe(CLUSTER_ADMIN_SERVER);
+      expect(extractServerOverrideFor(spec, 'getClusterStatus')).toBe(ROOT_AUTHORITY);
     });
 
     it("prefers an operation-level servers override over the path item's", () => {
-      // A different bare-root authority — no path suffix — so this stays
-      // within the only override shape the codebase can route (see the
-      // "unsupported shape" test below) while still being distinguishable
-      // from the path-item-level override.
-      const OPERATION_LEVEL_SERVER = '{schema}://{host}:{operationLevelPort}';
+      // The path-item-level override below is NOT the one valid override
+      // value (it's missing the scheme entirely) — if extraction used it
+      // instead of the operation-level one, this would throw rather than
+      // return ROOT_AUTHORITY, so a passing test also proves precedence.
       const spec: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-operation-level-override', version: '0.0.0' },
+        servers: [{ url: DOCUMENT_ROOT }],
         paths: {
           '/cluster/v2/mode': {
-            servers: [{ url: CLUSTER_ADMIN_SERVER }],
+            servers: [{ url: 'not-the-valid-override' }],
             patch: {
               operationId: 'changeClusterModeAsClusterAdmin',
-              servers: [{ url: OPERATION_LEVEL_SERVER }],
+              servers: [{ url: ROOT_AUTHORITY }],
               responses: { '200': { description: 'ok' } },
             },
           },
         },
       };
       expect(extractServerOverrideFor(spec, 'changeClusterModeAsClusterAdmin')).toBe(
-        OPERATION_LEVEL_SERVER,
+        ROOT_AUTHORITY,
       );
     });
 
@@ -595,12 +600,12 @@ describe('extractor construct fixtures', () => {
       const spec: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-redundant-root-restatement', version: '0.0.0' },
-        servers: [{ url: CLUSTER_ADMIN_SERVER }],
+        servers: [{ url: DOCUMENT_ROOT }],
         paths: {
           '/things': {
             get: {
               operationId: 'listThings',
-              servers: [{ url: CLUSTER_ADMIN_SERVER }],
+              servers: [{ url: DOCUMENT_ROOT }],
               responses: { '200': { description: 'ok' } },
             },
           },
@@ -609,13 +614,30 @@ describe('extractor construct fixtures', () => {
       expect(extractServerOverrideFor(spec, 'listThings')).toBeUndefined();
     });
 
-    it('throws for an override shape it cannot route (a path suffix beyond the authority)', () => {
+    it('throws when there is no document root to derive the expected override from', () => {
+      const spec: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-no-document-root', version: '0.0.0' },
+        paths: {
+          '/cluster/v2/status': {
+            servers: [{ url: ROOT_AUTHORITY }],
+            get: { operationId: 'getClusterStatus', responses: { '200': { description: 'ok' } } },
+          },
+        },
+      };
+      expect(() => extractServerOverrideFor(spec, 'getClusterStatus')).toThrow(
+        /unsupported servers override/,
+      );
+    });
+
+    it('throws for an override shape it cannot route (a path suffix beyond the stripped root)', () => {
       const spec: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-unsupported-override-shape', version: '0.0.0' },
+        servers: [{ url: DOCUMENT_ROOT }],
         paths: {
           '/cluster/v2/rebalance': {
-            servers: [{ url: '{schema}://{host}:{port}/not-a-bare-root' }],
+            servers: [{ url: `${ROOT_AUTHORITY}/not-a-bare-root` }],
             post: {
               operationId: 'triggerClusterRebalance',
               responses: { '202': { description: 'accepted' } },
@@ -624,6 +646,23 @@ describe('extractor construct fixtures', () => {
         },
       };
       expect(() => extractServerOverrideFor(spec, 'triggerClusterRebalance')).toThrow(
+        /unsupported servers override/,
+      );
+    });
+
+    it('throws for an override with a query or fragment, even without a path segment', () => {
+      const specWithQuery: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-query-override', version: '0.0.0' },
+        servers: [{ url: 'http://host:8080/v2' }],
+        paths: {
+          '/cluster/v2/status': {
+            servers: [{ url: 'http://host:8080?x=1' }],
+            get: { operationId: 'getClusterStatus', responses: { '200': { description: 'ok' } } },
+          },
+        },
+      };
+      expect(() => extractServerOverrideFor(specWithQuery, 'getClusterStatus')).toThrow(
         /unsupported servers override/,
       );
     });
