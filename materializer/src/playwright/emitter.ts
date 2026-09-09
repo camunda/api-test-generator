@@ -487,7 +487,7 @@ function renderScenarioTest(
     for (const l of wrapped) body.push(`  // ${l}`);
   }
   const serverOverride = resolveScenarioServerOverride(s.operations);
-  body.push(`  const baseUrl = buildBaseUrl(${!!serverOverride});`);
+  body.push(`  const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   // `unknown` (not `any`) keeps the emitted suite biome-clean while still
   // accepting the wide value space we shovel through ctx (string ids,
   // numeric keys, structured response payloads). Reads from ctx flow into

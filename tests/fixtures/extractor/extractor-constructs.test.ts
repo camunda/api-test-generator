@@ -567,7 +567,11 @@ describe('extractor construct fixtures', () => {
     });
 
     it("prefers an operation-level servers override over the path item's", () => {
-      const OPERATION_LEVEL_SERVER = '{schema}://{host}:{port}/operation-level';
+      // A different bare-root authority — no path suffix — so this stays
+      // within the only override shape the codebase can route (see the
+      // "unsupported shape" test below) while still being distinguishable
+      // from the path-item-level override.
+      const OPERATION_LEVEL_SERVER = '{schema}://{host}:{operationLevelPort}';
       const spec: OpenAPISpec = {
         openapi: '3.0.3',
         info: { title: 'fixture-operation-level-override', version: '0.0.0' },
@@ -584,6 +588,43 @@ describe('extractor construct fixtures', () => {
       };
       expect(extractServerOverrideFor(spec, 'changeClusterModeAsClusterAdmin')).toBe(
         OPERATION_LEVEL_SERVER,
+      );
+    });
+
+    it('is not an override when it merely restates the document root verbatim', () => {
+      const spec: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-redundant-root-restatement', version: '0.0.0' },
+        servers: [{ url: CLUSTER_ADMIN_SERVER }],
+        paths: {
+          '/things': {
+            get: {
+              operationId: 'listThings',
+              servers: [{ url: CLUSTER_ADMIN_SERVER }],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      };
+      expect(extractServerOverrideFor(spec, 'listThings')).toBeUndefined();
+    });
+
+    it('throws for an override shape it cannot route (a path suffix beyond the authority)', () => {
+      const spec: OpenAPISpec = {
+        openapi: '3.0.3',
+        info: { title: 'fixture-unsupported-override-shape', version: '0.0.0' },
+        paths: {
+          '/cluster/v2/rebalance': {
+            servers: [{ url: '{schema}://{host}:{port}/not-a-bare-root' }],
+            post: {
+              operationId: 'triggerClusterRebalance',
+              responses: { '202': { description: 'accepted' } },
+            },
+          },
+        },
+      };
+      expect(() => extractServerOverrideFor(spec, 'triggerClusterRebalance')).toThrow(
+        /unsupported servers override/,
       );
     });
   });

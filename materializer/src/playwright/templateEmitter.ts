@@ -320,7 +320,7 @@ function renderLifecycleSuite(
     `  test('establish ${file.subjectName}, observe present, revoke, observe absent', async ({ request }, testInfo) => {`,
   );
   const serverOverride = resolveScenarioServerOverride(allRequestSteps);
-  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   // Canonical seeding: literals → planner seedBindings → universal
@@ -488,7 +488,7 @@ function renderRestoreLifecycleSuite(
     `  test('establish ${file.subjectName}, soft-delete, restore, observe present', async ({ request }, testInfo) => {`,
   );
   const serverOverride = resolveScenarioServerOverride(allRequestSteps);
-  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
   lines.push(
     ...emitCtxSeeding({
@@ -957,7 +957,7 @@ function renderReadBackSuite(
     `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }, testInfo) => {`,
   );
   const serverOverride = resolveScenarioServerOverride(allRequestSteps);
-  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   lines.push(
@@ -1153,7 +1153,7 @@ function renderStateTransitionSuite(
     `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }, testInfo) => {`,
   );
   const serverOverride = resolveScenarioServerOverride(allRequestSteps);
-  lines.push(`    const baseUrl = buildBaseUrl(${!!serverOverride});`);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   lines.push(

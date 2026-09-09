@@ -181,7 +181,11 @@ async function main() {
   // EmitOpts.serverOverridesByOperationId's doc comment.
   const serverOverridesByOperationId: Record<string, string> = {};
   for (const op of model.operations) {
-    if (op.serverOverride) serverOverridesByOperationId[op.operationId] = op.serverOverride;
+    // `!== undefined`, not a truthiness check: an OpenAPI `servers[].url` can
+    // legitimately be the empty string (relative to the current host).
+    if (op.serverOverride !== undefined) {
+      serverOverridesByOperationId[op.operationId] = op.serverOverride;
+    }
   }
   // #419 — drop config-excluded operations up front so every generator skips
   // them (blocked-upstream ops whose negative tests can't reach their target,

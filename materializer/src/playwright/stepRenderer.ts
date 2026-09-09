@@ -64,8 +64,11 @@ export function buildUrlExpression(pathTemplate: string): string {
 export function resolveScenarioServerOverride(
   operations: readonly { serverOverride?: string }[],
 ): string | undefined {
-  const withOverride = operations.filter((o) => !!o.serverOverride);
-  const withoutOverride = operations.filter((o) => !o.serverOverride);
+  // `!== undefined`, not a truthiness check: an OpenAPI `servers[].url` can
+  // legitimately be the empty string (relative to the current host), which
+  // is a real override and must not be conflated with "no override".
+  const withOverride = operations.filter((o) => o.serverOverride !== undefined);
+  const withoutOverride = operations.filter((o) => o.serverOverride === undefined);
   const overrides = new Set(withOverride.map((o) => o.serverOverride));
   if (overrides.size > 1 || (overrides.size === 1 && withoutOverride.length > 0)) {
     const labels = [...overrides];

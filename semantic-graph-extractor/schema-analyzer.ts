@@ -24,6 +24,49 @@ import {
 } from './types';
 
 /**
+ * A `servers[].url` this codebase knows how to route: a bare
+ * `scheme://host[:port]` authority — or the equivalent OpenAPI Server
+ * Variable template, e.g. `{schema}://{host}:{port}` — with no additional
+ * path segments. `buildUrl`/`buildBaseUrl`'s `useRoot` parameter only ever
+ * means "use the bare API root instead of the default `/v2` base", never
+ * "use this literal path suffix" — so accepting an override with a path
+ * suffix (or any other shape) would silently misroute requests (PR #564
+ * review). The one override in the wild today — the Orchestration Cluster
+ * REST API's cluster-admin operations — is exactly this shape.
+ */
+function isBareRootServerUrl(url: string): boolean {
+  const authority = url.split('://')[1];
+  return authority !== undefined && !authority.includes('/');
+}
+
+/**
+ * Resolve the effective `serverOverride` for an operation/path-item pair.
+ *
+ * `undefined` when neither declares `servers`, or when the declared value
+ * is byte-identical to the document root's own `servers[0].url` — a
+ * redundant restatement, not an actual override, and must not flip
+ * base-URL selection for an operation that behaves just like every other
+ * one. Throws when a genuine override doesn't match the only shape this
+ * codebase can route (see `isBareRootServerUrl`) — silently ignoring or
+ * truncating it would misroute requests instead of failing loudly.
+ */
+function resolveServerOverride(
+  operationId: string,
+  raw: string | undefined,
+  documentRootUrl: string | undefined,
+): string | undefined {
+  if (raw === undefined || raw === documentRootUrl) return undefined;
+  if (!isBareRootServerUrl(raw)) {
+    throw new Error(
+      `${operationId}: unsupported servers override "${raw}" — this codebase only knows how to ` +
+        'route a bare-root override (no path segments, e.g. "{schema}://{host}:{port}"); extend ' +
+        "buildUrl/buildBaseUrl's useRoot handling before adding a differently-shaped one.",
+    );
+  }
+  return raw;
+}
+
+/**
  * Analyzes OpenAPI schemas to extract semantic types and operations
  */
 export class SchemaAnalyzer {
@@ -316,12 +359,14 @@ export class SchemaAnalyzer {
     }
 
     // OpenAPI `servers` precedence: operation-level overrides path-item-level,
-    // which overrides the document root (never consulted here — its absence
-    // at both levels above simply means "use the default base"). Only the
-    // Orchestration Cluster REST API's cluster-admin operations set this
-    // today, to drop the document's `/v2` base (camunda/camunda's
-    // cluster-admin.yaml).
-    const serverOverride = (operation.servers ?? pathServers)?.[0]?.url;
+    // which overrides the document root. Only the Orchestration Cluster REST
+    // API's cluster-admin operations set this today, to drop the document's
+    // `/v2` base (camunda/camunda's cluster-admin.yaml).
+    const serverOverride = resolveServerOverride(
+      operation.operationId,
+      (operation.servers ?? pathServers)?.[0]?.url,
+      spec.servers?.[0]?.url,
+    );
 
     return {
       operationId: operation.operationId,
