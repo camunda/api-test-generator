@@ -159,25 +159,42 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # playwright/config.json → clientMintedFixtures). Default to the seeded
   # `camunda@example.com` user Identity provisions; override for other setups.
   POS_FIXTURE_MEMBER_EMAIL="${POS_FIXTURE_MEMBER_EMAIL:-camunda@example.com}"
-  # POS_FIXTURE_CATALOG_ASSET_KEY: deleteCatalogAsset targets a client-minted
-  # assetKey (an element-template id) that must reference a REAL ingested asset,
-  # else 404. Ingest the shipped fixture — a multipart upload with named parts
-  # `readme` + `template` (ingestCatalogAssets is an orphan op with no producer
-  # chain, so the suite can't self-create it) — and point the fixture var at the
-  # template's own id. A failed ingest is non-fatal (the if/else below only
-  # warns, so `set -e` doesn't abort the run); the test would then 404 and
-  # report itself.
+  # POS_FIXTURE_CATALOG_ASSET_KEY: every op on /catalog/assets/{assetKey}
+  # (deleteCatalogAsset, searchCatalogAssetProjectUsages) binds the path
+  # variable to a CatalogAsset via findById, so assetKey is the asset's
+  # SERVER-minted UUID (openapi keys.yaml → CatalogAssetKey) — NOT the element
+  # template's `id`, which the API exposes separately as `resourceId`. Ingest
+  # the shipped fixture — a multipart upload with named parts `readme` +
+  # `template` (ingestCatalogAssets is an orphan op with no producer chain, so
+  # the suite can't self-create it) — then read the minted key back off
+  # searchCatalogAssets, which returns `assetKey` alongside `resourceId`;
+  # ingestion answers 204 with no body, so that search is the only way to learn
+  # it. Both steps are non-fatal (the branches below only warn, so `set -e`
+  # doesn't abort the run); an unresolved key leaves those ops to 404 and
+  # report themselves.
   CATALOG_FIX_DIR="configs/${CONFIG}/fixtures/catalog"
-  POS_FIXTURE_CATALOG_ASSET_KEY="${POS_FIXTURE_CATALOG_ASSET_KEY:-$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)}"
-  if [ -n "$POS_FIXTURE_CATALOG_ASSET_KEY" ]; then
+  CATALOG_FIXTURE_RESOURCE_ID="$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)"
+  if [ -z "${POS_FIXTURE_CATALOG_ASSET_KEY:-}" ] && [ -n "$CATALOG_FIXTURE_RESOURCE_ID" ]; then
     if curl -sf -X PUT "$POS_URL/catalog/assets/ingestion" -H "Authorization: Bearer $ADMIN_TOK" \
       -F "readme=@${CATALOG_FIX_DIR}/readme.md;type=text/markdown" \
       -F "template=@${CATALOG_FIX_DIR}/test-catalog-asset.json;type=application/json" >/dev/null 2>&1; then
-      echo "  ✓ catalog asset ingested ($POS_FIXTURE_CATALOG_ASSET_KEY)"
+      # Match resourceId client-side too: a build whose search ignores the
+      # filter would otherwise hand back an unrelated asset's key.
+      POS_FIXTURE_CATALOG_ASSET_KEY="$(curl -sf -X POST "$POS_URL/catalog/assets/search" \
+        -H "Authorization: Bearer $ADMIN_TOK" -H "Content-Type: application/json" \
+        -d "{\"filter\":{\"resourceId\":\"${CATALOG_FIXTURE_RESOURCE_ID}\"}}" 2>/dev/null \
+        | python3 -c "import json,sys; rid=sys.argv[1]; items=json.load(sys.stdin).get('items',[]); print(next((i['assetKey'] for i in items if i.get('resourceId')==rid and i.get('assetKey')), ''))" \
+          "$CATALOG_FIXTURE_RESOURCE_ID" 2>/dev/null || true)"
+      if [ -n "$POS_FIXTURE_CATALOG_ASSET_KEY" ]; then
+        echo "  ✓ catalog asset ingested ($CATALOG_FIXTURE_RESOURCE_ID → assetKey $POS_FIXTURE_CATALOG_ASSET_KEY)"
+      else
+        echo "  ⚠ catalog asset ingested but its assetKey could not be read back from searchCatalogAssets — ops on /catalog/assets/{assetKey} will 404"
+      fi
     else
-      echo "  ⚠ catalog asset ingest failed — deleteCatalogAsset may 404"
+      echo "  ⚠ catalog asset ingest failed — ops on /catalog/assets/{assetKey} may 404"
     fi
   fi
+  POS_FIXTURE_CATALOG_ASSET_KEY="${POS_FIXTURE_CATALOG_ASSET_KEY:-}"
   # POS_FIXTURE_FILE_CONTENT: createFile validates that `content` is parseable
   # for its `type` (bpmn) — the seeded placeholder is rejected 400
   # (SAXException: Content is not allowed in prolog). Provide a minimal valid
