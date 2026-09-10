@@ -4,7 +4,19 @@ import {
   jsSuiteFileName,
   renderJsSuite,
 } from '../../materializer/src/js-sdk/emitter.js';
-import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
+import type {
+  EndpointScenarioCollection,
+  GlobalContextSeed,
+  RequestStep,
+} from '../../path-analyser/src/types.ts';
+
+// Mirrors the production entry in configs/camunda-oca/ontology/global-context-seeds.json.
+const TENANT_SEED_OMIT: GlobalContextSeed = {
+  binding: 'tenantIdVar',
+  fieldName: 'tenantId',
+  seedRule: 'tenantIdVar',
+  omitWhenUnbound: true,
+};
 
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{username}' },
@@ -165,6 +177,73 @@ const FIXTURE_BODY_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+// Mirrors the real createDeployment scenario shape: tenantIdVar is
+// __PENDING__ and listed in seedBindings (the planner's "someone must
+// supply this" signal), but this scenario is a *consumer* — it does not
+// declare HTTP 409 on the binding, so it must not mint a fresh tenant id
+// and the field must be left unseeded so the request omits it (#342).
+const TENANT_OMIT_CONSUMER_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'bpmn',
+      description: 'Deploy a BPMN resource',
+      operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { tenantIdVar: '__PENDING__' },
+      seedBindings: ['tenantIdVar'],
+      requestPlan: [
+        {
+          operationId: 'createDeployment',
+          method: 'POST',
+          pathTemplate: '/deployments',
+          expect: { status: 200 },
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner placeholder in a test fixture
+          bodyTemplate: { tenantId: '${tenantIdVar}' },
+          bodyKind: 'json',
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+// Mirrors a producer scenario (e.g. createTenant): the op declares HTTP 409
+// on the client-minted tenantIdVar, so it must still mint a fresh value —
+// omitWhenUnbound only suppresses the *consumer* seed path (#342).
+const TENANT_OMIT_PRODUCER_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'createTenant', method: 'POST', path: '/tenants' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'base',
+      description: 'Create a tenant',
+      operations: [{ operationId: 'createTenant', method: 'POST', path: '/tenants' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { tenantIdVar: '__PENDING__' },
+      seedBindings: ['tenantIdVar'],
+      requestPlan: [
+        {
+          operationId: 'createTenant',
+          method: 'POST',
+          pathTemplate: '/tenants',
+          expect: { status: 201 },
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner placeholder in a test fixture
+          bodyTemplate: { tenantId: '${tenantIdVar}' },
+          bodyKind: 'json',
+          declares409: true,
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
     const emitter = createJsSdkEmitter();
@@ -252,5 +331,66 @@ describe('JavaScript SDK Emitter', () => {
 
     expect(output).toContain('waitUpToMs: 5000');
     expect(output).not.toContain('waitUpToMs: 0');
+  });
+});
+
+// Regression guard for the js-sdk emitter's missing globalContextSeeds
+// plumbing (#342 parity with Playwright/C#): js-sdk used to hardcode
+// `globalContextSeeds: []`, so every scenario minted a random tenantIdVar
+// via the catch-all seedBinding() rule — a value a single-tenant broker
+// rejects with INVALID_ARGUMENT. These tests pin the fix: an
+// omitWhenUnbound binding is left unseeded for consumer-only scenarios,
+// and still minted for producer scenarios that declare HTTP 409 on it.
+describe('emitter: universal-seed prologue parity with Playwright/C# (#342)', () => {
+  test('a consumer-only scenario leaves an omitWhenUnbound tenantIdVar unseeded so the field is omitted on the wire', () => {
+    const output = renderJsSuite(TENANT_OMIT_CONSUMER_COLLECTION, {
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED_OMIT],
+    });
+
+    expect(output).not.toContain("seedBinding('tenantIdVar')");
+    expect(output).not.toMatch(/ctx\['tenantIdVar'\] = ctx\['tenantIdVar'\] \?\?/);
+    expect(output).toContain('"tenantId": ctx[\'tenantIdVar\']');
+  });
+
+  test('a producer scenario declaring HTTP 409 on the binding still mints a fresh tenantIdVar', () => {
+    const output = renderJsSuite(TENANT_OMIT_PRODUCER_COLLECTION, {
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED_OMIT],
+    });
+
+    expect(output).toContain(
+      "ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar', { unique: true });",
+    );
+  });
+
+  test('createJsSdkEmitter().emit forwards ctx.globalContextSeeds through to the rendered suite', async () => {
+    const emitter = createJsSdkEmitter();
+    const [file] = await emitter.emit(TENANT_OMIT_CONSUMER_COLLECTION, {
+      outDir: '/unused',
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
+      globalContextSeeds: [TENANT_SEED_OMIT],
+    });
+
+    expect(file.content).not.toContain("seedBinding('tenantIdVar')");
+  });
+
+  test('rejects an unsafe globalContextSeeds shape (boundary re-validation, mirrors PlaywrightEmitter)', async () => {
+    const badSeed = { binding: 'tenant-id', fieldName: 'tenantId', seedRule: 'tenantIdVar' };
+    await expect(
+      createJsSdkEmitter().emit(TENANT_OMIT_CONSUMER_COLLECTION, {
+        outDir: '/unused',
+        suiteName: 'createDeployment',
+        mode: 'feature',
+        configName: 'test',
+        emitterConfig: {},
+        resolveConfigPath: (rel) => rel,
+        globalContextSeeds: [badSeed],
+      }),
+    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier|must match pattern/);
   });
 });
