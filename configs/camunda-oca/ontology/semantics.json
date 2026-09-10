@@ -97,6 +97,24 @@
       "$comment": "Free-form correlation identifier attached to a process instance (createProcessInstance.businessId, searchProcessInstances.filter.businessId, etc.). Like Tag: client-minted, no producer endpoint, no first-order entity retrievable by it. The planner mints a deterministic value at the setter site; filter-consumer reuse is deferred (see #168)."
     },
     {
+      "name": "AgentDefinitionKey",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Client-supplied agent-definition identifier used in agent-definition and agent-instance search filters. This is a filter value, not a lifecycle entity key, so it is classified as a client-minted attribute rather than a runtime-emitted entity."
+    },
+    {
+      "name": "LoopIterationId",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Client-minted loop-iteration identifier attached to createAgentInstanceHistoryItem and updateAgentInstance request bodies. It is supplied by the AI Agent Connector and is not a server-emitted resource key."
+    },
+    {
+      "name": "AgentHistoryItemKey",
+      "kind": "attribute",
+      "clientMinted": true,
+      "$comment": "Client-supplied history-item identifier used in agent-instance-history search filters. It behaves like a filter-scope attribute rather than a server-emitted lifecycle key."
+    },
+    {
       "name": "AuditLogKey",
       "kind": "serverEmergent",
       "$comment": "Server-minted lifecycle key for audit-log entries. Audit logs are produced as a side-effect of audited writes \u2014 no direct create API. Search-filter input only; planner mints a deterministic placeholder. See #162 PR 5."
