@@ -45,3 +45,20 @@ If the bundled spec content drifts from the pin, the vitest globalSetup
 in [tests/regression/spec-pin.setup.ts](tests/regression/spec-pin.setup.ts)
 aborts the entire run with an actionable re-pin message. See
 [README §Spec pin](README.md#spec-pin) for the bump procedure.
+
+## Opening a fix PR for a not-yet-merged hub API change
+
+If you're adding/changing a `camunda-hub` endpoint and opening a matching
+PR here ahead of time (so coverage lands with the API change instead of
+being discovered by the nightly), **label it `nightly-api-fix`**.
+
+`.github/workflows/triage-camunda-hub-nightly.yml` runs after every
+nightly failure and, before opening its own fix PR for a test-generation
+bug or coverage gap, searches for open PRs labeled `nightly-api-fix`
+whose diff already covers the affected operation — if one exists, it
+links to it instead of duplicating the fix. That search only matches on
+the label; the bot applies it automatically to PRs it opens itself, but a
+manually-opened PR needs the label added by hand. Without it, the triage
+agent has no way to know your PR already covers the endpoint, and if the
+nightly runs before yours merges, it will open a competing fix PR (the
+two then race to merge, and the loser has to be closed as a duplicate).
