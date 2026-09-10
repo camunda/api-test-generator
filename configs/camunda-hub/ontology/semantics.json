@@ -13,7 +13,7 @@
       "name": "CatalogAssetKey",
       "kind": "attribute",
       "clientMinted": true,
-      "$comment": "Key identifying an ingested catalog asset. Derived from the element template's `id` field in the fixture file. Client-minted because ingestCatalogAssets returns 204 (no response body). Override at runtime via POS_FIXTURE_CATALOG_ASSET_KEY."
+      "$comment": "Key identifying an ingested catalog asset — the asset's server-minted UUID, NOT the element template's `id` (the API exposes that separately as `resourceId`). Modelled as client-minted only because ingestCatalogAssets returns 204 (no response body), so the planner cannot chain the key out of the producer; scripts/e2e/run-hub.sh ingests the fixture, reads the real key back off searchCatalogAssets (`items[].assetKey`, matched on `resourceId`), and injects it via POS_FIXTURE_CATALOG_ASSET_KEY."
     }
   ]
 }
