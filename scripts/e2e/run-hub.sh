@@ -82,6 +82,44 @@ import json,sys
 try: print(json.load(sys.stdin).get('$1',''))
 except Exception: pass
 " 2>/dev/null || true; }
+# Ingest the shipped catalog-asset fixture and print its assetKey ('' on any
+# failure). Every op on /catalog/assets/{assetKey} (deleteCatalogAsset,
+# searchCatalogAssetProjectUsages) binds the path variable to a CatalogAsset via
+# findById, so assetKey is the asset's SERVER-minted UUID (openapi keys.yaml →
+# CatalogAssetKey) — NOT the element template's `id`, which the API exposes
+# separately as `resourceId`. Ingestion (a multipart upload with named parts
+# `readme` + `template`) answers 204 with no body, so searchCatalogAssets —
+# which returns `assetKey` alongside `resourceId` — is the only way to learn the
+# key. Ingestion dedupes on resourceId per organization, so calling this twice
+# is a no-op on the second pass. Progress goes to stderr: stdout is the key.
+CATALOG_FIX_DIR="configs/${CONFIG}/fixtures/catalog"
+ingest_catalog_asset() {
+  local rid key
+  rid="$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)"
+  if [ -z "$rid" ]; then
+    echo "  ⚠ catalog fixture template unreadable — ops on /catalog/assets/{assetKey} will 404" >&2
+    return 0
+  fi
+  if ! curl -sf -X PUT "$POS_URL/catalog/assets/ingestion" -H "Authorization: Bearer $ADMIN_TOK" \
+    -F "readme=@${CATALOG_FIX_DIR}/readme.md;type=text/markdown" \
+    -F "template=@${CATALOG_FIX_DIR}/test-catalog-asset.json;type=application/json" >/dev/null 2>&1; then
+    echo "  ⚠ catalog asset ingest failed — ops on /catalog/assets/{assetKey} may 404" >&2
+    return 0
+  fi
+  # Match resourceId client-side too: a build whose search ignores the filter
+  # would otherwise hand back an unrelated asset's key.
+  key="$(curl -sf -X POST "$POS_URL/catalog/assets/search" \
+    -H "Authorization: Bearer $ADMIN_TOK" -H "Content-Type: application/json" \
+    -d "{\"filter\":{\"resourceId\":\"${rid}\"}}" 2>/dev/null \
+    | python3 -c "import json,sys; rid=sys.argv[1]; items=json.load(sys.stdin).get('items',[]); print(next((i['assetKey'] for i in items if i.get('resourceId')==rid and i.get('assetKey')), ''))" \
+      "$rid" 2>/dev/null || true)"
+  if [ -n "$key" ]; then
+    echo "  ✓ catalog asset ingested ($rid → assetKey $key)" >&2
+  else
+    echo "  ⚠ catalog asset ingested but its assetKey could not be read back from searchCatalogAssets — ops on /catalog/assets/{assetKey} will 404" >&2
+  fi
+  printf '%s' "$key"
+}
 make_fixtures() {
   local h=(-H "Authorization: Bearer $ADMIN_TOK" -H "Content-Type: application/json")
   # content must be valid BPMN XML — createFile rejects a non-parseable body (400).
@@ -98,9 +136,15 @@ make_fixtures() {
   # versionable, so this stays empty until #25801 — restore/updateVersion path
   # tests will 404 (tracked, same block as the dropped positive Version suite).
   export RV_FIXTURE_VERSION_KEY;   RV_FIXTURE_VERSION_KEY="$(curl -s -X POST "$POS_URL/versions" "${h[@]}" -d "$(printf '{"fileKey":"%s","name":"rv-fixture-version"}' "$RV_FIXTURE_FILE_KEY")" | _jget versionKey)"
-  echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY"
+  # Catalog assets have no create op in the v2 API (ingestion is a multipart PUT
+  # that returns no key), so this one comes from the shared ingest helper rather
+  # than a POST + _jget like the others.
+  export RV_FIXTURE_CATALOG_ASSET_KEY; RV_FIXTURE_CATALOG_ASSET_KEY="$(ingest_catalog_asset)"
+  echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY catalogAsset=$RV_FIXTURE_CATALOG_ASSET_KEY"
   # Surface any failed create: an empty key means the tests fall back to the 'x'
   # filler for that resource (via `|| 'x'`) and will 404/403 as if unfixtured.
+  # CATALOG_ASSET_KEY is absent here on purpose: ingest_catalog_asset already
+  # warns, and distinguishes ingest failure from an unreadable key.
   local k var
   for k in WORKSPACE_KEY V2_PROJECT_KEY FOLDER_KEY FILE_KEY VERSION_KEY; do
     var="RV_FIXTURE_${k}"
@@ -159,42 +203,14 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # playwright/config.json → clientMintedFixtures). Default to the seeded
   # `camunda@example.com` user Identity provisions; override for other setups.
   POS_FIXTURE_MEMBER_EMAIL="${POS_FIXTURE_MEMBER_EMAIL:-camunda@example.com}"
-  # POS_FIXTURE_CATALOG_ASSET_KEY: every op on /catalog/assets/{assetKey}
-  # (deleteCatalogAsset, searchCatalogAssetProjectUsages) binds the path
-  # variable to a CatalogAsset via findById, so assetKey is the asset's
-  # SERVER-minted UUID (openapi keys.yaml → CatalogAssetKey) — NOT the element
-  # template's `id`, which the API exposes separately as `resourceId`. Ingest
-  # the shipped fixture — a multipart upload with named parts `readme` +
-  # `template` (ingestCatalogAssets is an orphan op with no producer chain, so
-  # the suite can't self-create it) — then read the minted key back off
-  # searchCatalogAssets, which returns `assetKey` alongside `resourceId`;
-  # ingestion answers 204 with no body, so that search is the only way to learn
-  # it. Both steps are non-fatal (the branches below only warn, so `set -e`
-  # doesn't abort the run); an unresolved key leaves those ops to 404 and
-  # report themselves.
-  CATALOG_FIX_DIR="configs/${CONFIG}/fixtures/catalog"
-  CATALOG_FIXTURE_RESOURCE_ID="$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)"
-  if [ -z "${POS_FIXTURE_CATALOG_ASSET_KEY:-}" ] && [ -n "$CATALOG_FIXTURE_RESOURCE_ID" ]; then
-    if curl -sf -X PUT "$POS_URL/catalog/assets/ingestion" -H "Authorization: Bearer $ADMIN_TOK" \
-      -F "readme=@${CATALOG_FIX_DIR}/readme.md;type=text/markdown" \
-      -F "template=@${CATALOG_FIX_DIR}/test-catalog-asset.json;type=application/json" >/dev/null 2>&1; then
-      # Match resourceId client-side too: a build whose search ignores the
-      # filter would otherwise hand back an unrelated asset's key.
-      POS_FIXTURE_CATALOG_ASSET_KEY="$(curl -sf -X POST "$POS_URL/catalog/assets/search" \
-        -H "Authorization: Bearer $ADMIN_TOK" -H "Content-Type: application/json" \
-        -d "{\"filter\":{\"resourceId\":\"${CATALOG_FIXTURE_RESOURCE_ID}\"}}" 2>/dev/null \
-        | python3 -c "import json,sys; rid=sys.argv[1]; items=json.load(sys.stdin).get('items',[]); print(next((i['assetKey'] for i in items if i.get('resourceId')==rid and i.get('assetKey')), ''))" \
-          "$CATALOG_FIXTURE_RESOURCE_ID" 2>/dev/null || true)"
-      if [ -n "$POS_FIXTURE_CATALOG_ASSET_KEY" ]; then
-        echo "  ✓ catalog asset ingested ($CATALOG_FIXTURE_RESOURCE_ID → assetKey $POS_FIXTURE_CATALOG_ASSET_KEY)"
-      else
-        echo "  ⚠ catalog asset ingested but its assetKey could not be read back from searchCatalogAssets — ops on /catalog/assets/{assetKey} will 404"
-      fi
-    else
-      echo "  ⚠ catalog asset ingest failed — ops on /catalog/assets/{assetKey} may 404"
-    fi
-  fi
-  POS_FIXTURE_CATALOG_ASSET_KEY="${POS_FIXTURE_CATALOG_ASSET_KEY:-}"
+  # POS_FIXTURE_CATALOG_ASSET_KEY: the positive suite reads it for the
+  # client-minted assetKey binding (configs/camunda-hub/codegen/playwright/
+  # config.json → clientMintedFixtures). make_fixtures resolved the same key
+  # into RV_FIXTURE_CATALOG_ASSET_KEY a few steps earlier, so reuse it; only
+  # fall back to a fresh ingest if that failed or make_fixtures never ran.
+  # See ingest_catalog_asset for why the key is a UUID rather than the
+  # template's own id.
+  POS_FIXTURE_CATALOG_ASSET_KEY="${POS_FIXTURE_CATALOG_ASSET_KEY:-${RV_FIXTURE_CATALOG_ASSET_KEY:-$(ingest_catalog_asset)}}"
   # POS_FIXTURE_FILE_CONTENT: createFile validates that `content` is parseable
   # for its `type` (bpmn) — the seeded placeholder is rejected 400
   # (SAXException: Content is not allowed in prolog). Provide a minimal valid
