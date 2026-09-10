@@ -229,6 +229,7 @@ services:
       # full surface the suite covers (workspaces, catalog) is reachable.
       CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED: "true"
       FEATURE_WORKSPACES_ENABLED: "true"
+      CAMUNDA_MODELER_FEATURE_ENVIRONMENTS_ENABLED: "true"
       FEATURE_CATALOG_ENABLED: "true"
       CAMUNDA_MODELER_FEATURE_CONSOLE_ENABLED: "true"
       FEATURE_GLOBAL_NAVIGATION_V2_ENABLED: "true"
