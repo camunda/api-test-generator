@@ -288,11 +288,50 @@ case "${1:-start}" in
       # the public repo > SNAPSHOT.
       export HUB_IMAGE="${HUB_IMAGE:-camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}}"
       echo "Hub image: ${HUB_IMAGE}"
+      # Pull the Hub image on its own, with backoff, before composing anything.
+      # A freshly-pushed pr-<sha> tag is briefly unservable by Harbor — and it
+      # answers `unauthorized` rather than 404 while in that state — but the hub
+      # PR check dispatches within seconds of the image build finishing, so the
+      # compose-level retry below (3 × 15s ≈ 50s) expired mid-propagation and the
+      # whole run died before a single test ran. Deadline-bounded; override with
+      # HUB_IMAGE_PULL_TIMEOUT_SECONDS.
+      pull_timeout="${HUB_IMAGE_PULL_TIMEOUT_SECONDS:-300}"
+      pull_deadline=$(( $(date +%s) + pull_timeout ))
+      pull_delay=10
+      pull_log="$(mktemp)"
+      until docker pull "$HUB_IMAGE" >/dev/null 2>"$pull_log"; do
+        sed 's/^/  /' "$pull_log" >&2
+        if [ "$(date +%s)" -ge "$pull_deadline" ]; then
+          echo "Error: could not pull ${HUB_IMAGE} within ${pull_timeout}s." >&2
+          # Harbor reports a tag that does not exist as EITHER `unauthorized` or
+          # `not found` depending on how long it has been gone, so treat both as
+          # "never published, or already pruned" rather than a network blip.
+          if grep -qiE "not found|unauthorized|denied" "$pull_log"; then
+            echo "The tag looks absent from the registry rather than slow to serve:" >&2
+            echo "  - pr-<sha> tags are pruned by registry retention, so RE-RUNNING an old" >&2
+            echo "    hub PR check can never pull one. Re-dispatch from a fresh camunda-hub" >&2
+            echo "    run instead of re-running this one." >&2
+            echo "  - if it was never published, check that commit's" >&2
+            echo "    'Stage - Build / build-restapi-self-managed' job in camunda-hub." >&2
+          fi
+          rm -f "$pull_log"
+          exit 1
+        fi
+        echo "pull of ${HUB_IMAGE} failed — retrying in ${pull_delay}s..."
+        sleep "$pull_delay"
+        [ "$pull_delay" -ge 60 ] || pull_delay=$(( pull_delay * 2 ))
+      done
+      rm -f "$pull_log"
+      # The image is local now, so stop compose re-pulling it (hub's pull_policy
+      # defaults to `always`). `missing` is what the other services already
+      # default to (if_not_present), and an explicit PULL_POLICY still wins.
+      export PULL_POLICY="${PULL_POLICY:-missing}"
       # Bring up only the hub + its deps (NOT websockets — it's a private image
       # the suite doesn't need; excluding it keeps the prebuilt path free of any
       # Camunda registry credentials since camunda/hub itself is public).
       # Retry to absorb transient Docker Hub pull errors ("Get …/manifests/…:
-      # unknown"); `docker compose up -d` is idempotent, so a retry just resumes.
+      # unknown") on the remaining public images; `docker compose up -d` is
+      # idempotent, so a retry just resumes.
       compose_attempts=0
       until docker compose -f "$COMPOSE_FILE" --profile prebuilt up -d \
             modeler-db keycloak-db identity-db keycloak identity mailpit hub; do
