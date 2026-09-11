@@ -293,13 +293,37 @@ case "${1:-start}" in
       # answers `unauthorized` rather than 404 while in that state — but the hub
       # PR check dispatches within seconds of the image build finishing, so the
       # compose-level retry below (3 × 15s ≈ 50s) expired mid-propagation and the
-      # whole run died before a single test ran. Deadline-bounded; override with
-      # HUB_IMAGE_PULL_TIMEOUT_SECONDS.
+      # whole run died before a single test ran.
+      #
+      # Two separate budgets, because they guard different things:
+      #   HUB_IMAGE_PULL_TIMEOUT_SECONDS bounds the RETRY window — how long a
+      #     just-pushed tag is given to become servable.
+      #   HUB_IMAGE_PULL_ATTEMPT_TIMEOUT_SECONDS bounds ONE pull, so a wedged
+      #     daemon/registry can't block indefinitely (the retry budget can't do
+      #     this: `docker pull` is synchronous). It is deliberately far above any
+      #     healthy pull of this image — capping an attempt at the retry budget
+      #     would kill a slow-but-progressing pull that succeeds today.
+      # `timeout` is GNU coreutils and absent on stock macOS, so it is used only
+      # when present; without it the attempt is simply unbounded, as before.
       pull_timeout="${HUB_IMAGE_PULL_TIMEOUT_SECONDS:-300}"
+      pull_attempt_timeout="${HUB_IMAGE_PULL_ATTEMPT_TIMEOUT_SECONDS:-900}"
       pull_deadline=$(( $(date +%s) + pull_timeout ))
       pull_delay=10
       pull_log="$(mktemp)"
-      until docker pull "$HUB_IMAGE" >/dev/null 2>"$pull_log"; do
+      timeout_bin=""
+      for candidate in timeout gtimeout; do
+        if command -v "$candidate" >/dev/null 2>&1; then timeout_bin="$candidate"; break; fi
+      done
+      [ -n "$timeout_bin" ] ||
+        echo "Note: no timeout(1) on PATH — a hung 'docker pull' will not be interrupted."
+      pull_hub_image() {
+        if [ -n "$timeout_bin" ]; then
+          "$timeout_bin" "$pull_attempt_timeout" docker pull "$HUB_IMAGE"
+        else
+          docker pull "$HUB_IMAGE"
+        fi
+      }
+      until pull_hub_image >/dev/null 2>"$pull_log"; do
         sed 's/^/  /' "$pull_log" >&2
         # Budget the SLEEP against what is left, not just the next wake-up: an
         # uncapped backoff would let the wait run past pull_timeout (and a short
@@ -308,15 +332,11 @@ case "${1:-start}" in
         pull_remaining=$(( pull_deadline - $(date +%s) ))
         if [ "$pull_remaining" -le 0 ]; then
           echo "Error: could not pull ${HUB_IMAGE} within ${pull_timeout}s." >&2
-          # Harbor reports a tag that does not exist as EITHER `unauthorized` or
-          # `not found` depending on how long it has been gone, so treat both as
-          # "never published, or already pruned" rather than a network blip.
-          if grep -qiE "not found|unauthorized|denied" "$pull_log"; then
-            echo "The tag looks absent from the registry rather than slow to serve:" >&2
+          # Where a missing tag could come from. Only the PR check pulls a
+          # pr-<sha> tag from the internal registry, so the retention/build-job
+          # advice is meaningless for the public camunda/hub:<tag> default.
+          absent_tag_advice() {
             case "$HUB_IMAGE" in
-              # Only the PR check pulls a pr-<sha> tag from the internal registry;
-              # the retention/build-job advice below is meaningless (and
-              # misleading) for the public camunda/hub:<tag> default.
               registry.camunda.cloud/*:pr-*)
                 echo "  - pr-<sha> tags are pruned by registry retention, so RE-RUNNING an old" >&2
                 echo "    hub PR check can never pull one. Re-dispatch from a fresh camunda-hub" >&2
@@ -325,10 +345,23 @@ case "${1:-start}" in
                 echo "    'Stage - Build / build-restapi-self-managed' job in camunda-hub." >&2
                 ;;
               *)
-                echo "  - check the tag exists (HUB_IMAGE / HUB_IMAGE_TAG) and that this host" >&2
-                echo "    is logged in to its registry, then re-run." >&2
+                echo "  - check the tag exists (HUB_IMAGE / HUB_IMAGE_TAG), then re-run." >&2
                 ;;
             esac
+          }
+          if grep -qiE "manifest unknown|not found" "$pull_log"; then
+            echo "The tag is absent from the registry rather than slow to serve:" >&2
+            absent_tag_advice
+          elif grep -qiE "unauthorized|denied|authentication required" "$pull_log"; then
+            # Do NOT call this an absent tag: Harbor answers `unauthorized` for a
+            # tag that does not exist (or is not yet servable) AND for a genuine
+            # credential/permission failure, and `denied` is likewise ambiguous.
+            # Asserting the first would mask a lost robot-account grant.
+            echo "The registry refused the pull. That message is ambiguous — it covers" >&2
+            echo "both a missing/not-yet-servable tag and a real access problem:" >&2
+            echo "  - access: confirm this host is logged in to the registry and that the" >&2
+            echo "    credentials still carry pull rights on that repository." >&2
+            absent_tag_advice
           fi
           rm -f "$pull_log"
           exit 1
