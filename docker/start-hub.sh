@@ -288,11 +288,146 @@ case "${1:-start}" in
       # the public repo > SNAPSHOT.
       export HUB_IMAGE="${HUB_IMAGE:-camunda/hub:${HUB_IMAGE_TAG:-SNAPSHOT}}"
       echo "Hub image: ${HUB_IMAGE}"
+      # Pull the Hub image on its own, with backoff, before composing anything.
+      # A freshly-pushed pr-<sha> tag is briefly unservable by Harbor — and it
+      # answers `unauthorized` rather than 404 while in that state — but the hub
+      # PR check dispatches within seconds of the image build finishing, so the
+      # compose-level retry below (3 × 15s ≈ 50s) expired mid-propagation and the
+      # whole run died before a single test ran.
+      #
+      # Skipped entirely when the caller's PULL_POLICY says not to reach the
+      # registry: `never` means "use what is local" (offline, or a hand-loaded
+      # image), and `missing`/`if_not_present` means "only when it isn't here
+      # yet". Pre-pulling regardless would refresh the tag behind the caller's
+      # back, before Compose ever applies the policy.
+      #
+      # Two separate budgets, because they guard different things:
+      #   HUB_IMAGE_PULL_TIMEOUT_SECONDS bounds the RETRY window — how long a
+      #     just-pushed tag is given to become servable. No attempt STARTS after
+      #     it; an attempt already in flight is bounded by the attempt cap below,
+      #     so the worst case is one attempt cap past the window.
+      #   HUB_IMAGE_PULL_ATTEMPT_TIMEOUT_SECONDS bounds ONE pull, so a wedged
+      #     daemon/registry can't block indefinitely (the retry budget can't do
+      #     this: `docker pull` is synchronous). It is deliberately far above any
+      #     healthy pull of this image — capping an attempt at the retry budget
+      #     would kill a slow-but-progressing pull that succeeds today.
+      # `timeout` is GNU coreutils and absent on stock macOS, so it is used only
+      # when present; without it the attempt is simply unbounded, as before.
+      pull_timeout="${HUB_IMAGE_PULL_TIMEOUT_SECONDS:-300}"
+      pull_attempt_timeout="${HUB_IMAGE_PULL_ATTEMPT_TIMEOUT_SECONDS:-900}"
+      pull_deadline=$(( $(date +%s) + pull_timeout ))
+      pull_delay=10
+      pull_log="$(mktemp)"
+      timeout_bin=""
+      for candidate in timeout gtimeout; do
+        if command -v "$candidate" >/dev/null 2>&1; then timeout_bin="$candidate"; break; fi
+      done
+      [ -n "$timeout_bin" ] ||
+        echo "Note: no timeout(1) on PATH — a hung 'docker pull' will not be interrupted."
+      pull_hub_image() {
+        if [ -n "$timeout_bin" ]; then
+          "$timeout_bin" "$pull_attempt_timeout" docker pull "$HUB_IMAGE"
+        else
+          docker pull "$HUB_IMAGE"
+        fi
+      }
+      # Resolve the policy Compose will actually apply, BEFORE deciding whether to
+      # pre-pull — it comes from the shell OR from an env file, and honouring only
+      # the shell would let a `.env` saying `never` still hit the registry.
+      # Shell wins, matching Compose's own precedence. Compose reads the env file
+      # from the PROJECT directory, i.e. beside the compose file (verified on
+      # Compose 5.5.1: a `.env` in the invoking cwd is ignored); the cwd copy is
+      # checked purely as belt-and-braces for older Compose versions that did read
+      # it. Values may be quoted, and a CRLF file leaves a stray \r.
+      pull_policy_effective="${PULL_POLICY:-}"
+      if [ -z "$pull_policy_effective" ]; then
+        for compose_env_file in "$(dirname "$COMPOSE_FILE")/.env" "$PWD/.env"; do
+          [ -f "$compose_env_file" ] || continue
+          pull_policy_effective="$(
+            sed -n 's/^[[:space:]]*PULL_POLICY=[[:space:]]*//p' "$compose_env_file" |
+              tail -1 | tr -d '\r' | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+          )"
+          [ -z "$pull_policy_effective" ] || break
+        done
+      fi
+      prepull_wanted=yes
+      case "$pull_policy_effective" in
+        never)
+          prepull_wanted=no
+          echo "PULL_POLICY=never — skipping the image pre-pull; using the local ${HUB_IMAGE}."
+          ;;
+        missing | if_not_present)
+          if docker image inspect "$HUB_IMAGE" >/dev/null 2>&1; then
+            prepull_wanted=no
+            echo "PULL_POLICY=${pull_policy_effective} and ${HUB_IMAGE} is already local — skipping the pre-pull."
+          fi
+          ;;
+      esac
+      while [ "$prepull_wanted" = yes ] && ! pull_hub_image >/dev/null 2>"$pull_log"; do
+        sed 's/^/  /' "$pull_log" >&2
+        # Give up unless the budget can fit BOTH the next wait and the attempt it
+        # exists for: sleeping right up to the deadline and then starting a pull
+        # anyway would push the window out by a whole attempt, and sleeping past
+        # it to discover that is pure waste. So every attempt starts strictly
+        # inside pull_timeout.
+        pull_remaining=$(( pull_deadline - $(date +%s) ))
+        if [ "$pull_remaining" -le 0 ] || [ "$pull_delay" -ge "$pull_remaining" ]; then
+          echo "Error: could not pull ${HUB_IMAGE} within ${pull_timeout}s." >&2
+          # Where a missing tag could come from. Only the PR check pulls a
+          # pr-<sha> tag from the internal registry, so the retention/build-job
+          # advice is meaningless for the public camunda/hub:<tag> default.
+          absent_tag_advice() {
+            case "$HUB_IMAGE" in
+              registry.camunda.cloud/*:pr-*)
+                echo "  - pr-<sha> tags are pruned by registry retention, so RE-RUNNING an old" >&2
+                echo "    hub PR check can never pull one. Re-dispatch from a fresh camunda-hub" >&2
+                echo "    run instead of re-running this one." >&2
+                echo "  - if it was never published, check that commit's" >&2
+                echo "    'Stage - Build / build-restapi-self-managed' job in camunda-hub." >&2
+                ;;
+              *)
+                echo "  - check the tag exists (HUB_IMAGE / HUB_IMAGE_TAG), then re-run." >&2
+                ;;
+            esac
+          }
+          if grep -qiE "manifest unknown|not found" "$pull_log"; then
+            echo "The tag is absent from the registry rather than slow to serve:" >&2
+            absent_tag_advice
+          elif grep -qiE "unauthorized|denied|authentication required" "$pull_log"; then
+            # Do NOT call this an absent tag: Harbor answers `unauthorized` for a
+            # tag that does not exist (or is not yet servable) AND for a genuine
+            # credential/permission failure, and `denied` is likewise ambiguous.
+            # Asserting the first would mask a lost robot-account grant.
+            echo "The registry refused the pull. That message is ambiguous — it covers" >&2
+            echo "both a missing/not-yet-servable tag and a real access problem:" >&2
+            echo "  - access: confirm this host is logged in to the registry and that the" >&2
+            echo "    credentials still carry pull rights on that repository." >&2
+            absent_tag_advice
+          fi
+          rm -f "$pull_log"
+          exit 1
+        fi
+        echo "pull of ${HUB_IMAGE} failed — retrying in ${pull_delay}s..."
+        sleep "$pull_delay"
+        [ "$pull_delay" -ge 60 ] || pull_delay=$(( pull_delay * 2 ))
+      done
+      rm -f "$pull_log"
+      # The image is local now, so stop compose re-pulling it (hub's pull_policy
+      # defaults to `always`). `missing` is what the other services already
+      # default to (if_not_present). Only default when NOTHING chose a policy —
+      # pull_policy_effective already folded in the env files above, and a value
+      # that came from one of those is left for Compose to read itself rather
+      # than re-exported. Declining the default is harmless: it only means
+      # Compose re-pulls a tag we already have.
+      if [ -z "$pull_policy_effective" ]; then
+        export PULL_POLICY=missing
+      fi
       # Bring up only the hub + its deps (NOT websockets — it's a private image
       # the suite doesn't need; excluding it keeps the prebuilt path free of any
       # Camunda registry credentials since camunda/hub itself is public).
       # Retry to absorb transient Docker Hub pull errors ("Get …/manifests/…:
-      # unknown"); `docker compose up -d` is idempotent, so a retry just resumes.
+      # unknown") on the remaining public images; `docker compose up -d` is
+      # idempotent, so a retry just resumes.
       compose_attempts=0
       until docker compose -f "$COMPOSE_FILE" --profile prebuilt up -d \
             modeler-db keycloak-db identity-db keycloak identity mailpit hub; do
