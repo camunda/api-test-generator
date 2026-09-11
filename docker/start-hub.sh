@@ -301,22 +301,39 @@ case "${1:-start}" in
       pull_log="$(mktemp)"
       until docker pull "$HUB_IMAGE" >/dev/null 2>"$pull_log"; do
         sed 's/^/  /' "$pull_log" >&2
-        if [ "$(date +%s)" -ge "$pull_deadline" ]; then
+        # Budget the SLEEP against what is left, not just the next wake-up: an
+        # uncapped backoff would let the wait run past pull_timeout (and a short
+        # override sleep 10s for a 1s budget), so no new attempt starts after the
+        # deadline and the last one lands exactly on it.
+        pull_remaining=$(( pull_deadline - $(date +%s) ))
+        if [ "$pull_remaining" -le 0 ]; then
           echo "Error: could not pull ${HUB_IMAGE} within ${pull_timeout}s." >&2
           # Harbor reports a tag that does not exist as EITHER `unauthorized` or
           # `not found` depending on how long it has been gone, so treat both as
           # "never published, or already pruned" rather than a network blip.
           if grep -qiE "not found|unauthorized|denied" "$pull_log"; then
             echo "The tag looks absent from the registry rather than slow to serve:" >&2
-            echo "  - pr-<sha> tags are pruned by registry retention, so RE-RUNNING an old" >&2
-            echo "    hub PR check can never pull one. Re-dispatch from a fresh camunda-hub" >&2
-            echo "    run instead of re-running this one." >&2
-            echo "  - if it was never published, check that commit's" >&2
-            echo "    'Stage - Build / build-restapi-self-managed' job in camunda-hub." >&2
+            case "$HUB_IMAGE" in
+              # Only the PR check pulls a pr-<sha> tag from the internal registry;
+              # the retention/build-job advice below is meaningless (and
+              # misleading) for the public camunda/hub:<tag> default.
+              registry.camunda.cloud/*:pr-*)
+                echo "  - pr-<sha> tags are pruned by registry retention, so RE-RUNNING an old" >&2
+                echo "    hub PR check can never pull one. Re-dispatch from a fresh camunda-hub" >&2
+                echo "    run instead of re-running this one." >&2
+                echo "  - if it was never published, check that commit's" >&2
+                echo "    'Stage - Build / build-restapi-self-managed' job in camunda-hub." >&2
+                ;;
+              *)
+                echo "  - check the tag exists (HUB_IMAGE / HUB_IMAGE_TAG) and that this host" >&2
+                echo "    is logged in to its registry, then re-run." >&2
+                ;;
+            esac
           fi
           rm -f "$pull_log"
           exit 1
         fi
+        [ "$pull_delay" -le "$pull_remaining" ] || pull_delay="$pull_remaining"
         echo "pull of ${HUB_IMAGE} failed — retrying in ${pull_delay}s..."
         sleep "$pull_delay"
         [ "$pull_delay" -ge 60 ] || pull_delay=$(( pull_delay * 2 ))
@@ -324,8 +341,15 @@ case "${1:-start}" in
       rm -f "$pull_log"
       # The image is local now, so stop compose re-pulling it (hub's pull_policy
       # defaults to `always`). `missing` is what the other services already
-      # default to (if_not_present), and an explicit PULL_POLICY still wins.
-      export PULL_POLICY="${PULL_POLICY:-missing}"
+      # default to (if_not_present). Compose takes PULL_POLICY from the shell OR
+      # from the env file beside the compose file, and a shell export silently
+      # outranks that file — so check the file too, and leave an explicit setting
+      # from either source alone.
+      compose_env_file="$(dirname "$COMPOSE_FILE")/.env"
+      if [ -z "${PULL_POLICY:-}" ] &&
+         ! grep -qE '^[[:space:]]*PULL_POLICY=' "$compose_env_file" 2>/dev/null; then
+        export PULL_POLICY=missing
+      fi
       # Bring up only the hub + its deps (NOT websockets — it's a private image
       # the suite doesn't need; excluding it keeps the prebuilt path free of any
       # Camunda registry credentials since camunda/hub itself is public).
