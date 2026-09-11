@@ -295,9 +295,17 @@ case "${1:-start}" in
       # compose-level retry below (3 × 15s ≈ 50s) expired mid-propagation and the
       # whole run died before a single test ran.
       #
+      # Skipped entirely when the caller's PULL_POLICY says not to reach the
+      # registry: `never` means "use what is local" (offline, or a hand-loaded
+      # image), and `missing`/`if_not_present` means "only when it isn't here
+      # yet". Pre-pulling regardless would refresh the tag behind the caller's
+      # back, before Compose ever applies the policy.
+      #
       # Two separate budgets, because they guard different things:
       #   HUB_IMAGE_PULL_TIMEOUT_SECONDS bounds the RETRY window — how long a
-      #     just-pushed tag is given to become servable.
+      #     just-pushed tag is given to become servable. No attempt STARTS after
+      #     it; an attempt already in flight is bounded by the attempt cap below,
+      #     so the worst case is one attempt cap past the window.
       #   HUB_IMAGE_PULL_ATTEMPT_TIMEOUT_SECONDS bounds ONE pull, so a wedged
       #     daemon/registry can't block indefinitely (the retry budget can't do
       #     this: `docker pull` is synchronous). It is deliberately far above any
@@ -323,14 +331,28 @@ case "${1:-start}" in
           docker pull "$HUB_IMAGE"
         fi
       }
-      until pull_hub_image >/dev/null 2>"$pull_log"; do
+      prepull_wanted=yes
+      case "${PULL_POLICY:-}" in
+        never)
+          prepull_wanted=no
+          echo "PULL_POLICY=never — skipping the image pre-pull; using the local ${HUB_IMAGE}."
+          ;;
+        missing | if_not_present)
+          if docker image inspect "$HUB_IMAGE" >/dev/null 2>&1; then
+            prepull_wanted=no
+            echo "PULL_POLICY=${PULL_POLICY} and ${HUB_IMAGE} is already local — skipping the pre-pull."
+          fi
+          ;;
+      esac
+      while [ "$prepull_wanted" = yes ] && ! pull_hub_image >/dev/null 2>"$pull_log"; do
         sed 's/^/  /' "$pull_log" >&2
-        # Budget the SLEEP against what is left, not just the next wake-up: an
-        # uncapped backoff would let the wait run past pull_timeout (and a short
-        # override sleep 10s for a 1s budget), so no new attempt starts after the
-        # deadline and the last one lands exactly on it.
+        # Give up unless the budget can fit BOTH the next wait and the attempt it
+        # exists for: sleeping right up to the deadline and then starting a pull
+        # anyway would push the window out by a whole attempt, and sleeping past
+        # it to discover that is pure waste. So every attempt starts strictly
+        # inside pull_timeout.
         pull_remaining=$(( pull_deadline - $(date +%s) ))
-        if [ "$pull_remaining" -le 0 ]; then
+        if [ "$pull_remaining" -le 0 ] || [ "$pull_delay" -ge "$pull_remaining" ]; then
           echo "Error: could not pull ${HUB_IMAGE} within ${pull_timeout}s." >&2
           # Where a missing tag could come from. Only the PR check pulls a
           # pr-<sha> tag from the internal registry, so the retention/build-job
@@ -366,7 +388,6 @@ case "${1:-start}" in
           rm -f "$pull_log"
           exit 1
         fi
-        [ "$pull_delay" -le "$pull_remaining" ] || pull_delay="$pull_remaining"
         echo "pull of ${HUB_IMAGE} failed — retrying in ${pull_delay}s..."
         sleep "$pull_delay"
         [ "$pull_delay" -ge 60 ] || pull_delay=$(( pull_delay * 2 ))
@@ -375,12 +396,20 @@ case "${1:-start}" in
       # The image is local now, so stop compose re-pulling it (hub's pull_policy
       # defaults to `always`). `missing` is what the other services already
       # default to (if_not_present). Compose takes PULL_POLICY from the shell OR
-      # from the env file beside the compose file, and a shell export silently
-      # outranks that file — so check the file too, and leave an explicit setting
-      # from either source alone.
-      compose_env_file="$(dirname "$COMPOSE_FILE")/.env"
-      if [ -z "${PULL_POLICY:-}" ] &&
-         ! grep -qE '^[[:space:]]*PULL_POLICY=' "$compose_env_file" 2>/dev/null; then
+      # from an env file, and a shell export silently outranks the file — so
+      # check the files too and leave an explicit setting from any source alone.
+      # Compose reads the env file from the PROJECT directory, i.e. beside the
+      # compose file (verified on Compose 5.5.1: a `.env` in the invoking cwd is
+      # ignored); the cwd copy is checked purely as belt-and-braces for older
+      # Compose versions that did read it. Declining the default is harmless —
+      # it only means Compose re-pulls a tag we already have.
+      for compose_env_file in "$(dirname "$COMPOSE_FILE")/.env" "$PWD/.env"; do
+        if grep -qE '^[[:space:]]*PULL_POLICY=' "$compose_env_file" 2>/dev/null; then
+          PULL_POLICY_FROM_ENV_FILE=1
+          break
+        fi
+      done
+      if [ -z "${PULL_POLICY:-}" ] && [ -z "${PULL_POLICY_FROM_ENV_FILE:-}" ]; then
         export PULL_POLICY=missing
       fi
       # Bring up only the hub + its deps (NOT websockets — it's a private image
