@@ -226,12 +226,21 @@ services:
       OAUTH2_CLIENT_ID: web-modeler
       # Feature flags: the public API v2 is OFF by default in the image, so
       # /api/v2 returns 404 until enabled. Mirror the local (make) config so the
-      # full surface the suite covers (workspaces, catalog) is reachable.
+      # full surface the suite covers (workspaces, catalog, environments) is
+      # reachable. NOTE the two env-var spellings are not interchangeable — each
+      # flag is only readable under the name hub's application-common.yml binds
+      # it to (`${FEATURE_X_ENABLED}` vs `${CAMUNDA_MODELER_FEATURE_X_ENABLED}`),
+      # and the wrong spelling leaves the flag silently off.
       CAMUNDA_MODELER_FEATURE_PUBLIC_API_V2_ENABLED: "true"
       FEATURE_WORKSPACES_ENABLED: "true"
       FEATURE_CATALOG_ENABLED: "true"
       CAMUNDA_MODELER_FEATURE_CONSOLE_ENABLED: "true"
       FEATURE_GLOBAL_NAVIGATION_V2_ENABLED: "true"
+      # Environments (camunda-hub#28601): HubV2EnvironmentController is gated on
+      # public-api-v2 AND workspaces AND environments, and environments-enabled
+      # defaults to false on Self-Managed, so the whole /api/v2 environments
+      # surface 404s (unmatched route, not a handled 404) until this is set.
+      CAMUNDA_MODELER_FEATURE_ENVIRONMENTS_ENABLED: "true"
       # Dynamic cluster management: exposes the v2 /clusters surface so the suite
       # can exercise the cluster ops. Which cluster ops run vs stay suppressed
       # (with known-issue links) lives in configs/camunda-hub/positive-suppress.json.
