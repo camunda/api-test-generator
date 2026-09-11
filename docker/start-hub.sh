@@ -331,8 +331,27 @@ case "${1:-start}" in
           docker pull "$HUB_IMAGE"
         fi
       }
+      # Resolve the policy Compose will actually apply, BEFORE deciding whether to
+      # pre-pull — it comes from the shell OR from an env file, and honouring only
+      # the shell would let a `.env` saying `never` still hit the registry.
+      # Shell wins, matching Compose's own precedence. Compose reads the env file
+      # from the PROJECT directory, i.e. beside the compose file (verified on
+      # Compose 5.5.1: a `.env` in the invoking cwd is ignored); the cwd copy is
+      # checked purely as belt-and-braces for older Compose versions that did read
+      # it. Values may be quoted, and a CRLF file leaves a stray \r.
+      pull_policy_effective="${PULL_POLICY:-}"
+      if [ -z "$pull_policy_effective" ]; then
+        for compose_env_file in "$(dirname "$COMPOSE_FILE")/.env" "$PWD/.env"; do
+          [ -f "$compose_env_file" ] || continue
+          pull_policy_effective="$(
+            sed -n 's/^[[:space:]]*PULL_POLICY=[[:space:]]*//p' "$compose_env_file" |
+              tail -1 | tr -d '\r' | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+          )"
+          [ -z "$pull_policy_effective" ] || break
+        done
+      fi
       prepull_wanted=yes
-      case "${PULL_POLICY:-}" in
+      case "$pull_policy_effective" in
         never)
           prepull_wanted=no
           echo "PULL_POLICY=never — skipping the image pre-pull; using the local ${HUB_IMAGE}."
@@ -340,7 +359,7 @@ case "${1:-start}" in
         missing | if_not_present)
           if docker image inspect "$HUB_IMAGE" >/dev/null 2>&1; then
             prepull_wanted=no
-            echo "PULL_POLICY=${PULL_POLICY} and ${HUB_IMAGE} is already local — skipping the pre-pull."
+            echo "PULL_POLICY=${pull_policy_effective} and ${HUB_IMAGE} is already local — skipping the pre-pull."
           fi
           ;;
       esac
@@ -395,21 +414,12 @@ case "${1:-start}" in
       rm -f "$pull_log"
       # The image is local now, so stop compose re-pulling it (hub's pull_policy
       # defaults to `always`). `missing` is what the other services already
-      # default to (if_not_present). Compose takes PULL_POLICY from the shell OR
-      # from an env file, and a shell export silently outranks the file — so
-      # check the files too and leave an explicit setting from any source alone.
-      # Compose reads the env file from the PROJECT directory, i.e. beside the
-      # compose file (verified on Compose 5.5.1: a `.env` in the invoking cwd is
-      # ignored); the cwd copy is checked purely as belt-and-braces for older
-      # Compose versions that did read it. Declining the default is harmless —
-      # it only means Compose re-pulls a tag we already have.
-      for compose_env_file in "$(dirname "$COMPOSE_FILE")/.env" "$PWD/.env"; do
-        if grep -qE '^[[:space:]]*PULL_POLICY=' "$compose_env_file" 2>/dev/null; then
-          PULL_POLICY_FROM_ENV_FILE=1
-          break
-        fi
-      done
-      if [ -z "${PULL_POLICY:-}" ] && [ -z "${PULL_POLICY_FROM_ENV_FILE:-}" ]; then
+      # default to (if_not_present). Only default when NOTHING chose a policy —
+      # pull_policy_effective already folded in the env files above, and a value
+      # that came from one of those is left for Compose to read itself rather
+      # than re-exported. Declining the default is harmless: it only means
+      # Compose re-pulls a tag we already have.
+      if [ -z "$pull_policy_effective" ]; then
         export PULL_POLICY=missing
       fi
       # Bring up only the hub + its deps (NOT websockets — it's a private image
