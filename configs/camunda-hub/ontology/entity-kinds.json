@@ -1,6 +1,5 @@
 {
   "$schema": "https://camunda.github.io/api-test-generator/ns/v1/entity-kinds.schema.json",
-  "$comment": "A Version entity-kind (createVersion/getVersion/deleteVersion) is intentionally omitted. createVersion is unsatisfiable via the public API: the only files it can create live inside a project (process application), and those cannot be versioned (400 'Cannot create a version for file … as it is located inside a process application'). Blocked on https://github.com/camunda/camunda-hub/issues/25801 — re-add Version once resolved.",
   "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
   "version": 1,
   "kinds": [
@@ -54,6 +53,16 @@
       "revokedBy": "deleteFolder",
       "restorableVia": "restoreFolder",
       "description": "A folder entity, identified by its server-minted folderKey. Established via createFolder (POST /folders), observed via getFolder, revoked via deleteFolder (a soft-delete). restoreFolder (POST /folders/{folderKey}/restoration) restores a soft-deleted folder — the RestoreLifecycle template (#426) drives create → soft-delete → restore so restore is exercised against a recently-deleted folder rather than a live one (which 404s)."
+    },
+    {
+      "@type": "EntityKind",
+      "name": "Version",
+      "shape": "entity",
+      "identifiers": ["VersionKey"],
+      "establishedBy": "createVersion",
+      "observableVia": "getVersion",
+      "revokedBy": "deleteVersion",
+      "description": "A version entity, identified by its server-minted versionKey — a snapshot of a file's content at a point in time. Established via createVersion (POST /versions) for a file, observed via getVersion, revoked via deleteVersion (a hard delete, 204, no restoration). createVersion was unblocked by camunda-hub#27610, which lifted the prior restriction on versioning a file located inside a process application (camunda-hub#25801)."
     }
   ]
 }

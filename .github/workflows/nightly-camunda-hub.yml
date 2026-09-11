@@ -133,8 +133,8 @@ jobs:
       - name: Generate + run positive + negative suites
         env:
           # Runs the positive (lifecycle) + negative (request-validation) suites.
-          # Blocked ops with no achievable green (versions #25801, catalog #25576)
-          # are positive-suppressed in configs/camunda-hub/positive-suppress.json.
+          # Blocked ops with no achievable green (catalog #25576) are
+          # positive-suppressed in configs/camunda-hub/positive-suppress.json.
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
           # The "Bundle latest camunda-hub spec" step above already re-bundled
@@ -317,8 +317,9 @@ jobs:
       # suppress/exclude configs (single source of truth — no hand-maintained
       # duplicate). Each relevant entry carries a `knownIssue { summary, url,
       # tracker? }`; entries without one (e.g. the out-of-scope cluster ops) are
-      # omitted. Bullets are deduped by issue url (all 5 version ops → one
-      # #25801 line). Emitted with literal `\n` so they slot into the Slack JSON.
+      # omitted. Bullets are deduped by issue url (e.g. the two cluster ops
+      # blocked on #25907 → one line). Emitted with literal `\n` so they slot
+      # into the Slack JSON.
       - name: Derive known-issue bullets
         id: known-issues
         if: always()

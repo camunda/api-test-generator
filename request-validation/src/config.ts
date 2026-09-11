@@ -119,9 +119,8 @@ export interface RequestValidationConfig {
   /**
    * Operations to exclude from negative-suite generation, with a documented
    * reason. Use for ops that are blocked upstream so their negative tests
-   * can't reach the validation path they target (e.g. Hub version ops —
-   * updateVersion/restoreVersion — whose fixture can't exist per
-   * camunda/camunda-hub#25801, so they 404 instead of 400; tracked via #419).
+   * can't reach the validation path they target (e.g. Hub's
+   * createWorkspace malformed-json-body gap, camunda-hub#27155 — see below).
    *
    * By default (no `scenarioKinds`) the WHOLE op is dropped (all its negative
    * cases), so the nightly stays green on known blockers instead of

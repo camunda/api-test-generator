@@ -129,12 +129,6 @@ make_fixtures() {
   export RV_FIXTURE_FOLDER_KEY;    RV_FIXTURE_FOLDER_KEY="$(curl -s -X POST "$POS_URL/folders" "${h[@]}" -d "$(printf '{"name":"rv-fixture-folder","projectKey":"%s"}' "$RV_FIXTURE_V2_PROJECT_KEY")" | _jget folderKey)"
   local file_body; file_body="$(BPMN="$bpmn" PK="$RV_FIXTURE_V2_PROJECT_KEY" python3 -c 'import json,os; print(json.dumps({"name":"rv-fixture-file","projectKey":os.environ["PK"],"content":os.environ["BPMN"],"type":"BPMN"}))')"
   export RV_FIXTURE_FILE_KEY;      RV_FIXTURE_FILE_KEY="$(curl -s -X POST "$POS_URL/files" "${h[@]}" -d "$file_body" | _jget fileKey)"
-  # VERSION_KEY is blocked on camunda/camunda-hub#25801: a file created via the
-  # v2 API now lives inside a ProcessApplication (V2) project, and createVersion
-  # rejects that ("Cannot create a version for file ... located inside a process
-  # application", 400). There is no project that is both v2-file-creatable AND
-  # versionable, so this stays empty until #25801 — restore/updateVersion path
-  # tests will 404 (tracked, same block as the dropped positive Version suite).
   export RV_FIXTURE_VERSION_KEY;   RV_FIXTURE_VERSION_KEY="$(curl -s -X POST "$POS_URL/versions" "${h[@]}" -d "$(printf '{"fileKey":"%s","name":"rv-fixture-version"}' "$RV_FIXTURE_FILE_KEY")" | _jget versionKey)"
   # Catalog assets have no create op in the v2 API (ingestion is a multipart PUT
   # that returns no key), so this one comes from the shared ingest helper rather
