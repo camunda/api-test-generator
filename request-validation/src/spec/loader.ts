@@ -136,6 +136,41 @@ function buildParameter(raw: unknown): ParameterModel | undefined {
   };
 }
 
+/**
+ * Resolve the effective `serverOverride` for an operation/path-item pair.
+ *
+ * The only override this codebase can route today is the document's own
+ * root server with its version segment stripped — the Orchestration
+ * Cluster REST API's cluster-admin operations declare exactly
+ * `{schema}://{host}:{port}` where the document root is
+ * `{schema}://{host}:{port}/v2` (`buildUrl`'s `useRoot` parameter resolves
+ * against `credentials.baseUrl`, not the raw override string, so an
+ * override that changed the authority, added a query/fragment, or used any
+ * other path suffix would be silently misrouted if accepted — PR #564
+ * review). `undefined` when the operation/path-item declares no `servers`
+ * at all, or when it merely restates the document root verbatim (not an
+ * override at all — must not flip base-URL selection for an operation that
+ * behaves like every other one). Throws for anything else, rather than
+ * silently truncating or misrouting.
+ */
+export function resolveServerOverride(
+  operationId: string,
+  raw: string | undefined,
+  documentRootUrl: string | undefined,
+): string | undefined {
+  if (raw === undefined || raw === documentRootUrl) return undefined;
+  const rootWithVersionStripped = documentRootUrl?.replace(/\/v2\/?$/, '');
+  if (raw !== rootWithVersionStripped) {
+    throw new Error(
+      `${operationId}: unsupported servers override "${raw}" — this codebase only knows how to ` +
+        `route the document root with its version segment stripped (expected ` +
+        `${JSON.stringify(rootWithVersionStripped ?? null)}); extend buildUrl's useRoot handling ` +
+        'before adding a differently-shaped override.',
+    );
+  }
+  return raw;
+}
+
 function extractResponseInfo(op: Record<string, unknown>): {
   responseCodes: string[];
   successIsCollection: boolean;
@@ -165,6 +200,9 @@ export async function loadSpec(file: string): Promise<SpecModel> {
   const paths = isRecord(api) && isRecord(api.paths) ? api.paths : {};
   const conditionalSchemes = collectConditionalSchemes(api);
   const globalSecurity = isRecord(api) ? api.security : undefined;
+  const documentRootServers =
+    isRecord(api) && isSchemaFragmentArray(api.servers) ? api.servers : undefined;
+  const documentRootUrl = asString(documentRootServers?.[0]?.url);
   for (const [p, methods] of Object.entries(paths)) {
     if (!isRecord(methods)) continue;
     // Path-level parameters are inherited by every operation under the path.
@@ -220,11 +258,23 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         }
       }
       const { responseCodes, successIsCollection } = extractResponseInfo(op);
+      // OpenAPI `servers` precedence: operation-level overrides path-item-
+      // level, which overrides the document root. Only the Orchestration
+      // Cluster REST API's cluster-admin operations set this today, to drop
+      // the document's `/v2` base (camunda/camunda's cluster-admin.yaml).
+      const opServers = isSchemaFragmentArray(op.servers) ? op.servers : undefined;
+      const pathLevelServers = isSchemaFragmentArray(methods.servers) ? methods.servers : undefined;
+      const serverOverride = resolveServerOverride(
+        operationId,
+        asString((opServers ?? pathLevelServers)?.[0]?.url),
+        documentRootUrl,
+      );
       operations.push({
         operationId,
         method,
         path: p,
         tags: isStringArray(op.tags) ? op.tags : [],
+        serverOverride,
         requestBodySchema,
         bodyRequired,
         requiredProps,

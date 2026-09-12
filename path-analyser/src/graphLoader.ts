@@ -77,6 +77,7 @@ interface RawOp {
   dependencies?: string[];
   deps?: string[];
   eventuallyConsistent?: boolean;
+  serverOverride?: string;
   operationMetadata?: OperationNode['operationMetadata'];
   conditionalIdempotency?: OperationNode['conditionalIdempotency'];
   establishes?: OperationNode['establishes'];
@@ -913,6 +914,7 @@ function normalizeOp(
     operationId: op.operationId ?? op.id ?? op.name ?? opId,
     method: (op.method ?? op.httpMethod ?? op.verb ?? 'GET').toUpperCase(),
     path: op.path ?? op.route ?? op.url ?? '',
+    serverOverride: op.serverOverride,
     produces: unique(produces),
     // Issue #104: a non-edge establisher self-satisfies the identifier
     // it mints, so drop the established semantic types from `requires`

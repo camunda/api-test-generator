@@ -82,6 +82,15 @@ export interface OperationModel {
    * excludes them (#372 pattern 3 / #381).
    */
   successIsCollection?: boolean;
+  /**
+   * The resolved `servers[0].url` when this operation (or its path item)
+   * overrides the document-level `servers` block — e.g. the Orchestration
+   * Cluster REST API's cluster-admin operations, served at
+   * `{host}:{port}/cluster/v2/...` outside the document's `/v2` base.
+   * `undefined` means "use the default base" — the common case. See
+   * `buildUrl`'s `useRoot` parameter in `templates/support/http.ts`.
+   */
+  serverOverride?: string;
 }
 
 export interface ParameterModel {

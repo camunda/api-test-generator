@@ -326,6 +326,15 @@ export interface Operation {
   // schedule the operation as a satisfier for the named `semanticType`s
   // with a fresh shared binding (camunda/api-test-generator#104).
   establishes?: EstablishesSpec;
+  /**
+   * The resolved `servers[0].url` when this operation (or its path item)
+   * overrides the document-level `servers` block — e.g. the Orchestration
+   * Cluster REST API's cluster-admin operations, which are served at
+   * `{host}:{port}/cluster/v2/...` outside the document's `/v2` base and
+   * override `servers` per path item to drop that suffix. `undefined` means
+   * "use the default base the runtime is configured with" — the common case.
+   */
+  serverOverride?: string;
 }
 
 export enum OperationType {

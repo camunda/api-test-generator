@@ -13,6 +13,7 @@ import {
   reindent,
   renderEventualWait,
   renderInlineStepLines,
+  resolveScenarioServerOverride,
   stepNeedsAwaitForOp,
   toOptionalAccessor,
 } from './stepRenderer.js';
@@ -124,12 +125,29 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
   await fs.mkdir(opts.outDir, { recursive: true });
   const written: string[] = [];
   for (const f of jsonFiles) {
-    const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
-    const parsed = parseTemplateScenarioFile(raw, f);
-    const source = renderLifecycleSuite(parsed, opts.globalContextSeeds, opts.clientMintedFixtures);
-    const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
-    await fs.writeFile(outPath, source, 'utf8');
-    written.push(outPath);
+    // Isolate one bad template file from the rest, mirroring the per-file
+    // try/catch around feature/variant emission in materializer/src/index.ts
+    // (`Skipping file (parse/emission failed): ...`). Before this guard, a
+    // throw here (e.g. resolveScenarioServerOverride rejecting a scenario
+    // that mixes overridden and non-overridden operations) propagated all
+    // the way out of `emitTemplateSuites`, past its uncaught call site in
+    // index.ts, aborting the entire materializer run — including every
+    // already-planned feature/variant/template suite (#564 review).
+    try {
+      const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
+      const parsed = parseTemplateScenarioFile(raw, f);
+      const source = renderLifecycleSuite(
+        parsed,
+        opts.globalContextSeeds,
+        opts.clientMintedFixtures,
+      );
+      const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
+      await fs.writeFile(outPath, source, 'utf8');
+      written.push(outPath);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('Skipping template file (parse/emission failed):', f, msg);
+    }
   }
   return written;
 }
@@ -318,7 +336,8 @@ function renderLifecycleSuite(
   lines.push(
     `  test('establish ${file.subjectName}, observe present, revoke, observe absent', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   // Canonical seeding: literals → planner seedBindings → universal
@@ -485,7 +504,8 @@ function renderRestoreLifecycleSuite(
   lines.push(
     `  test('establish ${file.subjectName}, soft-delete, restore, observe present', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
   lines.push(
     ...emitCtxSeeding({
@@ -953,7 +973,8 @@ function renderReadBackSuite(
   lines.push(
     `  test('mutate ${file.subjectName}, observe field on read-back', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   lines.push(
@@ -1148,7 +1169,8 @@ function renderStateTransitionSuite(
   lines.push(
     `  test('invoke ${transition.operationId}, observe state=${observe.assertion.expectedState} on read-back', async ({ request }, testInfo) => {`,
   );
-  lines.push('    const baseUrl = buildBaseUrl();');
+  const serverOverride = resolveScenarioServerOverride(allRequestSteps);
+  lines.push(`    const baseUrl = buildBaseUrl(${serverOverride !== undefined});`);
   lines.push('    const ctx: Record<string, unknown> = {};');
 
   lines.push(

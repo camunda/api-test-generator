@@ -19,8 +19,45 @@ import {
   type Schema,
   type SemanticType,
   type SemanticTypeReference,
+  type ServerObject,
   type ValidationConstraint,
 } from './types';
+
+/**
+ * Resolve the effective `serverOverride` for an operation/path-item pair.
+ *
+ * The only override this codebase can route today is the document's own
+ * root server with its version segment stripped — the Orchestration
+ * Cluster REST API's cluster-admin operations declare exactly
+ * `{schema}://{host}:{port}` where the document root is
+ * `{schema}://{host}:{port}/v2` (`buildUrl`/`buildBaseUrl`'s `useRoot`
+ * parameter resolves against `API_ROOT_URL`/`credentials.baseUrl`, not the
+ * raw override string, so an override that changed the authority, added a
+ * query/fragment, or used any other path suffix would be silently
+ * misrouted if accepted — PR #564 review). `undefined` when the
+ * operation/path-item declares no `servers` at all, or when it merely
+ * restates the document root verbatim (not an override at all — must not
+ * flip base-URL selection for an operation that behaves like every other
+ * one). Throws for anything else, rather than silently truncating or
+ * misrouting.
+ */
+function resolveServerOverride(
+  operationId: string,
+  raw: string | undefined,
+  documentRootUrl: string | undefined,
+): string | undefined {
+  if (raw === undefined || raw === documentRootUrl) return undefined;
+  const rootWithVersionStripped = documentRootUrl?.replace(/\/v2\/?$/, '');
+  if (raw !== rootWithVersionStripped) {
+    throw new Error(
+      `${operationId}: unsupported servers override "${raw}" — this codebase only knows how to ` +
+        `route the document root with its version segment stripped (expected ` +
+        `${JSON.stringify(rootWithVersionStripped ?? null)}); extend buildUrl/buildBaseUrl's ` +
+        'useRoot handling before adding a differently-shaped override.',
+    );
+  }
+  return raw;
+}
 
 /**
  * Analyzes OpenAPI schemas to extract semantic types and operations
@@ -126,7 +163,13 @@ export class SchemaAnalyzer {
       for (const method of methods) {
         const operation = pathItem[method];
         if (operation) {
-          const extractedOp = this.extractOperation(method, path, operation, spec);
+          const extractedOp = this.extractOperation(
+            method,
+            path,
+            operation,
+            spec,
+            pathItem.servers,
+          );
           if (extractedOp) {
             operations.push(extractedOp);
           }
@@ -145,6 +188,7 @@ export class SchemaAnalyzer {
     path: string,
     operation: OperationObject,
     spec: OpenAPISpec,
+    pathServers?: ServerObject[],
   ): Operation | null {
     if (!operation.operationId) {
       console.warn(`Operation ${method.toUpperCase()} ${path} has no operationId, skipping`);
@@ -307,6 +351,16 @@ export class SchemaAnalyzer {
       }
     }
 
+    // OpenAPI `servers` precedence: operation-level overrides path-item-level,
+    // which overrides the document root. Only the Orchestration Cluster REST
+    // API's cluster-admin operations set this today, to drop the document's
+    // `/v2` base (camunda/camunda's cluster-admin.yaml).
+    const serverOverride = resolveServerOverride(
+      operation.operationId,
+      (operation.servers ?? pathServers)?.[0]?.url,
+      spec.servers?.[0]?.url,
+    );
+
     return {
       operationId: operation.operationId,
       method: method.toUpperCase(),
@@ -325,6 +379,7 @@ export class SchemaAnalyzer {
       conditionalIdempotency,
       establishes,
       responseLeafPaths,
+      serverOverride,
     };
   }
 

@@ -32,14 +32,22 @@ const API_VERSION = 'v2';
  * - `pathTemplate` may include `{paramName}` placeholders.
  * - Missing path params are substituted with `__MISSING_PARAM__` so the
  *   server returns the expected validation error rather than a routing 404.
+ * - `useRoot: true` builds against the bare API root (`credentials.baseUrl`,
+ *   no `/v2`) instead of the default base — for operations whose OpenAPI
+ *   path item overrides `servers` (see `OperationModel.serverOverride`),
+ *   e.g. the Orchestration Cluster REST API's cluster-admin operations,
+ *   served at `{host}:{port}/cluster/v2/...` outside the document's `/v2`
+ *   base.
  */
 export function buildUrl(
   pathTemplate: string,
   params?: Record<string, string | number | undefined>,
   query?: Record<string, string | number | undefined>,
+  useRoot?: boolean,
 ): string {
   const base = credentials.baseUrl;
-  let url = `${base}/${API_VERSION}${pathTemplate}`.replace(/\{(\w+)}/g, (_, k) => {
+  const versionSegment = useRoot ? '' : `/${API_VERSION}`;
+  let url = `${base}${versionSegment}${pathTemplate}`.replace(/\{(\w+)}/g, (_, k) => {
     const v = params?.[k];
     return v == null ? '__MISSING_PARAM__' : String(v);
   });
