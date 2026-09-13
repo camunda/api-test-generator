@@ -43,6 +43,14 @@ const SEARCH_JOBS_REQUEST_STEP: RequestStep = {
   expect: { status: 200 },
 };
 
+const SEARCH_PROCESS_DEFINITIONS_REQUEST_STEP: RequestStep = {
+  operationId: 'searchProcessDefinitions',
+  method: 'POST',
+  pathTemplate: '/process-definitions/search',
+  bodyKind: 'json',
+  expect: { status: 200 },
+};
+
 const CREATE_PROCESS_INSTANCE_REQUEST_STEP: RequestStep = {
   operationId: 'createProcessInstance',
   method: 'POST',
@@ -65,6 +73,13 @@ const OPERATION_MAP: CsharpOperationMap = {
       file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
       region: 'SearchJobsAsync',
       label: 'Search jobs',
+    },
+  ],
+  searchProcessDefinitions: [
+    {
+      file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+      region: 'SearchProcessDefinitionsAsync',
+      label: 'Search process definitions',
     },
   ],
   cancelProcessInstance: [
@@ -133,6 +148,43 @@ describe('C# SDK Emitter', () => {
 
     expect(files[0].content).toContain('BuildRequest<JobSearchQuery>(');
     expect(files[0].content).not.toContain('BuildRequest<SearchJobsRequest>(');
+  });
+
+  test('passes an empty query object when a search body template is absent', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const processDefinitionsCollection: EndpointScenarioCollection = {
+      endpoint: {
+        operationId: 'searchProcessDefinitions',
+        method: 'POST',
+        path: '/process-definitions/search',
+      },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'search process definitions',
+          description: 'Search process definitions without filters',
+          operations: [
+            {
+              operationId: 'searchProcessDefinitions',
+              method: 'POST',
+              path: '/process-definitions/search',
+            },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [SEARCH_PROCESS_DEFINITIONS_REQUEST_STEP],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(processDefinitionsCollection, EMIT_CTX);
+
+    expect(files[0].content).toContain('var request1 = new ProcessDefinitionSearchQuery();');
+    expect(files[0].content).toContain(
+      'await Client.SearchProcessDefinitionsAsync(request1);',
+    );
   });
 
   test('derives request path parameters from the path template when step.pathParams is absent', async () => {
