@@ -5,17 +5,15 @@
  */
 
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
-import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
-  GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
 // Reused rather than re-implemented: the Playwright emitter already owns the
-// canonical logic for resolving a scenario's __PENDING__ bindings into
-// either a literal, a planner-driven seedBinding() call, or a universal
-// globalContextSeeds entry (including the #342 omitWhenUnbound skip).
+// canonical logic for resolving a scenario's __PENDING__ bindings into either
+// a literal, a planner-driven seedBinding() call, or (skipped here — js-sdk
+// has no config plumbing for it yet) a universal globalContextSeeds entry.
 import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
 import { camelCase } from '../playwright/stepRenderer.js';
 import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
@@ -33,19 +31,16 @@ const KNOWN_SDK_METHODS = new Set<string>(knownSdkMethods.methods);
  * Compute the `ctx['x'] = ...` seed lines for a scenario's bindings, reusing
  * the Playwright emitter's canonical ctx-seeding logic (see ctxSeeding.ts's
  * module doc comment for the emission order: literals, then planner
- * seedBindings, then global context seeds). `fixtureEnvByBinding` has no
- * js-sdk config plumbing yet, so it's intentionally omitted.
+ * seedBindings, then — not wired here — global context seeds). js-sdk has
+ * no config plumbing yet for globalContextSeeds/fixtureEnvByBinding, so
+ * those are intentionally omitted rather than reimplemented ad hoc.
  */
-function computeScenarioSeedLines(
-  scenario: EndpointScenario,
-  indent: string,
-  globalContextSeeds: readonly GlobalContextSeed[],
-): string[] {
+function computeScenarioSeedLines(scenario: EndpointScenario, indent: string): string[] {
   return emitCtxSeeding({
     indent,
     bindings: scenario.bindings,
     seedBindings: scenario.seedBindings,
-    globalContextSeeds,
+    globalContextSeeds: [],
     uniqueBindings: computeUniqueBindings(
       scenario.requestPlan,
       scenario.modelDerivedLiteralBindings,
@@ -84,10 +79,7 @@ export function createJsSdkEmitter(): EmitterStrategy {
     name: 'JavaScript SDK',
     supportedConfigs: ['*'],
     async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
-      const content = renderJsSuite(collection, {
-        mode: ctx.mode,
-        globalContextSeeds: ctx.globalContextSeeds,
-      });
+      const content = renderJsSuite(collection, { mode: ctx.mode });
       return [
         {
           relativePath: jsSuiteFileName(collection, ctx.mode),
@@ -112,13 +104,8 @@ export function renderJsSuite(
   collection: EndpointScenarioCollection,
   opts: {
     mode?: 'feature' | 'integration' | 'variant';
-    globalContextSeeds?: readonly GlobalContextSeed[];
   } = {},
 ): string {
-  if (opts.globalContextSeeds !== undefined) {
-    assertSafeGlobalContextSeeds(opts.globalContextSeeds);
-  }
-  const globalContextSeeds = opts.globalContextSeeds ?? [];
   const lines: string[] = [];
   const mode = opts.mode ?? 'feature';
   const operationId = collection.endpoint.operationId;
@@ -137,7 +124,7 @@ export function renderJsSuite(
   lines.push("import { Camunda8 } from '@camunda8/sdk';");
   lines.push("import type { HttpSdkError } from '@camunda8/sdk';");
   const needsSeeding = collection.scenarios.some(
-    (scenario) => computeScenarioSeedLines(scenario, '', globalContextSeeds).length > 0,
+    (scenario) => computeScenarioSeedLines(scenario, '').length > 0,
   );
   const needsFixtures = collection.scenarios.some((scenario) =>
     (scenario.requestPlan ?? []).some((step) =>
@@ -196,7 +183,7 @@ export function renderJsSuite(
   // Render each scenario as an async it() block
   // =========================================================================
   for (const scenario of collection.scenarios) {
-    renderScenarioTest(lines, scenario, globalContextSeeds);
+    renderScenarioTest(lines, scenario);
   }
 
   lines.push('});');
@@ -215,11 +202,7 @@ export function renderJsSuite(
  * 4. Assert response status
  * 5. Store response in context for next operation
  */
-function renderScenarioTest(
-  lines: string[],
-  scenario: EndpointScenario,
-  globalContextSeeds: readonly GlobalContextSeed[],
-): void {
+function renderScenarioTest(lines: string[], scenario: EndpointScenario): void {
   const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
   const operations = scenario.requestPlan || [];
 
@@ -268,7 +251,7 @@ function renderScenarioTest(
   // bindings via the planner-computed scenario.seedBindings (falls back to
   // a deterministic seedBinding() call rather than leaving the value
   // undefined, which used to silently drop required request-body fields).
-  const seedLines = computeScenarioSeedLines(scenario, '      ', globalContextSeeds);
+  const seedLines = computeScenarioSeedLines(scenario, '      ');
   if (seedLines.length > 0) {
     lines.push(...seedLines);
     lines.push('');
