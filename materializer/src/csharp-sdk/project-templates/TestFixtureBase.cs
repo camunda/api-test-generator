@@ -62,6 +62,12 @@ public abstract class TestFixtureBase
         return value;
     }
 
+    protected static string? RequireStringBinding(Dictionary<string, object?> ctx, string key)
+    {
+        var value = RequireBinding(ctx, key);
+        return value as string ?? value?.ToString();
+    }
+
     protected static T BuildRequest<T>(Dictionary<string, object?> data) where T : class, new()
     {
         var json = JsonSerializer.Serialize(data, JsonOptions);

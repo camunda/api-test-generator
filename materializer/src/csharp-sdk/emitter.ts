@@ -573,6 +573,12 @@ function renderFileArray(value: unknown): string {
 }
 
 function renderTenantExpr(value: unknown): string {
+  if (typeof value === 'string') {
+    const fullMatch = value.match(/^\$\{([^}]+)\}$/);
+    if (fullMatch) {
+      return `RequireStringBinding(ctx, ${stringLiteral(fullMatch[1])})`;
+    }
+  }
   return value !== undefined ? renderCsharpValue(value) : 'null';
 }
 

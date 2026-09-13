@@ -58,6 +58,18 @@ const CREATE_PROCESS_INSTANCE_REQUEST_STEP: RequestStep = {
   expect: { status: 400 },
 };
 
+const DEPLOYMENT_REQUEST_STEP: RequestStep = {
+  operationId: 'createDeployment',
+  method: 'POST',
+  pathTemplate: '/deployments',
+  bodyKind: 'multipart',
+  multipartTemplate: {
+    fields: { tenantId: '${tenantIdVar}' },
+    files: { resources: ['process.bpmn'] },
+  },
+  expect: { status: 200 },
+};
+
 // Mirrors the committed csharp-sdk/examples/operation-map.json shape:
 // operationId -> ordered SDK references, each with a `region` (the method name).
 const OPERATION_MAP: CsharpOperationMap = {
@@ -66,6 +78,13 @@ const OPERATION_MAP: CsharpOperationMap = {
       file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
       region: 'CreateProcessInstanceAsync',
       label: 'Create process instance',
+    },
+  ],
+  createDeployment: [
+    {
+      file: 'Deployment.cs',
+      region: 'DeployResourcesFromFilesAsync',
+      label: 'Deploy resources from files',
     },
   ],
   searchJobs: [
@@ -184,6 +203,35 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).toContain('var request1 = new ProcessDefinitionSearchQuery();');
     expect(files[0].content).toContain(
       'await Client.SearchProcessDefinitionsAsync(request1);',
+    );
+  });
+
+  test('uses RequireStringBinding for deployment tenant IDs', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const deploymentCollection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'deploy resources',
+          description: 'Deploy resources for a tenant',
+          operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [DEPLOYMENT_REQUEST_STEP],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(deploymentCollection, EMIT_CTX);
+
+    expect(files[0].content).toContain(
+      'await Client.DeployResourcesFromFilesAsync(resourceFiles, RequireStringBinding(ctx, "tenantIdVar"));',
+    );
+    expect(files[0].content).not.toContain(
+      'await Client.DeployResourcesFromFilesAsync(resourceFiles, RequireBinding(ctx, "tenantIdVar"));',
     );
   });
 
