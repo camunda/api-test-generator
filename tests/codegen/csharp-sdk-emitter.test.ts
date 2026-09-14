@@ -204,7 +204,12 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).toContain('await Client.SearchProcessDefinitionsAsync(request1);');
   });
 
-  test('uses RequireStringBinding for deployment tenant IDs', async () => {
+  test('uses a nullable GetStringBindingOrNull lookup for deployment tenant IDs', async () => {
+    // Regression (Copilot PR #573 review): deployment's tenantId is always
+    // optional at the SDK/broker level. RequireStringBinding threw before
+    // the request could even be sent when a consumer scenario legitimately
+    // never seeded tenantIdVar; a nullable lookup preserves null and lets
+    // the broker apply its default instead.
     const emitter = createCsharpEmitter(OPERATION_MAP);
     const deploymentCollection: EndpointScenarioCollection = {
       endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
@@ -226,6 +231,9 @@ describe('C# SDK Emitter', () => {
     const files = await emitter.emit(deploymentCollection, EMIT_CTX);
 
     expect(files[0].content).toContain(
+      'await Client.DeployResourcesFromFilesAsync(resourceFiles, GetStringBindingOrNull(ctx, "tenantIdVar"));',
+    );
+    expect(files[0].content).not.toContain(
       'await Client.DeployResourcesFromFilesAsync(resourceFiles, RequireStringBinding(ctx, "tenantIdVar"));',
     );
     expect(files[0].content).not.toContain(
@@ -305,6 +313,83 @@ describe('C# SDK Emitter', () => {
         'SeedBindingIfMissing(ctx, "tenantIdVar", "tenantIdVar", unique: true);',
       );
     });
+
+    // Regression (Copilot PR #573 review): the JSON body renderer had no
+    // omitWhenUnbound awareness at all -- every top-level field was rendered
+    // via RequireBinding unconditionally, throwing for a consumer scenario
+    // that never seeded an optional binding instead of omitting the field.
+    test('omits a JSON body field with an unbound omitWhenUnbound binding instead of throwing via RequireBinding (consumer case)', async () => {
+      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'createProcessInstance',
+                method: 'POST',
+                pathTemplate: '/process-instances',
+                bodyKind: 'json',
+                bodyTemplate: { tenantId: '${tenantIdVar}' },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      };
+
+      const files = await emitter.emit(collection, {
+        ...EMIT_CTX,
+        globalContextSeeds: [OMIT_WHEN_UNBOUND_SEED],
+      });
+
+      expect(files[0].content).toContain(
+        'var __tenantIdVal = GetBindingOrNull(ctx, "tenantIdVar");',
+      );
+      expect(files[0].content).toContain(
+        'if (__tenantIdVal is not null) request1Data["tenantId"] = __tenantIdVal;',
+      );
+      expect(files[0].content).not.toContain('RequireBinding(ctx, "tenantIdVar")');
+    });
+
+    // Regression (Copilot PR #573 review): the multipart fields null-guard
+    // computed its "unbound" local via renderCsharpValue, which lowers a
+    // whole `${binding}` placeholder to RequireBinding -- throwing before
+    // the `if (local is not null)` check could ever run. Only a genuinely
+    // null-tolerant lookup lets the field be omitted.
+    test('uses a nullable GetBindingOrNull lookup (not a throwing RequireBinding) for an unbound omitWhenUnbound multipart field', async () => {
+      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const collection: EndpointScenarioCollection = {
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            name: 'deploy resources',
+            description: 'Deploy resources for a tenant',
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [DEPLOYMENT_REQUEST_STEP],
+          },
+        ],
+      };
+
+      const files = await emitter.emit(collection, {
+        ...EMIT_CTX,
+        globalContextSeeds: [OMIT_WHEN_UNBOUND_SEED],
+      });
+
+      expect(files[0].content).toContain(
+        'var __tenantIdVal = GetBindingOrNull(ctx, "tenantIdVar");',
+      );
+      expect(files[0].content).toContain(
+        'if (__tenantIdVal is not null) fields1["tenantId"] = __tenantIdVal;',
+      );
+      expect(files[0].content).not.toContain('RequireBinding(ctx, "tenantIdVar")');
+    });
   });
 
   test('derives request path parameters from the path template when step.pathParams is absent', async () => {
@@ -383,12 +468,12 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('RequireBinding(ctx, "jobKeyVar")');
   });
 
-  test('throws a clear error for a path parameter with no published C# key-type mapping', async () => {
-    // Class-scoped guard: any path parameter name absent from
-    // CSHARP_PATH_PARAM_KEY_TYPE must fail generation loudly (matching the
-    // existing "No published C# SDK method mapping" / "...request DTO
-    // mapping" fail-fast style) rather than silently emitting a bare
-    // `object` argument that only fails much later, at C# compile time.
+  test('falls back to a plain string binding for a path parameter with no published C# key-type mapping', async () => {
+    // Regression (Copilot PR #573 review): not every path parameter is a
+    // strongly-typed key struct -- e.g. the real getUser operation's
+    // `/users/{username}` takes a plain string. Throwing on every unmapped
+    // name made generation fail entirely for such operations instead of
+    // emitting the (perfectly valid) string-argument call.
     const emitter = createCsharpEmitter(OPERATION_MAP);
     const requestWithUnknownPathParam: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/widgets/{widgetId}/search' },
@@ -415,8 +500,10 @@ describe('C# SDK Emitter', () => {
       ],
     };
 
-    await expect(emitter.emit(requestWithUnknownPathParam, EMIT_CTX)).rejects.toThrow(
-      /No published C# key-type mapping for path parameter "widgetId"/,
+    const files = await emitter.emit(requestWithUnknownPathParam, EMIT_CTX);
+
+    expect(files[0].content).toContain(
+      'await Client.SearchJobsAsync(RequireStringBinding(ctx, "widgetIdVar"), request1);',
     );
   });
 

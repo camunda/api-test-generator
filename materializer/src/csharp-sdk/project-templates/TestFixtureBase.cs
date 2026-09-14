@@ -72,6 +72,24 @@ public abstract class TestFixtureBase
         return value as string ?? value?.ToString();
     }
 
+    /// <summary>
+    /// Read an optional (<c>omitWhenUnbound</c>, #342) binding without
+    /// throwing when it is absent. Unlike <see cref="RequireBinding"/>, a
+    /// missing/null binding returns <c>null</c> so the caller can omit the
+    /// field entirely and let the broker apply its own default, instead of
+    /// failing a legitimate consumer scenario that never seeded this value.
+    /// </summary>
+    protected static object? GetBindingOrNull(Dictionary<string, object?> ctx, string binding)
+    {
+        return ctx.TryGetValue(binding, out var value) ? value : null;
+    }
+
+    protected static string? GetStringBindingOrNull(Dictionary<string, object?> ctx, string binding)
+    {
+        var value = GetBindingOrNull(ctx, binding);
+        return value as string ?? value?.ToString();
+    }
+
     protected static T BuildRequest<T>(Dictionary<string, object?> data) where T : class, new()
     {
         var json = JsonSerializer.Serialize(data, JsonOptions);

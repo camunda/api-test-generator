@@ -275,6 +275,132 @@ describe('Python SDK Emitter', () => {
       expect(output).toContain("'password': ctx.get('passwordVar')");
     });
 
+    // Regression (Copilot PR #573 review): the seedBindings loop had no
+    // omitWhenUnbound/unique awareness at all, unlike the csharp-sdk and
+    // Playwright emitters -- it always emitted an unconditional
+    // seed_binding() call, sending a fabricated value for a consumer
+    // scenario that should legitimately leave the binding unseeded, and
+    // never passing unique=True for a client-minted/409 producer scenario.
+    test('omits a seedBindings entry entirely when it is omitWhenUnbound and not client-minted/unique (consumer case)', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            seedBindings: ['tenantIdVar'],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection, {
+        globalContextSeeds: [
+          {
+            binding: 'tenantIdVar',
+            fieldName: 'tenantId',
+            seedRule: 'tenantIdVar',
+            omitWhenUnbound: true,
+          },
+        ],
+      });
+
+      expect(output).not.toContain("seed_binding('tenantIdVar')");
+      expect(output).not.toContain("ctx.set('tenantIdVar'");
+    });
+
+    test('adds unique=True to seed_binding when the binding is client-minted and the consuming step declares 409 (producer case)', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            seedBindings: ['tenantIdVar'],
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: { tenantId: `${'${'}tenantIdVar}` },
+                declares409: true,
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection, {
+        globalContextSeeds: [
+          {
+            binding: 'tenantIdVar',
+            fieldName: 'tenantId',
+            seedRule: 'tenantIdVar',
+            omitWhenUnbound: true,
+          },
+        ],
+      });
+
+      expect(output).toContain(
+        "ctx.set('tenantIdVar', ctx.get('tenantIdVar') if ctx.get('tenantIdVar') is not None else seed_binding('tenantIdVar', unique=True))",
+      );
+    });
+
+    // Regression (Copilot PR #573 review): init_spec_salt() was emitted once
+    // at module import time, using whichever operationId happened to render
+    // last across the whole run -- every test in every generated module then
+    // shared that one salt for its seed_binding() calls. Placing the call
+    // inside each test function scopes it correctly.
+    test('calls init_spec_salt once per test function, not once at module scope', () => {
+      const multiScenarioCollection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            seedBindings: ['passwordVar'],
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: { password: `${'${'}passwordVar}` },
+                expect: { status: 201 },
+              },
+            ],
+          },
+          {
+            id: 'sc2',
+            name: 'second scenario',
+            operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            seedBindings: ['passwordVar'],
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: { password: `${'${'}passwordVar}` },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(multiScenarioCollection);
+      const initCalls = output.match(/init_spec_salt\('createWidget'\)/g) ?? [];
+      expect(initCalls).toHaveLength(2);
+      // Every occurrence must be indented inside a test function body, never
+      // flush against the left margin (module scope).
+      for (const line of output.split('\n')) {
+        if (line.includes('init_spec_salt(')) {
+          expect(line.startsWith('    ')).toBe(true);
+        }
+      }
+    });
+
     test('test functions include operation steps', () => {
       const output = renderPythonSuite(SAMPLE_COLLECTION);
       expect(output).toContain('# Step 1: createWidget');

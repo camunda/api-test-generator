@@ -11,6 +11,12 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
+// Reused rather than re-implemented: the Playwright emitter already owns the
+// canonical logic for deciding which client-minted bindings need a
+// `unique=True` seed (#304 -- client-minted, not extracted from an earlier
+// step, and the consuming step declares HTTP 409). See #342 for the
+// omitWhenUnbound half of the same contract.
+import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
 import { camelCase } from '../playwright/stepRenderer.js';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
 
@@ -227,6 +233,15 @@ export function renderPythonSuite(
       .filter((seed) => seed.omitWhenUnbound)
       .map((seed) => seed.fieldName),
   );
+  // Binding names (not field names) for the same omitWhenUnbound seeds --
+  // without this, a scenario whose planner-computed seedBindings named e.g.
+  // tenantIdVar would still unconditionally seed_binding() it here, sending
+  // a fabricated value instead of leaving the field genuinely unset (#342).
+  const omitWhenUnboundBindingNames = new Set(
+    (opts.globalContextSeeds ?? [])
+      .filter((seed) => seed.omitWhenUnbound)
+      .map((seed) => seed.binding),
+  );
   const lines: string[] = [];
 
   // Header and imports
@@ -297,10 +312,6 @@ export function renderPythonSuite(
   lines.push('        return None');
   lines.push('    return current');
   lines.push('');
-  if (hasSeedBindings) {
-    lines.push(`init_spec_salt('${collection.endpoint.operationId}')`);
-    lines.push('');
-  }
 
   // Test scenarios
   for (const scenario of collection.scenarios) {
@@ -314,15 +325,30 @@ export function renderPythonSuite(
     }
     lines.push(`    """`);
 
+    if (hasSeedBindings) {
+      // Set immediately before this test's own seeding, not once at module
+      // import time: pytest imports every generated operation module before
+      // running any test, so a module-level call left the salt reflecting
+      // whichever module was imported last, and every test's seed_binding()
+      // calls (across every suite) collided on that one salt.
+      lines.push(`    init_spec_salt('${collection.endpoint.operationId}')`);
+    }
+
     const bindings = scenario.bindings ?? {};
     for (const [key, value] of Object.entries(bindings)) {
       if (value === '__PENDING__') continue;
       lines.push(`    ctx.set('${key}', ${renderPythonValue(value)})`);
     }
 
+    const uniqueBindings = computeUniqueBindings(
+      scenario.requestPlan,
+      scenario.modelDerivedLiteralBindings,
+    );
     for (const seedName of scenario.seedBindings ?? []) {
+      if (omitWhenUnboundBindingNames.has(seedName) && !uniqueBindings.has(seedName)) continue;
+      const uniqueArg = uniqueBindings.has(seedName) ? ', unique=True' : '';
       lines.push(
-        `    ctx.set('${seedName}', ctx.get('${seedName}') if ctx.get('${seedName}') is not None else seed_binding('${seedName}'))`,
+        `    ctx.set('${seedName}', ctx.get('${seedName}') if ctx.get('${seedName}') is not None else seed_binding('${seedName}'${uniqueArg}))`,
       );
     }
 

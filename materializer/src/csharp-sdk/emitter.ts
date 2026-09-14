@@ -376,19 +376,22 @@ function renderScenarioTest(
 
       body.push(`        var ${fieldsVar} = new Dictionary<string, object?>();`);
       for (const [fieldName, fieldValue] of Object.entries(multipart.fields)) {
-        const valueExpr = renderCsharpValue(fieldValue, '        ');
-        if (omitWhenUnboundFields.has(fieldName)) {
-          // Unbound `omitWhenUnbound` fields resolve to a null ctx lookup;
-          // omit them from the multipart body so the broker applies its
-          // default (#342) rather than sending an empty value.
+        const whole = typeof fieldValue === 'string' ? /^\$\{([^}]+)\}$/.exec(fieldValue) : null;
+        if (whole && omitWhenUnboundFields.has(fieldName)) {
+          // A nullable lookup, NOT renderCsharpValue: the latter renders a
+          // whole `${binding}` placeholder via RequireBinding, which throws
+          // on a missing binding before this null-guard ever runs. Only a
+          // null-tolerant lookup lets a genuinely-unbound consumer scenario
+          // omit the field so the broker applies its default (#342).
           const local = `__${toSafeIdentifier(fieldName)}Val`;
-          body.push(`        var ${local} = ${valueExpr};`);
+          body.push(`        var ${local} = GetBindingOrNull(ctx, ${stringLiteral(whole[1])});`);
           body.push(
             `        if (${local} is not null) ${fieldsVar}[${stringLiteral(fieldName)}] = ${local};`,
           );
-        } else {
-          body.push(`        ${fieldsVar}[${stringLiteral(fieldName)}] = ${valueExpr};`);
+          continue;
         }
+        const valueExpr = renderCsharpValue(fieldValue, '        ');
+        body.push(`        ${fieldsVar}[${stringLiteral(fieldName)}] = ${valueExpr};`);
       }
 
       body.push(`        var ${filesVar} = new Dictionary<string, object?>();`);
@@ -500,17 +503,25 @@ function renderScenarioTest(
     body.push(`      // Step ${idx + 1}: ${step.operationId}`);
     body.push('      {');
 
-    const requestParts = buildRequestParts(step);
-    const shouldPassEmptyRequest = requestParts.length === 0 && requestType !== undefined;
-    if (requestParts.length > 0 && requestType === undefined) {
+    const jsonFields = collectJsonRequestFields(step, omitWhenUnboundFields);
+    const hasBody = jsonRequestFieldsHaveBody(jsonFields);
+    const shouldPassEmptyRequest = !hasBody && requestType !== undefined;
+    if (hasBody && requestType === undefined) {
       throw new Error(
         `No published C# request DTO mapping found for operationId ${step.operationId}`,
       );
     }
     if (expectError) {
       body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () => {');
-      if (requestParts.length > 0) {
-        body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
+      if (hasBody) {
+        body.push(
+          ...emitJsonRequestDataLines(
+            requestVar,
+            requireRequestType(step, requestType),
+            jsonFields,
+            '          ',
+          ),
+        );
         body.push(`          await ${renderClientCall(method, step, requestVar)};`);
       } else if (shouldPassEmptyRequest) {
         body.push(`          var ${requestVar} = new ${requestType}();`);
@@ -536,8 +547,15 @@ function renderScenarioTest(
       );
     }
 
-    if (requestParts.length > 0) {
-      body.push(`        var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
+    if (hasBody) {
+      body.push(
+        ...emitJsonRequestDataLines(
+          requestVar,
+          requireRequestType(step, requestType),
+          jsonFields,
+          '        ',
+        ),
+      );
       body.push(
         `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
       );
@@ -589,35 +607,116 @@ function renderScenarioTest(
   return body.join('\n');
 }
 
-function buildRequestParts(step: RequestStep): string {
-  const entries: string[] = [];
+/**
+ * Partition a JSON request body's top-level fields into ones that render
+ * inline immediately, and ones that must be deferred to a runtime-conditional
+ * assignment because they are a whole `${binding}` placeholder flagged
+ * `omitWhenUnbound` (#342). Mirrors the multipart-fields handling above and
+ * python-sdk's `renderPythonDictAssignment` -- without this, every JSON
+ * consumer scenario either sends the legacy seeded sentinel or throws from
+ * `RequireBinding` once the seed is correctly left unset, instead of omitting
+ * the field and letting the broker apply its own default.
+ */
+function partitionJsonFields(
+  bodyTemplate: Record<string, unknown>,
+  omitWhenUnboundFields: ReadonlySet<string>,
+): { inline: [string, unknown][]; deferred: { fieldName: string; binding: string }[] } {
+  const inline: [string, unknown][] = [];
+  const deferred: { fieldName: string; binding: string }[] = [];
+  for (const [k, v] of Object.entries(bodyTemplate)) {
+    const whole = typeof v === 'string' ? /^\$\{([^}]+)\}$/.exec(v) : null;
+    if (whole && omitWhenUnboundFields.has(k)) {
+      deferred.push({ fieldName: k, binding: whole[1] });
+      continue;
+    }
+    inline.push([k, v]);
+  }
+  return { inline, deferred };
+}
 
-  if (step.bodyKind === 'json' && step.bodyTemplate !== undefined) {
-    if (isRecord(step.bodyTemplate)) {
-      for (const [k, v] of Object.entries(step.bodyTemplate)) {
-        const rendered = renderCsharpValue(v, '          ');
-        entries.push(`          [${stringLiteral(k)}] = ${rendered},`);
-      }
-    } else {
-      const bodyExpr = renderCsharpValue(step.bodyTemplate, '          ');
-      entries.push(`          ["body"] = ${bodyExpr},`);
+type JsonRequestFields =
+  | {
+      kind: 'record';
+      inline: [string, unknown][];
+      deferred: { fieldName: string; binding: string }[];
+    }
+  | { kind: 'scalar'; value: unknown }
+  | { kind: 'none' };
+
+function collectJsonRequestFields(
+  step: RequestStep,
+  omitWhenUnboundFields: ReadonlySet<string>,
+): JsonRequestFields {
+  if (step.bodyKind !== 'json' || step.bodyTemplate === undefined) return { kind: 'none' };
+  if (isRecord(step.bodyTemplate)) {
+    const { inline, deferred } = partitionJsonFields(step.bodyTemplate, omitWhenUnboundFields);
+    return { kind: 'record', inline, deferred };
+  }
+  return { kind: 'scalar', value: step.bodyTemplate };
+}
+
+function jsonRequestFieldsHaveBody(fields: JsonRequestFields): boolean {
+  if (fields.kind === 'scalar') return true;
+  if (fields.kind === 'record') return fields.inline.length > 0 || fields.deferred.length > 0;
+  return false;
+}
+
+/**
+ * Emit the statements that build a request's data dictionary (mirroring the
+ * multipart-fields statement style) and the final `BuildRequest<T>(...)`
+ * call, deferring `omitWhenUnbound` fields to a nullable lookup + null-guard
+ * assignment instead of an unconditional (and possibly throwing) inline
+ * value.
+ */
+function emitJsonRequestDataLines(
+  requestVar: string,
+  requestType: string,
+  fields: JsonRequestFields,
+  indent: string,
+): string[] {
+  const dataVar = `${requestVar}Data`;
+  const lines = [`${indent}var ${dataVar} = new Dictionary<string, object?>();`];
+  if (fields.kind === 'scalar') {
+    lines.push(`${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent)};`);
+  } else if (fields.kind === 'record') {
+    for (const [fieldName, value] of fields.inline) {
+      lines.push(
+        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent)};`,
+      );
+    }
+    for (const { fieldName, binding } of fields.deferred) {
+      const local = `__${toSafeIdentifier(fieldName)}Val`;
+      lines.push(`${indent}var ${local} = GetBindingOrNull(ctx, ${stringLiteral(binding)});`);
+      lines.push(
+        `${indent}if (${local} is not null) ${dataVar}[${stringLiteral(fieldName)}] = ${local};`,
+      );
     }
   }
+  lines.push(`${indent}var ${requestVar} = BuildRequest<${requestType}>(${dataVar});`);
+  return lines;
+}
 
-  if (entries.length === 0) return '';
-  return `new Dictionary<string, object?>\n        {\n${entries.join('\n')}\n        }`;
+function requireRequestType(step: RequestStep, requestType: string | undefined): string {
+  if (requestType === undefined) {
+    throw new Error(
+      `No published C# request DTO mapping found for operationId ${step.operationId}`,
+    );
+  }
+  return requestType;
 }
 
 function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
   const argumentsList = derivePathParamNames(step.pathTemplate).map((rawName) => {
     const name = toCamelCase(rawName);
     const keyType = CSHARP_PATH_PARAM_KEY_TYPE[name];
+    const binding = stringLiteral(`${name}Var`);
     if (keyType === undefined) {
-      throw new Error(
-        `No published C# key-type mapping for path parameter "${name}" (operationId ${step.operationId}); add it to CSHARP_PATH_PARAM_KEY_TYPE`,
-      );
+      // Not every path parameter is a strongly-typed key struct (e.g.
+      // getUser's `/users/{username}` takes a plain string) -- fall back to
+      // the raw string binding instead of erroring on every unmapped name.
+      return `RequireStringBinding(ctx, ${binding})`;
     }
-    return `${keyType}.AssumeExists(RequireStringBinding(ctx, ${stringLiteral(`${name}Var`)}))`;
+    return `${keyType}.AssumeExists(RequireStringBinding(ctx, ${binding}))`;
   });
   if (requestExpression !== undefined) argumentsList.push(requestExpression);
   return `Client.${method}(${argumentsList.join(', ')})`;
@@ -735,7 +834,11 @@ function renderTenantExpr(value: unknown): string {
   if (typeof value === 'string') {
     const fullMatch = value.match(/^\$\{([^}]+)\}$/);
     if (fullMatch) {
-      return `RequireStringBinding(ctx, ${stringLiteral(fullMatch[1])})`;
+      // tenantId is omitWhenUnbound (#342): a nullable lookup lets a
+      // consumer scenario that never seeded this binding pass `null` and
+      // have the broker apply its default, instead of RequireStringBinding
+      // throwing before the request can even be sent.
+      return `GetStringBindingOrNull(ctx, ${stringLiteral(fullMatch[1])})`;
     }
   }
   return value !== undefined ? renderCsharpValue(value) : 'null';
