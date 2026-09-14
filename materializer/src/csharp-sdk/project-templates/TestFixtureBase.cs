@@ -5,7 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Camunda.Orchestration.Sdk;
 using Xunit;
@@ -17,6 +19,7 @@ public abstract class TestFixtureBase
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        Converters = { new StringValueObjectConverterFactory() },
     };
 
     protected CamundaClient Client { get; }
@@ -115,11 +118,31 @@ public abstract class TestFixtureBase
         return string.Equals(Convert.ToString(value, CultureInfo.InvariantCulture), sentinel, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Convert an SDK response to a JsonElement suitable for field-path
+    /// extraction/assertion. Many SDK response types (e.g.
+    /// <c>ExtendedDeploymentResponse</c>) are C#-ergonomic wrappers around a
+    /// <c>Raw</c> property holding the true wire-shape DTO (camelCase
+    /// property names matching the OpenAPI contract) alongside redundant
+    /// PascalCase convenience mirrors. Serializing the wrapper directly
+    /// produces a JSON object with duplicate camelCase/PascalCase keys, and
+    /// our field paths (authored against the wire contract, e.g.
+    /// <c>deployments[0].processDefinition.processDefinitionKey</c>) only
+    /// match the nested <c>Raw</c> shape -- so prefer it when present.
+    /// </summary>
     protected static JsonElement ToJsonElement(object? response)
     {
         if (response is JsonElement elem)
         {
             return elem.Clone();
+        }
+        if (response is not null)
+        {
+            var rawProp = response.GetType().GetProperty("Raw");
+            if (rawProp is not null)
+            {
+                response = rawProp.GetValue(response);
+            }
         }
         var json = JsonSerializer.Serialize(response, JsonOptions);
         using var doc = JsonDocument.Parse(json);
@@ -193,8 +216,27 @@ public abstract class TestFixtureBase
         }
     }
 
+    /// <summary>
+    /// Unwrap a JSON value pulled out by field-path extraction into a plain
+    /// CLR scalar/collection. Strongly-typed SDK key structs (JobKey,
+    /// ProcessInstanceKey, ...) have no custom JSON converter registered for
+    /// our own serialization pass, so they round-trip as a single-property
+    /// object <c>{"Value": "..."}</c> rather than a bare string. Left
+    /// unwrapped, that object would be stored in the test context as a
+    /// Dictionary, and a later <c>RequireStringBinding</c> would stringify
+    /// the dictionary itself (garbage) instead of the key's real value --
+    /// silently corrupting every downstream key-typed path parameter.
+    /// </summary>
     private static object? ConvertJsonElement(JsonElement element)
     {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var props = element.EnumerateObject().ToList();
+            if (props.Count == 1 && string.Equals(props[0].Name, "Value", StringComparison.OrdinalIgnoreCase))
+            {
+                return ConvertJsonElement(props[0].Value);
+            }
+        }
         return element.ValueKind switch
         {
             JsonValueKind.Null => null,
@@ -293,6 +335,63 @@ public abstract class TestFixtureBase
             while (i < path.Length && path[i] != '.' && path[i] != '[') i++;
             var name = path.Substring(start, i - start);
             if (name.Length > 0) yield return (name, -1, false);
+        }
+    }
+
+    /// <summary>
+    /// Handles the SDK's pervasive "string-backed value object" struct
+    /// pattern (JobKey, ProcessDefinitionKey, TenantId, Tag, ...): a
+    /// readonly struct with a single <c>string Value</c> property and a
+    /// <c>static T AssumeExists(string)</c> factory, with no
+    /// <c>[JsonConverter]</c> registered by the SDK itself. Without this,
+    /// <see cref="JsonSerializer"/> round-trips these as
+    /// <c>{"Value": "..."}</c> objects on write and refuses to deserialize
+    /// a plain JSON string into them on read -- breaking both
+    /// <see cref="BuildRequest{T}"/> (building a request body field typed
+    /// as one of these structs from a plain extracted string) and
+    /// <see cref="ToJsonElement"/> (field-path extraction expects a plain
+    /// scalar, not a nested object).
+    /// </summary>
+    private sealed class StringValueObjectConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert)
+        {
+            if (!typeToConvert.IsValueType) return false;
+            var valueProp = typeToConvert.GetProperty("Value", BindingFlags.Public | BindingFlags.Instance);
+            if (valueProp is null || valueProp.PropertyType != typeof(string)) return false;
+            var factory = typeToConvert.GetMethod(
+                "AssumeExists", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null);
+            return factory is not null && factory.ReturnType == typeToConvert;
+        }
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
+        {
+            var converterType = typeof(StringValueObjectConverter<>).MakeGenericType(typeToConvert);
+            return (JsonConverter)Activator.CreateInstance(converterType)!;
+        }
+
+        private sealed class StringValueObjectConverter<T> : JsonConverter<T>
+        {
+            private static readonly MethodInfo AssumeExistsMethod = typeof(T).GetMethod(
+                "AssumeExists", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null)!;
+            private static readonly PropertyInfo ValueProperty =
+                typeof(T).GetProperty("Value", BindingFlags.Public | BindingFlags.Instance)!;
+
+            public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            {
+                var raw = reader.GetString();
+                if (raw is null)
+                {
+                    throw new JsonException($"Cannot convert null to {typeof(T).Name}.");
+                }
+                return (T)AssumeExistsMethod.Invoke(null, new object?[] { raw })!;
+            }
+
+            public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+            {
+                var raw = (string?)ValueProperty.GetValue(value);
+                writer.WriteStringValue(raw);
+            }
         }
     }
 

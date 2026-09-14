@@ -17,7 +17,7 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   searchDecisionInstances: 'DecisionInstanceSearchQuery',
   searchDecisionRequirements: 'DecisionRequirementsSearchQuery',
   searchUserTasks: 'UserTaskSearchQuery',
-  searchUserTaskVariables: 'UserTaskVariableSearchQueryRequest',
+  searchUserTaskVariables: 'SearchUserTaskVariablesRequest',
   searchUserTaskAuditLogs: 'UserTaskAuditLogSearchQueryRequest',
   activateJobs: 'JobActivationRequest',
   searchJobs: 'JobSearchQuery',
@@ -45,19 +45,121 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   searchMappingRule: 'MappingRuleSearchQueryRequest',
   searchBatchOperations: 'BatchOperationSearchQuery',
   searchBatchOperationItems: 'BatchOperationItemSearchQuery',
-  searchVariables: 'VariableSearchQuery',
+  searchVariables: 'SearchVariablesRequest',
   searchElementInstances: 'ElementInstanceSearchQuery',
   searchElementInstanceIncidents: 'IncidentSearchQuery',
   searchClusterVariables: 'ClusterVariableSearchQueryRequest',
   searchGlobalTaskListeners: 'GlobalTaskListenerSearchQueryRequest',
   searchAuditLogs: 'AuditLogSearchQueryRequest',
-  searchUserTaskEffectiveVariables: 'UserTaskEffectiveVariableSearchQueryRequest',
+  searchUserTaskEffectiveVariables: 'SearchUserTaskEffectiveVariablesRequest',
   completeJob: 'JobCompletionRequest',
   cancelProcessInstance: 'CancelProcessInstanceRequest',
   failJob: 'JobFailRequest',
+  completeUserTask: 'UserTaskCompletionRequest',
+  assignUserTask: 'UserTaskAssignmentRequest',
+  deleteResource: 'DeleteResourceRequest',
+  deleteProcessInstance: 'DeleteProcessInstanceRequest',
+  createDocumentLink: 'DocumentLinkRequest',
+  getJobTypeStatistics: 'JobTypeStatisticsQuery',
+  getProcessDefinitionMessageSubscriptionStatistics: 'ProcessDefinitionMessageSubscriptionStatisticsQuery',
+  getProcessDefinitionStatistics: 'ProcessDefinitionElementStatisticsQuery',
+  getProcessDefinitionInstanceStatistics: 'ProcessDefinitionInstanceStatisticsQuery',
+  getProcessInstanceStatisticsByError: 'IncidentProcessInstanceStatisticsByErrorQuery',
+  modifyProcessInstance: 'ProcessInstanceModificationInstruction',
+  resolveIncident: 'IncidentResolutionRequest',
+};
+
+// operationId-independent map: a path parameter's name (camelCased) to the
+// real SDK's strongly-typed key struct. Verified by reflecting the real
+// Camunda.Orchestration.Sdk 9.2.2 assembly -- every one of these types
+// exposes a `static <Type> AssumeExists(string value)` factory. Path
+// parameters previously passed the raw `object` returned by `RequireBinding`
+// straight into the SDK call, which fails to compile with CS1503
+// ("cannot convert from 'object' to '<KeyType>'") against the real SDK.
+const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
+  auditLogKey: 'AuditLogKey',
+  decisionDefinitionKey: 'DecisionDefinitionKey',
+  decisionRequirementsKey: 'DecisionRequirementsKey',
+  documentId: 'DocumentId',
+  elementInstanceKey: 'ElementInstanceKey',
+  incidentKey: 'IncidentKey',
+  jobKey: 'JobKey',
+  processDefinitionKey: 'ProcessDefinitionKey',
+  processInstanceKey: 'ProcessInstanceKey',
+  resourceKey: 'ResourceKey',
+  userTaskKey: 'UserTaskKey',
+  variableKey: 'VariableKey',
 };
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
+
+// SDK methods that return a bare (non-generic) `Task` rather than
+// `Task<T>`. Verified by reflecting every public `CamundaClient` method
+// against the real Camunda.Orchestration.Sdk 9.2.2 assembly. Assigning the
+// awaited result of one of these calls to a `var` fails to compile with
+// CS0815 ("Cannot assign void to an implicitly-typed variable") -- these
+// methods have no response body to assert against or extract from.
+const CSHARP_VOID_METHODS = new Set<string>([
+  'ActivateAdHocSubProcessActivitiesAsync',
+  'AssignClientToGroupAsync',
+  'AssignClientToTenantAsync',
+  'AssignGroupToTenantAsync',
+  'AssignMappingRuleToGroupAsync',
+  'AssignMappingRuleToTenantAsync',
+  'AssignRoleToClientAsync',
+  'AssignRoleToGroupAsync',
+  'AssignRoleToMappingRuleAsync',
+  'AssignRoleToTenantAsync',
+  'AssignRoleToUserAsync',
+  'AssignUserTaskAsync',
+  'AssignUserToGroupAsync',
+  'AssignUserToTenantAsync',
+  'CancelBatchOperationAsync',
+  'CancelProcessInstanceAsync',
+  'CompleteJobAsync',
+  'CompleteUserTaskAsync',
+  'CreateElementInstanceVariablesAsync',
+  'DeleteAuthorizationAsync',
+  'DeleteDecisionInstanceAsync',
+  'DeleteDocumentAsync',
+  'DeleteGlobalClusterVariableAsync',
+  'DeleteGlobalTaskListenerAsync',
+  'DeleteGroupAsync',
+  'DeleteMappingRuleAsync',
+  'DeleteProcessInstanceAsync',
+  'DeleteRoleAsync',
+  'DeleteTenantAsync',
+  'DeleteTenantClusterVariableAsync',
+  'DeleteUserAsync',
+  'FailJobAsync',
+  'GetStatusAsync',
+  'MigrateProcessInstanceAsync',
+  'ModifyProcessInstanceAsync',
+  'PinClockAsync',
+  'ResetClockAsync',
+  'ResolveIncidentAsync',
+  'ResumeBatchOperationAsync',
+  'RunWorkersAsync',
+  'StopAllWorkersAsync',
+  'SuspendBatchOperationAsync',
+  'ThrowJobErrorAsync',
+  'UnassignClientFromGroupAsync',
+  'UnassignClientFromTenantAsync',
+  'UnassignGroupFromTenantAsync',
+  'UnassignMappingRuleFromGroupAsync',
+  'UnassignMappingRuleFromTenantAsync',
+  'UnassignRoleFromClientAsync',
+  'UnassignRoleFromGroupAsync',
+  'UnassignRoleFromMappingRuleAsync',
+  'UnassignRoleFromTenantAsync',
+  'UnassignRoleFromUserAsync',
+  'UnassignUserFromGroupAsync',
+  'UnassignUserFromTenantAsync',
+  'UnassignUserTaskAsync',
+  'UpdateAuthorizationAsync',
+  'UpdateJobAsync',
+  'UpdateUserTaskAsync',
+]);
 
 /**
  * A single operation-map entry as committed in
@@ -283,7 +385,9 @@ function renderScenarioTest(
           const filesExpr = renderFileArray(resources);
           const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
           body.push(`          var resourceFiles = ${filesExpr};`);
-          body.push(`          ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`)};`);
+          body.push(
+            `          await ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`)};`,
+          );
         } else if (emptyDocumentFiles) {
           body.push(`          using var content${idx + 1} = new MultipartFormDataContent();`);
           body.push(
@@ -295,12 +399,12 @@ function renderScenarioTest(
             `            content${idx + 1}.Add(new StringContent(Convert.ToString(field.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty), field.Key);`,
           );
           body.push(`          }`);
-          body.push(`          ${renderClientCall(method, step, `content${idx + 1}`)};`);
+          body.push(`          await ${renderClientCall(method, step, `content${idx + 1}`)};`);
         } else {
           body.push(
             `          using var content${idx + 1} = BuildMultipart(${fieldsVar}, ${filesVar});`,
           );
-          body.push(`          ${renderClientCall(method, step, `content${idx + 1}`)};`);
+          body.push(`          await ${renderClientCall(method, step, `content${idx + 1}`)};`);
         }
         body.push('        });');
         body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
@@ -382,12 +486,12 @@ function renderScenarioTest(
       body.push('        var ex = await Assert.ThrowsAnyAsync<CamundaSdkException>(async () => {');
       if (requestParts.length > 0) {
         body.push(`          var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
-        body.push(`          ${renderClientCall(method, step, requestVar)};`);
+        body.push(`          await ${renderClientCall(method, step, requestVar)};`);
       } else if (shouldPassEmptyRequest) {
         body.push(`          var ${requestVar} = new ${requestType}();`);
-        body.push(`          ${renderClientCall(method, step, requestVar)};`);
+        body.push(`          await ${renderClientCall(method, step, requestVar)};`);
       } else {
-        body.push(`          ${renderClientCall(method, step)};`);
+        body.push(`          await ${renderClientCall(method, step)};`);
       }
       body.push('        });');
       body.push(`        Assert.Equal((int?)${step.expect.status}, (int?)ex.Status);`);
@@ -395,14 +499,37 @@ function renderScenarioTest(
       return;
     }
 
+    // Methods that return a bare `Task` (CSHARP_VOID_METHODS) have no
+    // response body: assigning `await Client.Method(...)` to a `var` fails
+    // to compile with CS0815. A successful (non-throwing) completion is the
+    // pass condition for these calls, so there is nothing to assert or
+    // extract from.
+    const isVoidMethod = CSHARP_VOID_METHODS.has(method);
+    if (isVoidMethod && step.extract?.length) {
+      throw new Error(
+        `Cannot extract from the response of operationId ${step.operationId}: its SDK method ${method} returns no response body (bare Task).`,
+      );
+    }
+
     if (requestParts.length > 0) {
       body.push(`        var ${requestVar} = BuildRequest<${requestType}>(${requestParts});`);
-      body.push(`        var ${varName} = await ${renderClientCall(method, step, requestVar)};`);
+      body.push(
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
+      );
     } else if (shouldPassEmptyRequest) {
       body.push(`        var ${requestVar} = new ${requestType}();`);
-      body.push(`        var ${varName} = await ${renderClientCall(method, step, requestVar)};`);
+      body.push(
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
+      );
     } else {
-      body.push(`        var ${varName} = await ${renderClientCall(method, step)};`);
+      body.push(
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step)};`,
+      );
+    }
+
+    if (isVoidMethod) {
+      body.push('      }');
+      return;
     }
 
     body.push(`        AssertExpectedStatus(${varName}, ${step.expect.status});`);
@@ -457,9 +584,16 @@ function buildRequestParts(step: RequestStep): string {
 }
 
 function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
-  const argumentsList = derivePathParamNames(step.pathTemplate).map(
-    (name) => `RequireBinding(ctx, ${stringLiteral(`${toCamelCase(name)}Var`)})`,
-  );
+  const argumentsList = derivePathParamNames(step.pathTemplate).map((rawName) => {
+    const name = toCamelCase(rawName);
+    const keyType = CSHARP_PATH_PARAM_KEY_TYPE[name];
+    if (keyType === undefined) {
+      throw new Error(
+        `No published C# key-type mapping for path parameter "${name}" (operationId ${step.operationId}); add it to CSHARP_PATH_PARAM_KEY_TYPE`,
+      );
+    }
+    return `${keyType}.AssumeExists(RequireStringBinding(ctx, ${stringLiteral(`${name}Var`)}))`;
+  });
   if (requestExpression !== undefined) argumentsList.push(requestExpression);
   return `Client.${method}(${argumentsList.join(', ')})`;
 }
@@ -556,16 +690,16 @@ function renderMultipartFileValue(value: unknown): string {
 function renderFileArray(value: unknown): string {
   if (typeof value === 'string') {
     const raw = value.startsWith('@@FILE:') ? value.slice('@@FILE:'.length) : value;
-    return `new[] { Path.Combine(AppContext.BaseDirectory, "fixtures", ${stringLiteral(raw)}) }`;
+    return `new[] { ResolveFixturePath(${stringLiteral(raw)}) }`;
   }
   if (Array.isArray(value)) {
     const entries = value.map((v) => {
       if (typeof v === 'string') {
         const raw = v.startsWith('@@FILE:') ? v.slice('@@FILE:'.length) : v;
-        return `Path.Combine(AppContext.BaseDirectory, "fixtures", ${stringLiteral(raw)})`;
+        return `ResolveFixturePath(${stringLiteral(raw)})`;
       }
       const expr = renderCsharpValue(v);
-      return `Path.Combine(AppContext.BaseDirectory, "fixtures", Convert.ToString(${expr}) ?? string.Empty)`;
+      return `ResolveFixturePath(Convert.ToString(${expr}) ?? string.Empty)`;
     });
     return `new[] { ${entries.join(', ')} }`;
   }
