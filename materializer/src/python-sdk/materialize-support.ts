@@ -5,9 +5,61 @@
  * This includes package configuration, runtime helpers, and fixtures.
  */
 
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { EmittedFile } from '@camunda8/emitter-sdk';
+import { getActiveConfigDir } from 'path-analyser/configResolver';
+
+export const PYTHON_SDK_FIXTURES_DIR_NAME = 'fixtures';
+
+/**
+ * Locate the active config's `fixtures/` directory (#221 / Lift 11:
+ * `configs/<config>/fixtures/`). Walks up from this module's location
+ * looking for a repo root (one containing `configs.json`), mirroring
+ * js-sdk's `defaultFixturesSourceDir` and csharp-sdk's `defaultFixturesDir`.
+ */
+function defaultFixturesSourceDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(path.join(dir, 'configs.json'))) {
+      return path.join(getActiveConfigDir(dir), PYTHON_SDK_FIXTURES_DIR_NAME);
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Could not locate repo root for Python SDK fixtures from ${here}.`);
+}
+
+/**
+ * Copy the active config's `fixtures/` directory into
+ * `<outDir>/fixtures/`, so `support.fixtures.resolve_fixture()` finds
+ * deployment artifacts (BPMN/DMN/form files) regardless of the cwd pytest
+ * is invoked from. Mirrors js-sdk's `materializeSdkFixtures` and
+ * csharp-sdk's fixture vendoring in `materializeCsharpSupport`. A missing
+ * source dir is tolerated (not every config ships fixtures) — an absent
+ * destination surfaces as a normal `resolve_fixture` `FileNotFoundError`
+ * at test time instead of a hard failure here.
+ */
+export async function materializePythonFixtures(
+  outDir: string,
+  fixturesSourceDir: string = defaultFixturesSourceDir(),
+): Promise<string> {
+  const destination = path.join(outDir, PYTHON_SDK_FIXTURES_DIR_NAME);
+  await fs.rm(destination, { recursive: true, force: true });
+  await fs.mkdir(destination, { recursive: true });
+  try {
+    await fs.cp(fixturesSourceDir, destination, { recursive: true });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return destination;
+    }
+    throw error;
+  }
+  return destination;
+}
 
 /**
  * Materialize Python SDK support files into the output directory.

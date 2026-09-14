@@ -9,7 +9,12 @@ import type {
   EndpointScenarioCollection,
   RequestStep,
 } from 'path-analyser/types';
+import { camelCase } from '../playwright/stepRenderer.js';
 import { type OperationMapSource, toPythonLiteral } from './sdk-mapping.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function toSnakeCase(value: string): string {
   return value
@@ -56,19 +61,24 @@ export function pythonSuiteFileName(collection: EndpointScenarioCollection): str
  * Example: '/widgets/{id}' → f'/widgets/{ctx["id_var"] or "{id}"}'
  * The fallback gives the broker a recognizable URL (and a 4xx) when a
  * path-param binding is missing.
+ *
+ * `pathParams` is accepted for backward compatibility but intentionally
+ * ignored: `RequestStep.pathParams` is never populated by path-analyser
+ * (see js-sdk's `derivePathParamNames` comment and repo memory item 7), so
+ * trusting it here always fell through to the raw, un-suffixed OpenAPI
+ * param name — which never matches a real `ctx` key. Every ctx binding for
+ * a path param is guaranteed to exist under `${camelCase(paramName)}Var`
+ * instead (path-analyser's own `aliasProducerExtractsToPlaceholders`
+ * enforces this), matching js-sdk's `derivePathParamNames` + `camelCase`
+ * workaround for the same gap.
  */
 export function buildPythonUrlExpression(
   pathTemplate: string,
-  pathParams?: { name: string; var: string }[],
+  _pathParams?: { name: string; var: string }[],
 ): string {
-  const varByName = new Map((pathParams ?? []).map((p) => [p.name, p.var]));
-
   let result = pathTemplate;
   result = result.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
-    // ctx keys are the planner's original binding variable names (e.g.
-    // widgetKeyVar) — this must match the ctx.set(...) calls emitted for
-    // scenario.bindings verbatim, so no casing transform here (#354).
-    const varName = varByName.get(paramName) ?? paramName;
+    const varName = `${camelCase(paramName)}Var`;
     // Use f-string syntax with Python bracket notation
     return `{ctx.get('${varName}') or '${paramName}'}`;
   });
@@ -175,6 +185,20 @@ export function renderPythonSuite(
   lines.push('');
   lines.push('import pytest');
   lines.push('import httpx');
+  const hasMultipartStep = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some(
+      (step) => step.bodyKind === 'multipart' && step.multipartTemplate !== undefined,
+    ),
+  );
+  const hasSeedBindings = collection.scenarios.some(
+    (scenario) => (scenario.seedBindings ?? []).length > 0,
+  );
+  if (hasMultipartStep) {
+    lines.push('from support.fixtures import resolve_fixture');
+  }
+  if (hasSeedBindings) {
+    lines.push('from support.seeding import init_spec_salt, seed_binding');
+  }
   lines.push('from typing import Any, Dict');
   lines.push('');
 
@@ -221,6 +245,10 @@ export function renderPythonSuite(
   lines.push('        return None');
   lines.push('    return current');
   lines.push('');
+  if (hasSeedBindings) {
+    lines.push(`init_spec_salt('${collection.endpoint.operationId}')`);
+    lines.push('');
+  }
 
   // Test scenarios
   for (const scenario of collection.scenarios) {
@@ -238,6 +266,12 @@ export function renderPythonSuite(
     for (const [key, value] of Object.entries(bindings)) {
       if (value === '__PENDING__') continue;
       lines.push(`    ctx.set('${key}', ${renderPythonValue(value)})`);
+    }
+
+    for (const seedName of scenario.seedBindings ?? []) {
+      lines.push(
+        `    ctx.set('${seedName}', ctx.get('${seedName}') if ctx.get('${seedName}') is not None else seed_binding('${seedName}'))`,
+      );
     }
 
     const requestPlan = scenario.requestPlan ?? [];
@@ -275,10 +309,22 @@ function renderPythonRequestStep(lines: string[], step: RequestStep, index: numb
   }
 
   if (payloadTemplate !== undefined) {
-    const bodyExpr = renderPythonBody(payloadTemplate, {});
-    lines.push(`    body_${stepNum} = ${bodyExpr}`);
-    const payloadKey = step.bodyKind === 'multipart' ? 'files' : 'json';
-    requestArgs.push(`${payloadKey}=body_${stepNum}`);
+    if (step.bodyKind === 'multipart' && isRecord(payloadTemplate)) {
+      const fieldsTemplate = payloadTemplate.fields;
+      const filesTemplate = payloadTemplate.files;
+      if (fieldsTemplate !== undefined) {
+        lines.push(`    data_${stepNum} = ${renderPythonValue(fieldsTemplate)}`);
+        requestArgs.push(`data=data_${stepNum}`);
+      }
+      if (filesTemplate !== undefined) {
+        lines.push(`    files_${stepNum} = ${renderPythonMultipartFiles(filesTemplate)}`);
+        requestArgs.push(`files=files_${stepNum}`);
+      }
+    } else {
+      const bodyExpr = renderPythonBody(payloadTemplate, {});
+      lines.push(`    body_${stepNum} = ${bodyExpr}`);
+      requestArgs.push(`json=body_${stepNum}`);
+    }
   }
 
   lines.push(`    ${responseVar} = await client.${methodName}(`);
@@ -300,4 +346,19 @@ function renderPythonRequestStep(lines: string[], step: RequestStep, index: numb
       );
     }
   }
+}
+
+function renderPythonMultipartFiles(filesTemplate: unknown): string {
+  if (!isRecord(filesTemplate)) {
+    return renderPythonValue(filesTemplate);
+  }
+  const entries = Object.entries(filesTemplate).map(([key, value]) => {
+    if (typeof value === 'string' && value.startsWith('@@FILE:')) {
+      const fixturePath = value.slice('@@FILE:'.length);
+      const filename = fixturePath.split('/').pop() || key;
+      return `'${key}': (${renderPythonStringLiteral(filename)}, resolve_fixture('${fixturePath}'))`;
+    }
+    return `'${key}': ${renderPythonValue(value)}`;
+  });
+  return `{${entries.join(', ')}}`;
 }

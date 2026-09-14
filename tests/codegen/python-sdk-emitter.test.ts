@@ -403,6 +403,62 @@ describe('Python SDK Emitter', () => {
       expect(output).not.toContain('widget_key_var');
     });
 
+    // step.pathParams is never populated by path-analyser (mirrors js-sdk's
+    // derivePathParamNames gap) — the emitter must derive the ctx var from
+    // the path template itself and must not trust a stale/incorrect
+    // pathParams entry if one happens to be present.
+    test('ignores a stale pathParams mapping and derives the ctx var from the path template', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'getWidget',
+                method: 'GET',
+                pathTemplate: '/widgets/{widgetKey}',
+                pathParams: [{ name: 'widgetKey', var: 'someUnrelatedVar' }],
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+
+      expect(output).toContain("ctx.get('widgetKeyVar')");
+      expect(output).not.toContain('someUnrelatedVar');
+    });
+
+    // Real path param names are consistently camelCase in this repo's spec,
+    // but the derivation must still normalize a leading-uppercase name (the
+    // same defensive case js-sdk's `camelCase` helper handles) rather than
+    // emitting a ctx key that can never be set.
+    test('camelCases a path param name with a capitalized first letter', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'getWidget',
+                method: 'GET',
+                pathTemplate: '/widgets/{WidgetKey}',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+
+      expect(output).toContain("ctx.get('widgetKeyVar')");
+    });
+
     test('ctx.set and ctx.get use the same unmodified key for body placeholders', () => {
       const collection: EndpointScenarioCollection = {
         ...SAMPLE_COLLECTION,
