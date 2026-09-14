@@ -201,9 +201,7 @@ describe('C# SDK Emitter', () => {
     const files = await emitter.emit(processDefinitionsCollection, EMIT_CTX);
 
     expect(files[0].content).toContain('var request1 = new ProcessDefinitionSearchQuery();');
-    expect(files[0].content).toContain(
-      'await Client.SearchProcessDefinitionsAsync(request1);',
-    );
+    expect(files[0].content).toContain('await Client.SearchProcessDefinitionsAsync(request1);');
   });
 
   test('uses RequireStringBinding for deployment tenant IDs', async () => {
@@ -643,9 +641,7 @@ describe('C# SDK Emitter', () => {
       ],
     };
 
-    await expect(emitter.emit(collection, EMIT_CTX)).rejects.toThrow(
-      /returns no response body/,
-    );
+    await expect(emitter.emit(collection, EMIT_CTX)).rejects.toThrow(/returns no response body/);
   });
 
   test('resolves deployment resource-file paths via ResolveFixturePath instead of a bare AppContext.BaseDirectory join', async () => {
@@ -669,9 +665,7 @@ describe('C# SDK Emitter', () => {
             id: 'sc1',
             name: 'deploy resources',
             description: 'Deploy resources for a tenant',
-            operations: [
-              { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
-            ],
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
             producedSemanticTypes: [],
             satisfiedSemanticTypes: [],
             requestPlan: [DEPLOYMENT_REQUEST_STEP],
