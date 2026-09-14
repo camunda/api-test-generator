@@ -66,9 +66,11 @@ export function pythonSuiteFileName(collection: EndpointScenarioCollection): str
  * Build the URL expression for a path template, substituting {paramName}
  * with ctx['param_name_var'] (Python bracket notation).
  *
- * Example: '/widgets/{id}' → f'/widgets/{ctx["id_var"] or "{id}"}'
+ * Example: '/widgets/{id}' → f'widgets/{ctx["id_var"] or "{id}"}'
  * The fallback gives the broker a recognizable URL (and a 4xx) when a
- * path-param binding is missing.
+ * path-param binding is missing. The leading '/' is stripped so the result
+ * resolves as a relative reference against the client's base_url path
+ * segment (e.g. '/v2') instead of replacing it -- see the strip below.
  *
  * `pathParams` is accepted for backward compatibility but intentionally
  * ignored: `RequestStep.pathParams` is never populated by path-analyser
@@ -84,7 +86,14 @@ export function buildPythonUrlExpression(
   pathTemplate: string,
   _pathParams?: { name: string; var: string }[],
 ): string {
-  let result = pathTemplate;
+  // Strip the leading '/': httpx.AsyncClient.base_url carries its own path
+  // segment (e.g. 'http://localhost:8080/v2/'), and per RFC 3986 relative
+  // resolution, a request path starting with '/' is treated as root-relative
+  // and replaces the base_url's path entirely instead of extending it --
+  // silently dropping '/v2'. A relative (non-leading-slash) path resolves
+  // against base_url's own path as intended. See conftest.py's client
+  // fixture, which normalizes base_url to always end with '/' to match.
+  let result = pathTemplate.startsWith('/') ? pathTemplate.slice(1) : pathTemplate;
   result = result.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
     const varName = `${camelCase(paramName)}Var`;
     // Double-quote the inner literals: this whole expression is embedded in
@@ -252,6 +261,7 @@ export function renderPythonSuite(
   lines.push('');
   lines.push('import pytest');
   lines.push('import httpx');
+  lines.push('import re');
   const hasMultipartStep = collection.scenarios.some((scenario) =>
     (scenario.requestPlan ?? []).some(
       (step) => step.bodyKind === 'multipart' && step.multipartTemplate !== undefined,
@@ -293,15 +303,17 @@ export function renderPythonSuite(
   lines.push('    return TestContext()');
   lines.push('');
   lines.push('def get_nested_value(value: Any, field_path: str) -> Any:');
-  lines.push('    """Safely navigate dotted field paths on dict/list payloads."""');
+  lines.push(
+    '    """Safely navigate dotted/indexed field paths (e.g. \'a.b[0].c\') on dict/list payloads."""',
+  );
   lines.push('    current = value');
-  lines.push("    for part in field_path.split('.'):");
+  lines.push("    for part in re.findall(r'[^.\\[\\]]+|\\[[0-9]+\\]', field_path):");
   lines.push('        if current is None:');
   lines.push('            return None');
-  lines.push('        if part.isdigit():');
+  lines.push("        if part.startswith('[') and part.endswith(']'):");
   lines.push('            if not isinstance(current, list):');
   lines.push('                return None');
-  lines.push('            index = int(part)');
+  lines.push('            index = int(part[1:-1])');
   lines.push('            if index >= len(current):');
   lines.push('                return None');
   lines.push('            current = current[index]');

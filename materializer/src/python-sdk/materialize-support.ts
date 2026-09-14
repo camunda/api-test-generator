@@ -234,6 +234,11 @@ def resolve_fixture(relative_path: str) -> bytes:
     """Resolve a @@FILE relative path to file bytes."""
     if not isinstance(relative_path, str) or not relative_path.strip():
         raise ValueError('Fixture path missing after @@FILE:')
+    # Mirror the JS fixture helper's guard: @@FILE markers can be authored in
+    # scenario/domain-semantics inputs, so reject absolute paths and '..'
+    # segments before they ever reach a filesystem read.
+    if Path(relative_path).is_absolute() or '..' in Path(relative_path).parts:
+        raise ValueError(f'Unsafe fixture path: {relative_path}')
 
     active_config = os.getenv('CONFIG', 'camunda-oca').strip() or 'camunda-oca'
     here = Path(__file__).resolve().parent
@@ -399,6 +404,12 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         An httpx AsyncClient configured for the test environment
     """
     base_url = os.getenv("CAMUNDA_BASE_URL", "http://localhost:8080/v2")
+    if not base_url.endswith("/"):
+        # Request URLs are emitted without a leading '/' so they resolve as
+        # relative references against base_url's own path (e.g. '/v2'). Per
+        # RFC 3986, that only extends the path -- rather than replacing it --
+        # when base_url itself ends with '/'.
+        base_url += "/"
     timeout_seconds = float(os.getenv("CAMUNDA_TIMEOUT_SECONDS", "30"))
 
     async with httpx.AsyncClient(

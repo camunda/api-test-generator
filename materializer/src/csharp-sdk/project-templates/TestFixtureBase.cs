@@ -251,7 +251,11 @@ public abstract class TestFixtureBase
         if (element.ValueKind == JsonValueKind.Object)
         {
             var props = element.EnumerateObject().ToList();
-            if (props.Count == 1 && string.Equals(props[0].Name, "Value", StringComparison.OrdinalIgnoreCase))
+            // Ordinal, case-sensitive: the key-struct converter always emits
+            // exactly "Value" (PascalCase). A case-insensitive match would also
+            // unwrap legitimate wire JSON shaped like {"value": ...}, silently
+            // collapsing a real response object down to its scalar field.
+            if (props.Count == 1 && string.Equals(props[0].Name, "Value", StringComparison.Ordinal))
             {
                 return ConvertJsonElement(props[0].Value);
             }
@@ -427,6 +431,12 @@ public abstract class TestFixtureBase
         private readonly Random uniqueRandom;
         private readonly string runId;
         private readonly string uniqueRunId;
+        // xUnit runs test classes/collections in parallel by default, and this
+        // singleton (Random + Dictionary counters) is shared across all of them --
+        // neither System.Random nor Dictionary<TKey,TValue> is thread-safe, so
+        // concurrent Generate() calls can corrupt PRNG state or the counters,
+        // producing colliding/garbage generated identifiers.
+        private readonly object gate = new();
 
         private SeedEnv()
         {
@@ -467,27 +477,30 @@ public abstract class TestFixtureBase
 
         public string Generate(string varName, bool unique = false)
         {
-            var rnd = unique ? uniqueRandom : random;
-            var id = unique ? uniqueRunId : runId;
-            var bucket = unique ? uniqueCounters : counters;
+            lock (gate)
+            {
+                var rnd = unique ? uniqueRandom : random;
+                var id = unique ? uniqueRunId : runId;
+                var bucket = unique ? uniqueCounters : counters;
 
-            if (varName == "RANDOM")
-            {
-                return RandomBase36(rnd, 6);
+                if (varName == "RANDOM")
+                {
+                    return RandomBase36(rnd, 6);
+                }
+                if (Regex.IsMatch(varName, "correlation", RegexOptions.IgnoreCase))
+                {
+                    return $"corr-{id}-{NextCounter(bucket, "corr")}-{RandomBase36(rnd, 4)}";
+                }
+                if (Regex.IsMatch(varName, "(key|id)$", RegexOptions.IgnoreCase))
+                {
+                    return $"{varName}-{id}-{NextCounter(bucket, "id")}-{RandomBase36(rnd, 6)}";
+                }
+                if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
+                {
+                    return $"{varName}-{RandomBase36(rnd, 8)}";
+                }
+                return $"{varName}-{RandomBase36(rnd, 6)}";
             }
-            if (Regex.IsMatch(varName, "correlation", RegexOptions.IgnoreCase))
-            {
-                return $"corr-{id}-{NextCounter(bucket, "corr")}-{RandomBase36(rnd, 4)}";
-            }
-            if (Regex.IsMatch(varName, "(key|id)$", RegexOptions.IgnoreCase))
-            {
-                return $"{varName}-{id}-{NextCounter(bucket, "id")}-{RandomBase36(rnd, 6)}";
-            }
-            if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
-            {
-                return $"{varName}-{RandomBase36(rnd, 8)}";
-            }
-            return $"{varName}-{RandomBase36(rnd, 6)}";
         }
 
         private static int NextCounter(Dictionary<string, int> counters, string bucket)

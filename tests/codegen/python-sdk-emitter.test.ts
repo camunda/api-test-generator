@@ -437,7 +437,10 @@ describe('Python SDK Emitter', () => {
       expect(output).toContain('# Step 1: createWidget');
       // #354: ctx key must be the planner's original binding name (widgetKeyVar),
       // matching whatever ctx.set(...) would use for the same binding.
-      expect(output).toContain('url_1 = f\'/widgets/{ctx.get("widgetKeyVar") or "widgetKey"}\'');
+      // Leading '/' is stripped so the URL resolves as relative against the
+      // httpx client's base_url path segment (e.g. '/v2') instead of
+      // replacing it -- see conftest.py's client fixture.
+      expect(output).toContain('url_1 = f\'widgets/{ctx.get("widgetKeyVar") or "widgetKey"}\'');
       expect(output).toContain("body_1 = {'enabled': True, 'archived': False, 'owner': None}");
       expect(output).toContain('response_1 = await client.post(');
       expect(output).toContain('assert response_1.status_code == 201');
@@ -694,6 +697,86 @@ describe('Python SDK Emitter', () => {
       const seeding = files.find((f) => f.relativePath === 'support/seeding.py');
       expect(seeding).toBeDefined();
       expect(seeding?.content).toMatch(/_RUN_NONCE = env if env else uuid\.uuid4\(\)\.hex/);
+    });
+  });
+
+  // Regression (Copilot PR #573 review): get_nested_value() only split on
+  // '.' and treated a purely-numeric segment as a list index -- it never
+  // recognized bracket notation (e.g. 'deployments[0].processDefinition.key'),
+  // which is the actual field-path convention used across every other
+  // emitter (see js-sdk/playwright's toOptionalAccessor, csharp-sdk's
+  // ParseFieldPath). A path like 'deployments[0].x' looked up the literal
+  // dict key "deployments[0]" instead of indexing the deployments list,
+  // silently returning None for every extraction using this convention.
+  describe('get_nested_value bracket-notation field paths (Copilot PR #573 review)', () => {
+    test('generated helper tokenizes bracket-index segments instead of only dotted digits', () => {
+      const output = renderPythonSuite(SAMPLE_COLLECTION);
+      expect(output).toContain('import re');
+      expect(output).toContain("for part in re.findall(r'[^.\\[\\]]+|\\[[0-9]+\\]', field_path):");
+      expect(output).toContain("if part.startswith('[') and part.endswith(']'):");
+      expect(output).not.toContain("for part in field_path.split('.'):");
+    });
+
+    test('extract call passes the bracket-notation field path through unchanged', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                bodyKind: 'json',
+                bodyTemplate: {},
+                expect: { status: 200 },
+                extract: [
+                  {
+                    bind: 'processDefinitionKeyVar',
+                    fieldPath: 'deployments[0].processDefinition.processDefinitionKey',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+      expect(output).toContain(
+        "ctx.set('processDefinitionKeyVar', get_nested_value(response_data_1, 'deployments[0].processDefinition.processDefinitionKey'))",
+      );
+    });
+  });
+
+  // Regression (Copilot PR #573 review): OperationMapSource.has() only
+  // checked key presence via `in`, but lookup() additionally requires the
+  // value to be a non-empty array of valid entries -- an operationId with a
+  // present-but-malformed entry (e.g. `[]` or `[{}]`) reported has() === true
+  // while lookup() === undefined, an inconsistency callers could rely on
+  // incorrectly.
+  describe('OperationMapSource.has()/lookup() consistency (Copilot PR #573 review)', () => {
+    test('has() returns false for a key with an empty array value', () => {
+      const map = createOperationMapSourceFromJson(JSON.stringify({ createWidget: [] }));
+      expect(map.has('createWidget')).toBe(false);
+      expect(map.lookup('createWidget')).toBeUndefined();
+    });
+
+    test('has() returns false for a key whose first entry is not a valid operation-map entry', () => {
+      const map = createOperationMapSourceFromJson(JSON.stringify({ createWidget: [{}] }));
+      expect(map.has('createWidget')).toBe(false);
+      expect(map.lookup('createWidget')).toBeUndefined();
+    });
+
+    test('has() returns true only when lookup() would actually succeed', () => {
+      const map = createOperationMapSourceFromJson(
+        JSON.stringify({
+          createWidget: [{ file: 'src/client.py', region: 'create_widget', label: 'Create' }],
+        }),
+      );
+      expect(map.has('createWidget')).toBe(true);
+      expect(map.lookup('createWidget')).toBeDefined();
     });
   });
 });

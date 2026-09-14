@@ -16,6 +16,10 @@ import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.j
 
 const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   createDeployment: 'DeploymentRequest',
+  createUser: 'UserRequest',
+  createTenant: 'TenantCreateRequest',
+  createGroup: 'GroupCreateRequest',
+  createMappingRule: 'MappingRuleCreateRequest',
   searchProcessInstances: 'ProcessInstanceSearchQuery',
   searchProcessDefinitions: 'ProcessDefinitionSearchQuery',
   searchProcessInstanceIncidents: 'IncidentSearchQuery',

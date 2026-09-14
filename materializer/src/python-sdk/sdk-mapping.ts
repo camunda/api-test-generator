@@ -147,6 +147,6 @@ export class OperationMapSource {
    * Check if an operation is mapped in the SDK.
    */
   has(operationId: string): boolean {
-    return operationId in this.map;
+    return this.lookup(operationId) !== undefined;
   }
 }

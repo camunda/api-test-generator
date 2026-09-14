@@ -616,6 +616,66 @@ describe('C# SDK Emitter', () => {
     );
   });
 
+  test('maps createUser/createTenant/createGroup/createMappingRule to their real request DTOs', async () => {
+    // Regression: these 4 operations were absent from
+    // CSHARP_REQUEST_TYPE_BY_OPERATION, so `resolveRequestTypeName` returned
+    // undefined and `requireRequestType` threw "No published C# request DTO
+    // mapping found" for every one of them. Confirmed the real DTO names via
+    // reflection against the installed Camunda.Orchestration.Sdk 9.2.2:
+    // CreateUserAsync(UserRequest), CreateTenantAsync(TenantCreateRequest),
+    // CreateGroupAsync(GroupCreateRequest), CreateMappingRuleAsync(MappingRuleCreateRequest).
+    const cases: Array<{ operationId: string; path: string; requestType: string }> = [
+      { operationId: 'createUser', path: '/users', requestType: 'UserRequest' },
+      { operationId: 'createTenant', path: '/tenants', requestType: 'TenantCreateRequest' },
+      { operationId: 'createGroup', path: '/groups', requestType: 'GroupCreateRequest' },
+      {
+        operationId: 'createMappingRule',
+        path: '/mapping-rules',
+        requestType: 'MappingRuleCreateRequest',
+      },
+    ];
+
+    for (const { operationId, path, requestType } of cases) {
+      const emitter = createCsharpEmitter({
+        [operationId]: [
+          {
+            file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+            region: `${operationId[0].toUpperCase()}${operationId.slice(1)}Async`,
+            label: operationId,
+          },
+        ],
+      });
+      const collection: EndpointScenarioCollection = {
+        endpoint: { operationId, method: 'POST', path },
+        requiredSemanticTypes: [],
+        optionalSemanticTypes: [],
+        scenarios: [
+          {
+            id: 'sc1',
+            name: operationId,
+            description: operationId,
+            operations: [{ operationId, method: 'POST', path }],
+            producedSemanticTypes: [],
+            satisfiedSemanticTypes: [],
+            requestPlan: [
+              {
+                operationId,
+                method: 'POST',
+                pathTemplate: path,
+                bodyKind: 'json',
+                bodyTemplate: { name: 'test' },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const files = await emitter.emit(collection, EMIT_CTX);
+      expect(files[0].content).toContain(`BuildRequest<${requestType}>(`);
+    }
+  });
+
   test('feature and variant suites for the same operationId emit distinct C# class names', async () => {
     // Regression: a feature suite and a variant suite for the same
     // operationId previously both emitted `public class
