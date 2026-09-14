@@ -207,7 +207,7 @@ jobs:
         id: testrail-secrets
         if: always()
         continue-on-error: true
-        uses: hashicorp/vault-action@v3
+        uses: hashicorp/vault-action@v4
         with:
           url: ${{ secrets.VAULT_ADDR }}
           method: jwt
