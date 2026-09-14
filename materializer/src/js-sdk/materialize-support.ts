@@ -117,7 +117,7 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
           compilerOptions: {
             target: 'ES2020',
             module: 'ES2020',
-            lib: ['ES2020'],
+            lib: ['ES2020', 'ES2022.Error'],
             moduleResolution: 'bundler',
             strict: true,
             esModuleInterop: true,
