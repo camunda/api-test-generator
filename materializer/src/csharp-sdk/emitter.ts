@@ -61,7 +61,8 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   deleteProcessInstance: 'DeleteProcessInstanceRequest',
   createDocumentLink: 'DocumentLinkRequest',
   getJobTypeStatistics: 'JobTypeStatisticsQuery',
-  getProcessDefinitionMessageSubscriptionStatistics: 'ProcessDefinitionMessageSubscriptionStatisticsQuery',
+  getProcessDefinitionMessageSubscriptionStatistics:
+    'ProcessDefinitionMessageSubscriptionStatisticsQuery',
   getProcessDefinitionStatistics: 'ProcessDefinitionElementStatisticsQuery',
   getProcessDefinitionInstanceStatistics: 'ProcessDefinitionInstanceStatisticsQuery',
   getProcessInstanceStatisticsByError: 'IncidentProcessInstanceStatisticsByErrorQuery',
@@ -178,7 +179,7 @@ export interface CsharpOperationMapEntry {
  * operation may map to more than one SDK region; the emitter uses the
  * first entry's `region` as the method name.
  */
-export type CsharpOperationMap = Record<string, CsharpOperationMapEntry[]>;
+export type CsharpOperationMap = Record<string, readonly CsharpOperationMapEntry[]>;
 
 export function csharpSdkSuiteFileName(
   collection: EndpointScenarioCollection,

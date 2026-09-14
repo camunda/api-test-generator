@@ -16,7 +16,7 @@ export interface CsharpOperationMapEntry {
   label?: string;
 }
 
-export type CsharpOperationMap = Record<string, CsharpOperationMapEntry[]>;
+export type CsharpOperationMap = Record<string, readonly CsharpOperationMapEntry[]>;
 
 function isCsharpOperationMapEntry(value: unknown): value is CsharpOperationMapEntry {
   return (
