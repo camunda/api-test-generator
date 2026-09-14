@@ -32,18 +32,19 @@ public abstract class TestFixtureBase
     protected static void SeedBindingIfMissing(
         Dictionary<string, object?> ctx,
         string binding,
-        string seedRule
+        string seedRule,
+        bool unique = false
     )
     {
         if (!ctx.TryGetValue(binding, out var value) || value == null)
         {
-            ctx[binding] = SeedBinding(seedRule);
+            ctx[binding] = SeedBinding(seedRule, unique);
         }
     }
 
-    protected static string SeedBinding(string varName)
+    protected static string SeedBinding(string varName, bool unique = false)
     {
-        return SeedEnv.Instance.Generate(varName);
+        return SeedEnv.Instance.Generate(varName, unique);
     }
 
     /// <summary>
@@ -400,9 +401,14 @@ public abstract class TestFixtureBase
         private static readonly Lazy<SeedEnv> LazyInstance = new(() => new SeedEnv());
         public static SeedEnv Instance => LazyInstance.Value;
 
+        private static string? _runNonce;
+
         private readonly Dictionary<string, int> counters = new();
+        private readonly Dictionary<string, int> uniqueCounters = new();
         private readonly Random random;
+        private readonly Random uniqueRandom;
         private readonly string runId;
+        private readonly string uniqueRunId;
 
         private SeedEnv()
         {
@@ -412,41 +418,61 @@ public abstract class TestFixtureBase
             if (useRandom)
             {
                 random = new Random();
+                uniqueRandom = new Random();
                 runId = $"rt-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds():x}";
+                uniqueRunId = runId;
             }
             else
             {
                 random = new Random(HashSeed(seed));
                 runId = $"det-{seed}";
+                // A separate PRNG stream + runId, seeded with a per-process
+                // nonce mixed in, so `unique: true` bindings (client-minted
+                // identifiers consumed by an op that declares HTTP 409)
+                // differ across separate run invocations instead of
+                // colliding on the previous run's value. Mirrors
+                // _resolveRunNonce() in
+                // materializer/src/playwright/support/seeding.ts.
+                var nonce = ResolveRunNonce();
+                uniqueRandom = new Random(HashSeed(seed + nonce));
+                uniqueRunId = $"det-{seed}-{nonce}";
             }
         }
 
-        public string Generate(string varName)
+        private static string ResolveRunNonce()
         {
+            if (_runNonce is not null) return _runNonce;
+            var env = Environment.GetEnvironmentVariable("TEST_RUN_NONCE");
+            _runNonce = !string.IsNullOrEmpty(env) ? env : Guid.NewGuid().ToString("n");
+            return _runNonce;
+        }
+
+        public string Generate(string varName, bool unique = false)
+        {
+            var rnd = unique ? uniqueRandom : random;
+            var id = unique ? uniqueRunId : runId;
+            var bucket = unique ? uniqueCounters : counters;
+
             if (varName == "RANDOM")
             {
-                return RandomBase36(6);
-            }
-            if (varName == "tenantIdVar")
-            {
-                return "<default>";
+                return RandomBase36(rnd, 6);
             }
             if (Regex.IsMatch(varName, "correlation", RegexOptions.IgnoreCase))
             {
-                return $"corr-{runId}-{NextCounter("corr")}-{RandomBase36(4)}";
+                return $"corr-{id}-{NextCounter(bucket, "corr")}-{RandomBase36(rnd, 4)}";
             }
             if (Regex.IsMatch(varName, "(key|id)$", RegexOptions.IgnoreCase))
             {
-                return $"{varName}-{runId}-{NextCounter("id")}-{RandomBase36(6)}";
+                return $"{varName}-{id}-{NextCounter(bucket, "id")}-{RandomBase36(rnd, 6)}";
             }
             if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
             {
-                return $"{varName}-{RandomBase36(8)}";
+                return $"{varName}-{RandomBase36(rnd, 8)}";
             }
-            return $"{varName}-{RandomBase36(6)}";
+            return $"{varName}-{RandomBase36(rnd, 6)}";
         }
 
-        private int NextCounter(string bucket)
+        private static int NextCounter(Dictionary<string, int> counters, string bucket)
         {
             counters.TryGetValue(bucket, out var current);
             var next = current + 1;
@@ -454,13 +480,13 @@ public abstract class TestFixtureBase
             return next;
         }
 
-        private string RandomBase36(int length)
+        private static string RandomBase36(Random rnd, int length)
         {
             const string alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
             var buffer = new char[length];
             for (var i = 0; i < length; i++)
             {
-                buffer[i] = alphabet[random.Next(alphabet.Length)];
+                buffer[i] = alphabet[rnd.Next(alphabet.Length)];
             }
             return new string(buffer);
         }

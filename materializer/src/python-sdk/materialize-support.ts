@@ -271,8 +271,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import uuid
 
 _SPEC_SALT = ''
+_RUN_NONCE: str | None = None
 
 
 def init_spec_salt(salt: str) -> None:
@@ -281,10 +283,32 @@ def init_spec_salt(salt: str) -> None:
     _SPEC_SALT = salt
 
 
+def _resolve_run_nonce() -> str:
+    """
+    Per-process nonce mixed into \`unique=True\` seeds so re-running the
+    suite against the same broker doesn't collide on a previous run's
+    client-minted identifiers. Sourced from env \`TEST_RUN_NONCE\` if set
+    (lets CI replay a specific failed run), otherwise from \`uuid.uuid4()\`
+    at first use, cached for the process lifetime. Mirrors
+    \`_resolveRunNonce()\` in materializer/src/playwright/support/seeding.ts.
+    """
+    global _RUN_NONCE
+    if _RUN_NONCE is not None:
+        return _RUN_NONCE
+    env = os.getenv('TEST_RUN_NONCE', '')
+    _RUN_NONCE = env if env else uuid.uuid4().hex
+    return _RUN_NONCE
+
+
 def seed_binding(name: str, unique: bool = False) -> str:
     """Generate a deterministic seed value for the given binding name."""
     seed = os.getenv('TEST_SEED', 'snapshot-baseline')
-    nonce = os.getenv('TEST_RUN_NONCE', '') if unique else ''
+    # Without a per-process fallback, an unset TEST_RUN_NONCE made
+    # nonce == '' regardless of \`unique\`, so a "unique" seed was
+    # byte-identical to an ordinary one — defeating the whole point of
+    # \`unique=True\` (client-minted identifiers consumed by an op that
+    # declares HTTP 409 would collide across separate run invocations).
+    nonce = _resolve_run_nonce() if unique else ''
     material = f'{seed}:{_SPEC_SALT}:{nonce}:{name}'
     digest = hashlib.sha256(material.encode('utf-8')).hexdigest()[:12]
     if 'email' in name.lower():

@@ -10,6 +10,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EmittedFile } from '@camunda8/emitter-sdk';
 import { getActiveConfigDir } from 'path-analyser/configResolver';
+// Pin the generated project's runtime dependency to the EXACT version the
+// method-capability inventory below was captured from (regenerate via
+// `npm run js-sdk:dump-methods --workspace materializer` whenever the
+// @camunda8/sdk devDependency is bumped). A floating `^8.8.0` range let npm
+// install a newer patch/minor release whose real method surface silently
+// diverged from `known-sdk-methods.json`, causing scenarios to be
+// (in)correctly `it.skip()`-ed against a version that was never actually
+// installed.
+import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
 
 export const JS_SDK_FIXTURES_DIR_NAME = 'fixtures';
 
@@ -103,7 +112,7 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
             vitest: '^4.1.0',
           },
           dependencies: {
-            '@camunda8/sdk': '^8.8.0',
+            '@camunda8/sdk': knownSdkMethods.sdkVersion,
           },
         },
         null,

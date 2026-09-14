@@ -233,6 +233,80 @@ describe('C# SDK Emitter', () => {
     );
   });
 
+  // Regression (Copilot PR #573 review): `SeedEnv.Generate` special-cased
+  // `tenantIdVar` to a hardcoded `"<default>"` sentinel, and the emitter's
+  // `seedBindingsList` filter only excluded globally-seeded (non-
+  // omitWhenUnbound) names — an `omitWhenUnbound` binding named in a
+  // scenario's `seedBindings` was still routed through the legacy
+  // `SeedBindingIfMissing` call, sending the literal string `"<default>"`
+  // instead of leaving the field genuinely unset. Mirrors the canonical
+  // `emitCtxSeeding`/`omitWhenUnbound` contract already covered for
+  // Playwright in tests/codegen/emit-ctx-seeding.test.ts (#342).
+  describe('omitWhenUnbound + unique-binding seeding (#342 / #304, csharp-sdk)', () => {
+    const OMIT_WHEN_UNBOUND_SEED = {
+      binding: 'tenantIdVar',
+      fieldName: 'tenantId',
+      seedRule: 'tenantIdVar',
+      omitWhenUnbound: true,
+    };
+
+    test('does not seed an omitWhenUnbound binding via SeedBindingIfMissing when it is not client-minted/unique (consumer case)', async () => {
+      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            // Planner-computed seedBindings still names tenantIdVar, exactly
+            // as the real reported bug scenario did — the fix must exclude it
+            // here rather than relying on requestPlan shape alone.
+            seedBindings: ['tenantIdVar'],
+          },
+        ],
+      };
+
+      const files = await emitter.emit(collection, {
+        ...EMIT_CTX,
+        globalContextSeeds: [OMIT_WHEN_UNBOUND_SEED],
+      });
+
+      expect(files[0].content).not.toContain('SeedBindingIfMissing(ctx, "tenantIdVar"');
+    });
+
+    test('seeds an omitWhenUnbound binding with unique: true when it is client-minted and the consuming step declares 409 (producer case)', async () => {
+      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            seedBindings: ['tenantIdVar'],
+            requestPlan: [
+              {
+                operationId: 'createProcessInstance',
+                method: 'POST',
+                pathTemplate: '/process-instances',
+                bodyKind: 'json',
+                bodyTemplate: { tenantId: '${tenantIdVar}' },
+                declares409: true,
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      };
+
+      const files = await emitter.emit(collection, {
+        ...EMIT_CTX,
+        globalContextSeeds: [OMIT_WHEN_UNBOUND_SEED],
+      });
+
+      expect(files[0].content).toContain(
+        'SeedBindingIfMissing(ctx, "tenantIdVar", "tenantIdVar", unique: true);',
+      );
+    });
+  });
+
   test('derives request path parameters from the path template when step.pathParams is absent', async () => {
     const emitter = createCsharpEmitter(OPERATION_MAP);
     const requestWithPathParam: EndpointScenarioCollection = {

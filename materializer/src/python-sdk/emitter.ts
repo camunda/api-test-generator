@@ -4,9 +4,11 @@
  */
 
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
+import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
+  GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
 import { camelCase } from '../playwright/stepRenderer.js';
@@ -79,8 +81,10 @@ export function buildPythonUrlExpression(
   let result = pathTemplate;
   result = result.replace(/\{([^}]+)\}/g, (_, paramName: string) => {
     const varName = `${camelCase(paramName)}Var`;
-    // Use f-string syntax with Python bracket notation
-    return `{ctx.get('${varName}') or '${paramName}'}`;
+    // Double-quote the inner literals: this whole expression is embedded in
+    // a single-quoted f-string below, so a single-quoted literal here would
+    // close the f-string early and produce a Python SyntaxError.
+    return `{ctx.get("${varName}") or "${paramName}"}`;
   });
   return `f'${result}'`;
 }
@@ -136,6 +140,42 @@ export function renderPythonBody(
 }
 
 /**
+ * Render a top-level request-body / multipart-fields dict as statements
+ * rather than a single literal expression, deferring any field flagged
+ * `omitWhenUnbound` (per the config's global-context-seeds ABox, e.g.
+ * `tenantId`) to a runtime-conditional assignment. Without this, a whole-
+ * string `${tenantIdVar}` placeholder always renders inline as
+ * `ctx.get('tenantIdVar')`, which is `None` when the scenario legitimately
+ * never seeded it — sending an explicit JSON/multipart `null` instead of
+ * omitting the field and letting the broker apply its own default (#342;
+ * mirrors the C#/Playwright emitters' `omitWhenUnboundFields` handling).
+ */
+function renderPythonDictAssignment(
+  varName: string,
+  record: Record<string, unknown>,
+  omitWhenUnboundFieldNames: ReadonlySet<string>,
+): string[] {
+  const inlineEntries: string[] = [];
+  const deferred: { fieldName: string; binding: string }[] = [];
+  for (const [fieldName, fieldValue] of Object.entries(record)) {
+    const whole = typeof fieldValue === 'string' ? /^\$\{([^}]+)\}$/.exec(fieldValue) : null;
+    if (whole && omitWhenUnboundFieldNames.has(fieldName)) {
+      deferred.push({ fieldName, binding: whole[1] });
+      continue;
+    }
+    inlineEntries.push(`'${fieldName}': ${renderPythonValue(fieldValue)}`);
+  }
+  const lines = [`    ${varName} = {${inlineEntries.join(', ')}}`];
+  for (const { fieldName, binding } of deferred) {
+    const local = `__${toSnakeCase(fieldName)}_val`;
+    lines.push(`    ${local} = ctx.get('${binding}')`);
+    lines.push(`    if ${local} is not None:`);
+    lines.push(`        ${varName}['${fieldName}'] = ${local}`);
+  }
+  return lines;
+}
+
+/**
  * Main entry point for the Python SDK emitter.
  * Creates and returns the EmitterStrategy implementation.
  *
@@ -154,8 +194,11 @@ export function createPythonSdkEmitter(
       refEnv: 'PYTHON_SDK_REF',
       out: 'spec/python-sdk/operation-map.json',
     },
-    async emit(collection: EndpointScenarioCollection, _ctx: EmitContext): Promise<EmittedFile[]> {
-      const content = renderPythonSuite(collection, { operationMap });
+    async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
+      const content = renderPythonSuite(collection, {
+        operationMap,
+        globalContextSeeds: ctx.globalContextSeeds,
+      });
       return [
         {
           relativePath: pythonSuiteFileName(collection),
@@ -171,10 +214,19 @@ export function createPythonSdkEmitter(
  */
 export function renderPythonSuite(
   collection: EndpointScenarioCollection,
-  _opts: {
+  opts: {
     operationMap?: OperationMapSource;
+    globalContextSeeds?: readonly GlobalContextSeed[];
   } = {},
 ): string {
+  if (opts.globalContextSeeds !== undefined) {
+    assertSafeGlobalContextSeeds(opts.globalContextSeeds);
+  }
+  const omitWhenUnboundFieldNames = new Set(
+    (opts.globalContextSeeds ?? [])
+      .filter((seed) => seed.omitWhenUnbound)
+      .map((seed) => seed.fieldName),
+  );
   const lines: string[] = [];
 
   // Header and imports
@@ -276,7 +328,7 @@ export function renderPythonSuite(
 
     const requestPlan = scenario.requestPlan ?? [];
     for (let i = 0; i < requestPlan.length; i++) {
-      renderPythonRequestStep(lines, requestPlan[i], i);
+      renderPythonRequestStep(lines, requestPlan[i], i, omitWhenUnboundFieldNames);
     }
 
     if (requestPlan.length === 0) {
@@ -289,7 +341,12 @@ export function renderPythonSuite(
   return lines.join('\n');
 }
 
-function renderPythonRequestStep(lines: string[], step: RequestStep, index: number): void {
+function renderPythonRequestStep(
+  lines: string[],
+  step: RequestStep,
+  index: number,
+  omitWhenUnboundFieldNames: ReadonlySet<string>,
+): void {
   const stepNum = index + 1;
   const responseVar = `response_${stepNum}`;
   const methodName = step.method.toLowerCase();
@@ -313,13 +370,32 @@ function renderPythonRequestStep(lines: string[], step: RequestStep, index: numb
       const fieldsTemplate = payloadTemplate.fields;
       const filesTemplate = payloadTemplate.files;
       if (fieldsTemplate !== undefined) {
-        lines.push(`    data_${stepNum} = ${renderPythonValue(fieldsTemplate)}`);
+        if (isRecord(fieldsTemplate)) {
+          lines.push(
+            ...renderPythonDictAssignment(
+              `data_${stepNum}`,
+              fieldsTemplate,
+              omitWhenUnboundFieldNames,
+            ),
+          );
+        } else {
+          lines.push(`    data_${stepNum} = ${renderPythonValue(fieldsTemplate)}`);
+        }
         requestArgs.push(`data=data_${stepNum}`);
       }
       if (filesTemplate !== undefined) {
         lines.push(`    files_${stepNum} = ${renderPythonMultipartFiles(filesTemplate)}`);
         requestArgs.push(`files=files_${stepNum}`);
       }
+    } else if (isRecord(payloadTemplate)) {
+      lines.push(
+        ...renderPythonDictAssignment(
+          `body_${stepNum}`,
+          payloadTemplate,
+          omitWhenUnboundFieldNames,
+        ),
+      );
+      requestArgs.push(`json=body_${stepNum}`);
     } else {
       const bodyExpr = renderPythonBody(payloadTemplate, {});
       lines.push(`    body_${stepNum} = ${bodyExpr}`);

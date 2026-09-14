@@ -311,7 +311,7 @@ describe('Python SDK Emitter', () => {
       expect(output).toContain('# Step 1: createWidget');
       // #354: ctx key must be the planner's original binding name (widgetKeyVar),
       // matching whatever ctx.set(...) would use for the same binding.
-      expect(output).toContain("url_1 = f'/widgets/{ctx.get('widgetKeyVar') or 'widgetKey'}'");
+      expect(output).toContain('url_1 = f\'/widgets/{ctx.get("widgetKeyVar") or "widgetKey"}\'');
       expect(output).toContain("body_1 = {'enabled': True, 'archived': False, 'owner': None}");
       expect(output).toContain('response_1 = await client.post(');
       expect(output).toContain('assert response_1.status_code == 201');
@@ -399,7 +399,7 @@ describe('Python SDK Emitter', () => {
       const output = renderPythonSuite(collection);
 
       expect(output).toContain("ctx.set('widgetKeyVar', 'seed-widget-1')");
-      expect(output).toContain("ctx.get('widgetKeyVar')");
+      expect(output).toContain('ctx.get("widgetKeyVar")');
       expect(output).not.toContain('widget_key_var');
     });
 
@@ -428,7 +428,7 @@ describe('Python SDK Emitter', () => {
 
       const output = renderPythonSuite(collection);
 
-      expect(output).toContain("ctx.get('widgetKeyVar')");
+      expect(output).toContain('ctx.get("widgetKeyVar")');
       expect(output).not.toContain('someUnrelatedVar');
     });
 
@@ -456,7 +456,7 @@ describe('Python SDK Emitter', () => {
 
       const output = renderPythonSuite(collection);
 
-      expect(output).toContain("ctx.get('widgetKeyVar')");
+      expect(output).toContain('ctx.get("widgetKeyVar")');
     });
 
     test('ctx.set and ctx.get use the same unmodified key for body placeholders', () => {
@@ -537,6 +537,37 @@ describe('Python SDK Emitter', () => {
       const pyproject = files.find((f) => f.relativePath === 'pyproject.toml');
       expect(pyproject).toBeDefined();
       expect(pyproject?.content).toMatch(/\[tool\.poetry\][^[]*package-mode\s*=\s*false/);
+    });
+  });
+
+  // Regression (Copilot PR #573 review): `seed_binding(name, unique=True)`
+  // mixed in `os.getenv('TEST_RUN_NONCE', '')` directly — when the env var
+  // is unset (the default, outside CI replay), the nonce silently fell back
+  // to `''`, making a "unique" seed byte-identical to a deterministic one
+  // for the whole process lifetime. That defeats the entire purpose of
+  // `unique=True` (client-minted identifiers consumed by an op that
+  // declares HTTP 409 collide across separate run invocations against the
+  // same broker). Mirrors the `_resolveRunNonce()` per-process cache already
+  // used by materializer/src/playwright/support/seeding.ts.
+  describe('support/seeding.py nonce caching (#304, python-sdk)', () => {
+    test('unique seeds are mixed with a per-process nonce, not a possibly-empty env lookup', () => {
+      const files = loadPythonProjectScaffoldingFiles();
+      const seeding = files.find((f) => f.relativePath === 'support/seeding.py');
+      expect(seeding).toBeDefined();
+      expect(seeding?.content).toContain('_resolve_run_nonce()');
+      expect(seeding?.content).toContain('import uuid');
+      // The regressed line unconditionally read the env var with a '' default
+      // as the nonce for `unique=True` calls -- must no longer appear verbatim.
+      expect(seeding?.content).not.toContain(
+        "nonce = os.getenv('TEST_RUN_NONCE', '') if unique else ''",
+      );
+    });
+
+    test('falls back to a fresh uuid4 when TEST_RUN_NONCE is unset, not an empty string', () => {
+      const files = loadPythonProjectScaffoldingFiles();
+      const seeding = files.find((f) => f.relativePath === 'support/seeding.py');
+      expect(seeding).toBeDefined();
+      expect(seeding?.content).toMatch(/_RUN_NONCE = env if env else uuid\.uuid4\(\)\.hex/);
     });
   });
 });

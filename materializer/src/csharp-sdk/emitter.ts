@@ -6,6 +6,12 @@ import type {
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
+// Reused rather than re-implemented: the Playwright emitter already owns the
+// canonical logic for deciding which client-minted bindings need a
+// `{ unique: true }` seed (#304 — client-minted, not extracted from an
+// earlier step, and the consuming step declares HTTP 409). See #342 for the
+// omitWhenUnbound half of the same contract.
+import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
 import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.js';
 
 const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
@@ -290,7 +296,6 @@ function renderScenarioTest(
   const globalSeedNames = new Set(
     globalContextSeeds.filter((seed) => !seed.omitWhenUnbound).map((seed) => seed.binding),
   );
-  const seedBindingsList = (s.seedBindings ?? []).filter((k) => !globalSeedNames.has(k));
   // `omitWhenUnbound` seeds are NOT auto-seeded in the universal prologue;
   // the binding stays null so the outgoing request omits the field and the
   // broker applies its default (#342). Mirrors the Playwright ctxSeeding
@@ -298,6 +303,22 @@ function renderScenarioTest(
   // mapped field names so multipart bodies can null-guard them.
   const omitWhenUnboundFields = new Set(
     globalContextSeeds.filter((seed) => seed.omitWhenUnbound).map((seed) => seed.fieldName),
+  );
+  // Binding names (not field names) for the same omitWhenUnbound seeds, used
+  // below to also exclude them from the per-scenario `seedBindingsList`
+  // path — without this, a scenario whose planner-computed `seedBindings`
+  // happened to name e.g. `tenantIdVar` would still auto-seed it via the
+  // legacy `SeedBindingIfMissing` call, defeating the omission above (the
+  // reviewed bug: the binding got a generic/sentinel value instead of
+  // staying unset). A binding stays eligible for seeding when this
+  // scenario is itself the *producer* minting the value uniquely — see
+  // `uniqueBindings` below (mirrors ctxSeeding.ts's `emitCtxSeeding`).
+  const omitWhenUnboundNames = new Set(
+    globalContextSeeds.filter((seed) => seed.omitWhenUnbound).map((seed) => seed.binding),
+  );
+  const uniqueBindings = computeUniqueBindings(s.requestPlan, s.modelDerivedLiteralBindings);
+  const seedBindingsList = (s.seedBindings ?? []).filter(
+    (k) => !globalSeedNames.has(k) && (!omitWhenUnboundNames.has(k) || uniqueBindings.has(k)),
   );
 
   if (s.bindings && Object.keys(s.bindings).length > 0) {
@@ -312,7 +333,10 @@ function renderScenarioTest(
       body.push('      // Seed scenario bindings');
     }
     for (const k of seedBindingsList) {
-      body.push(`      SeedBindingIfMissing(ctx, ${stringLiteral(k)}, ${stringLiteral(k)});`);
+      const uniqueArg = uniqueBindings.has(k) ? ', unique: true' : '';
+      body.push(
+        `      SeedBindingIfMissing(ctx, ${stringLiteral(k)}, ${stringLiteral(k)}${uniqueArg});`,
+      );
     }
   }
   for (const seed of globalContextSeeds) {
