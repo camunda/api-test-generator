@@ -55,7 +55,7 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
  *
  * The pre-fix instantiation guard was `templatesAbox && edgesAbox`, treating an
  * edges ABox as the *only* subject source — so an entity-only config (e.g.
- * camunda-hub: File/Folder/Version entity-kinds, no edges) got zero lifecycle
+ * camunda-hub: File/Folder entity-kinds, no edges) got zero lifecycle
  * suites. Recognising an entity-kinds ABox as an independent subject source
  * fixes that without affecting configs that ship both (e.g. camunda-oca).
  */

@@ -14,9 +14,10 @@ import { describe, expect, it } from 'vitest';
  * happens, forcing entries that share a `url` to share a `summary`.
  *
  * Scope is PER config file: the same issue may legitimately have a different
- * summary in a different file/suite (e.g. camunda-hub#25801 reads "versions
- * can't be created" in positive-suppress but "updateVersion/restoreVersion
- * blocked" in request-validation — different threads, different context).
+ * summary in a different file/suite — e.g. one file's entry could describe
+ * an op missing from the positive suite while another describes the same
+ * upstream issue blocking a specific negative scenario kind. Different
+ * threads, different context, still the same tracked issue.
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');

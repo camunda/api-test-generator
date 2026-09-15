@@ -8,7 +8,7 @@
  *
  * Regression: the pre-fix guard was `templatesAbox && edgesAbox`, treating an
  * edges ABox as the *only* subject source. An entity-only config (camunda-hub
- * ships File/Folder/Version entity-kinds but declares no edges) therefore got
+ * ships File/Folder entity-kinds but declares no edges) therefore got
  * zero lifecycle suites. This asserts an entity-kinds ABox is a sufficient
  * subject source on its own.
  *

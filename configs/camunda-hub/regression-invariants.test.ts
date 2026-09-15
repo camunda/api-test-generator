@@ -180,4 +180,21 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       ).toBe(false);
     }
   });
+
+  // Not-suppressed alone doesn't prove coverage exists: the planner could
+  // still emit zero feature/variant specs for an op (or the op could vanish
+  // from the bundle) while the suppression check above stays green. Assert
+  // the generated file each op's coverage actually lands in.
+  it('each unblocked version op has a generated positive-suite feature spec', () => {
+    for (const op of [
+      'createVersion',
+      'getVersion',
+      'updateVersion',
+      'deleteVersion',
+      'restoreVersion',
+    ]) {
+      const path = join(SUITE_DIR, `${op}.feature.spec.ts`);
+      expect(existsSync(path), `${op}.feature.spec.ts not generated`).toBe(true);
+    }
+  });
 });

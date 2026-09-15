@@ -178,7 +178,7 @@ async function main() {
   const model = await loadSpec(specPath);
   // #419 — drop config-excluded operations up front so every generator skips
   // them (blocked-upstream ops whose negative tests can't reach their target,
-  // e.g. Hub updateVersion/restoreVersion per camunda-hub#25801). One filter
+  // e.g. Hub's searchCatalogAssetFileUsages per camunda-hub#28913). One filter
   // here beats threading an exclude set through every generate*() call.
   //
   // An entry with `scenarioKinds` is narrower (#500-era addition, e.g.

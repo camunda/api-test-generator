@@ -133,8 +133,9 @@ jobs:
       - name: Generate + run positive + negative suites
         env:
           # Runs the positive (lifecycle) + negative (request-validation) suites.
-          # Blocked ops with no achievable green (versions #25801, catalog #25576)
-          # are positive-suppressed in configs/camunda-hub/positive-suppress.json.
+          # Blocked ops with no achievable green (catalog #25576, #28913; cluster
+          # #25907) are positive-suppressed in
+          # configs/camunda-hub/positive-suppress.json.
           STEPS: 'generate run'
           RV_PROFILES: 'secured rbac'
           # The "Bundle latest camunda-hub spec" step above already re-bundled
