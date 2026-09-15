@@ -123,21 +123,46 @@ jobs:
       # The base branch the camunda-hub PR targets, which for stacked work is
       # often a feature branch rather than main. Same degrade-to-empty contract
       # as the two above (the spec diff falls back to main), but validated more
-      # tightly because this one reaches a `git fetch` refspec: a conservative
-      # ref charset, and none of the forms git treats specially.
+      # tightly because this one reaches a `git fetch` refspec — and, unlike
+      # those two, a wrongly-dropped value is not harmless, so the drop is
+      # announced rather than silent. See below.
       - name: Validate base_ref (optional; empty if missing/invalid)
         id: baseref
         env:
           REF: ${{ github.event.client_payload.base_ref }}
         run: |
           set -euo pipefail
-          # Whole-string, for the reason given on the source_sha step above —
-          # doubly so here, because this value reaches a `git fetch` refspec.
-          allowed='^[A-Za-z0-9][A-Za-z0-9._/-]*$'
-          special='([.][.]|@[{]|//|[.]lock$|/$)'
-          if [ "${#REF}" -le 255 ] && [[ "$REF" =~ $allowed ]] && [[ ! "$REF" =~ $special ]]; then
+          # Two independent gates, answering two different questions:
+          #
+          #   1. `git check-ref-format` — is this a valid git ref at all? Git is
+          #      the authority on its own grammar, so this covers the forms it
+          #      treats specially (leading '-', '..', '@{', '//', trailing
+          #      '.lock' or '/', control characters, space, ~ ^ : ? * [ \) more
+          #      correctly than a hand-rolled regex, and it accepts legitimate
+          #      names that a narrow charset drops — `feature/foo+bar` is the
+          #      case that motivated widening this.
+          #   2. A conservative charset — because check-ref-format accepts
+          #      `$(whoami)`: `$ ( )` are legal in a ref name. Every use of this
+          #      value here is quoted, so that is safe today, but a value headed
+          #      for a `git fetch` refspec should not carry shell metacharacters
+          #      for some later edit to trip over.
+          #
+          # Whole-string match, for the reason given on the source_sha step.
+          allowed='^[A-Za-z0-9][A-Za-z0-9._/+-]*$'
+          if [ "${#REF}" -le 255 ] && [[ "$REF" =~ $allowed ]] \
+             && git check-ref-format --allow-onelevel "$REF"; then
             echo "base_ref=$REF" >> "$GITHUB_OUTPUT"
           else
+            # A non-empty ref that fails validation is NOT equivalent to no ref
+            # at all. Both degrade to empty, but here the spec diff then falls
+            # back to main — which for a stacked PR is exactly the whole-stack
+            # baseline base_ref exists to avoid. Dropping it silently means the
+            # classifier runs against the wrong baseline with nothing in the log
+            # to say why, so say it. (The value itself is not echoed, for the
+            # reason given on the source_sha step; length is the safe clue.)
+            if [ -n "$REF" ]; then
+              echo "::warning::base_ref from the dispatch payload failed validation (length ${#REF}) and was dropped. The spec diff falls back to main, so for a stacked camunda-hub PR it may describe the whole stack rather than the PR. If this was a legitimate branch name, widen the charset in this step."
+            fi
             echo "base_ref=" >> "$GITHUB_OUTPUT"
           fi
 
