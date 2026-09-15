@@ -444,6 +444,21 @@ jobs:
           set -euo pipefail
           rm -f /tmp/hub-pr-classification.json
 
+          # Render the baseline ONCE, so the prompt cannot both name a ref and
+          # say the baseline is unavailable. In particular it must never fall
+          # back to origin/main when nothing resolved: for a stacked PR main is
+          # precisely the ref NOT fetched into the checkout, so naming it would
+          # point the agent at a baseline that does not exist.
+          if [ -n "${HUB_BASE_REF}" ]; then
+            baseline="\`origin/${HUB_BASE_REF}\`"
+            baseline_rule="Use ${baseline} as the baseline everywhere below, never \`origin/main\`: it is this PR's own base, and the only baseline fetched into the checkout."
+            baseline_example="e.g. \`git -C ${HUB_REPO_DIR} diff origin/${HUB_BASE_REF} -- PATH\` (start with \`--stat\` against the whole repo to scope down before diffing anything large)"
+          else
+            baseline="<unavailable>"
+            baseline_rule="NO baseline ref resolved, so no baseline comparison is possible. Do NOT substitute \`origin/main\` or any other ref -- it is not in the checkout. Treat every new-vs-unchanged judgment below as unestablished and say so explicitly in your summary."
+            baseline_example="no baseline is available (see above), so inspect this PR's own commit directly, e.g. \`git -C ${HUB_REPO_DIR} show --stat HEAD\`, and do not compare against any baseline ref"
+          fi
+
           prompt=$(cat <<EOF
           You are classifying a SINGLE failing generated-hub-suite run, triggered by
           a camunda-hub pull request. This is READ-ONLY with respect to the checked-
@@ -458,22 +473,16 @@ jobs:
             — may be absent if the artifact upload/download itself failed; say so if so.
           - OpenAPI spec AT THIS PR's SHA: ${SPEC_DIR}/*.yaml (may be absent if the
             camunda-hub clone step failed; treat as unavailable, don't guess).
-          - Spec diff (this PR's sha vs its BASE branch, \`${HUB_BASE_REF:-<unavailable>}\`),
-            OpenAPI dir only: ${SPEC_DIFF_FILE} (empty file = this PR does not touch
-            the API spec, or the diff step failed). camunda-hub stacks much of its
-            work, so for a stacked PR this base is a feature branch, NOT main —
-            \`origin/${HUB_BASE_REF:-main}\` is also the only baseline fetched into the
-            checkout below, so use that ref, never \`origin/main\`. If it reads
-            <unavailable>, no baseline resolved: treat every new-vs-unchanged
-            judgment below as unestablished rather than assuming a ref.
+          - Spec diff (this PR's sha vs its BASE branch, ${baseline}), OpenAPI dir
+            only: ${SPEC_DIFF_FILE} (empty file = this PR does not touch the API
+            spec, or the diff step failed). camunda-hub stacks much of its work, so
+            for a stacked PR this base is a feature branch, NOT main.
+            ${baseline_rule}
           - Full camunda-hub checkout AT THIS PR's SHA: ${HUB_REPO_DIR} (the complete
             repo, not just the spec dir -- may be absent under the same condition as
             the spec dir above). SPEC_DIFF_FILE only ever covers the OpenAPI YAML;
             for step 4 below, use this to inspect the PR's actual CODE changes
-            yourself, e.g. \`git -C ${HUB_REPO_DIR} diff origin/${HUB_BASE_REF:-main} -- PATH\`
-            (start with \`--stat\` against the whole repo to scope down before diffing
-            anything large). Use that base ref, not origin/main: it is the PR's own
-            base and the only one fetched here.
+            yourself: ${baseline_example}.
           - Known-issue configs: configs/camunda-hub/positive-suppress.json and
             configs/camunda-hub/request-validation.json (their knownIssue /
             knownProblemDetailShapeGaps entries).
@@ -510,8 +519,8 @@ jobs:
              for that causal link, DO NOT rely on the spec diff alone -- it only
              covers the OpenAPI YAML, not the actual implementation. Inspect the
              PR's real code diff yourself in the full checkout (see Inputs above):
-             run a \`--stat\` diff against the PR's base (\`origin/${HUB_BASE_REF:-main}\`,
-             see Inputs) first to see which files
+             start from the PR's own changed files (see Inputs for the baseline and
+             the rule that governs it) to see which files
              changed at all, then look closer at anything touching this operation's
              controller/handler, request-body deserialization, or shared
              validation/config code. Only use category "product" with confidence
