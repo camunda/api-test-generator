@@ -174,9 +174,10 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       'deleteVersion',
       'restoreVersion',
     ]) {
-      expect(suppressed.has(op), `${op} should NOT be suppressed — see positive-suppress.json`).toBe(
-        false,
-      );
+      expect(
+        suppressed.has(op),
+        `${op} should NOT be suppressed — see positive-suppress.json`,
+      ).toBe(false);
     }
   });
 });
