@@ -150,17 +150,16 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   });
 
   // --- Suppression contract (upstream-blocked ops stay out of the suite) -----
-  it('version + catalog blockers are explicitly suppressed from the positive suite', () => {
+  it('catalog blocker is explicitly suppressed from the positive suite', () => {
     const suppressed = new Set(explicitlySuppressedOpIds());
-    // Blocked on camunda-hub#25801 (versions) and #25576 (catalog).
-    for (const op of [
-      'createVersion',
-      'getVersion',
-      'updateVersion',
-      'deleteVersion',
-      'restoreVersion',
-      'deleteCatalogAsset',
-    ]) {
+    // Blocked on #25576 (catalog). The version ops (createVersion,
+    // getVersion, updateVersion, deleteVersion, restoreVersion) were
+    // blocked on camunda-hub#25801 — closed as a duplicate of #27382,
+    // which was fixed (PR #27610 lifted the public-API restriction on
+    // in-process-application version creation) — so they're no longer
+    // suppressed; see positive-suppress.json's git history for the
+    // removed entries.
+    for (const op of ['deleteCatalogAsset']) {
       expect(suppressed.has(op), `${op} should be explicitly suppressed`).toBe(true);
     }
   });
