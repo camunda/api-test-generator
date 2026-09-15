@@ -3103,8 +3103,18 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // the inner test arrow function call.
     const TEST_BLOCK =
       /test\([^]*?scenarioKind:\s*'param-(?:type-mismatch|constraint-violation|enum-violation)'[^]*?}\);/g;
+    // #564 review: the emitter pads unused slots with the literal token
+    // `undefined` (not omitting them) once a 4th arg (`useRoot`, for
+    // cluster-admin operations' server override) is present, e.g.
+    // `buildUrl('/cluster/v2/mode', undefined, undefined, true)`. Slot 3 must
+    // therefore accept `undefined` too, and a trailing `, true|false)` (plus
+    // an optional trailing comma before the closing paren) must not make the
+    // whole call fail to match — a non-match here means the block is
+    // silently skipped below (`if (!urlMatch) continue;`), exactly the #148
+    // silent-skip failure class this file's own comments warn about
+    // elsewhere.
     const BUILD_URL =
-      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(\{[^}]*\}))?\s*\)/;
+      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(?:true|false))?\s*,?\s*\)/;
     const PARAM_KEY = /(\b[a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g;
 
     interface Offender {
@@ -3242,8 +3252,11 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // the previous regex required exactly two args and silently skipped
     // every block with a query-params slot, weakening coverage.
     const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'param-constraint-violation'[^]*?}\);/g;
+    // #564 review: see the identical note on the #127 invariant's BUILD_URL
+    // above — the emitter can now emit a 4th (`useRoot`) arg plus a trailing
+    // comma for cluster-admin operations; both must not defeat the match.
     const BUILD_URL =
-      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))(?:\s*,\s*(?:\{[^}]*\}|undefined))?\s*\)/;
+      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))(?:\s*,\s*(?:\{[^}]*\}|undefined))?(?:\s*,\s*(?:true|false))?\s*,?\s*\)/;
     // `<key>: <value>` — key is either a bare identifier or a quoted
     // string (in case prettier ever quotes a non-identifier key); value is
     // a single- or double-quoted string literal that *may contain
