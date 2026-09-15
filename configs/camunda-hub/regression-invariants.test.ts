@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
   getPlaywrightSuiteDir,
+  getRequestValidationSuiteDir,
   getSpecBundleDir,
 } from '../../path-analyser/src/configResolver.js';
 
@@ -41,6 +42,11 @@ const describeForThisConfig = describe.skipIf(ACTIVE_CONFIG !== CONFIG_NAME);
 const SUITE_DIR = getPlaywrightSuiteDir(REPO_ROOT);
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 const COVERAGE_PATH = join(SUITE_DIR, 'coverage.json');
+const RV_SECURED_VERSIONS_PATH = join(
+  getRequestValidationSuiteDir(REPO_ROOT),
+  'secured',
+  'versions-validation-api-tests.spec.ts',
+);
 
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'options', 'head', 'trace']);
 
@@ -150,18 +156,94 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   });
 
   // --- Suppression contract (upstream-blocked ops stay out of the suite) -----
-  it('version + catalog blockers are explicitly suppressed from the positive suite', () => {
+  it('catalog blockers are explicitly suppressed from the positive suite', () => {
     const suppressed = new Set(explicitlySuppressedOpIds());
-    // Blocked on camunda-hub#25801 (versions) and #25576 (catalog).
+    // deleteCatalogAsset: blocked on #25576 (no obtainable assetKey). Always
+    // present in the pinned bundle, so asserted unconditionally.
+    expect(
+      suppressed.has('deleteCatalogAsset'),
+      'deleteCatalogAsset should be explicitly suppressed',
+    ).toBe(true);
+    // searchCatalogAssetFileUsages: TEMPORARY — the route is implemented
+    // (camunda-hub#28713) but camunda/hub:SNAPSHOT is frozen mid-inc-8019
+    // (#28913). The op post-dates the current spec-pin.json (2208e9bf...),
+    // so it's absent from today's pinned bundle — guarded conditionally so
+    // this starts protecting the moment a spec-bump PR brings it in, without
+    // failing on the current pin. Remove both this and the matching
+    // positive-suppress.json entry once SNAPSHOT publishing resumes and a
+    // rebuilt image is confirmed live — don't just widen this list forever.
+    if (bundleOperationIds().has('searchCatalogAssetFileUsages')) {
+      expect(
+        suppressed.has('searchCatalogAssetFileUsages'),
+        'searchCatalogAssetFileUsages should be explicitly suppressed',
+      ).toBe(true);
+    }
+  });
+
+  // The other half of the contract above: these 5 ops were blocked on
+  // camunda-hub#25801 — closed as a duplicate of #27382, which was fixed
+  // (PR #27610 lifted the public-API restriction on in-process-application
+  // version creation) — so they must NOT be suppressed. Without this,
+  // re-adding any one of them to positive-suppress.json later would pass
+  // every other invariant in this file silently; this one exists solely to
+  // catch that regression.
+  it('version ops (unblocked by camunda-hub#27382/#27610) are NOT suppressed from the positive suite', () => {
+    const suppressed = new Set(explicitlySuppressedOpIds());
     for (const op of [
       'createVersion',
       'getVersion',
       'updateVersion',
       'deleteVersion',
       'restoreVersion',
-      'deleteCatalogAsset',
     ]) {
-      expect(suppressed.has(op), `${op} should be explicitly suppressed`).toBe(true);
+      expect(
+        suppressed.has(op),
+        `${op} should NOT be suppressed — see positive-suppress.json`,
+      ).toBe(false);
     }
+  });
+
+  // Not-suppressed alone doesn't prove coverage exists: the planner could
+  // still emit zero feature/variant specs for an op (or the op could vanish
+  // from the bundle) while the suppression check above stays green. The
+  // emitter writes `<op>.feature.spec.ts` even for an empty scenario
+  // collection, so file existence alone isn't proof either — assert the
+  // file actually contains an emitted `test(` block.
+  it('each unblocked version op has a non-empty generated positive-suite feature spec', () => {
+    for (const op of [
+      'createVersion',
+      'getVersion',
+      'updateVersion',
+      'deleteVersion',
+      'restoreVersion',
+    ]) {
+      const spec = readGeneratedSpec(`${op}.feature.spec.ts`);
+      expect(spec, `${op}.feature.spec.ts has no emitted test`).toContain('test(');
+    }
+  });
+
+  // The positive-suite guards above have no negative-suite counterpart: the
+  // request-validation generator doesn't fail on an absent operation, so
+  // re-adding updateVersion/restoreVersion to excludeOperations (or otherwise
+  // losing their scenarios) would leave the nightly green while silently
+  // dropping the promised negative coverage. Assert each version op still
+  // has negative tests, and pin the one intentional gap (updateVersion's
+  // malformed-json-body omission, camunda-hub#28911) so it stays a single
+  // documented exception rather than silently widening.
+  it('each version op keeps negative-suite coverage, with only updateVersion malformed-json-body omitted', () => {
+    const spec = readRequired(RV_SECURED_VERSIONS_PATH);
+    for (const op of [
+      'createVersion',
+      'getVersion',
+      'updateVersion',
+      'deleteVersion',
+      'restoreVersion',
+    ]) {
+      expect(spec, `${op} has no negative-suite tests`).toContain(`test('${op}`);
+    }
+    expect(
+      spec,
+      'updateVersion malformed-json-body should stay excluded — see request-validation.json',
+    ).not.toContain('updateVersion__malformedJsonBody');
   });
 });

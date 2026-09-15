@@ -20,21 +20,11 @@
   },
   "excludeOperations": [
     {
-      "operationId": "updateVersion",
-      "reason": "Blocked on camunda/camunda-hub#25801 (tracked via #419): a version can't be created via the public API (every v2-creatable file lives inside a process application, which can't be versioned), so RV_FIXTURE_VERSION_KEY is empty and updateVersion's negative tests 404 on the missing version instead of reaching body validation (400). Excluded from the negative suite until versioning is unblocked.",
+      "operationId": "searchCatalogAssetFileUsages",
+      "reason": "Same cause as the positive-suite exclusion: the route is implemented (camunda/camunda-hub#28713) but camunda/hub:SNAPSHOT hasn't published since 2026-09-12 (inc-8019 froze SNAPSHOT tag pushes), so every route-dependent negative case (missing-required, malformed body, param checks, etc.) still hits the pre-#28713 404. Its 2 auth-absent/auth-invalid cases are separately otherwise-valid, still-passing 401 coverage — Spring Security's filter chain runs before route resolution, so those aren't affected by the missing route; excluding the whole op drops those 2 too, same disclosed tradeoff as ingestCatalogAssets/getClusterUsageMetrics above.",
       "knownIssue": {
-        "summary": "updateVersion / restoreVersion — versioning blocked, no version fixture can exist",
-        "url": "https://github.com/camunda/camunda-hub/issues/25801",
-        "tracker": "https://github.com/camunda/api-test-generator/issues/419"
-      }
-    },
-    {
-      "operationId": "restoreVersion",
-      "reason": "Blocked on camunda/camunda-hub#25801 (tracked via #419): same as updateVersion — no version can exist, so restoreVersion's negative tests 404 instead of 400. Excluded until versioning is unblocked.",
-      "knownIssue": {
-        "summary": "updateVersion / restoreVersion — versioning blocked, no version fixture can exist",
-        "url": "https://github.com/camunda/camunda-hub/issues/25801",
-        "tracker": "https://github.com/camunda/api-test-generator/issues/419"
+        "summary": "searchCatalogAssetFileUsages 404s because camunda/hub:SNAPSHOT is frozen (inc-8019), not a route gap",
+        "url": "https://github.com/camunda/camunda-hub/issues/28913"
       }
     },
     {
@@ -55,11 +45,24 @@
     },
     {
       "operationId": "createWorkspace",
-      "scenarioKinds": ["malformed-json-body"],
+      "scenarioKinds": [
+        "malformed-json-body"
+      ],
       "reason": "createWorkspace accepts a syntactically invalid JSON body (200, not 400) and persists the raw garbage text verbatim as `name` — verified live twice (a specific PR's built image, and camunda/hub:SNAPSHOT dispatched directly on main), so it's in current mainline, not tied to one PR. Unlike ingestCatalogAssets/getClusterUsageMetrics above, this op has plenty of other still-passing negative coverage (missing-required, constraint-violation, missing-body, auth, param checks, …) worth keeping — this is exactly the (operationId + scenarioKind) case those entries' comments said wasn't worth building for saving 2 tests; here it's worth it.",
       "knownIssue": {
         "summary": "createWorkspace accepts syntactically invalid JSON and persists it as the workspace name",
         "url": "https://github.com/camunda/camunda-hub/issues/27155"
+      }
+    },
+    {
+      "operationId": "updateVersion",
+      "scenarioKinds": [
+        "malformed-json-body"
+      ],
+      "reason": "Not the same defect this scenarioKind's name suggests: the generator's malformed-json-body body is a plain JS string; Playwright's request.patch() only sends it raw when it's already parsable JSON, and JSON.stringify()s it otherwise (isJsonParsable check in playwright-core's fetch.js) — our malformed text fails JSON.parse, so the actual wire body is a syntactically VALID top-level JSON string (e.g. \"{\\\"malformed\\\": \"), not malformed JSON. Every other still-covered operation's identical malformed-json-body test correctly 400s on that same wire shape (confirmed: updateVersion - Body wrong top-level type, sending a JSON array, also 400s) — createWorkspace is the one other exception, excluded above for the opposite reason (it accepts this wire shape as 200, not that it's untested). Only updateVersion accepts a top-level JSON STRING and binds it directly into `name` via VersionUpdateRequest's implicit single-String delegating constructor (Jackson creator resolution), bypassing normal object-shape validation entirely. Genuinely unparseable JSON (the original camunda-hub#25801-era report) is already fixed and correctly 400s — verified live with curl using the true malformed bytes. Narrowed to this one scenarioKind; updateVersion's other 19 negative tests pass and stay covered.",
+      "knownIssue": {
+        "summary": "updateVersion accepts a top-level JSON string and binds it into name via an implicit Jackson delegating constructor",
+        "url": "https://github.com/camunda/camunda-hub/issues/28911"
       }
     }
   ],
@@ -71,7 +74,10 @@
   ],
   "knownProblemDetailShapeGaps": [
     {
-      "scenarioKinds": ["auth-absent", "auth-invalid"],
+      "scenarioKinds": [
+        "auth-absent",
+        "auth-invalid"
+      ],
       "reason": "Live-verified (hub-ondemand-test.yml run 29422042438): every 401 response returns a completely empty body instead of a ProblemDetail — Spring Security's authentication entry point rejects the request before the app's own ProblemDetail assembly ever runs. Systemic across ~39 operations, so excluding each op (excludeOperations) would drop its other, unaffected negative coverage too. The status-code assertion for these scenarios is unaffected — only the shape check is skipped.",
       "knownIssue": {
         "summary": "Every 401 response returns an empty body instead of a ProblemDetail",
