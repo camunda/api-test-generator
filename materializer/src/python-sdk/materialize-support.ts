@@ -280,12 +280,28 @@ import uuid
 
 _SPEC_SALT = ''
 _RUN_NONCE: str | None = None
+# Per-name call counter (see seed_binding() below): distinguishes repeated
+# calls for the same binding name within one run, e.g. two scenarios in the
+# same endpoint collection (sharing init_spec_salt(operationId)) that both
+# seed a binding named "tenantIdVar" would otherwise hash to the identical
+# value -- a producer/consumer pair uniquely seeding the same name within a
+# single run still collided even though _resolve_run_nonce() differentiates
+# separate run invocations. Never reset mid-run, so values stay distinct
+# for the process lifetime; deterministic across runs because pytest's
+# collection order is itself deterministic for a fixed TEST_SEED.
+_CALL_COUNTERS: dict[str, int] = {}
 
 
 def init_spec_salt(salt: str) -> None:
     """Set the per-suite salt used by seed_binding()."""
     global _SPEC_SALT
     _SPEC_SALT = salt
+
+
+def _next_call_index(name: str) -> int:
+    idx = _CALL_COUNTERS.get(name, 0)
+    _CALL_COUNTERS[name] = idx + 1
+    return idx
 
 
 def _resolve_run_nonce() -> str:
@@ -314,7 +330,8 @@ def seed_binding(name: str, unique: bool = False) -> str:
     # \`unique=True\` (client-minted identifiers consumed by an op that
     # declares HTTP 409 would collide across separate run invocations).
     nonce = _resolve_run_nonce() if unique else ''
-    material = f'{seed}:{_SPEC_SALT}:{nonce}:{name}'
+    call_index = _next_call_index(name)
+    material = f'{seed}:{_SPEC_SALT}:{nonce}:{name}:{call_index}'
     digest = hashlib.sha256(material.encode('utf-8')).hexdigest()[:12]
     if 'email' in name.lower():
         return f'{name}-{digest}@example.com'
@@ -323,6 +340,7 @@ def seed_binding(name: str, unique: bool = False) -> str:
     return f'{name}-{digest}'
 `,
     },
+
     {
       relativePath: 'conftest.py',
       content: `"""

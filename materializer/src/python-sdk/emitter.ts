@@ -8,6 +8,7 @@ import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
+  EventualWaitSpec,
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
@@ -54,10 +55,20 @@ function toPythonTestName(scenario: EndpointScenario): string {
  * Build the file name a scenario collection lowers to.
  * Python test convention: `test_<operation_id>.py`
  */
-export function pythonSuiteFileName(collection: EndpointScenarioCollection): string {
+export function pythonSuiteFileName(
+  collection: EndpointScenarioCollection,
+  mode: 'feature' | 'integration' | 'variant' = 'feature',
+): string {
   const operationId = collection.endpoint.operationId;
   const snakeCase = toSnakeCase(operationId);
-  return `test_${snakeCase}.py`;
+  // The mode suffix is omitted for the default `feature` mode to preserve
+  // existing file names. Without it, a `variant` collection for the same
+  // operationId (see materializer/src/index.ts's feature + variant
+  // emission passes) silently overwrote the feature suite -- both resolved
+  // to the identical `test_<op>.py` path in the same output directory.
+  // Mirrors the JS/C# emitters' mode-suffix handling.
+  const modeSuffix = mode !== 'feature' ? `_${toSnakeCase(mode)}` : '';
+  return `test_${snakeCase}${modeSuffix}.py`;
 }
 
 /**
@@ -216,7 +227,7 @@ export function createPythonSdkEmitter(
       });
       return [
         {
-          relativePath: pythonSuiteFileName(collection),
+          relativePath: pythonSuiteFileName(collection, ctx.mode),
           content,
         },
       ];
@@ -251,6 +262,14 @@ export function renderPythonSuite(
       .filter((seed) => seed.omitWhenUnbound)
       .map((seed) => seed.binding),
   );
+  // Bindings already handled by the universal-seed prologue below -- a
+  // per-scenario seed name that collides with one of these is skipped so
+  // it isn't seeded twice (mirrors ctxSeeding.ts's `globalSeedNames`).
+  const globalSeedNames = new Set(
+    (opts.globalContextSeeds ?? [])
+      .filter((seed) => !seed.omitWhenUnbound)
+      .map((seed) => seed.binding),
+  );
   const lines: string[] = [];
 
   // Header and imports
@@ -262,14 +281,37 @@ export function renderPythonSuite(
   lines.push('import pytest');
   lines.push('import httpx');
   lines.push('import re');
+  const hasEventualWaits = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => (step.eventualWaitsAfter ?? []).length > 0),
+  );
+  if (hasEventualWaits) {
+    lines.push('import asyncio');
+    lines.push('import time');
+  }
   const hasMultipartStep = collection.scenarios.some((scenario) =>
     (scenario.requestPlan ?? []).some(
       (step) => step.bodyKind === 'multipart' && step.multipartTemplate !== undefined,
     ),
   );
-  const hasSeedBindings = collection.scenarios.some(
-    (scenario) => (scenario.seedBindings ?? []).length > 0,
+  // A scenario needs seed_binding() when it has planner-computed
+  // seedBindings, OR when one of its own literal bindings is stripped out
+  // for uniqueness (see the unique-binding handling below), OR when any
+  // non-`omitWhenUnbound` global context seed exists (that prologue loop
+  // runs for every scenario in the collection).
+  const hasNonOmittingGlobalSeeds = (opts.globalContextSeeds ?? []).some(
+    (seed) => !seed.omitWhenUnbound,
   );
+  const hasSeedBindings =
+    (hasNonOmittingGlobalSeeds && collection.scenarios.length > 0) ||
+    collection.scenarios.some((scenario) => {
+      if ((scenario.seedBindings ?? []).length > 0) return true;
+      const unique = computeUniqueBindings(
+        scenario.requestPlan,
+        scenario.modelDerivedLiteralBindings,
+      );
+      const bindings = scenario.bindings ?? {};
+      return Object.entries(bindings).some(([k, v]) => v !== '__PENDING__' && unique.has(k));
+    });
   if (hasMultipartStep) {
     lines.push('from support.fixtures import resolve_fixture');
   }
@@ -346,17 +388,29 @@ export function renderPythonSuite(
       lines.push(`    init_spec_salt('${collection.endpoint.operationId}')`);
     }
 
-    const bindings = scenario.bindings ?? {};
-    for (const [key, value] of Object.entries(bindings)) {
-      if (value === '__PENDING__') continue;
-      lines.push(`    ctx.set('${key}', ${renderPythonValue(value)})`);
-    }
-
     const uniqueBindings = computeUniqueBindings(
       scenario.requestPlan,
       scenario.modelDerivedLiteralBindings,
     );
-    for (const seedName of scenario.seedBindings ?? []) {
+
+    const bindings = scenario.bindings ?? {};
+    // Literal entries flagged unique must NOT be written verbatim: a
+    // concrete client-minted value here would defeat the `unique=True`
+    // seed the binding needs on a re-run (mirrors ctxSeeding.ts's
+    // `emitCtxSeeding` -- see #320). Strip them from the literal loop and
+    // re-route them into the seed loop below.
+    for (const [key, value] of Object.entries(bindings)) {
+      if (value === '__PENDING__' || uniqueBindings.has(key)) continue;
+      lines.push(`    ctx.set('${key}', ${renderPythonValue(value)})`);
+    }
+    const strippedForUnique = Object.entries(bindings)
+      .filter(([k, v]) => v !== '__PENDING__' && uniqueBindings.has(k))
+      .map(([k]) => k);
+
+    const seedNames = Array.from(
+      new Set([...(scenario.seedBindings ?? []), ...strippedForUnique]),
+    ).filter((n) => !globalSeedNames.has(n));
+    for (const seedName of seedNames) {
       if (omitWhenUnboundBindingNames.has(seedName) && !uniqueBindings.has(seedName)) continue;
       const uniqueArg = uniqueBindings.has(seedName) ? ', unique=True' : '';
       lines.push(
@@ -364,9 +418,25 @@ export function renderPythonSuite(
       );
     }
 
+    // Universal-seed prologue (the ABox-driven globalContextSeeds list),
+    // mirroring the Playwright/JS/C# emitters' final seeding step. Without
+    // this loop a normal (non-`omitWhenUnbound`) global seed was NEVER
+    // emitted for Python, leaving its binding unset for every scenario.
+    for (const seed of opts.globalContextSeeds ?? []) {
+      if (seed.omitWhenUnbound) continue;
+      const uniqueArg = uniqueBindings.has(seed.binding) ? ', unique=True' : '';
+      lines.push(
+        `    ctx.set('${seed.binding}', ctx.get('${seed.binding}') if ctx.get('${seed.binding}') is not None else seed_binding('${seed.seedRule}'${uniqueArg}))`,
+      );
+    }
+
     const requestPlan = scenario.requestPlan ?? [];
     for (let i = 0; i < requestPlan.length; i++) {
       renderPythonRequestStep(lines, requestPlan[i], i, omitWhenUnboundFieldNames);
+      const waits = requestPlan[i].eventualWaitsAfter ?? [];
+      for (let w = 0; w < waits.length; w++) {
+        renderPythonEventualWait(lines, waits[w], i, w);
+      }
     }
 
     if (requestPlan.length === 0) {
@@ -462,6 +532,56 @@ function renderPythonRequestStep(
   }
 }
 
+/**
+ * Render a planner-annotated eventual-state wait (#159) as a sibling block
+ * immediately after its producer step. Polls the witness operation via a
+ * raw GET (using the same httpx client the request steps use) until the
+ * predicate field matches or the wait budget is exhausted, mirroring the
+ * Playwright/JS reference emitters' `awaitEventually` semantics.
+ */
+function renderPythonEventualWait(
+  lines: string[],
+  wait: EventualWaitSpec,
+  stepIndex: number,
+  waitIndex: number,
+): void {
+  const w = wait.witness;
+  const suffix = `${stepIndex + 1}_${waitIndex + 1}`;
+  const waitUpToMs = w.waitUpToMs ?? 10_000;
+  const pollIntervalMs = Math.max(10, w.pollIntervalMs ?? 500);
+  const urlVar = `witness_url_${suffix}`;
+  const startedVar = `witness_started_${suffix}`;
+  const respVar = `witness_response_${suffix}`;
+  const dataVar = `witness_data_${suffix}`;
+  const methodName = w.method.toLowerCase();
+
+  lines.push(`    # Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
+  lines.push(`    ${urlVar} = ${buildPythonUrlExpression(w.pathTemplate)}`);
+  lines.push(`    ${startedVar} = time.monotonic()`);
+  lines.push('    while True:');
+  lines.push(`        ${respVar} = await client.${methodName}(${urlVar})`);
+  lines.push(`        if ${respVar}.status_code == 200:`);
+  lines.push(`            ${dataVar}: Any = None`);
+  lines.push('            try:');
+  lines.push(`                ${dataVar} = ${respVar}.json()`);
+  lines.push('            except ValueError:');
+  lines.push('                pass');
+  lines.push(
+    `            if isinstance(${dataVar}, dict) and ${dataVar}.get(${renderPythonStringLiteral(w.predicate.path)}) == ${renderPythonValue(w.predicate.equals)}:`,
+  );
+  lines.push('                break');
+  lines.push(`        elif ${respVar}.status_code not in (404,):`);
+  lines.push('            break');
+  lines.push(`        if (time.monotonic() - ${startedVar}) * 1000 >= ${waitUpToMs}:`);
+  lines.push(
+    `            raise AssertionError(f"Eventual consistency timeout for operation '${w.operationId}' after {(time.monotonic() - ${startedVar}) * 1000:.0f}ms")`,
+  );
+  lines.push(
+    `        await asyncio.sleep(min(${pollIntervalMs / 1000}, (${waitUpToMs} - (time.monotonic() - ${startedVar}) * 1000) / 1000))`,
+  );
+  lines.push(`    assert ${respVar}.status_code == 200`);
+}
+
 function renderPythonMultipartFiles(filesTemplate: unknown): string {
   if (!isRecord(filesTemplate)) {
     return renderPythonValue(filesTemplate);
@@ -470,7 +590,7 @@ function renderPythonMultipartFiles(filesTemplate: unknown): string {
     if (typeof value === 'string' && value.startsWith('@@FILE:')) {
       const fixturePath = value.slice('@@FILE:'.length);
       const filename = fixturePath.split('/').pop() || key;
-      return `'${key}': (${renderPythonStringLiteral(filename)}, resolve_fixture('${fixturePath}'))`;
+      return `'${key}': (${renderPythonStringLiteral(filename)}, resolve_fixture(${renderPythonStringLiteral(fixturePath)}))`;
     }
     return `'${key}': ${renderPythonValue(value)}`;
   });

@@ -89,8 +89,8 @@ def ctx() -> TestContext:
 async def test_happy_path(ctx: TestContext, client: httpx.AsyncClient) -> None:
     """Scenario: happy path"""
     # Step 1: POST /widgets
-  response_1 = await client.post('/widgets', json={"name": "w1"})
-  assert response_1.status_code == 201
+    response_1 = await client.post('widgets', json={"name": "w1"})
+    assert response_1.status_code == 201
     # Step 2: GET /widgets/{widgetKey}
     # ...
 ```

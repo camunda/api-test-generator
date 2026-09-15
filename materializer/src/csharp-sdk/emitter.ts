@@ -3,6 +3,7 @@ import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
+  EventualWaitSpec,
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
@@ -321,19 +322,34 @@ function renderScenarioTest(
     globalContextSeeds.filter((seed) => seed.omitWhenUnbound).map((seed) => seed.binding),
   );
   const uniqueBindings = computeUniqueBindings(s.requestPlan, s.modelDerivedLiteralBindings);
-  const seedBindingsList = (s.seedBindings ?? []).filter(
+  // Literal entries whose binding name is flagged unique must NOT be
+  // written verbatim: a concrete client-minted value here would defeat the
+  // `{ unique: true }` seed the binding needs (mirrors ctxSeeding.ts's
+  // `emitCtxSeeding` — see #320). Strip them from the literal loop and
+  // re-route them into the seed loop below so they get a fresh
+  // `SeedBindingIfMissing(..., unique: true)` call instead.
+  const literalEntries = s.bindings
+    ? Object.entries(s.bindings).filter(([k, v]) => v !== '__PENDING__' && !uniqueBindings.has(k))
+    : [];
+  const strippedForUnique = s.bindings
+    ? Object.entries(s.bindings)
+        .filter(([k, v]) => v !== '__PENDING__' && uniqueBindings.has(k))
+        .map(([k]) => k)
+    : [];
+  const seedBindingsList = Array.from(
+    new Set([...(s.seedBindings ?? []), ...strippedForUnique]),
+  ).filter(
     (k) => !globalSeedNames.has(k) && (!omitWhenUnboundNames.has(k) || uniqueBindings.has(k)),
   );
 
-  if (s.bindings && Object.keys(s.bindings).length > 0) {
+  if (literalEntries.length > 0) {
     body.push('      // Seed scenario bindings');
-    for (const [k, v] of Object.entries(s.bindings)) {
-      if (v === '__PENDING__') continue;
+    for (const [k, v] of literalEntries) {
       body.push(`      ctx[${stringLiteral(k)}] = ${renderCsharpValue(v)};`);
     }
   }
   if (seedBindingsList.length > 0) {
-    if (!s.bindings || Object.keys(s.bindings).length === 0) {
+    if (literalEntries.length === 0) {
       body.push('      // Seed scenario bindings');
     }
     for (const k of seedBindingsList) {
@@ -345,8 +361,9 @@ function renderScenarioTest(
   }
   for (const seed of globalContextSeeds) {
     if (seed.omitWhenUnbound) continue;
+    const uniqueArg = uniqueBindings.has(seed.binding) ? ', unique: true' : '';
     body.push(
-      `      SeedBindingIfMissing(ctx, ${stringLiteral(seed.binding)}, ${stringLiteral(seed.seedRule)});`,
+      `      SeedBindingIfMissing(ctx, ${stringLiteral(seed.binding)}, ${stringLiteral(seed.seedRule)}${uniqueArg});`,
     );
   }
 
@@ -501,6 +518,7 @@ function renderScenarioTest(
       }
 
       body.push('      }');
+      renderCsharpEventualWaits(body, step, idx, mapping);
       return;
     }
 
@@ -576,6 +594,7 @@ function renderScenarioTest(
 
     if (isVoidMethod) {
       body.push('      }');
+      renderCsharpEventualWaits(body, step, idx, mapping);
       return;
     }
 
@@ -605,6 +624,7 @@ function renderScenarioTest(
     }
 
     body.push('      }');
+    renderCsharpEventualWaits(body, step, idx, mapping);
   });
 
   body.push('    }');
@@ -710,7 +730,15 @@ function requireRequestType(step: RequestStep, requestType: string | undefined):
 }
 
 function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
-  const argumentsList = derivePathParamNames(step.pathTemplate).map((rawName) => {
+  return renderClientCallForPath(method, step.pathTemplate, requestExpression);
+}
+
+function renderClientCallForPath(
+  method: string,
+  pathTemplate: string,
+  requestExpression?: string,
+): string {
+  const argumentsList = derivePathParamNames(pathTemplate).map((rawName) => {
     const name = toCamelCase(rawName);
     const keyType = CSHARP_PATH_PARAM_KEY_TYPE[name];
     const binding = stringLiteral(`${name}Var`);
@@ -724,6 +752,57 @@ function renderClientCall(method: string, step: RequestStep, requestExpression?:
   });
   if (requestExpression !== undefined) argumentsList.push(requestExpression);
   return `Client.${method}(${argumentsList.join(', ')})`;
+}
+
+/**
+ * Render every planner-annotated eventual-state wait (#159) attached to
+ * `step` as sibling blocks after its producer step's own block closes.
+ * Polls the witness operation via `AwaitEventuallyWitness` (vendored in
+ * TestFixtureBase.cs), which treats a thrown exception (e.g. a 404 while
+ * the indexer catches up) the same as a false predicate and rethrows on
+ * budget exhaustion -- mirroring the Playwright/JS reference emitters.
+ */
+function renderCsharpEventualWaits(
+  body: string[],
+  step: RequestStep,
+  stepIdx: number,
+  mapping: SdkMappingSource,
+): void {
+  const waits = step.eventualWaitsAfter ?? [];
+  for (let w = 0; w < waits.length; w++) {
+    renderCsharpEventualWait(body, waits[w], stepIdx, w, mapping);
+  }
+}
+
+function renderCsharpEventualWait(
+  body: string[],
+  wait: EventualWaitSpec,
+  _stepIdx: number,
+  _waitIdx: number,
+  mapping: SdkMappingSource,
+): void {
+  const w = wait.witness;
+  const method = mapping.resolveMethod(w.operationId);
+  if (method === undefined) {
+    throw new Error(`No published C# SDK method mapping found for operationId ${w.operationId}`);
+  }
+  const waitUpToMs = w.waitUpToMs ?? 10_000;
+  const pollIntervalMs = Math.max(10, w.pollIntervalMs ?? 500);
+
+  body.push(`      // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
+  body.push('      {');
+  body.push('        await AwaitEventuallyWitness(');
+  body.push(
+    `          async () => (object?)(await ${renderClientCallForPath(method, w.pathTemplate)}),`,
+  );
+  body.push(
+    `          b => WitnessPredicateMatches(b, ${stringLiteral(w.predicate.path)}, ${renderCsharpValue(w.predicate.equals)}),`,
+  );
+  body.push(`          ${stringLiteral(w.operationId)},`);
+  body.push(`          ${waitUpToMs},`);
+  body.push(`          ${pollIntervalMs}`);
+  body.push('        );');
+  body.push('      }');
 }
 
 function resolveRequestTypeName(step: RequestStep): string | undefined {

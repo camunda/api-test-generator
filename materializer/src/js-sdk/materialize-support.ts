@@ -6,10 +6,17 @@
  */
 
 import { existsSync, promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EmittedFile } from '@camunda8/emitter-sdk';
 import { getActiveConfigDir } from 'path-analyser/configResolver';
+
+interface KnownSdkMethods {
+  sdkVersion: string;
+  methods: string[];
+}
+
 // Pin the generated project's runtime dependency to the EXACT version the
 // method-capability inventory below was captured from (regenerate via
 // `npm run js-sdk:dump-methods --workspace materializer` whenever the
@@ -18,7 +25,13 @@ import { getActiveConfigDir } from 'path-analyser/configResolver';
 // diverged from `known-sdk-methods.json`, causing scenarios to be
 // (in)correctly `it.skip()`-ed against a version that was never actually
 // installed.
-import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
+//
+// Loaded via createRequire rather than a static `with { type: 'json' }`
+// import: the latter depends on TS/Node import-attribute support that
+// varies across toolchain versions, whereas `require()` for JSON has been
+// supported unconditionally since early Node.
+const require = createRequire(import.meta.url);
+const knownSdkMethods: KnownSdkMethods = require('./known-sdk-methods.json');
 
 export const JS_SDK_FIXTURES_DIR_NAME = 'fixtures';
 
@@ -317,6 +330,91 @@ export function seedBinding(varName: string, opts?: { unique?: boolean }): strin
     if (rule.match.test(varName)) return rule.gen(varName, env);
   }
   return \`\${varName}-\${env.random().slice(0, 6)}\`;
+}
+`,
+    },
+    {
+      // Eventual-consistency polling helper for `eventualWaitsAfter`
+      // witness steps (#159). Simplified relative to the Playwright
+      // reference (materializer/src/playwright/support/await-eventually.ts):
+      // the JS SDK client throws on non-2xx rather than returning a
+      // structural response object, so a thrown error is treated the same
+      // as a false predicate (transient/indexer-lag) and retried within
+      // budget, then rethrown on timeout.
+      relativePath: 'support/await-eventually.ts',
+      content: `// Eventual-consistency polling helper for witness reads emitted from
+// planner-annotated \`eventualWaitsAfter\` steps. Vendored (not imported from
+// a sibling generated target) so this project remains standalone.
+
+export interface AwaitEventuallyOptions {
+  /** Operation id for error messages. */
+  operationId: string;
+  /** Total wait budget in ms (default 10000). */
+  waitUpToMs?: number;
+  /** Poll interval in ms (default 500, floor 10). */
+  pollIntervalMs?: number;
+}
+
+export class EventualConsistencyTimeoutError extends Error {
+  readonly operationId: string;
+  readonly attempts: number;
+  readonly elapsedMs: number;
+
+  constructor(info: { operationId: string; attempts: number; elapsedMs: number }) {
+    super(
+      \`Eventual consistency timeout for operation '\${info.operationId}' after \${info.attempts} attempt(s) in \${info.elapsedMs}ms\`,
+    );
+    this.name = 'EventualConsistencyTimeoutError';
+    this.operationId = info.operationId;
+    this.attempts = info.attempts;
+    this.elapsedMs = info.elapsedMs;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Invoke \`fetch\` repeatedly until \`predicate\` returns true or the budget is
+ * exhausted. A thrown error from \`fetch\` (e.g. a 404 while the indexer
+ * catches up) is treated as a transient failure and retried within budget;
+ * the last error is rethrown once the budget is exhausted (or a generic
+ * timeout error if no attempt ever threw).
+ */
+export async function awaitEventually<T>(
+  fetch: () => Promise<T>,
+  predicate: (body: T) => boolean,
+  options: AwaitEventuallyOptions,
+): Promise<T> {
+  const waitUpToMs = options.waitUpToMs ?? 10_000;
+  const pollIntervalMs = Math.max(10, options.pollIntervalMs ?? 500);
+  const started = Date.now();
+  let attempts = 0;
+  let lastError: unknown;
+
+  while (true) {
+    attempts++;
+    try {
+      const body = await fetch();
+      if (predicate(body)) return body;
+      lastError = undefined;
+    } catch (err) {
+      lastError = err;
+    }
+
+    const elapsed = Date.now() - started;
+    const remaining = waitUpToMs - elapsed;
+    if (remaining <= 0) {
+      if (lastError instanceof Error) throw lastError;
+      throw new EventualConsistencyTimeoutError({
+        operationId: options.operationId,
+        attempts,
+        elapsedMs: elapsed,
+      });
+    }
+    await sleep(Math.min(pollIntervalMs, remaining));
+  }
 }
 `,
     },

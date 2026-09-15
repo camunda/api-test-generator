@@ -3,8 +3,16 @@
  *
  * The C# SDK emitter consults this interface to determine what method to call
  * for each upstream OpenAPI `operationId`. The mapping is loaded from
- * `csharp-sdk/examples/operation-map.json` in the spec directory; if the file
- * is absent, every operation maps to a default (toPascalCase(opId) + 'Async').
+ * `csharp-sdk/examples/operation-map.json` in the spec directory. There is no
+ * blind-fallback method-name guess: `createCsharpEmitter` always wraps the
+ * loaded map in `CsharpOperationMapSource`, whose `resolveMethod` returns
+ * `undefined` for any operationId missing from the map, and generation then
+ * throws a clear `No published C# SDK method mapping found for operationId
+ * ...` error rather than emitting a call to a guessed method name that may
+ * not exist on the real SDK client (which would otherwise surface much later
+ * as a confusing C# compiler error). `FallbackMappingSource` in this file
+ * implements the PascalCase-guess behavior but is intentionally unused in
+ * production — it exists only for `tests/codegen/csharp-sdk-mapping.test.ts`.
  */
 export interface SdkMappingSource {
   resolveMethod(operationId: string): string | undefined;

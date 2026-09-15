@@ -4,11 +4,13 @@
  * using the Camunda JavaScript SDK and Vitest.
  */
 
+import { createRequire } from 'node:module';
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
+  EventualWaitSpec,
   GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
@@ -18,12 +20,23 @@ import type {
 // globalContextSeeds entry (including the #342 omitWhenUnbound skip).
 import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
 import { camelCase } from '../playwright/stepRenderer.js';
-import knownSdkMethods from './known-sdk-methods.json' with { type: 'json' };
 import {
   containsJavaScriptFixtureMarker,
   renderJavaScriptBody,
   renderJavaScriptMultipartBody,
 } from './sdk-mapping.js';
+
+interface KnownSdkMethods {
+  sdkVersion: string;
+  methods: string[];
+}
+
+// Loaded via createRequire rather than a static `with { type: 'json' }`
+// import: the latter depends on TS/Node import-attribute support that
+// varies across toolchain versions, whereas `require()` for JSON has been
+// supported unconditionally since early Node.
+const require = createRequire(import.meta.url);
+const knownSdkMethods: KnownSdkMethods = require('./known-sdk-methods.json');
 
 // Regenerate via `npm run js-sdk:dump-methods --workspace materializer`
 // whenever the @camunda8/sdk devDependency is bumped.
@@ -154,6 +167,12 @@ export function renderJsSuite(
   if (needsFixtures) {
     lines.push("import { resolveFixture } from '../support/fixtures';");
   }
+  const needsEventualWaits = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => (step.eventualWaitsAfter ?? []).length > 0),
+  );
+  if (needsEventualWaits) {
+    lines.push("import { awaitEventually } from '../support/await-eventually';");
+  }
   lines.push('');
   if (needsSeeding) {
     // Mixed into the seed so parallel vitest workers (sharing one TEST_SEED)
@@ -231,7 +250,11 @@ function renderScenarioTest(
   const missingMethods = [
     ...new Set(
       operations
-        .map((step) => toSdkMethodName(step.operationId))
+        .flatMap((step) => [
+          step.operationId,
+          ...(step.eventualWaitsAfter ?? []).map((wait) => wait.witness.operationId),
+        ])
+        .map((opId) => toSdkMethodName(opId))
         .filter((method) => !KNOWN_SDK_METHODS.has(method)),
     ),
   ];
@@ -278,6 +301,10 @@ function renderScenarioTest(
   for (let i = 0; i < operations.length; i++) {
     const step = operations[i];
     renderRequestStep(lines, step, i);
+    const waits = step.eventualWaitsAfter ?? [];
+    for (let w = 0; w < waits.length; w++) {
+      renderEventualWait(lines, waits[w], i, w);
+    }
   }
 
   if (operations.length === 0) {
@@ -377,6 +404,49 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
     lines.push(`      ctx['${opId}Response'] = ${responseVar};`);
   }
 
+  lines.push('');
+}
+
+/**
+ * Render a planner-annotated eventual-state wait (#159) as a sibling block
+ * immediately after its producer step. Polls the witness operation via the
+ * real SDK client (through the vendored `awaitEventually` helper, which
+ * treats a thrown `HttpSdkError` the same as a false predicate) until the
+ * predicate field matches or the wait budget is exhausted.
+ */
+function renderEventualWait(
+  lines: string[],
+  wait: EventualWaitSpec,
+  stepIndex: number,
+  waitIndex: number,
+): void {
+  const w = wait.witness;
+  const suffix = `${stepIndex + 1}_${waitIndex + 1}`;
+  const method = toSdkMethodName(w.operationId);
+  lines.push(`      // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
+  lines.push('      {');
+  lines.push(`        const witnessInput${suffix} = {`);
+  for (const name of derivePathParamNames(w.pathTemplate)) {
+    lines.push(`          ${renderObjectKey(name)}: ctx['${camelCase(name)}Var'],`);
+  }
+  lines.push('        };');
+  lines.push(`        const witnessCall${suffix} = client.${method}.bind(client) as SdkCall;`);
+  const optionFields: string[] = [`operationId: ${JSON.stringify(w.operationId)}`];
+  if (typeof w.waitUpToMs === 'number') optionFields.push(`waitUpToMs: ${w.waitUpToMs}`);
+  if (typeof w.pollIntervalMs === 'number')
+    optionFields.push(`pollIntervalMs: ${w.pollIntervalMs}`);
+  lines.push(`        await awaitEventually(`);
+  lines.push(`          () => witnessCall${suffix}(witnessInput${suffix}),`);
+  lines.push('          (body) => {');
+  lines.push("            if (body === null || typeof body !== 'object') return false;");
+  lines.push(
+    `            const v = (body as Record<string, unknown>)[${JSON.stringify(w.predicate.path)}];`,
+  );
+  lines.push(`            return v === ${JSON.stringify(w.predicate.equals)};`);
+  lines.push('          },');
+  lines.push(`          { ${optionFields.join(', ')} },`);
+  lines.push('        );');
+  lines.push('      }');
   lines.push('');
 }
 

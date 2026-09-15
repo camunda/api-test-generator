@@ -236,6 +236,77 @@ public abstract class TestFixtureBase
     }
 
     /// <summary>
+    /// True when <paramref name="body"/> has a top-level property named
+    /// <paramref name="path"/> whose value equals the scalar
+    /// <paramref name="expected"/> (a string/bool/int/long/double, per
+    /// <c>WitnessPredicate</c> in path-analyser/src/types.ts). Used by
+    /// eventual-state witness polling (#159) emitted after a producer step
+    /// whose runtime state is <c>eventual: true</c>.
+    /// </summary>
+    protected static bool WitnessPredicateMatches(JsonElement body, string path, object expected)
+    {
+        if (body.ValueKind != JsonValueKind.Object) return false;
+        if (!body.TryGetProperty(path, out var prop)) return false;
+        return expected switch
+        {
+            string s => prop.ValueKind == JsonValueKind.String && prop.GetString() == s,
+            bool b => (prop.ValueKind == JsonValueKind.True || prop.ValueKind == JsonValueKind.False)
+                && prop.GetBoolean() == b,
+            int i => prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var li) && li == i,
+            long l => prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var ll) && ll == l,
+            double d => prop.ValueKind == JsonValueKind.Number && prop.GetDouble() == d,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Poll <paramref name="fetch"/> until <paramref name="predicate"/>
+    /// returns true or <paramref name="waitUpToMs"/> elapses. Mirrors the
+    /// Playwright/JS reference emitters' <c>awaitEventually</c>: a thrown
+    /// exception from <paramref name="fetch"/> (e.g. a 404 while the
+    /// indexer catches up) is treated the same as a false predicate and
+    /// retried within budget; the last exception is rethrown on timeout.
+    /// </summary>
+    protected static async Task<JsonElement> AwaitEventuallyWitness(
+        Func<Task<object?>> fetch,
+        Func<JsonElement, bool> predicate,
+        string operationId,
+        int waitUpToMs,
+        int pollIntervalMs
+    )
+    {
+        var started = DateTime.UtcNow;
+        var attempts = 0;
+        Exception? lastError = null;
+
+        while (true)
+        {
+            attempts++;
+            try
+            {
+                var result = await fetch();
+                var body = ToJsonElement(result);
+                if (predicate(body)) return body;
+                lastError = null;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            var elapsedMs = (DateTime.UtcNow - started).TotalMilliseconds;
+            var remainingMs = waitUpToMs - elapsedMs;
+            if (remainingMs <= 0)
+            {
+                if (lastError is not null) throw lastError;
+                throw new InvalidOperationException(
+                    $"Eventual consistency timeout for operation '{operationId}' after {attempts} attempt(s) in {elapsedMs:F0}ms");
+            }
+            await Task.Delay((int)Math.Min(pollIntervalMs, remainingMs));
+        }
+    }
+
+    /// <summary>
     /// Unwrap a JSON value pulled out by field-path extraction into a plain
     /// CLR scalar/collection. Strongly-typed SDK key structs (JobKey,
     /// ProcessInstanceKey, ...) have no custom JSON converter registered for
@@ -305,7 +376,16 @@ public abstract class TestFixtureBase
         var path = rawPath.StartsWith("@@FILE:", StringComparison.Ordinal)
             ? rawPath.Substring("@@FILE:".Length)
             : rawPath;
-        if (Path.IsPathRooted(path) && File.Exists(path)) return path;
+        // Mirror the JS (support/fixtures.ts) and Python (support/fixtures.py)
+        // fixture helpers: reject an absolute path or any ".." segment before
+        // ever touching the filesystem, rather than trusting the caller. A
+        // rooted path was previously returned verbatim whenever it happened
+        // to exist, and ".." segments were never checked at all, letting an
+        // @@FILE: marker read outside the vendored fixtures directory.
+        if (Path.IsPathRooted(path) || path.Split('/', '\\').Contains(".."))
+        {
+            throw new InvalidOperationException($"Invalid fixture path: {path}");
+        }
 
         var candidates = new[]
         {

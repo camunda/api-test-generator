@@ -27,8 +27,10 @@ directory.
 ## SDK method mapping
 
 The emitter maps `operationId` values to SDK methods using a mapping loaded from
-`csharp-sdk/examples/operation-map.json` in the repository root. If no mapping is available, the
-emitter falls back to `PascalCase(operationId) + "Async"`.
+`csharp-sdk/examples/operation-map.json` in the repository root. There is no blind fallback: an
+`operationId` missing from the map fails generation with a clear
+`No published C# SDK method mapping found for operationId ...` error rather than guessing a method
+name that may not exist on the real SDK client.
 
 ## Running the tests
 

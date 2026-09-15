@@ -899,4 +899,117 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).toContain('ResolveFixturePath("process.bpmn")');
     expect(files[0].content).not.toContain('Path.Combine(AppContext.BaseDirectory, "fixtures"');
   });
+
+  test('renders eventual-state witness polling after a producer step (#159)', async () => {
+    const mapWithWitness: CsharpOperationMap = {
+      ...OPERATION_MAP,
+      getProcessInstance: [
+        {
+          file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+          region: 'GetProcessInstanceAsync',
+          label: 'Get process instance',
+        },
+      ],
+    };
+    const emitter = createCsharpEmitter(mapWithWitness);
+    const collection: EndpointScenarioCollection = {
+      endpoint: {
+        operationId: 'createProcessInstance',
+        method: 'POST',
+        path: '/process-instances',
+      },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          description: 'Create a process instance and wait for it to become active',
+          operations: [
+            { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createProcessInstance',
+              method: 'POST',
+              pathTemplate: '/process-instances',
+              expect: { status: 200 },
+              eventualWaitsAfter: [
+                {
+                  state: 'ACTIVE',
+                  witness: {
+                    operationId: 'getProcessInstance',
+                    method: 'GET',
+                    pathTemplate: '/process-instances/{processInstanceKey}',
+                    predicate: { path: 'state', equals: 'ACTIVE' },
+                    waitUpToMs: 5000,
+                    pollIntervalMs: 250,
+                  },
+                },
+              ],
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const files = await emitter.emit(collection, EMIT_CTX);
+
+    expect(files[0].content).toContain('AwaitEventuallyWitness(');
+    expect(files[0].content).toContain('await Client.GetProcessInstanceAsync(');
+    expect(files[0].content).toContain('WitnessPredicateMatches(b, "state", "ACTIVE")');
+    expect(files[0].content).toContain('"getProcessInstance"');
+    expect(files[0].content).toContain('5000');
+    expect(files[0].content).toContain('250');
+  });
+
+  test('throws when a witness operationId has no published C# SDK method mapping', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const collection: EndpointScenarioCollection = {
+      endpoint: {
+        operationId: 'createProcessInstance',
+        method: 'POST',
+        path: '/process-instances',
+      },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          description: 'Create a process instance',
+          operations: [
+            { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createProcessInstance',
+              method: 'POST',
+              pathTemplate: '/process-instances',
+              expect: { status: 200 },
+              eventualWaitsAfter: [
+                {
+                  state: 'ACTIVE',
+                  witness: {
+                    operationId: 'getProcessInstance',
+                    method: 'GET',
+                    pathTemplate: '/process-instances/{processInstanceKey}',
+                    predicate: { path: 'state', equals: 'ACTIVE' },
+                  },
+                },
+              ],
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    await expect(emitter.emit(collection, EMIT_CTX)).rejects.toThrow(
+      /No published C# SDK method mapping found for operationId getProcessInstance/,
+    );
+  });
 });
