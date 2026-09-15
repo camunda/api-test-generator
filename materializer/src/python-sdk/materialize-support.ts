@@ -172,6 +172,9 @@ The generated tests execute real HTTP calls through \`httpx.AsyncClient\`.
 
 - \`CAMUNDA_BASE_URL\` (default: \`http://localhost:8080/v2\`)
 - \`CAMUNDA_TIMEOUT_SECONDS\` (default: \`30\`)
+- \`BEARER_TOKEN\` (optional) -- sent as \`Authorization: Bearer <token>\` on every
+  request, for secured clusters. Matches the Playwright/JS SDK suites' own
+  \`BEARER_TOKEN\` convention (see the repo README).
 
 Example:
 
@@ -429,10 +432,13 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         # when base_url itself ends with '/'.
         base_url += "/"
     timeout_seconds = float(os.getenv("CAMUNDA_TIMEOUT_SECONDS", "30"))
+    bearer_token = os.getenv("BEARER_TOKEN")
+    headers = {"Authorization": f"Bearer {bearer_token}"} if bearer_token else {}
 
     async with httpx.AsyncClient(
         base_url=base_url,
         timeout=timeout_seconds,
+        headers=headers,
     ) as client:
         yield client
 `,
