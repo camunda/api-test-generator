@@ -2,8 +2,8 @@
 # build and report the result back onto the PR.
 #
 # Triggered by a repository_dispatch (type: camunda-hub-pr) sent FROM a
-# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying just the
-# PR's source SHA + number. It derives the pr-<sha> image ref, runs the shared
+# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying the PR's
+# source SHA, number and base ref. It derives the pr-<sha> image ref, runs the shared
 # hub-suite reusable against it (our own Keycloak; #462 decision) and posts a
 # commit status back onto the camunda-hub PR (POST .../statuses/{sha}) — mirroring
 # how c8-cross-component-e2e-tests reports on hub PRs.
@@ -18,8 +18,8 @@
 #   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
 #      sending the repository_dispatch.
 #
-# Expected client_payload: { source_sha, pr_number, base_ref, caller_run_url }. The image
-# ref and registry are NOT taken from the payload — they're derived/fixed below
+# Expected client_payload: { source_sha, pr_number, base_ref, caller_run_url }.
+# The image ref and registry are NOT taken from the payload — derived/fixed below
 # (image = .../hub-restapi-self-managed:pr-<source_sha>, registry =
 # registry.camunda.cloud) so the image can't drift from the reported commit and
 # validation always runs. caller_run_url (a link back to the camunda-hub run
@@ -94,7 +94,9 @@ jobs:
           URL: ${{ github.event.client_payload.caller_run_url }}
         run: |
           set -euo pipefail
-          if [[ "$URL" =~ ^https://github[.]com/camunda/camunda-hub/actions/runs/[0-9]+$ ]]; then
+          # Digit count bounded, like pr_number's — an unbounded [0-9]+ would let an
+          # arbitrarily long run id through into $GITHUB_OUTPUT and the Slack link.
+          if [[ "$URL" =~ ^https://github[.]com/camunda/camunda-hub/actions/runs/[0-9]{1,20}$ ]]; then
             echo "caller_run_url=$URL" >> "$GITHUB_OUTPUT"
           else
             echo "caller_run_url=" >> "$GITHUB_OUTPUT"
