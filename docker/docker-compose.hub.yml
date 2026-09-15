@@ -232,6 +232,14 @@ services:
       FEATURE_CATALOG_ENABLED: "true"
       CAMUNDA_MODELER_FEATURE_CONSOLE_ENABLED: "true"
       FEATURE_GLOBAL_NAVIGATION_V2_ENABLED: "true"
+      # Gates the environment controllers, which are @ConditionalOnProperty: with
+      # the flag off they are never registered and every /environments route
+      # answers 404. Needs the camunda.hub.feature.* (or legacy camunda.modeler.*)
+      # prefix — unlike the FEATURE_* vars above, which work because Hub's
+      # application-common.yml reads those as ${FEATURE_*} placeholders;
+      # environments-enabled is hardcoded false there, so only a relaxed-binding
+      # env var overrides it. No-op until camunda-hub ships the property.
+      CAMUNDA_HUB_FEATURE_ENVIRONMENTS_ENABLED: "true"
       # Dynamic cluster management: exposes the v2 /clusters surface so the suite
       # can exercise the cluster ops. Which cluster ops run vs stay suppressed
       # (with known-issue links) lives in configs/camunda-hub/positive-suppress.json.

@@ -2,8 +2,8 @@
 # build and report the result back onto the PR.
 #
 # Triggered by a repository_dispatch (type: camunda-hub-pr) sent FROM a
-# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying just the
-# PR's source SHA + number. It derives the pr-<sha> image ref, runs the shared
+# camunda/camunda-hub PR workflow (Part B, lives in that repo), carrying the PR's
+# source SHA, number and base ref. It derives the pr-<sha> image ref, runs the shared
 # hub-suite reusable against it (our own Keycloak; #462 decision) and posts a
 # commit status back onto the camunda-hub PR (POST .../statuses/{sha}) — mirroring
 # how c8-cross-component-e2e-tests reports on hub PRs.
@@ -18,8 +18,8 @@
 #   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
 #      sending the repository_dispatch.
 #
-# Expected client_payload: { source_sha, pr_number, caller_run_url }. The image
-# ref and registry are NOT taken from the payload — they're derived/fixed below
+# Expected client_payload: { source_sha, pr_number, base_ref, caller_run_url }.
+# The image ref and registry are NOT taken from the payload — derived/fixed below
 # (image = .../hub-restapi-self-managed:pr-<source_sha>, registry =
 # registry.camunda.cloud) so the image can't drift from the reported commit and
 # validation always runs. caller_run_url (a link back to the camunda-hub run
@@ -53,6 +53,7 @@ jobs:
       source_sha: ${{ steps.v.outputs.source_sha }}
       caller_run_url: ${{ steps.caller.outputs.caller_run_url }}
       pr_number: ${{ steps.prnum.outputs.pr_number }}
+      base_ref: ${{ steps.baseref.outputs.base_ref }}
       # || 'false': if the lookup below never ran (empty pr_number, or the
       # token mint failed/unprovisioned), this is empty, not "false" —
       # default to "not draft" so a lookup failure degrades to the
@@ -60,14 +61,24 @@ jobs:
       # real signal.
       is_draft: ${{ steps.draft.outputs.is_draft || 'false' }}
     steps:
+      # Every payload validator below matches the WHOLE string with bash's
+      # `[[ =~ ]]`, never `printf | grep -qE`. `grep` is line-oriented: ^ and $
+      # anchor each LINE, so a multiline payload such as $'<valid>\nkey=value'
+      # matches on its first line and the raw value then reaches
+      # $GITHUB_OUTPUT, where the newline injects further step outputs.
+      # `[[ =~ ]]` has no multiline mode, so ^/$ bound the entire value.
+      #
+      # For the same reason a rejected value is never echoed back into the log:
+      # it is the multiline one, and its extra lines would be interpreted as
+      # workflow commands. The length is reported instead, as a debugging clue.
       - name: Validate source_sha is a 40-char hex commit SHA
         id: v
         env:
           SHA: ${{ github.event.client_payload.source_sha }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
-            echo "::error::source_sha '$SHA' is not a 40-char hex commit SHA."
+          if ! [[ "$SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::source_sha is not a 40-char hex commit SHA (length ${#SHA})."
             exit 1
           fi
           echo "source_sha=$SHA" >> "$GITHUB_OUTPUT"
@@ -83,7 +94,9 @@ jobs:
           URL: ${{ github.event.client_payload.caller_run_url }}
         run: |
           set -euo pipefail
-          if printf '%s' "$URL" | grep -qE '^https://github\.com/camunda/camunda-hub/actions/runs/[0-9]+$'; then
+          # Digit count bounded, like pr_number's — an unbounded [0-9]+ would let an
+          # arbitrarily long run id through into $GITHUB_OUTPUT and the Slack link.
+          if [[ "$URL" =~ ^https://github[.]com/camunda/camunda-hub/actions/runs/[0-9]{1,20}$ ]]; then
             echo "caller_run_url=$URL" >> "$GITHUB_OUTPUT"
           else
             echo "caller_run_url=" >> "$GITHUB_OUTPUT"
@@ -101,10 +114,31 @@ jobs:
           N: ${{ github.event.client_payload.pr_number }}
         run: |
           set -euo pipefail
-          if printf '%s' "$N" | grep -qE '^[1-9][0-9]*$'; then
+          if [[ "$N" =~ ^[1-9][0-9]*$ ]] && [ "${#N}" -le 12 ]; then
             echo "pr_number=$N" >> "$GITHUB_OUTPUT"
           else
             echo "pr_number=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The base branch the camunda-hub PR targets, which for stacked work is
+      # often a feature branch rather than main. Same degrade-to-empty contract
+      # as the two above (the spec diff falls back to main), but validated more
+      # tightly because this one reaches a `git fetch` refspec: a conservative
+      # ref charset, and none of the forms git treats specially.
+      - name: Validate base_ref (optional; empty if missing/invalid)
+        id: baseref
+        env:
+          REF: ${{ github.event.client_payload.base_ref }}
+        run: |
+          set -euo pipefail
+          # Whole-string, for the reason given on the source_sha step above —
+          # doubly so here, because this value reaches a `git fetch` refspec.
+          allowed='^[A-Za-z0-9][A-Za-z0-9._/-]*$'
+          special='([.][.]|@[{]|//|[.]lock$|/$)'
+          if [ "${#REF}" -le 255 ] && [[ "$REF" =~ $allowed ]] && [[ ! "$REF" =~ $special ]]; then
+            echo "base_ref=$REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "base_ref=" >> "$GITHUB_OUTPUT"
           fi
 
       # #519: a draft camunda-hub PR failing the generated suite still gets
@@ -224,11 +258,37 @@ jobs:
           persist-credentials: false
 
       - name: Download hub-suite Playwright reports
+        id: reports
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: hub-suite-reports
           path: test-results/e2e-camunda-hub
+
+      # Without this, a run that produced no evidence looks the same to the
+      # classifier as one whose tests simply passed, and it reports "could not
+      # confirm" — which reads as a problem with the camunda-hub PR rather than
+      # with the harness. Say which it is. Advisory on purpose: the classifier
+      # still runs and still posts, it just no longer implies the PR is at fault.
+      #
+      # "Artifact present" is NOT the same as "reports present": run-hub.sh
+      # opens pw-<profile>.stderr.log by shell redirection BEFORE
+      # `npx playwright test` starts, so a crash before any reporter writes
+      # still leaves a non-empty directory that uploads and downloads happily.
+      # Only a Playwright JSON or JUnit report counts as evidence.
+      - name: Note when no report evidence was produced
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.reports.outcome }}
+        run: |
+          set -euo pipefail
+          dir="test-results/e2e-camunda-hub"
+          if [ "${DOWNLOAD_OUTCOME}" != "success" ]; then
+            echo "::warning::No hub-suite-reports artifact — no Playwright/JUnit reports are available for classification (the suite may have produced none, or artifact upload/download may have failed). Check the suite job and artifact step before attributing this to the camunda-hub PR."
+          elif [ -z "$(find "$dir" -type f \( -name 'pw-*.json' -o -name 'pw-*.junit.xml' \) -print -quit 2>/dev/null)" ]; then
+            echo "::warning::hub-suite-reports artifact contains no Playwright JSON or JUnit report (only logs, if anything), so this run cannot be classified as pass or fail. Playwright died before writing a report — check the pw-*.stderr.log in the artifact and the suite job, not the camunda-hub PR."
+          else
+            echo "Report evidence present."
+          fi
 
       # Contents:Read only — same token type _hub-suite-run.yml itself already
       # uses to clone for generation, never a write-capable App token.
@@ -250,26 +310,78 @@ jobs:
           token: ${{ steps.hub-token.outputs.token }}
           ref: ${{ needs.validate.outputs.source_sha }}
 
-      # One clone, diffed against main, instead of cloning both refs
+      # One clone, diffed against the PR's base, instead of cloning both refs
       # separately — the OpenAPI dir only, this is the one signal that
       # actually distinguishes "generator doesn't handle this yet" (operation
       # is new/changed in this PR) from "hub regressed" (operation unchanged).
-      - name: Diff the OpenAPI spec against main
+      - name: Diff the OpenAPI spec against the PR's base
+        id: specdiff
         if: steps.hub-token.outputs.token != ''
         continue-on-error: true
         env:
           SHA: ${{ needs.validate.outputs.source_sha }}
+          BASE_REF: ${{ needs.validate.outputs.base_ref }}
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
         run: |
           set -euo pipefail
           cd ../camunda-hub
-          git fetch -q origin main
-          # main FIRST, PR sha second: `git diff <old> <new>` shows +/- from
+          # camunda-hub is private and clone-hub-sibling leaves `origin` on the
+          # plain https URL, applying the App token only through a per-command
+          # `-c url.<authed>.insteadOf` rewrite. Any fetch here needs the same
+          # rewrite or it gets "Repository not found" — which, since this step
+          # is continue-on-error, would silently leave the classifier with no
+          # baseline at all.
+          git_authed() {
+            git -c "url.https://x-access-token:${HUB_TOKEN}@github.com/.insteadOf=https://github.com/" "$@"
+          }
+          # Explicit refspec: a bare `git fetch origin <branch>` does not
+          # reliably create the remote-tracking ref across git versions, and
+          # the diff below needs origin/<base>.
+          fetch_base() {
+            git_authed fetch -q --depth 1 origin "$1:refs/remotes/origin/$1"
+          }
+          # The PR's own base, not main. camunda-hub stacks much of its work, so
+          # for a PR based on a feature branch, main is the wrong baseline and
+          # the diff then describes the whole stack rather than this PR.
+          #
+          # Fall back to main when the dispatch carried no usable ref, or when
+          # the branch no longer resolves — a stacked PR's base can be merged
+          # and deleted while this run sits queued.
+          base=""
+          if [ -n "${BASE_REF}" ] && fetch_base "${BASE_REF}"; then
+            base="${BASE_REF}"
+          else
+            if [ -n "${BASE_REF}" ]; then
+              echo "::warning::base_ref '${BASE_REF}' could not be fetched — falling back to main. For a stacked PR the spec diff may describe the whole stack."
+            fi
+            if fetch_base main; then
+              base="main"
+            fi
+          fi
+          # Publish whichever baseline actually resolved, so the classification
+          # prompt below describes (and inspects) the same one rather than
+          # assuming main. Empty means no baseline at all.
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          if [ -z "${base}" ]; then
+            echo "::warning::No camunda-hub baseline ref could be fetched — the spec diff is empty, so the classifier cannot tell new-vs-unchanged operations apart."
+            : > "${GITHUB_WORKSPACE}/spec-diff.txt"
+            exit 0
+          fi
+          # The base TIP, not merge-base(base, SHA): clone-hub-sibling fetches
+          # --depth 1, so the two refs share no ancestor in this clone and
+          # merge-base would just fail. `git diff` compares trees, so it works
+          # regardless. The cost is that spec changes the base gained after this
+          # PR branched off it also show up; against the right base that is a
+          # far smaller window than diffing against main. Deepen both fetches if
+          # the branch point is ever needed exactly.
+          #
+          # base FIRST, PR sha second: `git diff <old> <new>` shows +/- from
           # old to new, so this way the PR's own additions/changes show as
           # `+` — the natural reading for "what did this PR add or change
-          # relative to main." The reverse order would flip that polarity
+          # relative to its base." The reverse order would flip that polarity
           # (a genuinely new construct would show as REMOVED), which could
           # mislead the classifier's new-vs-changed-vs-unchanged judgment.
-          git diff origin/main "${SHA}" -- restapi/public-api/src/main/resources/openapi/v2 \
+          git diff "origin/${base}" "${SHA}" -- restapi/public-api/src/main/resources/openapi/v2 \
             > "${GITHUB_WORKSPACE}/spec-diff.txt" || true
 
       - name: Fetch Anthropic key from Vault
@@ -310,6 +422,14 @@ jobs:
           REPORTS_DIR: ${{ github.workspace }}/test-results/e2e-camunda-hub
           SPEC_DIR: ${{ github.workspace }}/../camunda-hub/restapi/public-api/src/main/resources/openapi/v2
           SPEC_DIFF_FILE: ${{ github.workspace }}/spec-diff.txt
+          # The baseline the diff above actually resolved to — the PR's own base
+          # branch for stacked work, `main` otherwise. The prompt below must name
+          # the same ref it was diffed against, and it is also the only baseline
+          # fetched into the clone, so telling the agent to inspect `origin/main`
+          # would both misdescribe the diff and fail outright on a stacked PR.
+          # Empty when no baseline resolved; `<unavailable>` then tells the agent
+          # to skip the baseline comparison rather than invent a ref.
+          HUB_BASE_REF: ${{ steps.specdiff.outputs.base }}
           # The clone-hub-sibling action does a full clone, not a sparse/
           # openapi-only one -- the agent runs as a real tool-using session
           # (claude -p), so it can inspect this itself (git diff/log/grep)
@@ -326,6 +446,21 @@ jobs:
           set -euo pipefail
           rm -f /tmp/hub-pr-classification.json
 
+          # Render the baseline ONCE, so the prompt cannot both name a ref and
+          # say the baseline is unavailable. In particular it must never fall
+          # back to origin/main when nothing resolved: for a stacked PR main is
+          # precisely the ref NOT fetched into the checkout, so naming it would
+          # point the agent at a baseline that does not exist.
+          if [ -n "${HUB_BASE_REF}" ]; then
+            baseline="\`origin/${HUB_BASE_REF}\`"
+            baseline_rule="Use ${baseline} as the baseline everywhere below, never \`origin/main\`: it is this PR's own base, and the only baseline fetched into the checkout."
+            baseline_example="e.g. \`git -C ${HUB_REPO_DIR} diff origin/${HUB_BASE_REF} -- PATH\` (start with \`--stat\` against the whole repo to scope down before diffing anything large)"
+          else
+            baseline="<unavailable>"
+            baseline_rule="NO baseline ref resolved, so no baseline comparison is possible. Do NOT substitute \`origin/main\` or any other ref -- it is not in the checkout. Treat every new-vs-unchanged judgment below as unestablished and say so explicitly in your summary."
+            baseline_example="no baseline is available (see above), so inspect this PR's own commit directly, e.g. \`git -C ${HUB_REPO_DIR} show --stat HEAD\`, and do not compare against any baseline ref"
+          fi
+
           prompt=$(cat <<EOF
           You are classifying a SINGLE failing generated-hub-suite run, triggered by
           a camunda-hub pull request. This is READ-ONLY with respect to the checked-
@@ -340,15 +475,16 @@ jobs:
             — may be absent if the artifact upload/download itself failed; say so if so.
           - OpenAPI spec AT THIS PR's SHA: ${SPEC_DIR}/*.yaml (may be absent if the
             camunda-hub clone step failed; treat as unavailable, don't guess).
-          - Spec diff (this PR's sha vs camunda-hub main), OpenAPI dir only: ${SPEC_DIFF_FILE}
-            (empty file = this PR does not touch the API spec, or the diff step failed).
+          - Spec diff (this PR's sha vs its BASE branch, ${baseline}), OpenAPI dir
+            only: ${SPEC_DIFF_FILE} (empty file = this PR does not touch the API
+            spec, or the diff step failed). camunda-hub stacks much of its work, so
+            for a stacked PR this base is a feature branch, NOT main.
+            ${baseline_rule}
           - Full camunda-hub checkout AT THIS PR's SHA: ${HUB_REPO_DIR} (the complete
             repo, not just the spec dir -- may be absent under the same condition as
             the spec dir above). SPEC_DIFF_FILE only ever covers the OpenAPI YAML;
             for step 4 below, use this to inspect the PR's actual CODE changes
-            yourself, e.g. \`git -C ${HUB_REPO_DIR} diff origin/main -- PATH\`
-            (start with \`--stat\` against the whole repo to scope down before diffing
-            anything large).
+            yourself: ${baseline_example}.
           - Known-issue configs: configs/camunda-hub/positive-suppress.json and
             configs/camunda-hub/request-validation.json (their knownIssue /
             knownProblemDetailShapeGaps entries).
@@ -385,7 +521,8 @@ jobs:
              for that causal link, DO NOT rely on the spec diff alone -- it only
              covers the OpenAPI YAML, not the actual implementation. Inspect the
              PR's real code diff yourself in the full checkout (see Inputs above):
-             run a \`--stat\` diff against camunda-hub main first to see which files
+             start from the PR's own changed files (see Inputs for the baseline and
+             the rule that governs it) to see which files
              changed at all, then look closer at anything touching this operation's
              controller/handler, request-body deserialization, or shared
              validation/config code. Only use category "product" with confidence

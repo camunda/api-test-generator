@@ -338,6 +338,11 @@ jobs:
         with:
           name: hub-suite-reports
           path: test-results/e2e-camunda-hub/
+          # A run that produced no reports at all did not pass — it never got
+          # far enough to write any (Hub failed to start, or the job died before
+          # the first test). Uploading nothing and succeeding is what makes that
+          # indistinguishable downstream from a clean run.
+          if-no-files-found: error
           retention-days: 14
 
       - name: Write results to run summary
