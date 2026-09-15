@@ -318,8 +318,9 @@ jobs:
       # suppress/exclude configs (single source of truth — no hand-maintained
       # duplicate). Each relevant entry carries a `knownIssue { summary, url,
       # tracker? }`; entries without one (e.g. the out-of-scope cluster ops) are
-      # omitted. Bullets are deduped by issue url (all 5 version ops → one
-      # #25801 line). Emitted with literal `\n` so they slot into the Slack JSON.
+      # omitted. Bullets are deduped by issue url (e.g. searchCatalogAssetFileUsages's
+      # positive + negative entries → one #28913 line). Emitted with literal `\n`
+      # so they slot into the Slack JSON.
       - name: Derive known-issue bullets
         id: known-issues
         if: always()

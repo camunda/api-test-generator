@@ -21,7 +21,7 @@
   "excludeOperations": [
     {
       "operationId": "searchCatalogAssetFileUsages",
-      "reason": "Same cause as the positive-suite exclusion: the route is implemented (camunda/camunda-hub#28713) but camunda/hub:SNAPSHOT hasn't published since 2026-09-12 (inc-8019 froze SNAPSHOT tag pushes), so every negative-suite status-code assertion for this op still hits the pre-#28713 404 regardless of scenario kind.",
+      "reason": "Same cause as the positive-suite exclusion: the route is implemented (camunda/camunda-hub#28713) but camunda/hub:SNAPSHOT hasn't published since 2026-09-12 (inc-8019 froze SNAPSHOT tag pushes), so every route-dependent negative case (missing-required, malformed body, param checks, etc.) still hits the pre-#28713 404. Its 2 auth-absent/auth-invalid cases are separately otherwise-valid, still-passing 401 coverage — Spring Security's filter chain runs before route resolution, so those aren't affected by the missing route; excluding the whole op drops those 2 too, same disclosed tradeoff as ingestCatalogAssets/getClusterUsageMetrics above.",
       "knownIssue": {
         "summary": "searchCatalogAssetFileUsages 404s because camunda/hub:SNAPSHOT is frozen (inc-8019), not a route gap",
         "url": "https://github.com/camunda/camunda-hub/issues/28913"
