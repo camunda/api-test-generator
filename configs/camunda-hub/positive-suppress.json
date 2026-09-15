@@ -3,9 +3,9 @@
   "suppress": [
     {
       "operationId": "searchCatalogAssetFileUsages",
-      "reason": "Spec declares this op (x-added-in-version 8.10) but the route isn't implemented — 404s with Spring's default whitelabel error page, not this API's own ProblemDetail shape, even against a real, valid assetKey (confirmed working against the identically-shaped project-usages/search sibling with the same key). Live check runs against camunda-hub@main (unpinned), so this fails on every PR right now regardless of what it changes, until the route ships.",
+      "reason": "The route is implemented (camunda/camunda-hub#28713, merged 2026-09-15) but camunda/hub:SNAPSHOT — the image the live check runs against — hasn't published since 2026-09-12: stage-build.yml has the SNAPSHOT/branch-SNAPSHOT Docker Hub tag pushes disabled while inc-8019 (a feel-engine RCE fix) rolls out, so the running image predates #28713 and still 404s with Spring's default whitelabel error page. Re-enable once SNAPSHOT publishing resumes and a rebuilt image includes #28713.",
       "knownIssue": {
-        "summary": "searchCatalogAssetFileUsages route not implemented (spec-first gap)",
+        "summary": "searchCatalogAssetFileUsages 404s because camunda/hub:SNAPSHOT is frozen (inc-8019), not a route gap",
         "url": "https://github.com/camunda/camunda-hub/issues/28913"
       }
     },
