@@ -281,7 +281,7 @@ jobs:
           set -euo pipefail
           dir="test-results/e2e-camunda-hub"
           if [ "${DOWNLOAD_OUTCOME}" != "success" ]; then
-            echo "::warning::No hub-suite-reports artifact — the suite never produced Playwright/JUnit reports, so this run cannot be classified as pass or fail. That points at the suite job (Hub failed to start, or it died before the first test), not at the camunda-hub PR."
+            echo "::warning::No hub-suite-reports artifact — no Playwright/JUnit reports are available for classification (the suite may have produced none, or artifact upload/download may have failed). Check the suite job and artifact step before attributing this to the camunda-hub PR."
           elif [ -z "$(find "$dir" -type f \( -name 'pw-*.json' -o -name 'pw-*.junit.xml' \) -print -quit 2>/dev/null)" ]; then
             echo "::warning::hub-suite-reports artifact contains no Playwright JSON or JUnit report (only logs, if anything), so this run cannot be classified as pass or fail. Playwright died before writing a report — check the pw-*.stderr.log in the artifact and the suite job, not the camunda-hub PR."
           else
