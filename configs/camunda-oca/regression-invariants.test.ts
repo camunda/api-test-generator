@@ -10188,15 +10188,21 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
 
     // #354: a step comment with no corresponding `await client.<method>(...)`
     // invocation would mean the emitter lowered scenario.requestPlan into a
-    // comment only, silently dropping the actual request — assert every
-    // emitted file's step count and real-call count agree.
+    // comment only, silently dropping the actual request. Checked per-step
+    // against the exact `response_N = await client...` variable the emitter
+    // assigns (rather than an aggregate step-count vs. call-count tally),
+    // since a `witness_response_N = await client...` eventual-wait poll call
+    // also matches a bare `await client\.\w+\(` scan and would let an
+    // aggregate count mask a genuinely missing step N call.
     const offenders: string[] = [];
     for (const file of files) {
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
-      const stepCount = (src.match(/# Step \d+:/g) ?? []).length;
-      const clientCallCount = (src.match(/await client\.\w+\(/g) ?? []).length;
-      if (stepCount > 0 && clientCallCount < stepCount) {
-        offenders.push(`${file} (steps=${stepCount}, client calls=${clientCallCount})`);
+      const stepNumbers = Array.from(src.matchAll(/# Step (\d+):/g)).map((m) => Number(m[1]));
+      const missingSteps = stepNumbers.filter(
+        (n) => !new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src),
+      );
+      if (missingSteps.length > 0) {
+        offenders.push(`${file} (missing client call for step(s): ${missingSteps.join(', ')})`);
       }
     }
     expect(

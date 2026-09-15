@@ -431,12 +431,21 @@ function renderEventualWait(
   }
   lines.push('        };');
   lines.push(`        const witnessCall${suffix} = client.${method}.bind(client) as SdkCall;`);
+  // Same arity-detected consistency argument as ordinary request steps
+  // (see renderRequestStep): the real SDK throws a client-side "Missing
+  // consistencyManagement parameter" error for an eventually-consistent
+  // witness method invoked with only one argument (Copilot PR #575 review).
+  lines.push(
+    `        const witnessConsistency${suffix} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;`,
+  );
   const optionFields: string[] = [`operationId: ${JSON.stringify(w.operationId)}`];
   if (typeof w.waitUpToMs === 'number') optionFields.push(`waitUpToMs: ${w.waitUpToMs}`);
   if (typeof w.pollIntervalMs === 'number')
     optionFields.push(`pollIntervalMs: ${w.pollIntervalMs}`);
   lines.push(`        await awaitEventually(`);
-  lines.push(`          () => witnessCall${suffix}(witnessInput${suffix}),`);
+  lines.push(
+    `          () => witnessCall${suffix}(witnessInput${suffix}, witnessConsistency${suffix}),`,
+  );
   lines.push('          (body) => {');
   lines.push("            if (body === null || typeof body !== 'object') return false;");
   lines.push(

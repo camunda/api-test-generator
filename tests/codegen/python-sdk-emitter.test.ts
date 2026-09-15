@@ -779,4 +779,91 @@ describe('Python SDK Emitter', () => {
       expect(map.lookup('createWidget')).toBeDefined();
     });
   });
+
+  // Regression (Copilot PR #574 review): a successful scenario only asserted
+  // response_N.status_code -- scenario.responseShapeFields (the same
+  // planner-derived required/nullable field list the Playwright and C# SDK
+  // emitters already assert against on their final step) was never
+  // consulted, so a malformed 2xx body passed the generated Python test.
+  describe('response shape assertion on the final step (Copilot PR #574 review)', () => {
+    const collectionWithShape: EndpointScenarioCollection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          responseShapeFields: [
+            { name: 'widgetKey', type: 'string', required: true, nullable: false },
+            { name: 'tenantId', type: 'string', required: false, nullable: true },
+          ],
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              bodyKind: 'json',
+              bodyTemplate: { name: 'widget-1' },
+              expect: { status: 201 },
+            },
+          ],
+        },
+      ],
+    };
+
+    test('emits an assert_response_shape helper and calls it on the final step', () => {
+      const output = renderPythonSuite(collectionWithShape);
+      expect(output).toContain('def assert_response_shape(data: Any, fields: list) -> None:');
+      expect(output).toContain(
+        "assert_response_shape(response_data_1, [{'name': 'widgetKey', 'required': True, 'nullable': False}, {'name': 'tenantId', 'required': False, 'nullable': True}])",
+      );
+    });
+
+    test('does not assert shape on a non-final step', () => {
+      const multiStep: EndpointScenarioCollection = {
+        ...collectionWithShape,
+        scenarios: [
+          {
+            ...collectionWithShape.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: { name: 'widget-1' },
+                expect: { status: 201 },
+              },
+              {
+                operationId: 'getWidget',
+                method: 'GET',
+                pathTemplate: '/widgets/{widgetKey}',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(multiStep);
+      expect(output).not.toContain('assert_response_shape(response_data_1,');
+      expect(output).toContain('assert_response_shape(response_data_2,');
+    });
+
+    test('does not assert shape for an error scenario', () => {
+      const errorScenario: EndpointScenarioCollection = {
+        ...collectionWithShape,
+        scenarios: [
+          {
+            ...collectionWithShape.scenarios[0],
+            expectedResult: { kind: 'error' },
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(errorScenario);
+      // The helper's own `def assert_response_shape(...)` is always emitted
+      // (unconditional, like get_nested_value) — only the *call* site must
+      // be absent for an error-expected scenario.
+      expect(output).not.toContain('assert_response_shape(response_data_1,');
+    });
+  });
 });

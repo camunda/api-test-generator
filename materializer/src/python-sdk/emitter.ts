@@ -366,6 +366,21 @@ export function renderPythonSuite(
   lines.push('        return None');
   lines.push('    return current');
   lines.push('');
+  lines.push('def assert_response_shape(data: Any, fields: list) -> None:');
+  lines.push(
+    '    """Validate top-level required/nullable fields on a successful response (mirrors the Playwright/C# emitters\' final-step shape check)."""',
+  );
+  lines.push("    assert isinstance(data, dict), 'Response is not a JSON object.'");
+  lines.push('    for field in fields:');
+  lines.push("        name = field['name']");
+  lines.push("        required = field.get('required', False)");
+  lines.push("        nullable = field.get('nullable', False)");
+  lines.push('        if name not in data:');
+  lines.push('            assert not required, f"Missing required field \'{name}\'."');
+  lines.push('            continue');
+  lines.push('        if required and not nullable:');
+  lines.push('            assert data[name] is not None, f"Field \'{name}\' must not be null."');
+  lines.push('');
 
   // Test scenarios
   for (const scenario of collection.scenarios) {
@@ -431,8 +446,16 @@ export function renderPythonSuite(
     }
 
     const requestPlan = scenario.requestPlan ?? [];
+    const isErrorScenario = scenario.expectedResult?.kind === 'error';
     for (let i = 0; i < requestPlan.length; i++) {
-      renderPythonRequestStep(lines, requestPlan[i], i, omitWhenUnboundFieldNames);
+      const isFinal = i === requestPlan.length - 1;
+      renderPythonRequestStep(
+        lines,
+        requestPlan[i],
+        i,
+        omitWhenUnboundFieldNames,
+        isFinal && !isErrorScenario ? scenario.responseShapeFields : undefined,
+      );
       const waits = requestPlan[i].eventualWaitsAfter ?? [];
       for (let w = 0; w < waits.length; w++) {
         renderPythonEventualWait(lines, waits[w], i, w);
@@ -454,6 +477,7 @@ function renderPythonRequestStep(
   step: RequestStep,
   index: number,
   omitWhenUnboundFieldNames: ReadonlySet<string>,
+  responseShapeFields?: EndpointScenario['responseShapeFields'],
 ): void {
   const stepNum = index + 1;
   const responseVar = `response_${stepNum}`;
@@ -518,16 +542,30 @@ function renderPythonRequestStep(
   lines.push('    )');
   lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}`);
 
-  if (step.extract && step.extract.length > 0) {
+  const needsResponseData =
+    (step.extract && step.extract.length > 0) || (responseShapeFields?.length ?? 0) > 0;
+  if (needsResponseData) {
     lines.push(`    ${responseDataVar}: Any = None`);
     lines.push('    try:');
     lines.push(`        ${responseDataVar} = ${responseVar}.json()`);
     lines.push('    except ValueError:');
     lines.push('        pass');
-    for (const extract of step.extract) {
-      lines.push(
-        `    ctx.set('${extract.bind}', get_nested_value(${responseDataVar}, '${extract.fieldPath}'))`,
+    if (step.extract) {
+      for (const extract of step.extract) {
+        lines.push(
+          `    ctx.set('${extract.bind}', get_nested_value(${responseDataVar}, '${extract.fieldPath}'))`,
+        );
+      }
+    }
+    if (responseShapeFields?.length) {
+      const shapeLiteral = renderPythonValue(
+        responseShapeFields.map((field) => ({
+          name: field.name,
+          required: field.required ?? false,
+          nullable: field.nullable ?? false,
+        })),
       );
+      lines.push(`    assert_response_shape(${responseDataVar}, ${shapeLiteral})`);
     }
   }
 }
