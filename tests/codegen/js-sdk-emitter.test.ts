@@ -332,6 +332,64 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).toContain('waitUpToMs: 5000');
     expect(output).not.toContain('waitUpToMs: 0');
   });
+
+  // Regression (Copilot PR #575 review): the witness call inside an
+  // eventualWaitsAfter poll reused the arity-detected consistency object a
+  // normal request step computes for itself, but never computed/passed one
+  // for the witness's own method — an eventually-consistent witness (e.g.
+  // getProcessInstance) threw the real SDK's client-side "Missing
+  // consistencyManagement parameter" error before polling ever started.
+  test('passes an arity-detected consistency argument to the eventual-wait witness call', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: {
+        operationId: 'createProcessInstance',
+        method: 'POST',
+        path: '/process-instances',
+      },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          description: 'Create a process instance and wait for it to become active',
+          operations: [
+            { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
+          ],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createProcessInstance',
+              method: 'POST',
+              pathTemplate: '/process-instances',
+              expect: { status: 200 },
+              eventualWaitsAfter: [
+                {
+                  state: 'ACTIVE',
+                  witness: {
+                    operationId: 'getProcessInstance',
+                    method: 'GET',
+                    pathTemplate: '/process-instances/{processInstanceKey}',
+                    predicate: { path: 'state', equals: 'ACTIVE' },
+                    waitUpToMs: 5000,
+                    pollIntervalMs: 250,
+                  },
+                },
+              ],
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const output = renderJsSuite(collection, { mode: 'feature' });
+
+    expect(output).toContain(
+      'const witnessConsistency1_1 = client.getProcessInstance.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;',
+    );
+    expect(output).toContain('witnessCall1_1(witnessInput1_1, witnessConsistency1_1)');
+  });
 });
 
 // Regression guard for the js-sdk emitter's missing globalContextSeeds
