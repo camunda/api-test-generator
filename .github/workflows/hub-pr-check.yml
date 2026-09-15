@@ -18,7 +18,7 @@
 #   3. The camunda-hub-side dispatch workflow (Part B, camunda-hub#26236)
 #      sending the repository_dispatch.
 #
-# Expected client_payload: { source_sha, pr_number, caller_run_url }. The image
+# Expected client_payload: { source_sha, pr_number, base_ref, caller_run_url }. The image
 # ref and registry are NOT taken from the payload — they're derived/fixed below
 # (image = .../hub-restapi-self-managed:pr-<source_sha>, registry =
 # registry.camunda.cloud) so the image can't drift from the reported commit and
@@ -53,6 +53,7 @@ jobs:
       source_sha: ${{ steps.v.outputs.source_sha }}
       caller_run_url: ${{ steps.caller.outputs.caller_run_url }}
       pr_number: ${{ steps.prnum.outputs.pr_number }}
+      base_ref: ${{ steps.baseref.outputs.base_ref }}
       # || 'false': if the lookup below never ran (empty pr_number, or the
       # token mint failed/unprovisioned), this is empty, not "false" —
       # default to "not draft" so a lookup failure degrades to the
@@ -105,6 +106,24 @@ jobs:
             echo "pr_number=$N" >> "$GITHUB_OUTPUT"
           else
             echo "pr_number=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The base branch the camunda-hub PR targets, which for stacked work is
+      # often a feature branch rather than main. Same degrade-to-empty contract
+      # as the two above (the spec diff falls back to main), but validated more
+      # tightly because this one reaches a `git fetch` refspec: a conservative
+      # ref charset, and none of the forms git treats specially.
+      - name: Validate base_ref (optional; empty if missing/invalid)
+        id: baseref
+        env:
+          REF: ${{ github.event.client_payload.base_ref }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$REF" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$' \
+             && ! printf '%s' "$REF" | grep -qE '(\.\.|@\{|//|\.lock$|/$)'; then
+            echo "base_ref=$REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "base_ref=" >> "$GITHUB_OUTPUT"
           fi
 
       # #519: a draft camunda-hub PR failing the generated suite still gets
@@ -224,11 +243,22 @@ jobs:
           persist-credentials: false
 
       - name: Download hub-suite Playwright reports
+        id: reports
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: hub-suite-reports
           path: test-results/e2e-camunda-hub
+
+      # Without this, a run that produced no evidence looks the same to the
+      # classifier as one whose tests simply passed, and it reports "could not
+      # confirm" — which reads as a problem with the camunda-hub PR rather than
+      # with the harness. Say which it is. Advisory on purpose: the classifier
+      # still runs and still posts, it just no longer implies the PR is at fault.
+      - name: Note when no report evidence was produced
+        if: steps.reports.outcome != 'success'
+        run: |
+          echo "::warning::No hub-suite-reports artifact — the suite never produced Playwright/JUnit reports, so this run cannot be classified as pass or fail. That points at the suite job (Hub failed to start, or it died before the first test), not at the camunda-hub PR."
 
       # Contents:Read only — same token type _hub-suite-run.yml itself already
       # uses to clone for generation, never a write-capable App token.
@@ -250,26 +280,55 @@ jobs:
           token: ${{ steps.hub-token.outputs.token }}
           ref: ${{ needs.validate.outputs.source_sha }}
 
-      # One clone, diffed against main, instead of cloning both refs
+      # One clone, diffed against the PR's base, instead of cloning both refs
       # separately — the OpenAPI dir only, this is the one signal that
       # actually distinguishes "generator doesn't handle this yet" (operation
       # is new/changed in this PR) from "hub regressed" (operation unchanged).
-      - name: Diff the OpenAPI spec against main
+      - name: Diff the OpenAPI spec against the PR's base
         if: steps.hub-token.outputs.token != ''
         continue-on-error: true
         env:
           SHA: ${{ needs.validate.outputs.source_sha }}
+          BASE_REF: ${{ needs.validate.outputs.base_ref }}
         run: |
           set -euo pipefail
           cd ../camunda-hub
-          git fetch -q origin main
-          # main FIRST, PR sha second: `git diff <old> <new>` shows +/- from
+          # The PR's own base, not main. camunda-hub stacks much of its work, so
+          # for a PR based on a feature branch, main is the wrong baseline and
+          # the diff then describes the whole stack rather than this PR.
+          #
+          # Fall back to main when the dispatch carried no usable ref, or when
+          # the branch no longer resolves — a stacked PR's base can be merged
+          # and deleted while this run sits queued.
+          #
+          # Explicit refspec: a bare `git fetch origin <branch>` does not
+          # reliably create the remote-tracking ref across git versions, and
+          # the diff below needs origin/<base>.
+          base=main
+          if [ -n "${BASE_REF}" ] \
+             && git fetch -q --depth 1 origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"; then
+            base="${BASE_REF}"
+          else
+            if [ -n "${BASE_REF}" ]; then
+              echo "::warning::base_ref '${BASE_REF}' could not be fetched — falling back to main. For a stacked PR the spec diff may describe the whole stack."
+            fi
+            git fetch -q --depth 1 origin main
+          fi
+          # The base TIP, not merge-base(base, SHA): clone-hub-sibling fetches
+          # --depth 1, so the two refs share no ancestor in this clone and
+          # merge-base would just fail. `git diff` compares trees, so it works
+          # regardless. The cost is that spec changes the base gained after this
+          # PR branched off it also show up; against the right base that is a
+          # far smaller window than diffing against main. Deepen both fetches if
+          # the branch point is ever needed exactly.
+          #
+          # base FIRST, PR sha second: `git diff <old> <new>` shows +/- from
           # old to new, so this way the PR's own additions/changes show as
           # `+` — the natural reading for "what did this PR add or change
-          # relative to main." The reverse order would flip that polarity
+          # relative to its base." The reverse order would flip that polarity
           # (a genuinely new construct would show as REMOVED), which could
           # mislead the classifier's new-vs-changed-vs-unchanged judgment.
-          git diff origin/main "${SHA}" -- restapi/public-api/src/main/resources/openapi/v2 \
+          git diff "origin/${base}" "${SHA}" -- restapi/public-api/src/main/resources/openapi/v2 \
             > "${GITHUB_WORKSPACE}/spec-diff.txt" || true
 
       - name: Fetch Anthropic key from Vault
