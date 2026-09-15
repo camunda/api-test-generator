@@ -3,15 +3,66 @@
  *
  * The C# SDK emitter consults this interface to determine what method to call
  * for each upstream OpenAPI `operationId`. The mapping is loaded from
- * `csharp-sdk/examples/operation-map.json` in the spec directory; if the file
- * is absent, every operation maps to a default (toPascalCase(opId) + 'Async').
+ * `csharp-sdk/examples/operation-map.json` in the spec directory. There is no
+ * blind-fallback method-name guess: `createCsharpEmitter` always wraps the
+ * loaded map in `CsharpOperationMapSource`, whose `resolveMethod` returns
+ * `undefined` for any operationId missing from the map, and generation then
+ * throws a clear `No published C# SDK method mapping found for operationId
+ * ...` error rather than emitting a call to a guessed method name that may
+ * not exist on the real SDK client (which would otherwise surface much later
+ * as a confusing C# compiler error). `FallbackMappingSource` in this file
+ * implements the PascalCase-guess behavior but is intentionally unused in
+ * production — it exists only for `tests/codegen/csharp-sdk-mapping.test.ts`.
  */
 export interface SdkMappingSource {
-  resolveMethod(operationId: string): string;
+  resolveMethod(operationId: string): string | undefined;
+}
+
+export interface CsharpOperationMapEntry {
+  file: string;
+  region: string;
+  label?: string;
+}
+
+export type CsharpOperationMap = Record<string, readonly CsharpOperationMapEntry[]>;
+
+function isCsharpOperationMapEntry(value: unknown): value is CsharpOperationMapEntry {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'region' in value &&
+    typeof value.region === 'string' &&
+    value.region.length > 0
+  );
+}
+
+export class CsharpOperationMapSource implements SdkMappingSource {
+  private readonly methodByOpId: Map<string, string>;
+
+  constructor(mapping?: CsharpOperationMap) {
+    this.methodByOpId = new Map<string, string>();
+    if (mapping) {
+      for (const [opId, entries] of Object.entries(mapping)) {
+        const first = entries?.[0];
+        if (isCsharpOperationMapEntry(first)) this.methodByOpId.set(opId, first.region);
+      }
+    }
+  }
+
+  resolveMethod(operationId: string): string | undefined {
+    return this.methodByOpId.get(operationId);
+  }
 }
 
 export class FallbackMappingSource implements SdkMappingSource {
   resolveMethod(operationId: string): string {
+    // Preserve operation ids that are already valid C# method names.
+    // The generated C# SDK map can carry PascalCase method names already
+    // suffixed with Async, and those must flow through unchanged.
+    if (/^[A-Z][A-Za-z0-9]*Async$/.test(operationId)) {
+      return operationId;
+    }
+
     // Capitalise the first letter of each `-`/`_`-separated segment while
     // preserving existing camelCase humps, so `createProcessInstance` becomes
     // `CreateProcessInstanceAsync` (not `CreateprocessinstanceAsync`).
