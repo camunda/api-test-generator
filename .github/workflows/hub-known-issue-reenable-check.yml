@@ -66,6 +66,40 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # --- Provision the camunda-hub spec bundle -------------------------------
+      # hub-reenable-check.sh's regenerate step (CONFIG=camunda-hub npm run
+      # testsuite:generate) needs spec/camunda-hub/bundled/rest-api.bundle.json
+      # to already exist — that path is gitignored and only ever materialized
+      # by `npm run fetch-spec`, which in camunda-hub's local-bundle mode reads
+      # from a cloned ../camunda-hub sibling, not the network. Without this,
+      # extract-graph fails immediately with ENOENT and every candidate this
+      # workflow ever evaluates looks like "re-enabling broke local
+      # generate/tests" regardless of whether it actually would. Pinned to the
+      # currently-committed specRef (not main) — main can be ahead of the pin,
+      # which would trip the spec-pin-drift guard in regression-invariants.test.ts
+      # for an unrelated reason.
+      - name: Read pinned camunda-hub specRef
+        id: spec-pin
+        run: echo "ref=$(jq -r .specRef configs/camunda-hub/spec-pin.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Mint camunda-hub clone token
+        id: hub-clone-token
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Clone camunda-hub @ ${{ steps.spec-pin.outputs.ref }} (sibling ../camunda-hub)
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-clone-token.outputs.token }}
+          ref: ${{ steps.spec-pin.outputs.ref }}
+
+      - name: Bundle the camunda-hub spec
+        run: CONFIG=camunda-hub npm run fetch-spec
+
       # --- Two separately-scoped qa-processes App tokens ----------------------
       - name: Generate qa-processes App token (camunda-hub issues)
         id: qa-token-hub

@@ -65,11 +65,24 @@ if [ "$suite_wide_count" -gt 0 ]; then
       echo "No GH_TOKEN_HUB — skipping state check for suite-wide ${url}"
       continue
     fi
-    state=$(GH_TOKEN="$GH_TOKEN_HUB" gh issue view "$url" --repo "$HUB_REPO" --json state --jq .state 2>/dev/null || true)
-    echo "suite-wide: ${url} -> ${state:-unresolved}"
-    if [ "$state" = "CLOSED" ]; then
+    view_json=$(GH_TOKEN="$GH_TOKEN_HUB" gh issue view "$url" --repo "$HUB_REPO" --json state,stateReason 2>/dev/null || true)
+    if [ -z "$view_json" ]; then
+      view_json='{}'
+    fi
+    state=$(jq -r '.state // ""' <<<"$view_json")
+    state_reason=$(jq -r '.stateReason // ""' <<<"$view_json")
+    echo "suite-wide: ${url} -> ${state:-unresolved}${state_reason:+ (${state_reason})}"
+    if [ "$state" = "CLOSED" ] && [ "$state_reason" = "COMPLETED" ]; then
       add_summary "$(jq -nc --arg url "$url" --arg summary "$summary" \
         '{type: "suite_wide_closed", url: $url, summary: $summary}')"
+    elif [ "$state" = "CLOSED" ]; then
+      # Closed but NOT as "completed" (NOT_PLANNED/DUPLICATE) — the hub team
+      # declined this, it was not fixed. Reporting it as "needs manual
+      # follow-up" every night forever would be misleading busywork; a
+      # distinct type says plainly that nothing changed and nothing is
+      # expected to.
+      add_summary "$(jq -nc --arg url "$url" --arg summary "$summary" --arg reason "$state_reason" \
+        '{type: "suite_wide_declined", url: $url, summary: $summary, state_reason: $reason}')"
     fi
   done < <(jq -c '.suiteWide[]' <<<"$collected")
 fi
@@ -89,20 +102,35 @@ while IFS= read -r group; do
     continue
   fi
 
-  view_json=$(GH_TOKEN="$GH_TOKEN_HUB" gh issue view "$url" --repo "$HUB_REPO" --json state,title 2>/dev/null || true)
+  view_json=$(GH_TOKEN="$GH_TOKEN_HUB" gh issue view "$url" --repo "$HUB_REPO" --json state,stateReason,title 2>/dev/null || true)
   if [ -z "$view_json" ]; then
     echo "::warning::Could not resolve state for ${url} (empty/403?) — skipping, will retry next run."
     continue
   fi
   state=$(jq -r '.state' <<<"$view_json")
+  state_reason=$(jq -r '.stateReason // ""' <<<"$view_json")
   title=$(jq -r '.title' <<<"$view_json")
-  echo "op-scoped: ${url} (${title}) -> ${state}"
+  echo "op-scoped: ${url} (${title}) -> ${state}${state_reason:+ (${state_reason})}"
   if [ "$state" != "CLOSED" ]; then
     continue
   fi
 
   ops="$(jq -r '.entries | map(.operationId) | unique | join(", ")' <<<"$group")"
   branch="chore/hub-unskip-${issue_num}"
+
+  # A closed-but-NOT_PLANNED/DUPLICATE issue means the hub team explicitly
+  # declined to fix this — the blocking behavior is not expected to have
+  # changed. Attempting the regenerate+guard cycle anyway would, at best,
+  # waste a cycle re-discovering the same still-suppressed state every
+  # night forever, and at worst (once the environment can actually run the
+  # cycle) open a PR that re-enables an operation the API still rejects.
+  # Report distinctly and stop — never attempt removal for this candidate.
+  if [ "$state_reason" != "COMPLETED" ]; then
+    echo "Blocker ${url} is CLOSED but declined (stateReason=${state_reason:-null}) — not attempting to re-enable ${ops}."
+    add_summary "$(jq -nc --arg url "$url" --arg title "$title" --arg ops "$ops" --arg reason "$state_reason" \
+      '{type: "declined_not_planned", url: $url, title: $title, operations: $ops, state_reason: $reason}')"
+    continue
+  fi
 
   # Checked BEFORE any removal/regenerate work (not just before the eventual
   # `gh pr create`) — there is no point running the whole regenerate + test

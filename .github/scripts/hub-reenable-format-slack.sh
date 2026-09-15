@@ -27,12 +27,16 @@ jq -r '
       "🎉 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed — `" + $ops + "` already has an open unskip PR: <" + item.pr_url + ">"
     elif item.type == "aborted_broke_checks" then
       "⚠️ <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed, but re-enabling `" + $ops + "` breaks local generate/tests — needs manual investigation (see the workflow run log)."
+    elif item.type == "declined_not_planned" then
+      "🚫 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + $title + "_) is closed as *" + (item.state_reason // "not planned") + "* — `" + $ops + "` stays suppressed, nothing to re-enable."
     elif item.type == "aborted_no_token" then
       "⚠️ <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed and `" + $ops + "` is ready to re-enable, but no generator token was available this run — will retry."
     elif item.type == "aborted_pr_create_failed" then
       "⚠️ <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> is closed, but opening the unskip PR for `" + $ops + "` failed — see the workflow run log."
     elif item.type == "suite_wide_closed" then
       "📋 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + (item.summary // "") + "_) is closed but has no specific operation(s) to auto-unskip — needs manual follow-up."
+    elif item.type == "suite_wide_declined" then
+      "🚫 <" + $url + "|camunda-hub#" + ($url | split("/") | last) + "> (_" + (item.summary // "") + "_) is closed as *" + (item.state_reason // "not planned") + "* — no follow-up expected."
     else
       "❓ Unrecognized summary item type: " + (item.type // "?")
     end;
