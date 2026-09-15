@@ -156,11 +156,27 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   });
 
   // --- Suppression contract (upstream-blocked ops stay out of the suite) -----
-  it('catalog blocker is explicitly suppressed from the positive suite', () => {
+  it('catalog blockers are explicitly suppressed from the positive suite', () => {
     const suppressed = new Set(explicitlySuppressedOpIds());
-    // Blocked on #25576 (catalog).
-    for (const op of ['deleteCatalogAsset']) {
-      expect(suppressed.has(op), `${op} should be explicitly suppressed`).toBe(true);
+    // deleteCatalogAsset: blocked on #25576 (no obtainable assetKey). Always
+    // present in the pinned bundle, so asserted unconditionally.
+    expect(
+      suppressed.has('deleteCatalogAsset'),
+      'deleteCatalogAsset should be explicitly suppressed',
+    ).toBe(true);
+    // searchCatalogAssetFileUsages: TEMPORARY — the route is implemented
+    // (camunda-hub#28713) but camunda/hub:SNAPSHOT is frozen mid-inc-8019
+    // (#28913). The op post-dates the current spec-pin.json (2208e9bf...),
+    // so it's absent from today's pinned bundle — guarded conditionally so
+    // this starts protecting the moment a spec-bump PR brings it in, without
+    // failing on the current pin. Remove both this and the matching
+    // positive-suppress.json entry once SNAPSHOT publishing resumes and a
+    // rebuilt image is confirmed live — don't just widen this list forever.
+    if (bundleOperationIds().has('searchCatalogAssetFileUsages')) {
+      expect(
+        suppressed.has('searchCatalogAssetFileUsages'),
+        'searchCatalogAssetFileUsages should be explicitly suppressed',
+      ).toBe(true);
     }
   });
 
