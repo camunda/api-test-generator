@@ -3,6 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  JS_SDK_FIXTURES_DIR_NAME,
+  materializeSdkFixtures,
+} from '../../materializer/src/js-sdk/materialize-support.ts';
+import {
   FIXTURES_DIR_NAME,
   loadProjectScaffoldingFiles,
   materializeFixtures,
@@ -222,6 +226,54 @@ describe('materializeFixtures', () => {
     const candidate = path.resolve(supportDir, '..', 'fixtures', 'bpmn/service-task.bpmn');
     const buf = await fs.readFile(candidate);
     expect(buf.length).toBeGreaterThan(0);
+  });
+});
+
+describe('materializeSdkFixtures', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-js-sdk-fixtures-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('copies fixture files into the JS SDK output directory', async () => {
+    const source = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-js-sdk-source-'));
+    try {
+      await fs.mkdir(path.join(source, 'bpmn'), { recursive: true });
+      await fs.writeFile(path.join(source, 'bpmn', 'service-task.bpmn'), 'fixture-bytes', 'utf8');
+
+      const destination = await materializeSdkFixtures(tmp, source);
+
+      expect(destination).toBe(path.join(tmp, JS_SDK_FIXTURES_DIR_NAME));
+      await expect(
+        fs.readFile(path.join(destination, 'bpmn', 'service-task.bpmn'), 'utf8'),
+      ).resolves.toBe('fixture-bytes');
+    } finally {
+      await fs.rm(source, { recursive: true, force: true });
+    }
+  });
+
+  test('replaces stale fixture files on repeated materialization', async () => {
+    const source = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-js-sdk-source-'));
+    try {
+      await fs.writeFile(path.join(source, 'old.bpmn'), 'old', 'utf8');
+      await materializeSdkFixtures(tmp, source);
+      await fs.rm(path.join(source, 'old.bpmn'));
+      await fs.writeFile(path.join(source, 'new.bpmn'), 'new', 'utf8');
+
+      await materializeSdkFixtures(tmp, source);
+
+      await expect(fs.access(path.join(tmp, 'fixtures', 'old.bpmn'))).rejects.toThrow();
+      await expect(fs.readFile(path.join(tmp, 'fixtures', 'new.bpmn'), 'utf8')).resolves.toBe(
+        'new',
+      );
+    } finally {
+      await fs.rm(source, { recursive: true, force: true });
+    }
   });
 });
 

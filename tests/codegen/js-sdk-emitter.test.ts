@@ -4,26 +4,37 @@ import {
   jsSuiteFileName,
   renderJsSuite,
 } from '../../materializer/src/js-sdk/emitter.js';
-import type { EndpointScenarioCollection, RequestStep } from '../../path-analyser/src/types.ts';
+import type {
+  EndpointScenarioCollection,
+  GlobalContextSeed,
+  RequestStep,
+} from '../../path-analyser/src/types.ts';
+
+// Mirrors the production entry in configs/camunda-oca/ontology/global-context-seeds.json.
+const TENANT_SEED_OMIT: GlobalContextSeed = {
+  binding: 'tenantIdVar',
+  fieldName: 'tenantId',
+  seedRule: 'tenantIdVar',
+  omitWhenUnbound: true,
+};
 
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
-  endpoint: { operationId: 'getWidget', method: 'GET', path: '/widgets/{widgetId}' },
+  endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{username}' },
   requiredSemanticTypes: [],
   optionalSemanticTypes: [],
   scenarios: [
     {
       id: 'sc1',
       name: 'happy path',
-      description: 'Fetch a widget by ID',
-      operations: [{ operationId: 'getWidget', method: 'GET', path: '/widgets/{widgetId}' }],
+      description: 'Fetch a user by username',
+      operations: [{ operationId: 'getUser', method: 'GET', path: '/users/{username}' }],
       producedSemanticTypes: [],
       satisfiedSemanticTypes: [],
       requestPlan: [
         {
-          operationId: 'getWidget',
+          operationId: 'getUser',
           method: 'GET',
-          pathTemplate: '/widgets/{widgetId}',
-          pathParams: [{ name: 'widgetId', var: 'widgetIdVar' }],
+          pathTemplate: '/users/{widgetId}',
           expect: { status: 200 },
           extract: [{ fieldPath: 'data.id', bind: 'widgetId' }],
         } satisfies RequestStep,
@@ -32,23 +43,224 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+// Regression fixture for the path-params bug: an operation whose only
+// params are path segments (no request body) — e.g. real "assign X to Y"
+// operations like `assignClientToGroup` (PUT /groups/{groupId}/clients/{clientId}).
+// step.pathParams is never populated by path-analyser (repo memory item 7);
+// path params must be derived from pathTemplate instead, or the input object
+// is emitted empty and the real SDK call fails with a 400.
+const PATH_PARAMS_ONLY_COLLECTION: EndpointScenarioCollection = {
+  endpoint: {
+    operationId: 'assignClientToGroup',
+    method: 'PUT',
+    path: '/groups/{groupId}/clients/{clientId}',
+  },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'path #1',
+      description: 'Assign a client to a group',
+      operations: [
+        {
+          operationId: 'assignClientToGroup',
+          method: 'PUT',
+          path: '/groups/{groupId}/clients/{clientId}',
+        },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { groupIdVar: 'group_1', clientIdVar: 'client_1' },
+      requestPlan: [
+        {
+          operationId: 'assignClientToGroup',
+          method: 'PUT',
+          pathTemplate: '/groups/{groupId}/clients/{clientId}',
+          expect: { status: 204 },
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+const UNMAPPED_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'getNonexistentThing', method: 'GET', path: '/nonexistent/{id}' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'happy path',
+      description: 'An operationId with no backing SDK method',
+      operations: [
+        { operationId: 'getNonexistentThing', method: 'GET', path: '/nonexistent/{id}' },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      requestPlan: [
+        {
+          operationId: 'getNonexistentThing',
+          method: 'GET',
+          pathTemplate: '/nonexistent/{id}',
+          pathParams: [{ name: 'id', var: 'idVar' }],
+          expect: { status: 200 },
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+// Regression fixture for the pending-binding fix: a scenario whose only
+// binding has no in-scenario producer step (`bindings.nameVar ===
+// '__PENDING__'`), mirroring the real `publishMessage` scenario that
+// motivated the fix. `seedBindings` is planner-computed data (see
+// path-analyser/src/seedBindings.ts) already present on real scenario JSON.
+const PENDING_BINDING_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'publishMessage', method: 'POST', path: '/messages/publication' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'base',
+      description: 'Publish a message with a client-minted name',
+      operations: [
+        { operationId: 'publishMessage', method: 'POST', path: '/messages/publication' },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { nameVar: '__PENDING__' },
+      seedBindings: ['nameVar'],
+      requestPlan: [
+        {
+          operationId: 'publishMessage',
+          method: 'POST',
+          pathTemplate: '/messages/publication',
+          expect: { status: 200 },
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholder syntax used by the planner's bodyTemplate format, not a JS template literal
+          bodyTemplate: { name: '${nameVar}' },
+          bodyKind: 'json',
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+const FIXTURE_BODY_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'deployment fixture',
+      description: 'Deploy a BPMN resource from a fixture file',
+      operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      requestPlan: [
+        {
+          operationId: 'createDeployment',
+          method: 'POST',
+          pathTemplate: '/deployments',
+          expect: { status: 200 },
+          bodyTemplate: {
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner placeholder in a test fixture
+            fields: { tenantId: '${tenantIdVar}' },
+            files: { resources: '@@FILE:bpmn/service-task.bpmn' },
+          },
+          bodyKind: 'multipart',
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+// Mirrors the real createDeployment scenario shape: tenantIdVar is
+// __PENDING__ and listed in seedBindings (the planner's "someone must
+// supply this" signal), but this scenario is a *consumer* — it does not
+// declare HTTP 409 on the binding, so it must not mint a fresh tenant id
+// and the field must be left unseeded so the request omits it (#342).
+const TENANT_OMIT_CONSUMER_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'bpmn',
+      description: 'Deploy a BPMN resource',
+      operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { tenantIdVar: '__PENDING__' },
+      seedBindings: ['tenantIdVar'],
+      requestPlan: [
+        {
+          operationId: 'createDeployment',
+          method: 'POST',
+          pathTemplate: '/deployments',
+          expect: { status: 200 },
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner placeholder in a test fixture
+          bodyTemplate: { tenantId: '${tenantIdVar}' },
+          bodyKind: 'json',
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
+// Mirrors a producer scenario (e.g. createTenant): the op declares HTTP 409
+// on the client-minted tenantIdVar, so it must still mint a fresh value —
+// omitWhenUnbound only suppresses the *consumer* seed path (#342).
+const TENANT_OMIT_PRODUCER_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'createTenant', method: 'POST', path: '/tenants' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'base',
+      description: 'Create a tenant',
+      operations: [{ operationId: 'createTenant', method: 'POST', path: '/tenants' }],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { tenantIdVar: '__PENDING__' },
+      seedBindings: ['tenantIdVar'],
+      requestPlan: [
+        {
+          operationId: 'createTenant',
+          method: 'POST',
+          pathTemplate: '/tenants',
+          expect: { status: 201 },
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner placeholder in a test fixture
+          bodyTemplate: { tenantId: '${tenantIdVar}' },
+          bodyKind: 'json',
+          declares409: true,
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
-    const emitter = createJsSdkEmitter(undefined);
+    const emitter = createJsSdkEmitter();
     expect(emitter.id).toBe('js-sdk');
     expect(emitter.name).toBe('JavaScript SDK');
     expect(emitter.supportedConfigs).toEqual(['*']);
   });
 
   test('suite file name uses the operationId and feature mode', () => {
-    expect(jsSuiteFileName(SAMPLE_COLLECTION)).toBe('getWidget/getWidget.feature.test.ts');
+    expect(jsSuiteFileName(SAMPLE_COLLECTION)).toBe('getUser/getUser.feature.test.ts');
   });
 
   test('emitter.emit returns one file with generated suite content', async () => {
-    const emitter = createJsSdkEmitter(undefined);
+    const emitter = createJsSdkEmitter();
     const files = await emitter.emit(SAMPLE_COLLECTION, {
       outDir: '/unused',
-      suiteName: 'getWidget',
+      suiteName: 'getUser',
       mode: 'feature',
       configName: 'test',
       emitterConfig: {},
@@ -56,21 +268,129 @@ describe('JavaScript SDK Emitter', () => {
     });
 
     expect(files).toHaveLength(1);
-    expect(files[0].relativePath).toBe('getWidget/getWidget.feature.test.ts');
+    expect(files[0].relativePath).toBe('getUser/getUser.feature.test.ts');
     expect(files[0].content).toContain(
       "import { describe, it, expect, beforeEach } from 'vitest';",
     );
-    expect(files[0].content).toContain(
-      "import type { ApiClient, RestClientError } from '@camunda8/sdk';",
+    expect(files[0].content).toContain("import { Camunda8 } from '@camunda8/sdk';");
+    expect(files[0].content).toContain("import type { HttpSdkError } from '@camunda8/sdk';");
+  });
+
+  test('rendered suite builds a flat input object and renders extract bindings', () => {
+    const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain('client = new Camunda8().getOrchestrationClusterApiClientLoose();');
+    expect(output).toContain('const input1 = {');
+    expect(output).toContain("widgetId: ctx['widgetIdVar'],");
+    expect(output).not.toContain('expect(response1.status).toBe(200);');
+    expect(output).toContain("ctx['widgetId'] = response1?.data?.id;");
+  });
+
+  test('scenario using an operationId with no backing SDK method is emitted as a skipped test', () => {
+    const output = renderJsSuite(UNMAPPED_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("it.skip(\n    'sc1 - happy path',");
+    expect(output).toContain(
+      "// SKIPPED: no method 'getNonexistentThing' on installed @camunda8/sdk",
+    );
+    expect(output).not.toContain('const input1 = {');
+    expect(output).not.toContain('client.getNonexistentThing');
+  });
+
+  test('a __PENDING__ binding with a planner seedBindings entry is seeded via seedBinding(), not left undefined', () => {
+    const output = renderJsSuite(PENDING_BINDING_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("import { initSpecSalt, seedBinding } from '../support/seeding';");
+    expect(output).toContain('initSpecSalt("publishMessage");');
+    expect(output).toContain("ctx['nameVar'] = ctx['nameVar'] ?? seedBinding('nameVar');");
+    expect(output).not.toContain('pending binding');
+    expect(output).not.toContain("ctx['nameVar'] = undefined;");
+  });
+
+  test('a path-params-only operation (no body) derives its input from pathTemplate, not the dead step.pathParams field', () => {
+    const output = renderJsSuite(PATH_PARAMS_ONLY_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("groupId: ctx['groupIdVar'],");
+    expect(output).toContain("clientId: ctx['clientIdVar'],");
+    expect(output).not.toContain('const input1 = {\n      };');
+  });
+
+  test('resolves nested @@FILE body markers through the generated fixture helper', () => {
+    const output = renderJsSuite(FIXTURE_BODY_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("import { resolveFixture } from '../support/fixtures';");
+    expect(output).toContain(
+      '"resources": [new File([await resolveFixture("bpmn/service-task.bpmn")], "service-task.bpmn")]',
+    );
+    expect(output).toContain('"tenantId": ctx[\'tenantIdVar\']');
+    expect(output).not.toContain('@@FILE:bpmn/service-task.bpmn');
+  });
+
+  test('uses a non-zero consistency wait budget for SDK methods requiring consistency', () => {
+    const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain('waitUpToMs: 5000');
+    expect(output).not.toContain('waitUpToMs: 0');
+  });
+});
+
+// Regression guard for the js-sdk emitter's missing globalContextSeeds
+// plumbing (#342 parity with Playwright/C#): js-sdk used to hardcode
+// `globalContextSeeds: []`, so every scenario minted a random tenantIdVar
+// via the catch-all seedBinding() rule — a value a single-tenant broker
+// rejects with INVALID_ARGUMENT. These tests pin the fix: an
+// omitWhenUnbound binding is left unseeded for consumer-only scenarios,
+// and still minted for producer scenarios that declare HTTP 409 on it.
+describe('emitter: universal-seed prologue parity with Playwright/C# (#342)', () => {
+  test('a consumer-only scenario leaves an omitWhenUnbound tenantIdVar unseeded so the field is omitted on the wire', () => {
+    const output = renderJsSuite(TENANT_OMIT_CONSUMER_COLLECTION, {
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED_OMIT],
+    });
+
+    expect(output).not.toContain("seedBinding('tenantIdVar')");
+    expect(output).not.toMatch(/ctx\['tenantIdVar'\] = ctx\['tenantIdVar'\] \?\?/);
+    expect(output).toContain('"tenantId": ctx[\'tenantIdVar\']');
+  });
+
+  test('a producer scenario declaring HTTP 409 on the binding still mints a fresh tenantIdVar', () => {
+    const output = renderJsSuite(TENANT_OMIT_PRODUCER_COLLECTION, {
+      mode: 'feature',
+      globalContextSeeds: [TENANT_SEED_OMIT],
+    });
+
+    expect(output).toContain(
+      "ctx['tenantIdVar'] = ctx['tenantIdVar'] ?? seedBinding('tenantIdVar', { unique: true });",
     );
   });
 
-  test('rendered suite substitutes path params and renders extract bindings', () => {
-    const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
+  test('createJsSdkEmitter().emit forwards ctx.globalContextSeeds through to the rendered suite', async () => {
+    const emitter = createJsSdkEmitter();
+    const [file] = await emitter.emit(TENANT_OMIT_CONSUMER_COLLECTION, {
+      outDir: '/unused',
+      suiteName: 'createDeployment',
+      mode: 'feature',
+      configName: 'test',
+      emitterConfig: {},
+      resolveConfigPath: (rel) => rel,
+      globalContextSeeds: [TENANT_SEED_OMIT],
+    });
 
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — asserting the emitter produces this exact template-literal string in output
-    expect(output).toContain("const url1 = `/widgets/${ctx['widgetIdVar'] ?? '{widgetId}'}`;");
-    expect(output).toContain('expect(response1.status).toBe(200);');
-    expect(output).toContain("ctx['widgetId'] = response1.data?.data?.id;");
+    expect(file.content).not.toContain("seedBinding('tenantIdVar')");
+  });
+
+  test('rejects an unsafe globalContextSeeds shape (boundary re-validation, mirrors PlaywrightEmitter)', async () => {
+    const badSeed = { binding: 'tenant-id', fieldName: 'tenantId', seedRule: 'tenantIdVar' };
+    await expect(
+      createJsSdkEmitter().emit(TENANT_OMIT_CONSUMER_COLLECTION, {
+        outDir: '/unused',
+        suiteName: 'createDeployment',
+        mode: 'feature',
+        configName: 'test',
+        emitterConfig: {},
+        resolveConfigPath: (rel) => rel,
+        globalContextSeeds: [badSeed],
+      }),
+    ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier|must match pattern/);
   });
 });
