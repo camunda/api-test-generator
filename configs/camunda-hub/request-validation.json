@@ -20,6 +20,14 @@
   },
   "excludeOperations": [
     {
+      "operationId": "searchCatalogAssetFileUsages",
+      "reason": "Same gap as the positive-suite exclusion: the route isn't implemented yet (404 whitelabel error, not this API's ProblemDetail shape), so every negative-suite status-code assertion for this op fails the same way regardless of scenario kind.",
+      "knownIssue": {
+        "summary": "searchCatalogAssetFileUsages route not implemented (spec-first gap)",
+        "url": "https://github.com/camunda/camunda-hub/issues/28913"
+      }
+    },
+    {
       "operationId": "ingestCatalogAssets",
       "reason": "Its missing-required-multipart-part cases hit camunda-hub#26448 (ProblemDetail missing `type` on Spring's own framework-level validation errors). Its 2 auth-absent/auth-invalid cases are separately the camunda-hub#26447 pattern (see knownProblemDetailShapeGaps below) — those two ARE otherwise-valid, still-passing status-code coverage; excluding the whole op drops them too rather than building a third (operationId + scenarioKind) suppression mechanism just to save 2 tests per op across the 2 ops affected here. Accepted as a small, disclosed cost, not a coverage-neutral exclusion.",
       "knownIssue": {
