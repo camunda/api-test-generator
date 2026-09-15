@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getActiveConfigName,
   getPlaywrightSuiteDir,
+  getRequestValidationSuiteDir,
   getSpecBundleDir,
 } from '../../path-analyser/src/configResolver.js';
 
@@ -41,6 +42,11 @@ const describeForThisConfig = describe.skipIf(ACTIVE_CONFIG !== CONFIG_NAME);
 const SUITE_DIR = getPlaywrightSuiteDir(REPO_ROOT);
 const BUNDLED_SPEC_PATH = join(getSpecBundleDir(REPO_ROOT), 'rest-api.bundle.json');
 const COVERAGE_PATH = join(SUITE_DIR, 'coverage.json');
+const RV_SECURED_VERSIONS_PATH = join(
+  getRequestValidationSuiteDir(REPO_ROOT),
+  'secured',
+  'versions-validation-api-tests.spec.ts',
+);
 
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'options', 'head', 'trace']);
 
@@ -198,5 +204,30 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       const spec = readGeneratedSpec(`${op}.feature.spec.ts`);
       expect(spec, `${op}.feature.spec.ts has no emitted test`).toContain('test(');
     }
+  });
+
+  // The positive-suite guards above have no negative-suite counterpart: the
+  // request-validation generator doesn't fail on an absent operation, so
+  // re-adding updateVersion/restoreVersion to excludeOperations (or otherwise
+  // losing their scenarios) would leave the nightly green while silently
+  // dropping the promised negative coverage. Assert each version op still
+  // has negative tests, and pin the one intentional gap (updateVersion's
+  // malformed-json-body omission, camunda-hub#28911) so it stays a single
+  // documented exception rather than silently widening.
+  it('each version op keeps negative-suite coverage, with only updateVersion malformed-json-body omitted', () => {
+    const spec = readRequired(RV_SECURED_VERSIONS_PATH);
+    for (const op of [
+      'createVersion',
+      'getVersion',
+      'updateVersion',
+      'deleteVersion',
+      'restoreVersion',
+    ]) {
+      expect(spec, `${op} has no negative-suite tests`).toContain(`test('${op}`);
+    }
+    expect(
+      spec,
+      'updateVersion malformed-json-body should stay excluded — see request-validation.json',
+    ).not.toContain('updateVersion__malformedJsonBody');
   });
 });
