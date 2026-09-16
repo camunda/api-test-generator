@@ -25,6 +25,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function containsFixtureMarker(value: unknown): boolean {
+  if (typeof value === 'string') return value.startsWith('@@FILE:');
+  if (Array.isArray(value)) return value.some(containsFixtureMarker);
+  if (isRecord(value)) return Object.values(value).some(containsFixtureMarker);
+  return false;
+}
+
 function toSnakeCase(value: string): string {
   return value
     .replace(/([A-Z])/g, '_$1')
@@ -353,7 +360,9 @@ export function renderPythonSuite(
   }
   const hasMultipartStep = collection.scenarios.some((scenario) =>
     (scenario.requestPlan ?? []).some(
-      (step) => step.bodyKind === 'multipart' && step.multipartTemplate !== undefined,
+      (step) =>
+        step.bodyKind === 'multipart' &&
+        containsFixtureMarker(step.multipartTemplate ?? step.bodyTemplate),
     ),
   );
   // A scenario needs seed_binding() when it has planner-computed

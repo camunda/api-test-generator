@@ -260,6 +260,43 @@ describe('Python SDK Emitter', () => {
       expect(output).not.toContain('files=body_1');
     });
 
+    // Regression (Copilot PR #574 review): the import gate previously only
+    // checked `step.multipartTemplate !== undefined`, missing the
+    // `bodyTemplate` fallback path multipart steps also use (see
+    // `payloadTemplate = step.multipartTemplate ?? step.bodyTemplate`
+    // below) — a multipart step relying on that fallback still calls
+    // `resolve_fixture(...)` for its files but the import was omitted,
+    // producing a `NameError` at runtime.
+    test('a multipart step using the bodyTemplate fallback (no multipartTemplate) still imports resolve_fixture', () => {
+      const collection: EndpointScenarioCollection = {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            operations: [{ operationId: 'createDeployment', method: 'POST', path: '/deployments' }],
+            requestPlan: [
+              {
+                operationId: 'createDeployment',
+                method: 'POST',
+                pathTemplate: '/deployments',
+                bodyKind: 'multipart',
+                bodyTemplate: {
+                  fields: { tenantId: 'tenant-1' },
+                  files: { resources: '@@FILE:deployments/process.bpmn' },
+                },
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const output = renderPythonSuite(collection);
+      expect(output).toContain('from support.fixtures import resolve_fixture');
+      expect(output).toContain("resolve_fixture('deployments/process.bpmn')");
+    });
+
     test('seedBindings emit a seed prologue for pending prerequisite inputs', () => {
       const collection: EndpointScenarioCollection = {
         ...SAMPLE_COLLECTION,
