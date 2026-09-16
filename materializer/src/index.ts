@@ -36,8 +36,7 @@ import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js
 import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
-import { materializeSdkSupport } from './js-sdk/materialize-support.js';
-import { OperationMapJsonSource } from './js-sdk/sdk-mapping.js';
+import { materializeSdkFixtures, materializeSdkSupport } from './js-sdk/materialize-support.js';
 import { writeEmitted, writeScaffolded } from './orchestrator.js';
 import { PlaywrightEmitter, readClientMintedFixtures } from './playwright/emitter.js';
 import {
@@ -49,7 +48,10 @@ import {
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
-import { materializePythonSupport } from './python-sdk/materialize-support.js';
+import {
+  materializePythonFixtures,
+  materializePythonSupport,
+} from './python-sdk/materialize-support.js';
 import { createOperationMapSourceFromJson } from './python-sdk/sdk-mapping.js';
 import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js';
 
@@ -66,17 +68,6 @@ registerEmitter(PlaywrightEmitter);
 // they can load operation-map.json files from the spec/ directory. Keeping
 // them here (at module level) would require resolving the repo root before
 // the CLI args are parsed, which is fragile on Windows paths and CI.
-
-/** Load the JS SDK operation map from spec/js-sdk/operation-map.json, or undefined if absent. */
-function loadJsSdkMap(repoRoot: string): OperationMapJsonSource | undefined {
-  const mapPath = path.join(repoRoot, 'spec', 'js-sdk', 'operation-map.json');
-  if (!fsSync.existsSync(mapPath)) return undefined;
-  try {
-    return OperationMapJsonSource.fromJson(fsSync.readFileSync(mapPath, 'utf-8'));
-  } catch {
-    return undefined;
-  }
-}
 
 /** Load the Python SDK operation map from spec/python-sdk/operation-map.json, or undefined if absent. */
 function loadPythonSdkMap(
@@ -412,13 +403,18 @@ interface TargetRunEnv {
 /**
  * Register the file-system-backed SDK emitters. Kept here (not at module
  * level) so operation-map.json files load from the resolved repoRoot. The
- * factories tolerate an absent map (fall back to operationId-derived method
- * names), so this is safe to call even when the maps haven't been fetched —
- * e.g. for the `list-targets` projection. The Playwright emitter is already
- * registered at module level (it has no file-system dependencies).
+ * factories tolerate an absent map at construction time (an empty/missing
+ * map is not itself an error), so this is safe to call even when the maps
+ * haven't been fetched yet — e.g. for the `list-targets` projection. Note
+ * this is NOT the same as an operationId falling back to a guessed method
+ * name at generation time: the C# emitter's `CsharpOperationMapSource`
+ * throws a clear error for any operationId missing from the map rather than
+ * guessing `PascalCase(operationId) + "Async"` (see csharp-sdk/sdk-mapping.ts).
+ * The Playwright emitter is already registered at module level (it has no
+ * file-system dependencies).
  */
 function registerSdkEmitters(repoRoot: string): void {
-  registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
+  registerEmitter(createJsSdkEmitter());
   registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
   registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
 }
@@ -601,9 +597,11 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
   }
   if (emitter.id === 'js-sdk') {
     await materializeSdkSupport(outDir);
+    await materializeSdkFixtures(outDir);
   }
   if (emitter.id === 'python-sdk') {
     await materializePythonSupport(outDir);
+    await materializePythonFixtures(outDir);
   }
   if (emitter.id === 'csharp-sdk') {
     // materializeCsharpSupport already vendors the active config's BPMN/DMN/form
