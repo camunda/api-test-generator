@@ -54,7 +54,9 @@ or contradict it?**
   worth raising, even if you don't yet have a fix). Examples: a field the
   schema marks `required` is accepted omitted; the status code doesn't
   match what the spec documents for that case; previously-passing behavior
-  regressed.
+  regressed. **The actual fix is fixing camunda-hub** — go do that like any
+  other bug. What's below is only about what happens to the *test* in the
+  meantime, not a substitute for the fix.
   - One wrinkle worth knowing before you call something a contradiction:
     Hub checks body-validation (400) before resource-existence (404)
     before the authority gate (403). A negative test that "should" 403 but
@@ -68,22 +70,35 @@ or contradict it?**
     chain from).
   - A brand-new operation's shape doesn't fit an existing test template yet.
   - The test's own expected-status assumption was wrong from the start.
+  **The actual fix is extending the generator** — a new chaining strategy,
+  a new template, correcting a wrong assumption — so the operation gets
+  real coverage, not a permanent workaround. That's a bigger task than
+  reacting to one alert, and not always realistic to do on the spot; if
+  you can't do it right now, Step 2 below is the fallback, not the goal.
 
 Read the response and spec yourself before reaching for the confidence
 score — it's a hint from the same read, not a substitute for it. If you've
 done that and it's still genuinely ambiguous, that's when to ask in the
 hub-test-generator channel — not before.
 
-## Step 2: if it's a generator gap, open the fix — proactively if you can
+## Step 2: can't fix it right now? suppress to unblock CI — it's a bridge, not the fix
 
-Whoever's making the camunda-hub change is the right person to open this —
-it's not something to leave to "whoever watches the nightly." If you
-already know your PR adds or changes an endpoint the generator will need
-to catch up on, open the matching **camunda/api-test-generator** PR
-yourself, alongside your hub PR. Best case, it merges before the nightly
-ever runs and the failure never happens at all.
+Whether it's a hub bug you haven't fixed yet or a generator gap you can't
+extend right now, the practical next step is usually the same: suppress
+the test so it stops blocking CI while the real fix happens elsewhere.
+**This step exists to buy time, not to close the matter** — Step 3's
+tracking-issue requirement is what keeps it from quietly becoming
+permanent.
 
-The fix PR suppresses or narrows the affected test(s), in
+Whoever's making the camunda-hub change is the right person to open the
+suppression — it's not something to leave to "whoever watches the
+nightly." If you already know your PR adds or changes an endpoint the
+generator will need to catch up on, open the matching
+**camunda/api-test-generator** PR yourself, alongside your hub PR. Best
+case, it merges before the nightly ever runs and the failure never
+happens at all.
+
+The suppress PR narrows the affected test(s), in
 `configs/camunda-hub/positive-suppress.json` (drops an op from the
 positive suite) and/or `configs/camunda-hub/request-validation.json`
 (drops specific negative scenarios via `excludeOperations`). See either
