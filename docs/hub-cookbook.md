@@ -9,13 +9,16 @@ mechanics beyond what's covered here.
 
 ## What's actually running
 
-Every camunda-hub PR gets two checks from this repo (`Hub PR live check`):
-`Guard`, `Run hub suite (internal)`, and `Live Hub suite`. They regenerate a
-Playwright suite from your PR's spec and run it against a live Hub built
-from your branch. A nightly job (`triage-camunda-hub-nightly.yml`) does the
-same against `main` on a schedule.
+There are two different checks, and they behave differently once something
+fails — worth knowing which one you're looking at.
 
-When one of these fails, you'll see a Slack alert like:
+### On your PR — `Hub PR live check`
+
+`Guard`, `Run hub suite (internal)`, and `Live Hub suite` regenerate a
+Playwright suite from your PR's spec and run it against a live Hub built
+from your branch. On failure, a **read-only** classification agent
+(`hub-pr-check.yml`) tags a category + confidence and posts a Slack alert
+like:
 
 > :red_circle: Generated Hub Suite Failed on a camunda-hub PR
 > • Source: camunda/camunda-hub PR #NNNNN @ `<sha>`
@@ -25,8 +28,21 @@ When one of these fails, you'll see a Slack alert like:
 > Likely api-test-generator not yet handling a new/changed endpoint shape,
 > not a hub bug (confidence: high). ...
 
-That "Likely ... not a hub bug" line is an automated classification, not a
-human judgment call yet — read it as a strong hint, not a verdict.
+That agent never files an issue or opens a PR itself — it only classifies.
+Everything from here (Steps 1–4 below) is on a human to act on. Read the
+confidence line as a strong hint, not a verdict.
+
+### Nightly — `triage-camunda-hub-nightly.yml`
+
+Runs against unpinned `main` on a schedule, and is fully autonomous where
+the PR-time check is read-only: it files camunda-hub product-bug issues,
+opens api-test-generator suppression/fix PRs (labeled `nightly-api-fix`),
+dedups against already-open fix PRs, re-verifies negative-suite failures
+live via `curl` before filing, and separately checks for operations with
+*no* generated coverage at all (a check that only runs here, not per-PR).
+Most of the time you'll see its output as an already-filed camunda-hub
+issue or an already-opened, already-tracked fix PR — not a raw failure
+that still needs triaging.
 
 ## Step 1: is this a hub bug or a generator gap?
 
