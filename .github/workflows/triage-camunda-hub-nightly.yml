@@ -595,12 +595,63 @@ jobs:
           echo "count=${count}" >> "$GITHUB_OUTPUT"
           echo "Open nightly-api-fix PRs found: ${count}"
 
+      # --- Discover existing camunda-hub issues (for dedup, read-only) --------
+      # Read-only, deterministic (no LLM involved) — same idea as "Discover
+      # open fix PRs" above, applied to camunda-hub issues instead of
+      # api-test-generator PRs. This exists so the agent below never needs
+      # GH_TOKEN_HUB itself to search/list issues: it dedups against this
+      # plain JSON snapshot instead of running its own `gh search issues`/
+      # `gh issue list` mid-run.
+      - name: Discover existing nightly-detected camunda-hub issues (for dedup)
+        id: hub-issues
+        if: ${{ steps.reports.outputs.has_reports == 'true' && steps.qa-token-hub.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.qa-token-hub.outputs.token }}
+        run: |
+          set -euo pipefail
+          out="${GITHUB_WORKSPACE}/open-hub-issues.json"
+          # nightlyDetected: full body text (open + closed), for fingerprint
+          # ("nightly-api-triage fp=<fp>") dedup — this agent's own prior filings.
+          nightly_err="$(mktemp)"
+          if ! gh issue list --repo camunda/camunda-hub --label nightly-detected --state all \
+                --limit 200 --json number,title,body,state,url > /tmp/nightly-detected.json 2>"$nightly_err"; then
+            echo "::warning::Could not list nightly-detected camunda-hub issues ($(cat "$nightly_err")) — fingerprint dedup for this run will be empty, which could let a duplicate issue get filed for an already-tracked bug."
+            echo '[]' > /tmp/nightly-detected.json
+          fi
+          rm -f "$nightly_err"
+          # openTitles: broader, title-only sweep of ALL open issues (not just
+          # nightly-detected) — best-effort coverage for a human-filed
+          # duplicate that was never labeled by this agent. Title/url only
+          # (no body) since this is a much larger, less-targeted set.
+          open_err="$(mktemp)"
+          if ! gh issue list --repo camunda/camunda-hub --state open \
+                --limit 300 --json number,title,url > /tmp/open-titles.json 2>"$open_err"; then
+            echo "::warning::Could not list open camunda-hub issues ($(cat "$open_err")) — human-filed-duplicate dedup for this run will be empty."
+            echo '[]' > /tmp/open-titles.json
+          fi
+          rm -f "$open_err"
+          jq -n --slurpfile nightlyDetected /tmp/nightly-detected.json --slurpfile openTitles /tmp/open-titles.json \
+            '{nightlyDetected: $nightlyDetected[0], openTitles: $openTitles[0]}' > "$out"
+          count=$(jq '.nightlyDetected | length' "$out")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Existing nightly-detected camunda-hub issues found: ${count}"
+
+      # Runs regardless of the step above's outcome/skip — the agent's
+      # guidance treats a missing/empty file as "no existing issues to dedup
+      # against," so this just guarantees the path always exists to read.
+      - name: Ensure open-hub-issues.json exists
+        if: always()
+        run: |
+          f="${GITHUB_WORKSPACE}/open-hub-issues.json"
+          [ -s "$f" ] || echo '{"nightlyDetected":[],"openTitles":[]}' > "$f"
+
       # --- Run the Claude triage agent ----------------------------------------
       - name: Run Claude triage agent in workspace
         id: agent
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
         env:
           OPEN_FIX_PRS_FILE: ${{ github.workspace }}/open-fix-prs.json
+          OPEN_HUB_ISSUES_FILE: ${{ github.workspace }}/open-hub-issues.json
           # #482 — always exists (the "Ensure curl-verification.json exists"
           # step above guarantees it), but may be "{}" if there were no
           # negative-suite failures, the Hub never came up, or the script
@@ -609,12 +660,13 @@ jobs:
           # single-observation judgment (see the guidance's own section).
           CURL_VERIFICATION_FILE: ${{ github.workspace }}/curl-verification.json
           ANTHROPIC_API_KEY: ${{ steps.vault.outputs.ANTHROPIC_API_KEY }}
-          # Two separately-scoped tokens — see "Configure git credentials" above
-          # and the guidance's Role section for which one is valid where.
-          # Empty if the App couldn't be reached → the agent falls back to
-          # report-only for that repo at runtime.
-          GH_TOKEN_HUB: ${{ steps.qa-token-hub.outputs.token }}
-          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          # Deliberately NOT set here: GH_TOKEN_HUB / GH_TOKEN_GENERATOR. This
+          # step reads attacker-influenceable content (spec text, report
+          # bodies, PR diffs) with --dangerously-skip-permissions, so it must
+          # never hold a write-capable GitHub credential — see "Execute
+          # triage actions" below, which is the only step that does. The
+          # agent drafts intended issue/PR content into hub-triage.json
+          # instead of calling gh/git itself.
           NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
           REPORTS_DIR: ${{ env.REPORTS_DIR }}
           WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
@@ -631,12 +683,20 @@ jobs:
           reconciliation, the test-generation/coverage fix-PR procedure, and the exact output schema.
           Follow it precisely.
 
-          Your write access is asymmetric — memorize this: camunda-hub gets issues ONLY, never code,
-          never a PR, never a push (use \$GH_TOKEN_HUB for that, nothing else). api-test-generator may
-          get a PR, but ONLY for a confirmed test-generation bug or an unmapped-operation with an
-          obvious, minimal, safe fix — never a direct push to main (use \$GH_TOKEN_GENERATOR for that,
-          and only after you're confident per the guidance's guardrails). camunda-docs is always
-          read-only. When in doubt, report-only — that is always the safe choice.
+          Your write access is entirely DEFERRED — memorize this: you never hold a GitHub write
+          credential yourself (no \$GH_TOKEN_HUB, no \$GH_TOKEN_GENERATOR in your environment) and you
+          never run \`gh issue create\`, \`gh pr create\`, or \`git push\` directly. A separate,
+          non-agentic workflow step performs the actual writes after you finish, driven entirely by
+          the structured fields you record in /tmp/hub-triage.json.
+          - For camunda-hub: dedup against \${OPEN_HUB_ISSUES_FILE} (see Inputs) — you have no live
+            \`gh\` access to camunda-hub, that file is your only view of existing issues. Record what
+            you want done in each failure's \`issue\` object; never invent an issue_url yourself.
+          - For api-test-generator: you MAY make the actual file edits and commit them to a local
+            branch in your own workspace clone (plain \`git commit\` needs no token) — but do NOT push
+            and do NOT open the PR yourself. Record the branch name + intended PR title/body in
+            \`fix_pr\`/\`suppress_pr\` and the executor step pushes it and opens the PR.
+          camunda-docs is always read-only. When in doubt, leave the relevant action field
+          "none"/empty — that is always the safe choice.
 
           Inputs:
           - The downloaded nightly reports are at: ${REPORTS_DIR}
@@ -655,6 +715,13 @@ jobs:
             anywhere in one of these diffs (a substring match, e.g. as a JSON key in
             positive-suppress.json or a comment); if so, that operation is already being
             fixed elsewhere.
+          - Existing camunda-hub issues, for dedup (JSON, may be {"nightlyDetected":[],"openTitles":[]}):
+            ${OPEN_HUB_ISSUES_FILE} — \`nightlyDetected\` is every issue (open + closed) labeled
+            nightly-detected, with full body text, for fingerprint (\`nightly-api-triage fp=<fp>\`)
+            dedup against this agent's own prior filings; \`openTitles\` is a broader title-only sweep
+            of ALL open camunda-hub issues, best-effort coverage for a human-filed duplicate that was
+            never labeled by this agent. You have no live \`gh search\`/\`gh issue list\` access — this
+            file is authoritative for dedup.
           - Live curl-replay verification results (#482), negative-suite failures only, may be "{}"
             (no negative-suite failures, or verification itself was unavailable that night):
             ${CURL_VERIFICATION_FILE} — keyed by "<operationId>::<scenarioKind>::<test title>", each
@@ -697,25 +764,37 @@ jobs:
                  unavailable that night) → fall back to filing on your own single-observation judgment
                  as before, and say so explicitly in the issue/summary (so it's visible that live
                  re-verification was attempted but inconclusive, not silently skipped).
-             Once past that check: compute the fingerprint, dedup by the
-             \`nightly-api-triage fp=<fp>\` marker (then by symptom), and either link the existing issue
-             or file a new one with \`gh issue create --repo camunda/camunda-hub\` using GH_TOKEN_HUB
-             (labels kind/bug + nightly-detected, already pre-created; fingerprint marker in the body).
-             If GH_TOKEN_HUB is empty or filing fails, set action "report-only" with file_error.
+             Once past that check: compute the fingerprint, dedup against ${OPEN_HUB_ISSUES_FILE}
+             (search \`nightlyDetected[].body\` for the \`nightly-api-triage fp=<fp>\` marker, then
+             \`openTitles[].title\` for the operationId as a symptom fallback) — do NOT call
+             \`gh issue create\`/\`gh search\` yourself, you have no credential for it. Set \`action\` to
+             "file"/"skip"/"report-only" as before, and record the drafted content in \`issue\`:
+             \`{ "action": "create", "title": "...", "body": "..." }\` for a genuinely new issue (body
+             must still contain everything "Filing a product-bug issue" in the guidance requires,
+             including the fingerprint marker line); \`{ "action": "comment-fp", "target_number": N,
+             "comment_body": "..." }\` to link/dedup against an existing OPEN match found in
+             \`nightlyDetected\`/\`openTitles\`; or \`{ "action": "reopen-and-comment", "target_number": N,
+             "comment_body": "..." }\` if only a CLOSED \`nightlyDetected\` marker match exists. Leave
+             \`issue.action: "none"\` (or omit \`issue\`) if nothing should be done. A later workflow step
+             performs the actual gh call and fills in \`issue_url\` — never set \`issue_url\` yourself.
           7. For EVERY product bug you just filed OR found already-known (known_issue: true) — not only
              newly-filed ones — also suppress the affected test in api-test-generator: per the
              guidance's "Suppressing a confirmed product bug" section, ONLY the exact operationId+suite
              this failure implicates, never other operations. Check ${OPEN_FIX_PRS_FILE}'s diffs first;
-             if already covered by an open PR, set suppress_pr_url to that PR's url instead of opening a
-             duplicate. Record the result as suppress_pr_url (or leave null + suppress_error, a separate
-             field from file_error, if it couldn't be done) — independent of the issue-filing action
-             above, never fails the run.
+             if already covered by an open PR, set suppress_pr_url to that PR's url instead of drafting
+             a duplicate. Otherwise make the edit and commit it (do NOT push) to a new branch in your
+             workspace's api-test-generator clone, and record \`suppress_pr: { "branch": "...",
+             "title": "...", "body": "..." }\` — leave \`suppress_pr\` null if it couldn't be done, with
+             \`suppress_error\` explaining why (a separate field from \`file_error\`, since issue-filing
+             and suppression are independent outcomes for the same finding) — never fails the run.
           8. For each test-generation bug or unmapped operation: search ${OPEN_FIX_PRS_FILE}'s diffs
              for the operationId FIRST. If it appears in any listed PR's diff: do NOT attempt a fix —
              set action "skip" and fix_pr_url to that PR's url. Otherwise, per the guidance's
-             guardrails, either apply a minimal fix and open an api-test-generator PR using
-             GH_TOKEN_GENERATOR (label nightly-api-fix, already pre-created), or — if you're not fully
-             confident — action "report-only". Never push directly to main.
+             guardrails, either apply a minimal fix and commit it (do NOT push) to a new branch in
+             your workspace's api-test-generator clone, recording \`fix_pr: { "branch": "...",
+             "title": "...", "body": "..." }\`, or — if you're not fully confident — action
+             "report-only". Never push directly to main, and never push at all — that is the
+             executor step's job.
           9. Write the full triage result to /tmp/hub-triage.json in the exact schema from the guidance.
           EOF
           )
@@ -732,6 +811,30 @@ jobs:
               "${NIGHTLY_RUN_URL}" > /tmp/hub-triage.json
           fi
           cp /tmp/hub-triage.json "${GITHUB_WORKSPACE}/hub-triage.json"
+
+      # --- Execute the actions the agent drafted (issues + PRs) ---------------
+      # The agent step above never held GH_TOKEN_HUB/GH_TOKEN_GENERATOR — it
+      # only drafted issue/PR content and, for api-test-generator, committed
+      # any fix/suppress edit to a local branch (never pushed). This plain,
+      # non-agentic step is the only place those write-capable credentials
+      # are used: it reads hub-triage.json's structured issue/fix_pr/
+      # suppress_pr fields and performs the corresponding gh/git calls, then
+      # overwrites those same fields with the real outcome (issue_url/
+      # fix_pr_url/suppress_pr_url or an error) so the Slack digest below
+      # reflects what actually happened, not what the agent merely intended.
+      - name: Execute triage actions (file issues / open PRs)
+        if: ${{ steps.reports.outputs.has_reports == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN_HUB: ${{ steps.qa-token-hub.outputs.token }}
+          GH_TOKEN_GENERATOR: ${{ steps.qa-token-generator.outputs.token }}
+          WORKSPACE_NAME: ${{ steps.ws.outputs.name }}
+        run: |
+          set -euo pipefail
+          ws_dir="$HOME/workspaces/${WORKSPACE_NAME}"
+          node scripts/triage/apply-hub-triage-actions.mjs \
+            "${GITHUB_WORKSPACE}/hub-triage.json" \
+            "${ws_dir}/api-test-generator"
 
       # Any fix/suppress/unskip PR opened against api-test-generator already
       # gets a real live-Hub check automatically: hub-pr-live-check.yml fires
