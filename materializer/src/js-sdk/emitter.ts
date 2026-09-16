@@ -161,11 +161,26 @@ export function renderJsSuite(
       ),
     ),
   );
+  // `new File(...)` (used only for multipart file fields) is not a global
+  // on Node 18 — the generated README's documented minimum supported
+  // version. Import it explicitly from 'node:buffer' (stable there since
+  // Node 18.13) rather than relying on the ambient global, and only when
+  // a scenario actually emits a `files` entry.
+  const needsFileConstructor = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => {
+      if (step.bodyKind !== 'multipart') return false;
+      const template = step.multipartTemplate ?? step.bodyTemplate;
+      return isRecord(template) && containsJavaScriptFixtureMarker(template.files);
+    }),
+  );
   if (needsSeeding) {
     lines.push("import { initSpecSalt, seedBinding } from '../support/seeding';");
   }
   if (needsFixtures) {
     lines.push("import { resolveFixture } from '../support/fixtures';");
+  }
+  if (needsFileConstructor) {
+    lines.push("import { File } from 'node:buffer';");
   }
   const needsEventualWaits = collection.scenarios.some((scenario) =>
     (scenario.requestPlan ?? []).some((step) => (step.eventualWaitsAfter ?? []).length > 0),
@@ -196,7 +211,7 @@ export function renderJsSuite(
   // =========================================================================
   // Test suite describe block
   // =========================================================================
-  lines.push(`describe('${operationId} (${mode} tests)', () => {`);
+  lines.push(`describe(${JSON.stringify(`${operationId} (${mode} tests)`)}, () => {`);
   lines.push("  let client: ReturnType<Camunda8['getOrchestrationClusterApiClientLoose']>;");
   lines.push('  let ctx: TestContext;');
   lines.push('');
@@ -239,7 +254,7 @@ function renderScenarioTest(
   scenario: EndpointScenario,
   globalContextSeeds: readonly GlobalContextSeed[],
 ): void {
-  const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
+  const testName = `${scenario.id} - ${scenario.name || 'scenario'}`;
   const operations = scenario.requestPlan || [];
 
   // Spec/SDK version skew: some operationIds have no backing method on the
@@ -262,7 +277,7 @@ function renderScenarioTest(
   if (missingMethods.length > 0) {
     const reason = `no method ${missingMethods.map((m) => `'${m}'`).join(', ')} on installed @camunda8/sdk@${knownSdkMethods.sdkVersion} (spec/SDK version skew)`;
     lines.push('  it.skip(');
-    lines.push(`    '${testName}',`);
+    lines.push(`    ${JSON.stringify(testName)},`);
     lines.push('    async () => {');
     lines.push(`      // SKIPPED: ${reason}`);
     lines.push('    },');
@@ -272,7 +287,7 @@ function renderScenarioTest(
   }
 
   lines.push('  it(');
-  lines.push(`    '${testName}',`);
+  lines.push(`    ${JSON.stringify(testName)},`);
   lines.push(`    async () => {`);
 
   if (operations.length > 0) {
@@ -461,6 +476,10 @@ function renderEventualWait(
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Extract `{paramName}` placeholder names from a path template, in order. */
 function derivePathParamNames(pathTemplate: string | undefined): string[] {
   if (!pathTemplate) return [];
@@ -488,13 +507,6 @@ function toSdkMethodName(operationId: string): string {
  */
 function renderObjectKey(name: string): string {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) ? name : `'${name.replace(/'/g, "\\'")}'`;
-}
-
-/**
- * Escape quotes in a string for use within JavaScript string literals.
- */
-function escapeQuotesForString(value: string): string {
-  return value.replace(/'/g, "\\'").replace(/"/g, '\\"');
 }
 
 /**

@@ -289,7 +289,7 @@ describe('JavaScript SDK Emitter', () => {
   test('scenario using an operationId with no backing SDK method is emitted as a skipped test', () => {
     const output = renderJsSuite(UNMAPPED_COLLECTION, { mode: 'feature' });
 
-    expect(output).toContain("it.skip(\n    'sc1 - happy path',");
+    expect(output).toContain('it.skip(\n    "sc1 - happy path",');
     expect(output).toContain(
       "// SKIPPED: no method 'getNonexistentThing' on installed @camunda8/sdk",
     );
@@ -324,6 +324,22 @@ describe('JavaScript SDK Emitter', () => {
     );
     expect(output).toContain('"tenantId": ctx[\'tenantIdVar\']');
     expect(output).not.toContain('@@FILE:bpmn/service-task.bpmn');
+  });
+
+  // Regression (Copilot PR #575 review): `new File(...)` in a multipart
+  // `files` field is not a global on Node 18 (the generated README's
+  // documented minimum) — it must be imported explicitly from
+  // 'node:buffer' rather than relying on the ambient global.
+  test('imports File from node:buffer when a scenario emits a multipart file field', () => {
+    const output = renderJsSuite(FIXTURE_BODY_COLLECTION, { mode: 'feature' });
+
+    expect(output).toContain("import { File } from 'node:buffer';");
+  });
+
+  test('does not import File when no scenario emits a multipart file field', () => {
+    const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
+
+    expect(output).not.toContain("import { File } from 'node:buffer';");
   });
 
   test('uses a non-zero consistency wait budget for SDK methods requiring consistency', () => {
@@ -389,6 +405,77 @@ describe('JavaScript SDK Emitter', () => {
       'const witnessConsistency1_1 = client.getProcessInstance.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;',
     );
     expect(output).toContain('witnessCall1_1(witnessInput1_1, witnessConsistency1_1)');
+  });
+});
+
+// Regression (Copilot PR #575 review): describe()/it() titles interpolated
+// operationId/scenario name directly into a single-quoted string literal
+// without escaping. An operationId or scenario name containing an
+// apostrophe, backslash, or newline (the OpenAPI spec does not formally
+// restrict operationId to /[A-Za-z0-9_]+/) would produce unparseable or
+// semantically-wrong generated code. Mirrors the Playwright emitter's
+// JSON.stringify(...) fix (Copilot PR #170 review).
+describe('describe()/it() title escaping (Copilot PR #575 review)', () => {
+  const hostileOpId = "weird'op\\with\nnewline";
+
+  test('escapes an operationId containing string metacharacters in the describe() title', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: hostileOpId, method: 'GET', path: '/x' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'hostile id',
+          operations: [{ operationId: hostileOpId, method: 'GET', path: '/x' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: hostileOpId,
+              method: 'GET',
+              pathTemplate: '/x',
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const output = renderJsSuite(collection, { mode: 'feature' });
+
+    expect(output).toContain(
+      `describe(${JSON.stringify(`${hostileOpId} (feature tests)`)}, () => {`,
+    );
+  });
+
+  test('escapes a scenario name containing string metacharacters in the it() title', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{username}' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: "weird's\\name\nhere",
+          operations: [{ operationId: 'getUser', method: 'GET', path: '/users/{username}' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'getUser',
+              method: 'GET',
+              pathTemplate: '/users/{username}',
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const output = renderJsSuite(collection, { mode: 'feature' });
+
+    expect(output).toContain(`  it(\n    ${JSON.stringify("sc1 - weird's\\name\nhere")},`);
   });
 });
 
