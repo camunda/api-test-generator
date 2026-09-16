@@ -61,19 +61,31 @@ that still needs triaging.
 If you're not sure which it is, ask in the hub-test-generator channel — the
 classification confidence score is a hint, not a guarantee.
 
-## Step 2: if it's a generator gap, what happens next
+## Step 2: if it's a generator gap, open the fix — proactively if you can
 
-Someone (a human or the nightly triage bot) opens a PR against
-**camunda/api-test-generator** that suppresses or narrows the affected
-test(s), in `configs/camunda-hub/positive-suppress.json` (drops an op from
-the positive suite) and/or `configs/camunda-hub/request-validation.json`
+Whoever's making the camunda-hub change is the right person to open this —
+it's not something to leave to "whoever watches the nightly." If you
+already know your PR adds or changes an endpoint the generator will need
+to catch up on, open the matching **camunda/api-test-generator** PR
+yourself, alongside your hub PR. Best case, it merges before the nightly
+ever runs and the failure never happens at all.
+
+The fix PR suppresses or narrows the affected test(s), in
+`configs/camunda-hub/positive-suppress.json` (drops an op from the
+positive suite) and/or `configs/camunda-hub/request-validation.json`
 (drops specific negative scenarios via `excludeOperations`). See either
 file's own `$comment` header for the exact mechanics.
 
-If your camunda-hub PR is still open when this happens, the fix PR gets
-labeled `nightly-api-fix` (see `CONTRIBUTING.md`'s "Opening a fix PR for a
-not-yet-merged hub API change") so the nightly doesn't open a competing
-duplicate before yours merges.
+**Label it `nightly-api-fix` by hand — this is the one step that's easy to
+miss, and it's caused real duplicate-PR pain before.** The nightly triage
+agent dedups against already-open fix PRs by searching their diffs, but
+only among PRs carrying this label. It's applied automatically to PRs the
+bot opens itself, but a manually-opened PR needs it added by hand — with
+no label, the agent has no way to know your PR already covers the
+endpoint. If the nightly happens to run before your PR merges, it opens
+its own competing fix PR, and now there are two covering the same
+operation. If that happens: whichever merges first wins, close the other
+as a duplicate referencing it.
 
 ## Step 3: every suppression needs a tracking issue
 
