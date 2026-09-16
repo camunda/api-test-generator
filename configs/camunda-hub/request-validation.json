@@ -64,6 +64,13 @@
         "summary": "updateVersion accepts a top-level JSON string and binds it into name via an implicit Jackson delegating constructor",
         "url": "https://github.com/camunda/camunda-hub/issues/28911"
       }
+    },
+    {
+      "operationId": "replaceWorkspaceEnvironments",
+      "scenarioKinds": [
+        "missing-required"
+      ],
+      "reason": "The OpenAPI schema marks environmentIds required, but the live hub (camunda/camunda-hub#28601, 'expose environments in public API v2', still open) accepts a body with the field omitted entirely -- PUT with body `{}` returns 200 with `{\"items\":[]}`, not 400. environmentIds' own schema description says an empty array unassigns all environments; the implementation appears to treat an absent field the same as an explicit empty array rather than rejecting the omission. Confirmed live, not a chain/fixture issue. Narrowed to this one scenarioKind; replaceWorkspaceEnvironments' other negative cases (missing-body, constraint-violation, malformed-json-body, additional-prop, auth-absent, auth-invalid) pass and stay covered."
     }
   ],
   "knownIssues": [

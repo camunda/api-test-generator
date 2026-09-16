@@ -32,6 +32,10 @@
         "summary": "deleteCatalogAsset has no obtainable assetKey",
         "url": "https://github.com/camunda/camunda-hub/issues/25576"
       }
+    },
+    {
+      "operationId": "replaceWorkspaceEnvironments",
+      "reason": "Environments are a GET-only, externally-discovered resource (GET /environments, GET /workspaces/{workspaceKey}/environments, camunda/camunda-hub#28601 'expose environments in public API v2', still open) -- there is no create-environment operation the planner can chain to source a real environmentId, and one can't be fabricated. Same shape as removeClusterRegistration/getClusterUsageMetrics above: the positive scenario's placeholder environmentIds value 400s (Invalid Data) instead of the expected 200. Revisit once the planner supports discovery-based (GET-list) chaining for read-only resources, or #28601 lands a way to source a valid environmentId for testing."
     }
   ]
 }
