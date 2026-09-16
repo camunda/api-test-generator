@@ -46,20 +46,33 @@ that still needs triaging.
 
 ## Step 1: is this a hub bug or a generator gap?
 
-- **Hub bug**: your API genuinely does the wrong thing (wrong status code,
-  wrong response shape, a regression against previously-passing behavior).
-  Fix it in camunda-hub like any other bug.
-- **Generator gap**: the test itself can't be satisfied through no fault of
-  the API — most commonly one of:
+You can determine this yourself — it's the same test the triage automation
+uses internally: **does the actual response agree with the OpenAPI spec,
+or contradict it?**
+
+- **Contradicts the spec → hub bug** (or at minimum a hub-behavior question
+  worth raising, even if you don't yet have a fix). Examples: a field the
+  schema marks `required` is accepted omitted; the status code doesn't
+  match what the spec documents for that case; previously-passing behavior
+  regressed.
+  - One wrinkle worth knowing before you call something a contradiction:
+    Hub checks body-validation (400) before resource-existence (404)
+    before the authority gate (403). A negative test that "should" 403 but
+    actually 404s isn't automatically a bug — check which layer the
+    request is actually failing at first.
+- **Agrees with the spec, but the test still failed anyway → generator
+  gap.** The test itself couldn't be set up correctly, through no fault of
+  the API. Common causes:
   - The planner has no way to obtain a real resource ID to test against
     (e.g. a GET-only, externally-discovered resource with no create op to
     chain from).
-  - The OpenAPI schema says one thing (e.g. a field is `required`) but the
-    live implementation does something else (e.g. accepts it omitted).
   - A brand-new operation's shape doesn't fit an existing test template yet.
+  - The test's own expected-status assumption was wrong from the start.
 
-If you're not sure which it is, ask in the hub-test-generator channel — the
-classification confidence score is a hint, not a guarantee.
+Read the response and spec yourself before reaching for the confidence
+score — it's a hint from the same read, not a substitute for it. If you've
+done that and it's still genuinely ambiguous, that's when to ask in the
+hub-test-generator channel — not before.
 
 ## Step 2: if it's a generator gap, open the fix — proactively if you can
 
