@@ -77,7 +77,7 @@ export function pythonSuiteFileName(
  * Build the URL expression for a path template, substituting {paramName}
  * with ctx['param_name_var'] (Python bracket notation).
  *
- * Example: '/widgets/{id}' → f'widgets/{ctx["id_var"] or "{id}"}'
+ * Example: '/widgets/{id}' → f'widgets/{ctx.get("idVar") if ctx.get("idVar") is not None else "id"}'
  * The fallback gives the broker a recognizable URL (and a 4xx) when a
  * path-param binding is missing. The leading '/' is stripped so the result
  * resolves as a relative reference against the client's base_url path
@@ -109,8 +109,11 @@ export function buildPythonUrlExpression(
     const varName = `${camelCase(paramName)}Var`;
     // Double-quote the inner literals: this whole expression is embedded in
     // a single-quoted f-string below, so a single-quoted literal here would
-    // close the f-string early and produce a Python SyntaxError.
-    return `{ctx.get("${varName}") or "${paramName}"}`;
+    // close the f-string early and produce a Python SyntaxError. Use an
+    // explicit `is not None` check (not `or`): a falsy-but-bound value like
+    // 0 or False must not be treated as missing and replaced by the raw
+    // param-name placeholder text (Copilot PR #574 review).
+    return `{ctx.get("${varName}") if ctx.get("${varName}") is not None else "${paramName}"}`;
   });
   return `f'${result}'`;
 }
@@ -155,7 +158,10 @@ function renderPythonTemplateString(value: string): string {
   let lastIndex = 0;
   for (const match of value.matchAll(EMBEDDED_PLACEHOLDER_RE)) {
     rendered += escapeLiteral(value.slice(lastIndex, match.index));
-    rendered += `{ctx.get('${match[1]}') or ''}`;
+    // `is not None`, not `or`: a falsy-but-bound value like 0 or False must
+    // not collapse to '' (Copilot PR #574 review, same class as the
+    // path-param fix in buildPythonUrlExpression above).
+    rendered += `{ctx.get('${match[1]}') if ctx.get('${match[1]}') is not None else ''}`;
     lastIndex = match.index + match[0].length;
   }
   rendered += escapeLiteral(value.slice(lastIndex));
