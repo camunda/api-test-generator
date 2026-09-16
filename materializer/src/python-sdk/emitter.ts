@@ -124,6 +124,44 @@ export function renderPythonStringLiteral(value: string): string {
   return `'${escaped}'`;
 }
 
+const EMBEDDED_PLACEHOLDER_RE = /\$\{([^}]+)\}/g;
+// Non-global twin of EMBEDDED_PLACEHOLDER_RE for a stateless presence check
+// — reusing a `g`-flagged RegExp's own `.test()` mutates its `lastIndex`,
+// corrupting later calls against a different string.
+const HAS_PLACEHOLDER_RE = /\$\{[^}]+\}/;
+
+/**
+ * Render a string that may contain one or more embedded `${var}` bindings
+ * mixed with literal text (e.g. `proc-${processInstanceKeyVar}-${tenantIdVar}`)
+ * as a Python f-string, so no binding is silently dropped by only matching
+ * a whole-string placeholder (Copilot PR #574 review).
+ */
+function renderPythonTemplateString(value: string): string {
+  const whole = /^\$\{([^}]+)\}$/.exec(value);
+  if (whole) {
+    // ctx keys are the planner's original binding variable names (e.g.
+    // tenantIdVar) — must match the ctx.set(...) calls emitted for
+    // scenario.bindings verbatim, so no casing transform here (#354).
+    return `ctx.get('${whole[1]}')`;
+  }
+  if (!HAS_PLACEHOLDER_RE.test(value)) {
+    return renderPythonStringLiteral(value);
+  }
+  // Double-quoted f-string (matches buildPythonUrlExpression's convention)
+  // so the single-quoted ctx.get(...) key can't close the string early.
+  const escapeLiteral = (text: string) =>
+    text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\{/g, '{{').replace(/\}/g, '}}');
+  let rendered = '';
+  let lastIndex = 0;
+  for (const match of value.matchAll(EMBEDDED_PLACEHOLDER_RE)) {
+    rendered += escapeLiteral(value.slice(lastIndex, match.index));
+    rendered += `{ctx.get('${match[1]}') or ''}`;
+    lastIndex = match.index + match[0].length;
+  }
+  rendered += escapeLiteral(value.slice(lastIndex));
+  return `f"${rendered}"`;
+}
+
 /**
  * Render an arbitrary JSON-like value as a valid Python literal.
  * Booleans/None map to Python spelling; whole-string `${var}` placeholders
@@ -134,14 +172,7 @@ function renderPythonValue(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'True' : 'False';
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') {
-    const whole = /^\$\{([^}]+)\}$/.exec(value);
-    if (whole) {
-      // ctx keys are the planner's original binding variable names (e.g.
-      // tenantIdVar) — must match the ctx.set(...) calls emitted for
-      // scenario.bindings verbatim, so no casing transform here (#354).
-      return `ctx.get('${whole[1]}')`;
-    }
-    return renderPythonStringLiteral(value);
+    return renderPythonTemplateString(value);
   }
   if (Array.isArray(value)) {
     return `[${value.map((v) => renderPythonValue(v)).join(', ')}]`;
@@ -446,6 +477,14 @@ export function renderPythonSuite(
     }
 
     const requestPlan = scenario.requestPlan ?? [];
+    if (requestPlan.length === 0) {
+      // A silently-empty test body pytest reports as a pass — fail loudly
+      // at generation time instead of shipping false endpoint coverage
+      // (Copilot PR #574 review).
+      throw new Error(
+        `python-sdk emitter: scenario '${scenario.id}' for operation '${collection.endpoint.operationId}' has an empty requestPlan — refusing to emit a no-op test.`,
+      );
+    }
     const isErrorScenario = scenario.expectedResult?.kind === 'error';
     for (let i = 0; i < requestPlan.length; i++) {
       const isFinal = i === requestPlan.length - 1;
@@ -460,10 +499,6 @@ export function renderPythonSuite(
       for (let w = 0; w < waits.length; w++) {
         renderPythonEventualWait(lines, waits[w], i, w);
       }
-    }
-
-    if (requestPlan.length === 0) {
-      lines.push('    # No request plan available for this scenario');
     }
 
     lines.push('');

@@ -15,7 +15,11 @@ import {
 } from '../../materializer/src/python-sdk/emitter.js';
 import { loadPythonProjectScaffoldingFiles } from '../../materializer/src/python-sdk/materialize-support.js';
 import { createOperationMapSourceFromJson } from '../../materializer/src/python-sdk/sdk-mapping.js';
-import type { EndpointScenarioCollection } from '../../path-analyser/src/types.js';
+import type {
+  EndpointScenarioCollection,
+  EventualWaitSpec,
+  RequestStep,
+} from '../../path-analyser/src/types.js';
 
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
   endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
@@ -127,6 +131,17 @@ describe('Python SDK Emitter', () => {
             operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
             producedSemanticTypes: [],
             satisfiedSemanticTypes: [],
+            expectedResult: { kind: 'error' },
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: {},
+                expect: { status: 400 },
+              },
+            ],
           },
         ],
       };
@@ -865,5 +880,165 @@ describe('Python SDK Emitter', () => {
       // be absent for an error-expected scenario.
       expect(output).not.toContain('assert_response_shape(response_data_1,');
     });
+  });
+});
+
+// Regression (Copilot PR #574 review): embedded `${var}` bindings mixed with
+// literal text were only ever resolved when a placeholder occupied the
+// entire string — a template like `proc-${a}-${b}` was previously emitted
+// as a dead literal Python string, silently dropping both bindings.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: describe title intentionally names the literal `${var}` placeholder syntax under test.
+describe('mixed literal + embedded ${var} template rendering (Copilot PR #574 review)', () => {
+  const MIXED_TEMPLATE_COLLECTION: EndpointScenarioCollection = {
+    endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'happy path',
+        description: 'Create a widget with a composite name',
+        operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        requestPlan: [
+          {
+            operationId: 'createWidget',
+            method: 'POST',
+            pathTemplate: '/widgets',
+            bodyKind: 'json',
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal generator `${var}` placeholder fixture, not JS interpolation.
+            bodyTemplate: { name: 'proc-${processInstanceKeyVar}-${tenantIdVar}' },
+            expect: { status: 201 },
+          } satisfies RequestStep,
+        ],
+      },
+    ],
+  };
+
+  test('renders a mixed literal/binding string as an f-string preserving both bindings', () => {
+    const output = renderPythonSuite(MIXED_TEMPLATE_COLLECTION);
+
+    expect(output).toContain(
+      "'name': f\"proc-{ctx.get('processInstanceKeyVar') or ''}-{ctx.get('tenantIdVar') or ''}\"",
+    );
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal generator placeholder text is absent from the rendered output.
+    expect(output).not.toContain('proc-${processInstanceKeyVar}-${tenantIdVar}');
+  });
+
+  test('a whole-string placeholder still renders as the original plain ctx.get(...) lookup', () => {
+    const output = renderPythonSuite(SAMPLE_COLLECTION);
+
+    expect(output).not.toMatch(/f"\{ctx\.get\('widgetId'\)/);
+  });
+
+  test('a plain literal string with no placeholder is unaffected', () => {
+    const output = renderPythonSuite(SAMPLE_COLLECTION);
+
+    expect(output).toContain("'name': 'widget-1'");
+  });
+});
+
+// Regression (Copilot PR #574 review): an empty requestPlan previously
+// emitted a test body containing only a comment, which pytest reports as a
+// silent pass — false endpoint coverage. Materialization must now fail loud.
+describe('empty requestPlan refuses to emit a no-op passing test (Copilot PR #574 review)', () => {
+  test('throws at generation time instead of emitting a comment-only test body', () => {
+    const emptyPlanCollection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          description: 'no steps',
+          operations: [],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [],
+        },
+      ],
+    };
+
+    expect(() => renderPythonSuite(emptyPlanCollection)).toThrow(/empty requestPlan/);
+  });
+});
+
+// Regression (Copilot PR #574 review): the eventual-wait witness-polling
+// renderer had no dedicated coverage for its URL binding, predicate match,
+// timeout, and polling-interval branches.
+describe('renderPythonEventualWait witness polling (Copilot PR #574 review)', () => {
+  const EVENTUAL_WAIT_COLLECTION: EndpointScenarioCollection = {
+    endpoint: {
+      operationId: 'createProcessInstance',
+      method: 'POST',
+      path: '/process-instances',
+    },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'happy path',
+        description: 'Create a process instance and wait for it to become active',
+        operations: [
+          { operationId: 'createProcessInstance', method: 'POST', path: '/process-instances' },
+        ],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        requestPlan: [
+          {
+            operationId: 'createProcessInstance',
+            method: 'POST',
+            pathTemplate: '/process-instances',
+            expect: { status: 200 },
+            eventualWaitsAfter: [
+              {
+                state: 'ACTIVE',
+                witness: {
+                  operationId: 'getProcessInstance',
+                  method: 'GET',
+                  pathTemplate: '/process-instances/{processInstanceKey}',
+                  predicate: { path: 'state', equals: 'ACTIVE' },
+                  waitUpToMs: 5000,
+                  pollIntervalMs: 250,
+                } satisfies EventualWaitSpec['witness'],
+              },
+            ],
+          } satisfies RequestStep,
+        ],
+      },
+    ],
+  };
+
+  test('emits the asyncio/time imports gated on eventualWaitsAfter presence', () => {
+    const output = renderPythonSuite(EVENTUAL_WAIT_COLLECTION);
+
+    expect(output).toContain('import asyncio');
+    expect(output).toContain('import time');
+  });
+
+  test('emits the witness URL, predicate match, timeout, and poll-interval', () => {
+    const output = renderPythonSuite(EVENTUAL_WAIT_COLLECTION);
+
+    expect(output).toContain(
+      'witness_url_1_1 = f\'process-instances/{ctx.get("processInstanceKeyVar") or "processInstanceKey"}\'',
+    );
+    expect(output).toContain(
+      "if isinstance(witness_data_1_1, dict) and witness_data_1_1.get('state') == 'ACTIVE':",
+    );
+    expect(output).toContain(
+      'raise AssertionError(f"Eventual consistency timeout for operation \'getProcessInstance\' after {(time.monotonic() - witness_started_1_1) * 1000:.0f}ms")',
+    );
+    expect(output).toContain('await asyncio.sleep(min(0.25,');
+    expect(output).toContain('assert witness_response_1_1.status_code == 200');
+  });
+
+  test('omits the asyncio/time imports and witness block for a scenario with no eventual waits', () => {
+    const output = renderPythonSuite(SAMPLE_COLLECTION);
+
+    expect(output).not.toContain('import asyncio');
+    expect(output).not.toContain('witness_url_');
   });
 });
