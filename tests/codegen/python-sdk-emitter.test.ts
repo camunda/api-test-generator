@@ -923,16 +923,124 @@ describe('mixed literal + embedded ${var} template rendering (Copilot PR #574 re
     const output = renderPythonSuite(MIXED_TEMPLATE_COLLECTION);
 
     expect(output).toContain(
-      "'name': f\"proc-{ctx.get('processInstanceKeyVar') if ctx.get('processInstanceKeyVar') is not None else ''}-{ctx.get('tenantIdVar') if ctx.get('tenantIdVar') is not None else ''}\"",
+      "'name': 'proc-' + (str(ctx.get('processInstanceKeyVar')) if ctx.get('processInstanceKeyVar') is not None else '') + '-' + (str(ctx.get('tenantIdVar')) if ctx.get('tenantIdVar') is not None else '')",
     );
     // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal generator placeholder text is absent from the rendered output.
     expect(output).not.toContain('proc-${processInstanceKeyVar}-${tenantIdVar}');
   });
 
-  test('a whole-string placeholder still renders as the original plain ctx.get(...) lookup', () => {
-    const output = renderPythonSuite(SAMPLE_COLLECTION);
+  // Regression (Copilot PR #574 review): `${RANDOM}` is a planner-minted
+  // literal runtime seed token (path-analyser/src/scenarioGenerator.ts),
+  // not a ctx binding -- it must survive verbatim, not become
+  // `ctx.get('RANDOM')` (whole-string) or collapse to '' when unset (mixed).
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: describe title/fixture intentionally names the literal `${RANDOM}` token under test.
+  test('a whole-string ${RANDOM} token is preserved as a literal, not resolved via ctx.get', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              bodyKind: 'json',
+              // biome-ignore lint/suspicious/noTemplateCurlyInString: literal generator `${RANDOM}` placeholder fixture, not JS interpolation.
+              bodyTemplate: { processDefinitionId: '${RANDOM}' },
+              expect: { status: 201 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
 
-    expect(output).not.toMatch(/f"\{ctx\.get\('widgetId'\)/);
+    const output = renderPythonSuite(collection);
+
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal '${RANDOM}' token is preserved verbatim in the emitted source.
+    expect(output).toContain("'processDefinitionId': '${RANDOM}'");
+    expect(output).not.toContain("ctx.get('RANDOM')");
+  });
+
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: test title intentionally names the literal `${RANDOM}` token under test.
+  test('a ${RANDOM} token embedded with literal text and a real binding preserves both', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              bodyKind: 'json',
+              // biome-ignore lint/suspicious/noTemplateCurlyInString: literal generator `${var}`/`${RANDOM}` placeholder fixture, not JS interpolation.
+              bodyTemplate: { processDefinitionId: 'proc_${RANDOM}_${tenantIdVar}' },
+              expect: { status: 201 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const output = renderPythonSuite(collection);
+
+    expect(output).toContain(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal '${RANDOM}' token survives verbatim in a plain string-literal segment.
+      "'processDefinitionId': 'proc_${RANDOM}_' + (str(ctx.get('tenantIdVar')) if ctx.get('tenantIdVar') is not None else '')",
+    );
+    expect(output).not.toContain("ctx.get('RANDOM')");
+  });
+
+  // Regression (Copilot PR #574 review): the previous version of this test
+  // only asserted a negative regex against SAMPLE_COLLECTION's plain literal
+  // body, so it would still pass even if whole-string placeholder rendering
+  // were completely broken. Exercise a real whole-string `${widgetIdVar}`
+  // binding and assert the actual ctx.get(...) lookup it must render as.
+  test('a whole-string placeholder renders as the plain ctx.get(...) lookup', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'createWidget', method: 'POST', path: '/widgets' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'happy path',
+          operations: [{ operationId: 'createWidget', method: 'POST', path: '/widgets' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              bodyKind: 'json',
+              // biome-ignore lint/suspicious/noTemplateCurlyInString: literal generator `${var}` placeholder fixture, not JS interpolation.
+              bodyTemplate: { widgetId: '${widgetIdVar}' },
+              expect: { status: 201 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+
+    const output = renderPythonSuite(collection);
+
+    expect(output).toContain("'widgetId': ctx.get('widgetIdVar')");
+    expect(output).not.toMatch(/f"\{ctx\.get\('widgetIdVar'\)/);
   });
 
   test('a plain literal string with no placeholder is unaffected', () => {

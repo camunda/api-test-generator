@@ -136,12 +136,19 @@ const HAS_PLACEHOLDER_RE = /\$\{[^}]+\}/;
 /**
  * Render a string that may contain one or more embedded `${var}` bindings
  * mixed with literal text (e.g. `proc-${processInstanceKeyVar}-${tenantIdVar}`)
- * as a Python f-string, so no binding is silently dropped by only matching
- * a whole-string placeholder (Copilot PR #574 review).
+ * as a concatenation of Python string-literal and ctx-lookup expressions, so
+ * no binding is silently dropped by only matching a whole-string placeholder
+ * (Copilot PR #574 review).
  */
 function renderPythonTemplateString(value: string): string {
   const whole = /^\$\{([^}]+)\}$/.exec(value);
   if (whole) {
+    if (whole[1] === 'RANDOM') {
+      // Planner-minted literal runtime seed token (e.g. 'proc_${RANDOM}'),
+      // not a ctx binding -- mirrors the JS/Playwright emitters, which never
+      // resolve it either (Copilot PR #574 review).
+      return renderPythonStringLiteral(value);
+    }
     // ctx keys are the planner's original binding variable names (e.g.
     // tenantIdVar) — must match the ctx.set(...) calls emitted for
     // scenario.bindings verbatim, so no casing transform here (#354).
@@ -150,22 +157,41 @@ function renderPythonTemplateString(value: string): string {
   if (!HAS_PLACEHOLDER_RE.test(value)) {
     return renderPythonStringLiteral(value);
   }
-  // Double-quoted f-string (matches buildPythonUrlExpression's convention)
-  // so the single-quoted ctx.get(...) key can't close the string early.
-  const escapeLiteral = (text: string) =>
-    text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\{/g, '{{').replace(/\}/g, '}}');
-  let rendered = '';
+  // Concatenation, not an f-string: a literal runtime seed token like
+  // '${RANDOM}' (path-analyser/src/scenarioGenerator.ts) must survive
+  // verbatim in the emitted source -- regression-invariants.test.ts asserts
+  // the exact '${RANDOM}' substring -- which an f-string's brace-doubling
+  // escaping would corrupt into '${{RANDOM}}'. Non-RANDOM ctx lookups are
+  // `str(...)`-wrapped since '+' concatenation, unlike an f-string, requires
+  // an explicit string.
+  const parts: string[] = [];
+  let literalBuffer = '';
   let lastIndex = 0;
   for (const match of value.matchAll(EMBEDDED_PLACEHOLDER_RE)) {
-    rendered += escapeLiteral(value.slice(lastIndex, match.index));
-    // `is not None`, not `or`: a falsy-but-bound value like 0 or False must
-    // not collapse to '' (Copilot PR #574 review, same class as the
-    // path-param fix in buildPythonUrlExpression above).
-    rendered += `{ctx.get('${match[1]}') if ctx.get('${match[1]}') is not None else ''}`;
+    literalBuffer += value.slice(lastIndex, match.index);
+    if (match[1] === 'RANDOM') {
+      // Fold the literal token into the surrounding literal text instead of
+      // a ctx lookup -- it is a planner-minted literal, not a real binding.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal '${RANDOM}' runtime seed token, not JS interpolation.
+      literalBuffer += '${RANDOM}';
+    } else {
+      if (literalBuffer.length > 0) {
+        parts.push(renderPythonStringLiteral(literalBuffer));
+        literalBuffer = '';
+      }
+      const varName = match[1];
+      // `is not None`, not `or`: a falsy-but-bound value like 0 or False must
+      // not collapse to '' (Copilot PR #574 review, same class as the
+      // path-param fix in buildPythonUrlExpression above).
+      parts.push(`(str(ctx.get('${varName}')) if ctx.get('${varName}') is not None else '')`);
+    }
     lastIndex = match.index + match[0].length;
   }
-  rendered += escapeLiteral(value.slice(lastIndex));
-  return `f"${rendered}"`;
+  literalBuffer += value.slice(lastIndex);
+  if (literalBuffer.length > 0) {
+    parts.push(renderPythonStringLiteral(literalBuffer));
+  }
+  return parts.join(' + ');
 }
 
 /**
