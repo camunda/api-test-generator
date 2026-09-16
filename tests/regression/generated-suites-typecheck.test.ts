@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
+  getActiveConfigDir,
   getPlaywrightSuiteDir,
   getRequestValidationSuiteDir,
   getSdkOutDir,
@@ -32,6 +33,27 @@ import {
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 
+/**
+ * Whether the active config's `codegen/emitters.json` declares `js-sdk`
+ * (Copilot PR #575 review). camunda-hub only enables `playwright`, so an
+ * unconditional js-sdk entry here would fail that config's CI run with a
+ * missing-tsconfig error rather than a genuine typecheck regression.
+ */
+function isJsSdkEnabled(repoRoot: string): boolean {
+  const file = path.join(getActiveConfigDir(repoRoot), 'codegen', 'emitters.json');
+  if (!existsSync(file)) return false;
+  const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
+  if (
+    typeof raw !== 'object' ||
+    raw === null ||
+    !('emitters' in raw) ||
+    !Array.isArray(raw.emitters)
+  ) {
+    return false;
+  }
+  return raw.emitters.includes('js-sdk');
+}
+
 interface Suite {
   label: string;
   tsconfig: string;
@@ -53,10 +75,14 @@ const SUITES: readonly Suite[] = [
     label: 'request-validation (secured)',
     tsconfig: path.join(getRequestValidationSuiteDir(REPO_ROOT), 'secured', 'tsconfig.json'),
   },
-  {
-    label: 'js-sdk',
-    tsconfig: path.join(getSdkOutDir(REPO_ROOT, 'js-sdk'), 'tsconfig.json'),
-  },
+  ...(isJsSdkEnabled(REPO_ROOT)
+    ? [
+        {
+          label: 'js-sdk',
+          tsconfig: path.join(getSdkOutDir(REPO_ROOT, 'js-sdk'), 'tsconfig.json'),
+        },
+      ]
+    : []),
 ];
 
 describe.each(SUITES)('emitted $label suite typechecks under strict mode', ({

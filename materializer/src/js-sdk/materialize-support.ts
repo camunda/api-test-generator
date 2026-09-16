@@ -114,6 +114,12 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
           version: '0.1.0',
           description: 'Auto-generated test suite for Camunda JavaScript SDK',
           type: 'module',
+          // Node 18.0-18.12 lack the `File` global on `node:buffer` (only
+          // stable there since 18.13) -- multipart file-upload scenarios
+          // import it explicitly (Copilot PR #575 review).
+          engines: {
+            node: '>=18.13.0',
+          },
           scripts: {
             test: 'vitest run',
             'test:watch': 'vitest watch',
@@ -464,7 +470,7 @@ export async function awaitEventually<T>(
         '',
         '### Prerequisites',
         '',
-        '- Node.js >=18',
+        '- Node.js >=18.13 (`File` global on `node:buffer`, used for multipart file-upload scenarios, is only stable from this version)',
         '- A running Camunda instance (default: http://localhost:8080)',
         '',
         '### Installation',
