@@ -4,6 +4,8 @@ import {
   jsSuiteFileName,
   renderJsSuite,
 } from '../../materializer/src/js-sdk/emitter.js';
+import { loadJsProjectScaffoldingFiles } from '../../materializer/src/js-sdk/materialize-support.js';
+import { renderJavaScriptBody } from '../../materializer/src/js-sdk/sdk-mapping.js';
 import type {
   EndpointScenarioCollection,
   GlobalContextSeed,
@@ -244,6 +246,38 @@ const TENANT_OMIT_PRODUCER_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+// Regression fixture (Copilot PR #575 review): a hostile/malformed
+// operationId embedding a real newline. toSdkMethodName() does not strip
+// control characters, so without sanitization this would break out of the
+// `// SKIPPED: ...` line comment and inject the remainder of the line as
+// executable code.
+const HOSTILE_OPERATION_ID_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'getNonexistent\nThing', method: 'GET', path: '/nonexistent/{id}' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'happy path',
+      description: 'An operationId embedding a newline',
+      operations: [
+        { operationId: 'getNonexistent\nThing', method: 'GET', path: '/nonexistent/{id}' },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      requestPlan: [
+        {
+          operationId: 'getNonexistent\nThing',
+          method: 'GET',
+          pathTemplate: '/nonexistent/{id}',
+          pathParams: [{ name: 'id', var: 'idVar' }],
+          expect: { status: 200 },
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
     const emitter = createJsSdkEmitter();
@@ -297,6 +331,15 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).not.toContain('client.getNonexistentThing');
   });
 
+  test('a newline embedded in the missing-method reason does not break out of the SKIPPED comment', () => {
+    const output = renderJsSuite(HOSTILE_OPERATION_ID_COLLECTION, { mode: 'feature' });
+
+    // The whole reason must render on a single // comment line -- no raw
+    // newline between "SKIPPED:" and the rest of the sentence.
+    expect(output).toMatch(/\/\/ SKIPPED: no method '[^\n]*' on installed @camunda8\/sdk[^\n]*/);
+    expect(output).not.toMatch(/\/\/ SKIPPED: no method 'getNonexistent$/m);
+  });
+
   test('a __PENDING__ binding with a planner seedBindings entry is seeded via seedBinding(), not left undefined', () => {
     const output = renderJsSuite(PENDING_BINDING_COLLECTION, { mode: 'feature' });
 
@@ -340,6 +383,34 @@ describe('JavaScript SDK Emitter', () => {
     const output = renderJsSuite(SAMPLE_COLLECTION, { mode: 'feature' });
 
     expect(output).not.toContain("import { File } from 'node:buffer';");
+  });
+
+  // Regression (Copilot PR #575 review): the `File` global is only stable
+  // on `node:buffer` from Node 18.13 -- the generated project's documented/
+  // enforced minimum must match, not the earlier general ">=18" claim.
+  test('scaffolded package.json declares an engines.node minimum of >=18.13.0', () => {
+    const files = loadJsProjectScaffoldingFiles();
+    const packageJsonFile = files.find((f) => f.relativePath === 'package.json');
+    if (!packageJsonFile) throw new Error('package.json not found in scaffolding files');
+    const parsed: unknown = JSON.parse(packageJsonFile.content);
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('engines' in parsed) ||
+      typeof parsed.engines !== 'object' ||
+      parsed.engines === null
+    ) {
+      throw new Error('package.json has no engines field');
+    }
+    expect(parsed.engines).toEqual({ node: '>=18.13.0' });
+  });
+
+  test('scaffolded README documents the >=18.13 Node minimum', () => {
+    const files = loadJsProjectScaffoldingFiles();
+    const readmeFile = files.find((f) => f.relativePath === 'README.md');
+    if (!readmeFile) throw new Error('README.md not found in scaffolding files');
+    expect(readmeFile.content).toContain('Node.js >=18.13');
+    expect(readmeFile.content).not.toContain('Node.js >=18\n');
   });
 
   test('uses a non-zero consistency wait budget for SDK methods requiring consistency', () => {
@@ -537,5 +608,47 @@ describe('emitter: universal-seed prologue parity with Playwright/C# (#342)', ()
         globalContextSeeds: [badSeed],
       }),
     ).rejects.toThrow(/globalContextSeedSafeIdentifier|safe identifier|must match pattern/);
+  });
+});
+
+// Regression (Copilot PR #575 review): renderJavaScriptBody() previously
+// only resolved a *whole-string* `${var}` placeholder to `ctx['var']` —
+// a literal mixed with a placeholder (e.g. 'proc-${tenantIdVar}') fell
+// through to JSON.stringify() and was emitted as an unresolved literal.
+// Mirrors the equivalent python-sdk fix (renderPythonTemplateString).
+describe('renderJavaScriptBody: mixed literal/placeholder strings and the RANDOM seed token', () => {
+  test('a whole-string placeholder still renders as the plain ctx[...] lookup', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholder syntax used by the planner's bodyTemplate format, not a JS template literal
+    expect(renderJavaScriptBody({ widgetId: '${widgetIdVar}' })).toContain(
+      '"widgetId": ctx[\'widgetIdVar\']',
+    );
+  });
+
+  test('a literal/binding mix renders as a real JS template literal interpolating ctx[...]', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal `${var}` placeholder syntax used by the planner's bodyTemplate format, not a JS template literal
+    const output = renderJavaScriptBody({ name: 'proc-${processInstanceKeyVar}-${tenantIdVar}' });
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting on the real JS template literal the emitter produces
+    const expected = "\"name\": `proc-${ctx['processInstanceKeyVar']}-${ctx['tenantIdVar']}`";
+    expect(output).toContain(expected);
+  });
+
+  test('a whole-string RANDOM token is preserved as a literal, not resolved via ctx.get', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner-minted `${RANDOM}` seed token, not a JS template literal
+    const output = renderJavaScriptBody({ processDefinitionId: '${RANDOM}' });
+    expect(output).not.toContain("ctx['RANDOM']");
+    // Rendered as a template literal with the leading `$` escaped so it
+    // isn't evaluated as an interpolation referencing an undefined
+    // `RANDOM` identifier; the literal source text still contains the
+    // exact `${RANDOM}` substring the #133-style invariant whitelists.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting on the literal escaped `${RANDOM}` text produced by the emitter
+    expect(output).toContain('`\\${RANDOM}`');
+  });
+
+  test('a RANDOM token embedded with literal text and a real binding preserves both', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal planner-minted `${RANDOM}` seed token mixed with a real binding placeholder
+    const output = renderJavaScriptBody({ processDefinitionId: 'proc_${RANDOM}_${tenantIdVar}' });
+    expect(output).not.toContain("ctx['RANDOM']");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting on the literal escaped `${RANDOM}` text alongside a real ctx[...] interpolation
+    expect(output).toContain("`proc_\\${RANDOM}_${ctx['tenantIdVar']}`");
   });
 });
