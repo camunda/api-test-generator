@@ -8,6 +8,7 @@
 
 import { describe, expect, test } from 'vitest';
 import {
+  buildPythonUrlExpression,
   createPythonSdkEmitter,
   pythonSuiteFileName,
   renderPythonBody,
@@ -455,7 +456,9 @@ describe('Python SDK Emitter', () => {
       // Leading '/' is stripped so the URL resolves as relative against the
       // httpx client's base_url path segment (e.g. '/v2') instead of
       // replacing it -- see conftest.py's client fixture.
-      expect(output).toContain('url_1 = f\'widgets/{ctx.get("widgetKeyVar") or "widgetKey"}\'');
+      expect(output).toContain(
+        'url_1 = f\'widgets/{ctx.get("widgetKeyVar") if ctx.get("widgetKeyVar") is not None else "widgetKey"}\'',
+      );
       expect(output).toContain("body_1 = {'enabled': True, 'archived': False, 'owner': None}");
       expect(output).toContain('response_1 = await client.post(');
       expect(output).toContain('assert response_1.status_code == 201');
@@ -920,7 +923,7 @@ describe('mixed literal + embedded ${var} template rendering (Copilot PR #574 re
     const output = renderPythonSuite(MIXED_TEMPLATE_COLLECTION);
 
     expect(output).toContain(
-      "'name': f\"proc-{ctx.get('processInstanceKeyVar') or ''}-{ctx.get('tenantIdVar') or ''}\"",
+      "'name': f\"proc-{ctx.get('processInstanceKeyVar') if ctx.get('processInstanceKeyVar') is not None else ''}-{ctx.get('tenantIdVar') if ctx.get('tenantIdVar') is not None else ''}\"",
     );
     // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal generator placeholder text is absent from the rendered output.
     expect(output).not.toContain('proc-${processInstanceKeyVar}-${tenantIdVar}');
@@ -936,6 +939,31 @@ describe('mixed literal + embedded ${var} template rendering (Copilot PR #574 re
     const output = renderPythonSuite(SAMPLE_COLLECTION);
 
     expect(output).toContain("'name': 'widget-1'");
+  });
+
+  // Regression (Copilot PR #574 review): `ctx.get(...) or ''` treats a
+  // legitimately-bound falsy value (0, False) as missing and silently
+  // substitutes '' instead of the real value. Must use `is not None`.
+  test('uses ctx.get(...) is not None, not `or`, so a falsy-but-bound value is not dropped', () => {
+    const output = renderPythonSuite(MIXED_TEMPLATE_COLLECTION);
+
+    expect(output).not.toContain(" or ''");
+  });
+});
+
+// Regression (Copilot PR #574 review): `ctx.get(...) or <fallback>` treats a
+// legitimately-bound falsy value (0, False) as if the binding were absent,
+// silently substituting the fallback text instead of the real value. Must
+// use an explicit `is not None` check so only a truly-missing binding falls
+// back.
+describe('falsy-but-bound values are not mistaken for missing bindings (Copilot PR #574 review)', () => {
+  test('buildPythonUrlExpression uses ctx.get(...) is not None, not `or`, for a path param', () => {
+    const url = buildPythonUrlExpression('/widgets/{widgetKey}');
+
+    expect(url).toBe(
+      'f\'widgets/{ctx.get("widgetKeyVar") if ctx.get("widgetKeyVar") is not None else "widgetKey"}\'',
+    );
+    expect(url).not.toContain(' or ');
   });
 });
 
@@ -1023,7 +1051,7 @@ describe('renderPythonEventualWait witness polling (Copilot PR #574 review)', ()
     const output = renderPythonSuite(EVENTUAL_WAIT_COLLECTION);
 
     expect(output).toContain(
-      'witness_url_1_1 = f\'process-instances/{ctx.get("processInstanceKeyVar") or "processInstanceKey"}\'',
+      'witness_url_1_1 = f\'process-instances/{ctx.get("processInstanceKeyVar") if ctx.get("processInstanceKeyVar") is not None else "processInstanceKey"}\'',
     );
     expect(output).toContain(
       "if isinstance(witness_data_1_1, dict) and witness_data_1_1.get('state') == 'ACTIVE':",
