@@ -470,7 +470,13 @@ public abstract class TestFixtureBase
         public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
         {
             var converterType = typeof(StringValueObjectConverter<>).MakeGenericType(typeToConvert);
-            return (JsonConverter)Activator.CreateInstance(converterType)!;
+            // StringValueObjectConverter<T> is a private nested class, so its
+            // implicit parameterless constructor is non-public. The
+            // Activator.CreateInstance(Type) overload only probes *public*
+            // constructors and throws MissingMethodException here -- pass
+            // nonPublic: true so the non-public constructor is used too
+            // (Copilot PR #576 review).
+            return (JsonConverter)Activator.CreateInstance(converterType, nonPublic: true)!;
         }
 
         private sealed class StringValueObjectConverter<T> : JsonConverter<T>
