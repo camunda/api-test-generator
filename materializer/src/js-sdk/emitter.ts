@@ -276,10 +276,16 @@ function renderScenarioTest(
 
   if (missingMethods.length > 0) {
     const reason = `no method ${missingMethods.map((m) => `'${m}'`).join(', ')} on installed @camunda8/sdk@${knownSdkMethods.sdkVersion} (spec/SDK version skew)`;
+    // A hostile/malformed operationId could embed a line-break character
+    // (\r, \n, or the JS-specific line terminators U+2028/U+2029) into
+    // `missingMethods` via toSdkMethodName(), which would otherwise break
+    // out of this `//` line comment and inject the remainder of the line
+    // as executable code (Copilot PR #575 review).
+    const commentSafeReason = reason.replace(/\r\n|[\r\n\u2028\u2029]/g, ' ');
     lines.push('  it.skip(');
     lines.push(`    ${JSON.stringify(testName)},`);
     lines.push('    async () => {');
-    lines.push(`      // SKIPPED: ${reason}`);
+    lines.push(`      // SKIPPED: ${commentSafeReason}`);
     lines.push('    },');
     lines.push('  );');
     lines.push('');
