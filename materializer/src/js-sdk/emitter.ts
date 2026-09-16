@@ -4,17 +4,67 @@
  * using the Camunda JavaScript SDK and Vitest.
  */
 
+import { createRequire } from 'node:module';
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
+import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
   EndpointScenario,
   EndpointScenarioCollection,
+  EventualWaitSpec,
+  GlobalContextSeed,
   RequestStep,
 } from 'path-analyser/types';
+// Reused rather than re-implemented: the Playwright emitter already owns the
+// canonical logic for resolving a scenario's __PENDING__ bindings into
+// either a literal, a planner-driven seedBinding() call, or a universal
+// globalContextSeeds entry (including the #342 omitWhenUnbound skip).
+import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
+import { camelCase } from '../playwright/stepRenderer.js';
 import {
-  buildJavaScriptUrlExpression,
-  type OperationMapJsonSource,
+  containsJavaScriptFixtureMarker,
   renderJavaScriptBody,
+  renderJavaScriptMultipartBody,
 } from './sdk-mapping.js';
+
+interface KnownSdkMethods {
+  sdkVersion: string;
+  methods: string[];
+}
+
+// Loaded via createRequire rather than a static `with { type: 'json' }`
+// import: the latter depends on TS/Node import-attribute support that
+// varies across toolchain versions, whereas `require()` for JSON has been
+// supported unconditionally since early Node.
+const require = createRequire(import.meta.url);
+const knownSdkMethods: KnownSdkMethods = require('./known-sdk-methods.json');
+
+// Regenerate via `npm run js-sdk:dump-methods --workspace materializer`
+// whenever the @camunda8/sdk devDependency is bumped.
+const KNOWN_SDK_METHODS = new Set<string>(knownSdkMethods.methods);
+
+/**
+ * Compute the `ctx['x'] = ...` seed lines for a scenario's bindings, reusing
+ * the Playwright emitter's canonical ctx-seeding logic (see ctxSeeding.ts's
+ * module doc comment for the emission order: literals, then planner
+ * seedBindings, then global context seeds). `fixtureEnvByBinding` has no
+ * js-sdk config plumbing yet, so it's intentionally omitted.
+ */
+function computeScenarioSeedLines(
+  scenario: EndpointScenario,
+  indent: string,
+  globalContextSeeds: readonly GlobalContextSeed[],
+): string[] {
+  return emitCtxSeeding({
+    indent,
+    bindings: scenario.bindings,
+    seedBindings: scenario.seedBindings,
+    globalContextSeeds,
+    uniqueBindings: computeUniqueBindings(
+      scenario.requestPlan,
+      scenario.modelDerivedLiteralBindings,
+    ),
+  });
+}
 
 /**
  * Build the file name a scenario collection lowers to.
@@ -35,25 +85,21 @@ export function jsSuiteFileName(
  * Main entry point for the JavaScript SDK emitter.
  * Creates and returns the EmitterStrategy implementation.
  *
- * @param operationMap Optional operation map for method resolution
+ * Method names are resolved via `toSdkMethodName` (operationId -> real SDK
+ * method name), not an upstream operation-map.json: that map's `region`
+ * values are doc-example identifiers (PascalCase, sometimes multiple per
+ * operationId for oneOf variants), not the SDK's actual per-operation
+ * method names, so it isn't a reliable dispatch source.
  */
-export function createJsSdkEmitter(
-  operationMap: OperationMapJsonSource | undefined,
-): EmitterStrategy {
+export function createJsSdkEmitter(): EmitterStrategy {
   return {
     id: 'js-sdk',
     name: 'JavaScript SDK',
     supportedConfigs: ['*'],
-    sdkMap: {
-      repo: 'camunda/orchestration-cluster-api-js',
-      path: 'examples/operation-map.json',
-      refEnv: 'JS_SDK_REF',
-      out: 'spec/js-sdk/operation-map.json',
-    },
     async emit(collection: EndpointScenarioCollection, ctx: EmitContext): Promise<EmittedFile[]> {
       const content = renderJsSuite(collection, {
         mode: ctx.mode,
-        operationMap,
+        globalContextSeeds: ctx.globalContextSeeds,
       });
       return [
         {
@@ -79,9 +125,13 @@ export function renderJsSuite(
   collection: EndpointScenarioCollection,
   opts: {
     mode?: 'feature' | 'integration' | 'variant';
-    operationMap?: OperationMapJsonSource;
+    globalContextSeeds?: readonly GlobalContextSeed[];
   } = {},
 ): string {
+  if (opts.globalContextSeeds !== undefined) {
+    assertSafeGlobalContextSeeds(opts.globalContextSeeds);
+  }
+  const globalContextSeeds = opts.globalContextSeeds ?? [];
   const lines: string[] = [];
   const mode = opts.mode ?? 'feature';
   const operationId = collection.endpoint.operationId;
@@ -97,9 +147,54 @@ export function renderJsSuite(
   lines.push(' */');
   lines.push('');
   lines.push("import { describe, it, expect, beforeEach } from 'vitest';");
-  lines.push("import { createApiClient } from '@camunda8/sdk';");
-  lines.push("import type { ApiClient, RestClientError } from '@camunda8/sdk';");
+  lines.push("import { Camunda8 } from '@camunda8/sdk';");
+  lines.push("import type { HttpSdkError } from '@camunda8/sdk';");
+  const needsSeeding = collection.scenarios.some(
+    (scenario) => computeScenarioSeedLines(scenario, '', globalContextSeeds).length > 0,
+  );
+  const needsFixtures = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) =>
+      containsJavaScriptFixtureMarker(
+        step.bodyKind === 'multipart'
+          ? (step.multipartTemplate ?? step.bodyTemplate)
+          : step.bodyTemplate,
+      ),
+    ),
+  );
+  // `new File(...)` (used only for multipart file fields) is not a global
+  // on Node 18 — the generated README's documented minimum supported
+  // version. Import it explicitly from 'node:buffer' (stable there since
+  // Node 18.13) rather than relying on the ambient global, and only when
+  // a scenario actually emits a `files` entry.
+  const needsFileConstructor = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => {
+      if (step.bodyKind !== 'multipart') return false;
+      const template = step.multipartTemplate ?? step.bodyTemplate;
+      return isRecord(template) && containsJavaScriptFixtureMarker(template.files);
+    }),
+  );
+  if (needsSeeding) {
+    lines.push("import { initSpecSalt, seedBinding } from '../support/seeding';");
+  }
+  if (needsFixtures) {
+    lines.push("import { resolveFixture } from '../support/fixtures';");
+  }
+  if (needsFileConstructor) {
+    lines.push("import { File } from 'node:buffer';");
+  }
+  const needsEventualWaits = collection.scenarios.some((scenario) =>
+    (scenario.requestPlan ?? []).some((step) => (step.eventualWaitsAfter ?? []).length > 0),
+  );
+  if (needsEventualWaits) {
+    lines.push("import { awaitEventually } from '../support/await-eventually';");
+  }
   lines.push('');
+  if (needsSeeding) {
+    // Mixed into the seed so parallel vitest workers (sharing one TEST_SEED)
+    // don't draw the same sequence for the same binding name.
+    lines.push(`initSpecSalt(${JSON.stringify(operationId)});`);
+    lines.push('');
+  }
 
   // =========================================================================
   // Test context interface and setup
@@ -116,17 +211,18 @@ export function renderJsSuite(
   // =========================================================================
   // Test suite describe block
   // =========================================================================
-  lines.push(`describe('${operationId} (${mode} tests)', () => {`);
-  lines.push('  let apiClient: ApiClient;');
+  lines.push(`describe(${JSON.stringify(`${operationId} (${mode} tests)`)}, () => {`);
+  lines.push("  let client: ReturnType<Camunda8['getOrchestrationClusterApiClientLoose']>;");
   lines.push('  let ctx: TestContext;');
   lines.push('');
 
   lines.push('  beforeEach(() => {');
   lines.push('    // Initialize test context');
   lines.push('    ctx = {};');
-  lines.push('    apiClient = createApiClient({');
-  lines.push('      baseUrl: process.env.API_BASE_URL ?? ' + "'http://localhost:8080/v2'" + ',');
-  lines.push('    });');
+  lines.push(
+    '    // Zero-config: the SDK reads ZEEBE_REST_ADDRESS / CAMUNDA_AUTH_STRATEGY from env',
+  );
+  lines.push('    client = new Camunda8().getOrchestrationClusterApiClientLoose();');
   lines.push('  });');
   lines.push('');
 
@@ -134,7 +230,7 @@ export function renderJsSuite(
   // Render each scenario as an async it() block
   // =========================================================================
   for (const scenario of collection.scenarios) {
-    renderScenarioTest(lines, scenario, opts);
+    renderScenarioTest(lines, scenario, globalContextSeeds);
   }
 
   lines.push('});');
@@ -156,36 +252,80 @@ export function renderJsSuite(
 function renderScenarioTest(
   lines: string[],
   scenario: EndpointScenario,
-  opts: {
-    mode?: 'feature' | 'integration' | 'variant';
-    operationMap?: OperationMapJsonSource;
-  } = {},
+  globalContextSeeds: readonly GlobalContextSeed[],
 ): void {
-  const testName = `${scenario.id} - ${escapeQuotesForString(scenario.name || 'scenario')}`;
+  const testName = `${scenario.id} - ${scenario.name || 'scenario'}`;
+  const operations = scenario.requestPlan || [];
+
+  // Spec/SDK version skew: some operationIds have no backing method on the
+  // installed @camunda8/sdk yet (see known-sdk-methods.json). Emitting a
+  // real call for these throws an opaque runtime TypeError, so skip the
+  // whole scenario instead — a chain that depends on a missing step can't
+  // run regardless of which step it is.
+  const missingMethods = [
+    ...new Set(
+      operations
+        .flatMap((step) => [
+          step.operationId,
+          ...(step.eventualWaitsAfter ?? []).map((wait) => wait.witness.operationId),
+        ])
+        .map((opId) => toSdkMethodName(opId))
+        .filter((method) => !KNOWN_SDK_METHODS.has(method)),
+    ),
+  ];
+
+  if (missingMethods.length > 0) {
+    const reason = `no method ${missingMethods.map((m) => `'${m}'`).join(', ')} on installed @camunda8/sdk@${knownSdkMethods.sdkVersion} (spec/SDK version skew)`;
+    // A hostile/malformed operationId could embed a line-break character
+    // (\r, \n, or the JS-specific line terminators U+2028/U+2029) into
+    // `missingMethods` via toSdkMethodName(), which would otherwise break
+    // out of this `//` line comment and inject the remainder of the line
+    // as executable code (Copilot PR #575 review).
+    const commentSafeReason = reason.replace(/\r\n|[\r\n\u2028\u2029]/g, ' ');
+    lines.push('  it.skip(');
+    lines.push(`    ${JSON.stringify(testName)},`);
+    lines.push('    async () => {');
+    lines.push(`      // SKIPPED: ${commentSafeReason}`);
+    lines.push('    },');
+    lines.push('  );');
+    lines.push('');
+    return;
+  }
 
   lines.push('  it(');
-  lines.push(`    '${testName}',`);
+  lines.push(`    ${JSON.stringify(testName)},`);
   lines.push(`    async () => {`);
 
-  // Seed context from scenario.bindings
-  if (scenario.bindings && Object.keys(scenario.bindings).length > 0) {
-    lines.push('      // Seed bindings');
-    for (const [key, value] of Object.entries(scenario.bindings)) {
-      if (value === '__PENDING__') {
-        lines.push(`      ctx['${key}'] = undefined; // pending binding`);
-      } else {
-        const literal = JSON.stringify(value);
-        lines.push(`      ctx['${key}'] = ${literal};`);
-      }
-    }
+  if (operations.length > 0) {
+    // Declared once per test (rather than inlined per call) so the `any` it
+    // introduces stays on one short, unwrapped line — the biome formatter
+    // wraps long inline casts across lines, which would otherwise separate
+    // a per-call `biome-ignore` comment from the token it's meant to cover.
+    lines.push(
+      '      // biome-ignore lint/suspicious/noExplicitAny: dynamically-shaped SDK response requires chained optional-property access',
+    );
+    lines.push('      type SdkCall = (...args: unknown[]) => Promise<any>;');
+    lines.push('');
+  }
+
+  // Seed context from scenario.bindings — literals verbatim, __PENDING__
+  // bindings via the planner-computed scenario.seedBindings (falls back to
+  // a deterministic seedBinding() call rather than leaving the value
+  // undefined, which used to silently drop required request-body fields).
+  const seedLines = computeScenarioSeedLines(scenario, '      ', globalContextSeeds);
+  if (seedLines.length > 0) {
+    lines.push(...seedLines);
     lines.push('');
   }
 
   // Render each operation in the request plan
-  const operations = scenario.requestPlan || [];
   for (let i = 0; i < operations.length; i++) {
     const step = operations[i];
-    renderRequestStep(lines, step, i, opts);
+    renderRequestStep(lines, step, i);
+    const waits = step.eventualWaitsAfter ?? [];
+    for (let w = 0; w < waits.length; w++) {
+      renderEventualWait(lines, waits[w], i, w);
+    }
   }
 
   if (operations.length === 0) {
@@ -201,73 +341,84 @@ function renderScenarioTest(
  * Render a single request step (operation execution).
  *
  * Constructs:
- * - URL from path template with parameter substitution
- * - Request body with variable substitution
- * - Proper SDK method invocation
- * - Response assertion
+ * - A single flat input object (path params + body fields merged), matching
+ *   the real SDK's one-argument-per-call method signatures
+ * - A `consistency` second argument for eventually-consistent reads,
+ *   detected via the bound method's arity rather than a hardcoded operation
+ *   list (the real SDK throws a client-side "Missing consistencyManagement
+ *   parameter" error for these operations if it's omitted)
+ * - Proper SDK method invocation and response assertion
  */
-function renderRequestStep(
-  lines: string[],
-  step: RequestStep,
-  stepIndex: number,
-  opts: {
-    mode?: 'feature' | 'integration' | 'variant';
-    operationMap?: OperationMapJsonSource;
-  } = {},
-): void {
+function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number): void {
   const stepNum = stepIndex + 1;
   const opId = step.operationId;
-  const method = opts.operationMap?.lookup(opId) ?? toCamelCase(opId);
+  const method = toSdkMethodName(opId);
   const responseVar = `response${stepNum}`;
   const expectedStatus = step.expect.status;
   const isErrorExpected = expectedStatus >= 400;
-  const requestParts: string[] = [];
 
   lines.push(`      // Step ${stepNum}: ${opId}`);
 
-  // Build URL
-  if (step.pathTemplate) {
-    const urlExpr = buildJavaScriptUrlExpression(step.pathTemplate, step.pathParams);
-    lines.push(`      const url${stepNum} = ${urlExpr};`);
-    requestParts.push(`path: url${stepNum}`);
-  }
-
-  // Build request body if present
+  // Build the request body (if any), then merge it with path params into a
+  // single flat input object.
   const payloadTemplate =
     step.bodyKind === 'multipart'
       ? (step.multipartTemplate ?? step.bodyTemplate)
       : step.bodyTemplate;
   if (payloadTemplate) {
-    const bodyExpr = renderJavaScriptBody(payloadTemplate, {});
+    const bodyExpr =
+      step.bodyKind === 'multipart'
+        ? renderJavaScriptMultipartBody(payloadTemplate)
+        : renderJavaScriptBody(payloadTemplate, {});
     lines.push(`      const body${stepNum} = ${bodyExpr};`);
-    const payloadKey = step.bodyKind === 'multipart' ? 'multipart' : 'body';
-    requestParts.push(`${payloadKey}: body${stepNum}`);
   }
+
+  lines.push(`      const input${stepNum} = {`);
+  if (payloadTemplate) {
+    lines.push(`        ...body${stepNum},`);
+  }
+  // step.pathParams is never populated by path-analyser (see
+  // materializer/src/playwright/stepRenderer.ts's buildUrlExpression and
+  // repo memory item 7) — path params are derived from pathTemplate instead.
+  for (const name of derivePathParamNames(step.pathTemplate)) {
+    lines.push(`        ${renderObjectKey(name)}: ctx['${camelCase(name)}Var'],`);
+  }
+  lines.push('      };');
+
+  // Some read operations (get-by-id, search) require an explicit consistency
+  // argument as a second parameter; a plain single-arg call throws a
+  // client-side error for exactly those operations. `.length` reflects the
+  // bound method's declared arity at runtime, so this adapts automatically
+  // as the upstream SDK adds/removes eventually-consistent operations.
+  lines.push(
+    `      const consistency${stepNum} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;`,
+  );
+  // .bind(client) preserves the `this` binding the real SDK's generated
+  // methods rely on internally (e.g. accessing `this._client`) — without
+  // it, detaching the method reference from `client` before calling it
+  // throws at runtime. `SdkCall` (declared once per test) matches the
+  // emitted code's need to chain deep, dynamically-shaped response access.
+  lines.push(`      const call${stepNum} = client.${method}.bind(client) as SdkCall;`);
 
   if (isErrorExpected) {
     lines.push('      try {');
-    lines.push(`        const ${responseVar} = await apiClient.${method}({`);
-    for (const part of requestParts) {
-      lines.push(`          ${part},`);
-    }
-    lines.push('        });');
+    lines.push(
+      `        const ${responseVar} = await call${stepNum}(input${stepNum}, consistency${stepNum});`,
+    );
     lines.push(`        expect.fail('Expected ${expectedStatus} but request succeeded');`);
     lines.push('      } catch (error) {');
-    lines.push(`        const restError = error as RestClientError;`);
-    lines.push(`        expect(restError.status).toBe(${expectedStatus});`);
+    lines.push('        const sdkError = error as HttpSdkError;');
+    lines.push(`        expect(sdkError.status).toBe(${expectedStatus});`);
     lines.push('      }');
   } else {
-    lines.push(`      const ${responseVar} = await apiClient.${method}({`);
-    for (const part of requestParts) {
-      lines.push(`        ${part},`);
-    }
-    lines.push('      });');
-    lines.push(`      expect(${responseVar}.status).toBe(${expectedStatus});`);
+    lines.push(
+      `      const ${responseVar} = await call${stepNum}(input${stepNum}, consistency${stepNum});`,
+    );
 
     if (step.extract && step.extract.length > 0) {
       for (const extract of step.extract) {
         const accessor = toOptionalAccessor(extract.fieldPath);
-        lines.push(`      ctx['${extract.bind}'] = ${responseVar}.data${accessor};`);
+        lines.push(`      ctx['${extract.bind}'] = ${responseVar}${accessor};`);
       }
     }
 
@@ -278,23 +429,90 @@ function renderRequestStep(
 }
 
 /**
- * Convert operationId (camelCase) to camelCase SDK method name.
- * Most SDKs use camelCase for method names.
- *
- * @example
- * 'listProcessInstances' -> 'listProcessInstances'
- * 'CreateProcessInstance' -> 'createProcessInstance'
+ * Render a planner-annotated eventual-state wait (#159) as a sibling block
+ * immediately after its producer step. Polls the witness operation via the
+ * real SDK client (through the vendored `awaitEventually` helper, which
+ * treats a thrown `HttpSdkError` the same as a false predicate) until the
+ * predicate field matches or the wait budget is exhausted.
  */
-function toCamelCase(str: string): string {
-  if (!str) return str;
-  return str.charAt(0).toLowerCase() + str.slice(1);
+function renderEventualWait(
+  lines: string[],
+  wait: EventualWaitSpec,
+  stepIndex: number,
+  waitIndex: number,
+): void {
+  const w = wait.witness;
+  const suffix = `${stepIndex + 1}_${waitIndex + 1}`;
+  const method = toSdkMethodName(w.operationId);
+  lines.push(`      // Wait for ${wait.state} (eventual; witness: ${w.operationId})`);
+  lines.push('      {');
+  lines.push(`        const witnessInput${suffix} = {`);
+  for (const name of derivePathParamNames(w.pathTemplate)) {
+    lines.push(`          ${renderObjectKey(name)}: ctx['${camelCase(name)}Var'],`);
+  }
+  lines.push('        };');
+  lines.push(`        const witnessCall${suffix} = client.${method}.bind(client) as SdkCall;`);
+  // Same arity-detected consistency argument as ordinary request steps
+  // (see renderRequestStep): the real SDK throws a client-side "Missing
+  // consistencyManagement parameter" error for an eventually-consistent
+  // witness method invoked with only one argument (Copilot PR #575 review).
+  lines.push(
+    `        const witnessConsistency${suffix} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;`,
+  );
+  const optionFields: string[] = [`operationId: ${JSON.stringify(w.operationId)}`];
+  if (typeof w.waitUpToMs === 'number') optionFields.push(`waitUpToMs: ${w.waitUpToMs}`);
+  if (typeof w.pollIntervalMs === 'number')
+    optionFields.push(`pollIntervalMs: ${w.pollIntervalMs}`);
+  lines.push(`        await awaitEventually(`);
+  lines.push(
+    `          () => witnessCall${suffix}(witnessInput${suffix}, witnessConsistency${suffix}),`,
+  );
+  lines.push('          (body) => {');
+  lines.push("            if (body === null || typeof body !== 'object') return false;");
+  lines.push(
+    `            const v = (body as Record<string, unknown>)[${JSON.stringify(w.predicate.path)}];`,
+  );
+  lines.push(`            return v === ${JSON.stringify(w.predicate.equals)};`);
+  lines.push('          },');
+  lines.push(`          { ${optionFields.join(', ')} },`);
+  lines.push('        );');
+  lines.push('      }');
+  lines.push('');
+}
+
+const PATH_PARAM_RE = /\{([^}]+)\}/g;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Extract `{paramName}` placeholder names from a path template, in order. */
+function derivePathParamNames(pathTemplate: string | undefined): string[] {
+  if (!pathTemplate) return [];
+  return [...pathTemplate.matchAll(PATH_PARAM_RE)].map((m) => m[1]);
 }
 
 /**
- * Escape quotes in a string for use within JavaScript string literals.
+ * Convert an OpenAPI operationId to the real SDK's camelCase method name.
+ * The SDK's own codegen Title-cases multi-letter acronyms before lowercasing
+ * the leading character (e.g. operationId `getProcessDefinitionXML` ->
+ * method `getProcessDefinitionXml`), unlike a naive camelCase pass.
  */
-function escapeQuotesForString(value: string): string {
-  return value.replace(/'/g, "\\'").replace(/"/g, '\\"');
+function toSdkMethodName(operationId: string): string {
+  if (!operationId) return operationId;
+  const acronymNormalized = operationId.replace(
+    /[A-Z]{2,}/g,
+    (run) => run.charAt(0) + run.slice(1).toLowerCase(),
+  );
+  return acronymNormalized.charAt(0).toLowerCase() + acronymNormalized.slice(1);
+}
+
+/**
+ * Render an object literal key, quoting it only if it isn't a valid bare
+ * JavaScript identifier.
+ */
+function renderObjectKey(name: string): string {
+  return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) ? name : `'${name.replace(/'/g, "\\'")}'`;
 }
 
 /**
