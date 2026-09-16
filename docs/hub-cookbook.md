@@ -1,8 +1,11 @@
 # Hub team cookbook: reacting to generated-suite alerts
 
-This is for camunda-hub engineers, not api-test-generator contributors. It
+This is for camunda-hub engineers reacting to generated-suite alerts. It
 covers what the automated checks on your PRs and the nightly mean, how to
-tell a real hub bug from a generator limitation, and what to do next.
+tell a real hub bug from a generator limitation, and what to do next —
+including opening the fix yourself in api-test-generator, which you're
+welcome to do. See `CONTRIBUTING.md` there for the full contributor
+mechanics beyond what's covered here.
 
 ## What's actually running
 
