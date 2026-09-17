@@ -32,6 +32,10 @@
         "summary": "deleteCatalogAsset has no obtainable assetKey",
         "url": "https://github.com/camunda/camunda-hub/issues/25576"
       }
+    },
+    {
+      "operationId": "replaceWorkspaceEnvironments",
+      "reason": "No valid environmentId can be synthesized for a positive assign: environments are provisioned from real Camunda clusters, so there is no create-an-environment operation to chain from and no scenario template covers it. The generator's positive lifecycle fabricates environmentIds: [\"placeholder\"], which the backend correctly rejects with 400 Unknown environment ids. The empty-array/omitted-field clear-all path (200) is the only positive behavior reachable without a real id, and that is covered by the negative/edge suite. Suppressed by design rather than a bug (camunda/camunda-hub#29026); revisit if a client-mintable environment id becomes available."
     }
   ]
 }
