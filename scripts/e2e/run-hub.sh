@@ -134,17 +134,18 @@ make_fixtures() {
   # #27382, fixed by PR #27610 — createVersion now succeeds against a v2
   # file, so this mints a real version key here.
   export RV_FIXTURE_VERSION_KEY;   RV_FIXTURE_VERSION_KEY="$(curl -s -X POST "$POS_URL/versions" "${h[@]}" -d "$(printf '{"fileKey":"%s","name":"rv-fixture-version"}' "$RV_FIXTURE_FILE_KEY")" | _jget versionKey)"
+  export RV_FIXTURE_PROJECT_VERSION_KEY; RV_FIXTURE_PROJECT_VERSION_KEY="$(curl -s -X POST "$POS_URL/project-versions" "${h[@]}" -d "$(printf '{"projectKey":"%s","name":"rv-fixture-project-version"}' "$RV_FIXTURE_V2_PROJECT_KEY")" | _jget projectVersionKey)"
   # Catalog assets have no create op in the v2 API (ingestion is a multipart PUT
   # that returns no key), so this one comes from the shared ingest helper rather
   # than a POST + _jget like the others.
   export RV_FIXTURE_CATALOG_ASSET_KEY; RV_FIXTURE_CATALOG_ASSET_KEY="$(ingest_catalog_asset)"
-  echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY catalogAsset=$RV_FIXTURE_CATALOG_ASSET_KEY"
+  echo "  fixtures: ws=$RV_FIXTURE_WORKSPACE_KEY v2proj=$RV_FIXTURE_V2_PROJECT_KEY folder=$RV_FIXTURE_FOLDER_KEY file=$RV_FIXTURE_FILE_KEY version=$RV_FIXTURE_VERSION_KEY projectVersion=$RV_FIXTURE_PROJECT_VERSION_KEY catalogAsset=$RV_FIXTURE_CATALOG_ASSET_KEY"
   # Surface any failed create: an empty key means the tests fall back to the 'x'
   # filler for that resource (via `|| 'x'`) and will 404/403 as if unfixtured.
   # CATALOG_ASSET_KEY is absent here on purpose: ingest_catalog_asset already
   # warns, and distinguishes ingest failure from an unreadable key.
   local k var
-  for k in WORKSPACE_KEY V2_PROJECT_KEY FOLDER_KEY FILE_KEY VERSION_KEY; do
+  for k in WORKSPACE_KEY V2_PROJECT_KEY FOLDER_KEY FILE_KEY VERSION_KEY PROJECT_VERSION_KEY; do
     var="RV_FIXTURE_${k}"
     [ -n "${!var-}" ] || echo "  ⚠ RV_FIXTURE_${k} is empty — its create call failed; affected tests will see 404/403"
   done
