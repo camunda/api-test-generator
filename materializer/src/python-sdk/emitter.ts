@@ -392,6 +392,10 @@ export function renderPythonSuite(
   }
   lines.push('from typing import Any, Dict');
   lines.push('');
+  lines.push('# Sentinel distinguishing "field absent" from an explicit JSON null');
+  lines.push('# (Copilot PR #574 review).');
+  lines.push('_MISSING = object()');
+  lines.push('');
 
   // Test context setup
   lines.push('class TestContext:');
@@ -417,25 +421,27 @@ export function renderPythonSuite(
   lines.push('    return TestContext()');
   lines.push('');
   lines.push('def get_nested_value(value: Any, field_path: str) -> Any:');
-  lines.push(
-    '    """Safely navigate dotted/indexed field paths (e.g. \'a.b[0].c\') on dict/list payloads."""',
-  );
+  lines.push('    """Safely navigate dotted/indexed field paths (e.g. \'a.b[0].c\') on dict/list');
+  lines.push('    payloads. Returns _MISSING (not None) when the path does not resolve, so');
+  lines.push('    callers can distinguish an absent field from an explicit JSON null."""');
   lines.push('    current = value');
   lines.push("    for part in re.findall(r'[^.\\[\\]]+|\\[[0-9]+\\]', field_path):");
-  lines.push('        if current is None:');
-  lines.push('            return None');
+  lines.push('        if current is _MISSING:');
+  lines.push('            return _MISSING');
   lines.push("        if part.startswith('[') and part.endswith(']'):");
   lines.push('            if not isinstance(current, list):');
-  lines.push('                return None');
+  lines.push('                return _MISSING');
   lines.push('            index = int(part[1:-1])');
   lines.push('            if index >= len(current):');
-  lines.push('                return None');
+  lines.push('                return _MISSING');
   lines.push('            current = current[index]');
   lines.push('            continue');
   lines.push('        if isinstance(current, dict):');
-  lines.push('            current = current.get(part)');
+  lines.push('            if part not in current:');
+  lines.push('                return _MISSING');
+  lines.push('            current = current[part]');
   lines.push('            continue');
-  lines.push('        return None');
+  lines.push('        return _MISSING');
   lines.push('    return current');
   lines.push('');
   lines.push('def assert_response_shape(data: Any, fields: list) -> None:');
@@ -611,11 +617,26 @@ function renderPythonRequestStep(
     }
   }
 
-  lines.push(`    ${responseVar} = await client.${methodName}(`);
-  for (const arg of requestArgs) {
-    lines.push(`        ${arg},`);
+  // httpx.AsyncClient.get()/delete()/options()/head() don't accept the
+  // json=/data=/files= body kwargs (only request()/post()/put()/patch() do),
+  // so a body-bearing step on one of those verbs must go through the generic
+  // request() method to avoid a TypeError at test-run time (Copilot PR #574 review).
+  const bodylessConvenienceVerbs = new Set(['get', 'delete', 'options', 'head']);
+  const hasBodyArg = requestArgs.some((arg) => /^(json|data|files)=/.test(arg));
+  if (hasBodyArg && bodylessConvenienceVerbs.has(methodName)) {
+    lines.push(`    ${responseVar} = await client.request(`);
+    lines.push(`        '${step.method.toUpperCase()}',`);
+    for (const arg of requestArgs) {
+      lines.push(`        ${arg},`);
+    }
+    lines.push('    )');
+  } else {
+    lines.push(`    ${responseVar} = await client.${methodName}(`);
+    for (const arg of requestArgs) {
+      lines.push(`        ${arg},`);
+    }
+    lines.push('    )');
   }
-  lines.push('    )');
   lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}`);
 
   const needsResponseData =
@@ -627,10 +648,16 @@ function renderPythonRequestStep(
     lines.push('    except ValueError:');
     lines.push('        pass');
     if (step.extract) {
-      for (const extract of step.extract) {
+      for (const [extractIdx, extract] of step.extract.entries()) {
+        // Use the _MISSING sentinel (not None) so an absent field doesn't
+        // overwrite an existing seed/earlier extract; an explicit JSON null
+        // is still a real value and is set as such (Copilot PR #574 review).
+        const extractedVar = `extracted_${stepNum}_${extractIdx}`;
         lines.push(
-          `    ctx.set('${extract.bind}', get_nested_value(${responseDataVar}, '${extract.fieldPath}'))`,
+          `    ${extractedVar} = get_nested_value(${responseDataVar}, '${extract.fieldPath}')`,
         );
+        lines.push(`    if ${extractedVar} is not _MISSING:`);
+        lines.push(`        ctx.set('${extract.bind}', ${extractedVar})`);
       }
     }
     if (responseShapeFields?.length) {
@@ -684,7 +711,10 @@ function renderPythonEventualWait(
     `            if isinstance(${dataVar}, dict) and ${dataVar}.get(${renderPythonStringLiteral(w.predicate.path)}) == ${renderPythonValue(w.predicate.equals)}:`,
   );
   lines.push('                break');
-  lines.push(`        elif ${respVar}.status_code not in (404,):`);
+  // 429 (rate-limited) is retried like 404 (not-yet-materialized) rather
+  // than treated as terminal, so a transient broker throttle doesn't fail
+  // the wait before its budget is exhausted (Copilot PR #574 review).
+  lines.push(`        elif ${respVar}.status_code not in (404, 429):`);
   lines.push('            break');
   lines.push(`        if (time.monotonic() - ${startedVar}) * 1000 >= ${waitUpToMs}:`);
   lines.push(

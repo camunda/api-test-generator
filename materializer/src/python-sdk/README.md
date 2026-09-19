@@ -75,6 +75,7 @@ Each emitted module follows this structure:
 
 import pytest
 from typing import Any, Dict
+import httpx
 
 class TestContext:
     """Manages test state and variable binding."""
@@ -197,8 +198,10 @@ Implements `EmitterStrategy`:
 
 ## Operation Map
 
-The emitter optionally consumes `spec/python-sdk/operation-map.json` for
-coverage metadata and compatibility checks.
+The emitter accepts `spec/python-sdk/operation-map.json` and passes it through
+via `EmitOptions.operationMap`, but `renderPythonSuite` does not currently
+read it for coverage metadata or compatibility checks — it is unused
+metadata today, kept for forward-compatibility with a future check.
 
 Generated tests execute direct HTTP calls with `httpx.AsyncClient` from
 `conftest.py`, so runtime behavior is integration-oriented and does not depend

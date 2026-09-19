@@ -246,13 +246,13 @@ def resolve_fixture(relative_path: str) -> bytes:
     active_config = os.getenv('CONFIG', 'camunda-oca').strip() or 'camunda-oca'
     here = Path(__file__).resolve().parent
     candidates = [
+        here.parent / 'fixtures' / relative_path,
+        here.parent.parent / 'fixtures' / relative_path,
+        here.parent.parent.parent / 'fixtures' / relative_path,
         Path(relative_path),
         Path.cwd() / relative_path,
         Path.cwd() / 'fixtures' / relative_path,
         Path.cwd() / 'configs' / active_config / 'fixtures' / relative_path,
-        here.parent / 'fixtures' / relative_path,
-        here.parent.parent / 'fixtures' / relative_path,
-        here.parent.parent.parent / 'fixtures' / relative_path,
     ]
 
     last_error: OSError | None = None

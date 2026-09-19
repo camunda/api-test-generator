@@ -6,7 +6,10 @@
  * byte-identical output for the same input scenarios.
  */
 
-import { describe, expect, test } from 'vitest';
+import { existsSync, promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   buildPythonUrlExpression,
   createPythonSdkEmitter,
@@ -14,7 +17,11 @@ import {
   renderPythonBody,
   renderPythonSuite,
 } from '../../materializer/src/python-sdk/emitter.js';
-import { loadPythonProjectScaffoldingFiles } from '../../materializer/src/python-sdk/materialize-support.js';
+import {
+  loadPythonProjectScaffoldingFiles,
+  materializePythonFixtures,
+  PYTHON_SDK_FIXTURES_DIR_NAME,
+} from '../../materializer/src/python-sdk/materialize-support.js';
 import { createOperationMapSourceFromJson } from '../../materializer/src/python-sdk/sdk-mapping.js';
 import type {
   EndpointScenarioCollection,
@@ -800,8 +807,10 @@ describe('Python SDK Emitter', () => {
 
       const output = renderPythonSuite(collection);
       expect(output).toContain(
-        "ctx.set('processDefinitionKeyVar', get_nested_value(response_data_1, 'deployments[0].processDefinition.processDefinitionKey'))",
+        "extracted_1_0 = get_nested_value(response_data_1, 'deployments[0].processDefinition.processDefinitionKey')",
       );
+      expect(output).toContain('if extracted_1_0 is not _MISSING:');
+      expect(output).toContain("ctx.set('processDefinitionKeyVar', extracted_1_0)");
     });
   });
 
@@ -1213,5 +1222,66 @@ describe('renderPythonEventualWait witness polling (Copilot PR #574 review)', ()
 
     expect(output).not.toContain('import asyncio');
     expect(output).not.toContain('witness_url_');
+  });
+});
+
+// Regression (Copilot PR #574 review): materializePythonFixtures had no test
+// exercising the actual copy-and-resolve path — only the emitted call to
+// resolve_fixture() was asserted, not that the config's fixture bytes are
+// really vendored into <outDir>/fixtures/ (mirrors the Playwright
+// materializeFixtures coverage in tests/codegen/materialize-support.test.ts).
+describe('materializePythonFixtures (Copilot PR #574 review)', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-python-fixtures-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test('copies fixture files from the source dir into <outDir>/fixtures/ with matching bytes', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-python-fixtures-src-'));
+    try {
+      await fs.mkdir(path.join(srcDir, 'bpmn'), { recursive: true });
+      await fs.writeFile(path.join(srcDir, 'bpmn', 'process.bpmn'), '<bpmn-content/>', 'utf8');
+
+      const destination = await materializePythonFixtures(tmp, srcDir);
+
+      expect(destination).toBe(path.join(tmp, PYTHON_SDK_FIXTURES_DIR_NAME));
+      const copied = await fs.readFile(
+        path.join(tmp, PYTHON_SDK_FIXTURES_DIR_NAME, 'bpmn', 'process.bpmn'),
+        'utf8',
+      );
+      expect(copied).toBe('<bpmn-content/>');
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing fixtures source dir yields an empty fixtures/ dir, not an error', async () => {
+    const missingSrc = path.join(tmp, 'does-not-exist');
+
+    const destination = await materializePythonFixtures(tmp, missingSrc);
+
+    expect(existsSync(destination)).toBe(true);
+    expect(await fs.readdir(destination)).toEqual([]);
+  });
+
+  test('is idempotent: a second call with different content overwrites, not merges', async () => {
+    const srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-python-fixtures-src2-'));
+    try {
+      await fs.writeFile(path.join(srcDir, 'a.txt'), 'first', 'utf8');
+      await materializePythonFixtures(tmp, srcDir);
+
+      await fs.rm(path.join(srcDir, 'a.txt'));
+      await fs.writeFile(path.join(srcDir, 'b.txt'), 'second', 'utf8');
+      const destination = await materializePythonFixtures(tmp, srcDir);
+
+      expect(await fs.readdir(destination)).toEqual(['b.txt']);
+    } finally {
+      await fs.rm(srcDir, { recursive: true, force: true });
+    }
   });
 });
