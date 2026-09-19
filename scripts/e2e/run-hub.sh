@@ -162,7 +162,7 @@ make_fixtures() {
     [ -n "${!var-}" ] || echo "  ⚠ RV_FIXTURE_${k} is empty — its create call failed; affected tests will see 404/403"
   done
 }
-if step run; then
+if step run || step curl; then
   echo "── resource fixtures (#352) ──────────────"
   make_fixtures || echo "  ⚠ fixture creation failed — affected tests may see 404/403 instead of 400"
 fi

@@ -79,6 +79,11 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   getProcessInstanceStatisticsByError: 'IncidentProcessInstanceStatisticsByErrorQuery',
   modifyProcessInstance: 'ProcessInstanceModificationInstruction',
   resolveIncident: 'IncidentResolutionRequest',
+  getProcessInstanceStatisticsByDefinition: 'IncidentProcessInstanceStatisticsByDefinitionQuery',
+  getProcessDefinitionInstanceVersionStatistics: 'ProcessDefinitionInstanceVersionStatisticsQuery',
+  getJobErrorStatistics: 'JobErrorStatisticsQuery',
+  getJobTimeSeriesStatistics: 'JobTimeSeriesStatisticsQuery',
+  getJobWorkerStatistics: 'JobWorkerStatisticsQuery',
 };
 
 // operationId-independent map: a path parameter's name (camelCased) to the
@@ -101,6 +106,11 @@ const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
   resourceKey: 'ResourceKey',
   userTaskKey: 'UserTaskKey',
   variableKey: 'VariableKey',
+  authorizationKey: 'AuthorizationKey',
+  batchOperationKey: 'BatchOperationKey',
+  decisionEvaluationInstanceKey: 'DecisionEvaluationInstanceKey',
+  decisionEvaluationKey: 'DecisionEvaluationKey',
+  adHocSubProcessInstanceKey: 'ElementInstanceKey',
 };
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
