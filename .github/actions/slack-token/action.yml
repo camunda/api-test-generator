@@ -30,7 +30,7 @@ runs:
   steps:
     - name: Fetch Slack bot token from Vault
       id: fetch
-      uses: hashicorp/vault-action@v3
+      uses: hashicorp/vault-action@v4
       with:
         url: ${{ inputs.vault-url }}
         method: jwt

@@ -261,7 +261,7 @@ jobs:
         # no-reports night can't hard-fail the job before it reaches the
         # inconclusive-result write.
         if: ${{ steps.reports.outputs.has_reports == 'true' }}
-        uses: hashicorp/vault-action@v3
+        uses: hashicorp/vault-action@v4
         with:
           url: ${{ secrets.VAULT_ADDR }}
           method: jwt
