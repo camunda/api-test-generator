@@ -66,10 +66,10 @@ public abstract class TestFixtureBase
         return value;
     }
 
-    protected static string? RequireStringBinding(Dictionary<string, object?> ctx, string key)
+    protected static string RequireStringBinding(Dictionary<string, object?> ctx, string key)
     {
         var value = RequireBinding(ctx, key);
-        return value as string ?? value?.ToString();
+        return value as string ?? value.ToString()!;
     }
 
     /// <summary>
