@@ -19,7 +19,7 @@ import type {
 // either a literal, a planner-driven seedBinding() call, or a universal
 // globalContextSeeds entry (including the #342 omitWhenUnbound skip).
 import { computeUniqueBindings, emitCtxSeeding } from '../playwright/ctxSeeding.js';
-import { camelCase } from '../playwright/stepRenderer.js';
+import { camelCase, toOptionalAccessor } from '../playwright/stepRenderer.js';
 import {
   containsJavaScriptFixtureMarker,
   renderJavaScriptBody,
@@ -513,27 +513,4 @@ function toSdkMethodName(operationId: string): string {
  */
 function renderObjectKey(name: string): string {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) ? name : `'${name.replace(/'/g, "\\'")}'`;
-}
-
-/**
- * Convert a string to a safe JavaScript identifier.
- * Used for test method names, variable names, etc.
- *
- * Removes special characters, replaces spaces with underscores,
- * and ensures the result is a valid identifier.
- */
-function toOptionalAccessor(fieldPath: string): string {
-  if (!fieldPath) return '';
-  const parts = fieldPath.split('.');
-  return parts
-    .map((part) => {
-      const match = part.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(\[[0-9]+\])?$/);
-      if (match) {
-        const base = `?.${match[1]}`;
-        const idx = match[2] ? `?.${match[2]}` : '';
-        return base + idx;
-      }
-      return `?.['${part.replace(/'/g, "\\'")}']`;
-    })
-    .join('');
 }
