@@ -13,7 +13,14 @@ import type {
 // earlier step, and the consuming step declares HTTP 409). See #342 for the
 // omitWhenUnbound half of the same contract.
 import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
-import { CsharpOperationMapSource, type SdkMappingSource } from './sdk-mapping.js';
+import {
+  CsharpOperationMapSource,
+  type CsharpOperationMap,
+  type CsharpOperationMapEntry,
+  type SdkMappingSource,
+} from './sdk-mapping.js';
+
+export type { CsharpOperationMap, CsharpOperationMapEntry };
 
 const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   createDeployment: 'DeploymentRequest',
@@ -182,25 +189,6 @@ const CSHARP_VOID_METHODS = new Set<string>([
   'UpdateJobAsync',
   'UpdateUserTaskAsync',
 ]);
-
-/**
- * A single operation-map entry as committed in
- * `csharp-sdk/examples/operation-map.json`. The SDK method to invoke is
- * the `region` (e.g. `CreateDeploymentAsync`); `file`/`label` are metadata
- * used by the SDK's own `@@FILE`/region extraction tooling.
- */
-export interface CsharpOperationMapEntry {
-  file: string;
-  region: string;
-  label?: string;
-}
-
-/**
- * operationId → ordered SDK references. Each value is an array because an
- * operation may map to more than one SDK region; the emitter uses the
- * first entry's `region` as the method name.
- */
-export type CsharpOperationMap = Record<string, readonly CsharpOperationMapEntry[]>;
 
 export function csharpSdkSuiteFileName(
   collection: EndpointScenarioCollection,
