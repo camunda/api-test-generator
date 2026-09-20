@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EmittedFile } from '@camunda8/emitter-sdk';
 import { getActiveConfigDir } from 'path-analyser/configResolver';
+import { materializeFixtures } from '../playwright/materialize-support.js';
 
 interface KnownSdkMethods {
   sdkVersion: string;
@@ -87,18 +88,11 @@ export async function materializeSdkFixtures(
   outDir: string,
   fixturesSourceDir: string = defaultFixturesSourceDir(),
 ): Promise<string> {
-  const destination = path.join(outDir, JS_SDK_FIXTURES_DIR_NAME);
-  await fs.rm(destination, { recursive: true, force: true });
-  await fs.mkdir(destination, { recursive: true });
-  try {
-    await fs.cp(fixturesSourceDir, destination, { recursive: true });
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return destination;
-    }
-    throw error;
-  }
-  return destination;
+  // Delegates to the canonical `materializeFixtures()` (owned by
+  // `playwright/materialize-support.ts`) so the wipe, missing-source, and
+  // recursive-copy behavior lives in exactly one place and cannot drift
+  // between the SDK emitters (Copilot PR #575 review).
+  return materializeFixtures(outDir, fixturesSourceDir);
 }
 
 /**
@@ -169,7 +163,25 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
     },
     {
       relativePath: 'vitest.config.ts',
-      content: `import { defineConfig } from 'vitest/config';
+      content: `import { existsSync, readFileSync } from 'node:fs';
+import { defineConfig } from 'vitest/config';
+
+// Load '.env' into process.env before tests run: the SDK's zero-config
+// Camunda8 client reads ZEEBE_REST_ADDRESS / CAMUNDA_AUTH_STRATEGY / etc.
+// directly from process.env, and Vitest does not load dotenv files itself
+// (Copilot PR #575 review). Simple KEY=VALUE parsing — matches the
+// unquoted, single-line format shipped in '.env.example'.
+if (existsSync('.env')) {
+  for (const line of readFileSync('.env', 'utf8').split('\\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (key && !(key in process.env)) process.env[key] = value;
+  }
+}
 
 export default defineConfig({
   test: {
@@ -556,7 +568,7 @@ export async function awaitEventually<T>(
         '',
         '```typescript',
         '// Store values',
-        "ctx['processInstanceId'] = response.data.id;",
+        "ctx['processInstanceId'] = response.id;",
         '',
         ' // Retrieve values in subsequent operations',
         // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — this is source code rendered into a README code block
