@@ -456,8 +456,13 @@ function renderEventualWait(
   // (see renderRequestStep): the real SDK throws a client-side "Missing
   // consistencyManagement parameter" error for an eventually-consistent
   // witness method invoked with only one argument (Copilot PR #575 review).
+  // Align the SDK-side consistency budget with the planner's witness wait
+  // budget (falling back to awaitEventually's own 10_000ms default when the
+  // plan doesn't specify one), so the witness call doesn't time out earlier
+  // than the outer polling loop.
+  const witnessConsistencyWaitUpToMs = typeof w.waitUpToMs === 'number' ? w.waitUpToMs : 10_000;
   lines.push(
-    `        const witnessConsistency${suffix} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: 5000 } } : undefined;`,
+    `        const witnessConsistency${suffix} = client.${method}.length >= 2 ? { consistency: { waitUpToMs: ${witnessConsistencyWaitUpToMs} } } : undefined;`,
   );
   const optionFields: string[] = [`operationId: ${JSON.stringify(w.operationId)}`];
   if (typeof w.waitUpToMs === 'number') optionFields.push(`waitUpToMs: ${w.waitUpToMs}`);
