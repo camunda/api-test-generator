@@ -21,15 +21,15 @@ const TENANT_SEED_OMIT: GlobalContextSeed = {
 };
 
 const SAMPLE_COLLECTION: EndpointScenarioCollection = {
-  endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{username}' },
+  endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{widgetId}' },
   requiredSemanticTypes: [],
   optionalSemanticTypes: [],
   scenarios: [
     {
       id: 'sc1',
       name: 'happy path',
-      description: 'Fetch a user by username',
-      operations: [{ operationId: 'getUser', method: 'GET', path: '/users/{username}' }],
+      description: 'Fetch a user by widget id',
+      operations: [{ operationId: 'getUser', method: 'GET', path: '/users/{widgetId}' }],
       producedSemanticTypes: [],
       satisfiedSemanticTypes: [],
       requestPlan: [
