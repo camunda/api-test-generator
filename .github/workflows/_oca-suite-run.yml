@@ -202,7 +202,7 @@ jobs:
               echo "#### profile: $p"
               if [ -f "$out/pw-$p.json" ]; then
                 echo '```text'
-                node request-validation/templates/scripts/summarize-failures.mjs "$out/pw-$p.json"
+                node request-validation/templates/scripts/summarize-failures.mjs "$out/pw-$p.json" "configs/${CONFIG}/request-validation.json"
                 echo '```'
               else
                 echo "- no report for profile '$p' — the suite may not have generated or crashed before writing results"
