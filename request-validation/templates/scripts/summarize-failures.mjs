@@ -18,11 +18,20 @@
 // Reads ./test-results.json by default (produced by the JSON reporter
 // configured in playwright.config.ts). Pass a path as the first argument
 // to override.
+//
+// An optional second argument, the path to a config's request-validation.json,
+// prints that config's suite-wide `knownIssues[]` (if any) ahead of the
+// failure breakdown — the same {summary, url} entries camunda-hub's nightly
+// posts to Slack, surfaced here instead since this suite has no Slack step.
+// Unconditional: the schema has no way to scope a knownIssues entry to a
+// specific scenario kind or operation, so every entry always prints,
+// regardless of whether this particular run's failures relate to it.
 
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 const inputPath = path.resolve(process.argv[2] ?? 'test-results.json');
+const configPath = process.argv[3] ? path.resolve(process.argv[3]) : undefined;
 
 if (!existsSync(inputPath)) {
   console.error(`No JSON report found at ${inputPath}.`);
@@ -37,6 +46,8 @@ try {
   console.error(`Failed to parse ${inputPath}: ${e?.message ?? e}`);
   process.exit(2);
 }
+
+printKnownIssues(configPath);
 
 const failures = [];
 walkSuites(report.suites ?? [], failures);
@@ -135,6 +146,32 @@ function extractContext(result) {
     if (m2) out.expectedStatus = Number(m2[1]);
   }
   return out;
+}
+
+function printKnownIssues(configPath) {
+  if (!configPath || !existsSync(configPath)) return;
+  let config;
+  try {
+    config = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    return;
+  }
+  const knownIssues = Array.isArray(config?.knownIssues) ? config.knownIssues : [];
+  // This script reads the config file directly (unlike the generator, which
+  // validates it via config.ts's isKnownIssue before ever reaching this
+  // point) and runs with `if: always()`, so a malformed entry must be
+  // skipped, not thrown — throwing here would take down the whole summary
+  // step for every profile, not just the known-issues section.
+  const valid = knownIssues.filter(
+    (ki) => ki && typeof ki === 'object' && typeof ki.summary === 'string' && typeof ki.url === 'string',
+  );
+  if (valid.length === 0) return;
+  console.log('Known issues (suite-wide, does not affect the counts below):');
+  for (const { summary, url } of valid) {
+    console.log(`  - ${summary}`);
+    console.log(`    ${url}`);
+  }
+  console.log();
 }
 
 function groupAndPrint(heading, items, keyFn, maxRows = 20) {

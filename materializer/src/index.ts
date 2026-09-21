@@ -49,7 +49,10 @@ import {
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
-import { materializePythonSupport } from './python-sdk/materialize-support.js';
+import {
+  materializePythonFixtures,
+  materializePythonSupport,
+} from './python-sdk/materialize-support.js';
 import { createOperationMapSourceFromJson } from './python-sdk/sdk-mapping.js';
 import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js';
 
@@ -412,10 +415,15 @@ interface TargetRunEnv {
 /**
  * Register the file-system-backed SDK emitters. Kept here (not at module
  * level) so operation-map.json files load from the resolved repoRoot. The
- * factories tolerate an absent map (fall back to operationId-derived method
- * names), so this is safe to call even when the maps haven't been fetched —
- * e.g. for the `list-targets` projection. The Playwright emitter is already
- * registered at module level (it has no file-system dependencies).
+ * factories tolerate an absent map at construction time (an empty/missing
+ * map is not itself an error), so this is safe to call even when the maps
+ * haven't been fetched yet — e.g. for the `list-targets` projection. Note
+ * this is NOT the same as an operationId falling back to a guessed method
+ * name at generation time: the C# emitter's `CsharpOperationMapSource`
+ * throws a clear error for any operationId missing from the map rather than
+ * guessing `PascalCase(operationId) + "Async"` (see csharp-sdk/sdk-mapping.ts).
+ * The Playwright emitter is already registered at module level (it has no
+ * file-system dependencies).
  */
 function registerSdkEmitters(repoRoot: string): void {
   registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
@@ -604,6 +612,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
   }
   if (emitter.id === 'python-sdk') {
     await materializePythonSupport(outDir);
+    await materializePythonFixtures(outDir);
   }
   if (emitter.id === 'csharp-sdk') {
     // materializeCsharpSupport already vendors the active config's BPMN/DMN/form

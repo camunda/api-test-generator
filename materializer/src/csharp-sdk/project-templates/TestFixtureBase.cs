@@ -5,7 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Camunda.Orchestration.Sdk;
 using Xunit;
@@ -17,6 +19,7 @@ public abstract class TestFixtureBase
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        Converters = { new StringValueObjectConverterFactory() },
     };
 
     protected CamundaClient Client { get; }
@@ -29,18 +32,19 @@ public abstract class TestFixtureBase
     protected static void SeedBindingIfMissing(
         Dictionary<string, object?> ctx,
         string binding,
-        string seedRule
+        string seedRule,
+        bool unique = false
     )
     {
         if (!ctx.TryGetValue(binding, out var value) || value == null)
         {
-            ctx[binding] = SeedBinding(seedRule);
+            ctx[binding] = SeedBinding(seedRule, unique);
         }
     }
 
-    protected static string SeedBinding(string varName)
+    protected static string SeedBinding(string varName, bool unique = false)
     {
-        return SeedEnv.Instance.Generate(varName);
+        return SeedEnv.Instance.Generate(varName, unique);
     }
 
     /// <summary>
@@ -60,6 +64,30 @@ public abstract class TestFixtureBase
         }
 
         return value;
+    }
+
+    protected static string RequireStringBinding(Dictionary<string, object?> ctx, string key)
+    {
+        var value = RequireBinding(ctx, key);
+        return value as string ?? value.ToString()!;
+    }
+
+    /// <summary>
+    /// Read an optional (<c>omitWhenUnbound</c>, #342) binding without
+    /// throwing when it is absent. Unlike <see cref="RequireBinding"/>, a
+    /// missing/null binding returns <c>null</c> so the caller can omit the
+    /// field entirely and let the broker apply its own default, instead of
+    /// failing a legitimate consumer scenario that never seeded this value.
+    /// </summary>
+    protected static object? GetBindingOrNull(Dictionary<string, object?> ctx, string binding)
+    {
+        return ctx.TryGetValue(binding, out var value) ? value : null;
+    }
+
+    protected static string? GetStringBindingOrNull(Dictionary<string, object?> ctx, string binding)
+    {
+        var value = GetBindingOrNull(ctx, binding);
+        return value as string ?? value?.ToString();
     }
 
     protected static T BuildRequest<T>(Dictionary<string, object?> data) where T : class, new()
@@ -109,11 +137,31 @@ public abstract class TestFixtureBase
         return string.Equals(Convert.ToString(value, CultureInfo.InvariantCulture), sentinel, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Convert an SDK response to a JsonElement suitable for field-path
+    /// extraction/assertion. Many SDK response types (e.g.
+    /// <c>ExtendedDeploymentResponse</c>) are C#-ergonomic wrappers around a
+    /// <c>Raw</c> property holding the true wire-shape DTO (camelCase
+    /// property names matching the OpenAPI contract) alongside redundant
+    /// PascalCase convenience mirrors. Serializing the wrapper directly
+    /// produces a JSON object with duplicate camelCase/PascalCase keys, and
+    /// our field paths (authored against the wire contract, e.g.
+    /// <c>deployments[0].processDefinition.processDefinitionKey</c>) only
+    /// match the nested <c>Raw</c> shape -- so prefer it when present.
+    /// </summary>
     protected static JsonElement ToJsonElement(object? response)
     {
         if (response is JsonElement elem)
         {
             return elem.Clone();
+        }
+        if (response is not null)
+        {
+            var rawProp = response.GetType().GetProperty("Raw");
+            if (rawProp is not null)
+            {
+                response = rawProp.GetValue(response);
+            }
         }
         var json = JsonSerializer.Serialize(response, JsonOptions);
         using var doc = JsonDocument.Parse(json);
@@ -187,8 +235,102 @@ public abstract class TestFixtureBase
         }
     }
 
+    /// <summary>
+    /// True when <paramref name="body"/> has a top-level property named
+    /// <paramref name="path"/> whose value equals the scalar
+    /// <paramref name="expected"/> (a string/bool/int/long/double, per
+    /// <c>WitnessPredicate</c> in path-analyser/src/types.ts). Used by
+    /// eventual-state witness polling (#159) emitted after a producer step
+    /// whose runtime state is <c>eventual: true</c>.
+    /// </summary>
+    protected static bool WitnessPredicateMatches(JsonElement body, string path, object expected)
+    {
+        if (body.ValueKind != JsonValueKind.Object) return false;
+        if (!body.TryGetProperty(path, out var prop)) return false;
+        return expected switch
+        {
+            string s => prop.ValueKind == JsonValueKind.String && prop.GetString() == s,
+            bool b => (prop.ValueKind == JsonValueKind.True || prop.ValueKind == JsonValueKind.False)
+                && prop.GetBoolean() == b,
+            int i => prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var li) && li == i,
+            long l => prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var ll) && ll == l,
+            double d => prop.ValueKind == JsonValueKind.Number && prop.GetDouble() == d,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Poll <paramref name="fetch"/> until <paramref name="predicate"/>
+    /// returns true or <paramref name="waitUpToMs"/> elapses. Mirrors the
+    /// Playwright/JS reference emitters' <c>awaitEventually</c>: a thrown
+    /// exception from <paramref name="fetch"/> (e.g. a 404 while the
+    /// indexer catches up) is treated the same as a false predicate and
+    /// retried within budget; the last exception is rethrown on timeout.
+    /// </summary>
+    protected static async Task<JsonElement> AwaitEventuallyWitness(
+        Func<Task<object?>> fetch,
+        Func<JsonElement, bool> predicate,
+        string operationId,
+        int waitUpToMs,
+        int pollIntervalMs
+    )
+    {
+        var started = DateTime.UtcNow;
+        var attempts = 0;
+        Exception? lastError = null;
+
+        while (true)
+        {
+            attempts++;
+            try
+            {
+                var result = await fetch();
+                var body = ToJsonElement(result);
+                if (predicate(body)) return body;
+                lastError = null;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            var elapsedMs = (DateTime.UtcNow - started).TotalMilliseconds;
+            var remainingMs = waitUpToMs - elapsedMs;
+            if (remainingMs <= 0)
+            {
+                if (lastError is not null) throw lastError;
+                throw new InvalidOperationException(
+                    $"Eventual consistency timeout for operation '{operationId}' after {attempts} attempt(s) in {elapsedMs:F0}ms");
+            }
+            await Task.Delay((int)Math.Min(pollIntervalMs, remainingMs));
+        }
+    }
+
+    /// <summary>
+    /// Unwrap a JSON value pulled out by field-path extraction into a plain
+    /// CLR scalar/collection. Strongly-typed SDK key structs (JobKey,
+    /// ProcessInstanceKey, ...) have no custom JSON converter registered for
+    /// our own serialization pass, so they round-trip as a single-property
+    /// object <c>{"Value": "..."}</c> rather than a bare string. Left
+    /// unwrapped, that object would be stored in the test context as a
+    /// Dictionary, and a later <c>RequireStringBinding</c> would stringify
+    /// the dictionary itself (garbage) instead of the key's real value --
+    /// silently corrupting every downstream key-typed path parameter.
+    /// </summary>
     private static object? ConvertJsonElement(JsonElement element)
     {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var props = element.EnumerateObject().ToList();
+            // Ordinal, case-sensitive: the key-struct converter always emits
+            // exactly "Value" (PascalCase). A case-insensitive match would also
+            // unwrap legitimate wire JSON shaped like {"value": ...}, silently
+            // collapsing a real response object down to its scalar field.
+            if (props.Count == 1 && string.Equals(props[0].Name, "Value", StringComparison.Ordinal))
+            {
+                return ConvertJsonElement(props[0].Value);
+            }
+        }
         return element.ValueKind switch
         {
             JsonValueKind.Null => null,
@@ -234,7 +376,16 @@ public abstract class TestFixtureBase
         var path = rawPath.StartsWith("@@FILE:", StringComparison.Ordinal)
             ? rawPath.Substring("@@FILE:".Length)
             : rawPath;
-        if (Path.IsPathRooted(path) && File.Exists(path)) return path;
+        // Mirror the JS (support/fixtures.ts) and Python (support/fixtures.py)
+        // fixture helpers: reject an absolute path or any ".." segment before
+        // ever touching the filesystem, rather than trusting the caller. A
+        // rooted path was previously returned verbatim whenever it happened
+        // to exist, and ".." segments were never checked at all, letting an
+        // @@FILE: marker read outside the vendored fixtures directory.
+        if (Path.IsPathRooted(path) || path.Split('/', '\\').Contains(".."))
+        {
+            throw new InvalidOperationException($"Invalid fixture path: {path}");
+        }
 
         var candidates = new[]
         {
@@ -290,14 +441,88 @@ public abstract class TestFixtureBase
         }
     }
 
+    /// <summary>
+    /// Handles the SDK's pervasive "string-backed value object" struct
+    /// pattern (JobKey, ProcessDefinitionKey, TenantId, Tag, ...): a
+    /// readonly struct with a single <c>string Value</c> property and a
+    /// <c>static T AssumeExists(string)</c> factory, with no
+    /// <c>[JsonConverter]</c> registered by the SDK itself. Without this,
+    /// <see cref="JsonSerializer"/> round-trips these as
+    /// <c>{"Value": "..."}</c> objects on write and refuses to deserialize
+    /// a plain JSON string into them on read -- breaking both
+    /// <see cref="BuildRequest{T}"/> (building a request body field typed
+    /// as one of these structs from a plain extracted string) and
+    /// <see cref="ToJsonElement"/> (field-path extraction expects a plain
+    /// scalar, not a nested object).
+    /// </summary>
+    private sealed class StringValueObjectConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert)
+        {
+            if (!typeToConvert.IsValueType) return false;
+            var valueProp = typeToConvert.GetProperty("Value", BindingFlags.Public | BindingFlags.Instance);
+            if (valueProp is null || valueProp.PropertyType != typeof(string)) return false;
+            var factory = typeToConvert.GetMethod(
+                "AssumeExists", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null);
+            return factory is not null && factory.ReturnType == typeToConvert;
+        }
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
+        {
+            var converterType = typeof(StringValueObjectConverter<>).MakeGenericType(typeToConvert);
+            // StringValueObjectConverter<T> is a private nested class, so its
+            // implicit parameterless constructor is non-public. The
+            // Activator.CreateInstance(Type) overload only probes *public*
+            // constructors and throws MissingMethodException here -- pass
+            // nonPublic: true so the non-public constructor is used too
+            // (Copilot PR #576 review).
+            return (JsonConverter)Activator.CreateInstance(converterType, nonPublic: true)!;
+        }
+
+        private sealed class StringValueObjectConverter<T> : JsonConverter<T>
+        {
+            private static readonly MethodInfo AssumeExistsMethod = typeof(T).GetMethod(
+                "AssumeExists", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null)!;
+            private static readonly PropertyInfo ValueProperty =
+                typeof(T).GetProperty("Value", BindingFlags.Public | BindingFlags.Instance)!;
+
+            public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            {
+                var raw = reader.GetString();
+                if (raw is null)
+                {
+                    throw new JsonException($"Cannot convert null to {typeof(T).Name}.");
+                }
+                return (T)AssumeExistsMethod.Invoke(null, new object?[] { raw })!;
+            }
+
+            public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+            {
+                var raw = (string?)ValueProperty.GetValue(value);
+                writer.WriteStringValue(raw);
+            }
+        }
+    }
+
     private sealed class SeedEnv
     {
         private static readonly Lazy<SeedEnv> LazyInstance = new(() => new SeedEnv());
         public static SeedEnv Instance => LazyInstance.Value;
 
+        private static string? _runNonce;
+
         private readonly Dictionary<string, int> counters = new();
+        private readonly Dictionary<string, int> uniqueCounters = new();
         private readonly Random random;
+        private readonly Random uniqueRandom;
         private readonly string runId;
+        private readonly string uniqueRunId;
+        // xUnit runs test classes/collections in parallel by default, and this
+        // singleton (Random + Dictionary counters) is shared across all of them --
+        // neither System.Random nor Dictionary<TKey,TValue> is thread-safe, so
+        // concurrent Generate() calls can corrupt PRNG state or the counters,
+        // producing colliding/garbage generated identifiers.
+        private readonly object gate = new();
 
         private SeedEnv()
         {
@@ -307,37 +532,64 @@ public abstract class TestFixtureBase
             if (useRandom)
             {
                 random = new Random();
+                uniqueRandom = new Random();
                 runId = $"rt-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds():x}";
+                uniqueRunId = runId;
             }
             else
             {
                 random = new Random(HashSeed(seed));
                 runId = $"det-{seed}";
+                // A separate PRNG stream + runId, seeded with a per-process
+                // nonce mixed in, so `unique: true` bindings (client-minted
+                // identifiers consumed by an op that declares HTTP 409)
+                // differ across separate run invocations instead of
+                // colliding on the previous run's value. Mirrors
+                // _resolveRunNonce() in
+                // materializer/src/playwright/support/seeding.ts.
+                var nonce = ResolveRunNonce();
+                uniqueRandom = new Random(HashSeed(seed + nonce));
+                uniqueRunId = $"det-{seed}-{nonce}";
             }
         }
 
-        public string Generate(string varName)
+        private static string ResolveRunNonce()
         {
-            if (varName == "tenantIdVar")
-            {
-                return "<default>";
-            }
-            if (Regex.IsMatch(varName, "correlation", RegexOptions.IgnoreCase))
-            {
-                return $"corr-{runId}-{NextCounter(\"corr\")}-{RandomBase36(4)}";
-            }
-            if (Regex.IsMatch(varName, "(key|id)$", RegexOptions.IgnoreCase))
-            {
-                return $"{varName}-{runId}-{NextCounter(\"id\")}-{RandomBase36(6)}";
-            }
-            if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
-            {
-                return $"{varName}-{RandomBase36(8)}";
-            }
-            return $"{varName}-{RandomBase36(6)}";
+            if (_runNonce is not null) return _runNonce;
+            var env = Environment.GetEnvironmentVariable("TEST_RUN_NONCE");
+            _runNonce = !string.IsNullOrEmpty(env) ? env : Guid.NewGuid().ToString("n");
+            return _runNonce;
         }
 
-        private int NextCounter(string bucket)
+        public string Generate(string varName, bool unique = false)
+        {
+            lock (gate)
+            {
+                var rnd = unique ? uniqueRandom : random;
+                var id = unique ? uniqueRunId : runId;
+                var bucket = unique ? uniqueCounters : counters;
+
+                if (varName == "RANDOM")
+                {
+                    return RandomBase36(rnd, 6);
+                }
+                if (Regex.IsMatch(varName, "correlation", RegexOptions.IgnoreCase))
+                {
+                    return $"corr-{id}-{NextCounter(bucket, "corr")}-{RandomBase36(rnd, 4)}";
+                }
+                if (Regex.IsMatch(varName, "(key|id)$", RegexOptions.IgnoreCase))
+                {
+                    return $"{varName}-{id}-{NextCounter(bucket, "id")}-{RandomBase36(rnd, 6)}";
+                }
+                if (Regex.IsMatch(varName, "name", RegexOptions.IgnoreCase))
+                {
+                    return $"{varName}-{RandomBase36(rnd, 8)}";
+                }
+                return $"{varName}-{RandomBase36(rnd, 6)}";
+            }
+        }
+
+        private static int NextCounter(Dictionary<string, int> counters, string bucket)
         {
             counters.TryGetValue(bucket, out var current);
             var next = current + 1;
@@ -345,13 +597,13 @@ public abstract class TestFixtureBase
             return next;
         }
 
-        private string RandomBase36(int length)
+        private static string RandomBase36(Random rnd, int length)
         {
             const string alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
             var buffer = new char[length];
             for (var i = 0; i < length; i++)
             {
-                buffer[i] = alphabet[random.Next(alphabet.Length)];
+                buffer[i] = alphabet[rnd.Next(alphabet.Length)];
             }
             return new string(buffer);
         }

@@ -3103,8 +3103,18 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // the inner test arrow function call.
     const TEST_BLOCK =
       /test\([^]*?scenarioKind:\s*'param-(?:type-mismatch|constraint-violation|enum-violation)'[^]*?}\);/g;
+    // #564 review: the emitter pads unused slots with the literal token
+    // `undefined` (not omitting them) once a 4th arg (`useRoot`, for
+    // cluster-admin operations' server override) is present, e.g.
+    // `buildUrl('/cluster/v2/mode', undefined, undefined, true)`. Slot 3 must
+    // therefore accept `undefined` too, and a trailing `, true|false)` (plus
+    // an optional trailing comma before the closing paren) must not make the
+    // whole call fail to match — a non-match here means the block is
+    // silently skipped below (`if (!urlMatch) continue;`), exactly the #148
+    // silent-skip failure class this file's own comments warn about
+    // elsewhere.
     const BUILD_URL =
-      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(\{[^}]*\}))?\s*\)/;
+      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(\{[^}]*\}|undefined))?(?:\s*,\s*(?:true|false))?\s*,?\s*\)/;
     const PARAM_KEY = /(\b[a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g;
 
     interface Offender {
@@ -3242,8 +3252,11 @@ describeForThisConfig('bundled-spec invariants: emitted request-validation suite
     // the previous regex required exactly two args and silently skipped
     // every block with a query-params slot, weakening coverage.
     const TEST_BLOCK = /test\([^]*?scenarioKind:\s*'param-constraint-violation'[^]*?}\);/g;
+    // #564 review: see the identical note on the #127 invariant's BUILD_URL
+    // above — the emitter can now emit a 4th (`useRoot`) arg plus a trailing
+    // comma for cluster-admin operations; both must not defeat the match.
     const BUILD_URL =
-      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))(?:\s*,\s*(?:\{[^}]*\}|undefined))?\s*\)/;
+      /buildUrl\(\s*'([^']+)'(?:\s*,\s*(\{[^}]*\}|undefined))(?:\s*,\s*(?:\{[^}]*\}|undefined))?(?:\s*,\s*(?:true|false))?\s*,?\s*\)/;
     // `<key>: <value>` — key is either a bare identifier or a quoted
     // string (in case prettier ever quotes a non-identifier key); value is
     // a single- or double-quoted string literal that *may contain
@@ -10126,9 +10139,14 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
       const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
       assertionsRun++;
       // The Python emitter resolves ${var} body-template placeholders to
-      // ctx.get('<snake_var>') at code-generation time. Any remaining ${...}
+      // ctx.get('<var>') at code-generation time. Any remaining ${...}
       // literal indicates a missing binding and would break the test.
-      if (/\$\{[^}]+\}/.test(src)) {
+      // `${RANDOM}` is an intentional runtime seed token embedded verbatim in
+      // planner-minted literal bindings (mirrors the JS SDK invariant below,
+      // and path-analyser/src/scenarioGenerator.ts's `proc_${RANDOM}` /
+      // `jobType_${RANDOM}` literals) — it is not a missing-binding bug.
+      const placeholders = src.match(/\$\{[^}]+\}/g) ?? [];
+      if (placeholders.some((p) => p !== '${RANDOM}')) {
         offenders.push(file);
       }
     }
@@ -10136,6 +10154,73 @@ describeForThisConfig('bundled-spec invariants: emitted Python SDK suite (#133)'
     expect(
       offenders,
       'Emitted Python SDK test file(s) contain unresolved ${...} placeholder strings.',
+    ).toEqual([]);
+  });
+
+  it('no emitted Python SDK test contains a placeholder "pass  # TODO: implement" stub (#354)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      // #354: the Python emitter used to lower every requestPlan step to a
+      // single `pass  # TODO: implement` stub. This asserts the emitted
+      // suite is real, executable content, not a scaffold placeholder.
+      if (src.includes('pass  # TODO: implement')) {
+        offenders.push(file);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) contain unimplemented "pass  # TODO: implement" stub(s).',
+    ).toEqual([]);
+  });
+
+  it('every "# Step N:" comment in an emitted Python SDK test is followed by a real client call (#354)', () => {
+    if (!existsSync(PYTHON_SDK_DIR)) {
+      throw new Error(
+        `Python SDK output directory not found at ${PYTHON_SDK_DIR}. Run 'npm run codegen:all' (or 'npm run testsuite:generate') first.`,
+      );
+    }
+    const files = readdirSync(PYTHON_SDK_DIR).filter(
+      (f) => f.startsWith('test_') && f.endsWith('.py'),
+    );
+    if (files.length === 0) {
+      return;
+    }
+
+    // #354: a step comment with no corresponding `await client.<method>(...)`
+    // invocation would mean the emitter lowered scenario.requestPlan into a
+    // comment only, silently dropping the actual request. Checked per-step
+    // against the exact `response_N = await client...` variable the emitter
+    // assigns (rather than an aggregate step-count vs. call-count tally),
+    // since a `witness_response_N = await client...` eventual-wait poll call
+    // also matches a bare `await client\.\w+\(` scan and would let an
+    // aggregate count mask a genuinely missing step N call.
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(join(PYTHON_SDK_DIR, file), 'utf8');
+      const stepNumbers = Array.from(src.matchAll(/# Step (\d+):/g)).map((m) => Number(m[1]));
+      const missingSteps = stepNumbers.filter(
+        (n) => !new RegExp(`response_${n} = await client\\.\\w+\\(`).test(src),
+      );
+      if (missingSteps.length > 0) {
+        offenders.push(`${file} (missing client call for step(s): ${missingSteps.join(', ')})`);
+      }
+    }
+    expect(
+      offenders,
+      'Emitted Python SDK test file(s) have step comments with no corresponding client call.',
     ).toEqual([]);
   });
 

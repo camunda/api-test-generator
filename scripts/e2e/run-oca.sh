@@ -95,7 +95,7 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # command instead of applied as an env var (`CONFIG=camunda-oca: command
   # not found`).
   pos_env=(
-    API_BASE_URL="${CORE_URL}/v2" CONFIG="$CONFIG"
+    API_BASE_URL="${CORE_URL}/v2" API_ROOT_URL="$CORE_URL" CONFIG="$CONFIG"
     PLAYWRIGHT_HTML_REPORT="$ABS_OUT/pw-positive"
     PLAYWRIGHT_JSON_OUTPUT_FILE="$ABS_OUT/pw-positive.json"
     PLAYWRIGHT_JUNIT_OUTPUT_FILE="$ABS_OUT/pw-positive.junit.xml"

@@ -33,6 +33,14 @@ interface EmitOpts {
    * `assertResponseStatus` call's shape check is skipped for them.
    */
   problemDetailShapeSkipKinds?: ReadonlySet<ScenarioKind>;
+  /**
+   * operationId -> `OperationModel.serverOverride`, for operations whose
+   * OpenAPI path item overrides `servers` (see that field's doc comment).
+   * Looked up per-scenario by `renderScenario` rather than carried on
+   * `ValidationScenario` itself, so this doesn't require touching every one
+   * of the ~30 scenario-generator modules in `src/analysis/`.
+   */
+  serverOverridesByOperationId?: Readonly<Record<string, string>>;
 }
 
 export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
@@ -80,6 +88,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       opts.resourceFixtures,
       opts.pathResourceFixtures,
       opts.problemDetailShapeSkipKinds,
+      opts.serverOverridesByOperationId,
     );
     let formatted: string;
     try {
@@ -107,6 +116,7 @@ function buildFile(
   resourceFixtures?: Record<string, string>,
   pathResourceFixtures?: Record<string, string>,
   problemDetailShapeSkipKinds?: ReadonlySet<ScenarioKind>,
+  serverOverridesByOperationId?: Readonly<Record<string, string>>,
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
@@ -141,6 +151,24 @@ function buildFile(
       'pagination-offset-past-total scenarios require the standalone support module ' +
         "(assertResponseStatus's expectEmptyItems); they are not supported in legacy QA-tree " +
         'mode (--no-standalone / --qa-import-depth).',
+    );
+  }
+  // A serverOverride operation (e.g. a cluster-admin op) emits a 4-arg
+  // buildUrl(..., true) call. The vendored standalone http.ts's buildUrl
+  // accepts that 4th (useRoot) param; the external legacy utils/http module
+  // is not controlled by this repo and its arity can't be verified here.
+  // Same guard shape as auth-deny/pagination-offset-past-total above,
+  // rather than silently emitting a call the legacy module may not
+  // support and reintroducing the double-/v2 bug in legacy mode with no
+  // error at generation time (#564 review).
+  const usesServerOverride = scenarios.some(
+    (s) => serverOverridesByOperationId?.[s.operationId] !== undefined,
+  );
+  if (usesServerOverride && !standalone) {
+    throw new Error(
+      'serverOverride scenarios (e.g. cluster-admin operations) require the standalone support ' +
+        "module (buildUrl's useRoot param); they are not supported in legacy QA-tree mode " +
+        '(--no-standalone / --qa-import-depth).',
     );
   }
   const usesAuthHeaders = scenarios.some(
@@ -199,6 +227,7 @@ function buildFile(
         resourceFixtures,
         pathResourceFixtures,
         problemDetailShapeSkipKinds?.has(s.type) ?? false,
+        serverOverridesByOperationId?.[s.operationId],
       ),
     );
   }
@@ -270,6 +299,7 @@ function renderScenario(
   resourceFixtures?: Record<string, string>,
   pathResourceFixtures?: Record<string, string>,
   skipProblemDetailShape: boolean = false,
+  serverOverride?: string,
 ): string {
   const fixtures = resourceFixtures ?? {};
   // Path params use the base map with path-only overrides merged on top.
@@ -296,12 +326,20 @@ function renderScenario(
       : JSON.stringify(pathParams)
     : 'undefined';
   const queryArg = queryParams ? JSON.stringify(queryParams) : undefined;
-  const urlCall =
-    queryArg !== undefined
-      ? `buildUrl(${pathLit}, ${pathArg}, ${queryArg})`
-      : pathParams
-        ? `buildUrl(${pathLit}, ${pathArg})`
-        : `buildUrl(${pathLit})`;
+  // `buildUrl`'s 4th param (`useRoot`) only matters when set — pad the
+  // middle slots with `undefined` rather than skipping straight to it, since
+  // JS argument positions can't be skipped.
+  const urlArgs = [pathLit];
+  if (queryArg !== undefined) {
+    urlArgs.push(pathArg, queryArg);
+  } else if (pathParams) {
+    urlArgs.push(pathArg);
+  }
+  if (serverOverride !== undefined) {
+    while (urlArgs.length < 3) urlArgs.push('undefined');
+    urlArgs.push('true');
+  }
+  const urlCall = `buildUrl(${urlArgs.join(', ')})`;
   lines.push(`    const url = ${urlCall};`);
   if (s.bodyEncoding === 'multipart' && s.multipartForm) {
     const formLit = JSON.stringify(s.multipartForm, null, 2);
