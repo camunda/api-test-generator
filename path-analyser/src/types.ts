@@ -31,6 +31,16 @@ export interface OperationRef {
   path: string;
   eventuallyConsistent?: boolean;
   /**
+   * The resolved `servers[0].url` when this operation (or its OpenAPI path
+   * item) overrides the document-level `servers` block — e.g. the
+   * Orchestration Cluster REST API's cluster-admin operations, served at
+   * `{host}:{port}/cluster/v2/...` outside the document's `/v2` base.
+   * `undefined` means "use the runtime's default base". Sourced from
+   * `Operation.serverOverride` (semantic-graph-extractor) via
+   * `OperationNode.serverOverride` (graphLoader).
+   */
+  serverOverride?: string;
+  /**
    * #309 Phase A — stamped by `expandRuntimeEmission` on the inserted
    * runtimeEmission discovery step (e.g. `searchUserTasks` when the
    * chain is discovering `UserTaskKey`). Carries everything the body
@@ -487,6 +497,10 @@ export interface RequestStep {
   operationId: string;
   method: string;
   pathTemplate: string;
+  /** See {@link OperationRef.serverOverride}. Carried through so the emitter
+   * can build this step's request URL against the right base without
+   * looking the operation back up in the graph. */
+  serverOverride?: string;
   pathParams?: { name: string; var: string }[];
   bodyTemplate?: unknown; // object with ${var} placeholders
   bodyKind?: 'json' | 'multipart';
