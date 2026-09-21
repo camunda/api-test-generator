@@ -14,9 +14,9 @@ import type {
 // omitWhenUnbound half of the same contract.
 import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
 import {
-  CsharpOperationMapSource,
   type CsharpOperationMap,
   type CsharpOperationMapEntry,
+  CsharpOperationMapSource,
   type SdkMappingSource,
 } from './sdk-mapping.js';
 
@@ -728,18 +728,28 @@ function requireRequestType(step: RequestStep, requestType: string | undefined):
 }
 
 function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
-  return renderClientCallForPath(method, step.pathTemplate, requestExpression);
+  return renderClientCallForPath(method, step.pathTemplate, requestExpression, step.pathParams);
 }
 
 function renderClientCallForPath(
   method: string,
   pathTemplate: string,
   requestExpression?: string,
+  pathParams?: { name: string; var: string }[],
 ): string {
+  const nameToVar = new Map<string, string>();
+  for (const param of pathParams ?? []) {
+    nameToVar.set(param.name, param.var);
+  }
   const argumentsList = derivePathParamNames(pathTemplate).map((rawName) => {
     const name = toCamelCase(rawName);
     const keyType = CSHARP_PATH_PARAM_KEY_TYPE[name];
-    const binding = stringLiteral(`${name}Var`);
+    // The planner/emitter contract (mirrored by the JS SDK emitter's
+    // `buildJavaScriptUrlExpression`) lets `RequestStep.pathParams[].var`
+    // alias a URL param name to a different ctx binding name; fall back to
+    // the derived `${name}Var` only when no explicit alias is given.
+    const varName = nameToVar.get(rawName) ?? `${name}Var`;
+    const binding = stringLiteral(varName);
     if (keyType === undefined) {
       // Not every path parameter is a strongly-typed key struct (e.g.
       // getUser's `/users/{username}` takes a plain string) -- fall back to
