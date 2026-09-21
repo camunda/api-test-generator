@@ -1,4 +1,4 @@
-import type { OperationModel, ValidationScenario } from '../model/types.js';
+import type { OperationModel, SchemaFragment, ValidationScenario } from '../model/types.js';
 import { buildBaselineBody } from '../schema/baseline.js';
 import { makeId } from './common.js';
 import { findLimitOnlyBranch, findPaginationPage, isRecord } from './paginationShape.js';
@@ -12,6 +12,8 @@ interface PaginationLimitField {
   pageProp: string;
   minimum?: number;
   maximum?: number;
+  /** Every branch of the page's oneOf, so callers can check a candidate value against all of them, not just this one. */
+  branches: SchemaFragment[];
 }
 
 /**
@@ -28,7 +30,12 @@ export function findPaginationLimitField(op: OperationModel): PaginationLimitFie
   if (typeof limitSchema?.minimum !== 'number' && typeof limitSchema?.maximum !== 'number') {
     return undefined;
   }
-  return { pageProp: page.pageProp, minimum: limitSchema?.minimum, maximum: limitSchema?.maximum };
+  return {
+    pageProp: page.pageProp,
+    minimum: limitSchema?.minimum,
+    maximum: limitSchema?.maximum,
+    branches: page.branches,
+  };
 }
 
 function planLimitMutations(minimum?: number, maximum?: number): { kind: string; value: number }[] {
@@ -44,6 +51,23 @@ function planLimitMutations(minimum?: number, maximum?: number): { kind: string;
   return out;
 }
 
+/**
+ * `page` is a oneOf: a body only satisfies ONE branch, so a mutated `limit`
+ * only counts as contract-invalid if it violates every branch's own
+ * minimum/maximum, not just the branch we derived the mutation from. A
+ * branch with no `limit` constraint at all (or no `limit` property) accepts
+ * any value, which sinks the whole oneOf back to valid.
+ */
+function violatesEveryBranch(branches: SchemaFragment[], value: number): boolean {
+  return branches.every((b) => {
+    const lim = b.properties?.limit;
+    if (!lim) return false;
+    if (typeof lim.minimum === 'number' && value < lim.minimum) return true;
+    if (typeof lim.maximum === 'number' && value > lim.maximum) return true;
+    return false;
+  });
+}
+
 export function generatePaginationLimitInvalid(
   ops: OperationModel[],
   opts: Opts,
@@ -55,7 +79,9 @@ export function generatePaginationLimitInvalid(
     if (!field) continue;
     const baseline = buildBaselineBody(op);
     if (!isRecord(baseline)) continue;
-    const mutations = planLimitMutations(field.minimum, field.maximum);
+    const mutations = planLimitMutations(field.minimum, field.maximum).filter((mut) =>
+      violatesEveryBranch(field.branches, mut.value),
+    );
     let produced = 0;
     for (const mut of mutations) {
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;

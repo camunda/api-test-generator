@@ -38,6 +38,10 @@ function pageLimit(body: unknown): number | undefined {
   return typeof limit === 'number' ? limit : undefined;
 }
 
+function oneOfBranches(pageSchema: SchemaFragment): SchemaFragment[] {
+  return pageSchema.allOf?.[0]?.oneOf ?? [];
+}
+
 // camunda-hub shape: page's oneOf has only 2 branches (no cursor pagination).
 const hubPageSchema: SchemaFragment = {
   allOf: [
@@ -95,7 +99,12 @@ describe('request-validation: pagination limit field detection (#501)', () => {
       path: '/files/search',
       requestBodySchema: { type: 'object', properties: { page: hubPageSchema } },
     });
-    expect(findPaginationLimitField(o)).toEqual({ pageProp: 'page', minimum: 1, maximum: 10000 });
+    expect(findPaginationLimitField(o)).toEqual({
+      pageProp: 'page',
+      minimum: 1,
+      maximum: 10000,
+      branches: oneOfBranches(hubPageSchema),
+    });
   });
 
   it('finds the {limit}-only branch in a 4-branch (oca) page oneOf, ignoring from/after/before branches', () => {
@@ -104,7 +113,12 @@ describe('request-validation: pagination limit field detection (#501)', () => {
       path: '/process-instances/search',
       requestBodySchema: { type: 'object', properties: { page: ocaPageSchema } },
     });
-    expect(findPaginationLimitField(o)).toEqual({ pageProp: 'page', minimum: 1, maximum: 10000 });
+    expect(findPaginationLimitField(o)).toEqual({
+      pageProp: 'page',
+      minimum: 1,
+      maximum: 10000,
+      branches: oneOfBranches(ocaPageSchema),
+    });
   });
 
   it("finds `page` when it sits inside the ROOT schema's own allOf branch (real-spec shape)", () => {
@@ -123,7 +137,12 @@ describe('request-validation: pagination limit field detection (#501)', () => {
         ],
       },
     });
-    expect(findPaginationLimitField(o)).toEqual({ pageProp: 'page', minimum: 1, maximum: 10000 });
+    expect(findPaginationLimitField(o)).toEqual({
+      pageProp: 'page',
+      minimum: 1,
+      maximum: 10000,
+      branches: oneOfBranches(hubPageSchema),
+    });
   });
 
   it('returns undefined when there is no page property', () => {
@@ -187,8 +206,29 @@ describe('request-validation: pagination limit field detection (#501)', () => {
   });
 });
 
-describe('request-validation: pagination-limit-invalid generation (#501)', () => {
-  it('emits below/way-below-minimum and above/way-above-maximum scenarios for a hub-style page', () => {
+// A oneOf where every branch caps `limit` at the SAME maximum — unlike
+// hubPageSchema/ocaPageSchema, no branch here is unbounded, so a value above
+// that shared maximum violates every branch and above-maximum mutations
+// stay valid to emit (#541).
+const allCappedPageSchema: SchemaFragment = {
+  allOf: [
+    {
+      oneOf: [
+        { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 10000 } } },
+        {
+          type: 'object',
+          properties: {
+            after: { type: 'string', format: 'base64' },
+            limit: { type: 'integer', minimum: 1, maximum: 10000 },
+          },
+        },
+      ],
+    },
+  ],
+};
+
+describe('request-validation: pagination-limit-invalid generation (#501, #541)', () => {
+  it('emits only below/way-below-minimum for a hub-style page — its offset branch has no maximum (#541)', () => {
     const ops = [
       op({
         operationId: 'searchFiles',
@@ -197,7 +237,7 @@ describe('request-validation: pagination-limit-invalid generation (#501)', () =>
       }),
     ];
     const out = generatePaginationLimitInvalid(ops, {});
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(2);
     for (const s of out) {
       expect(s.type).toBe('pagination-limit-invalid');
       expect(s.expectedStatus).toBe(400);
@@ -210,15 +250,29 @@ describe('request-validation: pagination-limit-invalid generation (#501)', () =>
       expect(isPlainObject(page) && Object.keys(page)).toEqual(['limit']);
     }
     const values = out.map((s) => pageLimit(s.requestBody)).sort((a, b) => (a ?? 0) - (b ?? 0));
-    expect(values).toEqual([-99, 0, 10001, 10100]);
+    expect(values).toEqual([-99, 0]);
   });
 
-  it('emits the same 4 scenarios for an oca-style page (cursor branches ignored)', () => {
+  it('emits only below/way-below-minimum for an oca-style page too — its offset branch has no maximum, even though the cursor branches do (#541)', () => {
     const ops = [
       op({
         operationId: 'searchProcessInstances',
         path: '/process-instances/search',
         requestBodySchema: { type: 'object', properties: { page: ocaPageSchema } },
+      }),
+    ];
+    const out = generatePaginationLimitInvalid(ops, {});
+    expect(out).toHaveLength(2);
+    const values = out.map((s) => pageLimit(s.requestBody)).sort((a, b) => (a ?? 0) - (b ?? 0));
+    expect(values).toEqual([-99, 0]);
+  });
+
+  it('keeps above/way-above-maximum when every branch caps limit at the same maximum (#541)', () => {
+    const ops = [
+      op({
+        operationId: 'searchWidgets',
+        path: '/widgets/search',
+        requestBodySchema: { type: 'object', properties: { page: allCappedPageSchema } },
       }),
     ];
     const out = generatePaginationLimitInvalid(ops, {});
@@ -254,7 +308,7 @@ describe('request-validation: pagination-limit-invalid generation (#501)', () =>
     const out = generatePaginationLimitInvalid(ops, {
       onlyOperations: new Set(['searchProjects']),
     });
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(2);
     expect(out.every((s) => s.operationId === 'searchProjects')).toBe(true);
   });
 
@@ -266,7 +320,7 @@ describe('request-validation: pagination-limit-invalid generation (#501)', () =>
         requestBodySchema: { type: 'object', properties: { page: hubPageSchema } },
       }),
     ];
-    const out = generatePaginationLimitInvalid(ops, { capPerOperation: 2 });
-    expect(out).toHaveLength(2);
+    const out = generatePaginationLimitInvalid(ops, { capPerOperation: 1 });
+    expect(out).toHaveLength(1);
   });
 });
