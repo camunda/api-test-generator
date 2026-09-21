@@ -137,16 +137,7 @@ def parse_block(block: str, base: str, api_version: str):
         # top-level `;`, so the first `;\n` is the statement end.
         bm = re.search(r"const requestBody[^=]*=\s*(.+?);\s*\n", block, re.S)
         if bm:
-            # Playwright's `data:` option sends a JS *string* value as raw text
-            # (no re-encoding), and JSON-serializes anything else. Mirror that
-            # here: JSON.stringify()-ing a primitive string body (e.g. the
-            # body-top-type-mismatch scenario's `requestBody = "notNumber"`)
-            # would wrongly wrap it in an extra pair of quotes, sending a
-            # different wire payload than Playwright actually does.
-            body_json = node(
-                f"const __v = ({bm.group(1)}); "
-                "process.stdout.write(typeof __v === 'string' ? __v : JSON.stringify(__v))"
-            )
+            body_json = node(f"process.stdout.write(JSON.stringify(({bm.group(1)})))")
     # --- expected status + metadata (quote-agnostic) ---
     am = re.search(r"assertResponseStatus\(\s*testInfo,\s*res,\s*(\d{3})", block)
     expected = int(am.group(1)) if am else None
