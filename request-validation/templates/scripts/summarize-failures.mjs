@@ -157,9 +157,17 @@ function printKnownIssues(configPath) {
     return;
   }
   const knownIssues = Array.isArray(config?.knownIssues) ? config.knownIssues : [];
-  if (knownIssues.length === 0) return;
+  // This script reads the config file directly (unlike the generator, which
+  // validates it via config.ts's isKnownIssue before ever reaching this
+  // point) and runs with `if: always()`, so a malformed entry must be
+  // skipped, not thrown — throwing here would take down the whole summary
+  // step for every profile, not just the known-issues section.
+  const valid = knownIssues.filter(
+    (ki) => ki && typeof ki === 'object' && typeof ki.summary === 'string' && typeof ki.url === 'string',
+  );
+  if (valid.length === 0) return;
   console.log('Known issues (suite-wide, does not affect the counts below):');
-  for (const { summary, url } of knownIssues) {
+  for (const { summary, url } of valid) {
     console.log(`  - ${summary}`);
     console.log(`    ${url}`);
   }
