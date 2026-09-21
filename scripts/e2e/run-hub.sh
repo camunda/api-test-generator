@@ -54,26 +54,15 @@ mint() { # client_id client_secret
 echo "▶ config=$CONFIG  hub=$POS_URL  steps='$STEPS'  rv-profiles='$RV_PROFILES'"
 
 # --- tokens ---
-# Only minted when a step that actually needs a live Hub/Keycloak is
-# requested (`run` mints for the Playwright run + resource fixtures, `curl`
-# mints for the curl oracle). A `STEPS=generate` (offline codegen only, no
-# live broker) run must not require Keycloak to be up — minting unconditionally
-# here previously hard-failed generate-only invocations against a Hub that was
-# never started.
-ADMIN_TOK=""
-DENY_TOK=""
-DENY_HEADER=""
-if step run || step curl; then
-  # `|| true`: under set -euo pipefail a mint failure (Keycloak down / non-JSON
-  # response) would abort the assignment before the friendly check below runs.
-  ADMIN_TOK="$(mint c8-client c8-secret || true)"
-  [ -n "$ADMIN_TOK" ] || { echo "✗ could not mint c8-client token — is Hub/Keycloak up?"; exit 1; }
-  DENY_TOK="$(mint c8-client-deny c8-deny-secret || true)"
-  # Empty header (not `Bearer `) when the token is missing, so the oracle skips
-  # deny scenarios instead of re-issuing them with an invalid Authorization header.
-  [ -n "$DENY_TOK" ] && DENY_HEADER="Authorization: Bearer $DENY_TOK"
-  [ -n "$DENY_TOK" ] || echo "⚠ no c8-client-deny token (rbac/403 deny scenarios will be skipped by the oracle)"
-fi
+# `|| true`: under set -euo pipefail a mint failure (Keycloak down / non-JSON
+# response) would abort the assignment before the friendly check below runs.
+ADMIN_TOK="$(mint c8-client c8-secret || true)"
+[ -n "$ADMIN_TOK" ] || { echo "✗ could not mint c8-client token — is Hub/Keycloak up?"; exit 1; }
+DENY_TOK="$(mint c8-client-deny c8-deny-secret || true)"
+# Empty header (not `Bearer `) when the token is missing, so the oracle skips
+# deny scenarios instead of re-issuing them with an invalid Authorization header.
+DENY_HEADER=""; [ -n "$DENY_TOK" ] && DENY_HEADER="Authorization: Bearer $DENY_TOK"
+[ -n "$DENY_TOK" ] || echo "⚠ no c8-client-deny token (rbac/403 deny scenarios will be skipped by the oracle)"
 
 # ===== resource fixtures (#352) =====================================
 # Create REAL resources so a malformed-field negative test rides on an otherwise
@@ -160,7 +149,7 @@ make_fixtures() {
     [ -n "${!var-}" ] || echo "  ⚠ RV_FIXTURE_${k} is empty — its create call failed; affected tests will see 404/403"
   done
 }
-if step run || step curl; then
+if step run; then
   echo "── resource fixtures (#352) ──────────────"
   make_fixtures || echo "  ⚠ fixture creation failed — affected tests may see 404/403 instead of 400"
 fi
