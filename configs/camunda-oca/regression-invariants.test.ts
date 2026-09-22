@@ -16,6 +16,7 @@ import {
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
+import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -3549,23 +3550,75 @@ describeForThisConfig(
       expect(problems).toEqual([]);
     });
 
-    // Scoped to the checked-in config's current default
-    // (independentAuthGateMode: 'unavailable' — RequestValidationConfig's
-    // DEFAULTS in config.ts). If camunda-oca's config ever sets
-    // independentAuthGateMode: 'available', this invariant should be
-    // replaced with one asserting real negative-validation coverage exists
-    // for these operations instead (per that field's doc comment).
-    it('independentAuthGate operations carry no scenario kind beyond auth-absent/auth-invalid under independentAuthGateMode: "unavailable" (class-scoped)', () => {
+    // Reads the ACTIVE independentAuthGateMode rather than assuming the
+    // default: the PR's own test plan is to flip camunda-oca's config to
+    // 'available' once real cluster-admin credentials exist, at which
+    // point 400/etc. scenarios for these operations are correctly restored
+    // (RequestValidationConfig.independentAuthGateMode's doc comment) — a
+    // version of this invariant hardcoded to the 'unavailable' shape would
+    // then fail on that correct, intended behavior.
+    it("independentAuthGate operations' non-auth scenario coverage matches the active independentAuthGateMode (class-scoped)", () => {
       requireDir(UNSECURED_DIR);
       requireDir(SECURED_DIR);
       const gatedOpIds = loadIndependentlyGatedOperationIds();
+      const rvConfig = loadRequestValidationConfig(REPO_ROOT, CONFIG_NAME);
       const offenders: string[] = [];
-      for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
-        for (const [opId, kinds] of gatedOpScenarioKinds(dir, gatedOpIds)) {
-          for (const kind of kinds) {
-            if (kind !== 'auth-absent' && kind !== 'auth-invalid') {
-              offenders.push(`${dir}: ${opId} unexpectedly has scenarioKind '${kind}'`);
+      if (rvConfig.independentAuthGateMode === 'unavailable') {
+        // No independentAuthGate operation can reach body/param validation
+        // without the missing credential set, so none should carry any
+        // scenario kind beyond auth-absent/auth-invalid.
+        for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+          for (const [opId, kinds] of gatedOpScenarioKinds(dir, gatedOpIds)) {
+            for (const kind of kinds) {
+              if (kind !== 'auth-absent' && kind !== 'auth-invalid') {
+                offenders.push(
+                  `${dir}: ${opId} unexpectedly has scenarioKind '${kind}' under 'unavailable' mode`,
+                );
+              }
             }
+          }
+        }
+      } else {
+        // 'available': a real credential set is supplied, so negative-
+        // validation coverage should exist again for at least some gated
+        // operations with an applicable non-auth kind. Deliberately an
+        // aggregate ("at least one"), not a per-operation check: several
+        // gated operations coincidentally hit pre-existing, project-wide
+        // generator gaps unrelated to independentAuthGate (e.g.
+        // param-type-mismatch is missing for 141 operations across the
+        // whole spec, gated and non-gated alike — see COVERAGE.md's "True
+        // Gaps" summary), so "this one op has zero non-auth coverage" is
+        // not by itself evidence of an independentAuthGateMode regression.
+        // A regression that wipes non-auth coverage for EVERY gated
+        // operation (the actual failure mode a bug in the filtering step
+        // could cause) still trips this.
+        const coveragePath = join(RV_DIR, 'COVERAGE.json');
+        if (!existsSync(coveragePath)) {
+          throw new Error(
+            `COVERAGE.json not found at ${coveragePath}. Run 'npm run generate:request-validation' first.`,
+          );
+        }
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const coverage = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+          operations?: { operationId: string; applicableKindCount?: number }[];
+        };
+        const applicableCountByOp = new Map(
+          (coverage.operations ?? []).map((o) => [o.operationId, o.applicableKindCount ?? 0]),
+        );
+        const opsWithApplicableNonAuthKind = Array.from(gatedOpIds).filter(
+          (opId) => (applicableCountByOp.get(opId) ?? 0) > 2,
+        );
+        for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+          const byOp = gatedOpScenarioKinds(dir, gatedOpIds);
+          const hasAnyNonAuthCoverage = opsWithApplicableNonAuthKind.some((opId) =>
+            Array.from(byOp.get(opId) ?? []).some(
+              (k) => k !== 'auth-absent' && k !== 'auth-invalid',
+            ),
+          );
+          if (opsWithApplicableNonAuthKind.length > 0 && !hasAnyNonAuthCoverage) {
+            offenders.push(
+              `${dir}: no independentAuthGate operation has any negative-validation coverage under 'available' mode`,
+            );
           }
         }
       }
