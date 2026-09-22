@@ -3410,23 +3410,20 @@ describeForThisConfig(
     //    "any non-empty security array" (securityRequiresConditional's exact
     //    semantics — a scheme with no `x-enforcement` annotation, or an
     //    anonymous `{}` alternative, must NOT count).
+    const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
+
     interface SpecOperationLite {
       operationId?: string;
       security?: unknown[];
       servers?: { url?: string }[];
     }
-    interface SpecPathItemLite {
+    // Method keys derived from HTTP_METHODS (not hand-listed again) so the
+    // two can't silently drift apart if a method is ever added or removed.
+    interface SpecPathItemLite
+      extends Partial<Record<(typeof HTTP_METHODS)[number], SpecOperationLite>> {
       servers?: { url?: string }[];
       security?: unknown[];
-      get?: SpecOperationLite;
-      put?: SpecOperationLite;
-      post?: SpecOperationLite;
-      delete?: SpecOperationLite;
-      patch?: SpecOperationLite;
-      head?: SpecOperationLite;
-      options?: SpecOperationLite;
     }
-    const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
 
     function securityReferencesConditionalScheme(
       security: unknown,
