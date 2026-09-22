@@ -3477,6 +3477,27 @@ describeForThisConfig(
       return ids;
     }
 
+    // Per-gated-operation scenarioKind sets present in a profile directory.
+    // Shared by the two independentAuthGateMode invariants below.
+    function gatedOpScenarioKinds(
+      dir: string,
+      gatedOpIds: ReadonlySet<string>,
+    ): Map<string, Set<string>> {
+      const byOp = new Map<string, Set<string>>();
+      for (const f of specFiles(dir)) {
+        const src = readFileSync(join(dir, f), 'utf8');
+        for (const text of splitTestBlocks(src)) {
+          const opMatch = /operationId:\s*['"]([^'"]+)['"]/.exec(text);
+          const kindMatch = /scenarioKind:\s*['"]([^'"]+)['"]/.exec(text);
+          if (!opMatch || !kindMatch || !gatedOpIds.has(opMatch[1])) continue;
+          const set = byOp.get(opMatch[1]) ?? new Set<string>();
+          set.add(kindMatch[1]);
+          byOp.set(opMatch[1], set);
+        }
+      }
+      return byOp;
+    }
+
     it('never expects a 401 in the unsecured profile, except for independentAuthGate operations (class-scoped)', () => {
       requireDir(UNSECURED_DIR);
       const gatedOpIds = loadIndependentlyGatedOperationIds();
@@ -3500,6 +3521,54 @@ describeForThisConfig(
       // (or an implausibly small number of) real test blocks, leaving
       // `offenders` vacuously empty regardless of file content.
       expect(blocksScanned).toBeGreaterThan(100);
+      expect(offenders).toEqual([]);
+    });
+
+    it('independentAuthGate operations get identical, complete auth-absent/auth-invalid coverage in both unsecured and secured profiles', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      const gatedOpIds = loadIndependentlyGatedOperationIds();
+      // Sanity: don't let this pass vacuously if the spec ever loses its
+      // independentAuthGate operations entirely.
+      expect(gatedOpIds.size).toBeGreaterThan(0);
+      const unsecuredByOp = gatedOpScenarioKinds(UNSECURED_DIR, gatedOpIds);
+      const securedByOp = gatedOpScenarioKinds(SECURED_DIR, gatedOpIds);
+      const problems: string[] = [];
+      for (const opId of gatedOpIds) {
+        const u = Array.from(unsecuredByOp.get(opId) ?? []).sort();
+        const s = Array.from(securedByOp.get(opId) ?? []).sort();
+        if (JSON.stringify(u) !== JSON.stringify(s)) {
+          problems.push(`${opId}: unsecured=[${u.join(',')}] secured=[${s.join(',')}]`);
+        }
+        if (!u.includes('auth-absent') || !u.includes('auth-invalid')) {
+          problems.push(
+            `${opId}: missing auth-absent/auth-invalid coverage (has [${u.join(',')}])`,
+          );
+        }
+      }
+      expect(problems).toEqual([]);
+    });
+
+    // Scoped to the checked-in config's current default
+    // (independentAuthGateMode: 'unavailable' — RequestValidationConfig's
+    // DEFAULTS in config.ts). If camunda-oca's config ever sets
+    // independentAuthGateMode: 'available', this invariant should be
+    // replaced with one asserting real negative-validation coverage exists
+    // for these operations instead (per that field's doc comment).
+    it('independentAuthGate operations carry no scenario kind beyond auth-absent/auth-invalid under independentAuthGateMode: "unavailable" (class-scoped)', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      const gatedOpIds = loadIndependentlyGatedOperationIds();
+      const offenders: string[] = [];
+      for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+        for (const [opId, kinds] of gatedOpScenarioKinds(dir, gatedOpIds)) {
+          for (const kind of kinds) {
+            if (kind !== 'auth-absent' && kind !== 'auth-invalid') {
+              offenders.push(`${dir}: ${opId} unexpectedly has scenarioKind '${kind}'`);
+            }
+          }
+        }
+      }
       expect(offenders).toEqual([]);
     });
 
