@@ -30,11 +30,16 @@ from pathlib import Path
 TEST_RE = re.compile(r"test\(\s*(['\"])(?P<title>.*?)\1\s*,", re.S)
 
 # Exact copy of request-validation support/http.ts buildUrl (API_VERSION = 'v2').
+# `useRoot` (4th arg, PR #564): cluster-admin operations override their
+# server to the bare host root, dropping the document's /v2 base — without
+# this, the oracle replays /v2/cluster/v2/... instead of /cluster/v2/...
+# and gets a false 404/401 mismatch against every such scenario.
 BUILD_URL_JS = r"""
 const base = process.argv[1];
 const API_VERSION = process.argv[2];
-function buildUrl(pathTemplate, params, query) {
-  let url = `${base}/${API_VERSION}${pathTemplate}`.replace(/\{(\w+)}/g, (_, k) => {
+function buildUrl(pathTemplate, params, query, useRoot) {
+  const versionSegment = useRoot ? "" : `/${API_VERSION}`;
+  let url = `${base}${versionSegment}${pathTemplate}`.replace(/\{(\w+)}/g, (_, k) => {
     const v = params && params[k];
     return v == null ? "__MISSING_PARAM__" : String(v);
   });
