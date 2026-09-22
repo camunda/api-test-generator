@@ -1753,6 +1753,56 @@ export function buildRequestBodyFromCanonical(
       if (!scenario.bindings[varName]) scenario.bindings[varName] = PENDING_BINDING;
       setLeafPlaceholder(template, fieldPath, `${'${'}${varName}}`);
     }
+    // #403 (A2a) — batch-operation `filter` objects have every sub-property
+    // individually optional, so the required-only pass above (and
+    // `synthesizeObjectFromPrefix`) correctly, but insufficiently, leaves
+    // `filter` as `{}` or omits it outright. These endpoints additionally
+    // enforce an unmodelled "at least one of N" cross-field constraint (see
+    // #403's repro against `/v2/process-instances/cancellation` et al.).
+    //
+    // Prefer a leaf whose value can be a self-contained literal — boolean or
+    // enum — over one that needs a real, chained key. A `${varName}` bind
+    // (the approach the #408/#168 block above uses for REQUIRED filter
+    // leaves) only resolves to a real value when the planner's earlier BFS
+    // phase actually scheduled a producer chain for it; for an OPTIONAL leaf
+    // nothing schedules that chain, so the var falls back to
+    // `seedBinding`'s generic random string. Verified live against a real
+    // broker: binding `filter.processDefinitionKey` that way sends e.g.
+    // `"processDefinitionKeyVar-lr968e"`, which the server 400s with "not a
+    // valid key. Expected a numeric value." — trading one 400 for another.
+    // A boolean/enum literal has no such format constraint, so it can't hit
+    // this failure mode. Checked against the live bundled spec: every batch
+    // operation that actually has a body `filter` (cancel/delete/resolve
+    // Incidents/migrate/modify ProcessInstancesBatchOperation,
+    // deleteDecisionInstancesBatchOperation) has at least one such leaf
+    // (`hasIncident`/`hasRetriesLeft`/`hasElementInstanceIncident`, or
+    // `decisionDefinitionType`'s enum). If a future/other batch op's filter
+    // has ONLY key-typed leaves, `candidate` stays undefined and `filter`
+    // is left as `{}`, same as before this fix — no worse than today.
+    if (isBatchOperationOpId(opId)) {
+      const currentFilter = template.filter;
+      const filterIsEmpty =
+        currentFilter === undefined ||
+        (isPlainRecord(currentFilter) && Object.keys(currentFilter).length === 0);
+      if (filterIsEmpty) {
+        const filterPrefix = 'filter.';
+        const candidate = nodes.find((n) => {
+          if (!n.path.startsWith(filterPrefix)) return false;
+          const inner = n.path.slice(filterPrefix.length);
+          // Direct children only (matches synthesizeObjectFromPrefix's own
+          // depth restriction) — no nested `.` or array `[]` segment.
+          if (inner.length === 0 || inner.includes('.') || inner.includes('[]')) return false;
+          return n.type === 'boolean' || !!n.enum?.length;
+        });
+        if (candidate) {
+          const inner = candidate.path.slice(filterPrefix.length);
+          const literal = candidate.enum?.length ? candidate.enum[0] : true;
+          const filterObj = isPlainRecord(template.filter) ? template.filter : {};
+          filterObj[inner] = literal;
+          template.filter = filterObj;
+        }
+      }
+    }
     // Removed prior absolute guard (folded into unified omission pass above).
     return { kind: 'json' as const, template };
   }

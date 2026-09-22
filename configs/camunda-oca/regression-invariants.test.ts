@@ -16,6 +16,7 @@ import {
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
+import { isBatchOperationOpId } from '../../path-analyser/src/index.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -7619,6 +7620,27 @@ describeForThisConfig(
         // If ANY leaf under this top-level field is required, the
         // field's presence in the body is justified.
         if (fieldLeaves.some((l) => l.required)) continue;
+        // #403 / A2a — batch-operation `filter` objects have every leaf
+        // optional by schema, but the server enforces an unmodelled
+        // "at least one of N" cross-field constraint (see #403). The
+        // body-builder force-fills exactly one boolean/enum `filter.*`
+        // leaf with a literal to satisfy it. This is not incidental
+        // optional-variant leakage (the #247 guard this test enforces) —
+        // it's the only way the feature-base scenario can be satisfiable
+        // at all, since no combination of `required` flags can express
+        // "at least one of these optional properties". Exempt narrowly:
+        // field is `filter`, the operation matches the batch-operation
+        // heuristic, and exactly one leaf got filled.
+        if (
+          field === 'filter' &&
+          isBatchOperationOpId(finalStep.operationId) &&
+          value !== null &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          Object.keys(value).length === 1
+        ) {
+          continue;
+        }
         // Empty scaffolding for schema-required object/array fields
         // (`filter: {}`, `elements: []`, `mappingInstructions: [{...}]`)
         // is the minimal-required body shape — the canonical body
