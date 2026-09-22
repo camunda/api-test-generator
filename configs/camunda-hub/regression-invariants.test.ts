@@ -47,6 +47,11 @@ const RV_SECURED_VERSIONS_PATH = join(
   'secured',
   'versions-validation-api-tests.spec.ts',
 );
+const RV_SECURED_CATALOG_PATH = join(
+  getRequestValidationSuiteDir(REPO_ROOT),
+  'secured',
+  'catalog-validation-api-tests.spec.ts',
+);
 
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'options', 'head', 'trace']);
 
@@ -180,9 +185,28 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   });
 
   it('searchCatalogAssetFileUsages has a non-empty generated positive-suite feature spec', () => {
+    // Guarded on bundle presence like the suppression check above: this op
+    // could be absent from an older pinned bundle, and an unconditional
+    // readGeneratedSpec would throw loudly on ENOENT rather than reporting a
+    // clean, actionable failure — same reasoning as bundleOperationIds()'s
+    // other conditional guard.
+    if (!bundleOperationIds().has('searchCatalogAssetFileUsages')) return;
     const spec = readGeneratedSpec('searchCatalogAssetFileUsages.feature.spec.ts');
     expect(spec, 'searchCatalogAssetFileUsages.feature.spec.ts has no emitted test').toContain(
       'test(',
+    );
+  });
+
+  // The positive-suite guards above have no negative-suite counterpart: the
+  // request-validation generator doesn't fail on an absent operation, so
+  // re-adding searchCatalogAssetFileUsages to excludeOperations later would
+  // leave the nightly green while silently dropping the promised negative
+  // coverage. Same bundle-presence guard as above.
+  it('searchCatalogAssetFileUsages keeps negative-suite coverage', () => {
+    if (!bundleOperationIds().has('searchCatalogAssetFileUsages')) return;
+    const spec = readRequired(RV_SECURED_CATALOG_PATH);
+    expect(spec, 'searchCatalogAssetFileUsages has no negative-suite tests').toContain(
+      "test('searchCatalogAssetFileUsages",
     );
   });
 
