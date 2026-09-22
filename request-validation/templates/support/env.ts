@@ -140,7 +140,7 @@ let clusterAdminPartialCredsWarned = false;
  */
 export function clusterAdminAuthHeaders(): Record<string, string> {
   const { username, password } = clusterAdminCredentials;
-  if (username && password) return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+  if (username && password) return basicAuthHeaders(username, password);
   if ((username || password) && !clusterAdminPartialCredsWarned) {
     clusterAdminPartialCredsWarned = true;
     console.warn(
