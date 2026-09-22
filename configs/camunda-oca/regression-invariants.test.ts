@@ -3370,13 +3370,74 @@ describeForThisConfig(
       }
     });
 
-    it('never expects a 401 in the unsecured profile (class-scoped)', () => {
+    // independentAuthGate operations (OperationModel.independentAuthGate,
+    // request-validation/src/model/types.ts — currently the Orchestration
+    // Cluster REST API's cluster-admin ops) sit behind a security chain
+    // that's enforced unconditionally, independent of this unsecured/secured
+    // toggle, so their auth-absent/auth-invalid (401) coverage is the one
+    // deliberate exception to the invariant below: it's generated into BOTH
+    // profiles, not secured-only. Computed straight from the bundled spec
+    // (a path item overriding `servers`, whose effective `security` is
+    // non-empty) rather than importing the generator, to keep this file's
+    // existing bundled-spec-JSON-only dependency shape.
+    interface SpecOperationLite {
+      operationId?: string;
+      security?: unknown[];
+    }
+    interface SpecPathItemLite {
+      servers?: unknown[];
+      security?: unknown[];
+      get?: SpecOperationLite;
+      put?: SpecOperationLite;
+      post?: SpecOperationLite;
+      delete?: SpecOperationLite;
+      patch?: SpecOperationLite;
+      head?: SpecOperationLite;
+      options?: SpecOperationLite;
+    }
+    const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
+
+    function loadIndependentlyGatedOperationIds(): Set<string> {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as {
+        security?: unknown[];
+        paths?: Record<string, SpecPathItemLite>;
+      };
+      const globalSecurity = spec.security;
+      const ids = new Set<string>();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        if (!pathItem.servers) continue; // only cluster-admin path items override servers
+        for (const method of HTTP_METHODS) {
+          const op = pathItem[method];
+          if (!op?.operationId) continue;
+          const effectiveSecurity = op.security ?? pathItem.security ?? globalSecurity;
+          if (Array.isArray(effectiveSecurity) && effectiveSecurity.length > 0) {
+            ids.add(op.operationId);
+          }
+        }
+      }
+      return ids;
+    }
+
+    it('never expects a 401 in the unsecured profile, except for independentAuthGate operations (class-scoped)', () => {
       requireDir(UNSECURED_DIR);
+      const gatedOpIds = loadIndependentlyGatedOperationIds();
+      const TEST_BLOCK = /test\([^]*?}\);/g;
       const offenders: string[] = [];
       for (const f of specFiles(UNSECURED_DIR)) {
         const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
-        if (/scenarioKind:\s*['"]auth-absent['"]/.test(src)) offenders.push(`${f}: auth-absent`);
-        if (/assertResponseStatus\([^)]*,\s*401\s*,/.test(src)) offenders.push(`${f}: 401`);
+        let block: RegExpExecArray | null;
+        TEST_BLOCK.lastIndex = 0;
+        while ((block = TEST_BLOCK.exec(src)) !== null) {
+          const text = block[0];
+          const isAuthAbsentOr401 =
+            /scenarioKind:\s*['"]auth-absent['"]/.test(text) ||
+            /assertResponseStatus\([^)]*,\s*401\s*,/.test(text);
+          if (!isAuthAbsentOr401) continue;
+          const opMatch = /operationId:\s*['"]([^'"]+)['"]/.exec(text);
+          if (opMatch && gatedOpIds.has(opMatch[1])) continue; // expected exception
+          offenders.push(`${f}: ${opMatch?.[1] ?? '(unknown op)'} unexpectedly expects 401`);
+        }
       }
       expect(offenders).toEqual([]);
     });
