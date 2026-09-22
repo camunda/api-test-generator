@@ -294,5 +294,19 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       spec,
       'updateVersion__explicitNull__name should stay excluded — see request-validation.json',
     ).not.toContain('updateVersion__explicitNull__name');
+    // The exclusion is scoped to just these two scenario kinds — prove that
+    // narrowly, not just that *some* updateVersion test survives (which the
+    // generic negative-coverage check above would pass even if this
+    // exclusion had over-widened to drop everything else too).
+    for (const stillCovered of [
+      "test('updateVersion - Body wrong top-level type'",
+      "test('updateVersion - Constraint violation name (#1)'",
+      "test('updateVersion - Missing authentication'",
+    ]) {
+      expect(
+        spec,
+        `${stillCovered} should still be covered — the exclusion should not have widened beyond missing-required/explicit-null-required`,
+      ).toContain(stillCovered);
+    }
   });
 });
