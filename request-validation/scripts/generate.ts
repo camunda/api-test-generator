@@ -189,7 +189,7 @@ async function main() {
   }
   // #419 — drop config-excluded operations up front so every generator skips
   // them (blocked-upstream ops whose negative tests can't reach their target,
-  // e.g. Hub's searchCatalogAssetFileUsages per camunda-hub#28913). One filter
+  // e.g. Hub's getClusterUsageMetrics per camunda-hub#26448). One filter
   // here beats threading an exclude set through every generate*() call.
   //
   // An entry with `scenarioKinds` is narrower (#500-era addition, e.g.

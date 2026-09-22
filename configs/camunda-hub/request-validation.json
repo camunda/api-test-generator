@@ -21,14 +21,6 @@
   },
   "excludeOperations": [
     {
-      "operationId": "searchCatalogAssetFileUsages",
-      "reason": "Same cause as the positive-suite exclusion: the route is implemented (camunda/camunda-hub#28713) but camunda/hub:SNAPSHOT hasn't published since 2026-09-12 (inc-8019 froze SNAPSHOT tag pushes), so every route-dependent negative case (missing-required, malformed body, param checks, etc.) still hits the pre-#28713 404. Its 2 auth-absent/auth-invalid cases are separately otherwise-valid, still-passing 401 coverage — Spring Security's filter chain runs before route resolution, so those aren't affected by the missing route; excluding the whole op drops those 2 too, same disclosed tradeoff as ingestCatalogAssets/getClusterUsageMetrics above.",
-      "knownIssue": {
-        "summary": "searchCatalogAssetFileUsages 404s because camunda/hub:SNAPSHOT is frozen (inc-8019), not a route gap",
-        "url": "https://github.com/camunda/camunda-hub/issues/28913"
-      }
-    },
-    {
       "operationId": "ingestCatalogAssets",
       "reason": "Its missing-required-multipart-part cases hit camunda-hub#26448 (ProblemDetail missing `type` on Spring's own framework-level validation errors). Its 2 auth-absent/auth-invalid cases are separately the camunda-hub#26447 pattern (see knownProblemDetailShapeGaps below) — those two ARE otherwise-valid, still-passing status-code coverage; excluding the whole op drops them too rather than building a third (operationId + scenarioKind) suppression mechanism just to save 2 tests per op across the 2 ops affected here. Accepted as a small, disclosed cost, not a coverage-neutral exclusion.",
       "knownIssue": {

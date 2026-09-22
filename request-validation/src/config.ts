@@ -120,8 +120,8 @@ export interface RequestValidationConfig {
    * Operations to exclude from negative-suite generation, with a documented
    * reason. Use for ops that are blocked upstream so their negative tests
    * can't reach the validation path they target (e.g. Hub's
-   * searchCatalogAssetFileUsages — the route 404s because camunda/hub:SNAPSHOT
-   * hasn't caught up to it yet, camunda/camunda-hub#28913).
+   * getClusterUsageMetrics — its query-param validation errors return a
+   * ProblemDetail missing `type`, camunda/camunda-hub#26448).
    *
    * By default (no `scenarioKinds`) the WHOLE op is dropped (all its negative
    * cases), so the nightly stays green on known blockers instead of
