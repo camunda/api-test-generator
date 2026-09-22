@@ -3383,6 +3383,7 @@ describeForThisConfig(
     interface SpecOperationLite {
       operationId?: string;
       security?: unknown[];
+      servers?: unknown[];
     }
     interface SpecPathItemLite {
       servers?: unknown[];
@@ -3406,10 +3407,14 @@ describeForThisConfig(
       const globalSecurity = spec.security;
       const ids = new Set<string>();
       for (const pathItem of Object.values(spec.paths ?? {})) {
-        if (!pathItem.servers) continue; // only cluster-admin path items override servers
         for (const method of HTTP_METHODS) {
           const op = pathItem[method];
           if (!op?.operationId) continue;
+          // Mirror loadSpec()'s server precedence exactly: operation-level
+          // `servers` overrides path-item-level (loader.ts's `opServers ??
+          // pathLevelServers`), not just the path-item's.
+          const hasServerOverride = op.servers !== undefined || pathItem.servers !== undefined;
+          if (!hasServerOverride) continue;
           const effectiveSecurity = op.security ?? pathItem.security ?? globalSecurity;
           if (Array.isArray(effectiveSecurity) && effectiveSecurity.length > 0) {
             ids.add(op.operationId);
