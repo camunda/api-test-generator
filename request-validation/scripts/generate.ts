@@ -1263,6 +1263,19 @@ async function main() {
       if (f.hasConstraints) applicable.add('constraint-violation');
       if (f.hasFormats) applicable.add('format-invalid');
     }
+    // independentAuthGateMode: 'unavailable' drops every non-auth scenario
+    // for independentAuthGate operations before this point (see the
+    // filtering step above) because they can never reach body/param
+    // validation without the missing credential set. Without this guard,
+    // every kind the schema *would* otherwise support gets reported as a
+    // missing applicable kind — a false coverage gap for an intentional,
+    // documented limitation, not a real one. Restrict applicability to the
+    // kinds that actually can (and do) run: auth-absent/auth-invalid.
+    if (rvConfig.independentAuthGateMode === 'unavailable' && op.independentAuthGate === true) {
+      for (const k of Array.from(applicable)) {
+        if (k !== 'auth-absent' && k !== 'auth-invalid') applicable.delete(k);
+      }
+    }
     // Include actually present kinds in applicability to prevent >100%
     for (const pk of present) if (!applicable.has(pk)) applicable.add(pk);
     const rawPct = present.size ? (present.size / allKinds.length) * 100 : 0;
