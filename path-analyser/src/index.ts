@@ -1283,6 +1283,28 @@ function synthesizeArrayElement(basePath: string, nodes: CanonicalNode[]): unkno
   return synthesizeObjectFromPrefix(prefix, nodes);
 }
 
+// #403 (A2a) — cheap, explicitly provisional heuristic for "this operation
+// enforces an unmodelled cross-field 'at least one filter criterion'
+// constraint": operationId ends in `BatchOperation`, matching every
+// endpoint #403 lists (cancelBatchOperation, cancelProcessInstancesBatchOperation,
+// deleteDecisionInstancesBatchOperation, deleteProcessInstancesBatchOperation,
+// resolveIncidentsBatchOperation, migrateProcessInstancesBatchOperation,
+// modifyProcessInstancesBatchOperation, suspendBatchOperation,
+// resumeBatchOperation). This is a naming-convention proxy, not a
+// schema-derived fact: `minProperties` isn't modelled anywhere in the
+// canonical shape/graph loader, so there's currently no ontology-level way
+// to express "at least one of these optional properties is required".
+// Deliberately kept as its own, easily-revertible unit — if this heuristic
+// proves too broad or too narrow against the live spec, revert this
+// function and its one call site without touching the leaf-binding logic
+// that consumes it. The principled replacement is an ABox-declared
+// constraint (mirroring the role-based pattern `isJobActivatorOp`/
+// `isDeploymentGatewayOp` use in `./ontology/operationRoles.js`) rather
+// than a hard-coded name check.
+export function isBatchOperationOpId(opId: string): boolean {
+  return /BatchOperation$/.test(opId);
+}
+
 export function buildRequestBodyFromCanonical(
   opId: string,
   scenario: EndpointScenario,
