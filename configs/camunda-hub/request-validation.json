@@ -57,6 +57,18 @@
         "summary": "updateVersion accepts a top-level JSON string and binds it into name via an implicit Jackson delegating constructor",
         "url": "https://github.com/camunda/camunda-hub/issues/28911"
       }
+    },
+    {
+      "operationId": "updateVersion",
+      "scenarioKinds": [
+        "missing-required",
+        "explicit-null-required"
+      ],
+      "reason": "VersionUpdateRequest.name became required in camunda-hub#29029, but updateVersion doesn't enforce it: PATCH with {} or {\"name\": null} both return 200 and silently leave name unchanged, instead of 400. Not a stale-image artifact — verified live against camunda/hub:SNAPSHOT built 2026-09-22, a day after #29029 merged. Not a systemic PATCH-doesn't-validate-required-fields pattern either: the identical shape (FileUpdateRequest.revision, also required) is enforced correctly today (updateFile - Missing revision and updateFile__explicitNull__revision both 400 as expected) — updateVersion's name is the outlier. Narrowed to these two scenario kinds; updateVersion's other negative tests pass and stay covered.",
+      "knownIssue": {
+        "summary": "updateVersion doesn't enforce name as required despite the schema marking it so",
+        "url": "https://github.com/camunda/camunda-hub/issues/29306"
+      }
     }
   ],
   "knownIssues": [
