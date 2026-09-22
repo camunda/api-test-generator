@@ -282,22 +282,40 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
       POS_FIXTURE_CATALOG_ASSET_KEY="$pos_delete_asset_key" \
       PLAYWRIGHT_HTML_REPORT="$pos_abs_out/pw-positive-deleteCatalogAsset-html" \
       PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs_out/pw-positive-deleteCatalogAsset.json" \
+      PLAYWRIGHT_JUNIT_OUTPUT_FILE="$pos_abs_out/pw-positive-deleteCatalogAsset.junit.xml" \
       npx playwright test -c path-analyser/playwright.config.ts --grep deleteCatalogAsset; then
       echo "  ✓ Playwright passed: deleteCatalogAsset (isolated)"
     else
       PW_FAIL=1
       echo "  ✗ Playwright reported test failures for deleteCatalogAsset (isolated)"
     fi
-    if [ -f "$pos_abs_out/pw-positive-deleteCatalogAsset.json" ]; then
-      python3 "$(dirname "${BASH_SOURCE[0]}")/merge-playwright-json.py" \
-        "$pos_abs_out/pw-positive.json" "$pos_abs_out/pw-positive-deleteCatalogAsset.json"
-      rm -rf "$pos_abs_out/pw-positive-deleteCatalogAsset.json" "$pos_abs_out/pw-positive-deleteCatalogAsset-html"
-    else
-      echo "  ⚠ deleteCatalogAsset's isolated run produced no JSON report — it will be missing from pw-positive.json" >&2
-      PW_FAIL=1
-    fi
+    # Merge both reporter outputs — the JSON (consumed by triage tooling)
+    # AND the JUnit XML, which the nightly publishes directly to TestRail
+    # (nightly-camunda-hub.yml's TestRail step) as "the" positive suite
+    # result; without merging it too, deleteCatalogAsset would be silently
+    # absent from that published record even though it's present in the
+    # merged JSON. Each merge call is independent — a missing/unmergeable
+    # base report degrades to a clear warning (already covered by the
+    # PW_FAIL the failing main pass set) rather than crashing the rest of
+    # this script under `set -euo pipefail`.
+    merge_script="$(dirname "${BASH_SOURCE[0]}")/merge-playwright-report.py"
+    for base_name in pw-positive.json pw-positive.junit.xml; do
+      delta="$pos_abs_out/pw-positive-deleteCatalogAsset.${base_name#pw-positive.}"
+      base="$pos_abs_out/$base_name"
+      if [ -f "$delta" ]; then
+        python3 "$merge_script" "$base" "$delta" || {
+          echo "  ⚠ could not merge $delta into $base — see the error above" >&2
+          PW_FAIL=1
+        }
+        rm -f "$delta"
+      else
+        echo "  ⚠ deleteCatalogAsset's isolated run produced no $(basename "$delta") — it will be missing from $base_name" >&2
+        PW_FAIL=1
+      fi
+    done
+    rm -rf "$pos_abs_out/pw-positive-deleteCatalogAsset-html"
   else
-    echo "  ⚠ deleteCatalogAsset's dedicated asset could not be ingested — its positive test will be missing from pw-positive.json" >&2
+    echo "  ⚠ deleteCatalogAsset's dedicated asset could not be ingested — its positive test will be missing from pw-positive.json/pw-positive.junit.xml" >&2
     PW_FAIL=1
   fi
 
