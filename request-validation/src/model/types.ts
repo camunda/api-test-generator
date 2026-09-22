@@ -91,6 +91,20 @@ export interface OperationModel {
    * `buildUrl`'s `useRoot` parameter in `templates/support/http.ts`.
    */
   serverOverride?: string;
+  /**
+   * True when the operation sits behind a security chain that is enforced
+   * *unconditionally* — independent of the unsecured/secured deployment-mode
+   * axis that `conditionalAuth`/`secured` model — and requires its own,
+   * separate credential set. Currently exactly the Orchestration Cluster REST
+   * API's cluster-admin operations (`ClusterAdminBasicSecurityConfiguration`):
+   * they reuse the `bearerAuth`/`basicAuth` scheme names but do not accept the
+   * regular admin credentials, so a deployment's unsecured/secured toggle has
+   * no bearing on them. Derived as `serverOverride !== undefined &&
+   * conditionalAuth === true` (see `loader.ts`), which also correctly excludes
+   * the two public cluster-admin path items (`getClusterStatus`,
+   * `getClusterUpgradeStatus`, `security: []`).
+   */
+  independentAuthGate?: boolean;
 }
 
 export interface ParameterModel {

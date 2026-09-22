@@ -93,6 +93,29 @@ export interface RequestValidationConfig {
    */
   authDenyMode: 'slice' | 'all-secured';
   /**
+   * Whether a real credential set is available at runtime for operations
+   * with `OperationModel.independentAuthGate` (e.g. the Orchestration
+   * Cluster REST API's cluster-admin operations — see that field's doc
+   * comment) — a security chain that is always enforced, independent of the
+   * unsecured/secured deployment-mode toggle, and that does not accept the
+   * regular admin credentials.
+   *
+   * - `'unavailable'` (default) — no such credential set exists anywhere for
+   *   this API yet, so a request to one of these operations is always
+   *   unauthenticated and can never reach body/parameter validation. The
+   *   generator drops negative-validation scenarios for these operations
+   *   (they'd assert an unreachable 400) and instead generates only
+   *   auth-absent/auth-invalid (401) coverage, emitted into *both* the
+   *   `unsecured` and `secured` profiles (this axis doesn't depend on that
+   *   toggle).
+   * - `'available'` — a real credential set is supplied at runtime (see
+   *   `CLUSTER_ADMIN_BASIC_AUTH_USER`/`PASSWORD` in the vendored
+   *   `templates/support/env.ts`). Negative-validation scenarios for these
+   *   operations are kept and rendered with that credential set instead of
+   *   the regular admin one.
+   */
+  independentAuthGateMode: 'unavailable' | 'available';
+  /**
    * Maps resource-key names (path params AND body fields, e.g. `fileKey`,
    * `projectKey`, `workspaceKey`) to the env var holding a REAL key created by
    * the runner before tests run. Wherever the generator would otherwise emit a
@@ -197,6 +220,7 @@ const DEFAULTS: RequestValidationConfig = {
   unenforcedStringFormats: [],
   authAbsentMode: 'conditional',
   authDenyMode: 'slice',
+  independentAuthGateMode: 'unavailable',
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -329,6 +353,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.authDenyMode = v;
+  }
+  if ('independentAuthGateMode' in parsed) {
+    const v = parsed.independentAuthGateMode;
+    if (v !== 'unavailable' && v !== 'available') {
+      throw new Error(
+        `Invalid ${configPath}: "independentAuthGateMode" must be "unavailable" or "available", got ${JSON.stringify(v)}.`,
+      );
+    }
+    merged.independentAuthGateMode = v;
   }
   if ('resourceFixtures' in parsed) {
     const v = parsed.resourceFixtures;

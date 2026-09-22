@@ -110,3 +110,49 @@ export function jsonHeaders(): Record<string, string> {
     ...authHeaders(),
   };
 }
+
+/**
+ * Credentials for the Orchestration Cluster REST API's cluster-admin
+ * operations (`ClusterAdminBasicSecurityConfiguration`) — a security chain
+ * that is always enforced, independent of the unsecured/secured deployment
+ * mode, and separate from the main OCA admin user (`credentials` above): an
+ * Orchestration Cluster user session does not authenticate against it even
+ * when it reuses the same `bearerAuth`/`basicAuth` scheme names. Basic-only,
+ * no Bearer fallback (the chain has none today).
+ */
+export interface ClusterAdminCredentials {
+  username?: string;
+  password?: string;
+}
+
+export const clusterAdminCredentials: ClusterAdminCredentials = {
+  username: process.env.CLUSTER_ADMIN_BASIC_AUTH_USER || undefined,
+  password: process.env.CLUSTER_ADMIN_BASIC_AUTH_PASSWORD || undefined,
+};
+
+let clusterAdminPartialCredsWarned = false;
+
+/**
+ * Authorization header for cluster-admin operations. Returns `{}` when no
+ * (or only one of the two) `CLUSTER_ADMIN_BASIC_AUTH_*` env vars are set —
+ * only meaningful once `independentAuthGateMode: 'available'` generates
+ * scenarios that use it (see RequestValidationConfig).
+ */
+export function clusterAdminAuthHeaders(): Record<string, string> {
+  const { username, password } = clusterAdminCredentials;
+  if (username && password) return { Authorization: `Basic ${encode(`${username}:${password}`)}` };
+  if ((username || password) && !clusterAdminPartialCredsWarned) {
+    clusterAdminPartialCredsWarned = true;
+    console.warn(
+      '[auth] Only one of CLUSTER_ADMIN_BASIC_AUTH_USER / CLUSTER_ADMIN_BASIC_AUTH_PASSWORD is set — Basic auth requires both. The partial credential is ignored.',
+    );
+  }
+  return {};
+}
+
+export function clusterAdminJsonHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...clusterAdminAuthHeaders(),
+  };
+}

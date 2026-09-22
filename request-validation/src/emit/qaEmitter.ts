@@ -41,6 +41,15 @@ interface EmitOpts {
    * of the ~30 scenario-generator modules in `src/analysis/`.
    */
   serverOverridesByOperationId?: Readonly<Record<string, string>>;
+  /**
+   * operationIds with `OperationModel.independentAuthGate` (see its doc
+   * comment) — an always-on security chain independent of the
+   * unsecured/secured deployment-mode axis, using a separate credential set.
+   * A `headersAuth: true` scenario for one of these operations renders its
+   * Authorization header via `clusterAdminAuthHeaders()`/`clusterAdminJsonHeaders()`
+   * instead of the regular `authHeaders()`/`jsonHeaders()`.
+   */
+  independentlyGatedOperationIds?: ReadonlySet<string>;
 }
 
 export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
@@ -89,6 +98,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       opts.pathResourceFixtures,
       opts.problemDetailShapeSkipKinds,
       opts.serverOverridesByOperationId,
+      opts.independentlyGatedOperationIds,
     );
     let formatted: string;
     try {
@@ -117,6 +127,7 @@ function buildFile(
   pathResourceFixtures?: Record<string, string>,
   problemDetailShapeSkipKinds?: ReadonlySet<ScenarioKind>,
   serverOverridesByOperationId?: Readonly<Record<string, string>>,
+  independentlyGatedOperationIds?: ReadonlySet<string>,
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
@@ -124,12 +135,14 @@ function buildFile(
   // Generated files lint with noUnusedImports, so import only the http helpers
   // the file's scenarios actually reference. Each condition must mirror the
   // `headersExpr` selection below exactly:
-  //   - auth-deny             -> denyProbeHeaders()  (read-side RBAC deny)
-  //   - auth + multipart      -> authHeaders()       (Authorization only, no JSON
-  //                                                    content-type that would
-  //                                                    break the multipart boundary)
-  //   - auth + non-multipart  -> jsonHeaders()
-  //   - otherwise             -> {} (no helper)
+  //   - auth-deny                     -> denyProbeHeaders()  (read-side RBAC deny)
+  //   - auth + multipart              -> authHeaders()       (Authorization only, no JSON
+  //                                                            content-type that would
+  //                                                            break the multipart boundary)
+  //   - auth + non-multipart          -> jsonHeaders()
+  //   - independentAuthGate + multipart     -> clusterAdminAuthHeaders()
+  //   - independentAuthGate + non-multipart -> clusterAdminJsonHeaders()
+  //   - otherwise                     -> {} (no helper)
   const usesDenyProbe = scenarios.some((s) => s.type === 'auth-deny');
   // auth-deny relies on denyProbeHeaders(), which only exists in the vendored
   // standalone support module. Legacy QA-tree mode imports helpers from the
@@ -171,18 +184,55 @@ function buildFile(
         '(--no-standalone / --qa-import-depth).',
     );
   }
+  const isIndependentlyGated = (s: ValidationScenario) =>
+    independentlyGatedOperationIds?.has(s.operationId) === true;
   const usesAuthHeaders = scenarios.some(
-    (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding === 'multipart',
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding === 'multipart' &&
+      !isIndependentlyGated(s),
   );
   const usesJsonHeaders = scenarios.some(
-    (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding !== 'multipart',
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding !== 'multipart' &&
+      !isIndependentlyGated(s),
   );
+  // independentAuthGate scenarios (e.g. cluster-admin ops, under
+  // independentAuthGateMode: 'available') authenticate with a separate
+  // credential set — see EmitOpts.independentlyGatedOperationIds's doc
+  // comment — so they import distinct helpers rather than authHeaders/jsonHeaders.
+  const usesClusterAdminAuthHeaders = scenarios.some(
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding === 'multipart' &&
+      isIndependentlyGated(s),
+  );
+  const usesClusterAdminJsonHeaders = scenarios.some(
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding !== 'multipart' &&
+      isIndependentlyGated(s),
+  );
+  if ((usesClusterAdminAuthHeaders || usesClusterAdminJsonHeaders) && !standalone) {
+    throw new Error(
+      'independentAuthGate scenarios (e.g. cluster-admin operations under independentAuthGateMode: ' +
+        "'available') require the standalone support module (clusterAdminAuthHeaders/clusterAdminJsonHeaders); " +
+        'they are not supported in legacy QA-tree mode (--no-standalone / --qa-import-depth).',
+    );
+  }
   // `assertResponseStatus` exists only in the standalone support module; legacy
   // QA-tree mode falls back to a bare `expect(...).toBe(...)` assertion.
   const httpHelpers = [
     usesAuthHeaders ? 'authHeaders' : null,
     usesDenyProbe ? 'denyProbeHeaders' : null,
     usesJsonHeaders ? 'jsonHeaders' : null,
+    usesClusterAdminAuthHeaders ? 'clusterAdminAuthHeaders' : null,
+    usesClusterAdminJsonHeaders ? 'clusterAdminJsonHeaders' : null,
     'buildUrl',
     standalone ? 'assertResponseStatus' : null,
   ].filter((x): x is string => x !== null);
@@ -228,6 +278,7 @@ function buildFile(
         pathResourceFixtures,
         problemDetailShapeSkipKinds?.has(s.type) ?? false,
         serverOverridesByOperationId?.[s.operationId],
+        independentlyGatedOperationIds?.has(s.operationId) === true,
       ),
     );
   }
@@ -300,6 +351,7 @@ function renderScenario(
   pathResourceFixtures?: Record<string, string>,
   skipProblemDetailShape: boolean = false,
   serverOverride?: string,
+  independentlyGated: boolean = false,
 ): string {
   const fixtures = resourceFixtures ?? {};
   // Path params use the base map with path-only overrides merged on top.
@@ -378,9 +430,13 @@ function renderScenario(
           // never the admin, so the authorizations-enabled server denies the request.
           'denyProbeHeaders()'
         : s.headersAuth
-          ? s.bodyEncoding === 'multipart'
-            ? 'authHeaders()'
-            : 'jsonHeaders()'
+          ? independentlyGated
+            ? s.bodyEncoding === 'multipart'
+              ? 'clusterAdminAuthHeaders()'
+              : 'clusterAdminJsonHeaders()'
+            : s.bodyEncoding === 'multipart'
+              ? 'authHeaders()'
+              : 'jsonHeaders()'
           : '{}';
   const dataPart =
     s.bodyEncoding === 'multipart' && s.multipartForm

@@ -159,6 +159,7 @@ async function main() {
     unenforcedStringFormats: [],
     authAbsentMode: 'conditional',
     authDenyMode: 'slice',
+    independentAuthGateMode: 'unavailable',
   };
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
@@ -171,7 +172,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode}, independentAuthGateMode=${rvConfig.independentAuthGateMode})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -187,6 +188,12 @@ async function main() {
       serverOverridesByOperationId[op.operationId] = op.serverOverride;
     }
   }
+  // Operations gated by an always-on security chain independent of the
+  // unsecured/secured deployment-mode axis (see OperationModel.independentAuthGate
+  // and RequestValidationConfig.independentAuthGateMode's doc comments).
+  const independentlyGatedOperationIds = new Set(
+    model.operations.filter((op) => op.independentAuthGate === true).map((op) => op.operationId),
+  );
   // #419 — drop config-excluded operations up front so every generator skips
   // them (blocked-upstream ops whose negative tests can't reach their target,
   // e.g. Hub's searchCatalogAssetFileUsages per camunda-hub#28913). One filter
@@ -833,6 +840,40 @@ async function main() {
     deduped.push(...filtered);
   }
 
+  // ---- independentAuthGate filtering ----
+  // Operations gated by an always-on, separate-credential security chain
+  // (independentAuthGate — see its doc comment) can never reach body/param
+  // validation without that credential set. When independentAuthGateMode is
+  // 'unavailable' (default — no such credential set exists for this API
+  // yet), a negative-validation scenario for one of these operations would
+  // assert an unreachable 400/404/etc., so it's dropped here; auth-absent /
+  // auth-invalid / auth-deny are untouched (they assert the 401/403 that
+  // actually occurs). Under 'available' this step is a no-op — real
+  // credentials are supplied, so those scenarios are kept and rendered with
+  // them (see qaEmitter's use of independentlyGatedOperationIds).
+  if (rvConfig.independentAuthGateMode === 'unavailable' && independentlyGatedOperationIds.size) {
+    const filtered: ValidationScenario[] = [];
+    let removed = 0;
+    for (const s of deduped) {
+      if (
+        independentlyGatedOperationIds.has(s.operationId) &&
+        s.type !== 'auth-absent' &&
+        s.type !== 'auth-invalid' &&
+        s.type !== 'auth-deny'
+      ) {
+        removed++;
+        continue;
+      }
+      filtered.push(s);
+    }
+    if (removed)
+      console.log(
+        `[generate] independentAuthGateMode='unavailable' dropped ${removed} unreachable negative-validation scenarios for cluster-admin-style operations`,
+      );
+    deduped.length = 0;
+    deduped.push(...filtered);
+  }
+
   // ---- Profile split: parallel unsecured / secured / rbac suites ----
   // The negative-validation tests (400s) are deployment-mode-agnostic and run
   // in both unsecured and secured. The 401 tests — auth-absent (no credentials)
@@ -852,12 +893,31 @@ async function main() {
   // `authAbsentMode`: in `'conditional'` (default) that means no
   // `x-enforcement: conditional` op; in `'all-secured'` it means no op mandates
   // auth (e.g. an entirely public API).
+  //
+  // independentAuthGate operations are a fourth case: their gate is enforced
+  // unconditionally, independent of the unsecured/secured toggle, so their
+  // auth-absent/auth-invalid coverage belongs in BOTH profiles rather than
+  // `secured` only. The `unsecured` filter below ADDS that exception on top
+  // of the normal rule rather than replacing it — under
+  // independentAuthGateMode: 'available', a gated op's negative-validation
+  // (400) scenarios must still flow through into `unsecured` too, same as any
+  // other operation's, since a real cluster-admin credential set would
+  // authenticate successfully there as well (its gate doesn't care about the
+  // deployment-mode toggle). Under 'unavailable' those scenarios were already
+  // dropped from `deduped` above, so this exception is the only thing that
+  // fires for gated ops in that mode.
   const PROFILES = [
     {
       name: 'unsecured',
-      scenarios: deduped.filter(
-        (s) => s.type !== 'auth-absent' && s.type !== 'auth-invalid' && s.type !== 'auth-deny',
-      ),
+      scenarios: deduped.filter((s) => {
+        if (
+          independentlyGatedOperationIds.has(s.operationId) &&
+          (s.type === 'auth-absent' || s.type === 'auth-invalid')
+        ) {
+          return true;
+        }
+        return s.type !== 'auth-absent' && s.type !== 'auth-invalid' && s.type !== 'auth-deny';
+      }),
     },
     { name: 'secured', scenarios: deduped.filter((s) => s.type !== 'auth-deny') },
     { name: 'rbac', scenarios: deduped.filter((s) => s.type === 'auth-deny') },
@@ -882,6 +942,7 @@ async function main() {
       pathResourceFixtures: rvConfig.pathResourceFixtures,
       problemDetailShapeSkipKinds,
       serverOverridesByOperationId,
+      independentlyGatedOperationIds,
     });
   }
   console.log('[generate] Summary:', {
