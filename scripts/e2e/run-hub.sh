@@ -274,20 +274,39 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # report — sees it as part of the same suite.
   pos_delete_asset_key="$(ingest_catalog_asset test-catalog-asset-deletable.json readme-deletable.md)"
   if [ -n "$pos_delete_asset_key" ]; then
+    # Clear any leftovers from a previous, possibly-crashed invocation
+    # FIRST: if Playwright is interrupted before its reporters write, a
+    # stale file here would otherwise get merged into this run below,
+    # publishing a result for a test that never actually executed this
+    # time.
+    rm -rf \
+      "$pos_abs_out/pw-positive-deleteCatalogAsset.json" \
+      "$pos_abs_out/pw-positive-deleteCatalogAsset.junit.xml" \
+      "$pos_abs_out/pw-positive-deleteCatalogAsset-html"
     # Redirect the HTML reporter too — its config-relative default path is a
     # TRACKED baseline file (path-analyser/playwright-report/index.html);
     # without this override this isolated run overwrites it on every local
-    # run. It's discarded below, same as the merged-away JSON delta.
+    # run. Deleted below only on a pass — on a failure it's kept under $OUT
+    # (same tree as pw-positive/, so it's captured by whatever already
+    # uploads that): the positive suite has no request/response attachment
+    # mechanism at all, so this HTML report is the ONLY failure diagnostic
+    # for this test, same as pw-positive/ is for the main pass.
+    pos_delete_html_report="$pos_abs_out/pw-positive-deleteCatalogAsset-html"
+    pos_delete_passed=1
     if BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
       POS_FIXTURE_CATALOG_ASSET_KEY="$pos_delete_asset_key" \
-      PLAYWRIGHT_HTML_REPORT="$pos_abs_out/pw-positive-deleteCatalogAsset-html" \
+      PLAYWRIGHT_HTML_REPORT="$pos_delete_html_report" \
       PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs_out/pw-positive-deleteCatalogAsset.json" \
       PLAYWRIGHT_JUNIT_OUTPUT_FILE="$pos_abs_out/pw-positive-deleteCatalogAsset.junit.xml" \
       npx playwright test -c path-analyser/playwright.config.ts --grep deleteCatalogAsset; then
       echo "  ✓ Playwright passed: deleteCatalogAsset (isolated)"
     else
       PW_FAIL=1
+      pos_delete_passed=0
       echo "  ✗ Playwright reported test failures for deleteCatalogAsset (isolated)"
+      if [ -f "$pos_delete_html_report/index.html" ]; then
+        echo "  ⚠ deleteCatalogAsset (isolated) failure report kept: $pos_delete_html_report/index.html"
+      fi
     fi
     # Merge both reporter outputs — the JSON (consumed by triage tooling)
     # AND the JUnit XML, which the nightly publishes directly to TestRail
@@ -313,7 +332,7 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
         PW_FAIL=1
       fi
     done
-    rm -rf "$pos_abs_out/pw-positive-deleteCatalogAsset-html"
+    [ "$pos_delete_passed" = 1 ] && rm -rf "$pos_delete_html_report"
   else
     echo "  ⚠ deleteCatalogAsset's dedicated asset could not be ingested — its positive test will be missing from pw-positive.json/pw-positive.junit.xml" >&2
     PW_FAIL=1
