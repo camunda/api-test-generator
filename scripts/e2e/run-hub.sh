@@ -93,8 +93,8 @@ import json,sys
 try: print(json.load(sys.stdin).get('$1',''))
 except Exception: pass
 " 2>/dev/null || true; }
-# Ingest the shipped catalog-asset fixture and print its assetKey ('' on any
-# failure). Every op on /catalog/assets/{assetKey} (deleteCatalogAsset,
+# Ingest a catalog-asset fixture and print its assetKey ('' on any failure).
+# Every op on /catalog/assets/{assetKey} (deleteCatalogAsset,
 # searchCatalogAssetProjectUsages) binds the path variable to a CatalogAsset via
 # findById, so assetKey is the asset's SERVER-minted UUID (openapi keys.yaml →
 # CatalogAssetKey) — NOT the element template's `id`, which the API exposes
@@ -102,18 +102,29 @@ except Exception: pass
 # `readme` + `template`) answers 204 with no body, so searchCatalogAssets —
 # which returns `assetKey` alongside `resourceId` — is the only way to learn the
 # key. Ingestion dedupes on resourceId per organization, so calling this twice
-# is a no-op on the second pass. Progress goes to stderr: stdout is the key.
+# with the SAME template is a no-op on the second pass. Progress goes to
+# stderr: stdout is the key.
+#
+# Optional $1/$2 override the template/readme filenames (default:
+# test-catalog-asset.json / readme.md, the shared read-only fixture used by
+# search ops). deleteCatalogAsset's positive test genuinely deletes whatever
+# asset it's pointed at, so it must NOT share that fixture with
+# searchCatalogAssetProjectUsages/searchCatalogAssetFileUsages, which expect
+# it to keep existing — it gets its own (test-catalog-asset-deletable.json /
+# readme-deletable.md, a different resourceId so ingestion dedup doesn't
+# collide with the shared one) — see run_positive's isolated second pass.
 CATALOG_FIX_DIR="configs/${CONFIG}/fixtures/catalog"
 ingest_catalog_asset() {
+  local template="${1:-test-catalog-asset.json}" readme="${2:-readme.md}"
   local rid key
-  rid="$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/test-catalog-asset.json'))['id'])" 2>/dev/null || true)"
+  rid="$(python3 -c "import json;print(json.load(open('$CATALOG_FIX_DIR/$template'))['id'])" 2>/dev/null || true)"
   if [ -z "$rid" ]; then
     echo "  ⚠ catalog fixture template unreadable — ops on /catalog/assets/{assetKey} will 404" >&2
     return 0
   fi
   if ! curl -sf -X PUT "$POS_URL/catalog/assets/ingestion" -H "Authorization: Bearer $ADMIN_TOK" \
-    -F "readme=@${CATALOG_FIX_DIR}/readme.md;type=text/markdown" \
-    -F "template=@${CATALOG_FIX_DIR}/test-catalog-asset.json;type=application/json" >/dev/null 2>&1; then
+    -F "readme=@${CATALOG_FIX_DIR}/${readme};type=text/markdown" \
+    -F "template=@${CATALOG_FIX_DIR}/${template};type=application/json" >/dev/null 2>&1; then
     echo "  ⚠ catalog asset ingest failed — ops on /catalog/assets/{assetKey} may 404" >&2
     return 0
   fi
@@ -237,6 +248,11 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
   # sets PW_FAIL, which fails the run at the end unless E2E_SOFT=1. The html/json
   # reporters still write their output on failure, so the report is captured
   # either way.
+  # deleteCatalogAsset (#598) is excluded from this main pass and run
+  # separately below, against its own disposable asset — it genuinely
+  # deletes whatever asset it's pointed at, so it can't share the fixture
+  # searchCatalogAssetProjectUsages/searchCatalogAssetFileUsages expect to
+  # keep existing throughout the run.
   if BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
     POS_FIXTURE_MEMBER_EMAIL="$POS_FIXTURE_MEMBER_EMAIL" \
     POS_FIXTURE_CATALOG_ASSET_KEY="$POS_FIXTURE_CATALOG_ASSET_KEY" \
@@ -244,12 +260,47 @@ if step run && [ -z "${SKIP_POSITIVE:-}" ]; then
     PLAYWRIGHT_HTML_REPORT="$pos_abs_out/pw-positive" \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs_out/pw-positive.json" \
     PLAYWRIGHT_JUNIT_OUTPUT_FILE="$pos_abs_out/pw-positive.junit.xml" \
-    npx playwright test -c path-analyser/playwright.config.ts; then
+    npx playwright test -c path-analyser/playwright.config.ts --grep-invert deleteCatalogAsset; then
     echo "  ✓ Playwright passed: positive"
   else
     PW_FAIL=1
     echo "  ✗ Playwright reported test failures in the positive suite"
   fi
+
+  # deleteCatalogAsset, isolated (#598): its own disposable asset (a
+  # different resourceId from the shared fixture, so ingestion dedup doesn't
+  # collide), run alone, then merged into pw-positive.json so downstream
+  # nightly/PR-check triage — which expects exactly one positive-suite
+  # report — sees it as part of the same suite.
+  pos_delete_asset_key="$(ingest_catalog_asset test-catalog-asset-deletable.json readme-deletable.md)"
+  if [ -n "$pos_delete_asset_key" ]; then
+    # Redirect the HTML reporter too — its config-relative default path is a
+    # TRACKED baseline file (path-analyser/playwright-report/index.html);
+    # without this override this isolated run overwrites it on every local
+    # run. It's discarded below, same as the merged-away JSON delta.
+    if BEARER_TOKEN="$ADMIN_TOK" API_BASE_URL="$POS_URL" CONFIG="$CONFIG" \
+      POS_FIXTURE_CATALOG_ASSET_KEY="$pos_delete_asset_key" \
+      PLAYWRIGHT_HTML_REPORT="$pos_abs_out/pw-positive-deleteCatalogAsset-html" \
+      PLAYWRIGHT_JSON_OUTPUT_FILE="$pos_abs_out/pw-positive-deleteCatalogAsset.json" \
+      npx playwright test -c path-analyser/playwright.config.ts --grep deleteCatalogAsset; then
+      echo "  ✓ Playwright passed: deleteCatalogAsset (isolated)"
+    else
+      PW_FAIL=1
+      echo "  ✗ Playwright reported test failures for deleteCatalogAsset (isolated)"
+    fi
+    if [ -f "$pos_abs_out/pw-positive-deleteCatalogAsset.json" ]; then
+      python3 "$(dirname "${BASH_SOURCE[0]}")/merge-playwright-json.py" \
+        "$pos_abs_out/pw-positive.json" "$pos_abs_out/pw-positive-deleteCatalogAsset.json"
+      rm -rf "$pos_abs_out/pw-positive-deleteCatalogAsset.json" "$pos_abs_out/pw-positive-deleteCatalogAsset-html"
+    else
+      echo "  ⚠ deleteCatalogAsset's isolated run produced no JSON report — it will be missing from pw-positive.json" >&2
+      PW_FAIL=1
+    fi
+  else
+    echo "  ⚠ deleteCatalogAsset's dedicated asset could not be ingested — its positive test will be missing from pw-positive.json" >&2
+    PW_FAIL=1
+  fi
+
   if [ -f "$OUT/pw-positive/index.html" ]; then
     echo "  ✓ positive suite report: $OUT/pw-positive/index.html"
   else

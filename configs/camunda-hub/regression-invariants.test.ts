@@ -160,13 +160,23 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     expect(spec).not.toMatch(/fileKey:\s*'placeholder'/);
   });
 
-  // --- Suppression contract (upstream-blocked ops stay out of the suite) -----
-  it('catalog blocker is explicitly suppressed from the positive suite', () => {
+  // camunda-hub#25576 resolved (verified live 2026-09-22): deleteCatalogAsset
+  // now genuinely deletes a real, ingested-and-read-back assetKey (204,
+  // confirmed gone on re-search). It runs against its own disposable asset
+  // now (scripts/e2e/run-hub.sh, #598), so it must NOT be suppressed —
+  // without this, re-adding it to positive-suppress.json later would pass
+  // every other invariant in this file silently.
+  it('deleteCatalogAsset (unblocked by camunda-hub#25576) is NOT suppressed from the positive suite', () => {
     const suppressed = new Set(explicitlySuppressedOpIds());
-    // deleteCatalogAsset: blocked on #25576 (no obtainable assetKey).
-    for (const op of ['deleteCatalogAsset']) {
-      expect(suppressed.has(op), `${op} should be explicitly suppressed`).toBe(true);
-    }
+    expect(
+      suppressed.has('deleteCatalogAsset'),
+      'deleteCatalogAsset should NOT be suppressed — see positive-suppress.json',
+    ).toBe(false);
+  });
+
+  it('deleteCatalogAsset has a non-empty generated positive-suite feature spec', () => {
+    const spec = readGeneratedSpec('deleteCatalogAsset.feature.spec.ts');
+    expect(spec, 'deleteCatalogAsset.feature.spec.ts has no emitted test').toContain('test(');
   });
 
   // The other half of the contract above: camunda-hub#28913 (SNAPSHOT frozen

@@ -16,14 +16,6 @@
         "summary": "Cluster delete + usage-metrics need a chainable, client-minted clusterId the planner can't source",
         "url": "https://github.com/camunda/camunda-hub/issues/25907"
       }
-    },
-    {
-      "operationId": "deleteCatalogAsset",
-      "reason": "No way to obtain a deletable catalog assetKey via the public API: ingestCatalogAssets succeeds but deleteCatalogAsset then 404s on the ingested asset's id (the ingested element-template isn't resolvable as a deletable asset by that key). Blocked on camunda/camunda-hub#25576. Re-enable once a real assetKey can be sourced.",
-      "knownIssue": {
-        "summary": "deleteCatalogAsset has no obtainable assetKey",
-        "url": "https://github.com/camunda/camunda-hub/issues/25576"
-      }
     }
   ]
 }
