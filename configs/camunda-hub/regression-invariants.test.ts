@@ -181,7 +181,9 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
 
   it('searchCatalogAssetFileUsages has a non-empty generated positive-suite feature spec', () => {
     const spec = readGeneratedSpec('searchCatalogAssetFileUsages.feature.spec.ts');
-    expect(spec, 'searchCatalogAssetFileUsages.feature.spec.ts has no emitted test').toContain('test(');
+    expect(spec, 'searchCatalogAssetFileUsages.feature.spec.ts has no emitted test').toContain(
+      'test(',
+    );
   });
 
   // The other half of the contract above: these 5 ops were blocked on
