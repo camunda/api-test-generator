@@ -3357,6 +3357,26 @@ describeForThisConfig(
         .sort();
     }
 
+    // Slices a generated spec file into one string per `test(...)` call by
+    // finding consecutive top-level `test(` start positions (always emitted
+    // at a 2-space indent by qaEmitter.ts's renderScenario) and cutting
+    // between them — NOT by matching a closing `});`, which is ambiguous:
+    // the request call inside every test body (e.g. `request.delete(url, {
+    // headers: {} });`) also closes with `});` before the outer test's own
+    // closing brace, and a body-content-agnostic lazy match stops at the
+    // first one it finds. (A prior version of this file's invariant did
+    // exactly that and silently never matched past the request call, making
+    // the check vacuously pass — see PR #595 review.) Mirrors the technique
+    // scripts/e2e/curl_compare.py's split_tests() already uses for the same
+    // reason.
+    function splitTestBlocks(src: string): string[] {
+      const starts: number[] = [];
+      const TEST_START = /\n {2}test\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = TEST_START.exec(src)) !== null) starts.push(m.index + 1); // +1: skip the leading \n
+      return starts.map((start, i) => src.slice(start, starts[i + 1] ?? src.length));
+    }
+
     it('emits both profiles as self-contained suites with spec files', () => {
       requireDir(UNSECURED_DIR);
       requireDir(SECURED_DIR);
@@ -3463,14 +3483,12 @@ describeForThisConfig(
     it('never expects a 401 in the unsecured profile, except for independentAuthGate operations (class-scoped)', () => {
       requireDir(UNSECURED_DIR);
       const gatedOpIds = loadIndependentlyGatedOperationIds();
-      const TEST_BLOCK = /test\([^]*?}\);/g;
       const offenders: string[] = [];
+      let blocksScanned = 0;
       for (const f of specFiles(UNSECURED_DIR)) {
         const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
-        let block: RegExpExecArray | null;
-        TEST_BLOCK.lastIndex = 0;
-        while ((block = TEST_BLOCK.exec(src)) !== null) {
-          const text = block[0];
+        for (const text of splitTestBlocks(src)) {
+          blocksScanned++;
           const isAuthAbsentOr401 =
             /scenarioKind:\s*['"]auth-absent['"]/.test(text) ||
             /assertResponseStatus\([^)]*,\s*401\s*,/.test(text);
@@ -3480,6 +3498,11 @@ describeForThisConfig(
           offenders.push(`${f}: ${opMatch?.[1] ?? '(unknown op)'} unexpectedly expects 401`);
         }
       }
+      // Guards against a repeat of the exact regression this test caught in
+      // review: a block-splitting bug that makes the loop above match zero
+      // (or an implausibly small number of) real test blocks, leaving
+      // `offenders` vacuously empty regardless of file content.
+      expect(blocksScanned).toBeGreaterThan(100);
       expect(offenders).toEqual([]);
     });
 
