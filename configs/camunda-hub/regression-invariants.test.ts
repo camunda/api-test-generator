@@ -257,10 +257,12 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   // re-adding updateVersion/restoreVersion to excludeOperations (or otherwise
   // losing their scenarios) would leave the nightly green while silently
   // dropping the promised negative coverage. Assert each version op still
-  // has negative tests, and pin the one intentional gap (updateVersion's
-  // malformed-json-body omission, camunda-hub#28911) so it stays a single
-  // documented exception rather than silently widening.
-  it('each version op keeps negative-suite coverage, with only updateVersion malformed-json-body omitted', () => {
+  // has negative tests, and pin the first of updateVersion's two intentional
+  // gaps (malformed-json-body, camunda-hub#28911 — the second, missing-
+  // required/explicit-null-required, is pinned in the next test below) so
+  // together they stay a fixed, documented pair rather than silently
+  // widening.
+  it('each version op keeps negative-suite coverage, with only updateVersion malformed-json-body omitted here (see the next test for its other gap)', () => {
     const spec = readRequired(RV_SECURED_VERSIONS_PATH);
     for (const op of [
       'createVersion',
@@ -275,5 +277,22 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       spec,
       'updateVersion malformed-json-body should stay excluded — see request-validation.json',
     ).not.toContain('updateVersion__malformedJsonBody');
+  });
+
+  // Pins the second of updateVersion's two intentional gaps (the first,
+  // malformed-json-body, is pinned in the test above): camunda-hub#29306,
+  // updateVersion not enforcing name as required — missing-required and
+  // explicit-null cases. Same reasoning as the pin above; together the two
+  // tests keep the pair fixed rather than letting either widen silently.
+  it('updateVersion missing-required/explicit-null name coverage stays excluded (camunda-hub#29306)', () => {
+    const spec = readRequired(RV_SECURED_VERSIONS_PATH);
+    expect(
+      spec,
+      'updateVersion - Missing name should stay excluded — see request-validation.json',
+    ).not.toContain("test('updateVersion - Missing name'");
+    expect(
+      spec,
+      'updateVersion__explicitNull__name should stay excluded — see request-validation.json',
+    ).not.toContain('updateVersion__explicitNull__name');
   });
 });
