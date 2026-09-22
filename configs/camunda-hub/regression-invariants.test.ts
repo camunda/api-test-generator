@@ -276,4 +276,20 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       'updateVersion malformed-json-body should stay excluded — see request-validation.json',
     ).not.toContain('updateVersion__malformedJsonBody');
   });
+
+  // Pins the second intentional gap (camunda-hub#29306: updateVersion
+  // doesn't enforce name as required, missing-required + explicit-null cases)
+  // so it stays a single documented exception rather than silently widening
+  // — same reasoning as the malformed-json-body pin above.
+  it('updateVersion missing-required/explicit-null name coverage stays excluded (camunda-hub#29306)', () => {
+    const spec = readRequired(RV_SECURED_VERSIONS_PATH);
+    expect(
+      spec,
+      'updateVersion - Missing name should stay excluded — see request-validation.json',
+    ).not.toContain("test('updateVersion - Missing name'");
+    expect(
+      spec,
+      'updateVersion__explicitNull__name should stay excluded — see request-validation.json',
+    ).not.toContain('updateVersion__explicitNull__name');
+  });
 });
