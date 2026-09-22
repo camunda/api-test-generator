@@ -3376,17 +3376,27 @@ describeForThisConfig(
     // that's enforced unconditionally, independent of this unsecured/secured
     // toggle, so their auth-absent/auth-invalid (401) coverage is the one
     // deliberate exception to the invariant below: it's generated into BOTH
-    // profiles, not secured-only. Computed straight from the bundled spec
-    // (a path item overriding `servers`, whose effective `security` is
-    // non-empty) rather than importing the generator, to keep this file's
-    // existing bundled-spec-JSON-only dependency shape.
+    // profiles, not secured-only. Mirrors loader.ts's exact contract
+    // (`independentAuthGate = serverOverride !== undefined && conditionalAuth`)
+    // against the bundled spec JSON, rather than importing the generator, to
+    // keep this file's existing bundled-spec-JSON-only dependency shape:
+    //  - a RESOLVED server override — the op's (or path-item's) `servers[0].url`
+    //    is defined and differs from the document root (resolveServerOverride's
+    //    exact early-exit condition; a spec that fails validation there never
+    //    reaches a successfully generated bundle, so that's the only case this
+    //    invariant needs to reproduce).
+    //  - `conditionalAuth` — the effective `security` (op ?? pathItem ?? global)
+    //    references an `x-enforcement: conditional` scheme by name, not merely
+    //    "any non-empty security array" (securityRequiresConditional's exact
+    //    semantics — a scheme with no `x-enforcement` annotation, or an
+    //    anonymous `{}` alternative, must NOT count).
     interface SpecOperationLite {
       operationId?: string;
       security?: unknown[];
-      servers?: unknown[];
+      servers?: { url?: string }[];
     }
     interface SpecPathItemLite {
-      servers?: unknown[];
+      servers?: { url?: string }[];
       security?: unknown[];
       get?: SpecOperationLite;
       put?: SpecOperationLite;
@@ -3398,27 +3408,53 @@ describeForThisConfig(
     }
     const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
 
+    function securityReferencesConditionalScheme(
+      security: unknown,
+      conditionalSchemes: ReadonlySet<string>,
+    ): boolean | undefined {
+      if (!Array.isArray(security)) return undefined;
+      if (security.length === 0) return false;
+      for (const requirement of security) {
+        if (requirement && typeof requirement === 'object') {
+          for (const schemeName of Object.keys(requirement)) {
+            if (conditionalSchemes.has(schemeName)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
     function loadIndependentlyGatedOperationIds(): Set<string> {
       // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
       const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as {
+        servers?: { url?: string }[];
         security?: unknown[];
+        components?: { securitySchemes?: Record<string, { 'x-enforcement'?: string }> };
         paths?: Record<string, SpecPathItemLite>;
       };
+      const documentRootUrl = spec.servers?.[0]?.url;
+      const conditionalSchemes = new Set<string>();
+      for (const [name, scheme] of Object.entries(spec.components?.securitySchemes ?? {})) {
+        if (scheme?.['x-enforcement'] === 'conditional') conditionalSchemes.add(name);
+      }
       const globalSecurity = spec.security;
       const ids = new Set<string>();
       for (const pathItem of Object.values(spec.paths ?? {})) {
         for (const method of HTTP_METHODS) {
           const op = pathItem[method];
           if (!op?.operationId) continue;
-          // Mirror loadSpec()'s server precedence exactly: operation-level
-          // `servers` overrides path-item-level (loader.ts's `opServers ??
-          // pathLevelServers`), not just the path-item's.
-          const hasServerOverride = op.servers !== undefined || pathItem.servers !== undefined;
-          if (!hasServerOverride) continue;
-          const effectiveSecurity = op.security ?? pathItem.security ?? globalSecurity;
-          if (Array.isArray(effectiveSecurity) && effectiveSecurity.length > 0) {
-            ids.add(op.operationId);
-          }
+          // Operation-level `servers` takes precedence over path-item-level
+          // (loader.ts's `opServers ?? pathLevelServers`).
+          const rawOverride = (op.servers ?? pathItem.servers)?.[0]?.url;
+          const hasResolvedServerOverride =
+            rawOverride !== undefined && rawOverride !== documentRootUrl;
+          if (!hasResolvedServerOverride) continue;
+          const conditionalAuth =
+            securityReferencesConditionalScheme(op.security, conditionalSchemes) ??
+            securityReferencesConditionalScheme(pathItem.security, conditionalSchemes) ??
+            securityReferencesConditionalScheme(globalSecurity, conditionalSchemes) ??
+            false;
+          if (conditionalAuth) ids.add(op.operationId);
         }
       }
       return ids;
