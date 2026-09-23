@@ -267,12 +267,14 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
   // re-adding updateVersion/restoreVersion to excludeOperations (or otherwise
   // losing their scenarios) would leave the nightly green while silently
   // dropping the promised negative coverage. Assert each version op still
-  // has negative tests, and pin the first of updateVersion's two intentional
-  // gaps (malformed-json-body, camunda-hub#28911 — the second, missing-
-  // required/explicit-null-required, is pinned in the next test below) so
-  // together they stay a fixed, documented pair rather than silently
-  // widening.
-  it('each version op keeps negative-suite coverage, with only updateVersion malformed-json-body omitted here (see the next test for its other gap)', () => {
+  // has negative tests, and pin that updateVersion's malformed-json-body
+  // scenario is back (camunda-hub#28911 fixed — verified live: a top-level
+  // JSON string now 400s instead of binding into `name` via Jackson's
+  // delegating constructor; the exclusion is removed from
+  // request-validation.json). The other of updateVersion's two intentional
+  // gaps (missing-required/explicit-null-required, camunda-hub#29306, still
+  // open) is pinned separately in the next test below.
+  it('each version op keeps negative-suite coverage, including updateVersion malformed-json-body (camunda-hub#28911 fixed — see the next test for the still-open gap)', () => {
     const spec = readRequired(RV_SECURED_VERSIONS_PATH);
     for (const op of [
       'createVersion',
@@ -285,15 +287,14 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     }
     expect(
       spec,
-      'updateVersion malformed-json-body should stay excluded — see request-validation.json',
-    ).not.toContain('updateVersion__malformedJsonBody');
+      'updateVersion malformed-json-body should be covered again — camunda-hub#28911 is fixed',
+    ).toContain('updateVersion__malformedJsonBody');
   });
 
-  // Pins the second of updateVersion's two intentional gaps (the first,
-  // malformed-json-body, is pinned in the test above): camunda-hub#29306,
-  // updateVersion not enforcing name as required — missing-required and
-  // explicit-null cases. Same reasoning as the pin above; together the two
-  // tests keep the pair fixed rather than letting either widen silently.
+  // Pins updateVersion's one remaining intentional gap (the other,
+  // malformed-json-body, was fixed and unpinned in the test above —
+  // camunda-hub#28911): camunda-hub#29306, updateVersion not enforcing name
+  // as required — missing-required and explicit-null cases.
   it('updateVersion missing-required/explicit-null name coverage stays excluded (camunda-hub#29306)', () => {
     const spec = readRequired(RV_SECURED_VERSIONS_PATH);
     expect(
