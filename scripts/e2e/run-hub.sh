@@ -150,9 +150,21 @@ make_fixtures() {
   # all (see runtime-states.json's ProjectSnapshotReviewRequested state),
   # so its negative-validation tests need this fixture snapshot to already
   # have one — otherwise every malformed-body test would see 403 instead
-  # of the expected 400.
-  [ -n "$RV_FIXTURE_PROJECT_SNAPSHOT_KEY" ] &&
-    curl -s -X POST "$POS_URL/project-snapshots/$RV_FIXTURE_PROJECT_SNAPSHOT_KEY/review-requests" "${h[@]}" > /dev/null
+  # of the expected 400. Check the actual HTTP status: `curl -s` alone
+  # returns 0 on a 4xx/5xx response too, so a failed request would
+  # otherwise be silently treated as success and leave the snapshot
+  # without a review request.
+  if [ -n "$RV_FIXTURE_PROJECT_SNAPSHOT_KEY" ]; then
+    local review_request_status
+    review_request_status="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+      "$POS_URL/project-snapshots/$RV_FIXTURE_PROJECT_SNAPSHOT_KEY/review-requests" "${h[@]}")"
+    case "$review_request_status" in
+      2??) ;;
+      *)
+        echo "  ⚠ review-request for RV_FIXTURE_PROJECT_SNAPSHOT_KEY failed (HTTP $review_request_status) — submitProjectSnapshotReview's negative-validation tests will see 403 instead of 400"
+        ;;
+    esac
+  fi
   # Catalog assets have no create op in the v2 API (ingestion is a multipart PUT
   # that returns no key), so this one comes from the shared ingest helper rather
   # than a POST + _jget like the others.
