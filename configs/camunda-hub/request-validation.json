@@ -50,17 +50,6 @@
     {
       "operationId": "updateVersion",
       "scenarioKinds": [
-        "malformed-json-body"
-      ],
-      "reason": "Not the same defect this scenarioKind's name suggests: the generator's malformed-json-body body is a plain JS string; Playwright's request.patch() only sends it raw when it's already parsable JSON, and JSON.stringify()s it otherwise (isJsonParsable check in playwright-core's fetch.js) — our malformed text fails JSON.parse, so the actual wire body is a syntactically VALID top-level JSON string (e.g. \"{\\\"malformed\\\": \"), not malformed JSON. Every other still-covered operation's identical malformed-json-body test correctly 400s on that same wire shape (confirmed: updateVersion - Body wrong top-level type, sending a JSON array, also 400s) — createWorkspace is the one other exception, excluded above for the opposite reason (it accepts this wire shape as 200, not that it's untested). Only updateVersion accepts a top-level JSON STRING and binds it directly into `name` via VersionUpdateRequest's implicit single-String delegating constructor (Jackson creator resolution), bypassing normal object-shape validation entirely. Genuinely unparseable JSON (the original camunda-hub#25801-era report) is already fixed and correctly 400s — verified live with curl using the true malformed bytes. Narrowed to this one scenarioKind; updateVersion's other 19 negative tests pass and stay covered.",
-      "knownIssue": {
-        "summary": "updateVersion accepts a top-level JSON string and binds it into name via an implicit Jackson delegating constructor",
-        "url": "https://github.com/camunda/camunda-hub/issues/28911"
-      }
-    },
-    {
-      "operationId": "updateVersion",
-      "scenarioKinds": [
         "missing-required",
         "explicit-null-required"
       ],
