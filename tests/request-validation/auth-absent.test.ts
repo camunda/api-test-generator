@@ -531,4 +531,31 @@ describe('request-validation: generateAuthInvalid contract + emitter (#25264)', 
     expect(rendered).not.toContain('denyProbeHeaders()');
     expect(rendered).not.toContain('const requestBody');
   });
+
+  it('emitter sends a garbage Basic credential (not Bearer) for auth-invalid on an independentAuthGate operation', () => {
+    // The cluster-admin chain is Basic-only (env.ts's clusterAdminAuthHeaders
+    // doc comment — no Bearer fallback), so a Bearer literal would be rejected
+    // the same way an absent header is, testing nothing beyond auth-absent
+    // (review finding on PR #595).
+    const scenario: ValidationScenario = {
+      id: 'gatedOp__auth_invalid',
+      operationId: 'gatedOp',
+      method: 'POST',
+      path: '/cluster/v2/mode',
+      type: 'auth-invalid',
+      expectedStatus: 401,
+      description: 'invalid credential',
+      headersAuth: false,
+    };
+    const rendered = renderScenarioForTest(
+      scenario,
+      'gatedOp - Invalid authentication token',
+      undefined,
+      undefined,
+      true,
+    );
+    expect(rendered).not.toContain('Bearer invalid-token');
+    expect(rendered).toMatch(/Authorization: 'Basic [A-Za-z0-9+/=]+'/);
+    expect(rendered).toContain('assertResponseStatus(testInfo, res, 401');
+  });
 });

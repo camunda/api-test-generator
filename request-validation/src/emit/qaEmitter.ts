@@ -298,8 +298,18 @@ export function renderScenarioForTest(
   title: string,
   resourceFixtures?: Record<string, string>,
   pathResourceFixtures?: Record<string, string>,
+  independentlyGated?: boolean,
 ): string {
-  return renderScenario(s, title, true, resourceFixtures, pathResourceFixtures);
+  return renderScenario(
+    s,
+    title,
+    true,
+    resourceFixtures,
+    pathResourceFixtures,
+    false,
+    undefined,
+    independentlyGated,
+  );
 }
 
 /**
@@ -418,13 +428,21 @@ function renderScenario(
   }
   const headersExpr =
     s.type === 'auth-invalid'
-      ? // Auth-invalid: a well-formed Authorization header carrying a garbage
-        // credential (`Bearer invalid-token`). Exercises the invalid/unknown-
-        // credential path — the server must reject a present-but-bad header,
-        // not just a missing one.
-        // For Bearer/JWT APIs this exercises token validation specifically; for
-        // other schemes it's just an invalid credential. No helper needed.
-        "{ Authorization: 'Bearer invalid-token' }"
+      ? independentlyGated
+        ? // The cluster-admin chain is Basic-only (env.ts's clusterAdminAuthHeaders
+          // doc comment — no Bearer fallback), so a Bearer literal here would be
+          // rejected the same way an absent header is, testing nothing beyond what
+          // auth-absent already covers. Send a well-formed but wrong Basic
+          // credential ('invalid:invalid') instead, so this actually exercises
+          // invalid-credential rejection for the scheme the chain accepts.
+          "{ Authorization: 'Basic aW52YWxpZDppbnZhbGlk' }"
+        : // Auth-invalid: a well-formed Authorization header carrying a garbage
+          // credential (`Bearer invalid-token`). Exercises the invalid/unknown-
+          // credential path — the server must reject a present-but-bad header,
+          // not just a missing one.
+          // For Bearer/JWT APIs this exercises token validation specifically; for
+          // other schemes it's just an invalid credential. No helper needed.
+          "{ Authorization: 'Bearer invalid-token' }"
       : s.type === 'auth-deny'
         ? // Read-side RBAC deny: authenticate as the zero-grant probe user,
           // never the admin, so the authorizations-enabled server denies the request.
