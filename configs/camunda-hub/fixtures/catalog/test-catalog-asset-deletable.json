@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json",
+  "name": "Test Catalog Asset (deletable)",
+  "id": "io.camunda.test.catalog-asset-fixture-deletable",
+  "appliesTo": ["bpmn:Task"],
+  "properties": [],
+  "version": 1,
+  "description": "Dedicated, disposable element template fixture for deleteCatalogAsset's positive test — kept separate from test-catalog-asset-fixture so deleting it doesn't break sibling tests (searchCatalogAssetProjectUsages, searchCatalogAssetFileUsages) that expect that asset to keep existing."
+}
