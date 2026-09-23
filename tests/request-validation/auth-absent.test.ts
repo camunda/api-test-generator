@@ -536,7 +536,10 @@ describe('request-validation: generateAuthInvalid contract + emitter (#25264)', 
     // The cluster-admin chain is Basic-only (env.ts's clusterAdminAuthHeaders
     // doc comment — no Bearer fallback), so a Bearer literal would be rejected
     // the same way an absent header is, testing nothing beyond auth-absent
-    // (review finding on PR #595).
+    // (review finding on PR #595). Built via basicAuthHeaders('invalid',
+    // 'invalid') rather than a hardcoded `Basic <base64>` literal, so no
+    // base64-shaped string appears in the emitted spec (a literal one was a
+    // secret-scanner false positive).
     const scenario: ValidationScenario = {
       id: 'gatedOp__auth_invalid',
       operationId: 'gatedOp',
@@ -555,7 +558,7 @@ describe('request-validation: generateAuthInvalid contract + emitter (#25264)', 
       true,
     );
     expect(rendered).not.toContain('Bearer invalid-token');
-    expect(rendered).toMatch(/Authorization: 'Basic [A-Za-z0-9+/=]+'/);
+    expect(rendered).toContain("headers: basicAuthHeaders('invalid', 'invalid')");
     expect(rendered).toContain('assertResponseStatus(testInfo, res, 401');
   });
 });
