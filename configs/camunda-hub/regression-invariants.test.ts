@@ -309,4 +309,56 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       ).toContain(stillCovered);
     }
   });
+
+  // #602 — submitProjectSnapshotReview 403s a snapshot with no active review
+  // request (runtime-states.json's ProjectSnapshotReviewRequested). Pin the
+  // fix concretely: the positive-suite chain must call
+  // requestProjectSnapshotReview BEFORE submitProjectSnapshotReview, on the
+  // same snapshot. A bare `.toContain('submitProjectSnapshotReview')` would
+  // pass vacuously — the describe title and initSpecSalt call both already
+  // contain that literal string regardless of whether the actual chain is
+  // ordered correctly — so this matches the concrete `test.step(...)` calls
+  // instead.
+  it('submitProjectSnapshotReview chains requestProjectSnapshotReview first, on the same snapshot', () => {
+    const spec = readGeneratedSpec('submitProjectSnapshotReview.feature.spec.ts');
+    const createIdx = spec.indexOf("test.step('createProjectSnapshot'");
+    const requestIdx = spec.indexOf("test.step('requestProjectSnapshotReview'");
+    const submitIdx = spec.indexOf("test.step('submitProjectSnapshotReview'");
+    expect(createIdx, 'createProjectSnapshot step missing from the chain').toBeGreaterThan(-1);
+    expect(requestIdx, 'requestProjectSnapshotReview step missing from the chain').toBeGreaterThan(
+      -1,
+    );
+    expect(submitIdx, 'submitProjectSnapshotReview step missing from the chain').toBeGreaterThan(
+      -1,
+    );
+    expect(
+      createIdx,
+      'createProjectSnapshot must run before requestProjectSnapshotReview',
+    ).toBeLessThan(requestIdx);
+    expect(
+      requestIdx,
+      'requestProjectSnapshotReview must run before submitProjectSnapshotReview',
+    ).toBeLessThan(submitIdx);
+    // Both the review-request and the review submission must target the
+    // SAME snapshot key (the chain's one produced projectSnapshotKeyVar),
+    // not two different snapshots — which the ordering checks above alone
+    // wouldn't catch.
+    const requestStep = spec.slice(requestIdx, submitIdx);
+    const submitStep = spec.slice(submitIdx);
+    expect(
+      requestStep,
+      'requestProjectSnapshotReview must target ctx.projectSnapshotKeyVar',
+    ).toMatch(/project-snapshots\/\$\{ctx\.projectSnapshotKeyVar/);
+    expect(submitStep, 'submitProjectSnapshotReview must target ctx.projectSnapshotKeyVar').toMatch(
+      /project-snapshots\/\$\{ctx\.projectSnapshotKeyVar/,
+    );
+    // No second createProjectSnapshot sneaks in between the request and the
+    // submit — that would decouple the review request from the snapshot
+    // actually being reviewed even though both steps above still reference
+    // the same variable name.
+    expect(
+      requestStep.indexOf("test.step('createProjectSnapshot'"),
+      'a second createProjectSnapshot must not appear between the review request and the submission',
+    ).toBe(-1);
+  });
 });
