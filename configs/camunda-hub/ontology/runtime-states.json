@@ -1,0 +1,18 @@
+{
+  "$schema": "https://camunda.github.io/api-test-generator/ns/v1/runtime-states.schema.json",
+  "@context": "https://camunda.github.io/api-test-generator/ns/v1/context.jsonld",
+  "version": 1,
+  "states": [
+    {
+      "name": "ProjectSnapshotReviewRequested",
+      "parameter": "projectSnapshotKey",
+      "producedBy": ["requestProjectSnapshotReview"]
+    }
+  ],
+  "operationRequirements": [
+    {
+      "operationId": "submitProjectSnapshotReview",
+      "requires": ["ProjectSnapshotReviewRequested"]
+    }
+  ]
+}

@@ -146,6 +146,13 @@ make_fixtures() {
   # file, so this mints a real version key here.
   export RV_FIXTURE_VERSION_KEY;   RV_FIXTURE_VERSION_KEY="$(curl -s -X POST "$POS_URL/versions" "${h[@]}" -d "$(printf '{"fileKey":"%s","name":"rv-fixture-version"}' "$RV_FIXTURE_FILE_KEY")" | _jget versionKey)"
   export RV_FIXTURE_PROJECT_SNAPSHOT_KEY; RV_FIXTURE_PROJECT_SNAPSHOT_KEY="$(curl -s -X POST "$POS_URL/project-snapshots" "${h[@]}" -d "$(printf '{"projectKey":"%s","name":"rv-fixture-project-snapshot"}' "$RV_FIXTURE_V2_PROJECT_KEY")" | _jget projectSnapshotKey)"
+  # submitProjectSnapshotReview 403s a snapshot with no review request at
+  # all (see runtime-states.json's ProjectSnapshotReviewRequested state),
+  # so its negative-validation tests need this fixture snapshot to already
+  # have one — otherwise every malformed-body test would see 403 instead
+  # of the expected 400.
+  [ -n "$RV_FIXTURE_PROJECT_SNAPSHOT_KEY" ] &&
+    curl -s -X POST "$POS_URL/project-snapshots/$RV_FIXTURE_PROJECT_SNAPSHOT_KEY/review-requests" "${h[@]}" > /dev/null
   # Catalog assets have no create op in the v2 API (ingestion is a multipart PUT
   # that returns no key), so this one comes from the shared ingest helper rather
   # than a POST + _jget like the others.
