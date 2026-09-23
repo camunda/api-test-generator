@@ -20,6 +20,7 @@ params, the 3-arg `buildUrl(path, params, query)` form, and `encodeURIComponent`
 query encoding all match), and normalises JS object/array literals via node too.
 """
 import argparse
+import base64
 import html
 import json
 import re
@@ -183,6 +184,18 @@ def curl_headers(kind, admin_header, deny_header, cluster_admin_header):
         return [cluster_admin_header] if cluster_admin_header else []
     if "Bearer invalid-token" in k:
         return ["Authorization: Bearer invalid-token"]
+    # auth-invalid on an independentAuthGate operation: the cluster-admin
+    # chain is Basic-only, so renderScenario emits a call to the real
+    # basicAuthHeaders(username, password) with a fixed, deliberately-wrong
+    # credential instead of a Bearer literal — see qaEmitter.ts. Without this,
+    # the fallthrough below returns no Authorization header at all, so the
+    # oracle would replay auth-invalid as auth-absent and could report a
+    # match (both expect 401) without exercising the same request.
+    m = re.match(r"basicAuthHeaders\(\s*'([^']*)'\s*,\s*'([^']*)'\s*\)", k)
+    if m:
+        username, password = m.group(1), m.group(2)
+        encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
+        return [f"Authorization: Basic {encoded}"]
     return []  # {} → no auth
 
 
