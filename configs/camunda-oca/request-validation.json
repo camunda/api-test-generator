@@ -628,6 +628,116 @@
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
       }
+    },
+    {
+      "operationId": "deleteDecisionInstance",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteDecisionInstance's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteDecisionInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteDecisionInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "resolveIncident",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but resolveIncident's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "resolveIncidentsBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but resolveIncidentsBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "updateJob",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but updateJob's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the job-lookup step and 404s instead of 400ing up front. Narrowed to this scenario kind only; this also incidentally drops jobLeaseToken's belowMinLength constraint-violation case, the only other constrained field on this body — a small disclosed cost, not worth a separate per-field suppression mechanism for one test.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "cancelProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but cancelProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteProcessInstance",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteProcessInstance's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "resumeProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but resumeProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "suspendProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but suspendProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
     }
   ]
 }
