@@ -738,6 +738,270 @@
         "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
         "url": "https://github.com/camunda/camunda/issues/58942"
       }
+    },
+    {
+      "operationId": "deleteRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches role-lookup logic unvalidated and 404s (\"role with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches role-lookup logic unvalidated and 404s (\"role with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchClientsForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchGroupsForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchUsersForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches tenant-lookup logic unvalidated and 404s (\"tenant with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches tenant-lookup logic unvalidated and 404s (\"tenant with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchClientsForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchGroupIdsForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchRolesForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchUsersForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches group-lookup logic unvalidated and 404s (\"group with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches group-lookup logic unvalidated and 404s (\"group with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchClientsForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchRolesForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchUsersForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteUser",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "username declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches user-lookup logic unvalidated and 404s (\"user with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when username is supplied in the body at creation (createUser's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. username is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getUser",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "username declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches user-lookup logic unvalidated and 404s (\"user with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when username is supplied in the body at creation (createUser's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. username is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteMappingRule",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "mappingRuleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches mappingRule-lookup logic unvalidated and 404s (\"mappingRule with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when mappingRuleId is supplied in the body at creation (createMappingRule's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. mappingRuleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getMappingRule",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "mappingRuleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches mappingRule-lookup logic unvalidated and 404s (\"mappingRule with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when mappingRuleId is supplied in the body at creation (createMappingRule's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. mappingRuleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getAuditLog",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "auditLogKey declares a pattern constraint (via the shared LongKey schema) that a non-empty invalid value violates, but the request reaches audit-log lookup logic unvalidated and 404s (\"Audit log with id '<value>' not found\") instead of 400ing on the malformed input (camunda/camunda#58943). auditLogKey is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
     }
   ]
 }
