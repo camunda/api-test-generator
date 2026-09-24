@@ -91,6 +91,36 @@ export interface OperationModel {
    * `buildUrl`'s `useRoot` parameter in `templates/support/http.ts`.
    */
   serverOverride?: string;
+  /**
+   * True when the operation sits behind a security chain that is enforced
+   * *unconditionally* — independent of the unsecured/secured deployment-mode
+   * axis that `conditionalAuth`/`secured` model — and requires its own,
+   * separate credential set. Currently exactly the Orchestration Cluster REST
+   * API's cluster-admin operations (`ClusterAdminBasicSecurityConfiguration`):
+   * they reuse the `bearerAuth`/`basicAuth` scheme names but do not accept the
+   * regular admin credentials, so a deployment's unsecured/secured toggle has
+   * no bearing on them. Derived as `serverOverride !== undefined &&
+   * conditionalAuth === true` (see `loader.ts`), which also correctly excludes
+   * the two public cluster-admin path items (`getClusterStatus`,
+   * `getClusterUpgradeStatus`, `security: []`).
+   *
+   * This is a PROXY, not a declared spec signal: the spec has no scheme name
+   * or `x-enforcement` value dedicated to "always-on, separate-credential
+   * chain" the way it does for the conditional-auth axis (`x-enforcement:
+   * conditional` — camunda/camunda#53708, requested specifically for this
+   * generator). It happens to hold today because the only operations with a
+   * resolved server override are exactly the cluster-admin ones. A future
+   * spec change could break the correlation in either direction — a new
+   * always-gated operation that doesn't override its server (silently
+   * treated as ordinary conditional auth: real admin creds used, 400s
+   * expected, but the real gate 401s) or a new server-overriding operation
+   * that isn't gated the same way (silently excluded from RBAC-deny coverage
+   * by `authDeny.ts`, with nothing asserting the gap). If that ever happens,
+   * the fix is an upstream `x-enforcement: independent`-style annotation on
+   * the affected security scheme, mirroring the precedent above, rather than
+   * a cleverer local derivation.
+   */
+  independentAuthGate?: boolean;
 }
 
 export interface ParameterModel {

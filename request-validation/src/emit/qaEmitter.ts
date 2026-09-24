@@ -41,6 +41,15 @@ interface EmitOpts {
    * of the ~30 scenario-generator modules in `src/analysis/`.
    */
   serverOverridesByOperationId?: Readonly<Record<string, string>>;
+  /**
+   * operationIds with `OperationModel.independentAuthGate` (see its doc
+   * comment) — an always-on security chain independent of the
+   * unsecured/secured deployment-mode axis, using a separate credential set.
+   * A `headersAuth: true` scenario for one of these operations renders its
+   * Authorization header via `clusterAdminAuthHeaders()`/`clusterAdminJsonHeaders()`
+   * instead of the regular `authHeaders()`/`jsonHeaders()`.
+   */
+  independentlyGatedOperationIds?: ReadonlySet<string>;
 }
 
 export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpts) {
@@ -89,6 +98,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
       opts.pathResourceFixtures,
       opts.problemDetailShapeSkipKinds,
       opts.serverOverridesByOperationId,
+      opts.independentlyGatedOperationIds,
     );
     let formatted: string;
     try {
@@ -117,6 +127,7 @@ function buildFile(
   pathResourceFixtures?: Record<string, string>,
   problemDetailShapeSkipKinds?: ReadonlySet<ScenarioKind>,
   serverOverridesByOperationId?: Readonly<Record<string, string>>,
+  independentlyGatedOperationIds?: ReadonlySet<string>,
 ): string {
   const resource = deriveResource(scenarios[0].path);
   const describeTitle = `${capitalize(resource)} Validation API Tests`;
@@ -124,12 +135,14 @@ function buildFile(
   // Generated files lint with noUnusedImports, so import only the http helpers
   // the file's scenarios actually reference. Each condition must mirror the
   // `headersExpr` selection below exactly:
-  //   - auth-deny             -> denyProbeHeaders()  (read-side RBAC deny)
-  //   - auth + multipart      -> authHeaders()       (Authorization only, no JSON
-  //                                                    content-type that would
-  //                                                    break the multipart boundary)
-  //   - auth + non-multipart  -> jsonHeaders()
-  //   - otherwise             -> {} (no helper)
+  //   - auth-deny                     -> denyProbeHeaders()  (read-side RBAC deny)
+  //   - auth + multipart              -> authHeaders()       (Authorization only, no JSON
+  //                                                            content-type that would
+  //                                                            break the multipart boundary)
+  //   - auth + non-multipart          -> jsonHeaders()
+  //   - independentAuthGate + multipart     -> clusterAdminAuthHeaders()
+  //   - independentAuthGate + non-multipart -> clusterAdminJsonHeaders()
+  //   - otherwise                     -> {} (no helper)
   const usesDenyProbe = scenarios.some((s) => s.type === 'auth-deny');
   // auth-deny relies on denyProbeHeaders(), which only exists in the vendored
   // standalone support module. Legacy QA-tree mode imports helpers from the
@@ -171,18 +184,73 @@ function buildFile(
         '(--no-standalone / --qa-import-depth).',
     );
   }
+  const isIndependentlyGated = (s: ValidationScenario) =>
+    independentlyGatedOperationIds?.has(s.operationId) === true;
   const usesAuthHeaders = scenarios.some(
-    (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding === 'multipart',
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding === 'multipart' &&
+      !isIndependentlyGated(s),
   );
   const usesJsonHeaders = scenarios.some(
-    (s) => s.type !== 'auth-deny' && s.headersAuth && s.bodyEncoding !== 'multipart',
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding !== 'multipart' &&
+      !isIndependentlyGated(s),
   );
+  // independentAuthGate scenarios (e.g. cluster-admin ops, under
+  // independentAuthGateMode: 'available') authenticate with a separate
+  // credential set — see EmitOpts.independentlyGatedOperationIds's doc
+  // comment — so they import distinct helpers rather than authHeaders/jsonHeaders.
+  const usesClusterAdminAuthHeaders = scenarios.some(
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding === 'multipart' &&
+      isIndependentlyGated(s),
+  );
+  const usesClusterAdminJsonHeaders = scenarios.some(
+    (s) =>
+      s.type !== 'auth-deny' &&
+      s.headersAuth &&
+      s.bodyEncoding !== 'multipart' &&
+      isIndependentlyGated(s),
+  );
+  if ((usesClusterAdminAuthHeaders || usesClusterAdminJsonHeaders) && !standalone) {
+    throw new Error(
+      'independentAuthGate scenarios (e.g. cluster-admin operations under independentAuthGateMode: ' +
+        "'available') require the standalone support module (clusterAdminAuthHeaders/clusterAdminJsonHeaders); " +
+        'they are not supported in legacy QA-tree mode (--no-standalone / --qa-import-depth).',
+    );
+  }
+  // auth-invalid on an independentAuthGate operation sends a deliberately-wrong
+  // Basic credential (the chain is Basic-only — see renderScenario's headersExpr)
+  // via basicAuthHeaders('invalid', 'invalid') rather than a hardcoded `Basic
+  // <base64>` literal, so no base64-shaped string appears in this file's source
+  // or in the emitted spec (a literal one was flagged as a secret-scanner false
+  // positive in review — PR #595). headersAuth is false for auth-invalid, so
+  // this isn't already covered by the usesClusterAdmin* checks above.
+  const usesBasicAuthHeadersForInvalid = scenarios.some(
+    (s) => s.type === 'auth-invalid' && isIndependentlyGated(s),
+  );
+  if (usesBasicAuthHeadersForInvalid && !standalone) {
+    throw new Error(
+      'independentAuthGate auth-invalid scenarios (e.g. cluster-admin operations) require the ' +
+        'standalone support module (basicAuthHeaders); they are not supported in legacy QA-tree ' +
+        'mode (--no-standalone / --qa-import-depth).',
+    );
+  }
   // `assertResponseStatus` exists only in the standalone support module; legacy
   // QA-tree mode falls back to a bare `expect(...).toBe(...)` assertion.
   const httpHelpers = [
     usesAuthHeaders ? 'authHeaders' : null,
     usesDenyProbe ? 'denyProbeHeaders' : null,
     usesJsonHeaders ? 'jsonHeaders' : null,
+    usesClusterAdminAuthHeaders ? 'clusterAdminAuthHeaders' : null,
+    usesClusterAdminJsonHeaders ? 'clusterAdminJsonHeaders' : null,
+    usesBasicAuthHeadersForInvalid ? 'basicAuthHeaders' : null,
     'buildUrl',
     standalone ? 'assertResponseStatus' : null,
   ].filter((x): x is string => x !== null);
@@ -228,6 +296,7 @@ function buildFile(
         pathResourceFixtures,
         problemDetailShapeSkipKinds?.has(s.type) ?? false,
         serverOverridesByOperationId?.[s.operationId],
+        independentlyGatedOperationIds?.has(s.operationId) === true,
       ),
     );
   }
@@ -247,8 +316,18 @@ export function renderScenarioForTest(
   title: string,
   resourceFixtures?: Record<string, string>,
   pathResourceFixtures?: Record<string, string>,
+  independentlyGated?: boolean,
 ): string {
-  return renderScenario(s, title, true, resourceFixtures, pathResourceFixtures);
+  return renderScenario(
+    s,
+    title,
+    true,
+    resourceFixtures,
+    pathResourceFixtures,
+    false,
+    undefined,
+    independentlyGated,
+  );
 }
 
 /**
@@ -300,6 +379,7 @@ function renderScenario(
   pathResourceFixtures?: Record<string, string>,
   skipProblemDetailShape: boolean = false,
   serverOverride?: string,
+  independentlyGated: boolean = false,
 ): string {
   const fixtures = resourceFixtures ?? {};
   // Path params use the base map with path-only overrides merged on top.
@@ -366,21 +446,36 @@ function renderScenario(
   }
   const headersExpr =
     s.type === 'auth-invalid'
-      ? // Auth-invalid: a well-formed Authorization header carrying a garbage
-        // credential (`Bearer invalid-token`). Exercises the invalid/unknown-
-        // credential path — the server must reject a present-but-bad header,
-        // not just a missing one.
-        // For Bearer/JWT APIs this exercises token validation specifically; for
-        // other schemes it's just an invalid credential. No helper needed.
-        "{ Authorization: 'Bearer invalid-token' }"
+      ? independentlyGated
+        ? // The cluster-admin chain is Basic-only (env.ts's clusterAdminAuthHeaders
+          // doc comment — no Bearer fallback), so a Bearer literal here would be
+          // rejected the same way an absent header is, testing nothing beyond what
+          // auth-absent already covers. Send a well-formed but wrong Basic
+          // credential ('invalid:invalid') instead, so this actually exercises
+          // invalid-credential rejection for the scheme the chain accepts. Built
+          // via basicAuthHeaders() rather than a hardcoded `Basic <base64>`
+          // literal, so no base64-shaped string appears in this file or the
+          // emitted spec (a literal one was a secret-scanner false positive).
+          "basicAuthHeaders('invalid', 'invalid')"
+        : // Auth-invalid: a well-formed Authorization header carrying a garbage
+          // credential (`Bearer invalid-token`). Exercises the invalid/unknown-
+          // credential path — the server must reject a present-but-bad header,
+          // not just a missing one.
+          // For Bearer/JWT APIs this exercises token validation specifically; for
+          // other schemes it's just an invalid credential. No helper needed.
+          "{ Authorization: 'Bearer invalid-token' }"
       : s.type === 'auth-deny'
         ? // Read-side RBAC deny: authenticate as the zero-grant probe user,
           // never the admin, so the authorizations-enabled server denies the request.
           'denyProbeHeaders()'
         : s.headersAuth
-          ? s.bodyEncoding === 'multipart'
-            ? 'authHeaders()'
-            : 'jsonHeaders()'
+          ? independentlyGated
+            ? s.bodyEncoding === 'multipart'
+              ? 'clusterAdminAuthHeaders()'
+              : 'clusterAdminJsonHeaders()'
+            : s.bodyEncoding === 'multipart'
+              ? 'authHeaders()'
+              : 'jsonHeaders()'
           : '{}';
   const dataPart =
     s.bodyEncoding === 'multipart' && s.multipartForm

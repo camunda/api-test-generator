@@ -159,6 +159,7 @@ async function main() {
     unenforcedStringFormats: [],
     authAbsentMode: 'conditional',
     authDenyMode: 'slice',
+    independentAuthGateMode: 'unavailable',
   };
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
@@ -171,7 +172,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode}, independentAuthGateMode=${rvConfig.independentAuthGateMode})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -187,6 +188,12 @@ async function main() {
       serverOverridesByOperationId[op.operationId] = op.serverOverride;
     }
   }
+  // Operations gated by an always-on security chain independent of the
+  // unsecured/secured deployment-mode axis (see OperationModel.independentAuthGate
+  // and RequestValidationConfig.independentAuthGateMode's doc comments).
+  const independentlyGatedOperationIds = new Set(
+    model.operations.filter((op) => op.independentAuthGate === true).map((op) => op.operationId),
+  );
   // #419 — drop config-excluded operations up front so every generator skips
   // them (blocked-upstream ops whose negative tests can't reach their target,
   // e.g. Hub's getClusterUsageMetrics per camunda-hub#26448). One filter
@@ -833,6 +840,40 @@ async function main() {
     deduped.push(...filtered);
   }
 
+  // ---- independentAuthGate filtering ----
+  // Operations gated by an always-on, separate-credential security chain
+  // (independentAuthGate — see its doc comment) can never reach body/param
+  // validation without that credential set. When independentAuthGateMode is
+  // 'unavailable' (default — no such credential set exists for this API
+  // yet), a negative-validation scenario for one of these operations would
+  // assert an unreachable 400/404/etc., so it's dropped here; auth-absent /
+  // auth-invalid / auth-deny are untouched (they assert the 401/403 that
+  // actually occurs). Under 'available' this step is a no-op — real
+  // credentials are supplied, so those scenarios are kept and rendered with
+  // them (see qaEmitter's use of independentlyGatedOperationIds).
+  if (rvConfig.independentAuthGateMode === 'unavailable' && independentlyGatedOperationIds.size) {
+    const filtered: ValidationScenario[] = [];
+    let removed = 0;
+    for (const s of deduped) {
+      if (
+        independentlyGatedOperationIds.has(s.operationId) &&
+        s.type !== 'auth-absent' &&
+        s.type !== 'auth-invalid' &&
+        s.type !== 'auth-deny'
+      ) {
+        removed++;
+        continue;
+      }
+      filtered.push(s);
+    }
+    if (removed)
+      console.log(
+        `[generate] independentAuthGateMode='unavailable' dropped ${removed} unreachable negative-validation scenarios for cluster-admin-style operations`,
+      );
+    deduped.length = 0;
+    deduped.push(...filtered);
+  }
+
   // ---- Profile split: parallel unsecured / secured / rbac suites ----
   // The negative-validation tests (400s) are deployment-mode-agnostic and run
   // in both unsecured and secured. The 401 tests — auth-absent (no credentials)
@@ -852,12 +893,31 @@ async function main() {
   // `authAbsentMode`: in `'conditional'` (default) that means no
   // `x-enforcement: conditional` op; in `'all-secured'` it means no op mandates
   // auth (e.g. an entirely public API).
+  //
+  // independentAuthGate operations are a fourth case: their gate is enforced
+  // unconditionally, independent of the unsecured/secured toggle, so their
+  // auth-absent/auth-invalid coverage belongs in BOTH profiles rather than
+  // `secured` only. The `unsecured` filter below ADDS that exception on top
+  // of the normal rule rather than replacing it — under
+  // independentAuthGateMode: 'available', a gated op's negative-validation
+  // (400) scenarios must still flow through into `unsecured` too, same as any
+  // other operation's, since a real cluster-admin credential set would
+  // authenticate successfully there as well (its gate doesn't care about the
+  // deployment-mode toggle). Under 'unavailable' those scenarios were already
+  // dropped from `deduped` above, so this exception is the only thing that
+  // fires for gated ops in that mode.
   const PROFILES = [
     {
       name: 'unsecured',
-      scenarios: deduped.filter(
-        (s) => s.type !== 'auth-absent' && s.type !== 'auth-invalid' && s.type !== 'auth-deny',
-      ),
+      scenarios: deduped.filter((s) => {
+        if (
+          independentlyGatedOperationIds.has(s.operationId) &&
+          (s.type === 'auth-absent' || s.type === 'auth-invalid')
+        ) {
+          return true;
+        }
+        return s.type !== 'auth-absent' && s.type !== 'auth-invalid' && s.type !== 'auth-deny';
+      }),
     },
     { name: 'secured', scenarios: deduped.filter((s) => s.type !== 'auth-deny') },
     { name: 'rbac', scenarios: deduped.filter((s) => s.type === 'auth-deny') },
@@ -882,6 +942,7 @@ async function main() {
       pathResourceFixtures: rvConfig.pathResourceFixtures,
       problemDetailShapeSkipKinds,
       serverOverridesByOperationId,
+      independentlyGatedOperationIds,
     });
   }
   console.log('[generate] Summary:', {
@@ -1092,115 +1153,131 @@ async function main() {
   for (const op of model.operations) {
     const present = opScenarioKinds[op.operationId] || new Set();
     const applicable = new Set<string>();
-    // Parameters applicability
-    const requiredParams = op.parameters.filter((p) => p.required);
-    if (requiredParams.length) applicable.add('param-missing');
-    if (op.parameters.some((p) => p.schema && (p.schema.type || p.schema.enum)))
-      applicable.add('param-type-mismatch');
-    if (op.parameters.some((p) => Array.isArray(p.schema?.enum)))
-      applicable.add('param-enum-violation');
-    // param-constraint-violation reuses the exact eligibility check
-    // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
-    // which merges the allOf chain — a flat p.schema.* read misses
-    // constraints carried in an allOf branch, e.g. Camunda key types).
-    if (isParamConstraintEligible(op)) {
-      applicable.add('param-constraint-violation');
-    }
-    // malformed-json-body (#499) needs only a JSON request body of ANY type
-    // (malformedJsonBody.ts's own gate is just `!op.requestBodySchema`, not
-    // scoped to object bodies like the block below) — except multipart-only
-    // ops, which don't accept application/json at all (#499's own
-    // multipartSkip.ts fix, reused here rather than re-deriving
-    // hasMultipart && !hasJson inline).
-    if (op.requestBodySchema && !isMultipartOnly(op)) {
-      applicable.add('malformed-json-body');
+    // independentAuthGateMode: 'unavailable' drops every non-auth scenario
+    // for independentAuthGate operations (see the filtering step above)
+    // because they can never reach body/param validation without the
+    // missing credential set. Skip the schema/param/pagination analysis
+    // below entirely for these operations in that mode, rather than running
+    // it and then discarding almost everything it computes — the only kinds
+    // that can (and do) run are auth-absent/auth-invalid, added further down
+    // via isAuthTargeted regardless of this flag.
+    const skipNonAuthApplicability =
+      rvConfig.independentAuthGateMode === 'unavailable' && op.independentAuthGate === true;
+    if (!skipNonAuthApplicability) {
+      // Parameters applicability
+      const requiredParams = op.parameters.filter((p) => p.required);
+      if (requiredParams.length) applicable.add('param-missing');
+      if (op.parameters.some((p) => p.schema && (p.schema.type || p.schema.enum)))
+        applicable.add('param-type-mismatch');
+      if (op.parameters.some((p) => Array.isArray(p.schema?.enum)))
+        applicable.add('param-enum-violation');
+      // param-constraint-violation reuses the exact eligibility check
+      // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
+      // which merges the allOf chain — a flat p.schema.* read misses
+      // constraints carried in an allOf branch, e.g. Camunda key types).
+      if (isParamConstraintEligible(op)) {
+        applicable.add('param-constraint-violation');
+      }
+      // malformed-json-body (#499) needs only a JSON request body of ANY type
+      // (malformedJsonBody.ts's own gate is just `!op.requestBodySchema`, not
+      // scoped to object bodies like the block below) — except multipart-only
+      // ops, which don't accept application/json at all (#499's own
+      // multipartSkip.ts fix, reused here rather than re-deriving
+      // hasMultipart && !hasJson inline).
+      if (op.requestBodySchema && !isMultipartOnly(op)) {
+        applicable.add('malformed-json-body');
+      }
+      // not-found-fake-id (#381) — reuses the exact eligibility check
+      // notFoundFakeId.ts's own generator calls.
+      if (isNotFoundEligible(op)) {
+        applicable.add('not-found-fake-id');
+      }
+      // Pagination kinds (#501) — reuse the same shape-detection helpers their
+      // own generators call, so this can't drift from what actually generates.
+      const paginationPage = findPaginationPage(op);
+      if (paginationPage) {
+        if (findPaginationLimitField(op)) applicable.add('pagination-limit-invalid');
+        if (findOffsetBranch(paginationPage.branches))
+          applicable.add('pagination-offset-past-total');
+        if (findCursorFields(paginationPage.branches).length)
+          applicable.add('pagination-cursor-invalid');
+      }
+      // Body-based applicability
+      const body = op.requestBodySchema || op.multipartSchema;
+      if (body) {
+        const f = analyzeBodyFeatures(body);
+        if (f.hasObject) {
+          applicable.add('missing-body');
+          // required fields
+          const reqList = Array.isArray(body.required)
+            ? body.required
+            : op.multipartRequiredProps || [];
+          if (reqList.length) {
+            applicable.add('missing-required');
+            if (reqList.length > 1) applicable.add('missing-required-combo');
+          }
+          // explicit-null-required (#500) is narrower than missing-required:
+          // JSON bodies only. `body` above is `op.requestBodySchema ||
+          // op.multipartSchema` — for a multipart-only op with its own
+          // `required` array, that would make `Array.isArray(body.required)`
+          // true even though explicitNullRequired.ts's own gate requires
+          // `op.requestBodySchema` specifically (never falls back to
+          // multipartSchema), so this checks that field directly instead of
+          // going through the merged `body`/`reqList` variables above.
+          if (
+            op.requestBodySchema?.type === 'object' &&
+            Array.isArray(op.requestBodySchema.required) &&
+            op.requestBodySchema.required.length &&
+            (!op.mediaTypes || op.mediaTypes.includes('application/json'))
+          ) {
+            applicable.add('explicit-null-required');
+          }
+          applicable.add('type-mismatch');
+          applicable.add('body-top-type-mismatch');
+          applicable.add('additional-prop-general');
+          // additional-prop is narrower than -general: only when the schema
+          // itself declares additionalProperties: false (additionalProps.ts's
+          // own gate), unlike -general which fires for any object body.
+          if (op.requestBodySchema?.additionalProperties === false) {
+            applicable.add('additional-prop');
+          }
+          if (f.hasNestedObject) applicable.add('nested-additional-prop');
+        }
+        if (f.hasEnums) applicable.add('enum-violation');
+        if (f.hasOneOf) {
+          applicable.add('union');
+          applicable.add('oneof-ambiguous');
+          applicable.add('oneof-none-match');
+          applicable.add('oneof-multi-ambiguous');
+          applicable.add('oneof-cross-bleed');
+        }
+        if (f.hasDiscriminator) {
+          applicable.add('discriminator-mismatch');
+          applicable.add('discriminator-structure-mismatch');
+        }
+        if (f.hasAllOf) {
+          applicable.add('allof-missing-required');
+          applicable.add('allof-conflict');
+        }
+        if (f.hasUniqueItems) applicable.add('unique-items-violation');
+        if (f.hasMultipleOf) applicable.add('multiple-of-violation');
+        if (f.hasConstraints) applicable.add('constraint-violation');
+        if (f.hasFormats) applicable.add('format-invalid');
+      }
     }
     // auth-absent/auth-invalid (#495) target the same operation set (shared
-    // isAuthTargeted — see its own doc comment for the two modes).
+    // isAuthTargeted — see its own doc comment for the two modes). Not
+    // gated by skipNonAuthApplicability: these are exactly the kinds that
+    // DO apply to independentAuthGate operations.
     if (isAuthTargeted(op, { allSecured: rvConfig.authAbsentMode === 'all-secured' })) {
       applicable.add('auth-absent');
       applicable.add('auth-invalid');
     }
     // auth-deny (#462) — mode-dependent eligibility, same isAuthDenyEligible
-    // authDeny.ts's own generators call.
+    // authDeny.ts's own generators call (already excludes independentAuthGate
+    // operations regardless of this loop).
     if (isAuthDenyEligible(op, { allSecured: rvConfig.authDenyMode === 'all-secured' })) {
       applicable.add('auth-deny');
-    }
-    // not-found-fake-id (#381) — reuses the exact eligibility check
-    // notFoundFakeId.ts's own generator calls.
-    if (isNotFoundEligible(op)) {
-      applicable.add('not-found-fake-id');
-    }
-    // Pagination kinds (#501) — reuse the same shape-detection helpers their
-    // own generators call, so this can't drift from what actually generates.
-    const paginationPage = findPaginationPage(op);
-    if (paginationPage) {
-      if (findPaginationLimitField(op)) applicable.add('pagination-limit-invalid');
-      if (findOffsetBranch(paginationPage.branches)) applicable.add('pagination-offset-past-total');
-      if (findCursorFields(paginationPage.branches).length)
-        applicable.add('pagination-cursor-invalid');
-    }
-    // Body-based applicability
-    const body = op.requestBodySchema || op.multipartSchema;
-    if (body) {
-      const f = analyzeBodyFeatures(body);
-      if (f.hasObject) {
-        applicable.add('missing-body');
-        // required fields
-        const reqList = Array.isArray(body.required)
-          ? body.required
-          : op.multipartRequiredProps || [];
-        if (reqList.length) {
-          applicable.add('missing-required');
-          if (reqList.length > 1) applicable.add('missing-required-combo');
-        }
-        // explicit-null-required (#500) is narrower than missing-required:
-        // JSON bodies only. `body` above is `op.requestBodySchema ||
-        // op.multipartSchema` — for a multipart-only op with its own
-        // `required` array, that would make `Array.isArray(body.required)`
-        // true even though explicitNullRequired.ts's own gate requires
-        // `op.requestBodySchema` specifically (never falls back to
-        // multipartSchema), so this checks that field directly instead of
-        // going through the merged `body`/`reqList` variables above.
-        if (
-          op.requestBodySchema?.type === 'object' &&
-          Array.isArray(op.requestBodySchema.required) &&
-          op.requestBodySchema.required.length &&
-          (!op.mediaTypes || op.mediaTypes.includes('application/json'))
-        ) {
-          applicable.add('explicit-null-required');
-        }
-        applicable.add('type-mismatch');
-        applicable.add('body-top-type-mismatch');
-        applicable.add('additional-prop-general');
-        // additional-prop is narrower than -general: only when the schema
-        // itself declares additionalProperties: false (additionalProps.ts's
-        // own gate), unlike -general which fires for any object body.
-        if (op.requestBodySchema?.additionalProperties === false) {
-          applicable.add('additional-prop');
-        }
-        if (f.hasNestedObject) applicable.add('nested-additional-prop');
-      }
-      if (f.hasEnums) applicable.add('enum-violation');
-      if (f.hasOneOf) {
-        applicable.add('union');
-        applicable.add('oneof-ambiguous');
-        applicable.add('oneof-none-match');
-        applicable.add('oneof-multi-ambiguous');
-        applicable.add('oneof-cross-bleed');
-      }
-      if (f.hasDiscriminator) {
-        applicable.add('discriminator-mismatch');
-        applicable.add('discriminator-structure-mismatch');
-      }
-      if (f.hasAllOf) {
-        applicable.add('allof-missing-required');
-        applicable.add('allof-conflict');
-      }
-      if (f.hasUniqueItems) applicable.add('unique-items-violation');
-      if (f.hasMultipleOf) applicable.add('multiple-of-violation');
-      if (f.hasConstraints) applicable.add('constraint-violation');
-      if (f.hasFormats) applicable.add('format-invalid');
     }
     // Include actually present kinds in applicability to prevent >100%
     for (const pk of present) if (!applicable.has(pk)) applicable.add(pk);

@@ -85,6 +85,13 @@ const DENY_STATUS = 403;
  * three conditions is required).
  */
 export function isAuthDenyEligible(op: OperationModel, opts: Opts): boolean {
+  // independentAuthGate operations (e.g. cluster-admin) sit behind a
+  // separate, always-on security chain this generator has no deny-probe
+  // credentials for. denyProbeHeaders() authenticates against the REGULAR
+  // admin/probe scheme, which that chain rejects with 401 before RBAC ever
+  // runs — an auth-deny scenario against one of these operations would
+  // assert an unreachable 403. See OperationModel.independentAuthGate.
+  if (op.independentAuthGate === true) return false;
   if (opts.allSecured) {
     return (
       op.secured === true &&

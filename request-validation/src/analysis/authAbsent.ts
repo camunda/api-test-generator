@@ -32,6 +32,12 @@ interface Opts {
  */
 export function isAuthTargeted(op: OperationModel, opts: Opts): boolean {
   if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) return false;
+  // independentAuthGate operations (e.g. cluster-admin) are targeted
+  // regardless of authAbsentMode — their gate isn't part of the
+  // unsecured/secured deployment-mode axis that conditionalAuth/secured
+  // model, so it doesn't fit either branch below. Checked explicitly rather
+  // than relying on today's incidental conditionalAuth===true correlation.
+  if (op.independentAuthGate === true) return true;
   return opts.allSecured ? op.secured === true : op.conditionalAuth === true;
 }
 

@@ -10,7 +10,8 @@
 // module — exposes the symbols the generated specs import: `buildUrl`,
 // `assertResponseStatus`, and the header/credential helpers re-exported from
 // `./env` (`jsonHeaders`, `authHeaders`, `basicAuthHeaders`, `denyProbeHeaders`,
-// `denyProbeCredentials`). Auth/base-URL handling lives in `./env`.
+// `denyProbeCredentials`, `clusterAdminAuthHeaders`, `clusterAdminJsonHeaders`).
+// Auth/base-URL handling lives in `./env`.
 
 import { type APIResponse, expect, type TestInfo } from '@playwright/test';
 import { credentials } from './env';
@@ -22,6 +23,8 @@ export {
   denyProbeHeaders,
   denyProbeCredentials,
   credentials,
+  clusterAdminAuthHeaders,
+  clusterAdminJsonHeaders,
 } from './env';
 
 const API_VERSION = 'v2';

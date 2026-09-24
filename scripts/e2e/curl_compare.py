@@ -20,6 +20,7 @@ params, the 3-arg `buildUrl(path, params, query)` form, and `encodeURIComponent`
 query encoding all match), and normalises JS object/array literals via node too.
 """
 import argparse
+import base64
 import html
 import json
 import re
@@ -30,11 +31,16 @@ from pathlib import Path
 TEST_RE = re.compile(r"test\(\s*(['\"])(?P<title>.*?)\1\s*,", re.S)
 
 # Exact copy of request-validation support/http.ts buildUrl (API_VERSION = 'v2').
+# `useRoot` (4th arg, PR #564): cluster-admin operations override their
+# server to the bare host root, dropping the document's /v2 base — without
+# this, the oracle replays /v2/cluster/v2/... instead of /cluster/v2/...
+# and gets a false 404/401 mismatch against every such scenario.
 BUILD_URL_JS = r"""
 const base = process.argv[1];
 const API_VERSION = process.argv[2];
-function buildUrl(pathTemplate, params, query) {
-  let url = `${base}/${API_VERSION}${pathTemplate}`.replace(/\{(\w+)}/g, (_, k) => {
+function buildUrl(pathTemplate, params, query, useRoot) {
+  const versionSegment = useRoot ? "" : `/${API_VERSION}`;
+  let url = `${base}${versionSegment}${pathTemplate}`.replace(/\{(\w+)}/g, (_, k) => {
     const v = params && params[k];
     return v == null ? "__MISSING_PARAM__" : String(v);
   });
@@ -159,7 +165,7 @@ def parse_block(block: str, base: str, api_version: str):
     }
 
 
-def curl_headers(kind, admin_header, deny_header):
+def curl_headers(kind, admin_header, deny_header, cluster_admin_header):
     k = kind.strip()
     if k.startswith("jsonHeaders"):
         return (["Content-Type: application/json"] + ([admin_header] if admin_header else []))
@@ -167,8 +173,29 @@ def curl_headers(kind, admin_header, deny_header):
         return [admin_header] if admin_header else []
     if k.startswith("denyProbeHeaders"):
         return [deny_header] if deny_header else []
+    # independentAuthGate operations (cluster-admin) authenticate against a
+    # separate credential set — see templates/support/env.ts's
+    # clusterAdminAuthHeaders()/clusterAdminJsonHeaders(). Only reachable
+    # under independentAuthGateMode: 'available' (see RequestValidationConfig);
+    # under the default 'unavailable' these scenario kinds are never emitted.
+    if k.startswith("clusterAdminJsonHeaders"):
+        return (["Content-Type: application/json"] + ([cluster_admin_header] if cluster_admin_header else []))
+    if k.startswith("clusterAdminAuthHeaders"):
+        return [cluster_admin_header] if cluster_admin_header else []
     if "Bearer invalid-token" in k:
         return ["Authorization: Bearer invalid-token"]
+    # auth-invalid on an independentAuthGate operation: the cluster-admin
+    # chain is Basic-only, so renderScenario emits a call to the real
+    # basicAuthHeaders(username, password) with a fixed, deliberately-wrong
+    # credential instead of a Bearer literal — see qaEmitter.ts. Without this,
+    # the fallthrough below returns no Authorization header at all, so the
+    # oracle would replay auth-invalid as auth-absent and could report a
+    # match (both expect 401) without exercising the same request.
+    m = re.match(r"basicAuthHeaders\(\s*'([^']*)'\s*,\s*'([^']*)'\s*\)", k)
+    if m:
+        username, password = m.group(1), m.group(2)
+        encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
+        return [f"Authorization: Basic {encoded}"]
     return []  # {} → no auth
 
 
@@ -284,6 +311,7 @@ def main():
     ap.add_argument("--api-version", default="v2")
     ap.add_argument("--admin-header", default="")
     ap.add_argument("--deny-header", default="")
+    ap.add_argument("--cluster-admin-header", default="")
     ap.add_argument("--pw-json", default="")
     ap.add_argument("--show-body", action="store_true")
     ap.add_argument("--max-body", type=int, default=400)
@@ -308,7 +336,20 @@ def main():
             if d["headers_kind"].strip().startswith("denyProbeHeaders") and not args.deny_header:
                 skipped += 1
                 continue
-            headers = curl_headers(d["headers_kind"], args.admin_header, args.deny_header)
+            # Same reasoning for independentAuthGate (cluster-admin) scenarios
+            # that expect a real 400/etc. under independentAuthGateMode:
+            # 'available' — without --cluster-admin-header we'd re-issue them
+            # unauthenticated and get a bogus 400-vs-401 mismatch.
+            headers_kind_stripped = d["headers_kind"].strip()
+            if (
+                headers_kind_stripped.startswith("clusterAdminAuthHeaders")
+                or headers_kind_stripped.startswith("clusterAdminJsonHeaders")
+            ) and not args.cluster_admin_header:
+                skipped += 1
+                continue
+            headers = curl_headers(
+                d["headers_kind"], args.admin_header, args.deny_header, args.cluster_admin_header
+            )
             code, body = run_curl(d["method"], d["url"], headers, d["body_json"], d["multipart"])
             pw_rec = pw.get(title, {})
             pw_status = ("pass" if pw_rec.get("ok") else f"FAIL({pw_rec.get('received')})") if pw_rec else "—"

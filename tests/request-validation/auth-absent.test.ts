@@ -273,6 +273,73 @@ describe('request-validation: auth-absent loader derivation (#346)', () => {
     expect(byId.get('inheritsPathOp')?.conditionalAuth).toBe(true);
     expect(byId.get('overridesPathOp')?.conditionalAuth).toBe(false);
   });
+
+  it('derives independentAuthGate from serverOverride + conditionalAuth (cluster-admin model)', async () => {
+    const ROOT_AUTHORITY = '{schema}://{host}:{port}';
+    const DOCUMENT_ROOT = `${ROOT_AUTHORITY}/v2`;
+    const independentAuthGatePath = join(tmp, 'spec-independent-auth-gate.json');
+    writeFileSync(
+      independentAuthGatePath,
+      JSON.stringify({
+        openapi: '3.0.3',
+        info: { title: 'fixture', version: '1.0.0' },
+        servers: [{ url: DOCUMENT_ROOT }],
+        components: {
+          securitySchemes: {
+            BearerAuth: { type: 'http', scheme: 'bearer', 'x-enforcement': 'conditional' },
+          },
+        },
+        paths: {
+          // Server override (path-item level) + conditional security → gated.
+          '/cluster/v2/backups/history': {
+            servers: [{ url: ROOT_AUTHORITY }],
+            post: {
+              operationId: 'gatedViaPathLevelOverride',
+              security: [{ BearerAuth: [] }],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+          // Server override (op-level, no path-item override) + conditional
+          // security → gated. Proves op-level precedence (loader.ts's
+          // `opServers ?? pathLevelServers`) still yields the right gate.
+          '/cluster/v2/mode': {
+            post: {
+              operationId: 'gatedViaOpLevelOverride',
+              servers: [{ url: ROOT_AUTHORITY }],
+              security: [{ BearerAuth: [] }],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+          // Server override + explicit public security ([]) — the
+          // getClusterStatus/getClusterUpgradeStatus exception — must NOT be
+          // gated: conditionalAuth is false, so independentAuthGate is too.
+          '/cluster/v2/status': {
+            servers: [{ url: ROOT_AUTHORITY }],
+            get: {
+              operationId: 'publicDespiteOverride',
+              security: [],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+          // Conditional security but NO server override at all — the ordinary
+          // deployment-mode-axis case — must NOT be gated.
+          '/regular': {
+            post: {
+              operationId: 'regularConditionalOp',
+              security: [{ BearerAuth: [] }],
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      }),
+    );
+    const model = await loadSpec(independentAuthGatePath);
+    const byId = new Map(model.operations.map((o) => [o.operationId, o]));
+    expect(byId.get('gatedViaPathLevelOverride')?.independentAuthGate).toBe(true);
+    expect(byId.get('gatedViaOpLevelOverride')?.independentAuthGate).toBe(true);
+    expect(byId.get('publicDespiteOverride')?.independentAuthGate).toBe(false);
+    expect(byId.get('regularConditionalOp')?.independentAuthGate).toBe(false);
+  });
 });
 
 describe('request-validation: generateAuthAbsent contract (#346)', () => {
@@ -463,5 +530,35 @@ describe('request-validation: generateAuthInvalid contract + emitter (#25264)', 
     expect(rendered).not.toContain('jsonHeaders()');
     expect(rendered).not.toContain('denyProbeHeaders()');
     expect(rendered).not.toContain('const requestBody');
+  });
+
+  it('emitter sends a garbage Basic credential (not Bearer) for auth-invalid on an independentAuthGate operation', () => {
+    // The cluster-admin chain is Basic-only (env.ts's clusterAdminAuthHeaders
+    // doc comment — no Bearer fallback), so a Bearer literal would be rejected
+    // the same way an absent header is, testing nothing beyond auth-absent
+    // (review finding on PR #595). Built via basicAuthHeaders('invalid',
+    // 'invalid') rather than a hardcoded `Basic <base64>` literal, so no
+    // base64-shaped string appears in the emitted spec (a literal one was a
+    // secret-scanner false positive).
+    const scenario: ValidationScenario = {
+      id: 'gatedOp__auth_invalid',
+      operationId: 'gatedOp',
+      method: 'POST',
+      path: '/cluster/v2/mode',
+      type: 'auth-invalid',
+      expectedStatus: 401,
+      description: 'invalid credential',
+      headersAuth: false,
+    };
+    const rendered = renderScenarioForTest(
+      scenario,
+      'gatedOp - Invalid authentication token',
+      undefined,
+      undefined,
+      true,
+    );
+    expect(rendered).not.toContain('Bearer invalid-token');
+    expect(rendered).toContain("headers: basicAuthHeaders('invalid', 'invalid')");
+    expect(rendered).toContain('assertResponseStatus(testInfo, res, 401');
   });
 });

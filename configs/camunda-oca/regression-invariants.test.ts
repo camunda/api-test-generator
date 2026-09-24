@@ -16,6 +16,7 @@ import {
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
+import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 
 /**
  * Bundled-spec invariants — Layer 3 of the layered test strategy (#36).
@@ -3357,6 +3358,26 @@ describeForThisConfig(
         .sort();
     }
 
+    // Slices a generated spec file into one string per `test(...)` call by
+    // finding consecutive top-level `test(` start positions (always emitted
+    // at a 2-space indent by qaEmitter.ts's renderScenario) and cutting
+    // between them — NOT by matching a closing `});`, which is ambiguous:
+    // the request call inside every test body (e.g. `request.delete(url, {
+    // headers: {} });`) also closes with `});` before the outer test's own
+    // closing brace, and a body-content-agnostic lazy match stops at the
+    // first one it finds. (A prior version of this file's invariant did
+    // exactly that and silently never matched past the request call, making
+    // the check vacuously pass — see PR #595 review.) Mirrors the technique
+    // scripts/e2e/curl_compare.py's split_tests() already uses for the same
+    // reason.
+    function splitTestBlocks(src: string): string[] {
+      const starts: number[] = [];
+      const TEST_START = /\n {2}test\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = TEST_START.exec(src)) !== null) starts.push(m.index + 1); // +1: skip the leading \n
+      return starts.map((start, i) => src.slice(start, starts[i + 1] ?? src.length));
+    }
+
     it('emits both profiles as self-contained suites with spec files', () => {
       requireDir(UNSECURED_DIR);
       requireDir(SECURED_DIR);
@@ -3370,13 +3391,236 @@ describeForThisConfig(
       }
     });
 
-    it('never expects a 401 in the unsecured profile (class-scoped)', () => {
+    // independentAuthGate operations (OperationModel.independentAuthGate,
+    // request-validation/src/model/types.ts — currently the Orchestration
+    // Cluster REST API's cluster-admin ops) sit behind a security chain
+    // that's enforced unconditionally, independent of this unsecured/secured
+    // toggle, so their auth-absent/auth-invalid (401) coverage is the one
+    // deliberate exception to the invariant below: it's generated into BOTH
+    // profiles, not secured-only. Mirrors loader.ts's exact contract
+    // (`independentAuthGate = serverOverride !== undefined && conditionalAuth`)
+    // against the bundled spec JSON, rather than importing the generator, to
+    // keep this file's existing bundled-spec-JSON-only dependency shape:
+    //  - a RESOLVED server override — the op's (or path-item's) `servers[0].url`
+    //    is defined and differs from the document root (resolveServerOverride's
+    //    exact early-exit condition; a spec that fails validation there never
+    //    reaches a successfully generated bundle, so that's the only case this
+    //    invariant needs to reproduce).
+    //  - `conditionalAuth` — the effective `security` (op ?? pathItem ?? global)
+    //    references an `x-enforcement: conditional` scheme by name, not merely
+    //    "any non-empty security array" (securityRequiresConditional's exact
+    //    semantics — a scheme with no `x-enforcement` annotation, or an
+    //    anonymous `{}` alternative, must NOT count).
+    const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'] as const;
+
+    interface SpecOperationLite {
+      operationId?: string;
+      security?: unknown[];
+      servers?: { url?: string }[];
+    }
+    // Method keys derived from HTTP_METHODS (not hand-listed again) so the
+    // two can't silently drift apart if a method is ever added or removed.
+    interface SpecPathItemLite
+      extends Partial<Record<(typeof HTTP_METHODS)[number], SpecOperationLite>> {
+      servers?: { url?: string }[];
+      security?: unknown[];
+    }
+
+    function securityReferencesConditionalScheme(
+      security: unknown,
+      conditionalSchemes: ReadonlySet<string>,
+    ): boolean | undefined {
+      if (!Array.isArray(security)) return undefined;
+      if (security.length === 0) return false;
+      for (const requirement of security) {
+        if (requirement && typeof requirement === 'object') {
+          for (const schemeName of Object.keys(requirement)) {
+            if (conditionalSchemes.has(schemeName)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function loadIndependentlyGatedOperationIds(): Set<string> {
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const spec = JSON.parse(readFileSync(BUNDLED_SPEC_PATH, 'utf8')) as {
+        servers?: { url?: string }[];
+        security?: unknown[];
+        components?: { securitySchemes?: Record<string, { 'x-enforcement'?: string }> };
+        paths?: Record<string, SpecPathItemLite>;
+      };
+      const documentRootUrl = spec.servers?.[0]?.url;
+      const conditionalSchemes = new Set<string>();
+      for (const [name, scheme] of Object.entries(spec.components?.securitySchemes ?? {})) {
+        if (scheme?.['x-enforcement'] === 'conditional') conditionalSchemes.add(name);
+      }
+      const globalSecurity = spec.security;
+      const ids = new Set<string>();
+      for (const pathItem of Object.values(spec.paths ?? {})) {
+        for (const method of HTTP_METHODS) {
+          const op = pathItem[method];
+          if (!op?.operationId) continue;
+          // Operation-level `servers` takes precedence over path-item-level
+          // (loader.ts's `opServers ?? pathLevelServers`).
+          const rawOverride = (op.servers ?? pathItem.servers)?.[0]?.url;
+          const hasResolvedServerOverride =
+            rawOverride !== undefined && rawOverride !== documentRootUrl;
+          if (!hasResolvedServerOverride) continue;
+          const conditionalAuth =
+            securityReferencesConditionalScheme(op.security, conditionalSchemes) ??
+            securityReferencesConditionalScheme(pathItem.security, conditionalSchemes) ??
+            securityReferencesConditionalScheme(globalSecurity, conditionalSchemes) ??
+            false;
+          if (conditionalAuth) ids.add(op.operationId);
+        }
+      }
+      return ids;
+    }
+
+    // Per-gated-operation scenarioKind sets present in a profile directory.
+    // Shared by the two independentAuthGateMode invariants below.
+    function gatedOpScenarioKinds(
+      dir: string,
+      gatedOpIds: ReadonlySet<string>,
+    ): Map<string, Set<string>> {
+      const byOp = new Map<string, Set<string>>();
+      for (const f of specFiles(dir)) {
+        const src = readFileSync(join(dir, f), 'utf8');
+        for (const text of splitTestBlocks(src)) {
+          const opMatch = /operationId:\s*['"]([^'"]+)['"]/.exec(text);
+          const kindMatch = /scenarioKind:\s*['"]([^'"]+)['"]/.exec(text);
+          if (!opMatch || !kindMatch || !gatedOpIds.has(opMatch[1])) continue;
+          const set = byOp.get(opMatch[1]) ?? new Set<string>();
+          set.add(kindMatch[1]);
+          byOp.set(opMatch[1], set);
+        }
+      }
+      return byOp;
+    }
+
+    it('never expects a 401 in the unsecured profile, except for independentAuthGate operations (class-scoped)', () => {
       requireDir(UNSECURED_DIR);
+      const gatedOpIds = loadIndependentlyGatedOperationIds();
       const offenders: string[] = [];
+      let blocksScanned = 0;
       for (const f of specFiles(UNSECURED_DIR)) {
         const src = readFileSync(join(UNSECURED_DIR, f), 'utf8');
-        if (/scenarioKind:\s*['"]auth-absent['"]/.test(src)) offenders.push(`${f}: auth-absent`);
-        if (/assertResponseStatus\([^)]*,\s*401\s*,/.test(src)) offenders.push(`${f}: 401`);
+        for (const text of splitTestBlocks(src)) {
+          blocksScanned++;
+          const isAuthAbsentOr401 =
+            /scenarioKind:\s*['"]auth-absent['"]/.test(text) ||
+            /assertResponseStatus\([^)]*,\s*401\s*,/.test(text);
+          if (!isAuthAbsentOr401) continue;
+          const opMatch = /operationId:\s*['"]([^'"]+)['"]/.exec(text);
+          if (opMatch && gatedOpIds.has(opMatch[1])) continue; // expected exception
+          offenders.push(`${f}: ${opMatch?.[1] ?? '(unknown op)'} unexpectedly expects 401`);
+        }
+      }
+      // Guards against a repeat of the exact regression this test caught in
+      // review: a block-splitting bug that makes the loop above match zero
+      // (or an implausibly small number of) real test blocks, leaving
+      // `offenders` vacuously empty regardless of file content.
+      expect(blocksScanned).toBeGreaterThan(100);
+      expect(offenders).toEqual([]);
+    });
+
+    it('independentAuthGate operations get identical, complete auth-absent/auth-invalid coverage in both unsecured and secured profiles', () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      const gatedOpIds = loadIndependentlyGatedOperationIds();
+      // Sanity: don't let this pass vacuously if the spec ever loses its
+      // independentAuthGate operations entirely.
+      expect(gatedOpIds.size).toBeGreaterThan(0);
+      const unsecuredByOp = gatedOpScenarioKinds(UNSECURED_DIR, gatedOpIds);
+      const securedByOp = gatedOpScenarioKinds(SECURED_DIR, gatedOpIds);
+      const problems: string[] = [];
+      for (const opId of gatedOpIds) {
+        const u = Array.from(unsecuredByOp.get(opId) ?? []).sort();
+        const s = Array.from(securedByOp.get(opId) ?? []).sort();
+        if (JSON.stringify(u) !== JSON.stringify(s)) {
+          problems.push(`${opId}: unsecured=[${u.join(',')}] secured=[${s.join(',')}]`);
+        }
+        if (!u.includes('auth-absent') || !u.includes('auth-invalid')) {
+          problems.push(
+            `${opId}: missing auth-absent/auth-invalid coverage (has [${u.join(',')}])`,
+          );
+        }
+      }
+      expect(problems).toEqual([]);
+    });
+
+    // Reads the ACTIVE independentAuthGateMode rather than assuming the
+    // default: the PR's own test plan is to flip camunda-oca's config to
+    // 'available' once real cluster-admin credentials exist, at which
+    // point 400/etc. scenarios for these operations are correctly restored
+    // (RequestValidationConfig.independentAuthGateMode's doc comment) — a
+    // version of this invariant hardcoded to the 'unavailable' shape would
+    // then fail on that correct, intended behavior.
+    it("independentAuthGate operations' non-auth scenario coverage matches the active independentAuthGateMode (class-scoped)", () => {
+      requireDir(UNSECURED_DIR);
+      requireDir(SECURED_DIR);
+      const gatedOpIds = loadIndependentlyGatedOperationIds();
+      const rvConfig = loadRequestValidationConfig(REPO_ROOT, CONFIG_NAME);
+      const offenders: string[] = [];
+      if (rvConfig.independentAuthGateMode === 'unavailable') {
+        // No independentAuthGate operation can reach body/param validation
+        // without the missing credential set, so none should carry any
+        // scenario kind beyond auth-absent/auth-invalid.
+        for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+          for (const [opId, kinds] of gatedOpScenarioKinds(dir, gatedOpIds)) {
+            for (const kind of kinds) {
+              if (kind !== 'auth-absent' && kind !== 'auth-invalid') {
+                offenders.push(
+                  `${dir}: ${opId} unexpectedly has scenarioKind '${kind}' under 'unavailable' mode`,
+                );
+              }
+            }
+          }
+        }
+      } else {
+        // 'available': a real credential set is supplied, so negative-
+        // validation coverage should exist again for at least some gated
+        // operations with an applicable non-auth kind. Deliberately an
+        // aggregate ("at least one"), not a per-operation check: several
+        // gated operations coincidentally hit pre-existing, project-wide
+        // generator gaps unrelated to independentAuthGate (e.g.
+        // param-type-mismatch is missing for 141 operations across the
+        // whole spec, gated and non-gated alike — see COVERAGE.md's "True
+        // Gaps" summary), so "this one op has zero non-auth coverage" is
+        // not by itself evidence of an independentAuthGateMode regression.
+        // A regression that wipes non-auth coverage for EVERY gated
+        // operation (the actual failure mode a bug in the filtering step
+        // could cause) still trips this.
+        const coveragePath = join(RV_DIR, 'COVERAGE.json');
+        if (!existsSync(coveragePath)) {
+          throw new Error(
+            `COVERAGE.json not found at ${coveragePath}. Run 'npm run generate:request-validation' first.`,
+          );
+        }
+        // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+        const coverage = JSON.parse(readFileSync(coveragePath, 'utf8')) as {
+          operations?: { operationId: string; applicableKindCount?: number }[];
+        };
+        const applicableCountByOp = new Map(
+          (coverage.operations ?? []).map((o) => [o.operationId, o.applicableKindCount ?? 0]),
+        );
+        const opsWithApplicableNonAuthKind = Array.from(gatedOpIds).filter(
+          (opId) => (applicableCountByOp.get(opId) ?? 0) > 2,
+        );
+        for (const dir of [UNSECURED_DIR, SECURED_DIR]) {
+          const byOp = gatedOpScenarioKinds(dir, gatedOpIds);
+          const hasAnyNonAuthCoverage = opsWithApplicableNonAuthKind.some((opId) =>
+            Array.from(byOp.get(opId) ?? []).some(
+              (k) => k !== 'auth-absent' && k !== 'auth-invalid',
+            ),
+          );
+          if (opsWithApplicableNonAuthKind.length > 0 && !hasAnyNonAuthCoverage) {
+            offenders.push(
+              `${dir}: no independentAuthGate operation has any negative-validation coverage under 'available' mode`,
+            );
+          }
+        }
       }
       expect(offenders).toEqual([]);
     });

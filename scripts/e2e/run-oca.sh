@@ -65,6 +65,15 @@ DENY_HEADER=""
 if [ -n "$DENY_USER" ] && [ -n "$DENY_PASS" ]; then
   DENY_HEADER="Authorization: Basic $(b64 "$DENY_USER" "$DENY_PASS")"
 fi
+# Cluster-admin Basic header for independentAuthGate (cluster-admin) scenarios
+# under independentAuthGateMode: 'available' — mirrors env.ts's
+# clusterAdminAuthHeaders()/clusterAdminJsonHeaders() precedence. Empty by
+# default (no such credential set exists yet); curl-compare skips those
+# scenarios rather than false-mismatching when this is unset.
+CLUSTER_ADMIN_HEADER=""
+if [ -n "${CLUSTER_ADMIN_BASIC_AUTH_USER:-}" ] && [ -n "${CLUSTER_ADMIN_BASIC_AUTH_PASSWORD:-}" ]; then
+  CLUSTER_ADMIN_HEADER="Authorization: Basic $(b64 "$CLUSTER_ADMIN_BASIC_AUTH_USER" "$CLUSTER_ADMIN_BASIC_AUTH_PASSWORD")"
+fi
 
 echo "▶ config=$CONFIG  api=$CORE_URL  steps='$STEPS'  rv-profiles='$RV_PROFILES'  auth=$([ -n "$ADMIN_HEADER" ] && echo yes || echo no)"
 
@@ -166,6 +175,7 @@ for p in $RV_PROFILES; do
     python3 scripts/e2e/curl_compare.py \
       --spec-dir "$RV_DIR/$p" --base-url "$CORE_URL" --api-version v2 \
       --admin-header "$ADMIN_HEADER" --deny-header "$DENY_HEADER" \
+      --cluster-admin-header "$CLUSTER_ADMIN_HEADER" \
       --pw-json "$OUT/pw-$p.json" --show-body --html "$OUT/curl-compare-$p.html" \
       2>&1 | tee "$OUT/curl-compare-$p.txt" || RV_FAIL=1
   fi

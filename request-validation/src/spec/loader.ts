@@ -269,6 +269,11 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         asString((opServers ?? pathLevelServers)?.[0]?.url),
         documentRootUrl,
       );
+      const conditionalAuth =
+        securityRequiresConditional(op.security, conditionalSchemes) ??
+        securityRequiresConditional(pathLevelSecurity, conditionalSchemes) ??
+        securityRequiresConditional(globalSecurity, conditionalSchemes) ??
+        false;
       operations.push({
         operationId,
         method,
@@ -286,11 +291,8 @@ export async function loadSpec(file: string): Promise<SpecModel> {
         mediaTypes,
         responseCodes,
         successIsCollection,
-        conditionalAuth:
-          securityRequiresConditional(op.security, conditionalSchemes) ??
-          securityRequiresConditional(pathLevelSecurity, conditionalSchemes) ??
-          securityRequiresConditional(globalSecurity, conditionalSchemes) ??
-          false,
+        conditionalAuth,
+        independentAuthGate: serverOverride !== undefined && conditionalAuth,
         secured:
           securityRequiresAuth(op.security) ??
           securityRequiresAuth(pathLevelSecurity) ??

@@ -15,6 +15,8 @@ const ENV_KEYS = [
   'RBAC_DENY_PROBE_BEARER_TOKEN',
   'RBAC_DENY_PROBE_USER',
   'RBAC_DENY_PROBE_PASSWORD',
+  'CLUSTER_ADMIN_BASIC_AUTH_USER',
+  'CLUSTER_ADMIN_BASIC_AUTH_PASSWORD',
 ] as const;
 
 beforeEach(() => {
@@ -35,6 +37,16 @@ async function loadAuthHeaders() {
 async function loadDenyProbeHeaders() {
   const mod = await import('../../request-validation/templates/support/env.js');
   return mod.denyProbeHeaders;
+}
+
+async function loadClusterAdminAuthHeaders() {
+  const mod = await import('../../request-validation/templates/support/env.js');
+  return mod.clusterAdminAuthHeaders;
+}
+
+async function loadClusterAdminJsonHeaders() {
+  const mod = await import('../../request-validation/templates/support/env.js');
+  return mod.clusterAdminJsonHeaders;
 }
 
 describe('authHeaders() precedence', () => {
@@ -92,5 +104,57 @@ describe('denyProbeHeaders() scheme selection', () => {
     const denyProbeHeaders = await loadDenyProbeHeaders();
     const encoded = Buffer.from('probe:pw').toString('base64');
     expect(denyProbeHeaders()).toEqual({ Authorization: `Basic ${encoded}` });
+  });
+});
+
+describe('clusterAdminAuthHeaders()/clusterAdminJsonHeaders() precedence', () => {
+  it('returns Basic when both CLUSTER_ADMIN_BASIC_AUTH_* are set', async () => {
+    process.env.CLUSTER_ADMIN_BASIC_AUTH_USER = 'cluster';
+    process.env.CLUSTER_ADMIN_BASIC_AUTH_PASSWORD = 'secret';
+    const clusterAdminAuthHeaders = await loadClusterAdminAuthHeaders();
+    const encoded = Buffer.from('cluster:secret').toString('base64');
+    expect(clusterAdminAuthHeaders()).toEqual({ Authorization: `Basic ${encoded}` });
+  });
+
+  it('returns {} when neither CLUSTER_ADMIN_BASIC_AUTH_* var is set — no Bearer fallback', async () => {
+    process.env.BEARER_TOKEN = 'tok123'; // must NOT leak into the cluster-admin chain
+    const clusterAdminAuthHeaders = await loadClusterAdminAuthHeaders();
+    expect(clusterAdminAuthHeaders()).toEqual({});
+  });
+
+  it('returns {} and warns exactly once when only one CLUSTER_ADMIN_BASIC_AUTH_* var is set', async () => {
+    process.env.CLUSTER_ADMIN_BASIC_AUTH_USER = 'cluster';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const clusterAdminAuthHeaders = await loadClusterAdminAuthHeaders();
+    expect(clusterAdminAuthHeaders()).toEqual({});
+    expect(clusterAdminAuthHeaders()).toEqual({});
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('partial credential is ignored');
+  });
+
+  it('does not share its partial-credential warning latch with authHeaders()', async () => {
+    process.env.CAMUNDA_BASIC_AUTH_USER = 'alice'; // partial regular-admin creds
+    process.env.CLUSTER_ADMIN_BASIC_AUTH_USER = 'cluster'; // partial cluster-admin creds
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mod = await import('../../request-validation/templates/support/env.js');
+    expect(mod.authHeaders()).toEqual({});
+    expect(mod.clusterAdminAuthHeaders()).toEqual({});
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('clusterAdminJsonHeaders adds Content-Type and reuses clusterAdminAuthHeaders', async () => {
+    process.env.CLUSTER_ADMIN_BASIC_AUTH_USER = 'cluster';
+    process.env.CLUSTER_ADMIN_BASIC_AUTH_PASSWORD = 'secret';
+    const clusterAdminJsonHeaders = await loadClusterAdminJsonHeaders();
+    const encoded = Buffer.from('cluster:secret').toString('base64');
+    expect(clusterAdminJsonHeaders()).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: `Basic ${encoded}`,
+    });
+  });
+
+  it('clusterAdminJsonHeaders is Content-Type-only when no credentials are set', async () => {
+    const clusterAdminJsonHeaders = await loadClusterAdminJsonHeaders();
+    expect(clusterAdminJsonHeaders()).toEqual({ 'Content-Type': 'application/json' });
   });
 });
