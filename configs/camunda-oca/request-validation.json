@@ -1004,22 +1004,6 @@
       }
     },
     {
-      "operationId": "takeHistoryBackup",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to takeHistoryBackup 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
-      "operationId": "listHistoryBackups",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to listHistoryBackups 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
-      "operationId": "getHistoryBackup",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to getHistoryBackup 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
-      "operationId": "deleteHistoryBackup",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackup 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
       "operationId": "searchProcessDefinitionVariableNames",
       "scenarioKinds": [
         "pagination-cursor-invalid"
@@ -1029,6 +1013,43 @@
         "summary": "searchProcessDefinitionVariableNames accepts an undecodable pagination cursor and returns 200 instead of 400, inconsistent with other cursor-based endpoints",
         "url": "https://github.com/camunda/camunda/issues/64206"
       }
+    },
+    {
+      "operationId": "takeHistoryBackup",
+      "scenarioKinds": [
+        "additional-prop-general",
+        "body-top-type-mismatch",
+        "constraint-violation",
+        "explicit-null-required",
+        "malformed-json-body",
+        "missing-body",
+        "missing-required",
+        "type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to takeHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "listHistoryBackups",
+      "scenarioKinds": [
+        "param-constraint-violation",
+        "param-type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to listHistoryBackups 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "getHistoryBackup",
+      "scenarioKinds": [
+        "not-found-fake-id",
+        "type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to getHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "deleteHistoryBackup",
+      "scenarioKinds": [
+        "type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
     }
   ]
 }
