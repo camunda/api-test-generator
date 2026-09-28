@@ -1034,6 +1034,17 @@
     {
       "operationId": "deleteHistoryBackupAsClusterAdmin",
       "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackupAsClusterAdmin 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
+    },
+    {
+      "operationId": "searchProcessDefinitionVariableNames",
+      "scenarioKinds": [
+        "pagination-cursor-invalid"
+      ],
+      "reason": "Accepts a syntactically-valid-base64 but undecodable pagination cursor (page.after or page.before) and returns 200 instead of 400, unlike other cursor-based endpoints (e.g. searchTenants, searchProcessInstances) which correctly reject the same cursor value with a 400 INVALID_ARGUMENT ProblemDetail (camunda/camunda#64206). Endpoint-specific validation gap, not shared by other cursor-paginated operations. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "searchProcessDefinitionVariableNames accepts an undecodable pagination cursor and returns 200 instead of 400, inconsistent with other cursor-based endpoints",
+        "url": "https://github.com/camunda/camunda/issues/64206"
+      }
     }
   ]
 }
