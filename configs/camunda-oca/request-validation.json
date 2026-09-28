@@ -1020,22 +1020,6 @@
       "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackup 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
     },
     {
-      "operationId": "takeHistoryBackupAsClusterAdmin",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to takeHistoryBackupAsClusterAdmin 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
-      "operationId": "listHistoryBackupsAsClusterAdmin",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to listHistoryBackupsAsClusterAdmin 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
-      "operationId": "getHistoryBackupAsClusterAdmin",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to getHistoryBackupAsClusterAdmin 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
-      "operationId": "deleteHistoryBackupAsClusterAdmin",
-      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackupAsClusterAdmin 403s before reaching body/param validation — every negative-test scenario kind for this operation is equally unreachable here, not a specific gap. Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately)."
-    },
-    {
       "operationId": "searchProcessDefinitionVariableNames",
       "scenarioKinds": [
         "pagination-cursor-invalid"
