@@ -49,10 +49,7 @@ import {
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
 import { emitTemplateSuites } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
-import {
-  materializePythonFixtures,
-  materializePythonSupport,
-} from './python-sdk/materialize-support.js';
+import { materializePythonSupport } from './python-sdk/materialize-support.js';
 import { createOperationMapSourceFromJson } from './python-sdk/sdk-mapping.js';
 import { RoleHookConflictError, resolveRoleExtras } from './roleHookResolver.js';
 
@@ -612,7 +609,6 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
   }
   if (emitter.id === 'python-sdk') {
     await materializePythonSupport(outDir);
-    await materializePythonFixtures(outDir);
   }
   if (emitter.id === 'csharp-sdk') {
     // materializeCsharpSupport already vendors the active config's BPMN/DMN/form

@@ -1,6 +1,7 @@
 # Python SDK Emitter
 
-Lowers Camunda API test scenarios into executable Python integration test suites.
+Lowers Camunda API test scenarios into executable Python test suites using the
+Camunda Python SDK.
 
 ## Overview
 
@@ -75,7 +76,6 @@ Each emitted module follows this structure:
 
 import pytest
 from typing import Any, Dict
-import httpx
 
 class TestContext:
     """Manages test state and variable binding."""
@@ -87,11 +87,9 @@ def ctx() -> TestContext:
     return TestContext()
 
 @pytest.mark.asyncio
-async def test_happy_path(ctx: TestContext, client: httpx.AsyncClient) -> None:
+async def test_happy_path(ctx: TestContext) -> None:
     """Scenario: happy path"""
     # Step 1: POST /widgets
-    response_1 = await client.post('widgets', json={"name": "w1"})
-    assert response_1.status_code == 201
     # Step 2: GET /widgets/{widgetKey}
     # ...
 ```
@@ -198,16 +196,16 @@ Implements `EmitterStrategy`:
 
 ## Operation Map
 
-The emitter accepts `spec/python-sdk/operation-map.json` and passes it through
-via `EmitOptions.operationMap`, but `renderPythonSuite` does not currently
-read it for coverage metadata or compatibility checks — it is unused
-metadata today, kept for forward-compatibility with a future check.
+The emitter optionally consumes `spec/python-sdk/operation-map.json` (fetched
+via `npm run fetch-sdk-maps`), mapping OpenAPI operationId → SDK method names.
 
-Generated tests execute direct HTTP calls with `httpx.AsyncClient` from
-`conftest.py`, so runtime behavior is integration-oriented and does not depend
-on operation-map method names.
+When present, the emitter can validate:
+- SDK method coverage (which operations have SDK bindings?)
+- Expected method signatures
+- Breaking changes in new SDK versions
 
-When absent, emission still works with the same HTTP integration behavior.
+When absent, the emitter falls back to REST-only generation without SDK-specific
+validation.
 
 ## Integration with path-analyser
 
@@ -238,7 +236,7 @@ containing:
 }
 ```
 
-The emitter materializes this into executable Python integration tests.
+The emitter materializes this into executable Python test code.
 
 ---
 
