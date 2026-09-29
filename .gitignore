@@ -6,3 +6,7 @@ external-spec/
 test-results/
 *.tsbuildinfo
 .claw/
+
+# Python bytecode
+__pycache__/
+*.pyc
