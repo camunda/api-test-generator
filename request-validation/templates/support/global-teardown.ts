@@ -33,6 +33,12 @@ function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((item) => typeof item === 'string');
 }
 
+function errnoCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const code = Reflect.get(err, 'code');
+  return typeof code === 'string' ? code : undefined;
+}
+
 /**
  * Cancels one instance, reporting whether it's now actually accounted for —
  * a non-2xx/network failure returns `false` rather than being swallowed, so
@@ -63,9 +69,23 @@ async function globalTeardown(): Promise<void> {
   try {
     const raw = await fs.readFile(statePath, 'utf8');
     const parsed: unknown = JSON.parse(raw);
-    processInstanceKeys = isStringArray(parsed) ? parsed : [];
-  } catch {
-    return; // nothing recorded — global-setup.ts never created anything
+    if (!isStringArray(parsed)) {
+      throw new Error(`cleanup state file has an unexpected shape (not a string array): ${raw.slice(0, 300)}`);
+    }
+    processInstanceKeys = parsed;
+  } catch (err) {
+    // ENOENT alone means global-setup.ts never got far enough to create
+    // anything (rbac, or a config without these BPMN fixtures) — a true
+    // no-op. Anything else — a permission error, a truncated/corrupted file
+    // from an interrupted write, an unexpected shape — means something WAS
+    // likely recorded and this is silently losing track of it; fail loudly
+    // rather than treating it the same as "nothing to clean up" (#614's
+    // review discussion).
+    if (errnoCode(err) === 'ENOENT') return;
+    throw new Error(
+      `[runtime-key fixtures] cleanup state file at ${statePath} exists but couldn't be read: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   if (processInstanceKeys.length === 0) return;
 

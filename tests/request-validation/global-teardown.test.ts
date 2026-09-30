@@ -16,7 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *   4. a cancellation that doesn't succeed (non-2xx, not 404) is NOT treated
  *      as cleaned up — teardown throws (fails the run's exit code) and
  *      rewrites the state file with only the still-outstanding key(s),
- *      rather than swallowing the failure and deleting the file anyway.
+ *      rather than swallowing the failure and deleting the file anyway;
+ *   5. only ENOENT (the file genuinely doesn't exist) is a no-op — a
+ *      present-but-corrupted/unreadable/wrong-shape file throws instead of
+ *      being treated identically to "nothing recorded" (#614's review
+ *      discussion).
  */
 
 let readFileMock: ReturnType<typeof vi.fn>;
@@ -141,5 +145,35 @@ describe('globalTeardown', () => {
 
     expect(rmMock).toHaveBeenCalledTimes(1);
     expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
+  it('throws on a present-but-corrupted state file, rather than treating it as nothing recorded', async () => {
+    readFileMock.mockResolvedValue('{not valid json');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const globalTeardown = await loadGlobalTeardown();
+    await expect(globalTeardown()).rejects.toThrow(/couldn't be read/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('throws on a state file with an unexpected shape (not a string array)', async () => {
+    readFileMock.mockResolvedValue(JSON.stringify({ not: 'an array' }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const globalTeardown = await loadGlobalTeardown();
+    await expect(globalTeardown()).rejects.toThrow(/couldn't be read/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('throws on a non-ENOENT read error (e.g. a permission error), not just a corrupted file', async () => {
+    readFileMock.mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const globalTeardown = await loadGlobalTeardown();
+    await expect(globalTeardown()).rejects.toThrow(/couldn't be read/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

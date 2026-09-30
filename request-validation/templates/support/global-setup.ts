@@ -61,12 +61,15 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 // --- unsecured/secured runtime-key fixtures ---------------------------------
 
+// BPMN process ids ('Process_user_task', 'Process_0zc9jbi') aren't needed as
+// constants: instances are created from the exact processDefinitionKey
+// deployFixtureProcesses's own response returns, not by id (see that
+// function's doc comment for why id-based creation is unsafe here).
 const USER_TASK_BPMN = 'bpmn/user-task.bpmn';
-const USER_TASK_PROCESS_ID = 'Process_user_task';
 const SERVICE_TASK_BPMN = 'bpmn/service-task.bpmn';
-const SERVICE_TASK_PROCESS_ID = 'Process_0zc9jbi';
 // Base job type baked into service-task.bpmn's zeebe:taskDefinition. Never
-// used literally for activation (see makeUniqueServiceTaskJobType) — jobs/
+// used literally for activation (a unique per-run type is patched into the
+// deployed BPMN's content instead, in provisionRuntimeKeyFixtures) — jobs/
 // activation is broker-wide with no instance-scoping, so activating this
 // literal type could capture an unrelated job left by the positive suite's
 // own use of the identical fixture, or by a concurrent request-validation
@@ -126,10 +129,37 @@ async function readFixture(relPath: string): Promise<Buffer> {
   return fs.readFile(path.resolve(here, '..', 'fixtures', relPath));
 }
 
+function isDeployedProcess(
+  v: unknown,
+): v is { processDefinition: { processDefinitionKey: string; resourceName: string } } {
+  return (
+    isPlainObject(v) &&
+    isPlainObject(v.processDefinition) &&
+    typeof v.processDefinition.processDefinitionKey === 'string' &&
+    typeof v.processDefinition.resourceName === 'string'
+  );
+}
+
+function isDeploymentResponse(v: unknown): v is { deployments: unknown[] } {
+  return isPlainObject(v) && Array.isArray(v.deployments);
+}
+
+/**
+ * Deploys the given files and returns each one's exact `processDefinitionKey`
+ * (keyed by the `name` it was uploaded as), NOT the process id — creating a
+ * later instance by id alone would resolve to whatever the LATEST deployed
+ * version of that id is at that moment, which could be a DIFFERENT run's
+ * concurrent deployment on a shared broker (this repo's own e2e driver runs
+ * the positive suite and multiple request-validation profiles against the
+ * same broker; nothing prevents a genuinely concurrent second invocation
+ * either). Pinning to the key this call's own response just returned
+ * guarantees the instance created from it is THIS run's version, with THIS
+ * run's patched-in unique job type (#614's review discussion).
+ */
 async function deployFixtureProcesses(
   admin: Record<string, string>,
   files: ReadonlyArray<{ name: string; content: Buffer }>,
-): Promise<void> {
+): Promise<Map<string, string>> {
   const form = new FormData();
   for (const f of files) {
     form.append('resources', new Blob([new Uint8Array(f.content)]), f.name);
@@ -143,6 +173,20 @@ async function deployFixtureProcesses(
     const text = await res.text().catch(() => '');
     throw new Error(`deployment failed: HTTP ${res.status} ${text.slice(0, 300)}`);
   }
+  const body: unknown = await res.json();
+  if (!isDeploymentResponse(body)) {
+    throw new Error('deployment: unexpected response shape');
+  }
+  const processDefinitionKeysByResourceName = new Map<string, string>();
+  for (const deployed of body.deployments) {
+    if (isDeployedProcess(deployed)) {
+      processDefinitionKeysByResourceName.set(
+        deployed.processDefinition.resourceName,
+        deployed.processDefinition.processDefinitionKey,
+      );
+    }
+  }
+  return processDefinitionKeysByResourceName;
 }
 
 /** Best-effort cleanup for an instance created just before a sibling creation
@@ -180,24 +224,30 @@ function isCreateProcessInstanceResponse(v: unknown): v is { processInstanceKey:
   return isPlainObject(v) && typeof v.processInstanceKey === 'string';
 }
 
+/**
+ * Creates an instance of the EXACT deployed version identified by
+ * `processDefinitionKey` (from `deployFixtureProcesses`'s response), not by
+ * process id — see that function's doc comment for why id-based creation is
+ * unsafe here.
+ */
 async function createProcessInstance(
   admin: Record<string, string>,
-  processDefinitionId: string,
+  processDefinitionKey: string,
 ): Promise<string> {
   const res = await fetch(`${credentials.baseUrl}/v2/process-instances`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...admin },
-    body: JSON.stringify({ processDefinitionId }),
+    body: JSON.stringify({ processDefinitionKey }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(
-      `createProcessInstance(${processDefinitionId}) failed: HTTP ${res.status} ${text.slice(0, 300)}`,
+      `createProcessInstance(${processDefinitionKey}) failed: HTTP ${res.status} ${text.slice(0, 300)}`,
     );
   }
   const body: unknown = await res.json();
   if (!isCreateProcessInstanceResponse(body)) {
-    throw new Error(`createProcessInstance(${processDefinitionId}): unexpected response shape`);
+    throw new Error(`createProcessInstance(${processDefinitionKey}): unexpected response shape`);
   }
   return body.processInstanceKey;
 }
@@ -335,18 +385,25 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
     'utf8',
   );
 
-  await deployFixtureProcesses(admin, [
+  const processDefinitionKeysByResourceName = await deployFixtureProcesses(admin, [
     { name: 'user-task.bpmn', content: userTaskBpmn },
     { name: 'service-task.bpmn', content: serviceTaskBpmnForThisRun },
   ]);
+  const userTaskProcessDefinitionKey = processDefinitionKeysByResourceName.get('user-task.bpmn');
+  const serviceTaskProcessDefinitionKey = processDefinitionKeysByResourceName.get('service-task.bpmn');
+  if (!userTaskProcessDefinitionKey || !serviceTaskProcessDefinitionKey) {
+    throw new Error(
+      "deployment response didn't include a processDefinitionKey for both user-task.bpmn and service-task.bpmn",
+    );
+  }
 
   // allSettled (not all): if one create fails after the other already
   // succeeded, Promise.all would discard the successful one's key and
   // leak it as a permanently running orphan. Cancel anything that DID
   // get created before surfacing the failure.
   const created = await Promise.allSettled([
-    createProcessInstance(admin, USER_TASK_PROCESS_ID),
-    createProcessInstance(admin, SERVICE_TASK_PROCESS_ID),
+    createProcessInstance(admin, userTaskProcessDefinitionKey),
+    createProcessInstance(admin, serviceTaskProcessDefinitionKey),
   ]);
   const createdKeys: string[] = [];
   const createErrors: string[] = [];

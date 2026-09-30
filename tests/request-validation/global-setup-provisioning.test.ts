@@ -22,7 +22,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *   2. a deployment failure throws (fails loudly, per #614's review — see
  *      global-setup.ts's doc comment on provisionRuntimeKeyFixtures);
  *   3. a discovery timeout (user task never appears) throws, not swallowed,
- *      and cancels both process instances created before the timeout.
+ *      and cancels both process instances created before the timeout;
+ *   4. instances are created from the deployment response's exact
+ *      processDefinitionKey, not from a hardcoded process id — creating by
+ *      id would resolve to whatever the LATEST deployed version of that id
+ *      is at that moment, which could be a DIFFERENT (concurrent) run's
+ *      deployment on a shared broker, decoupling the instance from the
+ *      unique job type THIS run just patched into its own BPMN (#614's
+ *      review discussion).
  */
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -67,6 +74,26 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
+/** A `POST /v2/deployments` response shape matching what deployFixtureProcesses
+ *  actually reads: `deployments[].processDefinition.{resourceName,
+ *  processDefinitionKey}`. Instances are created from these exact keys, not
+ *  from the process id, so the mock must supply them. */
+function deploymentResponse(): Response {
+  return jsonResponse({
+    deployments: [
+      {
+        processDefinition: { resourceName: 'user-task.bpmn', processDefinitionKey: 'PDK-USERTASK' },
+      },
+      {
+        processDefinition: {
+          resourceName: 'service-task.bpmn',
+          processDefinitionKey: 'PDK-SERVICE',
+        },
+      },
+    ],
+  });
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -83,10 +110,10 @@ describe('provisionRuntimeKeyFixtures', () => {
   it('sets all four RV_FIXTURE_* env vars on the happy path', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/v2/deployments')) return jsonResponse({});
+      if (url.endsWith('/v2/deployments')) return deploymentResponse();
       if (url.endsWith('/v2/process-instances')) {
         const body = parseRequestBody(init);
-        const key = body.processDefinitionId === 'Process_user_task' ? 'PI-USERTASK' : 'PI-SERVICE';
+        const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
         return jsonResponse({ processInstanceKey: key });
       }
       if (url.endsWith('/v2/user-tasks/search')) {
@@ -131,10 +158,10 @@ describe('provisionRuntimeKeyFixtures', () => {
     const cancelledInstanceKeys: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/v2/deployments')) return jsonResponse({});
+      if (url.endsWith('/v2/deployments')) return deploymentResponse();
       if (url.endsWith('/v2/process-instances')) {
         const body = parseRequestBody(init);
-        const key = body.processDefinitionId === 'Process_user_task' ? 'PI-USERTASK' : 'PI-SERVICE';
+        const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
         return jsonResponse({ processInstanceKey: key });
       }
       // The user task never appears — this is the timeout case under test.
@@ -161,5 +188,45 @@ describe('provisionRuntimeKeyFixtures', () => {
     // cancelled — a failed setup shouldn't leak them into the broker for
     // later runs to trip over (#614's review discussion).
     expect(cancelledInstanceKeys.sort()).toEqual(['PI-SERVICE', 'PI-USERTASK']);
+  });
+
+  it('creates instances from the exact deployed processDefinitionKey, not a hardcoded process id', async () => {
+    const processInstanceBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v2/deployments')) return deploymentResponse();
+        if (url.endsWith('/v2/process-instances')) {
+          const body = parseRequestBody(init);
+          processInstanceBodies.push(body);
+          const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
+          return jsonResponse({ processInstanceKey: key });
+        }
+        if (url.endsWith('/v2/user-tasks/search')) {
+          return jsonResponse({
+            items: [{ userTaskKey: 'UT-1', elementInstanceKey: 'EI-USERTASK' }],
+          });
+        }
+        if (url.endsWith('/v2/jobs/activation')) {
+          return jsonResponse({ jobs: [{ jobKey: 'JOB-1', elementInstanceKey: 'EI-JOB' }] });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await provisionRuntimeKeyFixtures();
+
+    // Neither call should reference the process id at all — only the exact
+    // key this run's own deployment response returned.
+    for (const body of processInstanceBodies) {
+      expect(body.processDefinitionId).toBeUndefined();
+      expect(['PDK-USERTASK', 'PDK-SERVICE']).toContain(body.processDefinitionKey);
+    }
+    expect(processInstanceBodies.map((b) => b.processDefinitionKey).sort()).toEqual([
+      'PDK-SERVICE',
+      'PDK-USERTASK',
+    ]);
   });
 });
