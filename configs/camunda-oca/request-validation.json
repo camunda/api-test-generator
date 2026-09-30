@@ -890,6 +890,17 @@
       }
     },
     {
+      "operationId": "modifyProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but modifyProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
       "operationId": "resumeProcessInstancesBatchOperation",
       "scenarioKinds": [
         "constraint-violation"
