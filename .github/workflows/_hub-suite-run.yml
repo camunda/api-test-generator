@@ -80,6 +80,12 @@ on:
           caller skip failure analysis that needs suite output, which cannot
           exist in that case.
         value: ${{ jobs.run.outputs.suites_ran }}
+      hub_start_failed:
+        description: >-
+          "true" only when the Hub readiness wait itself failed (the container
+          crashed or never served), as opposed to any other pre-suite step
+          (checkout, clone, install, registry login, image pull) failing.
+        value: ${{ jobs.run.outputs.hub_start_failed }}
     # Declared explicitly (not `inherit`) so the interface is least-privilege and
     # callers can't accidentally omit one. Used by the hub-clone-token action.
     secrets:
@@ -125,6 +131,7 @@ jobs:
     outputs:
       unmapped_operations: ${{ steps.unmapped.outputs.unmapped }}
       suites_ran: ${{ steps.suites.conclusion != 'skipped' }}
+      hub_start_failed: ${{ steps.wait-hub.conclusion == 'failure' }}
       # || 'false': if the "unmapped" step never ran at all (its own `if:`
       # requires steps.suites.conclusion != 'skipped'), its output is EMPTY,
       # not "false" — defaulting here keeps the output contract a clean
@@ -247,6 +254,7 @@ jobs:
         run: ./docker/start-hub.sh start
 
       - name: Wait for Hub to be ready
+        id: wait-hub
         uses: ./.github/actions/wait-for-hub
         with:
           url: http://localhost:${{ env.HUB_UI_PORT }}/api/v2/

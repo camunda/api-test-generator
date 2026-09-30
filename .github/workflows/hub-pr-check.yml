@@ -909,6 +909,7 @@ jobs:
           CALLER_RUN_URL: ${{ needs.validate.outputs.caller_run_url }}
           CATEGORY: ${{ needs.classify.outputs.category }}
           SUITES_RAN: ${{ needs.run.outputs.suites_ran }}
+          HUB_START_FAILED: ${{ needs.run.outputs.hub_start_failed }}
           CONFIDENCE: ${{ needs.classify.outputs.confidence }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
           # #480 — see the same var on "Report status..." above. Surfaced
@@ -951,13 +952,19 @@ jobs:
           # (defense-in-depth alongside the prompt hardening, not a
           # replacement for it — the LLM can still misjudge).
           # classify is skipped when the suites never ran, so CATEGORY is empty.
-          if [ "$SUITES_RAN" != "true" ]; then
+          if [ "$HUB_START_FAILED" = "true" ]; then
             CATEGORY=startup
+          elif [ "$SUITES_RAN" != "true" ]; then
+            CATEGORY=presuite
           fi
           case "$CATEGORY" in
             startup)
               verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error."
               ping="${hub_medic} ${ta_medic}"
+              ;;
+            presuite)
+              verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
+              ping="${ta_medic}"
               ;;
             product)
               verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
