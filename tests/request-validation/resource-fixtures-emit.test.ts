@@ -130,45 +130,53 @@ describe('request-validation: resource-fixture emit (#352)', () => {
     expect(out).toContain('process.env["RV_FIXTURE_CATALOG_ASSET_KEY"] || "x"');
   });
 
-  it('camunda-oca: pathResourceFixtures-only entries (no base resourceFixtures) still substitute the path param (#614)', () => {
+  // Representative path template for each of camunda-oca's four
+  // pathResourceFixtures-only runtime keys (#614), and the env var each is
+  // expected to map to — from the real config, not hardcoded, so a rename in
+  // configs/camunda-oca/request-validation.json fails this test too.
+  const ocaFixtures = loadOcaPathResourceFixtures();
+  const OCA_RUNTIME_KEYS: ReadonlyArray<[key: string, path: string]> = [
+    ['processInstanceKey', '/process-instances/{processInstanceKey}/incidents/search'],
+    ['userTaskKey', '/user-tasks/{userTaskKey}/assignment'],
+    ['jobKey', '/jobs/{jobKey}/completion'],
+    ['elementInstanceKey', '/element-instances/{elementInstanceKey}/variables'],
+  ];
+
+  it.each(
+    OCA_RUNTIME_KEYS,
+  )('camunda-oca: pathResourceFixtures-only %s (no base resourceFixtures) still substitutes the path param (#614)', (key, path) => {
     // userTaskKey/jobKey/elementInstanceKey/processInstanceKey are deliberately
     // pathResourceFixtures-ONLY for camunda-oca (see that config's $comment):
     // putting them in the base resourceFixtures map would make generate.ts's
     // #427 authz-resolved-body-field logic drop body-type-mismatch coverage for
     // every unrelated operation with a same-named body field (e.g.
     // createAgentInstance's jobKey/elementInstanceKey).
-    const ocaFixtures = loadOcaPathResourceFixtures();
-    expect(ocaFixtures.jobKey).toBe('RV_FIXTURE_JOB_KEY');
+    expect(ocaFixtures[key]).toBeDefined();
     const out = renderScenarioForTest(
-      scenario({
-        method: 'PATCH',
-        path: '/jobs/{jobKey}/completion',
-        params: { jobKey: 'x' },
-      }),
+      scenario({ method: 'POST', path, params: { [key]: 'x' } }),
       'probe',
       {}, // no base resourceFixtures
       ocaFixtures, // path-only override
     );
-    expect(out).toMatch(/buildUrl\([^)]*RV_FIXTURE_JOB_KEY/s);
+    expect(out).toMatch(new RegExp(`buildUrl\\([^)]*${ocaFixtures[key]}`, 's'));
   });
 
-  it("camunda-oca: a body field sharing a pathResourceFixtures-only key's name is NOT substituted (#614)", () => {
-    const ocaFixtures = loadOcaPathResourceFixtures();
+  it.each(
+    OCA_RUNTIME_KEYS,
+  )("camunda-oca: a body field sharing pathResourceFixtures-only %s's name is NOT substituted (#614)", (key) => {
     const out = renderScenarioForTest(
       scenario({
         method: 'POST',
         path: '/agent-instances',
         params: undefined,
-        requestBody: { jobKey: 'x', elementInstanceKey: 'x' },
+        requestBody: { [key]: 'x' },
       }),
       'probe',
       {}, // no base resourceFixtures
       ocaFixtures,
     );
-    expect(out).toContain('"jobKey": "x"');
-    expect(out).toContain('"elementInstanceKey": "x"');
-    expect(out).not.toContain('RV_FIXTURE_JOB_KEY');
-    expect(out).not.toContain('RV_FIXTURE_ELEMENT_INSTANCE_KEY');
+    expect(out).toContain(`"${key}": "x"`);
+    expect(out).not.toContain(ocaFixtures[key]);
   });
 
   it('applies pathResourceFixtures override to the PATH param only, not the body', () => {

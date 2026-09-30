@@ -59,6 +59,7 @@ import {
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
 import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
+import { STANDALONE_FIXTURE_FILES } from '../src/emit/materializeStandalone.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
 import {
   describeScopeRule,
@@ -172,7 +173,43 @@ async function main() {
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
     rvConfig = loadRequestValidationConfig(repoRoot, configName);
-    fixturesSourceDir = path.join(repoRoot, 'configs', configName, 'fixtures');
+    // A config opts into support/global-setup.ts's runtime-key provisioning
+    // by mapping any of these names in resourceFixtures/pathResourceFixtures
+    // (userTaskKey/jobKey/elementInstanceKey have no create endpoint of their
+    // own; processInstanceKey rides along since it needs the same running
+    // instance — see #614). Only pass fixturesSourceDir when opted in — never
+    // unconditionally for every config — so global-setup.ts's fixture lookup
+    // can tell "this config doesn't use the feature" (fixturesSourceDir
+    // absent) apart from "this config uses it but something's broken" (the
+    // check below). Once opted in, BOTH BPMN files are mandatory: a config
+    // declaring the feature but missing one silently degraded to the old
+    // fake-key/404 behavior at runtime with no signal, which is exactly the
+    // failure mode this whole fix exists to close.
+    const runtimeKeyFixtureNames = [
+      'userTaskKey',
+      'jobKey',
+      'elementInstanceKey',
+      'processInstanceKey',
+    ] as const;
+    const usesRuntimeKeyFixtures = runtimeKeyFixtureNames.some(
+      (name) =>
+        rvConfig.pathResourceFixtures?.[name] !== undefined ||
+        rvConfig.resourceFixtures?.[name] !== undefined,
+    );
+    if (usesRuntimeKeyFixtures) {
+      fixturesSourceDir = path.join(repoRoot, 'configs', configName, 'fixtures');
+      for (const relPath of STANDALONE_FIXTURE_FILES) {
+        const src = path.join(fixturesSourceDir, relPath);
+        if (!fs.existsSync(src)) {
+          throw new Error(
+            `[generate] Config '${configName}' maps one of ${runtimeKeyFixtureNames.join('/')} in ` +
+              `resourceFixtures/pathResourceFixtures but is missing the required fixture at ${src}. ` +
+              'Every BPMN this feature needs must exist once a config opts in — a partial set would silently ' +
+              'fall back to the old fake-key/404 behavior at runtime instead of failing here, at generation time.',
+          );
+        }
+      }
+    }
   } else {
     console.warn(
       `[generate] Could not locate configs.json from ${process.cwd()} — ` +

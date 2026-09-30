@@ -84,33 +84,22 @@ const JOB_LOCK_DURATION_MS = 30 * 60_000;
  * positive suite's `resolveFixture` (materializer/src/playwright/support/
  * fixtures.ts) but kept self-contained here — this file must stay free of
  * cross-package imports since it's vendored standalone into the generated
- * suite. Tries, in order: the vendored `<suite>/fixtures/` directory
- * (sibling to `support/`, populated by `materializeStandalone`'s
- * `STANDALONE_FIXTURE_FILES` — works for a standalone suite run outside the
- * monorepo, and is what a real invocation actually uses); the in-repo
- * `configs/<CONFIG>/fixtures/` layout (a monorepo-checkout convenience); and
- * a walk-up from this file's own location as a last-resort fallback.
+ * suite. The vendored `<suite>/fixtures/` directory (sibling to `support/`,
+ * populated by `materializeStandalone`'s `STANDALONE_FIXTURE_FILES` — see
+ * `request-validation/scripts/generate.ts`'s mandatory-once-opted-in check)
+ * is the ONLY candidate: `generate.ts` guarantees it exists whenever this
+ * config's resourceFixtures/pathResourceFixtures maps a runtime-key name, so
+ * no other candidate is needed. Deliberately does NOT also try a
+ * `configs/<CONFIG>/fixtures/` monorepo-checkout fallback keyed off
+ * `process.env.CONFIG` (removed in #614's review): defaulting an absent
+ * `CONFIG` to `'camunda-oca'` meant a standalone Hub suite run without
+ * `CONFIG` set could resolve OCA's real fixture files and opt Hub into
+ * provisioning it never declared — cross-config leakage the vendored-only
+ * lookup can't produce, since Hub's suite simply has no `fixtures/` dir.
  */
 async function readFixture(relPath: string): Promise<Buffer> {
-  const activeConfig = process.env.CONFIG?.trim() || 'camunda-oca';
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(here, '..', 'fixtures', relPath),
-    path.resolve(process.cwd(), 'configs', activeConfig, 'fixtures', relPath),
-    // Walk up from <repoRoot>/generated/<config>/request-validation/<profile>/support/
-    // (this file's vendored location) to <repoRoot> — 5 levels, not 3.
-    path.resolve(here, '..', '..', '..', '..', '..', 'configs', activeConfig, 'fixtures', relPath),
-  ];
-  for (const candidate of candidates) {
-    try {
-      return await fs.readFile(candidate);
-    } catch {
-      // try the next candidate
-    }
-  }
-  throw new Error(
-    `[runtime-key fixtures] fixture not found: ${relPath} (tried: ${candidates.join(', ')})`,
-  );
+  return fs.readFile(path.resolve(here, '..', 'fixtures', relPath));
 }
 
 async function deployFixtureProcesses(
@@ -271,8 +260,12 @@ async function activateJob(
  * it — see #614's review discussion. The throw propagates out of
  * `globalSetup()` and fails the whole Playwright run, which is the correct,
  * loud outcome for a broker/environment problem during setup.
+ *
+ * Exported (only) so tests/request-validation/global-setup-provisioning.test.ts
+ * can exercise the success/failure/timeout paths directly against a mocked
+ * `fetch`, without spinning up Playwright's own globalSetup machinery.
  */
-async function provisionRuntimeKeyFixtures(): Promise<void> {
+export async function provisionRuntimeKeyFixtures(): Promise<void> {
   const admin = authHeaders();
   let userTaskBpmn: Buffer;
   let serviceTaskBpmn: Buffer;
