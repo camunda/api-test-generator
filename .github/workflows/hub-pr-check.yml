@@ -266,7 +266,11 @@ jobs:
     # camunda-hub PR, that alert is suppressed (see `report` below), so
     # running classify for a failing draft push is pure wasted cost (a real
     # Claude API call + a hub clone) with nothing to consume its output.
-    if: always() && needs.run.result == 'failure' && needs.validate.outputs.is_draft != 'true'
+    #
+    # Also skipped when the suites never ran (Hub failed to start): there are
+    # no reports to classify, so the agent can only answer "unknown".
+    # `report` states the startup failure directly instead.
+    if: always() && needs.run.result == 'failure' && needs.run.outputs.suites_ran == 'true' && needs.validate.outputs.is_draft != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -649,7 +653,9 @@ jobs:
   coverage-gap-tracker:
     name: Track coverage gap as an api-test-generator issue
     needs: [validate, run]
-    if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != ''
+    # unmapped_checked is only ever true once coverage.json was read, so a run
+    # that died before the suites (Hub startup) has nothing to track or close.
+    if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.run.outputs.unmapped_checked == 'true'
     runs-on: ubuntu-latest
     outputs:
       issue_url: ${{ steps.gap-issue.outputs.issue_url }}
@@ -902,6 +908,8 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CALLER_RUN_URL: ${{ needs.validate.outputs.caller_run_url }}
           CATEGORY: ${{ needs.classify.outputs.category }}
+          SUITES_RAN: ${{ needs.run.outputs.suites_ran }}
+          HUB_START_FAILED: ${{ needs.run.outputs.hub_start_failed }}
           CONFIDENCE: ${{ needs.classify.outputs.confidence }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
           # #480 — see the same var on "Report status..." above. Surfaced
@@ -943,7 +951,21 @@ jobs:
           # medium/low-confidence guess still isn't worth paging a human over
           # (defense-in-depth alongside the prompt hardening, not a
           # replacement for it — the LLM can still misjudge).
+          # classify is skipped when the suites never ran, so CATEGORY is empty.
+          if [ "$HUB_START_FAILED" = "true" ]; then
+            CATEGORY=startup
+          elif [ "$SUITES_RAN" != "true" ]; then
+            CATEGORY=presuite
+          fi
           case "$CATEGORY" in
+            startup)
+              verdict="The Hub PR image did not start or become ready, so no tests ran. Check the run's \"Wait for Hub to be ready\" step for the container's startup error."
+              ping="${hub_medic} ${ta_medic}"
+              ;;
+            presuite)
+              verdict="The run failed before the suites started, in a setup step (checkout, clone, install, registry login or image pull) rather than in Hub itself. Check the run to see which step."
+              ping="${ta_medic}"
+              ;;
             product)
               verdict="Likely a real regression from this PR (confidence: ${CONFIDENCE}). ${SUMMARY}"
               if [ "$CONFIDENCE" = "high" ]; then
