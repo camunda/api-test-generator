@@ -417,16 +417,26 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
   // a persisted record of whatever got created even if the in-process
   // cancellation a few lines down (or one later, in the discovery catch)
   // doesn't actually reach the broker (a network error there is swallowed,
-  // same as everywhere else here). Best-effort: a failure writing this file
-  // doesn't skip the in-process cancellation paths below, which don't
-  // depend on it; it only means teardown has nothing to retry against if
-  // THOSE also fail. See #614's review discussion.
+  // same as everywhere else here).
+  //
+  // Fatal, not best-effort: on a run that otherwise succeeds completely,
+  // this state file is the ONLY mechanism that will ever release these
+  // instances — global-teardown.ts reads it, nothing else does. A run
+  // whose in-process cancellation paths never fire (because nothing else
+  // goes wrong) but whose bookkeeping write silently failed would leak
+  // both instances with no record left to retry against, defeating the
+  // reason global-teardown.ts exists. Cancel immediately and surface the
+  // failure instead (#614's review discussion).
   if (createdKeys.length > 0) {
-    await recordCreatedInstancesForCleanup(createdKeys).catch((err) => {
-      console.warn(
-        `[runtime-key fixtures] failed to record cleanup state (best-effort, continuing): ${err instanceof Error ? err.message : String(err)}`,
+    try {
+      await recordCreatedInstancesForCleanup(createdKeys);
+    } catch (err) {
+      await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
+      throw new Error(
+        `[runtime-key fixtures] failed to persist cleanup state for ${createdKeys.join(', ')}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
       );
-    });
+    }
   }
 
   if (createErrors.length > 0) {

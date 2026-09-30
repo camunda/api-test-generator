@@ -29,6 +29,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *      is at that moment, which could be a DIFFERENT (concurrent) run's
  *      deployment on a shared broker, decoupling the instance from the
  *      unique job type THIS run just patched into its own BPMN (#614's
+ *      review discussion);
+ *   5. a failure to persist the cleanup-state file is fatal, not best-effort
+ *      — on an otherwise-successful run that file is the only thing
+ *      global-teardown.ts has to act on, so a silent write failure would
+ *      leak both instances with nothing left to retry against (#614's
  *      review discussion).
  */
 
@@ -228,5 +233,38 @@ describe('provisionRuntimeKeyFixtures', () => {
       'PDK-SERVICE',
       'PDK-USERTASK',
     ]);
+  });
+
+  it('throws and cancels both instances when persisting the cleanup state fails, rather than continuing silently', async () => {
+    const cancelledInstanceKeys: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v2/deployments')) return deploymentResponse();
+        if (url.endsWith('/v2/process-instances')) {
+          const body = parseRequestBody(init);
+          const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
+          return jsonResponse({ processInstanceKey: key });
+        }
+        const cancellationMatch = /\/v2\/process-instances\/([^/]+)\/cancellation$/.exec(url);
+        if (cancellationMatch) {
+          cancelledInstanceKeys.push(cancellationMatch[1]);
+          return jsonResponse({});
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+    const fs = await import('node:fs');
+    vi.mocked(fs.promises.writeFile).mockRejectedValue(new Error('ENOSPC'));
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await expect(provisionRuntimeKeyFixtures()).rejects.toThrow(/failed to persist cleanup state/);
+
+    // A silently-swallowed write failure here would leave global-teardown.ts
+    // with no state file to act on for an otherwise-successful run — the
+    // only safety net left is cancelling immediately, in-process.
+    expect(cancelledInstanceKeys.sort()).toEqual(['PI-SERVICE', 'PI-USERTASK']);
+    expect(process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY).toBeUndefined();
   });
 });
