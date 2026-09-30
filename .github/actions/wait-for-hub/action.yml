@@ -4,7 +4,9 @@ description: >-
   layer is wired and the app is serving) for several CONSECUTIVE checks, or time
   out. A bare "any response" check is unreliable — during Spring Boot startup the
   port accepts connections and can return 404/502/503 before the app is ready; the
-  consecutive-401 streak debounces that. Dumps the hub container log on timeout.
+  consecutive-401 streak debounces that. Fails fast, dumping the hub container log, if the container exits before it
+  becomes ready (a crash-on-startup never recovers, so waiting out the timeout
+  only delays the same failure); also dumps the log on timeout.
 
 inputs:
   url:
@@ -28,6 +30,14 @@ runs:
       run: |
         echo "Waiting for Hub at $HUB_URL (image pull + boot, up to $(( TIMEOUT_SECONDS / 60 ))m)..."
         deadline=$(( SECONDS + TIMEOUT_SECONDS )); streak=0; need=3; last=""
+        dump_hub_log() {
+          echo "----- docker logs $HUB_CONTAINER (tail) -----"
+          logs=$(docker logs --tail 150 "$HUB_CONTAINER" 2>&1 || echo "(no hub container log)")
+          printf '%s\n' "$logs"
+          cause=$(printf '%s\n' "$logs" | grep 'Caused by:' | tail -n 1 | cut -c1-400 || true)
+          [ -n "$cause" ] && echo "::error::Hub startup cause: ${cause}"
+          return 0
+        }
         while :; do
           code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "$HUB_URL" 2>/dev/null || echo 000)
           if [ "$code" = "401" ]; then
@@ -41,10 +51,15 @@ runs:
             echo "Hub ready (HTTP 401 x$need consecutive after ${SECONDS}s)."
             break
           fi
+          state=$(docker inspect -f '{{.State.Status}}' "$HUB_CONTAINER" 2>/dev/null || true)
+          if [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+            echo "::error::Hub container '$HUB_CONTAINER' $state before becoming ready (last code: $code)"
+            dump_hub_log
+            exit 1
+          fi
           if [ "$SECONDS" -ge "$deadline" ]; then
             echo "::error::Hub did not become ready within $(( TIMEOUT_SECONDS / 60 ))m (last code: $code)"
-            echo "----- docker logs $HUB_CONTAINER (tail) -----"
-            docker logs --tail 150 "$HUB_CONTAINER" 2>&1 || echo "(no hub container log)"
+            dump_hub_log
             exit 1
           fi
           sleep 5
