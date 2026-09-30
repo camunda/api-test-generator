@@ -5,9 +5,15 @@
     {
       "operationId": "searchAgentDefinitions",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -16,9 +22,15 @@
     {
       "operationId": "searchAgentInstances",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -27,9 +39,15 @@
     {
       "operationId": "searchAgentInstanceHistory",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -38,9 +56,15 @@
     {
       "operationId": "searchAuditLogs",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -49,9 +73,15 @@
     {
       "operationId": "searchOwnAuthorizations",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -60,9 +90,15 @@
     {
       "operationId": "searchAuthorizations",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -71,9 +107,15 @@
     {
       "operationId": "searchBatchOperationItems",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -82,9 +124,15 @@
     {
       "operationId": "searchBatchOperations",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -93,9 +141,15 @@
     {
       "operationId": "searchClusterVariables",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -104,9 +158,15 @@
     {
       "operationId": "searchCorrelatedMessageSubscriptions",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -115,9 +175,15 @@
     {
       "operationId": "searchDecisionDefinitions",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -126,9 +192,15 @@
     {
       "operationId": "searchDecisionInstances",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -137,9 +209,15 @@
     {
       "operationId": "searchDecisionRequirements",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -148,9 +226,15 @@
     {
       "operationId": "searchElementInstanceWaitStates",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -159,9 +243,15 @@
     {
       "operationId": "searchElementInstances",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -170,9 +260,15 @@
     {
       "operationId": "searchElementInstanceIncidents",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -181,9 +277,15 @@
     {
       "operationId": "searchGlobalTaskListeners",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -192,9 +294,15 @@
     {
       "operationId": "searchGroups",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -203,9 +311,15 @@
     {
       "operationId": "searchClientsForGroup",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -214,9 +328,15 @@
     {
       "operationId": "searchMappingRulesForGroup",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -225,9 +345,15 @@
     {
       "operationId": "searchRolesForGroup",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -236,9 +362,15 @@
     {
       "operationId": "searchUsersForGroup",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -247,9 +379,15 @@
     {
       "operationId": "searchIncidents",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -280,9 +418,15 @@
     {
       "operationId": "searchJobs",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -335,9 +479,15 @@
     {
       "operationId": "searchMappingRule",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -346,9 +496,15 @@
     {
       "operationId": "searchMessageSubscriptions",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -357,9 +513,15 @@
     {
       "operationId": "searchProcessDefinitions",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -390,9 +552,15 @@
     {
       "operationId": "searchProcessDefinitionVariableNames",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -412,9 +580,15 @@
     {
       "operationId": "searchProcessInstances",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -423,9 +597,15 @@
     {
       "operationId": "searchProcessInstanceIncidents",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -434,9 +614,15 @@
     {
       "operationId": "searchResources",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -445,9 +631,15 @@
     {
       "operationId": "searchRoles",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -456,9 +648,15 @@
     {
       "operationId": "searchClientsForRole",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -467,9 +665,15 @@
     {
       "operationId": "searchGroupsForRole",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -478,9 +682,15 @@
     {
       "operationId": "searchMappingRulesForRole",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -489,9 +699,15 @@
     {
       "operationId": "searchUsersForRole",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -500,9 +716,15 @@
     {
       "operationId": "searchTenants",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -511,9 +733,15 @@
     {
       "operationId": "searchClientsForTenant",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -522,9 +750,15 @@
     {
       "operationId": "searchGroupIdsForTenant",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -533,9 +767,15 @@
     {
       "operationId": "searchMappingRulesForTenant",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -544,9 +784,15 @@
     {
       "operationId": "searchRolesForTenant",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -555,9 +801,15 @@
     {
       "operationId": "searchUsersForTenant",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -566,9 +818,15 @@
     {
       "operationId": "searchUsers",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -577,9 +835,15 @@
     {
       "operationId": "searchUserTasks",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -588,9 +852,15 @@
     {
       "operationId": "searchUserTaskAuditLogs",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -610,9 +880,15 @@
     {
       "operationId": "searchUserTaskVariables",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
@@ -621,9 +897,15 @@
     {
       "operationId": "searchVariables",
       "scenarioKinds": [
-        "pagination-limit-invalid"
+        {
+          "kind": "pagination-limit-invalid",
+          "constraintKinds": [
+            "aboveMaximum",
+            "wayAboveMaximum"
+          ]
+        }
       ],
-      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Scoped to just those two mutations — belowMinimum/wayBelowMinimum coverage for page.limit, and this operation's other negative coverage (missing-required, type-mismatch, auth, etc.), is unaffected.",
       "knownIssue": {
         "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
         "url": "https://github.com/camunda/camunda/issues/48053"
