@@ -637,12 +637,21 @@ async function main() {
       for (const k of e.scenarioKinds ?? []) rules.push(toScopeRule(k));
       scopedByOp.set(e.operationId, rules);
     }
-    for (const [operationId, rules] of scopedByOp) {
-      for (const rule of rules) {
-        if (!ruleMatchesAny(rule, operationId, scenarios)) {
-          console.warn(
-            `[generate] ⚠ scoped exclude-operations entry matched zero scenarios: ${operationId} ${describeScopeRule(rule)} — the kind/targets/constraintKinds may not match what the generator actually produces for this operation`,
-          );
+    // --only/--only-operations/--no-deep all legitimately narrow which
+    // scenarios this invocation generates, independent of whether a rule's
+    // target/constraintKind is otherwise correct — under any of them, a
+    // scoped rule for a kind/operation this run never touched would look
+    // exactly like a dead rule. Only check on an unfiltered (full) run, the
+    // same shape CI's `generate:request-validation` actually invokes.
+    const isFullRun = !opts.only && !opts.onlyOperations && opts.deep;
+    if (isFullRun) {
+      for (const [operationId, rules] of scopedByOp) {
+        for (const rule of rules) {
+          if (!ruleMatchesAny(rule, operationId, scenarios)) {
+            console.warn(
+              `[generate] ⚠ scoped exclude-operations entry matched zero scenarios: ${operationId} ${describeScopeRule(rule)} — the kind/targets/constraintKinds may not match what the generator actually produces for this operation`,
+            );
+          }
         }
       }
     }
