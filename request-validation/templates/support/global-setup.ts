@@ -354,22 +354,30 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
     if (result.status === 'fulfilled') createdKeys.push(result.value);
     else createErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
   }
+
+  // Recorded as early as possible — before the createErrors check below, and
+  // unconditionally rather than only on failure — so global-teardown.ts has
+  // a persisted record of whatever got created even if the in-process
+  // cancellation a few lines down (or one later, in the discovery catch)
+  // doesn't actually reach the broker (a network error there is swallowed,
+  // same as everywhere else here). Best-effort: a failure writing this file
+  // doesn't skip the in-process cancellation paths below, which don't
+  // depend on it; it only means teardown has nothing to retry against if
+  // THOSE also fail. See #614's review discussion.
+  if (createdKeys.length > 0) {
+    await recordCreatedInstancesForCleanup(createdKeys).catch((err) => {
+      console.warn(
+        `[runtime-key fixtures] failed to record cleanup state (best-effort, continuing): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }
+
   if (createErrors.length > 0) {
     await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
     throw new Error(`createProcessInstance failed: ${createErrors.join('; ')}`);
   }
   const [userTaskInstanceKey] = createdKeys;
   process.env[RUNTIME_KEY_ENV_VARS.processInstanceKey] = userTaskInstanceKey;
-
-  // Recorded unconditionally (not just on failure) so a SUCCESSFUL run also
-  // gets cleaned up — global-teardown.ts cancels whatever's still listed
-  // here once the whole suite finishes, instead of leaving both instances
-  // (and the job under the service-task one) running on the broker forever.
-  // A failure below cancels them immediately in its own catch; teardown
-  // finding the same keys afterward is harmless (cancelling an
-  // already-cancelled instance is swallowed the same way as everywhere else
-  // here).
-  await recordCreatedInstancesForCleanup(createdKeys);
 
   // Discovery/validation failures below still have both process instances
   // (and, once activated, the job under the service-task one) alive on the
@@ -417,7 +425,16 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
       `elementInstanceKey=${process.env[RUNTIME_KEY_ENV_VARS.elementInstanceKey]}`,
   );
 
-  await persistDiscoveredFixtures();
+  // Best-effort: only the curl_compare.py oracle propagation (see this
+  // function's doc comment) depends on this write — the Playwright process
+  // itself already has the real values in its own process.env regardless,
+  // and the created instances are already recorded for teardown above, so a
+  // failure here shouldn't fail the whole suite or bypass either of those.
+  await persistDiscoveredFixtures().catch((err) => {
+    console.warn(
+      `[runtime-key fixtures] failed to persist fixtures for curl_compare.py (best-effort, continuing): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
 }
 
 /**

@@ -33,14 +33,26 @@ function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((item) => typeof item === 'string');
 }
 
+/**
+ * Cancels one instance, reporting whether it's now actually accounted for —
+ * a non-2xx/network failure returns `false` rather than being swallowed, so
+ * the caller can tell a real failure apart from success. A 404 counts as
+ * success: the instance is already gone (e.g. a test completed it), so
+ * there's nothing left to clean up either way.
+ */
 async function cancelProcessInstance(
   admin: Record<string, string>,
   processInstanceKey: string,
-): Promise<void> {
-  await fetch(`${credentials.baseUrl}/v2/process-instances/${processInstanceKey}/cancellation`, {
-    method: 'POST',
-    headers: admin,
-  }).catch(() => undefined);
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${credentials.baseUrl}/v2/process-instances/${processInstanceKey}/cancellation`,
+      { method: 'POST', headers: admin },
+    );
+    return res.ok || res.status === 404;
+  } catch {
+    return false;
+  }
 }
 
 async function globalTeardown(): Promise<void> {
@@ -58,8 +70,28 @@ async function globalTeardown(): Promise<void> {
   if (processInstanceKeys.length === 0) return;
 
   const admin = authHeaders();
-  await Promise.all(processInstanceKeys.map((key) => cancelProcessInstance(admin, key)));
-  await fs.rm(statePath, { force: true }).catch(() => undefined);
+  const results = await Promise.all(
+    processInstanceKeys.map(async (key) => ({ key, cleaned: await cancelProcessInstance(admin, key) })),
+  );
+  const remaining = results.filter((r) => !r.cleaned).map((r) => r.key);
+
+  if (remaining.length === 0) {
+    await fs.rm(statePath, { force: true }).catch(() => undefined);
+    return;
+  }
+
+  // Retain only what's still outstanding — rather than deleting the state
+  // file unconditionally and losing track of a genuine failure — so a
+  // future run's teardown (or a manual retry) has something to act on.
+  // Throwing (rather than warning) makes a real cleanup failure fail the
+  // whole `npx playwright test` run's exit code, matching this suite's
+  // fail-loud-on-broker-problems design elsewhere (#614's review
+  // discussion) instead of letting broker state silently accumulate.
+  await fs.writeFile(statePath, JSON.stringify(remaining), 'utf8').catch(() => undefined);
+  throw new Error(
+    `[runtime-key fixtures] failed to cancel ${remaining.length} process instance(s) during teardown: ` +
+      `${remaining.join(', ')}. They remain on the broker and in the cleanup state file for a future run to retry.`,
+  );
 }
 
 export default globalTeardown;

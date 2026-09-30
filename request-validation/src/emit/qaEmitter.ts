@@ -73,6 +73,34 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
   if (opts.standalone !== false) {
     await materializeStandalone(opts.outDir, undefined, true, opts.fixturesSourceDir);
   }
+  // userTaskKey/jobKey/elementInstanceKey/processInstanceKey substitutions
+  // (#614) are populated at runtime by support/global-setup.ts's runtime-key
+  // provisioning, which only exists in the vendored standalone support
+  // module — legacy QA-tree mode never materializes it (guarded above) or
+  // imports it. A config mapping one of these names would still get the
+  // `process.env["RV_FIXTURE_X"] || "<filler>"` substitution emitted (that
+  // logic doesn't itself check `standalone`), but nothing would ever set
+  // the env var, so every affected scenario would silently revert to the
+  // fake-key/404 behavior this feature exists to fix — same guard shape as
+  // auth-deny/pagination-offset-past-total/serverOverride below.
+  const runtimeKeyFixtureNames = [
+    'userTaskKey',
+    'jobKey',
+    'elementInstanceKey',
+    'processInstanceKey',
+  ];
+  const usesRuntimeKeyFixtures = runtimeKeyFixtureNames.some(
+    (name) =>
+      opts.resourceFixtures?.[name] !== undefined ||
+      opts.pathResourceFixtures?.[name] !== undefined,
+  );
+  if (usesRuntimeKeyFixtures && opts.standalone === false) {
+    throw new Error(
+      `resourceFixtures/pathResourceFixtures for ${runtimeKeyFixtureNames.join('/')} require the ` +
+        "standalone support module (support/global-setup.ts's runtime-key provisioning); they are not " +
+        'supported in legacy QA-tree mode (--no-standalone / --qa-import-depth).',
+    );
+  }
   // Resolve Prettier config once (fail fast if not found / cannot load)
   let resolvedConfig: prettier.Config | null = null;
   try {
