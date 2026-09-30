@@ -1,10 +1,1055 @@
 {
   "$comment": "Per-config request-validation settings for camunda-oca. The Camunda 8 Orchestration Cluster API parser accepts string-enum values case-insensitively (camunda/camunda#52409), so case-only mutations would be false 400 expectations. See api-test-generator#129.",
   "enumCaseInsensitive": true,
-  "knownIssues": [
+  "excludeOperations": [
     {
-      "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
-      "url": "https://github.com/camunda/camunda/issues/48053"
+      "operationId": "searchAgentDefinitions",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchAgentInstances",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchAgentInstanceHistory",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchAuditLogs",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchOwnAuthorizations",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchAuthorizations",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchBatchOperationItems",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchBatchOperations",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchClusterVariables",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchCorrelatedMessageSubscriptions",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchDecisionDefinitions",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchDecisionInstances",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchDecisionRequirements",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchElementInstanceWaitStates",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchElementInstances",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchElementInstanceIncidents",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchGlobalTaskListeners",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchGroups",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchClientsForGroup",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForGroup",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchRolesForGroup",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUsersForGroup",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchIncidents",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getProcessInstanceStatisticsByDefinition",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getProcessInstanceStatisticsByError",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchJobs",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getJobTypeStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getJobWorkerStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getJobTimeSeriesStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getJobErrorStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchMappingRule",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchMessageSubscriptions",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchProcessDefinitions",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getProcessDefinitionMessageSubscriptionStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getProcessDefinitionInstanceStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchProcessDefinitionVariableNames",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "getProcessDefinitionInstanceVersionStatistics",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchProcessInstances",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchProcessInstanceIncidents",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchResources",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchRoles",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchClientsForRole",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchGroupsForRole",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForRole",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUsersForRole",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchTenants",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchClientsForTenant",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchGroupIdsForTenant",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForTenant",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchRolesForTenant",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUsersForTenant",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUsers",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUserTasks",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUserTaskAuditLogs",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUserTaskEffectiveVariables",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchUserTaskVariables",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "searchVariables",
+      "scenarioKinds": [
+        "pagination-limit-invalid"
+      ],
+      "reason": "Shares the LimitPagination page.limit schema with no server-enforced upper bound (camunda/camunda#48053): aboveMaximum/wayAboveMaximum cases get 200 on rdbms or 500 on Elasticsearch instead of 400. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "page.limit has no enforced upper bound for plain limit-based pagination (no page.from/after/before set) — every pagination-limit-invalid aboveMaximum/wayAboveMaximum test stays red: 200 on rdbms, 500 on Elasticsearch once the value exceeds its max_result_window",
+        "url": "https://github.com/camunda/camunda/issues/48053"
+      }
+    },
+    {
+      "operationId": "deleteDecisionInstance",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteDecisionInstance's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteDecisionInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteDecisionInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "resolveIncident",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but resolveIncident's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "resolveIncidentsBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but resolveIncidentsBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "updateJob",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but updateJob's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the job-lookup step and 404s instead of 400ing up front. Narrowed to this scenario kind only; this also incidentally drops jobLeaseToken's belowMinLength constraint-violation case, the only other constrained field on this body — a small disclosed cost, not worth a separate per-field suppression mechanism for one test.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "cancelProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but cancelProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteProcessInstance",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteProcessInstance's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but deleteProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "resumeProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but resumeProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "suspendProcessInstancesBatchOperation",
+      "scenarioKinds": [
+        "constraint-violation"
+      ],
+      "reason": "operationReference declares minimum: 1 in the spec, but suspendProcessInstancesBatchOperation's request validator never calls RequestValidator.validateOperationReference for it (camunda/camunda#58942), so operationReference: 0 or a negative value is forwarded instead of rejected — the request reaches the lookup/dispatch step and 404s instead of 400ing up front. Narrowed to this scenario kind only; operationReference is the only constrained field on this body, so no other negative coverage is affected.",
+      "knownIssue": {
+        "summary": "operationReference's minimum:1 constraint isn't enforced on several job/incident/process-instance/decision-instance operations — 0 or negative values are forwarded instead of being rejected, and the request 404s (resource lookup runs first) instead of 400ing up front",
+        "url": "https://github.com/camunda/camunda/issues/58942"
+      }
+    },
+    {
+      "operationId": "deleteRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches role-lookup logic unvalidated and 404s (\"role with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches role-lookup logic unvalidated and 404s (\"role with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchClientsForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchGroupsForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchUsersForRole",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "roleId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when roleId is supplied in the body at creation (createRole's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. roleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches tenant-lookup logic unvalidated and 404s (\"tenant with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches tenant-lookup logic unvalidated and 404s (\"tenant with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchClientsForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchGroupIdsForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchRolesForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchUsersForTenant",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "tenantId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when tenantId is supplied in the body at creation (createTenant's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. tenantId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches group-lookup logic unvalidated and 404s (\"group with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches group-lookup logic unvalidated and 404s (\"group with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchClientsForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchMappingRulesForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchRolesForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchUsersForGroup",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "groupId declares a pattern/length constraint that a non-empty invalid value violates, but the request is silently accepted as a filter and returns 200 with an empty result set instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when groupId is supplied in the body at creation (createGroup's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. groupId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteUser",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "username declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches user-lookup logic unvalidated and 404s (\"user with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when username is supplied in the body at creation (createUser's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. username is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getUser",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "username declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches user-lookup logic unvalidated and 404s (\"user with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when username is supplied in the body at creation (createUser's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. username is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "deleteMappingRule",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "mappingRuleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches mappingRule-lookup logic unvalidated and 404s (\"mappingRule with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when mappingRuleId is supplied in the body at creation (createMappingRule's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. mappingRuleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getMappingRule",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "mappingRuleId declares a pattern/length constraint that a non-empty invalid value violates, but the request reaches mappingRule-lookup logic unvalidated and 404s (\"mappingRule with this ID doesn't exist\") instead of 400ing on the malformed input (camunda/camunda#58943). The server enforces this same constraint when mappingRuleId is supplied in the body at creation (createMappingRule's constraint-violation coverage passes), so this is a path-parameter validation gap, not intended behavior. mappingRuleId is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "getAuditLog",
+      "scenarioKinds": [
+        "param-constraint-violation"
+      ],
+      "reason": "auditLogKey declares a pattern constraint (via the shared LongKey schema) that a non-empty invalid value violates, but the request reaches audit-log lookup logic unvalidated and 404s (\"Audit log with id '<value>' not found\") instead of 400ing on the malformed input (camunda/camunda#58943). auditLogKey is the only param-constraint-violation-eligible parameter on this operation, so no other coverage is affected.",
+      "knownIssue": {
+        "summary": "roleId/tenantId/groupId/username/mappingRuleId/auditLogKey path parameters aren't validated against their declared pattern/length constraints — a non-empty invalid value reaches resource-lookup or search-filter logic and returns 404 (single-resource lookups) or 200 with an empty result set (search-by-parent-id endpoints) instead of 400. The server does enforce the same constraints when these identifiers are supplied in the request body at creation time (createRole/createTenant/createGroup/createUser/createMappingRule all correctly reject them), so this is a validation-wiring gap specific to path-parameter binding.",
+        "url": "https://github.com/camunda/camunda/issues/58943"
+      }
+    },
+    {
+      "operationId": "searchProcessDefinitionVariableNames",
+      "scenarioKinds": [
+        "pagination-cursor-invalid"
+      ],
+      "reason": "Accepts a syntactically-valid-base64 but undecodable pagination cursor (page.after or page.before) and returns 200 instead of 400, unlike other cursor-based endpoints (e.g. searchTenants, searchProcessInstances) which correctly reject the same cursor value with a 400 INVALID_ARGUMENT ProblemDetail (camunda/camunda#64206). Endpoint-specific validation gap, not shared by other cursor-paginated operations. Narrowed to this scenario kind only — this operation's other negative coverage (missing-required, type-mismatch, auth, etc.) is unaffected.",
+      "knownIssue": {
+        "summary": "searchProcessDefinitionVariableNames accepts an undecodable pagination cursor and returns 200 instead of 400, inconsistent with other cursor-based endpoints",
+        "url": "https://github.com/camunda/camunda/issues/64206"
+      }
+    },
+    {
+      "operationId": "takeHistoryBackup",
+      "scenarioKinds": [
+        "additional-prop-general",
+        "body-top-type-mismatch",
+        "constraint-violation",
+        "explicit-null-required",
+        "malformed-json-body",
+        "missing-body",
+        "missing-required",
+        "type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to takeHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "listHistoryBackups",
+      "scenarioKinds": [
+        "param-constraint-violation",
+        "param-type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to listHistoryBackups 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "getHistoryBackup",
+      "scenarioKinds": [
+        "not-found-fake-id",
+        "type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to getHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "deleteHistoryBackup",
+      "scenarioKinds": [
+        "type-mismatch"
+      ],
+      "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
     }
   ]
 }
