@@ -277,7 +277,9 @@ function isKnownIssue(v: unknown): v is KnownIssue {
 }
 
 function isNonEmptyStringArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string' && s.length > 0);
+  return (
+    Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string' && s.trim().length > 0)
+  );
 }
 
 // Only checks shape (kind is a real ScenarioKind; targets/constraintKinds,

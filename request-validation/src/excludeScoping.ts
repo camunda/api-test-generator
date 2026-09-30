@@ -21,12 +21,17 @@ export interface ScopeRule {
   constraintKinds?: string[];
 }
 
+// `k.targets?.length` (not a bare `k.targets ?`) so an empty array normalizes
+// to `undefined` (no filter on that axis) rather than a rule that can never
+// match anything on it — `loadRequestValidationConfig` already rejects an
+// empty array before it gets here, but this module is also called directly
+// (e.g. from tests) without going through that validation.
 export function toScopeRule(k: string | ScopedScenarioKind): ScopeRule {
   if (typeof k === 'string') return { kind: k };
   return {
     kind: k.kind,
-    targets: k.targets ? k.targets : undefined,
-    constraintKinds: k.constraintKinds ? k.constraintKinds : undefined,
+    targets: k.targets?.length ? k.targets : undefined,
+    constraintKinds: k.constraintKinds?.length ? k.constraintKinds : undefined,
   };
 }
 
