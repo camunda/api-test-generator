@@ -32,9 +32,14 @@
 //
 // All creates are idempotent — an already-existing resource (HTTP 409) is
 // treated as success. The runtime-key provisioning for unsecured/secured is
-// best-effort: a failure there is logged and swallowed (not thrown) so the
-// affected scenarios fall back to the old filler/404 behaviour instead of
-// failing the whole suite over one broker hiccup.
+// soft only about whether a config uses this feature at all: a config that
+// doesn't ship the BPMN fixtures (e.g. camunda-hub) isn't opted in, and
+// returns quietly. A config that IS opted in (its fixtures exist) fails
+// `globalSetup` loudly on any subsequent error — deploy/create/discovery
+// failure, or a missing elementInstanceKey — rather than falling back to
+// the filler placeholder, which would silently regress to the 404-masking
+// (or a false 400 for the wrong reason) this exists to fix, with nothing to
+// catch it.
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -255,9 +260,17 @@ async function activateJob(
  * exports them (plus the user-task instance's processInstanceKey) as
  * RV_FIXTURE_* env vars for qaEmitter's resourceFixtures substitution.
  *
- * Best-effort: any failure is logged and swallowed, not thrown — the
- * affected scenarios simply fall back to the filler placeholder (and the
- * 404 they were already getting), rather than failing the whole suite.
+ * Only the fixture-file lookup is soft: a config that doesn't ship the BPMN
+ * files (e.g. camunda-hub) hasn't opted into this feature at all, so a
+ * missing file just means "not applicable" and returns quietly. Past that
+ * point the config HAS opted in, and every failure — deploy, create, a
+ * discovery timeout, a missing elementInstanceKey — THROWS rather than
+ * warning and falling back to the filler placeholder. Swallowing it would
+ * silently regress to exactly the 404-masking (or worse, a false 400 for
+ * the wrong reason) this PR exists to fix, with no test failure to catch
+ * it — see #614's review discussion. The throw propagates out of
+ * `globalSetup()` and fails the whole Playwright run, which is the correct,
+ * loud outcome for a broker/environment problem during setup.
  */
 async function provisionRuntimeKeyFixtures(): Promise<void> {
   const admin = authHeaders();
@@ -274,76 +287,72 @@ async function provisionRuntimeKeyFixtures(): Promise<void> {
     // this feature doesn't apply here, not a failure worth a warning.
     return;
   }
-  try {
-    await deployFixtureProcesses(admin, [
-      { name: 'user-task.bpmn', content: userTaskBpmn },
-      { name: 'service-task.bpmn', content: serviceTaskBpmn },
-    ]);
 
-    // Job activation (jobs/activation) isn't scoped to a single instance —
-    // it activates the next available job of `type` broker-wide — so the
-    // service-task instance's own key never needs to be read back.
-    //
-    // allSettled (not all): if one create fails after the other already
-    // succeeded, Promise.all would discard the successful one's key and
-    // leak it as a permanently running orphan. Cancel anything that DID
-    // get created before surfacing the failure.
-    const created = await Promise.allSettled([
-      createProcessInstance(admin, USER_TASK_PROCESS_ID),
-      createProcessInstance(admin, SERVICE_TASK_PROCESS_ID),
-    ]);
-    const createdKeys: string[] = [];
-    const createErrors: string[] = [];
-    for (const result of created) {
-      if (result.status === 'fulfilled') createdKeys.push(result.value);
-      else createErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
-    }
-    if (createErrors.length > 0) {
-      await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
-      throw new Error(`createProcessInstance failed: ${createErrors.join('; ')}`);
-    }
-    const [userTaskInstanceKey] = createdKeys;
-    process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY = userTaskInstanceKey;
+  await deployFixtureProcesses(admin, [
+    { name: 'user-task.bpmn', content: userTaskBpmn },
+    { name: 'service-task.bpmn', content: serviceTaskBpmn },
+  ]);
 
-    const deadlineMs = Date.now() + RUNTIME_KEY_DISCOVERY_TIMEOUT_MS;
-    const [userTask, job] = await Promise.all([
-      findUserTask(admin, userTaskInstanceKey, deadlineMs),
-      activateJob(admin, SERVICE_TASK_JOB_TYPE, deadlineMs),
-    ]);
+  // Job activation (jobs/activation) isn't scoped to a single instance —
+  // it activates the next available job of `type` broker-wide — so the
+  // service-task instance's own key never needs to be read back.
+  //
+  // allSettled (not all): if one create fails after the other already
+  // succeeded, Promise.all would discard the successful one's key and
+  // leak it as a permanently running orphan. Cancel anything that DID
+  // get created before surfacing the failure.
+  const created = await Promise.allSettled([
+    createProcessInstance(admin, USER_TASK_PROCESS_ID),
+    createProcessInstance(admin, SERVICE_TASK_PROCESS_ID),
+  ]);
+  const createdKeys: string[] = [];
+  const createErrors: string[] = [];
+  for (const result of created) {
+    if (result.status === 'fulfilled') createdKeys.push(result.value);
+    else createErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+  }
+  if (createErrors.length > 0) {
+    await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
+    throw new Error(`createProcessInstance failed: ${createErrors.join('; ')}`);
+  }
+  const [userTaskInstanceKey] = createdKeys;
+  process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY = userTaskInstanceKey;
 
-    if (userTask) {
-      process.env.RV_FIXTURE_USER_TASK_KEY = userTask.userTaskKey;
-    } else {
-      console.warn(
-        '[runtime-key fixtures] user task did not appear within 30s — userTaskKey scenarios fall back to the filler placeholder.',
-      );
-    }
+  const deadlineMs = Date.now() + RUNTIME_KEY_DISCOVERY_TIMEOUT_MS;
+  const [userTask, job] = await Promise.all([
+    findUserTask(admin, userTaskInstanceKey, deadlineMs),
+    activateJob(admin, SERVICE_TASK_JOB_TYPE, deadlineMs),
+  ]);
 
-    if (job) {
-      process.env.RV_FIXTURE_JOB_KEY = job.jobKey;
-    } else {
-      console.warn(
-        '[runtime-key fixtures] no job activated within 30s — jobKey scenarios fall back to the filler placeholder.',
-      );
-    }
-
-    // Prefer the user task's element instance — decided directly from the
-    // two already-resolved locals, not by probing back through process.env.
-    const elementInstanceKey = userTask?.elementInstanceKey ?? job?.elementInstanceKey;
-    if (elementInstanceKey) {
-      process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY = elementInstanceKey;
-    }
-
-    console.log(
-      `[runtime-key fixtures] ready: processInstanceKey=${process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY ?? '(none)'} ` +
-        `userTaskKey=${process.env.RV_FIXTURE_USER_TASK_KEY ?? '(none)'} jobKey=${process.env.RV_FIXTURE_JOB_KEY ?? '(none)'} ` +
-        `elementInstanceKey=${process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY ?? '(none)'}`,
-    );
-  } catch (err) {
-    console.warn(
-      `[runtime-key fixtures] provisioning failed — affected scenarios fall back to filler placeholders: ${err instanceof Error ? err.message : String(err)}`,
+  if (!userTask) {
+    throw new Error(
+      `[runtime-key fixtures] user task did not appear within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms for process instance ${userTaskInstanceKey}`,
     );
   }
+  process.env.RV_FIXTURE_USER_TASK_KEY = userTask.userTaskKey;
+
+  if (!job) {
+    throw new Error(
+      `[runtime-key fixtures] no '${SERVICE_TASK_JOB_TYPE}' job was activated within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms`,
+    );
+  }
+  process.env.RV_FIXTURE_JOB_KEY = job.jobKey;
+
+  // Prefer the user task's element instance — decided directly from the
+  // two already-resolved locals, not by probing back through process.env.
+  const elementInstanceKey = userTask.elementInstanceKey ?? job.elementInstanceKey;
+  if (!elementInstanceKey) {
+    throw new Error(
+      '[runtime-key fixtures] neither the user task nor the activated job returned an elementInstanceKey',
+    );
+  }
+  process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY = elementInstanceKey;
+
+  console.log(
+    `[runtime-key fixtures] ready: processInstanceKey=${process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY} ` +
+      `userTaskKey=${process.env.RV_FIXTURE_USER_TASK_KEY} jobKey=${process.env.RV_FIXTURE_JOB_KEY} ` +
+      `elementInstanceKey=${process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY}`,
+  );
 }
 
 /** POST a create body as admin; accept any 2xx (create endpoints return

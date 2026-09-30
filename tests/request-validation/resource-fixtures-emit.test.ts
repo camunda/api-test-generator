@@ -21,7 +21,12 @@ import type { ValidationScenario } from '../../request-validation/src/model/type
  *   2. body field filler → env lookup (using the base map);
  *   3. a deliberately-malformed value on a fixture field is left intact;
  *   4. the `'1'` filler (constraintViolations/parameters) is substituted too;
- *   5. pathResourceFixtures override applies to path params only, not the body.
+ *   5. pathResourceFixtures override applies to path params only, not the body;
+ *   6. camunda-oca's userTaskKey/jobKey/elementInstanceKey/processInstanceKey
+ *      (#614) are pathResourceFixtures-ONLY (no base resourceFixtures entry) —
+ *      the path param must still get the env lookup, and a body field sharing
+ *      one of these names must NOT, or a typo/wiring regression here would
+ *      silently restore the pre-#614 404-masking behaviour with no signal.
  */
 
 function scenario(overrides: Partial<ValidationScenario>): ValidationScenario {
@@ -40,6 +45,17 @@ function scenario(overrides: Partial<ValidationScenario>): ValidationScenario {
 
 const FIX = { fileKey: 'RV_FIXTURE_FILE_KEY', projectKey: 'RV_FIXTURE_PROJECT_KEY' };
 
+function toStringRecord(fixtures: unknown): Record<string, string> {
+  if (typeof fixtures !== 'object' || fixtures === null) {
+    throw new Error('expected a fixture map object');
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fixtures)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
 /** The real camunda-hub `resourceFixtures` map, string-valued entries only. */
 function loadHubResourceFixtures(): Record<string, string> {
   const raw: unknown = JSON.parse(
@@ -49,14 +65,19 @@ function loadHubResourceFixtures(): Record<string, string> {
     typeof raw === 'object' && raw !== null && 'resourceFixtures' in raw
       ? raw.resourceFixtures
       : undefined;
-  if (typeof fixtures !== 'object' || fixtures === null) {
-    throw new Error('configs/camunda-hub/request-validation.json has no resourceFixtures object');
-  }
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(fixtures)) {
-    if (typeof v === 'string') out[k] = v;
-  }
-  return out;
+  return toStringRecord(fixtures);
+}
+
+/** The real camunda-oca `pathResourceFixtures` map, string-valued entries only. */
+function loadOcaPathResourceFixtures(): Record<string, string> {
+  const raw: unknown = JSON.parse(
+    readFileSync(join(process.cwd(), 'configs/camunda-oca/request-validation.json'), 'utf8'),
+  );
+  const fixtures =
+    typeof raw === 'object' && raw !== null && 'pathResourceFixtures' in raw
+      ? raw.pathResourceFixtures
+      : undefined;
+  return toStringRecord(fixtures);
 }
 
 describe('request-validation: resource-fixture emit (#352)', () => {
@@ -107,6 +128,47 @@ describe('request-validation: resource-fixture emit (#352)', () => {
       hubFixtures,
     );
     expect(out).toContain('process.env["RV_FIXTURE_CATALOG_ASSET_KEY"] || "x"');
+  });
+
+  it('camunda-oca: pathResourceFixtures-only entries (no base resourceFixtures) still substitute the path param (#614)', () => {
+    // userTaskKey/jobKey/elementInstanceKey/processInstanceKey are deliberately
+    // pathResourceFixtures-ONLY for camunda-oca (see that config's $comment):
+    // putting them in the base resourceFixtures map would make generate.ts's
+    // #427 authz-resolved-body-field logic drop body-type-mismatch coverage for
+    // every unrelated operation with a same-named body field (e.g.
+    // createAgentInstance's jobKey/elementInstanceKey).
+    const ocaFixtures = loadOcaPathResourceFixtures();
+    expect(ocaFixtures.jobKey).toBe('RV_FIXTURE_JOB_KEY');
+    const out = renderScenarioForTest(
+      scenario({
+        method: 'PATCH',
+        path: '/jobs/{jobKey}/completion',
+        params: { jobKey: 'x' },
+      }),
+      'probe',
+      {}, // no base resourceFixtures
+      ocaFixtures, // path-only override
+    );
+    expect(out).toMatch(/buildUrl\([^)]*RV_FIXTURE_JOB_KEY/s);
+  });
+
+  it("camunda-oca: a body field sharing a pathResourceFixtures-only key's name is NOT substituted (#614)", () => {
+    const ocaFixtures = loadOcaPathResourceFixtures();
+    const out = renderScenarioForTest(
+      scenario({
+        method: 'POST',
+        path: '/agent-instances',
+        params: undefined,
+        requestBody: { jobKey: 'x', elementInstanceKey: 'x' },
+      }),
+      'probe',
+      {}, // no base resourceFixtures
+      ocaFixtures,
+    );
+    expect(out).toContain('"jobKey": "x"');
+    expect(out).toContain('"elementInstanceKey": "x"');
+    expect(out).not.toContain('RV_FIXTURE_JOB_KEY');
+    expect(out).not.toContain('RV_FIXTURE_ELEMENT_INSTANCE_KEY');
   });
 
   it('applies pathResourceFixtures override to the PATH param only, not the body', () => {
