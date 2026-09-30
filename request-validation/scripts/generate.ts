@@ -168,9 +168,11 @@ async function main() {
     authDenyMode: 'slice',
     independentAuthGateMode: 'unavailable',
   };
+  let fixturesSourceDir: string | undefined;
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
     rvConfig = loadRequestValidationConfig(repoRoot, configName);
+    fixturesSourceDir = path.join(repoRoot, 'configs', configName, 'fixtures');
   } else {
     console.warn(
       `[generate] Could not locate configs.json from ${process.cwd()} — ` +
@@ -980,6 +982,7 @@ async function main() {
       generationTimestamp,
       resourceFixtures: rvConfig.resourceFixtures,
       pathResourceFixtures: rvConfig.pathResourceFixtures,
+      fixturesSourceDir,
       problemDetailShapeSkipKinds,
       serverOverridesByOperationId,
       independentlyGatedOperationIds,

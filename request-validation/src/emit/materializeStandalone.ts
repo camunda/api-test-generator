@@ -37,6 +37,21 @@ export const SUPPORT_DIR_NAME = 'support';
 /** Subdirectory under outDir for the post-run analyser script. */
 export const SCRIPTS_DIR_NAME = 'scripts';
 
+/** Subdirectory under outDir for fixtures the runtime-key provisioning in
+ *  support/global-setup.ts deploys (see STANDALONE_FIXTURE_FILES). */
+export const FIXTURES_DIR_NAME = 'fixtures';
+
+/**
+ * BPMN fixtures global-setup.ts's runtime-key provisioning deploys
+ * (userTaskKey/jobKey/elementInstanceKey — see configs/<config>/fixtures/).
+ * Vendored into <outDir>/fixtures/ so a standalone-materialized suite (run
+ * outside the monorepo checkout) can still find them — global-setup.ts's
+ * `readFixture` looks here first. Copying is best-effort per file: a config
+ * that doesn't ship one (e.g. camunda-hub has no fixtures/bpmn/ at all) just
+ * skips it rather than failing the whole materialization.
+ */
+export const STANDALONE_FIXTURE_FILES = ['bpmn/user-task.bpmn', 'bpmn/service-task.bpmn'] as const;
+
 function defaultTemplatesDir(): string {
   // import.meta.url resolves to:
   //   tsx mode:  <pkg>/src/emit/materializeStandalone.ts
@@ -64,18 +79,23 @@ function defaultTemplatesDir(): string {
  *
  * Idempotent: safe to call multiple times per emit run.
  *
- * @param outDir         Directory to materialize into (created if missing).
- * @param templatesDir   Optional override for the templates source directory.
- *                       Production callers must omit this; it exists for tests.
- * @param overwriteRoot  When false, root scaffolding files (package.json etc.)
- *                       are only written if they don't already exist. Support
- *                       files are always overwritten regardless. Default: true.
- * @returns              Path to the support directory under `outDir`.
+ * @param outDir           Directory to materialize into (created if missing).
+ * @param templatesDir     Optional override for the templates source directory.
+ *                         Production callers must omit this; it exists for tests.
+ * @param overwriteRoot    When false, root scaffolding files (package.json etc.)
+ *                         are only written if they don't already exist. Support
+ *                         files are always overwritten regardless. Default: true.
+ * @param fixturesSourceDir Optional `configs/<config>/fixtures` directory to
+ *                         vendor STANDALONE_FIXTURE_FILES from. Omitted (or a
+ *                         config missing a given file) skips that file rather
+ *                         than failing — most configs don't use this feature.
+ * @returns                Path to the support directory under `outDir`.
  */
 export async function materializeStandalone(
   outDir: string,
   templatesDir?: string,
   overwriteRoot: boolean = true,
+  fixturesSourceDir?: string,
 ): Promise<string> {
   const srcDir = templatesDir ?? defaultTemplatesDir();
   const supportSrcDir = path.join(srcDir, SUPPORT_DIR_NAME);
@@ -101,6 +121,18 @@ export async function materializeStandalone(
     const dest = path.join(outDir, name);
     if (!overwriteRoot && existsSync(dest)) continue;
     await fs.copyFile(path.join(srcDir, name), dest);
+  }
+
+  // Best-effort per file: a config without a given fixture (e.g. camunda-hub
+  // has no fixtures/bpmn/ at all) just skips it, not a materialization error.
+  if (fixturesSourceDir) {
+    for (const relPath of STANDALONE_FIXTURE_FILES) {
+      const src = path.join(fixturesSourceDir, relPath);
+      if (!existsSync(src)) continue;
+      const dest = path.join(outDir, FIXTURES_DIR_NAME, relPath);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.copyFile(src, dest);
+    }
   }
 
   return supportDestDir;

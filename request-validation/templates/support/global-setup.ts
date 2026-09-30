@@ -79,14 +79,18 @@ const JOB_LOCK_DURATION_MS = 30 * 60_000;
  * positive suite's `resolveFixture` (materializer/src/playwright/support/
  * fixtures.ts) but kept self-contained here — this file must stay free of
  * cross-package imports since it's vendored standalone into the generated
- * suite. Tries the in-repo `configs/<CONFIG>/fixtures/` layout (the normal
- * case when running via scripts/e2e/run-oca.sh from the repo root) and a
- * walk-up from this file's own location as a fallback for other layouts.
+ * suite. Tries, in order: the vendored `<suite>/fixtures/` directory
+ * (sibling to `support/`, populated by `materializeStandalone`'s
+ * `STANDALONE_FIXTURE_FILES` — works for a standalone suite run outside the
+ * monorepo, and is what a real invocation actually uses); the in-repo
+ * `configs/<CONFIG>/fixtures/` layout (a monorepo-checkout convenience); and
+ * a walk-up from this file's own location as a last-resort fallback.
  */
 async function readFixture(relPath: string): Promise<Buffer> {
   const activeConfig = process.env.CONFIG?.trim() || 'camunda-oca';
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    path.resolve(here, '..', 'fixtures', relPath),
     path.resolve(process.cwd(), 'configs', activeConfig, 'fixtures', relPath),
     // Walk up from <repoRoot>/generated/<config>/request-validation/<profile>/support/
     // (this file's vendored location) to <repoRoot> — 5 levels, not 3.

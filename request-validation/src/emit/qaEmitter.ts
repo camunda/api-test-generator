@@ -27,6 +27,14 @@ interface EmitOpts {
   /** Path-param-only overrides merged over resourceFixtures (see config). */
   pathResourceFixtures?: Record<string, string>;
   /**
+   * `configs/<config>/fixtures` — vendored into `<outDir>/fixtures/` (see
+   * `materializeStandalone`'s `STANDALONE_FIXTURE_FILES`) so a standalone
+   * suite (run outside the monorepo checkout) can still find the BPMN
+   * fixtures resourceFixtures/pathResourceFixtures's runtime-key provisioning
+   * deploys. Omit for a config that doesn't use this feature.
+   */
+  fixturesSourceDir?: string;
+  /**
    * Scenario kinds with a known, systemic ProblemDetail shape gap (see
    * `knownProblemDetailShapeGaps` in RequestValidationConfig). Scenarios of a
    * listed kind still emit their normal status-code assertion — only the
@@ -63,7 +71,7 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
   }
   await fs.promises.mkdir(opts.outDir, { recursive: true });
   if (opts.standalone !== false) {
-    await materializeStandalone(opts.outDir);
+    await materializeStandalone(opts.outDir, undefined, true, opts.fixturesSourceDir);
   }
   // Resolve Prettier config once (fail fast if not found / cannot load)
   let resolvedConfig: prettier.Config | null = null;
