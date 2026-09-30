@@ -58,12 +58,14 @@ import {
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
-import {
-  loadRequestValidationConfig,
-  type RequestValidationConfig,
-  type ScopedScenarioKind,
-} from '../src/config.js';
+import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
+import {
+  describeScenarioKindEntry,
+  type ScopeRule,
+  scopeRuleMatches,
+  toScopeRule,
+} from '../src/excludeScoping.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
@@ -94,44 +96,6 @@ function defaultOutDir(): string {
   }
   const config = getActiveConfigName(repoRoot);
   return path.join(repoRoot, 'generated', config, 'request-validation');
-}
-
-// A normalized scenarioKinds entry (see ScopedScenarioKind in config.ts) used
-// by the scoped-exclude filter below. `targets`/`constraintKinds` are Sets
-// for O(1) membership checks; undefined means "don't filter on this axis".
-export interface ScopeRule {
-  kind: string;
-  targets?: Set<string>;
-  constraintKinds?: Set<string>;
-}
-
-export function toScopeRule(k: string | ScopedScenarioKind): ScopeRule {
-  if (typeof k === 'string') return { kind: k };
-  return {
-    kind: k.kind,
-    targets: k.targets ? new Set(k.targets) : undefined,
-    constraintKinds: k.constraintKinds ? new Set(k.constraintKinds) : undefined,
-  };
-}
-
-export function scopeRuleMatches(rule: ScopeRule, s: ValidationScenario): boolean {
-  return (
-    rule.kind === s.type &&
-    (rule.targets === undefined || (s.target !== undefined && rule.targets.has(s.target))) &&
-    (rule.constraintKinds === undefined ||
-      (s.constraintKind !== undefined && rule.constraintKinds.has(s.constraintKind)))
-  );
-}
-
-export function describeScenarioKindEntry(k: string | ScopedScenarioKind): string {
-  if (typeof k === 'string') return k;
-  const scope = [
-    k.targets ? `targets=${k.targets.join('|')}` : undefined,
-    k.constraintKinds ? `constraintKinds=${k.constraintKinds.join('|')}` : undefined,
-  ]
-    .filter(Boolean)
-    .join(', ');
-  return `${k.kind}[${scope}]`;
 }
 
 function parseArgs(): CliOptions {

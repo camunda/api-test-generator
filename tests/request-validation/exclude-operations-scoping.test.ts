@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { generateConstraintViolations } from '../../request-validation/src/analysis/constraintViolations.js';
+import { generatePaginationLimitInvalid } from '../../request-validation/src/analysis/paginationLimit.js';
 import {
   describeScenarioKindEntry,
   scopeRuleMatches,
   toScopeRule,
-} from '../../request-validation/scripts/generate.js';
-import { generateConstraintViolations } from '../../request-validation/src/analysis/constraintViolations.js';
-import { generatePaginationLimitInvalid } from '../../request-validation/src/analysis/paginationLimit.js';
+} from '../../request-validation/src/excludeScoping.js';
 import type { OperationModel } from '../../request-validation/src/model/types.js';
 
 /**
