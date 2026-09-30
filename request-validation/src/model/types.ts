@@ -209,7 +209,20 @@ export interface ValidationScenario {
   bodyEncoding?: 'json' | 'multipart';
   /** Multipart form fields (used when bodyEncoding === 'multipart') */
   multipartForm?: Record<string, unknown>;
-  /** Additional metadata for constraint-based scenarios */
-  constraintKind?: string; // e.g. pattern | length-min | length-max | enum
+  /**
+   * The mutation subtype, for scenario kinds whose target alone doesn't
+   * distinguish every generated case (e.g. pagination-limit-invalid's four
+   * mutations all share one target, `page.limit`). Each generator that sets
+   * this defines its own vocabulary, and the three current ones don't share
+   * one: paramConstraintViolations.ts uses `pattern`/`length-min`/
+   * `length-max`/`enum`; constraintViolations.ts and paginationLimit.ts use
+   * free-form labels like `belowMinimum`/`wayBelowMinimum`/`patternMismatch`
+   * (see each file's own mutation-planning function for its exact list).
+   * There's no shared enum tying these together, so a `constraintKinds`
+   * filter in `ScopedScenarioKind` (config.ts) that names a value from the
+   * wrong generator's vocabulary will silently match nothing — generate.ts's
+   * scoped-exclude filter warns when that happens (api-test-generator#610).
+   */
+  constraintKind?: string;
   constraintOrigin?: 'body' | 'param';
 }

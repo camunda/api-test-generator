@@ -60,6 +60,13 @@ import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
 import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
+import {
+  describeScopeRule,
+  ruleMatchesAny,
+  type ScopeRule,
+  scopeRuleMatches,
+  toScopeRule,
+} from '../src/excludeScoping.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
@@ -221,9 +228,8 @@ async function main() {
     console.log(`[generate] excluded ${dropped} operation(s) from the negative suite (#419)`);
   }
   for (const e of scopedExcludes) {
-    console.log(
-      `  ⏭  exclude-operations (${e.scenarioKinds?.join(', ')} only): ${e.operationId} — ${e.reason}`,
-    );
+    const kindsLabel = (e.scenarioKinds ?? []).map(toScopeRule).map(describeScopeRule).join(', ');
+    console.log(`  ⏭  exclude-operations (${kindsLabel} only): ${e.operationId} — ${e.reason}`);
   }
   if (rvConfig.excludeOperations?.length) {
     // Surface stale/typo excludeOperations entries (either group): an
@@ -265,7 +271,7 @@ async function main() {
     process.env.TEST_SEED === 'random'
       ? new Date().toISOString()
       : `seeded:${process.env.TEST_SEED || 'snapshot-baseline'}`;
-  const scenarios: ValidationScenario[] = [];
+  let scenarios: ValidationScenario[] = [];
   // --only filters by scenario kind across the entire generator (base AND deep).
   // Without --only, all kinds permitted by the active mode (deep on/off) run.
   const wantKind = (k: string): boolean => !opts.only || opts.only.has(k);
@@ -607,18 +613,52 @@ async function main() {
   // Scoped excludeOperations entries (scenarioKinds present) — drop just the
   // listed kinds for that op, keeping its other coverage. See the config's
   // header comment for why this can't happen at the model-level filter above.
+  //
+  // A scenarioKinds entry is either a bare ScenarioKind (drop every scenario
+  // of that kind for the op) or a ScopedScenarioKind object narrowing further
+  // by `target` (ValidationScenario.target, the field/param path) and/or
+  // `constraintKind` (ValidationScenario.constraintKind, the mutation
+  // subtype — needed when several mutations share one target, e.g.
+  // pagination-limit-invalid's four mutations all target `page.limit`;
+  // api-test-generator#609).
+  //
+  // Nothing at config-load time can confirm that a configured target/
+  // constraintKind value is one a generator actually produces for that kind
+  // (the vocabulary is generator-specific and stringly-typed, e.g.
+  // constraint-violation's `belowMinimum` vs param-constraint-violation's
+  // `length-min`) — a typo or wrong-vocabulary entry would otherwise pass
+  // validation and silently exclude nothing. So each rule is checked here,
+  // before filtering, against the scenarios it could apply to; one that
+  // matches none is surfaced loudly rather than left as a quiet no-op.
   if (scopedExcludes.length > 0) {
-    const scopedByOp = new Map<string, Set<string>>();
+    const scopedByOp = new Map<string, ScopeRule[]>();
     for (const e of scopedExcludes) {
-      const kinds = scopedByOp.get(e.operationId) ?? new Set<string>();
-      for (const k of e.scenarioKinds ?? []) kinds.add(k);
-      scopedByOp.set(e.operationId, kinds);
+      const rules = scopedByOp.get(e.operationId) ?? [];
+      for (const k of e.scenarioKinds ?? []) rules.push(toScopeRule(k));
+      scopedByOp.set(e.operationId, rules);
+    }
+    // --only/--only-operations/--no-deep all legitimately narrow which
+    // scenarios this invocation generates, independent of whether a rule's
+    // target/constraintKind is otherwise correct — under any of them, a
+    // scoped rule for a kind/operation this run never touched would look
+    // exactly like a dead rule. Only check on an unfiltered (full) run, the
+    // same shape CI's `generate:request-validation` actually invokes.
+    const isFullRun = !opts.only && !opts.onlyOperations && opts.deep;
+    if (isFullRun) {
+      for (const [operationId, rules] of scopedByOp) {
+        for (const rule of rules) {
+          if (!ruleMatchesAny(rule, operationId, scenarios)) {
+            console.warn(
+              `[generate] ⚠ scoped exclude-operations entry matched zero scenarios: ${operationId} ${describeScopeRule(rule)} — the kind/targets/constraintKinds may not match what the generator actually produces for this operation`,
+            );
+          }
+        }
+      }
     }
     const before = scenarios.length;
-    for (let i = scenarios.length - 1; i >= 0; i--) {
-      const s = scenarios[i];
-      if (scopedByOp.get(s.operationId)?.has(s.type)) scenarios.splice(i, 1);
-    }
+    scenarios = scenarios.filter(
+      (s) => !scopedByOp.get(s.operationId)?.some((r) => scopeRuleMatches(r, s)),
+    );
     console.log(
       `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
     );

@@ -73,6 +73,8 @@ export function generatePaginationLimitInvalid(
         expectedStatus: 400,
         description: `Pagination limit ${mut.kind} (${field.pageProp}.limit)`,
         headersAuth: true,
+        constraintKind: mut.kind,
+        constraintOrigin: 'body',
       });
       produced++;
     }
