@@ -61,7 +61,8 @@ import { generateUnionViolations } from '../src/analysis/unionViolations.js';
 import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
 import {
-  describeScenarioKindEntry,
+  describeScopeRule,
+  ruleMatchesAny,
   type ScopeRule,
   scopeRuleMatches,
   toScopeRule,
@@ -227,7 +228,7 @@ async function main() {
     console.log(`[generate] excluded ${dropped} operation(s) from the negative suite (#419)`);
   }
   for (const e of scopedExcludes) {
-    const kindsLabel = (e.scenarioKinds ?? []).map(describeScenarioKindEntry).join(', ');
+    const kindsLabel = (e.scenarioKinds ?? []).map(toScopeRule).map(describeScopeRule).join(', ');
     console.log(`  ⏭  exclude-operations (${kindsLabel} only): ${e.operationId} — ${e.reason}`);
   }
   if (rvConfig.excludeOperations?.length) {
@@ -270,7 +271,7 @@ async function main() {
     process.env.TEST_SEED === 'random'
       ? new Date().toISOString()
       : `seeded:${process.env.TEST_SEED || 'snapshot-baseline'}`;
-  const scenarios: ValidationScenario[] = [];
+  let scenarios: ValidationScenario[] = [];
   // --only filters by scenario kind across the entire generator (base AND deep).
   // Without --only, all kinds permitted by the active mode (deep on/off) run.
   const wantKind = (k: string): boolean => !opts.only || opts.only.has(k);
@@ -620,6 +621,15 @@ async function main() {
   // subtype — needed when several mutations share one target, e.g.
   // pagination-limit-invalid's four mutations all target `page.limit`;
   // api-test-generator#609).
+  //
+  // Nothing at config-load time can confirm that a configured target/
+  // constraintKind value is one a generator actually produces for that kind
+  // (the vocabulary is generator-specific and stringly-typed, e.g.
+  // constraint-violation's `belowMinimum` vs param-constraint-violation's
+  // `length-min`) — a typo or wrong-vocabulary entry would otherwise pass
+  // validation and silently exclude nothing. So each rule is checked here,
+  // before filtering, against the scenarios it could apply to; one that
+  // matches none is surfaced loudly rather than left as a quiet no-op.
   if (scopedExcludes.length > 0) {
     const scopedByOp = new Map<string, ScopeRule[]>();
     for (const e of scopedExcludes) {
@@ -627,12 +637,19 @@ async function main() {
       for (const k of e.scenarioKinds ?? []) rules.push(toScopeRule(k));
       scopedByOp.set(e.operationId, rules);
     }
-    const before = scenarios.length;
-    for (let i = scenarios.length - 1; i >= 0; i--) {
-      const s = scenarios[i];
-      const rules = scopedByOp.get(s.operationId);
-      if (rules?.some((r) => scopeRuleMatches(r, s))) scenarios.splice(i, 1);
+    for (const [operationId, rules] of scopedByOp) {
+      for (const rule of rules) {
+        if (!ruleMatchesAny(rule, operationId, scenarios)) {
+          console.warn(
+            `[generate] ⚠ scoped exclude-operations entry matched zero scenarios: ${operationId} ${describeScopeRule(rule)} — the kind/targets/constraintKinds may not match what the generator actually produces for this operation`,
+          );
+        }
+      }
     }
+    const before = scenarios.length;
+    scenarios = scenarios.filter(
+      (s) => !scopedByOp.get(s.operationId)?.some((r) => scopeRuleMatches(r, s)),
+    );
     console.log(
       `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
     );

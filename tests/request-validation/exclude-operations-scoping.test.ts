@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { generateConstraintViolations } from '../../request-validation/src/analysis/constraintViolations.js';
 import { generatePaginationLimitInvalid } from '../../request-validation/src/analysis/paginationLimit.js';
 import {
-  describeScenarioKindEntry,
+  describeScopeRule,
+  ruleMatchesAny,
   scopeRuleMatches,
   toScopeRule,
 } from '../../request-validation/src/excludeScoping.js';
@@ -162,12 +163,49 @@ describe('excludeOperations: scoped scenarioKinds filtering (#609)', () => {
   });
 
   it('describes a bare kind and a scoped kind for the generate.ts exclude-operations log line', () => {
-    expect(describeScenarioKindEntry('pagination-limit-invalid')).toBe('pagination-limit-invalid');
+    expect(describeScopeRule(toScopeRule('pagination-limit-invalid'))).toBe(
+      'pagination-limit-invalid',
+    );
     expect(
-      describeScenarioKindEntry({
-        kind: 'pagination-limit-invalid',
-        constraintKinds: ['aboveMaximum', 'wayAboveMaximum'],
-      }),
+      describeScopeRule(
+        toScopeRule({
+          kind: 'pagination-limit-invalid',
+          constraintKinds: ['aboveMaximum', 'wayAboveMaximum'],
+        }),
+      ),
     ).toBe('pagination-limit-invalid[constraintKinds=aboveMaximum|wayAboveMaximum]');
+  });
+
+  it('toScopeRule normalizes an empty targets/constraintKinds array to no filter on that axis', () => {
+    // Not reachable through loadRequestValidationConfig (it rejects an empty
+    // array before this), but toScopeRule is exported and called directly —
+    // an empty array must not become a rule that matches nothing (#610).
+    const rule = toScopeRule({ kind: 'constraint-violation', targets: [] });
+    expect(rule.targets).toBeUndefined();
+    expect(describeScopeRule(rule)).toBe('constraint-violation');
+  });
+
+  it('ruleMatchesAny detects a scoped rule that matches nothing (the generate.ts warning it drives)', () => {
+    const scenarios = generateConstraintViolations([twoConstrainedFieldsOp()], {});
+
+    // a real target with a typo'd/wrong-vocabulary constraintKind matches nothing
+    const deadRule = toScopeRule({
+      kind: 'constraint-violation',
+      targets: ['operationReference'],
+      constraintKinds: ['aboveMaximm'], // not a real mutation label
+    });
+    expect(ruleMatchesAny(deadRule, 'updateJob', scenarios)).toBe(false);
+
+    // the same target without the bad constraintKind filter does match
+    const liveRule = toScopeRule({
+      kind: 'constraint-violation',
+      targets: ['operationReference'],
+    });
+    expect(ruleMatchesAny(liveRule, 'updateJob', scenarios)).toBe(true);
+
+    // a kind whose scenarios never set .target at all (e.g. auth-absent)
+    // matches nothing for any targets filter, on any operation
+    const auth = toScopeRule({ kind: 'auth-absent', targets: ['operationReference'] });
+    expect(ruleMatchesAny(auth, 'updateJob', scenarios)).toBe(false);
   });
 });

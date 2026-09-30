@@ -251,6 +251,22 @@ describe('request-validation: unenforcedStringFormats', () => {
       expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
     });
 
+    it('rejects a scoped scenarioKinds object with a whitespace-only targets entry', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'updateJob',
+              scenarioKinds: [{ kind: 'constraint-violation', targets: [' '] }],
+              reason: 'x',
+            },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
     it('rejects an excludeOperations entry with an empty scenarioKinds array', () => {
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),

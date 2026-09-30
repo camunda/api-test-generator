@@ -280,6 +280,17 @@ function isNonEmptyStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string' && s.length > 0);
 }
 
+// Only checks shape (kind is a real ScenarioKind; targets/constraintKinds,
+// when present, are non-empty string arrays with at least one of the two
+// set) — it can't also confirm a target/constraintKind value is one the
+// named kind's generator actually produces (that vocabulary is
+// generator-specific and lives in request-validation/src/analysis/, not
+// here; see ValidationScenario.constraintKind's doc comment in
+// model/types.ts). A rule that's shaped correctly but names a value nothing
+// ever sets — including a kind, like auth-absent, whose scenarios never set
+// target/constraintKind at all — is a silent no-op rather than a load-time
+// error; generate.ts's scoped-exclude filter warns on it at generation time
+// instead (api-test-generator#610).
 function isScopedScenarioKind(v: unknown): v is ScopedScenarioKind {
   return (
     isPlainObject(v) &&
@@ -430,7 +441,7 @@ export function loadRequestValidationConfig(
     const v = parsed.excludeOperations;
     if (!isExcludeOperations(v)) {
       throw new Error(
-        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, scenarioKinds?, reason, knownIssue? } objects — operationId/reason are non-empty strings, scenarioKinds (when present) a non-empty array of valid ScenarioKind values or { kind, targets?, constraintKinds? } objects (with at least one of targets/constraintKinds set, each a non-empty array of non-empty strings), and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
+        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, scenarioKinds?, reason, knownIssue? } objects — operationId/reason are non-empty strings, scenarioKinds (when present) a non-empty array of valid ScenarioKind values or { kind, targets?, constraintKinds? } objects (kind a valid ScenarioKind, with at least one of targets/constraintKinds set, each a non-empty array of non-empty strings), and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
       );
     }
     merged.excludeOperations = v;
