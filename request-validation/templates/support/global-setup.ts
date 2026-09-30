@@ -60,7 +60,19 @@ const USER_TASK_PROCESS_ID = 'Process_user_task';
 const SERVICE_TASK_BPMN = 'bpmn/service-task.bpmn';
 const SERVICE_TASK_PROCESS_ID = 'Process_0zc9jbi';
 const SERVICE_TASK_JOB_TYPE = 'sampleJobType';
+// Deliberately generous — a safety net against Zeebe search-endpoint import
+// lag (findUserTask) and the instance not yet reaching the service task
+// (activateJob), not a correctness signal. Don't tighten this without cause
+// (AGENTS.md "There are no flaky tests").
 const RUNTIME_KEY_DISCOVERY_TIMEOUT_MS = 30_000;
+// The `timeout` field of a jobs/activation request is the activated job's
+// LOCK duration on the broker (how long it stays held before becoming
+// eligible for re-activation by anyone else) — NOT a poll-wait. It must
+// outlive the whole request-validation run, not just this discovery step,
+// or a later completeJob/failJob/throwJobError/updateJob scenario could
+// find the job unlocked/reassigned. Deliberately generous; don't shrink
+// this to match RUNTIME_KEY_DISCOVERY_TIMEOUT_MS.
+const JOB_LOCK_DURATION_MS = 30 * 60_000;
 
 /**
  * Reads a fixture BPMN file. Mirrors the candidate-path strategy of the
@@ -76,7 +88,9 @@ async function readFixture(relPath: string): Promise<Buffer> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
     path.resolve(process.cwd(), 'configs', activeConfig, 'fixtures', relPath),
-    path.resolve(here, '..', '..', '..', 'configs', activeConfig, 'fixtures', relPath),
+    // Walk up from <repoRoot>/generated/<config>/request-validation/<profile>/support/
+    // (this file's vendored location) to <repoRoot> — 5 levels, not 3.
+    path.resolve(here, '..', '..', '..', '..', '..', 'configs', activeConfig, 'fixtures', relPath),
   ];
   for (const candidate of candidates) {
     try {
@@ -107,6 +121,19 @@ async function deployFixtureProcesses(
     const text = await res.text().catch(() => '');
     throw new Error(`deployment failed: HTTP ${res.status} ${text.slice(0, 300)}`);
   }
+}
+
+/** Best-effort cleanup for an instance created just before a sibling creation
+ *  failed — provisioning is already failing, so a cancellation error here is
+ *  swallowed rather than compounding it. */
+async function cancelProcessInstance(
+  admin: Record<string, string>,
+  processInstanceKey: string,
+): Promise<void> {
+  await fetch(`${credentials.baseUrl}/v2/process-instances/${processInstanceKey}/cancellation`, {
+    method: 'POST',
+    headers: admin,
+  }).catch(() => undefined);
 }
 
 function isCreateProcessInstanceResponse(v: unknown): v is { processInstanceKey: string } {
@@ -201,7 +228,7 @@ async function activateJob(
       body: JSON.stringify({
         type,
         maxJobsToActivate: 1,
-        timeout: RUNTIME_KEY_DISCOVERY_TIMEOUT_MS,
+        timeout: JOB_LOCK_DURATION_MS,
         worker: 'rv-global-setup',
       }),
     });
@@ -230,11 +257,20 @@ async function activateJob(
  */
 async function provisionRuntimeKeyFixtures(): Promise<void> {
   const admin = authHeaders();
+  let userTaskBpmn: Buffer;
+  let serviceTaskBpmn: Buffer;
   try {
-    const [userTaskBpmn, serviceTaskBpmn] = await Promise.all([
+    [userTaskBpmn, serviceTaskBpmn] = await Promise.all([
       readFixture(USER_TASK_BPMN),
       readFixture(SERVICE_TASK_BPMN),
     ]);
+  } catch {
+    // This config doesn't ship the user-task/service-task BPMN fixtures
+    // (e.g. camunda-hub, which has no configs/camunda-hub/fixtures/bpmn/) —
+    // this feature doesn't apply here, not a failure worth a warning.
+    return;
+  }
+  try {
     await deployFixtureProcesses(admin, [
       { name: 'user-task.bpmn', content: userTaskBpmn },
       { name: 'service-task.bpmn', content: serviceTaskBpmn },
@@ -243,10 +279,26 @@ async function provisionRuntimeKeyFixtures(): Promise<void> {
     // Job activation (jobs/activation) isn't scoped to a single instance —
     // it activates the next available job of `type` broker-wide — so the
     // service-task instance's own key never needs to be read back.
-    const [userTaskInstanceKey] = await Promise.all([
+    //
+    // allSettled (not all): if one create fails after the other already
+    // succeeded, Promise.all would discard the successful one's key and
+    // leak it as a permanently running orphan. Cancel anything that DID
+    // get created before surfacing the failure.
+    const created = await Promise.allSettled([
       createProcessInstance(admin, USER_TASK_PROCESS_ID),
       createProcessInstance(admin, SERVICE_TASK_PROCESS_ID),
     ]);
+    const createdKeys: string[] = [];
+    const createErrors: string[] = [];
+    for (const result of created) {
+      if (result.status === 'fulfilled') createdKeys.push(result.value);
+      else createErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+    }
+    if (createErrors.length > 0) {
+      await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
+      throw new Error(`createProcessInstance failed: ${createErrors.join('; ')}`);
+    }
+    const [userTaskInstanceKey] = createdKeys;
     process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY = userTaskInstanceKey;
 
     const deadlineMs = Date.now() + RUNTIME_KEY_DISCOVERY_TIMEOUT_MS;
@@ -257,9 +309,6 @@ async function provisionRuntimeKeyFixtures(): Promise<void> {
 
     if (userTask) {
       process.env.RV_FIXTURE_USER_TASK_KEY = userTask.userTaskKey;
-      if (userTask.elementInstanceKey) {
-        process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY = userTask.elementInstanceKey;
-      }
     } else {
       console.warn(
         '[runtime-key fixtures] user task did not appear within 30s — userTaskKey scenarios fall back to the filler placeholder.',
@@ -268,13 +317,17 @@ async function provisionRuntimeKeyFixtures(): Promise<void> {
 
     if (job) {
       process.env.RV_FIXTURE_JOB_KEY = job.jobKey;
-      if (!process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY && job.elementInstanceKey) {
-        process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY = job.elementInstanceKey;
-      }
     } else {
       console.warn(
         '[runtime-key fixtures] no job activated within 30s — jobKey scenarios fall back to the filler placeholder.',
       );
+    }
+
+    // Prefer the user task's element instance — decided directly from the
+    // two already-resolved locals, not by probing back through process.env.
+    const elementInstanceKey = userTask?.elementInstanceKey ?? job?.elementInstanceKey;
+    if (elementInstanceKey) {
+      process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY = elementInstanceKey;
     }
 
     console.log(
