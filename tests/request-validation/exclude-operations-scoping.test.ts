@@ -22,8 +22,8 @@ import type { OperationModel } from '../../request-validation/src/model/types.js
  * `ValidationScenario.target` and/or `.constraintKind` instead of dropping
  * the whole kind. This exercises the real generators (not a reimplementation
  * of their mutation logic) plus the real filter helpers exported from
- * `generate.ts`, applying them exactly as `main()`'s scoped-exclude filter
- * does.
+ * `src/excludeScoping.ts`, applying them exactly as `generate.ts`'s
+ * scoped-exclude filter does.
  */
 
 function paginationOp(): OperationModel {
@@ -67,6 +67,28 @@ function twoConstrainedFieldsOp(): OperationModel {
   };
 }
 
+// A third minimum-constrained field (retryLimit) sharing operationReference's
+// constraintKind vocabulary (belowMinimum/wayBelowMinimum/...) but on a
+// different target, so a combined { targets, constraintKinds } rule can be
+// checked for real AND semantics — see the "both axes" test below.
+function threeConstrainedFieldsOp(): OperationModel {
+  return {
+    operationId: 'updateJob',
+    method: 'PATCH',
+    path: '/jobs/{jobKey}',
+    tags: [],
+    parameters: [],
+    requestBodySchema: {
+      type: 'object',
+      properties: {
+        operationReference: { type: 'integer', minimum: 1 },
+        retryLimit: { type: 'integer', minimum: 5 },
+        jobLeaseToken: { type: 'string', minLength: 1 },
+      },
+    },
+  };
+}
+
 describe('excludeOperations: scoped scenarioKinds filtering (#609)', () => {
   it('drops only the listed constraintKinds, keeping the rest of the same kind/target', () => {
     const scenarios = generatePaginationLimitInvalid([paginationOp()], {});
@@ -95,6 +117,40 @@ describe('excludeOperations: scoped scenarioKinds filtering (#609)', () => {
     const rule = toScopeRule({ kind: 'constraint-violation', targets: ['operationReference'] });
     const kept = scenarios.filter((s) => !scopeRuleMatches(rule, s));
     expect(kept.some((s) => s.target === 'operationReference')).toBe(false);
+    expect(kept.some((s) => s.target === 'jobLeaseToken')).toBe(true);
+  });
+
+  it('a combined targets+constraintKinds rule requires both to match (not target OR constraintKind)', () => {
+    const scenarios = generateConstraintViolations([threeConstrainedFieldsOp()], {});
+    const byTargetAndKind = (target: string, kind: string | undefined) =>
+      scenarios.some((s) => s.target === target && s.constraintKind === kind);
+    // sanity: the vocabulary overlap this test depends on actually exists
+    expect(byTargetAndKind('operationReference', 'belowMinimum')).toBe(true);
+    expect(byTargetAndKind('operationReference', 'wayBelowMinimum')).toBe(true);
+    expect(byTargetAndKind('retryLimit', 'belowMinimum')).toBe(true);
+
+    const rule = toScopeRule({
+      kind: 'constraint-violation',
+      targets: ['operationReference'],
+      constraintKinds: ['belowMinimum'],
+    });
+    const kept = scenarios.filter((s) => !scopeRuleMatches(rule, s));
+
+    // dropped: matches both axes
+    expect(
+      kept.some((s) => s.target === 'operationReference' && s.constraintKind === 'belowMinimum'),
+    ).toBe(false);
+    // kept: target matches but constraintKind doesn't — an accidental `||`
+    // would wrongly drop this
+    expect(
+      kept.some((s) => s.target === 'operationReference' && s.constraintKind === 'wayBelowMinimum'),
+    ).toBe(true);
+    // kept: constraintKind matches but target doesn't — same check from the
+    // other direction
+    expect(kept.some((s) => s.target === 'retryLimit' && s.constraintKind === 'belowMinimum')).toBe(
+      true,
+    );
+    // kept: neither axis matches
     expect(kept.some((s) => s.target === 'jobLeaseToken')).toBe(true);
   });
 
