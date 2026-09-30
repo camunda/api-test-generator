@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../../request-validation/src/model/types.js';
+import { RUNTIME_KEY_ENV_VARS } from '../../request-validation/templates/support/global-setup.js';
 
 /**
  * Layer-2 fixture for issue #352 (resource fixtures).
@@ -131,11 +132,14 @@ describe('request-validation: resource-fixture emit (#352)', () => {
   });
 
   // Representative path template for each of camunda-oca's four
-  // pathResourceFixtures-only runtime keys (#614), and the env var each is
-  // expected to map to — from the real config, not hardcoded, so a rename in
-  // configs/camunda-oca/request-validation.json fails this test too.
+  // pathResourceFixtures-only runtime keys (#614). The expected env var name
+  // for each comes from RUNTIME_KEY_ENV_VARS — support/global-setup.ts's own
+  // exported contract for what it actually sets — NOT from `ocaFixtures`
+  // itself: asserting a config value against itself can't catch a typo in
+  // that same value (a prior version of this test did exactly that and a
+  // reviewer caught it — see #614's review discussion).
   const ocaFixtures = loadOcaPathResourceFixtures();
-  const OCA_RUNTIME_KEYS: ReadonlyArray<[key: string, path: string]> = [
+  const OCA_RUNTIME_KEYS: ReadonlyArray<[key: keyof typeof RUNTIME_KEY_ENV_VARS, path: string]> = [
     ['processInstanceKey', '/process-instances/{processInstanceKey}/incidents/search'],
     ['userTaskKey', '/user-tasks/{userTaskKey}/assignment'],
     ['jobKey', '/jobs/{jobKey}/completion'],
@@ -144,21 +148,21 @@ describe('request-validation: resource-fixture emit (#352)', () => {
 
   it.each(
     OCA_RUNTIME_KEYS,
-  )('camunda-oca: pathResourceFixtures-only %s (no base resourceFixtures) still substitutes the path param (#614)', (key, path) => {
+  )("camunda-oca: pathResourceFixtures.%s matches global-setup.ts's RUNTIME_KEY_ENV_VARS contract and substitutes the path param (#614)", (key, path) => {
     // userTaskKey/jobKey/elementInstanceKey/processInstanceKey are deliberately
     // pathResourceFixtures-ONLY for camunda-oca (see that config's $comment):
     // putting them in the base resourceFixtures map would make generate.ts's
     // #427 authz-resolved-body-field logic drop body-type-mismatch coverage for
     // every unrelated operation with a same-named body field (e.g.
     // createAgentInstance's jobKey/elementInstanceKey).
-    expect(ocaFixtures[key]).toBeDefined();
+    expect(ocaFixtures[key]).toBe(RUNTIME_KEY_ENV_VARS[key]);
     const out = renderScenarioForTest(
       scenario({ method: 'POST', path, params: { [key]: 'x' } }),
       'probe',
       {}, // no base resourceFixtures
       ocaFixtures, // path-only override
     );
-    expect(out).toMatch(new RegExp(`buildUrl\\([^)]*${ocaFixtures[key]}`, 's'));
+    expect(out).toMatch(new RegExp(`buildUrl\\([^)]*${RUNTIME_KEY_ENV_VARS[key]}`, 's'));
   });
 
   it.each(
@@ -176,7 +180,7 @@ describe('request-validation: resource-fixture emit (#352)', () => {
       ocaFixtures,
     );
     expect(out).toContain(`"${key}": "x"`);
-    expect(out).not.toContain(ocaFixtures[key]);
+    expect(out).not.toContain(RUNTIME_KEY_ENV_VARS[key]);
   });
 
   it('applies pathResourceFixtures override to the PATH param only, not the body', () => {

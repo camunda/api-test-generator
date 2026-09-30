@@ -80,6 +80,23 @@ const RUNTIME_KEY_DISCOVERY_TIMEOUT_MS = 30_000;
 const JOB_LOCK_DURATION_MS = 30 * 60_000;
 
 /**
+ * The RV_FIXTURE_* env var `provisionRuntimeKeyFixtures` sets for each
+ * runtime key — the single source of truth a config's `resourceFixtures`/
+ * `pathResourceFixtures` entries must match exactly (see
+ * `configs/camunda-oca/request-validation.json` and the #614 regression
+ * guard in `tests/request-validation/resource-fixtures-emit.test.ts`, which
+ * imports this constant rather than re-deriving the expected names from the
+ * config it's checking — asserting a value against itself can't catch a typo
+ * in that same value).
+ */
+export const RUNTIME_KEY_ENV_VARS = {
+  processInstanceKey: 'RV_FIXTURE_PROCESS_INSTANCE_KEY',
+  userTaskKey: 'RV_FIXTURE_USER_TASK_KEY',
+  jobKey: 'RV_FIXTURE_JOB_KEY',
+  elementInstanceKey: 'RV_FIXTURE_ELEMENT_INSTANCE_KEY',
+} as const;
+
+/**
  * Reads a fixture BPMN file. Mirrors the candidate-path strategy of the
  * positive suite's `resolveFixture` (materializer/src/playwright/support/
  * fixtures.ts) but kept self-contained here — this file must stay free of
@@ -309,42 +326,52 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
     throw new Error(`createProcessInstance failed: ${createErrors.join('; ')}`);
   }
   const [userTaskInstanceKey] = createdKeys;
-  process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY = userTaskInstanceKey;
+  process.env[RUNTIME_KEY_ENV_VARS.processInstanceKey] = userTaskInstanceKey;
 
-  const deadlineMs = Date.now() + RUNTIME_KEY_DISCOVERY_TIMEOUT_MS;
-  const [userTask, job] = await Promise.all([
-    findUserTask(admin, userTaskInstanceKey, deadlineMs),
-    activateJob(admin, SERVICE_TASK_JOB_TYPE, deadlineMs),
-  ]);
+  // Discovery/validation failures below still have both process instances
+  // (and, once activated, the job under the service-task one) alive on the
+  // broker — cancelling each created instance cancels its active elements
+  // too, releasing the job with it, so there's nothing separate to release
+  // for the job specifically.
+  try {
+    const deadlineMs = Date.now() + RUNTIME_KEY_DISCOVERY_TIMEOUT_MS;
+    const [userTask, job] = await Promise.all([
+      findUserTask(admin, userTaskInstanceKey, deadlineMs),
+      activateJob(admin, SERVICE_TASK_JOB_TYPE, deadlineMs),
+    ]);
 
-  if (!userTask) {
-    throw new Error(
-      `[runtime-key fixtures] user task did not appear within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms for process instance ${userTaskInstanceKey}`,
-    );
+    if (!userTask) {
+      throw new Error(
+        `[runtime-key fixtures] user task did not appear within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms for process instance ${userTaskInstanceKey}`,
+      );
+    }
+    process.env[RUNTIME_KEY_ENV_VARS.userTaskKey] = userTask.userTaskKey;
+
+    if (!job) {
+      throw new Error(
+        `[runtime-key fixtures] no '${SERVICE_TASK_JOB_TYPE}' job was activated within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms`,
+      );
+    }
+    process.env[RUNTIME_KEY_ENV_VARS.jobKey] = job.jobKey;
+
+    // Prefer the user task's element instance — decided directly from the
+    // two already-resolved locals, not by probing back through process.env.
+    const elementInstanceKey = userTask.elementInstanceKey ?? job.elementInstanceKey;
+    if (!elementInstanceKey) {
+      throw new Error(
+        '[runtime-key fixtures] neither the user task nor the activated job returned an elementInstanceKey',
+      );
+    }
+    process.env[RUNTIME_KEY_ENV_VARS.elementInstanceKey] = elementInstanceKey;
+  } catch (err) {
+    await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
+    throw err;
   }
-  process.env.RV_FIXTURE_USER_TASK_KEY = userTask.userTaskKey;
-
-  if (!job) {
-    throw new Error(
-      `[runtime-key fixtures] no '${SERVICE_TASK_JOB_TYPE}' job was activated within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms`,
-    );
-  }
-  process.env.RV_FIXTURE_JOB_KEY = job.jobKey;
-
-  // Prefer the user task's element instance — decided directly from the
-  // two already-resolved locals, not by probing back through process.env.
-  const elementInstanceKey = userTask.elementInstanceKey ?? job.elementInstanceKey;
-  if (!elementInstanceKey) {
-    throw new Error(
-      '[runtime-key fixtures] neither the user task nor the activated job returned an elementInstanceKey',
-    );
-  }
-  process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY = elementInstanceKey;
 
   console.log(
-    `[runtime-key fixtures] ready: processInstanceKey=${process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY} ` +
-      `userTaskKey=${process.env.RV_FIXTURE_USER_TASK_KEY} jobKey=${process.env.RV_FIXTURE_JOB_KEY} ` +
-      `elementInstanceKey=${process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY}`,
+    `[runtime-key fixtures] ready: processInstanceKey=${process.env[RUNTIME_KEY_ENV_VARS.processInstanceKey]} ` +
+      `userTaskKey=${process.env[RUNTIME_KEY_ENV_VARS.userTaskKey]} jobKey=${process.env[RUNTIME_KEY_ENV_VARS.jobKey]} ` +
+      `elementInstanceKey=${process.env[RUNTIME_KEY_ENV_VARS.elementInstanceKey]}`,
   );
 }
 

@@ -118,26 +118,29 @@ describe('provisionRuntimeKeyFixtures', () => {
     expect(process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY).toBeUndefined();
   });
 
-  it('throws when no user task appears within the discovery deadline, rather than falling back to fillers', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith('/v2/deployments')) return jsonResponse({});
-        if (url.endsWith('/v2/process-instances')) {
-          const body = parseRequestBody(init);
-          const key =
-            body.processDefinitionId === 'Process_user_task' ? 'PI-USERTASK' : 'PI-SERVICE';
-          return jsonResponse({ processInstanceKey: key });
-        }
-        // The user task never appears — this is the timeout case under test.
-        if (url.endsWith('/v2/user-tasks/search')) return jsonResponse({ items: [] });
-        if (url.endsWith('/v2/jobs/activation')) {
-          return jsonResponse({ jobs: [{ jobKey: 'JOB-1', elementInstanceKey: 'EI-JOB' }] });
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
-    );
+  it('throws when no user task appears within the discovery deadline, rather than falling back to fillers, and cancels both created instances', async () => {
+    const cancelledInstanceKeys: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/deployments')) return jsonResponse({});
+      if (url.endsWith('/v2/process-instances')) {
+        const body = parseRequestBody(init);
+        const key = body.processDefinitionId === 'Process_user_task' ? 'PI-USERTASK' : 'PI-SERVICE';
+        return jsonResponse({ processInstanceKey: key });
+      }
+      // The user task never appears — this is the timeout case under test.
+      if (url.endsWith('/v2/user-tasks/search')) return jsonResponse({ items: [] });
+      if (url.endsWith('/v2/jobs/activation')) {
+        return jsonResponse({ jobs: [{ jobKey: 'JOB-1', elementInstanceKey: 'EI-JOB' }] });
+      }
+      const cancellationMatch = /\/v2\/process-instances\/([^/]+)\/cancellation$/.exec(url);
+      if (cancellationMatch) {
+        cancelledInstanceKeys.push(cancellationMatch[1]);
+        return jsonResponse({});
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
     const result = provisionRuntimeKeyFixtures();
@@ -145,5 +148,9 @@ describe('provisionRuntimeKeyFixtures', () => {
     await vi.runAllTimersAsync();
     await assertion;
     expect(process.env.RV_FIXTURE_USER_TASK_KEY).toBeUndefined();
+    // Both process instances created before the discovery failure must be
+    // cancelled — a failed setup shouldn't leak them into the broker for
+    // later runs to trip over (#614's review discussion).
+    expect(cancelledInstanceKeys.sort()).toEqual(['PI-SERVICE', 'PI-USERTASK']);
   });
 });
