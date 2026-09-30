@@ -5,17 +5,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * runtime-key provisioning (deploy → create process instances → discover
  * userTaskKey/jobKey/elementInstanceKey) that fixes the request-validation
  * 404-masking bug for userTaskKey/jobKey/elementInstanceKey/processInstanceKey
- * path params. Mocks `fetch` (and `node:fs`'s `readFile`, since `readFixture`
- * now only tries the vendored `<suite>/fixtures/` sibling directory, which
- * doesn't exist for a plain import of the template file) so the full
- * deploy/create/search/activation sequence runs without a live broker.
+ * path params. Mocks `fetch` and all of `node:fs`'s `promises` used by
+ * global-setup.ts — `readFile` (since `readFixture` now only tries the
+ * vendored `<suite>/fixtures/` sibling directory, which doesn't exist for a
+ * plain import of the template file), plus `writeFile`/`rm` (the cleanup-state
+ * bookkeeping) so a test never touches the real filesystem. That last part
+ * also sidesteps a real hang: with `vi.useFakeTimers()` active, a genuine
+ * disk write's completion signal can depend on a macrotask
+ * (`setImmediate`-like) fake timers intercept, so real fs I/O under fake
+ * timers isn't just undesirable here, it can stall a test for its full
+ * `testTimeout` instead of resolving.
  *
  * Guards locked in here:
  *   1. the happy path sets all four RV_FIXTURE_* env vars from the mocked
  *      responses, preferring the user task's elementInstanceKey;
  *   2. a deployment failure throws (fails loudly, per #614's review — see
  *      global-setup.ts's doc comment on provisionRuntimeKeyFixtures);
- *   3. a discovery timeout (user task never appears) throws, not swallowed.
+ *   3. a discovery timeout (user task never appears) throws, not swallowed,
+ *      and cancels both process instances created before the timeout.
  */
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -25,6 +32,8 @@ vi.mock('node:fs', async (importOriginal) => {
     promises: {
       ...actual.promises,
       readFile: vi.fn(async () => Buffer.from('<bpmn/>')),
+      writeFile: vi.fn(async () => undefined),
+      rm: vi.fn(async () => undefined),
     },
   };
 });

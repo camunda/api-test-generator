@@ -147,7 +147,19 @@ run_rv() { # profile
   # reporter, but a crash before reporting (config/runtime error) only
   # surfaces on stderr.
   local pw_err="$ABS_OUT/pw-$p.stderr.log"
+  # RV_FIXTURE_ENV_FILE: global-setup.ts's runtime-key provisioning sets
+  # RV_FIXTURE_* env vars only inside this Playwright/Node process — that
+  # never propagates to curl_compare.py, spawned as a separate child process
+  # of THIS script after Playwright exits. Without this, curl_compare.py's
+  # own `node -e` evaluation of the emitted `process.env["RV_FIXTURE_..."] ||
+  # "<filler>"` expressions would see the filler and replay every
+  # fixture-substituted request differently from what Playwright actually
+  # sent. Have global-setup.ts write what it discovered here; source it back
+  # into this shell below so curl_compare.py inherits the same real values.
+  local rv_fixture_env_file="$ABS_OUT/rv-fixtures-$p.env"
+  rm -f "$rv_fixture_env_file"
   if env CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
+    RV_FIXTURE_ENV_FILE="$rv_fixture_env_file" \
     ${basic[@]+"${basic[@]}"} \
     PLAYWRIGHT_JSON_OUTPUT_FILE="$ABS_OUT/pw-$p.json" \
     PLAYWRIGHT_HTML_OUTPUT_DIR="$ABS_OUT/pw-$p" \
@@ -161,6 +173,14 @@ run_rv() { # profile
       echo "  ── playwright stderr (tail) ──────────────"
       tail -n 30 "$pw_err" | sed 's/^/    /'
     fi
+  fi
+  # Present regardless of pass/fail above — global-setup.ts writes it once
+  # provisioning itself succeeds, independent of whether individual test
+  # assertions later failed. Absent for a config/profile that doesn't use
+  # runtime-key fixtures at all (e.g. rbac, or camunda-hub) — nothing to do.
+  if [ -f "$rv_fixture_env_file" ]; then
+    # shellcheck disable=SC1090
+    source "$rv_fixture_env_file"
   fi
 }
 

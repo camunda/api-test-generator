@@ -41,6 +41,7 @@
 // (or a false 400 for the wrong reason) this exists to fix, with nothing to
 // catch it.
 
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,7 +65,13 @@ const USER_TASK_BPMN = 'bpmn/user-task.bpmn';
 const USER_TASK_PROCESS_ID = 'Process_user_task';
 const SERVICE_TASK_BPMN = 'bpmn/service-task.bpmn';
 const SERVICE_TASK_PROCESS_ID = 'Process_0zc9jbi';
-const SERVICE_TASK_JOB_TYPE = 'sampleJobType';
+// Base job type baked into service-task.bpmn's zeebe:taskDefinition. Never
+// used literally for activation (see makeUniqueServiceTaskJobType) — jobs/
+// activation is broker-wide with no instance-scoping, so activating this
+// literal type could capture an unrelated job left by the positive suite's
+// own use of the identical fixture, or by a concurrent request-validation
+// run, rather than the one from the instance this run just created.
+const SERVICE_TASK_JOB_TYPE_BASE = 'sampleJobType';
 // Deliberately generous — a safety net against Zeebe search-endpoint import
 // lag (findUserTask) and the instance not yet reaching the service task
 // (activateJob), not a correctness signal. Don't tighten this without cause
@@ -149,6 +156,24 @@ async function cancelProcessInstance(
     method: 'POST',
     headers: admin,
   }).catch(() => undefined);
+}
+
+/**
+ * Filename (sibling to `support/`) recording the process instance keys a run
+ * created and still needs cancelled — written unconditionally once creation
+ * succeeds, read by `global-teardown.ts` after the whole suite finishes.
+ * Exported so both files use the exact same literal rather than two copies
+ * that could drift.
+ */
+export const RUNTIME_KEY_CLEANUP_STATE_FILE = 'runtime-key-fixtures-cleanup.json';
+
+function cleanupStatePath(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, '..', RUNTIME_KEY_CLEANUP_STATE_FILE);
+}
+
+async function recordCreatedInstancesForCleanup(processInstanceKeys: readonly string[]): Promise<void> {
+  await fs.writeFile(cleanupStatePath(), JSON.stringify(processInstanceKeys), 'utf8');
 }
 
 function isCreateProcessInstanceResponse(v: unknown): v is { processInstanceKey: string } {
@@ -298,15 +323,23 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
     return;
   }
 
+  // A unique job type per run, patched into the service-task BPMN's
+  // zeebe:taskDefinition before deploying it: jobs/activation is broker-wide
+  // with no instance-scoping, so activating the fixture's literal job type
+  // could capture an unrelated job left by the positive suite's own use of
+  // the identical BPMN, or by a concurrent request-validation run, instead
+  // of the one from the instance this run just created.
+  const serviceTaskJobType = `${SERVICE_TASK_JOB_TYPE_BASE}-${randomUUID()}`;
+  const serviceTaskBpmnForThisRun = Buffer.from(
+    serviceTaskBpmn.toString('utf8').replaceAll(SERVICE_TASK_JOB_TYPE_BASE, serviceTaskJobType),
+    'utf8',
+  );
+
   await deployFixtureProcesses(admin, [
     { name: 'user-task.bpmn', content: userTaskBpmn },
-    { name: 'service-task.bpmn', content: serviceTaskBpmn },
+    { name: 'service-task.bpmn', content: serviceTaskBpmnForThisRun },
   ]);
 
-  // Job activation (jobs/activation) isn't scoped to a single instance —
-  // it activates the next available job of `type` broker-wide — so the
-  // service-task instance's own key never needs to be read back.
-  //
   // allSettled (not all): if one create fails after the other already
   // succeeded, Promise.all would discard the successful one's key and
   // leak it as a permanently running orphan. Cancel anything that DID
@@ -328,6 +361,16 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
   const [userTaskInstanceKey] = createdKeys;
   process.env[RUNTIME_KEY_ENV_VARS.processInstanceKey] = userTaskInstanceKey;
 
+  // Recorded unconditionally (not just on failure) so a SUCCESSFUL run also
+  // gets cleaned up — global-teardown.ts cancels whatever's still listed
+  // here once the whole suite finishes, instead of leaving both instances
+  // (and the job under the service-task one) running on the broker forever.
+  // A failure below cancels them immediately in its own catch; teardown
+  // finding the same keys afterward is harmless (cancelling an
+  // already-cancelled instance is swallowed the same way as everywhere else
+  // here).
+  await recordCreatedInstancesForCleanup(createdKeys);
+
   // Discovery/validation failures below still have both process instances
   // (and, once activated, the job under the service-task one) alive on the
   // broker — cancelling each created instance cancels its active elements
@@ -337,7 +380,7 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
     const deadlineMs = Date.now() + RUNTIME_KEY_DISCOVERY_TIMEOUT_MS;
     const [userTask, job] = await Promise.all([
       findUserTask(admin, userTaskInstanceKey, deadlineMs),
-      activateJob(admin, SERVICE_TASK_JOB_TYPE, deadlineMs),
+      activateJob(admin, serviceTaskJobType, deadlineMs),
     ]);
 
     if (!userTask) {
@@ -349,7 +392,7 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
 
     if (!job) {
       throw new Error(
-        `[runtime-key fixtures] no '${SERVICE_TASK_JOB_TYPE}' job was activated within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms`,
+        `[runtime-key fixtures] no '${serviceTaskJobType}' job was activated within ${RUNTIME_KEY_DISCOVERY_TIMEOUT_MS}ms`,
       );
     }
     process.env[RUNTIME_KEY_ENV_VARS.jobKey] = job.jobKey;
@@ -373,6 +416,35 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
       `userTaskKey=${process.env[RUNTIME_KEY_ENV_VARS.userTaskKey]} jobKey=${process.env[RUNTIME_KEY_ENV_VARS.jobKey]} ` +
       `elementInstanceKey=${process.env[RUNTIME_KEY_ENV_VARS.elementInstanceKey]}`,
   );
+
+  await persistDiscoveredFixtures();
+}
+
+/**
+ * Writes the four discovered RV_FIXTURE_* values to `$RV_FIXTURE_ENV_FILE`
+ * (as shell `export KEY="value"` lines), when that env var is set.
+ *
+ * `provisionRuntimeKeyFixtures` sets `process.env.RV_FIXTURE_*` inside THIS
+ * Playwright/Node process only — that's sufficient for the generated specs
+ * (same process). It is NOT sufficient for scripts/e2e/run-oca.sh's separate
+ * curl_compare.py oracle, spawned as its own child process *after* this one
+ * exits: process env changes never propagate to a sibling or parent process,
+ * so curl_compare.py's own `node -e` evaluation of the emitted
+ * `process.env["RV_FIXTURE_..."] || "<filler>"` expressions would silently
+ * see the filler and replay every fixture-substituted request differently
+ * from what Playwright actually sent — a real request/oracle mismatch, not
+ * a bug in the oracle itself (see #614's review discussion). run-oca.sh sets
+ * RV_FIXTURE_ENV_FILE to a per-profile path and sources it back into its own
+ * shell before invoking curl_compare.py; omitted (the default), this is a
+ * no-op for every other invocation style.
+ */
+async function persistDiscoveredFixtures(): Promise<void> {
+  const dest = process.env.RV_FIXTURE_ENV_FILE;
+  if (!dest) return;
+  const lines = Object.values(RUNTIME_KEY_ENV_VARS)
+    .map((envVar) => `export ${envVar}=${JSON.stringify(process.env[envVar] ?? '')}\n`)
+    .join('');
+  await fs.writeFile(dest, lines, 'utf8');
 }
 
 /** POST a create body as admin; accept any 2xx (create endpoints return
