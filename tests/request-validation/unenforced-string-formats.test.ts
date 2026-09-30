@@ -152,6 +152,105 @@ describe('request-validation: unenforcedStringFormats', () => {
       expect(cfg.excludeOperations?.[0]?.scenarioKinds).toEqual(['malformed-json-body']);
     });
 
+    it('parses excludeOperations with a target-scoped scenarioKinds entry (#609)', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'updateJob',
+              scenarioKinds: [{ kind: 'constraint-violation', targets: ['operationReference'] }],
+              reason: 'operationReference minimum:1 not enforced',
+              knownIssue: {
+                summary: 'operationReference minimum not enforced',
+                url: 'https://github.com/camunda/camunda/issues/58942',
+              },
+            },
+          ],
+        }),
+      );
+      const cfg = loadRequestValidationConfig(tmpRoot, 'probe');
+      expect(cfg.excludeOperations?.[0]?.scenarioKinds).toEqual([
+        { kind: 'constraint-violation', targets: ['operationReference'] },
+      ]);
+    });
+
+    it('parses excludeOperations with a constraintKinds-scoped scenarioKinds entry (#609)', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'searchProcessInstances',
+              scenarioKinds: [
+                {
+                  kind: 'pagination-limit-invalid',
+                  constraintKinds: ['aboveMaximum', 'wayAboveMaximum'],
+                },
+              ],
+              reason: 'page.limit upper bound not enforced',
+              knownIssue: {
+                summary: 'page.limit upper bound not enforced',
+                url: 'https://github.com/camunda/camunda/issues/48053',
+              },
+            },
+          ],
+        }),
+      );
+      const cfg = loadRequestValidationConfig(tmpRoot, 'probe');
+      expect(cfg.excludeOperations?.[0]?.scenarioKinds).toEqual([
+        { kind: 'pagination-limit-invalid', constraintKinds: ['aboveMaximum', 'wayAboveMaximum'] },
+      ]);
+    });
+
+    it('rejects a scoped scenarioKinds object with neither targets nor constraintKinds', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'updateJob',
+              scenarioKinds: [{ kind: 'constraint-violation' }],
+              reason: 'x',
+            },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
+    it('rejects a scoped scenarioKinds object with an unknown kind', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'updateJob',
+              scenarioKinds: [{ kind: 'not-a-real-kind', targets: ['x'] }],
+              reason: 'x',
+            },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
+    it('rejects a scoped scenarioKinds object with an empty targets array', () => {
+      fs.writeFileSync(
+        path.join(cfgDir, 'request-validation.json'),
+        JSON.stringify({
+          excludeOperations: [
+            {
+              operationId: 'updateJob',
+              scenarioKinds: [{ kind: 'constraint-violation', targets: [] }],
+              reason: 'x',
+            },
+          ],
+        }),
+      );
+      expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
+    });
+
     it('rejects an excludeOperations entry with an empty scenarioKinds array', () => {
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),

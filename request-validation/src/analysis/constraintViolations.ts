@@ -48,6 +48,8 @@ export function generateConstraintViolations(
           expectedStatus: 400,
           description: `Constraint violation ${mut.kind} on ${path.join('.')}`,
           headersAuth: true,
+          constraintKind: mut.kind,
+          constraintOrigin: 'body',
         });
         produced++;
       }

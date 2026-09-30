@@ -157,12 +157,25 @@ export interface RequestValidationConfig {
    * missing-required/constraint-violation/etc. coverage is unaffected and
    * shouldn't be thrown away to suppress one kind).
    *
+   * A `scenarioKinds` entry can also be a `ScopedScenarioKind` object instead
+   * of a bare kind, to narrow further than "every scenario of this kind":
+   * `targets` matches `ValidationScenario.target` (the field/param path, e.g.
+   * excluding only `operationReference` while keeping a sibling field's
+   * constraint-violation coverage on the same operation), and
+   * `constraintKinds` matches `ValidationScenario.constraintKind` (the
+   * mutation subtype, e.g. excluding only `aboveMaximum`/`wayAboveMaximum`
+   * while keeping `belowMinimum`/`wayBelowMinimum` for the same target — the
+   * four `pagination-limit-invalid` mutations share one target, `page.limit`,
+   * so only `constraintKinds` can tell them apart). A bare-string entry is
+   * exactly equivalent to `{ kind }` with neither filter set: drop every
+   * scenario of that kind.
+   *
    * The optional `knownIssue` feeds the nightly's "skipped due to known issues"
    * Slack thread (see the workflow's derive step).
    */
   excludeOperations?: {
     operationId: string;
-    scenarioKinds?: ScenarioKind[];
+    scenarioKinds?: (ScenarioKind | ScopedScenarioKind)[];
     reason: string;
     knownIssue?: KnownIssue;
   }[];
@@ -215,6 +228,21 @@ export interface KnownIssue {
   tracker?: string;
 }
 
+/**
+ * Narrows an `excludeOperations` entry's `scenarioKinds` beyond "every
+ * scenario of this kind" — see `RequestValidationConfig.excludeOperations`'s
+ * doc comment for when to use `targets` vs `constraintKinds`. At least one of
+ * the two must be set (api-test-generator#609): an object with neither is
+ * exactly a bare `kind` string, so write it that way instead.
+ */
+export interface ScopedScenarioKind {
+  kind: ScenarioKind;
+  /** Match `ValidationScenario.target` (the field/param dot-path). */
+  targets?: string[];
+  /** Match `ValidationScenario.constraintKind` (the mutation subtype). */
+  constraintKinds?: string[];
+}
+
 const DEFAULTS: RequestValidationConfig = {
   enumCaseInsensitive: false,
   unenforcedStringFormats: [],
@@ -248,9 +276,24 @@ function isKnownIssue(v: unknown): v is KnownIssue {
   );
 }
 
+function isNonEmptyStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string' && s.length > 0);
+}
+
+function isScopedScenarioKind(v: unknown): v is ScopedScenarioKind {
+  return (
+    isPlainObject(v) &&
+    typeof v.kind === 'string' &&
+    SCENARIO_KIND_SET.has(v.kind) &&
+    (v.targets === undefined || isNonEmptyStringArray(v.targets)) &&
+    (v.constraintKinds === undefined || isNonEmptyStringArray(v.constraintKinds)) &&
+    (v.targets !== undefined || v.constraintKinds !== undefined)
+  );
+}
+
 function isExcludeOperations(v: unknown): v is {
   operationId: string;
-  scenarioKinds?: ScenarioKind[];
+  scenarioKinds?: (ScenarioKind | ScopedScenarioKind)[];
   reason: string;
   knownIssue?: KnownIssue;
 }[] {
@@ -264,7 +307,9 @@ function isExcludeOperations(v: unknown): v is {
         (e.scenarioKinds === undefined ||
           (Array.isArray(e.scenarioKinds) &&
             e.scenarioKinds.length > 0 &&
-            e.scenarioKinds.every((k) => typeof k === 'string' && SCENARIO_KIND_SET.has(k)))) &&
+            e.scenarioKinds.every(
+              (k) => (typeof k === 'string' && SCENARIO_KIND_SET.has(k)) || isScopedScenarioKind(k),
+            ))) &&
         typeof e.reason === 'string' &&
         e.reason.trim().length > 0 &&
         (e.knownIssue === undefined || isKnownIssue(e.knownIssue)),
@@ -385,7 +430,7 @@ export function loadRequestValidationConfig(
     const v = parsed.excludeOperations;
     if (!isExcludeOperations(v)) {
       throw new Error(
-        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, scenarioKinds?, reason, knownIssue? } objects — operationId/reason are non-empty strings, scenarioKinds (when present) a non-empty array of valid ScenarioKind values, and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
+        `Invalid ${configPath}: "excludeOperations" must be an array of { operationId, scenarioKinds?, reason, knownIssue? } objects — operationId/reason are non-empty strings, scenarioKinds (when present) a non-empty array of valid ScenarioKind values or { kind, targets?, constraintKinds? } objects (with at least one of targets/constraintKinds set, each a non-empty array of non-empty strings), and knownIssue (when present) must be { summary, url, tracker? } with non-empty strings.`,
       );
     }
     merged.excludeOperations = v;

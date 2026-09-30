@@ -58,7 +58,11 @@ import {
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
-import { loadRequestValidationConfig, type RequestValidationConfig } from '../src/config.js';
+import {
+  loadRequestValidationConfig,
+  type RequestValidationConfig,
+  type ScopedScenarioKind,
+} from '../src/config.js';
 import { emitQaTests } from '../src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
@@ -90,6 +94,44 @@ function defaultOutDir(): string {
   }
   const config = getActiveConfigName(repoRoot);
   return path.join(repoRoot, 'generated', config, 'request-validation');
+}
+
+// A normalized scenarioKinds entry (see ScopedScenarioKind in config.ts) used
+// by the scoped-exclude filter below. `targets`/`constraintKinds` are Sets
+// for O(1) membership checks; undefined means "don't filter on this axis".
+export interface ScopeRule {
+  kind: string;
+  targets?: Set<string>;
+  constraintKinds?: Set<string>;
+}
+
+export function toScopeRule(k: string | ScopedScenarioKind): ScopeRule {
+  if (typeof k === 'string') return { kind: k };
+  return {
+    kind: k.kind,
+    targets: k.targets ? new Set(k.targets) : undefined,
+    constraintKinds: k.constraintKinds ? new Set(k.constraintKinds) : undefined,
+  };
+}
+
+export function scopeRuleMatches(rule: ScopeRule, s: ValidationScenario): boolean {
+  return (
+    rule.kind === s.type &&
+    (rule.targets === undefined || (s.target !== undefined && rule.targets.has(s.target))) &&
+    (rule.constraintKinds === undefined ||
+      (s.constraintKind !== undefined && rule.constraintKinds.has(s.constraintKind)))
+  );
+}
+
+export function describeScenarioKindEntry(k: string | ScopedScenarioKind): string {
+  if (typeof k === 'string') return k;
+  const scope = [
+    k.targets ? `targets=${k.targets.join('|')}` : undefined,
+    k.constraintKinds ? `constraintKinds=${k.constraintKinds.join('|')}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return `${k.kind}[${scope}]`;
 }
 
 function parseArgs(): CliOptions {
@@ -221,9 +263,8 @@ async function main() {
     console.log(`[generate] excluded ${dropped} operation(s) from the negative suite (#419)`);
   }
   for (const e of scopedExcludes) {
-    console.log(
-      `  ⏭  exclude-operations (${e.scenarioKinds?.join(', ')} only): ${e.operationId} — ${e.reason}`,
-    );
+    const kindsLabel = (e.scenarioKinds ?? []).map(describeScenarioKindEntry).join(', ');
+    console.log(`  ⏭  exclude-operations (${kindsLabel} only): ${e.operationId} — ${e.reason}`);
   }
   if (rvConfig.excludeOperations?.length) {
     // Surface stale/typo excludeOperations entries (either group): an
@@ -607,17 +648,26 @@ async function main() {
   // Scoped excludeOperations entries (scenarioKinds present) — drop just the
   // listed kinds for that op, keeping its other coverage. See the config's
   // header comment for why this can't happen at the model-level filter above.
+  //
+  // A scenarioKinds entry is either a bare ScenarioKind (drop every scenario
+  // of that kind for the op) or a ScopedScenarioKind object narrowing further
+  // by `target` (ValidationScenario.target, the field/param path) and/or
+  // `constraintKind` (ValidationScenario.constraintKind, the mutation
+  // subtype — needed when several mutations share one target, e.g.
+  // pagination-limit-invalid's four mutations all target `page.limit`;
+  // api-test-generator#609).
   if (scopedExcludes.length > 0) {
-    const scopedByOp = new Map<string, Set<string>>();
+    const scopedByOp = new Map<string, ScopeRule[]>();
     for (const e of scopedExcludes) {
-      const kinds = scopedByOp.get(e.operationId) ?? new Set<string>();
-      for (const k of e.scenarioKinds ?? []) kinds.add(k);
-      scopedByOp.set(e.operationId, kinds);
+      const rules = scopedByOp.get(e.operationId) ?? [];
+      for (const k of e.scenarioKinds ?? []) rules.push(toScopeRule(k));
+      scopedByOp.set(e.operationId, rules);
     }
     const before = scenarios.length;
     for (let i = scenarios.length - 1; i >= 0; i--) {
       const s = scenarios[i];
-      if (scopedByOp.get(s.operationId)?.has(s.type)) scenarios.splice(i, 1);
+      const rules = scopedByOp.get(s.operationId);
+      if (rules?.some((r) => scopeRuleMatches(r, s))) scenarios.splice(i, 1);
     }
     console.log(
       `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
