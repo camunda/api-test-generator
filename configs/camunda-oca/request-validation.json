@@ -1,6 +1,12 @@
 {
-  "$comment": "Per-config request-validation settings for camunda-oca. The Camunda 8 Orchestration Cluster API parser accepts string-enum values case-insensitively (camunda/camunda#52409), so case-only mutations would be false 400 expectations. See api-test-generator#129.",
+  "$comment": "Per-config request-validation settings for camunda-oca. The Camunda 8 Orchestration Cluster API parser accepts string-enum values case-insensitively (camunda/camunda#52409), so case-only mutations would be false 400 expectations. See api-test-generator#129. resourceFixtures: map each path-param name to the env var holding a REAL key the suite global-setup creates before tests run (mirrors camunda-hub's #352 mechanism); wherever the generator would emit a filler ('1' or 'x') for one of these names, it emits `process.env[<ENV>] || '<filler>'` instead. userTaskKey/elementInstanceKey/jobKey have no create endpoint of their own — they only exist once a deployed process's instance reaches a user task / active element / pending job, so a filler always 404s before the body/param validation the scenario targets is ever reached. The unsecured/secured global-setup branch (request-validation/templates/support/global-setup.ts) deploys fixtures/bpmn/user-task.bpmn and fixtures/bpmn/service-task.bpmn, starts an instance of each, and discovers the real keys via user-tasks/search and jobs/activation. processInstanceKey is included too even though it has a direct producer (createProcessInstance) because searchProcessInstanceIncidents needs the same real, running instance.",
   "enumCaseInsensitive": true,
+  "resourceFixtures": {
+    "processInstanceKey": "RV_FIXTURE_PROCESS_INSTANCE_KEY",
+    "userTaskKey": "RV_FIXTURE_USER_TASK_KEY",
+    "jobKey": "RV_FIXTURE_JOB_KEY",
+    "elementInstanceKey": "RV_FIXTURE_ELEMENT_INSTANCE_KEY"
+  },
   "excludeOperations": [
     {
       "operationId": "searchAgentDefinitions",
@@ -1222,6 +1228,49 @@
         "type-mismatch"
       ],
       "reason": "Documented in the spec as available only when secondary storage is Elasticsearch or OpenSearch (declared 403 otherwise). This config's standard/CI run uses RDBMS (docker/docker-compose.yml: CAMUNDA_DATA_SECONDARY_STORAGE_TYPE=rdbms), so every request to deleteHistoryBackup 403s before reaching body/param validation for these scenario kinds. auth-absent/auth-invalid are deliberately NOT excluded: Spring Security's auth filter enforces authentication before this operation's business logic (including the RDBMS/ES-OS backend check) ever runs, so those two kinds still correctly assert 401 and are unaffected by this gap (confirmed: they pass in a live run). Not a product bug: revisit only if this suite is run against an ES/OS backend, or once a backend-conditional generation mechanism exists (tracked separately, api-test-generator#605)."
+    },
+    {
+      "operationId": "searchElementInstanceIncidents",
+      "scenarioKinds": [
+        "missing-body"
+      ],
+      "reason": "Surfaced once elementInstanceKey resolved to a real element instance (the resourceFixtures addition above): with a real key the server treats a fully absent request body as an empty filter and returns 200 ({\"items\":[],...}), not 400. Previously this scenario coincidentally passed with the filler elementInstanceKey ('x', a non-numeric string) — that 400 was a key-format rejection, not a missing-body check, so the pass was for the wrong reason and never actually exercised this validator. Confirmed live (2026-09-30) against a local broker. No upstream issue filed yet — worth reporting to camunda/camunda if this is unintended."
+    },
+    {
+      "operationId": "completeJob",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "jobLeaseToken"
+          ]
+        }
+      ],
+      "reason": "Surfaced once jobKey resolved to a real, activated job (the resourceFixtures addition above): an empty jobLeaseToken is accepted (204, job completed) rather than rejected with 400. Previously this scenario coincidentally 404'd on the filler jobKey ('1'), which was also a failure, just for the unrelated reason of a nonexistent key rather than a rejected lease token. Confirmed live (2026-09-30) against a local broker. This op's other constraint-violation/missing-required/type-mismatch/etc. coverage is unaffected — narrowed to just the jobLeaseToken target. No upstream issue filed yet — worth reporting to camunda/camunda if this is unintended."
+    },
+    {
+      "operationId": "failJob",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "jobLeaseToken"
+          ]
+        }
+      ],
+      "reason": "Same gap as completeJob's jobLeaseToken exclusion above (see its reason) — confirmed live (2026-09-30). This op's other negative coverage is unaffected. No upstream issue filed yet."
+    },
+    {
+      "operationId": "throwJobError",
+      "scenarioKinds": [
+        {
+          "kind": "constraint-violation",
+          "targets": [
+            "jobLeaseToken"
+          ]
+        }
+      ],
+      "reason": "Same gap as completeJob's jobLeaseToken exclusion above (see its reason) — confirmed live (2026-09-30). This op's other negative coverage is unaffected. No upstream issue filed yet."
     }
   ]
 }
