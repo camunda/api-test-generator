@@ -242,7 +242,28 @@ describe('findDailyParent', () => {
       },
     };
     await expect(findDailyParent(impl, 'C1', base.date)).rejects.toThrow(
-      /refusing to post a second/,
+      /refusing to choose a parent/,
+    );
+  });
+
+  it('fails closed even when a parent was found, because an older one may be unread', async () => {
+    const impl: SlackApi = {
+      async call() {
+        return { ok: true };
+      },
+      async get() {
+        return {
+          ok: true,
+          messages: [{ ts: '5', bot_id: 'B1', text: `x \`${dailyMarker(base.date)}\`` }],
+          response_metadata: { next_cursor: 'more' },
+        };
+      },
+    };
+    await expect(findDailyParent(impl, 'C1', base.date)).rejects.toThrow(
+      /refusing to choose a parent/,
+    );
+    await expect(settleParent(impl, 'C1', base.date, '9')).rejects.toThrow(
+      /refusing to choose a parent/,
     );
   });
 });

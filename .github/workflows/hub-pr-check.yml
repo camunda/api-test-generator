@@ -800,7 +800,7 @@ jobs:
             fi
             # Confirmed clean — gap cleared on this push, close a
             # previously-open tracker.
-            if [ -n "$existing" ] && [ "$existing_state" = "OPEN" ]; then
+            if [ -n "$existing" ]; then
               gh issue close "$existing" --repo "$repo" \
                 --comment "Coverage gap cleared as of the latest push to camunda-hub#${PR_NUMBER} (run: ${RUN_URL})." >/dev/null
               echo "Closed cleared coverage-gap issue #${existing}."
