@@ -3,8 +3,8 @@
 
 Reads summary.json and rows.json written by hub_response_coverage.py and writes
 page.html. All text is derived from those numbers, so a gap that gets closed drops
-off the page by itself. Meant to be published as a Claude page by the weekly routine
-(see AGENTS.md), but it is plain HTML and opens anywhere.
+off the page by itself. It is plain HTML, so it opens anywhere and can be published as a
+Claude page by hand.
 
   hub_coverage_page.py --report DIR [--out FILE]
 """
