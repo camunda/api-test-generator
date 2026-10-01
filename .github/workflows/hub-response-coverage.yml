@@ -16,9 +16,6 @@ on:
   schedule:
     # Monday 05:00 UTC — after the 02:00 nightly, 03:00 spec-bump, 04:00 re-enable check.
     - cron: '0 5 * * 1'
-  # TEMPORARY while testing PR #629: remove before merge.
-  push:
-    branches: [feat/hub-weekly-response-coverage]
   workflow_dispatch:
     inputs:
       hub_ref:
