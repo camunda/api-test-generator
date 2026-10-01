@@ -561,13 +561,17 @@ caps/dedupe (this classifier is read-only and opens nothing) and its
 platform-noise prefilter (the Hub PR check already routes startup and pre-suite
 failures deterministically).
 
-When the verdict is `generator-gap` (or any operation is unmapped), `report` also
-leaves one sticky comment on the camunda-hub PR (marker
+Only when the PR's own spec change is what breaks the generator — a
+high-confidence `generator-gap` with `caused_by_pr: true` (every affected
+operationId new or changed by the PR, per the spec diff) — `report` also leaves
+one sticky comment on the camunda-hub PR (marker
 `api-test-generator:hub-pr-check:generator-gap`, edited in place) saying
 api-test-generator must be updated first and linking the coverage-gap tracking
-issue — the reverse of AlwaysGreen's "hub PR must not merge first" note on a
-shared-repo fix PR. It needs Issues/Pull requests: write for the qa-processes App
-on camunda-hub; without it the step only warns.
+issue; the reverse of AlwaysGreen's "hub PR must not merge first" note on a
+shared-repo fix PR. Every other failure — a gap on an untouched operation,
+product, infra, flaky, unknown — is Slack-only. The comment needs Issues or
+Pull requests: write for the qa-processes App on camunda-hub; without it the
+step only warns.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check

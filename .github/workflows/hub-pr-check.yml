@@ -281,6 +281,7 @@ jobs:
       confidence: ${{ steps.parse.outputs.confidence }}
       summary: ${{ steps.parse.outputs.summary }}
       fingerprint: ${{ steps.evidence.outputs.fingerprint }}
+      caused_by_pr: ${{ steps.parse.outputs.caused_by_pr }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -612,13 +613,22 @@ jobs:
              spec were unavailable above) -> category "unknown" with confidence "low"
              and say what evidence was missing — never guess "product".
 
+          "caused_by_pr" decides whether the camunda-hub PR author is told on their PR
+          (otherwise only the internal Slack channel hears about it), so be strict. Set it
+          true ONLY when category is "generator-gap" AND every affected operationId is
+          NEW or CHANGED by this PR in the spec diff (steps 0 and 3): the author's own spec
+          change is what the generator cannot yet handle. Set it false for everything else,
+          including a generator gap on an operation this PR did not touch, an unmapped
+          operation that already existed on the base, and any doubt.
+
           Write your answer to /tmp/hub-pr-classification.json as EXACTLY this shape,
           nothing else:
           {
             "category": "product|generator-gap|infra|flaky|unknown",
             "confidence": "high|medium|low",
             "summary": "<one sentence, under 200 chars, no line breaks>",
-            "affected_operation_ids": ["..."]
+            "affected_operation_ids": ["..."],
+            "caused_by_pr": true|false
           }
           EOF
           )
@@ -641,6 +651,7 @@ jobs:
         run: |
           set -euo pipefail
           f=/tmp/hub-pr-classification.json
+          caused_by_pr=false
           if [ "$DECIDED" = "true" ]; then
             category="$DECIDED_CATEGORY"
             confidence="$DECIDED_CONFIDENCE"
@@ -652,6 +663,8 @@ jobs:
             # not a looser bound that would let a non-compliant response
             # through longer than what we actually asked for.
             summary=$(jq -r '.summary // ""' "$f" | tr '\n' ' ' | cut -c1-200)
+            # Strictly the boolean true; a string "true" or anything else is false.
+            caused_by_pr=$(jq -r 'if .caused_by_pr == true then "true" else "false" end' "$f")
           else
             category="unknown"
             confidence="low"
@@ -681,6 +694,12 @@ jobs:
             echo "category=${category}"
             echo "confidence=${confidence}"
             echo "summary=${summary}"
+            # Only a confident generator-gap can be pinned on the PR's own change.
+            if [ "$category" = "generator-gap" ] && [ "$confidence" = "high" ]; then
+              echo "caused_by_pr=${caused_by_pr}"
+            else
+              echo "caused_by_pr=false"
+            fi
           } >> "$GITHUB_OUTPUT"
 
   # #480: when the generated hub suite fails BECAUSE of an unmapped
@@ -921,9 +940,10 @@ jobs:
           echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
       # Ported from camunda-hub's AlwaysGreen fix agent, whose shared-repo fix PRs must say the
-      # hub PR "must not merge first": here the roles are reversed. When the failure is the
-      # generator not yet modelling this PR's endpoint shape (not a hub bug), the author is told
-      # on their own PR, with a link to the api-test-generator issue that has to be resolved
+      # hub PR "must not merge first": here the roles are reversed. Only when the PR's OWN spec
+      # change is what the generator cannot yet handle (classify's caused_by_pr, high-confidence
+      # generator-gap) is the author told on their own PR; every other failure, including a gap
+      # on an operation the PR did not touch, goes to Slack only. The author is told with a link to the api-test-generator issue that has to be resolved
       # first, instead of finding out from a red status. One comment per PR, edited in place so
       # a dozen pushes leave one comment. Never fails the check: the qa-processes App may lack
       # Issues/Pull requests: write on camunda-hub (unconfirmed), in which case it just warns.
@@ -933,7 +953,8 @@ jobs:
           needs.validate.outputs.pr_number != '' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.status-token.outputs.token != '' &&
-          (needs.classify.outputs.category == 'generator-gap' || needs.run.outputs.unmapped_operations != '')
+          needs.classify.outputs.category == 'generator-gap' &&
+          needs.classify.outputs.caused_by_pr == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.status-token.outputs.token }}
