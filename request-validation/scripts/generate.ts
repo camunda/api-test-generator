@@ -72,6 +72,7 @@ import type { ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
 import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
+import { RUNTIME_KEY_ENV_VARS } from '../templates/support/global-setup.js';
 
 interface CliOptions {
   only?: Set<string>;
@@ -185,12 +186,10 @@ async function main() {
     // declaring the feature but missing one silently degraded to the old
     // fake-key/404 behavior at runtime with no signal, which is exactly the
     // failure mode this whole fix exists to close.
-    const runtimeKeyFixtureNames = [
-      'userTaskKey',
-      'jobKey',
-      'elementInstanceKey',
-      'processInstanceKey',
-    ] as const;
+    // Sourced from global-setup.ts's RUNTIME_KEY_ENV_VARS (not re-typed here)
+    // so this list can't drift from the one the provisioning code itself
+    // uses — see that constant's doc comment.
+    const runtimeKeyFixtureNames = Object.keys(RUNTIME_KEY_ENV_VARS);
     const usesRuntimeKeyFixtures = runtimeKeyFixtureNames.some(
       (name) =>
         rvConfig.pathResourceFixtures?.[name] !== undefined ||

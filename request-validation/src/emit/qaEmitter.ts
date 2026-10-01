@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import prettier from 'prettier';
+import { RUNTIME_KEY_ENV_VARS } from '../../templates/support/global-setup.js';
 import type { ScenarioKind, ValidationScenario } from '../model/types.js';
 import { LICENSE_HEADER } from './licenseHeader.js';
 import { materializeStandalone } from './materializeStandalone.js';
@@ -83,12 +84,10 @@ export async function emitQaTests(scenarios: ValidationScenario[], opts: EmitOpt
   // the env var, so every affected scenario would silently revert to the
   // fake-key/404 behavior this feature exists to fix — same guard shape as
   // auth-deny/pagination-offset-past-total/serverOverride below.
-  const runtimeKeyFixtureNames = [
-    'userTaskKey',
-    'jobKey',
-    'elementInstanceKey',
-    'processInstanceKey',
-  ];
+  // Sourced from global-setup.ts's RUNTIME_KEY_ENV_VARS (not re-typed here)
+  // so this list can't drift from the one the provisioning code itself uses
+  // and from generate.ts's own mandatory-fixture check.
+  const runtimeKeyFixtureNames = Object.keys(RUNTIME_KEY_ENV_VARS);
   const usesRuntimeKeyFixtures = runtimeKeyFixtureNames.some(
     (name) =>
       opts.resourceFixtures?.[name] !== undefined ||

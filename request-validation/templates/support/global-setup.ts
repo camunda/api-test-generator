@@ -59,6 +59,15 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Narrows a caught value to its errno `code` (e.g. 'ENOENT'), when it has
+ *  one. Exported so global-teardown.ts uses this exact same narrowing rather
+ *  than a second copy that could drift. */
+export function errnoCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const code = Reflect.get(err, 'code');
+  return typeof code === 'string' ? code : undefined;
+}
+
 // --- unsecured/secured runtime-key fixtures ---------------------------------
 
 // BPMN process ids ('Process_user_task', 'Process_0zc9jbi') aren't needed as
@@ -189,17 +198,27 @@ async function deployFixtureProcesses(
   return processDefinitionKeysByResourceName;
 }
 
-/** Best-effort cleanup for an instance created just before a sibling creation
- *  failed — provisioning is already failing, so a cancellation error here is
- *  swallowed rather than compounding it. */
-async function cancelProcessInstance(
+/**
+ * Cancels one process instance, reporting whether it's now actually
+ * accounted for — a 404 counts as success (already gone). Exported so
+ * global-teardown.ts uses this exact same implementation rather than a
+ * second copy that could silently diverge (#614's review discussion): the
+ * two previously disagreed on whether a non-2xx response was distinguishable
+ * from success at all.
+ */
+export async function cancelProcessInstance(
   admin: Record<string, string>,
   processInstanceKey: string,
-): Promise<void> {
-  await fetch(`${credentials.baseUrl}/v2/process-instances/${processInstanceKey}/cancellation`, {
-    method: 'POST',
-    headers: admin,
-  }).catch(() => undefined);
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${credentials.baseUrl}/v2/process-instances/${processInstanceKey}/cancellation`,
+      { method: 'POST', headers: admin },
+    );
+    return res.ok || res.status === 404;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -366,10 +385,17 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
       readFixture(USER_TASK_BPMN),
       readFixture(SERVICE_TASK_BPMN),
     ]);
-  } catch {
-    // This config doesn't ship the user-task/service-task BPMN fixtures
-    // (e.g. camunda-hub, which has no configs/camunda-hub/fixtures/bpmn/) —
-    // this feature doesn't apply here, not a failure worth a warning.
+  } catch (err) {
+    // Only ENOENT means this config doesn't ship the user-task/service-task
+    // BPMN fixtures (e.g. camunda-hub, which has no
+    // configs/camunda-hub/fixtures/bpmn/) — this feature doesn't apply here,
+    // not a failure worth a warning. Anything else (EACCES, a corrupted or
+    // truncated vendored copy) means generate.ts already confirmed this
+    // config IS opted in and the fixture should have been readable — fail
+    // loudly here too, matching global-teardown.ts's analogous ENOENT-only
+    // narrowing, rather than silently falling back to the filler placeholder
+    // this whole feature exists to eliminate (#614's review discussion).
+    if (errnoCode(err) !== 'ENOENT') throw err;
     return;
   }
 
@@ -431,10 +457,23 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
     try {
       await recordCreatedInstancesForCleanup(createdKeys);
     } catch (err) {
-      await Promise.all(createdKeys.map((key) => cancelProcessInstance(admin, key)));
+      // No persisted record exists here, so this in-process cancellation is
+      // the ONLY cleanup mechanism for these keys — unlike the other two
+      // failure branches below, global-teardown.ts has nothing to fall back
+      // on if it also fails. Surface which keys that happened to, rather
+      // than swallowing it into a uniform void return (#614's review
+      // discussion).
+      const results = await Promise.all(
+        createdKeys.map(async (key) => ({ key, cleaned: await cancelProcessInstance(admin, key) })),
+      );
+      const leaked = results.filter((r) => !r.cleaned).map((r) => r.key);
+      const leakNote =
+        leaked.length > 0
+          ? ` In-process cancellation ALSO failed for: ${leaked.join(', ')} — these are now leaked on the broker with no record to retry against.`
+          : ' In-process cancellation succeeded for all of them.';
       throw new Error(
         `[runtime-key fixtures] failed to persist cleanup state for ${createdKeys.join(', ')}: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
+          `${err instanceof Error ? err.message : String(err)}.${leakNote}`,
       );
     }
   }

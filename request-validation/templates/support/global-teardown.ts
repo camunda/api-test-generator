@@ -26,39 +26,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { authHeaders, credentials } from './env';
-import { RUNTIME_KEY_CLEANUP_STATE_FILE } from './global-setup';
+import { authHeaders } from './env';
+import { RUNTIME_KEY_CLEANUP_STATE_FILE, cancelProcessInstance, errnoCode } from './global-setup';
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((item) => typeof item === 'string');
-}
-
-function errnoCode(err: unknown): string | undefined {
-  if (!err || typeof err !== 'object') return undefined;
-  const code = Reflect.get(err, 'code');
-  return typeof code === 'string' ? code : undefined;
-}
-
-/**
- * Cancels one instance, reporting whether it's now actually accounted for —
- * a non-2xx/network failure returns `false` rather than being swallowed, so
- * the caller can tell a real failure apart from success. A 404 counts as
- * success: the instance is already gone (e.g. a test completed it), so
- * there's nothing left to clean up either way.
- */
-async function cancelProcessInstance(
-  admin: Record<string, string>,
-  processInstanceKey: string,
-): Promise<boolean> {
-  try {
-    const res = await fetch(
-      `${credentials.baseUrl}/v2/process-instances/${processInstanceKey}/cancellation`,
-      { method: 'POST', headers: admin },
-    );
-    return res.ok || res.status === 404;
-  } catch {
-    return false;
-  }
 }
 
 async function globalTeardown(): Promise<void> {

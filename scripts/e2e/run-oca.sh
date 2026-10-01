@@ -158,6 +158,14 @@ run_rv() { # profile
   # into this shell below so curl_compare.py inherits the same real values.
   local rv_fixture_env_file="$ABS_OUT/rv-fixtures-$p.env"
   rm -f "$rv_fixture_env_file"
+  # Clear any RV_FIXTURE_* this shell inherited from a PRIOR profile's run —
+  # the loop below reuses one shell across profiles. Without this, a profile
+  # whose own provisioning fails before global-setup.ts ever writes its env
+  # file (e.g. a discovery timeout) would silently keep sourcing the
+  # previous profile's real keys instead of having none, so curl_compare.py
+  # would replay this profile's requests against a DIFFERENT profile's
+  # broker resources instead of failing cleanly.
+  while IFS= read -r v; do unset "$v"; done < <(compgen -v RV_FIXTURE_ || true)
   if env CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
     RV_FIXTURE_ENV_FILE="$rv_fixture_env_file" \
     ${basic[@]+"${basic[@]}"} \
