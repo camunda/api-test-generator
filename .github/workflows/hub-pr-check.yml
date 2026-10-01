@@ -329,12 +329,12 @@ jobs:
         with:
           node-version: '22'
 
-      # Ported from camunda-hub's AlwaysGreen triage (classify.py): whatever Playwright's own
-      # retry history settles is decided here, deterministically, and the agent only sees what
-      # it cannot. A run where nothing failed outright and a test passed on retry is flaky by
-      # definition -- asking a model to rediscover that costs an API call and can get it wrong.
-      # The same step fingerprints the failing set, so `report` can edit one Slack reply in
-      # place for a repeated failure on a PR instead of paging again on every push.
+      # Ported from camunda-hub's AlwaysGreen triage (classify.py): the agent is handed the
+      # reports already parsed into per-spec attempt histories instead of re-parsing raw JSON, and
+      # the failing set is fingerprinted so `report` can edit one Slack reply in place for a
+      # repeated failure on a PR instead of paging again on every push. There is no retry-based
+      # verdict: Playwright exits 0 when a retry passes and this job only runs after a failed run,
+      # so such a verdict could never fire for a real flaky run and could only hide another failure.
       - name: Extract deterministic evidence from the reports
         id: evidence
         continue-on-error: true
@@ -354,7 +354,6 @@ jobs:
       # uses to clone for generation, never a write-capable App token.
       - name: Mint camunda-hub clone token (read-only)
         id: hub-token
-        if: steps.evidence.outputs.decided != 'true'
         continue-on-error: true
         uses: ./.github/actions/hub-clone-token
         with:
@@ -447,7 +446,6 @@ jobs:
 
       - name: Fetch Anthropic key from Vault
         id: vault
-        if: steps.evidence.outputs.decided != 'true'
         continue-on-error: true
         uses: hashicorp/vault-action@v4
         with:
@@ -605,10 +603,9 @@ jobs:
              category and note it is already tracked in your summary.
           6. If Hub failed to boot, a suite produced no report, or the failure is
              clearly environmental -> category "infra".
-          7. A run whose only red tests passed on retry was already classified "flaky"
-             before you were started. If you are here, something failed outright: a failing
-             spec with \`deterministic: false\` (some attempt passed) is flakiness
-             evidence, not a defect -- never classify it "product" on its own.
+          7. If a test passed on a Playwright retry -> category "flaky". A failing spec
+             with \`deterministic: false\` (some attempt passed) is flakiness evidence,
+             not a defect -- never classify it "product" on its own.
           8. If you genuinely cannot tell from the evidence (including: reports or
              spec were unavailable above) -> category "unknown" with confidence "low"
              and say what evidence was missing — never guess "product".
@@ -642,21 +639,11 @@ jobs:
       - name: Parse classification (falls back to "unknown" on any failure above)
         id: parse
         if: always()
-        env:
-          # Set only when the evidence step reached a verdict from retry history alone.
-          DECIDED: ${{ steps.evidence.outputs.decided }}
-          DECIDED_CATEGORY: ${{ steps.evidence.outputs.category }}
-          DECIDED_CONFIDENCE: ${{ steps.evidence.outputs.confidence }}
-          DECIDED_SUMMARY: ${{ steps.evidence.outputs.summary }}
         run: |
           set -euo pipefail
           f=/tmp/hub-pr-classification.json
           caused_by_pr=false
-          if [ "$DECIDED" = "true" ]; then
-            category="$DECIDED_CATEGORY"
-            confidence="$DECIDED_CONFIDENCE"
-            summary=$(printf '%s' "$DECIDED_SUMMARY" | tr '\n' ' ' | cut -c1-200)
-          elif [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
+          if [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
             category=$(jq -r '.category // "unknown"' "$f")
             confidence=$(jq -r '.confidence // "low"' "$f")
             # 200, matching the prompt's own "under 200 chars" contract —
@@ -987,9 +974,9 @@ jobs:
             fi
             echo
             if [ -n "$ISSUE_URL" ]; then
-              echo "A change in api-test-generator must land first. Tracked at ${ISSUE_URL}; this PR does not need to wait on it to merge, but its check result is not meaningful for the affected operations until then."
+              echo "api-test-generator must be updated first (tracked at ${ISSUE_URL}); until then this check cannot validate the affected operations."
             else
-              echo "A change in api-test-generator must land before this check is meaningful for the affected operations."
+              echo "api-test-generator must be updated first; until then this check cannot validate the affected operations."
             fi
             echo
             echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"

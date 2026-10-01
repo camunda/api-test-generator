@@ -102,6 +102,61 @@ export async function findDailyParent(api: SlackApi, channel: string, date: stri
   );
 }
 
+// Workflow concurrency is per PR, so two PRs can both see no parent and both create one. Slack
+// has no compare-and-set, and serialising the job would make GitHub drop all but one pending run
+// (and with it an alert). Instead converge after the fact: every racer re-reads the day's parents
+// and keeps the earliest, deleting its own if it lost. Whoever posts last always sees the other.
+export async function settleParent(
+  api: SlackApi,
+  channel: string,
+  date: string,
+  ownTs: string,
+): Promise<string> {
+  const marker = dailyMarker(date);
+  let cursor = '';
+  const parents: string[] = [];
+  for (let page = 0; page < HISTORY_PAGES; page++) {
+    const params: Record<string, string> = { channel, limit: '200' };
+    if (cursor) params.cursor = cursor;
+    const resp = must(await api.get('conversations.history', params), 'conversations.history');
+    for (const m of resp.messages ?? []) {
+      if ((m.bot_id || m.app_id) && (m.text ?? '').includes(marker) && m.ts) parents.push(m.ts);
+    }
+    cursor = resp.response_metadata?.next_cursor ?? '';
+    if (!cursor) break;
+  }
+  const earliest = parents.sort((a, b) => Number(a) - Number(b))[0];
+  if (!earliest || earliest === ownTs) return ownTs;
+  // Best effort: a failed delete only leaves an empty duplicate parent, never a lost alert.
+  await api.call('chat.delete', { channel, ts: ownTs });
+  return earliest;
+}
+
+// conversations.replies is cursor-paginated; reading one page would miss an older matching reply
+// once the day's thread outgrows it and post the same failure again.
+export async function findReply(
+  api: SlackApi,
+  channel: string,
+  parentTs: string,
+  marker: string,
+): Promise<string> {
+  let cursor = '';
+  for (let page = 0; page < HISTORY_PAGES; page++) {
+    const params: Record<string, string> = { channel, ts: parentTs, limit: '200' };
+    if (cursor) params.cursor = cursor;
+    const resp = must(await api.get('conversations.replies', params), 'conversations.replies');
+    const ts = findIn(
+      (resp.messages ?? []).filter((m) => m.ts !== parentTs),
+      marker,
+    );
+    if (ts) return ts;
+    cursor = resp.response_metadata?.next_cursor ?? '';
+    if (!cursor) return '';
+  }
+  // Returning '' would post a duplicate and re-page, so fail closed like findDailyParent.
+  throw new Error(`reply not found within ${HISTORY_PAGES} pages; refusing to post a duplicate`);
+}
+
 export async function upsert(
   api: SlackApi,
   args: { channel: string; date: string; marker: string; text: string },
@@ -118,16 +173,12 @@ export async function upsert(
       await api.call('chat.postMessage', { channel, text, unfurl_links: false }),
       'chat.postMessage (parent)',
     );
-    parentTs = resp.ts ?? '';
+    parentTs = await settleParent(api, channel, date, resp.ts ?? '');
   }
 
-  const replies = must(
-    await api.get('conversations.replies', { channel, ts: parentTs, limit: '200' }),
-    'conversations.replies',
-  ).messages?.filter((m) => m.ts !== parentTs);
   // The marker rides in the body so the next run can find this reply again.
   const body = `${args.text}\n\`${marker}\``;
-  const existing = findIn(replies ?? [], marker);
+  const existing = await findReply(api, channel, parentTs, marker);
 
   if (existing) {
     must(

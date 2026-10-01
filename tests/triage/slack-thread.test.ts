@@ -3,10 +3,12 @@ import {
   ChannelUnresolved,
   dailyMarker,
   findIn,
+  findReply,
   replyMarker,
   resolveChannel,
   type SlackApi,
   type SlackMessage,
+  settleParent,
   upsert,
 } from '../../scripts/triage/slack-thread.ts';
 
@@ -124,5 +126,71 @@ describe('resolveChannel', () => {
 
   it('signals fallback when the channel is unknown', async () => {
     await expect(resolveChannel(listing(true), '#other')).rejects.toBeInstanceOf(ChannelUnresolved);
+  });
+});
+
+describe('settleParent', () => {
+  const parent = (ts: string) => ({ ts, bot_id: 'B1', text: `x \`${dailyMarker(base.date)}\`` });
+
+  function api(messages: SlackMessage[]) {
+    const deleted: string[] = [];
+    const impl: SlackApi = {
+      async get() {
+        return { ok: true, messages };
+      },
+      async call(method, payload) {
+        if (method === 'chat.delete') deleted.push(String(payload.ts));
+        return { ok: true };
+      },
+    };
+    return { impl, deleted };
+  }
+
+  it('keeps its own parent when it is the earliest', async () => {
+    const { impl, deleted } = api([parent('2'), parent('5')]);
+    expect(await settleParent(impl, 'C1', base.date, '2')).toBe('2');
+    expect(deleted).toEqual([]);
+  });
+
+  it('deletes its own parent and adopts the earlier one when it lost the race', async () => {
+    const { impl, deleted } = api([parent('2'), parent('5')]);
+    expect(await settleParent(impl, 'C1', base.date, '5')).toBe('2');
+    expect(deleted).toEqual(['5']);
+  });
+});
+
+describe('findReply', () => {
+  it('walks pages to find an older matching reply', async () => {
+    const marker = replyMarker('7', 'aaaa1111');
+    const pages: Record<string, SlackMessage[]> = {
+      '': [{ ts: '1', bot_id: 'B1', text: 'other' }],
+      next: [{ ts: '2', bot_id: 'B1', text: marker }],
+    };
+    const impl: SlackApi = {
+      async call() {
+        return { ok: true };
+      },
+      async get(_method, params) {
+        const key = params.cursor ?? '';
+        return {
+          ok: true,
+          messages: pages[key],
+          response_metadata: { next_cursor: key === '' ? 'next' : '' },
+        };
+      },
+    };
+    expect(await findReply(impl, 'C1', '0', marker)).toBe('2');
+  });
+
+  it('fails closed instead of reporting "not found" when pages run out', async () => {
+    const impl: SlackApi = {
+      async call() {
+        return { ok: true };
+      },
+      async get() {
+        return { ok: true, messages: [], response_metadata: { next_cursor: 'again' } };
+      },
+    };
+    await expect(findReply(impl, 'C1', '0', 'm')).rejects.toThrow(/refusing to post a duplicate/);
   });
 });

@@ -1,9 +1,12 @@
 // Deterministic evidence for the Hub PR check's `classify` job.
 //
-// Ported from camunda-hub's AlwaysGreen triage (.github/scripts/alwaysgreen/classify.py): a
-// verdict that Playwright's own retry history can establish is computed here, not left to the
-// LLM. Only what the reports cannot settle reaches the agent, and the agent gets the parsed
-// attempts rather than raw reports to re-parse.
+// Ported from camunda-hub's AlwaysGreen triage (.github/scripts/alwaysgreen/classify.py): the
+// agent gets Playwright's reports parsed into per-spec attempt histories (and whether any
+// attempt passed) instead of re-parsing raw JSON, and the failing set is fingerprinted.
+//
+// There is deliberately no retry-based "flaky" verdict here, unlike AlwaysGreen: Playwright exits
+// successfully when a retry passes and `classify` only runs after a failed run, so a flaky-only
+// verdict could never fire for a real flaky run, and could only mask some other failed step.
 //
 // Runs under plain `node` (type stripping), so keep it to erasable syntax: no enums, no
 // parameter properties.
@@ -20,8 +23,6 @@ export const FAILED_ATTEMPT_STATUSES: ReadonlySet<string> = new Set([
   'timed_out',
   'interrupted',
 ]);
-
-export type Category = 'product' | 'generator-gap' | 'infra' | 'flaky' | 'unknown';
 
 export interface SpecEvidence {
   file: string;
@@ -40,12 +41,6 @@ export interface Evidence {
   total: number;
   failing: SpecEvidence[];
   flaky: SpecEvidence[];
-}
-
-export interface Verdict {
-  category: Category;
-  confidence: 'high' | 'medium' | 'low';
-  summary: string;
 }
 
 type Json = unknown;
@@ -140,26 +135,6 @@ export function buildEvidence(reports: Json[]): Evidence {
   return evidence;
 }
 
-// A verdict only when the retry history alone settles it. Everything else is the agent's.
-//
-// A flaky-only run must have no unmapped operations: a coverage gap fails the job with no
-// failing test at all, and that is a different story from "a test passed on retry".
-export function deterministicVerdict(evidence: Evidence, unmapped: string): Verdict | null {
-  if (!evidence.reportsPresent || unmapped.trim() !== '') return null;
-  if (evidence.failing.length === 0 && evidence.flaky.length > 0) {
-    const names = evidence.flaky
-      .slice(0, 3)
-      .map((s) => s.title)
-      .join('; ');
-    return {
-      category: 'flaky',
-      confidence: 'high',
-      summary: `${evidence.flaky.length} test(s) failed an attempt then passed on retry, none failed outright: ${names}`,
-    };
-  }
-  return null;
-}
-
 // Identity of "the same failure" on one PR, so repeated pushes with the same failing set
 // collapse into one alert. The category is deliberately not an input: the agent can word the
 // same failure differently between runs, and that must not re-page.
@@ -201,7 +176,6 @@ function arg(name: string): string {
 function main(): void {
   const evidence = buildEvidence(readReports(arg('reports')));
   const unmapped = arg('unmapped');
-  const verdict = deterministicVerdict(evidence, unmapped);
   const fp = fingerprint(arg('pr') || arg('sha'), evidence, unmapped);
   writeFileSync(arg('out'), `${JSON.stringify({ ...evidence, fingerprint: fp }, null, 2)}\n`);
 
@@ -211,12 +185,7 @@ function main(): void {
     `fingerprint=${fp}`,
     `failing=${evidence.failing.length}`,
     `flaky=${evidence.flaky.length}`,
-    `decided=${verdict ? 'true' : 'false'}`,
   ];
-  if (verdict) {
-    lines.push(`category=${verdict.category}`, `confidence=${verdict.confidence}`);
-    lines.push(`summary=${verdict.summary.replace(/\s+/g, ' ').slice(0, 200)}`);
-  }
   const out = process.env.GITHUB_OUTPUT;
   if (out) appendFileSync(out, `${lines.join('\n')}\n`);
   else console.log(lines.join('\n'));

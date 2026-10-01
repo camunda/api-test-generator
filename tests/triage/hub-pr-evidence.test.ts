@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildEvidence,
-  cleanError,
-  deterministicVerdict,
-  fingerprint,
-} from '../../scripts/triage/hub-pr-evidence.ts';
+import { buildEvidence, cleanError, fingerprint } from '../../scripts/triage/hub-pr-evidence.ts';
 
 function spec(title: string, ok: boolean, statuses: string[], error?: string) {
   return {
@@ -61,29 +56,6 @@ describe('cleanError', () => {
     const esc = String.fromCharCode(27);
     expect(cleanError(`expect(${esc}[31mx${esc}[39m)`)).toBe('expect(x)');
     expect(cleanError('y'.repeat(700))).toHaveLength(600);
-  });
-});
-
-describe('deterministicVerdict', () => {
-  const flakyOnly = buildEvidence([report(spec('a', true, ['failed', 'passed']))]);
-
-  it('decides flaky when only retried specs went red', () => {
-    expect(deterministicVerdict(flakyOnly, '')?.category).toBe('flaky');
-  });
-
-  it('leaves a genuine failure to the agent', () => {
-    const ev = buildEvidence([
-      report(spec('a', false, ['failed']), spec('b', true, ['failed', 'passed'])),
-    ]);
-    expect(deterministicVerdict(ev, '')).toBeNull();
-  });
-
-  it('leaves a run with unmapped operations to the agent', () => {
-    expect(deterministicVerdict(flakyOnly, 'newOp')).toBeNull();
-  });
-
-  it('never decides without reports', () => {
-    expect(deterministicVerdict(buildEvidence([]), '')).toBeNull();
   });
 });
 
