@@ -16,7 +16,7 @@ first (CONFIG=camunda-hub). Static analysis: it reports what the tests assert, n
 whether they pass.
 
   hub_response_coverage.py --out DIR [--previous prev/summary.json]
-                           [--spec-ref SHA] [--run-url URL] [--tracking-url URL] [--page-url URL]
+                           [--spec-ref SHA] [--run-url URL] [--tracking-url URL]
 
 Writes DIR/summary.json, DIR/rows.json, DIR/matrix.md and DIR/slack.txt. Exits 2 if the generated
 output could not be parsed as expected (so a format change fails the run instead
@@ -242,10 +242,8 @@ def slack(s, prev, args):
     if s['zeroTestOperations']:
         lines.append(':warning: Operations with no test at all: ' + ', '.join(f'`{o}`' for o in s['zeroTestOperations']))
     links = []
-    if args.page_url:
-        links.append(f'<{args.page_url}|Report page>')
     if args.run_url:
-        links.append(f'<{args.run_url}|Run and matrix>')
+        links.append(f'<{args.run_url}|Full matrix>')
     if args.tracking_url:
         links.append(f'<{args.tracking_url}|Tracking epic>')
     if links:
@@ -281,7 +279,6 @@ def main():
     ap.add_argument('--spec-ref', default='')
     ap.add_argument('--run-url', default='')
     ap.add_argument('--tracking-url', default='')
-    ap.add_argument('--page-url', default='')
     args = ap.parse_args()
 
     summary, rows = build(args)
