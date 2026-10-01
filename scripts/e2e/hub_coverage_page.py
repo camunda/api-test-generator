@@ -119,7 +119,7 @@ def cell(kind, tip):
 
 
 def bar_note(b, s):
-    miss, held = s['missing'][b], set(s['heldOperations'])
+    miss, held = s['missing'][b], set(s['heldCells'][b])
     tracked = [o for o in miss if o in held]
     open_ = [o for o in miss if o not in held]
     if not miss:
@@ -159,22 +159,22 @@ def findings(s):
         out.append(('Forbidden (403) on writes', issue(622),
                     f'A 403 is tested for {s["codes"]["403"][0]} of {s["codes"]["403"][1]} endpoints that list one. '
                     f'Hub checks 400, then 404, then 403, so a forbidden write test needs a real resource and a valid body.'))
-    open400 = [o for o in m['400'] if o not in set(s['heldOperations'])]
+    open400 = [o for o in m['400'] if o not in set(s['heldCells']['400'])]
     if open400:
         out.append(('Bad request (400) with no test', issue(627),
                     f'{names(open400)} list a 400 response that no test triggers.'))
     o_sent, o_total = s['optionalFields']
     if o_sent < o_total:
+        fields = [f'{op}.{f}' for op, fs in sorted(s['optionalMissing'].items()) for f in fs]
         out.append(('Optional request fields', issue(623, 624, 625),
-                    f'Success-path tests send {o_sent} of {o_total} optional body fields. Search <code>page</code> and '
-                    f'<code>sort</code>, <code>description</code> fields and a few special branches are never sent.'))
+                    f'Success-path tests send {o_sent} of {o_total} optional body fields. Never sent: {names(fields, 8)}.'))
     if s['shapeUnvalidated']:
         out.append(('Success response not checked', issue(626),
                     f'{len(s["shapeUnvalidated"])} endpoints check the success status but never check the response body against '
                     f'its schema: {names(s["shapeUnvalidated"])}.'))
     if s['zeroTestOperations']:
         out.append(('Endpoints with no test at all', issue(EPIC),
-                    f'{names(s["zeroTestOperations"])}.'))
+                    f'{names([o + (" (known, tracked)" if o in set(s["trackedOperations"]) else "") for o in s["zeroTestOperations"]])}.'))
     return ''.join(f'<article class="finding"><header><h3>{esc(t)}</h3><span class="tag">{ref}</span></header><p>{txt}</p></article>'
                    for t, ref, txt in out)
 
@@ -185,7 +185,7 @@ def render(s, rows):
         groups.setdefault(r['path'].strip('/').split('/')[0], []).append(r)
     body = []
     for g, rs in groups.items():
-        bad = sum(r['codeGap'] for r in rs)
+        bad = sum(not r['fullyTestedExcept403'] for r in rs)
         trs = []
         for r in rs:
             c = r['cells']
@@ -244,15 +244,27 @@ document.getElementById('onlygaps').addEventListener('change', function (e) {{
 """
 
 
+def as_document(fragment):
+    """Wrap the fragment (title, style, body, script) in a complete document."""
+    i = fragment.index('<main>')
+    head, body = fragment[:i], fragment[i:]
+    return ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            + head + '</head>\n<body>\n' + body + '</body>\n</html>\n')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--report', required=True)
     ap.add_argument('--out')
+    ap.add_argument('--fragment', action='store_true',
+                    help='emit the wrapper-free form (no doctype/html/head/body), for publishing as a Claude page')
     a = ap.parse_args()
     s = json.load(open(os.path.join(a.report, 'summary.json')))
     rows = json.load(open(os.path.join(a.report, 'rows.json')))
     out = a.out or os.path.join(a.report, 'page.html')
-    open(out, 'w', encoding='utf-8').write(render(s, rows))
+    page = render(s, rows)
+    open(out, 'w', encoding='utf-8').write(page if a.fragment else as_document(page))
     print(f'wrote {out}')
 
 

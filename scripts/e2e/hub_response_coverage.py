@@ -210,7 +210,8 @@ def build(args):
 
     suppressed = set(pos_cov['explicitlySuppressedOpIds'])
     excluded = {e['operationId'] for e in rv_cfg['excludeOperations'] if not e.get('scenarioKinds')}
-    held = suppressed | excluded
+    tracked = suppressed | excluded  # known and tracked elsewhere; used only to annotate lists
+    held_cells = collections.defaultdict(list)
     scoped = collections.defaultdict(list)
     for e in rv_cfg['excludeOperations']:
         if e.get('scenarioKinds'):
@@ -234,7 +235,12 @@ def build(args):
                 cells[b] = 'ok'
             else:
                 missing[b].append(op_id)
-                cells[b] = 'hold' if (op_id in held and b in ('2xx', '400', '401', '404')) else 'gap'
+                # positive-suite suppression covers only the success response; a whole-operation
+                # negative-suite exclusion covers every other response class.
+                is_held = (op_id in suppressed) if b == '2xx' else (op_id in excluded)
+                cells[b] = 'hold' if is_held else 'gap'
+                if is_held:
+                    held_cells[b].append(op_id)
         if op_id in suppressed:
             shape = 'hold'
         elif not shape_codes:
@@ -246,6 +252,8 @@ def build(args):
             'operationId': op_id, 'method': o['method'], 'path': o['path'], 'cells': cells,
             'shape': shape, 'optionalSent': sent, 'optionalTotal': len(o['optional']),
             'notes': sorted(scoped[op_id]),
+            'optionalMissing': [] if op_id in suppressed else [p for p in o['optional'] if p not in pos_sent[op_id]],
+            'fullyTestedExcept403': all(v == 'ok' for b, v in cells.items() if b != '403'),
             'codeGap': any(v == 'gap' for b, v in cells.items() if b != '403'),
             'fullyAsserted': all(v == 'ok' for v in cells.values()),
         })
@@ -261,8 +269,11 @@ def build(args):
         'opsMissingResponseTest': sum(r['codeGap'] for r in rows),
         'optionalFields': [opt_sent, opt_total],
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
-        'heldOperations': sorted(held),
-        'zeroTestOperations': sorted(o for o in ops if not pos_asserted[o] and not neg_tests[o] and o not in suppressed),
+        'trackedOperations': sorted(tracked),
+        'heldCells': {b: sorted(held_cells[b]) for b in BUCKETS},
+        'optionalMissing': {r['operationId']: r['optionalMissing'] for r in rows if r['optionalMissing']},
+        # Suppression explains zero coverage; it is not evidence of a test, so it stays in the list.
+        'zeroTestOperations': sorted(o for o in ops if not pos_asserted[o] and not neg_tests[o]),
     }
     return summary, rows
 
@@ -317,7 +328,9 @@ def slack(s, prev, args):
         if new:
             lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
     if s['zeroTestOperations']:
-        lines.append(':warning: Endpoints with no test at all: ' + ', '.join(f'`{o}`' for o in s['zeroTestOperations']))
+        tracked = set(s['trackedOperations'])
+        lines.append(':warning: Endpoints with no test at all: '
+                     + ', '.join(f'`{o}`' + (' (known, tracked)' if o in tracked else '') for o in s['zeroTestOperations']))
     links = []
     if args.run_url:
         links.append(f'<{args.run_url}|Full table>')

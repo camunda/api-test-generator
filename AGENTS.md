@@ -769,7 +769,7 @@ matrix is in the run summary and the `hub-coverage-report` artifact; the previou
 `CONFIG=camunda-hub`: `python3 scripts/e2e/hub_response_coverage.py --out /tmp/cov`.
 The gaps it reports are tracked in epic #618. The workflow also renders the report as a
 self-contained page (`scripts/e2e/hub_coverage_page.py`, text derived from the numbers) into the
-`hub-coverage-report` artifact as `page.html`, which can be published as a Claude page by hand.
+`hub-coverage-report` artifact as `page.html`, which can be published as a Claude page by hand (use `--fragment` for the wrapper-free form the Artifact tool expects).
 The Slack message links to the run (matrix) and the tracking epic only.
 
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
