@@ -563,6 +563,20 @@ Racing PRs that each create the day's parent converge on the earliest one (the
 loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls
 back to a plain post, so an alert is never lost to the threading logic.
+
+A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is also tracked: the
+`generator-gap-tracker` job keeps one issue per camunda-hub PR
+(`[hub-pr-check] Generator gap on camunda-hub#N`, labels `generator-gap` + `hub`), **assigned to
+the camunda-hub PR's author** (once, and only if unassigned, so a manual reassignment sticks;
+bots and users without access here are skipped with a warning). It is edited in place on later
+pushes and closed when a run proves the gap is gone. The issue contains only sanitized operation
+ids and our own classification, never the PR author's free text. Once the camunda-hub PR
+merges the gap is live on Hub main, so
+[hub-generator-gap-digest.yml](.github/workflows/hub-generator-gap-digest.yml) (weekdays 07:00 UTC,
+`scripts/triage/hub-gap-digest.ts`) posts one Slack message to `#camunda-hub-pr-e2e-results`
+listing those issues that are still open (merge age, issue age, assignee), and closes issues whose
+camunda-hub PR was closed without merging. It posts nothing on days with nothing overdue; a manual
+`workflow_dispatch` is a dry run by default.
 Both scripts run under plain `node` (type stripping, no `npm ci`) and are covered
 by `tests/triage/`. Not ported, deliberately: AlwaysGreen's fix-agent dispatch
 caps/dedupe (this classifier is read-only and opens nothing) and its

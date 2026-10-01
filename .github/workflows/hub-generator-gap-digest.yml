@@ -1,0 +1,77 @@
+# Daily nudge for generator-gap issues (opened by hub-pr-check.yml) whose camunda-hub PR has
+# already merged. At that point the gap is live on Hub main and the nightly will hit it, so a
+# still-open issue is overdue. Lists them in Slack, oldest merge first, with the assignee (the
+# camunda-hub PR author) and ages; closes issues whose camunda-hub PR was closed unmerged.
+# Silent on days with nothing to report. Deterministic: no agent.
+name: Hub generator-gap digest
+
+on:
+  schedule:
+    # 07:00 UTC on weekdays, after the nightly triage and spec-bump check have settled.
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the digest and the issues that would be closed, post and close nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write # list the issues, and close those whose camunda-hub PR was closed unmerged
+  id-token: write # OIDC → Vault (Slack token, camunda-hub read token)
+
+concurrency:
+  group: hub-generator-gap-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Digest of pending generator fixes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout api-test-generator
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Read access to camunda-hub pull requests, to see which tracked PRs have merged.
+      - name: Mint camunda-hub read token (qa-processes App)
+        id: hub-token
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: camunda-hub
+
+      - name: Fetch Slack bot token from Vault
+        id: slack-secrets
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Build and post the digest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HUB_TOKEN: ${{ steps.hub-token.outputs.token }}
+          SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          # Scheduled runs post; a manual run defaults to a dry run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: node scripts/triage/hub-gap-digest.ts

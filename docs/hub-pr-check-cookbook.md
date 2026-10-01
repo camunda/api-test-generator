@@ -50,6 +50,11 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 | generator-gap on an operation the PR did not touch | `failure` | yes, test-automation-medic | no |
 | generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment |
 
+When the generator gap is caused by the PR's own spec change, an issue
+`[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo and assigned to the
+camunda-hub PR's author. It is edited in place on later pushes and closes itself when a push clears
+the gap.
+
 Slack is one thread per day with one reply per (PR, failure fingerprint). The same failure on a
 later push edits its reply in place and does not page again; a different failure gets a new reply.
 
@@ -109,3 +114,15 @@ To re-run in CI without a new push, dispatch `trigger-api-test-generator.yml` in
 - *Slack edited instead of a new message:* same PR, same failure fingerprint.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because
   `product` at high confidence pages hub-medic.
+
+## Keeping track of pending generator fixes
+
+- **Where:** open issues with the `generator-gap` label. Each title names the camunda-hub PR.
+- **Who:** the author of that camunda-hub PR (assigned automatically; reassign freely, it will not
+  be overwritten).
+- **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays
+  at 07:00 UTC, listing issues whose camunda-hub PR has merged and whose issue is still open,
+  oldest merge first. Silent when there is nothing overdue.
+- **Cleanup:** an issue closes by itself when a later push to the camunda-hub PR clears the gap, or
+  when that PR is closed without merging.
+- **Try it without posting:** run the digest workflow by hand (it is a dry run by default).

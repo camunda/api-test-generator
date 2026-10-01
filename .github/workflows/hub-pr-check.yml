@@ -60,6 +60,8 @@ jobs:
       # EXISTING behavior (still alerts) rather than silently dropping a
       # real signal.
       is_draft: ${{ steps.draft.outputs.is_draft || 'false' }}
+      # Empty for a bot, a lookup failure or anything that is not a plain GitHub login.
+      pr_author: ${{ steps.draft.outputs.pr_author }}
     steps:
       # Every payload validator below matches the WHOLE string with bash's
       # `[[ =~ ]]`, never `printf | grep -qE`. `grep` is line-oriented: ^ and $
@@ -201,7 +203,14 @@ jobs:
           PR_NUMBER: ${{ steps.prnum.outputs.pr_number }}
         run: |
           set -euo pipefail
-          is_draft=$(gh pr view "$PR_NUMBER" --repo camunda/camunda-hub --json isDraft --jq .isDraft 2>/dev/null || echo "")
+          info=$(gh pr view "$PR_NUMBER" --repo camunda/camunda-hub --json isDraft,author 2>/dev/null || echo '{}')
+          is_draft=$(jq -r '.isDraft // empty' <<<"$info")
+          # Only a plain login can be assigned a tracking issue; bots ("app/renovate",
+          # "dependabot[bot]") and anything odd are dropped rather than escaped.
+          author=$(jq -r '.author.login // empty' <<<"$info")
+          if [[ "$author" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]]; then
+            echo "pr_author=$author" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$is_draft" = "true" ]; then
             echo "is_draft=true" >> "$GITHUB_OUTPUT"
           else
@@ -282,6 +291,7 @@ jobs:
       summary: ${{ steps.parse.outputs.summary }}
       fingerprint: ${{ steps.evidence.outputs.fingerprint }}
       caused_by_pr: ${{ steps.parse.outputs.caused_by_pr }}
+      affected_operation_ids: ${{ steps.parse.outputs.affected_operation_ids }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -643,6 +653,7 @@ jobs:
           set -euo pipefail
           f=/tmp/hub-pr-classification.json
           caused_by_pr=false
+          affected_ops=""
           if [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
             category=$(jq -r '.category // "unknown"' "$f")
             confidence=$(jq -r '.confidence // "low"' "$f")
@@ -652,6 +663,8 @@ jobs:
             summary=$(jq -r '.summary // ""' "$f" | tr '\n' ' ' | cut -c1-200)
             # Strictly the boolean true; a string "true" or anything else is false.
             caused_by_pr=$(jq -r 'if .caused_by_pr == true then "true" else "false" end' "$f")
+            # operationIds come from the PR's own spec: keep only identifier characters.
+            affected_ops=$(jq -r '[.affected_operation_ids[]? | strings | gsub("[^A-Za-z0-9_.-]"; "")] | map(select(length > 0)) | join(",")' "$f" | cut -c1-300)
           else
             category="unknown"
             confidence="low"
@@ -687,6 +700,7 @@ jobs:
             else
               echo "caused_by_pr=false"
             fi
+            echo "affected_operation_ids=${affected_ops}"
           } >> "$GITHUB_OUTPUT"
 
   # #480: when the generated hub suite fails BECAUSE of an unmapped
@@ -821,9 +835,135 @@ jobs:
           rm -f "$body_file"
           echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
 
+  # A generator gap the camunda-hub PR itself caused (classify's caused_by_pr) is a work item for
+  # THIS repo, but until now it lived only in Slack and a PR comment. Keep one tracking issue per
+  # camunda-hub PR, assigned to that PR's author (they know the change best), updated in place on
+  # later pushes and closed when a push clears the gap. hub-generator-gap-digest.yml nags daily
+  # once the camunda-hub PR has merged and the issue is still open. Deterministic: no agent, and
+  # the issue holds only sanitized operation ids plus our own classification, never the author's
+  # free text.
+  generator-gap-tracker:
+    name: Track a PR-caused generator gap as an issue
+    needs: [validate, run, classify]
+    if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.validate.outputs.is_draft != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      issue_url: ${{ steps.gap-issue.outputs.issue_url }}
+    steps:
+      - name: Mint qa-processes App token (api-test-generator issues)
+        id: gap-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+
+      - name: Open, update or close the generator-gap issue
+        id: gap-issue
+        if: steps.gap-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.gap-token.outputs.token }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_RESULT: ${{ needs.run.result }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          CAUSED: ${{ needs.classify.outputs.caused_by_pr }}
+          OPS: ${{ needs.classify.outputs.affected_operation_ids }}
+          SUMMARY: ${{ needs.classify.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          repo=camunda/api-test-generator
+          title="[hub-pr-check] Generator gap on camunda-hub#${PR_NUMBER}"
+          gh label create generator-gap --repo "$repo" --color D93F0B \
+            --description "camunda-hub PR changed the API in a way the generated hub suite does not handle yet" 2>/dev/null || true
+
+          existing=$(gh issue list --repo "$repo" --state open --label generator-gap \
+            --search "in:title \"${title}\"" --json number,title \
+            --jq "[.[] | select(.title == \"${title}\") | .number] | first // empty")
+
+          # Open only on a confident, PR-caused gap. Close only when this run PROVES it is gone:
+          # a green run, or a classified failure that is not PR-caused. Anything unproven (classify
+          # skipped or crashed, Hub failed to start) leaves the issue as it is.
+          if [ "$CAUSED" = "true" ]; then
+            mode=open
+          elif [ "$RUN_RESULT" = "success" ] || { [ "$CLASSIFY_RESULT" = "success" ] && [ "$CAUSED" != "true" ]; }; then
+            mode=close
+          else
+            mode=keep
+          fi
+          echo "mode=${mode} existing=${existing:-none}"
+
+          if [ "$mode" = "close" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --repo "$repo" \
+                --comment "No longer a generator gap as of camunda-hub#${PR_NUMBER}@${SHA:0:12} (run: ${RUN_URL})." >/dev/null
+            fi
+            echo "issue_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$mode" = "keep" ]; then
+            echo "issue_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Untrusted-derived text: identifier characters only, no mentions, markup or backticks.
+          clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
+          body_file="$(mktemp)"
+          {
+            echo "camunda/camunda-hub#${PR_NUMBER} changes the API in a way the generated hub suite cannot handle yet, so the \`api-test-generator/hub-suite\` check cannot validate it."
+            echo
+            echo "**Operation(s):** \`$(clean "$OPS" 300)\`"
+            echo
+            echo "**Classifier:** $(clean "$SUMMARY" 200)"
+            echo
+            echo "camunda-hub PR: https://github.com/camunda/camunda-hub/pull/${PR_NUMBER}"
+            echo "Latest run: ${RUN_URL}"
+            echo
+            echo "### What to do"
+            echo
+            echo "Update the generator so the operation(s) above get correct generated tests (see \`docs/hub-pr-check-cookbook.md\`). It is assigned to the author of the camunda-hub PR, who knows the change best; ask in #camunda-hub-pr-e2e-results if you need help."
+            echo
+            echo "Once camunda-hub#${PR_NUMBER} merges, the nightly will see the same gap on \`main\` and a daily digest will keep listing this issue until it is closed."
+            echo
+            echo "🤖 Opened/updated automatically by \`hub-pr-check.yml\`. Closes itself if a later push to the camunda-hub PR clears the gap."
+          } > "$body_file"
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$repo" --body-file "$body_file" --add-label generator-gap --add-label hub >/dev/null
+            number="$existing"
+            echo "Updated generator-gap issue #${number}."
+          else
+            url=$(gh issue create --repo "$repo" --title "$title" --body-file "$body_file" \
+              --label generator-gap --label hub)
+            number="${url##*/}"
+            echo "Opened ${url}"
+          fi
+
+          # Assign the camunda-hub PR author, once and only if nobody is assigned yet, so a manual
+          # reassignment sticks. GitHub rejects a user without access to this repo: warn, do not fail.
+          if [ -n "$PR_AUTHOR" ]; then
+            assigned=$(gh issue view "$number" --repo "$repo" --json assignees --jq '.assignees | length')
+            if [ "$assigned" = "0" ]; then
+              gh issue edit "$number" --repo "$repo" --add-assignee "$PR_AUTHOR" >/dev/null \
+                || echo "::warning::Could not assign ${PR_AUTHOR} (no access to ${repo}?)"
+            fi
+          fi
+          rm -f "$body_file"
+          echo "issue_url=https://github.com/${repo}/issues/${number}" >> "$GITHUB_OUTPUT"
+
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
-    needs: [validate, run, classify, coverage-gap-tracker]
+    needs: [validate, run, classify, coverage-gap-tracker, generator-gap-tracker]
     # Report whenever the SHA was valid (whatever the run result). If validate
     # failed there's no real commit to post a status on, so skip.
     if: always() && needs.validate.result == 'success'
@@ -951,7 +1091,7 @@ jobs:
           CATEGORY: ${{ needs.classify.outputs.category }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
           UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
-          ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
+          ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url || needs.coverage-gap-tracker.outputs.issue_url }}
         run: |
           set -euo pipefail
           marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
@@ -1037,6 +1177,8 @@ jobs:
           # one, e.g. an unprovisioned App token, or there's nothing to link
           # because UNMAPPED is empty).
           ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
+          # The generator-gap issue (a PR-caused gap), assigned to the camunda-hub PR author.
+          GAP_ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url }}
           # #480 — see "Report status..." above. Whenever COVERAGE_GAP_ONLY
           # is true, that run gets reported as "success" on the camunda-hub
           # PR, not "failure" — the headline here must not contradict that
@@ -1146,6 +1288,13 @@ jobs:
             if [ -n "$ISSUE_URL" ]; then
               verdict=$(printf '%s\n:bookmark_tabs: Tracked at %s' "$verdict" "$ISSUE_URL")
             fi
+          fi
+
+          # A generator gap the camunda-hub PR itself caused has its own issue, assigned to the
+          # PR's author; the URL is built by our workflow from a validated number, never from
+          # the PR's text.
+          if [ -n "$GAP_ISSUE_URL" ]; then
+            verdict=$(printf '%s\n:bookmark_tabs: Generator fix tracked at %s (assigned to the PR author)' "$verdict" "$GAP_ISSUE_URL")
           fi
 
           # Built via printf %s placeholders, not a literal multi-line
