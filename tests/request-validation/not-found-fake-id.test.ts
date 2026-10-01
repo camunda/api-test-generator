@@ -294,11 +294,15 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
     expect(generateNotFoundFakeId(ops, { declared: true })).toHaveLength(0);
   });
 
-  it('skips an operation whose required body has no buildable baseline (oneOf, array or scalar root), in eligibility and in generation alike', () => {
+  it('skips an operation whose required body has no buildable baseline (oneOf, array, scalar or unresolvable allOf root), in eligibility and in generation alike', () => {
     const roots: SchemaFragment[] = [
       { oneOf: [{ type: 'object' }, { type: 'object' }] },
       { type: 'array', items: { type: 'string' } },
       { type: 'string' },
+      // an allOf the baseline builder cannot resolve to an object: a wrapped oneOf yields
+      // null (the emitter would send no body), a lone primitive yields a bare string
+      { allOf: [{ oneOf: [{ type: 'object' }, { type: 'object' }] }] },
+      { allOf: [{ type: 'string' }] },
     ];
     for (const requestBodySchema of roots) {
       const o = op({

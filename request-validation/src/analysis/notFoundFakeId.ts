@@ -116,6 +116,18 @@ export function fakePathParamValue(p: ParameterModel): string | undefined {
 }
 
 /**
+ * The JSON body a required-body operation is sent in a 404 scenario, or undefined when none
+ * can be built. The baseline builder returns undefined for roots it cannot walk (oneOf,
+ * array, scalar) and null (or a bare primitive) for an allOf it cannot resolve to an object;
+ * none of those is a body we can send, and the emitter treats a null body as "no body",
+ * which would answer 400 instead of exercising the 404.
+ */
+function buildableBody(op: OperationModel): Record<string, unknown> | undefined {
+  const body = buildBaselineBody(op);
+  return typeof body === 'object' && body !== null && !Array.isArray(body) ? body : undefined;
+}
+
+/**
  * Eligibility for a fake-ID 404 test (#381):
  *   - the operation is a GET (read-by-key). v1 is scoped to safe, idempotent
  *     reads, which have unambiguous "resource not found" → 404 semantics. A
@@ -141,13 +153,13 @@ export function isNotFoundEligible(op: OperationModel, opts?: { declared?: boole
   if (op.bodyRequired) {
     // Read-only mode sends no body, so a required body would 400 before the lookup.
     // Declared mode sends a valid JSON baseline body instead. A multipart body can't be
-    // built from the schema alone, and the baseline builder only handles object (or allOf)
-    // roots, so a oneOf, array or scalar root has no body to send. Deciding that here keeps
-    // coverage applicability and scenario generation in step: an operation counted as
-    // applicable always gets its scenario.
+    // built from the schema alone, and a root that is not an object (oneOf, array, scalar,
+    // or an allOf that does not resolve to an object) has no body to send. Deciding that
+    // here keeps coverage applicability and scenario generation in step: an operation
+    // counted as applicable always gets its scenario.
     if (!declared) return false;
     if (!op.requestBodySchema || isMultipartOnly(op)) return false;
-    if (buildBaselineBody(op) === undefined) return false;
+    if (buildableBody(op) === undefined) return false;
   }
   return true;
 }
@@ -159,7 +171,7 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
     if (!isNotFoundEligible(op, { declared: opts.declared })) continue;
     // A required JSON body must be valid, or the server answers 400 before it looks the
     // resource up (isNotFoundEligible already ruled out operations with no buildable body).
-    const requestBody = op.bodyRequired ? buildBaselineBody(op) : undefined;
+    const requestBody = op.bodyRequired ? buildableBody(op) : undefined;
     const pathParams = op.parameters.filter((p) => p.in === 'path');
     const params: Record<string, string> = {};
     let allFaked = true;
