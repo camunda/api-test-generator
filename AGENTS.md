@@ -544,6 +544,9 @@ token for either repo) runs a Claude agent to distinguish a real hub
 regression from api-test-generator simply not yet modeling a new/changed
 endpoint shape (comparing the PR's spec diff against `main`), and a Slack
 alert to `#camunda-hub-pr-e2e-results` states that verdict on failure.
+For how to read and debug a result, see
+[docs/hub-pr-check-cookbook.md](docs/hub-pr-check-cookbook.md).
+
 Two behaviours are ported from camunda-hub's AlwaysGreen triage
 (`.github/scripts/alwaysgreen/` there). `classify` first runs
 [scripts/triage/hub-pr-evidence.ts](scripts/triage/hub-pr-evidence.ts), which parses
