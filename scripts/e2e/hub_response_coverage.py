@@ -213,37 +213,60 @@ def build(args):
     return summary, rows
 
 
-def delta(now, before):
+NAMES = {
+    '2xx': 'Success (2xx)', '400': 'Bad request (400)', '401': 'Not authenticated (401)',
+    '403': 'Forbidden (403)', '404': 'Not found (404)', '409': 'Conflict (409)',
+}
+
+
+def since_last(now, before, noun='endpoints'):
     if before is None:
         return ''
     d = now - before
-    return ' (no change)' if d == 0 else f' ({d:+d} vs last report)'
+    if d == 0:
+        return ' (same as last report)'
+    return f' ({"up" if d > 0 else "down"} {abs(d)} since last report)'
+
+
+def meter(got, doc, width=10):
+    filled = width if not doc else round(width * got / doc)
+    return '▰' * filled + '▱' * (width - filled)
 
 
 def slack(s, prev, args):
     c = s['codes']
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
     pf = prev['fullyAsserted'] if prev else None
+    ranked = sorted((b for b in BUCKETS if c[b][1]), key=lambda b: c[b][0] / c[b][1])
+    worst = [b for b in ranked[:2] if c[b][0] < c[b][1]]
     lines = [
-        ':bar_chart: *camunda-hub response coverage* (weekly)',
-        f'Spec `{ref}` · {s["operations"]} operations · {s["negativeTests"]} negative tests',
+        ':bar_chart: *Hub API test coverage* (weekly)',
+        f'{ref} · {s["operations"]} endpoints · {s["negativeTests"]} negative tests',
         '',
-        f'*Every documented response asserted:* {s["fullyAsserted"]} / {s["operations"]}{delta(s["fullyAsserted"], pf)}',
-        '  '.join(f'`{b}` {c[b][0]}/{c[b][1]}' for b in BUCKETS),
-        f'Optional request fields sent in a success-path test: {s["optionalFields"][0]}/{s["optionalFields"][1]} · '
-        f'success bodies not schema-validated: {len(s["shapeUnvalidated"])}',
-        f'{s["opsMissingResponseTest"]} operations are missing a success, 400, 401, 404 or 409 test '
-        f'(403 is tracked separately).',
+        f'*{s["fullyAsserted"]} of {s["operations"]} endpoints* have a test for every response the API spec lists'
+        f'{since_last(s["fullyAsserted"], pf)}.',
+        '',
+        '*Responses tested, out of those the spec lists*',
+    ]
+    lines += [f'• {NAMES[b]}: {c[b][0]} of {c[b][1]}  {meter(*c[b])}' for b in BUCKETS]
+    lines += ['']
+    if worst:
+        lines.append('*Biggest gaps:* ' + ' · '.join(f'{NAMES[b]}, {c[b][1] - c[b][0]} untested' for b in worst))
+    lines += [
+        f'Also: {s["optionalFields"][0]} of {s["optionalFields"][1]} optional request fields are used in a success test, '
+        f'and {len(s["shapeUnvalidated"])} endpoints never check the shape of the success response.',
+        f'{s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
+        f'(403 is tracked separately; 500 errors are not counted).',
     ]
     if prev:
         new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
         if new:
-            lines.append('New operations since last report: ' + ', '.join(f'`{o}`' for o in new))
+            lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
     if s['zeroTestOperations']:
-        lines.append(':warning: Operations with no test at all: ' + ', '.join(f'`{o}`' for o in s['zeroTestOperations']))
+        lines.append(':warning: Endpoints with no test at all: ' + ', '.join(f'`{o}`' for o in s['zeroTestOperations']))
     links = []
     if args.run_url:
-        links.append(f'<{args.run_url}|Full matrix>')
+        links.append(f'<{args.run_url}|Full table>')
     if args.tracking_url:
         links.append(f'<{args.tracking_url}|Tracking epic>')
     if links:
@@ -251,24 +274,32 @@ def slack(s, prev, args):
     return '\n'.join(lines) + '\n'
 
 
-GLYPH = {'ok': '●', 'gap': '×', 'hold': '◇', 'na': '·'}
+MARK = {'ok': '✅', 'gap': '❌', 'hold': '⏸️', 'na': '➖'}
 
 
 def matrix(s, rows):
+    c = s['codes']
     out = [
-        f'## camunda-hub response coverage ({s["operations"]} operations)', '',
-        f'Every documented response asserted: **{s["fullyAsserted"]} / {s["operations"]}**. Asserted / documented: '
-        + ' · '.join(f'`{b}` {s["codes"][b][0]}/{s["codes"][b][1]}' for b in BUCKETS), '',
-        '`●` asserted · `×` documented, not asserted · `◇` suppressed or excluded (tracked) · `·` not documented', '',
-        '| Operation | Success | Shape | Opt. fields | 400 | 401 | 403 | 404 | 409 |',
-        '|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|',
+        f'## Hub API test coverage ({s["operations"]} endpoints)', '',
+        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists.', '',
+        'Responses tested, out of those the spec lists: '
+        + ' · '.join(f'{NAMES[b]} {c[b][0]} of {c[b][1]}' for b in BUCKETS) + '.', '',
+        '✅ tested · ❌ the spec lists it but no test covers it · ⏸️ known and tracked elsewhere (suppressed or excluded) · '
+        '➖ the spec does not list it for this endpoint', '',
+        'The **Missing** column lists the response codes that are untested for that endpoint. '
+        '**Response checked** is whether a test validates the success response against its schema. '
+        '**Optional fields** is how many optional request fields a success test sends.', '',
+        '| Endpoint | Request | Success | Response checked | Optional fields | 400 | 401 | 403 | 404 | 409 | Missing |',
+        '|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|',
     ]
     for r in rows:
-        c = r['cells']
-        opt = '·' if not r['optionalTotal'] else f'{r["optionalSent"]}/{r["optionalTotal"]}'
-        out.append(f'| `{r["operationId"]}` <sub>{r["method"]} {r["path"]}</sub> | '
-                   + ' | '.join([GLYPH[c.get('2xx', 'na')], GLYPH[r['shape']], opt]
-                                + [GLYPH[c.get(b, 'na')] for b in ('400', '401', '403', '404', '409')]) + ' |')
+        cl = r['cells']
+        opt = '➖' if not r['optionalTotal'] else f'{r["optionalSent"]} of {r["optionalTotal"]}'
+        missing = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if cl.get(b) == 'gap') or '—'
+        out.append(f'| `{r["operationId"]}` | {r["method"]} {r["path"]} | '
+                   + ' | '.join([MARK[cl.get('2xx', 'na')], MARK[r['shape']], opt]
+                                + [MARK[cl.get(b, 'na')] for b in ('400', '401', '403', '404', '409')])
+                   + f' | {missing} |')
     return '\n'.join(out) + '\n'
 
 

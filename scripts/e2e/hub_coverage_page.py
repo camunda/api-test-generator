@@ -20,7 +20,7 @@ BUCKETS = (
     ('404', 'Resource not found'), ('403', 'Forbidden'), ('409', 'Conflict'),
 )
 GLYPH = {'ok': '●', 'gap': '×', 'hold': '◇', 'na': '·'}
-LABEL = {'ok': 'asserted', 'gap': 'documented, not asserted', 'hold': 'suppressed or excluded (tracked)', 'na': 'not documented'}
+LABEL = {'ok': 'tested', 'gap': 'in the spec, but no test', 'hold': 'known and tracked elsewhere', 'na': 'not in the spec'}
 CSS = """
 :root {
   --ground:#F4F7F8; --panel:#FFFFFF; --ink:#12232B; --muted:#566872; --rule:#D6DFE3; --wash:#EAF0F2;
@@ -123,13 +123,13 @@ def bar_note(b, s):
     tracked = [o for o in miss if o in held]
     open_ = [o for o in miss if o not in held]
     if not miss:
-        return 'Every documented response is asserted.'
+        return 'Every response the spec lists is tested.'
     if b == '404':
-        return f'{len(miss)} operations document a 404 that nothing asserts.'
+        return f'{len(miss)} endpoints list a 404 that no test covers.'
     if b == '403':
-        return f'{len(miss)} operations document a 403 that nothing asserts.'
+        return f'{len(miss)} endpoints list a 403 that no test covers.'
     if b == '409':
-        return f'{len(miss)} operations document a 409; none is asserted.'
+        return f'{len(miss)} endpoints list a 409; none is tested.'
     parts = []
     if open_:
         parts.append('Untested: ' + names(open_, 3) + '.')
@@ -142,38 +142,38 @@ def bar(b, label, got, doc, note):
     pct = round(100 * got / doc) if doc else 100
     sev = 'ok' if doc and got / doc >= 0.95 else ('mid' if doc and got / doc >= 0.5 else 'low')
     return (f'<li class="bar {sev}"><span class="bcode">{b}</span><span class="blabel">{label}<small>{note}</small></span>'
-            f'<span class="track" role="img" aria-label="{got} of {doc} operations"><i style="width:{pct}%"></i></span>'
+            f'<span class="track" role="img" aria-label="{got} of {doc} endpoints"><i style="width:{pct}%"></i></span>'
             f'<span class="bnum"><b>{got}</b> / {doc}</span></li>')
 
 
 def findings(s):
     m, out = s['missing'], []
     if m['404']:
-        out.append(('Not-found responses', issue(619),
-                    f'{len(m["404"])} of {s["codes"]["404"][1]} documented 404s have no test. The generator builds '
-                    f'not-found tests only for GET requests. Untested: {names(m["404"])}.'))
+        out.append(('Not found (404)', issue(619),
+                    f'Of the {s["codes"]["404"][1]} "not found" responses the spec lists, {len(m["404"])} have no test. Test generation '
+                    f'only covers "not found" for GET requests. Untested: {names(m["404"])}.'))
     if m['409']:
-        out.append(('Conflicts', issue(620, 621),
-                    f'{len(m["409"])} operations document a 409 and none is asserted: {names(m["409"])}.'))
+        out.append(('Conflict (409)', issue(620, 621),
+                    f'{len(m["409"])} endpoints list a 409 (conflict) response and none is tested: {names(m["409"])}.'))
     if m['403']:
-        out.append(('Forbidden on writes', issue(622),
-                    f'A 403 is asserted for {s["codes"]["403"][0]} of {s["codes"]["403"][1]} operations that document one. '
+        out.append(('Forbidden (403) on writes', issue(622),
+                    f'A 403 is tested for {s["codes"]["403"][0]} of {s["codes"]["403"][1]} endpoints that list one. '
                     f'Hub checks 400, then 404, then 403, so a forbidden write test needs a real resource and a valid body.'))
     open400 = [o for o in m['400'] if o not in set(s['heldOperations'])]
     if open400:
-        out.append(('Documented 400 with no test', issue(627),
-                    f'{names(open400)} document a 400 that nothing triggers.'))
+        out.append(('Bad request (400) with no test', issue(627),
+                    f'{names(open400)} list a 400 response that no test triggers.'))
     o_sent, o_total = s['optionalFields']
     if o_sent < o_total:
         out.append(('Optional request fields', issue(623, 624, 625),
                     f'Success-path tests send {o_sent} of {o_total} optional body fields. Search <code>page</code> and '
                     f'<code>sort</code>, <code>description</code> fields and a few special branches are never sent.'))
     if s['shapeUnvalidated']:
-        out.append(('Response body not validated', issue(626),
-                    f'{len(s["shapeUnvalidated"])} operations assert a success status but never validate the body against '
-                    f'the schema: {names(s["shapeUnvalidated"])}.'))
+        out.append(('Success response not checked', issue(626),
+                    f'{len(s["shapeUnvalidated"])} endpoints check the success status but never check the response body against '
+                    f'its schema: {names(s["shapeUnvalidated"])}.'))
     if s['zeroTestOperations']:
-        out.append(('Operations with no test at all', issue(EPIC),
+        out.append(('Endpoints with no test at all', issue(EPIC),
                     f'{names(s["zeroTestOperations"])}.'))
     return ''.join(f'<article class="finding"><header><h3>{esc(t)}</h3><span class="tag">{ref}</span></header><p>{txt}</p></article>'
                    for t, ref, txt in out)
@@ -206,7 +206,7 @@ def render(s, rows):
     c = s['codes']
     bars = ''.join(bar(b, label, c[b][0], c[b][1], bar_note(b, s)) for b, label in BUCKETS)
     ref = (s.get('specRef') or '')[:7] or s['specHash'].replace('sha256:', '')[:7]
-    verdict = 'Every documented response is asserted for every endpoint.' if s['fullyAsserted'] == s['operations'] else 'Not full.'
+    verdict = 'Every response the spec lists is tested for every endpoint.' if s['fullyAsserted'] == s['operations'] else 'Not full.'
     fnd = findings(s)
     findings_html = f'<section aria-labelledby="gaps"><h2 id="gaps">Where the gaps are</h2><div class="findings">{fnd}</div></section>' if fnd else ''
     return f"""<title>Hub Endpoint Coverage</title>
@@ -214,25 +214,25 @@ def render(s, rows):
 <main>
   <header>
     <h1>Hub endpoint coverage</h1>
-    <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} operations have a success-path test, but only {s['fullyAsserted']} of {s['operations']} have every documented response asserted. {s['opsMissingResponseTest']} are missing a success, 400, 401, 404 or 409 test, and {len(s['missing']['403'])} have an untested 403.</p>
-    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} operations</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span><span>tracked in <a href="{ISSUES}{EPIC}" rel="noopener">#{EPIC}</a></span></p>
+    <p class="lede"><b>{verdict}</b> {c['2xx'][0]} of {c['2xx'][1]} endpoints have a success test, but only {s['fullyAsserted']} of {s['operations']} have a test for every response the spec lists. {s['opsMissingResponseTest']} endpoints are missing a test for a success, 400, 401, 404 or 409 response, and {len(s['missing']['403'])} have an untested 403.</p>
+    <p class="meta"><span>camunda-hub@{esc(ref)}</span><span>{s['operations']} endpoints</span><span>{s['negativeTests']} negative tests</span><span>secured + rbac profiles</span><span>tracked in <a href="{ISSUES}{EPIC}" rel="noopener">#{EPIC}</a></span></p>
   </header>
-  <section aria-labelledby="codes"><h2 id="codes">Documented responses that a test asserts</h2><ol class="bars">{bars}</ol></section>
+  <section aria-labelledby="codes"><h2 id="codes">Responses tested, out of those the spec lists</h2><ol class="bars">{bars}</ol></section>
   {findings_html}
   <section aria-labelledby="matrix">
     <h2 id="matrix">Every endpoint</h2>
     <div class="tools">
-      <div class="legend"><span><i class="k ok">●</i> asserted</span><span><i class="k gap">×</i> documented, not asserted</span><span><i class="k hold">◇</i> suppressed or excluded (tracked)</span><span><i class="k na">·</i> not documented</span></div>
+      <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">·</i> not in the spec</span></div>
       <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>
     </div>
-    <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="Response body schema-validated">Shape</th><th title="Optional request-body fields sent">Opt. fields</th><th>400</th><th>401</th><th>403</th><th>404</th><th>409</th></tr></thead>{''.join(body)}</table></div>
+    <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="A test checks the success response against its schema">Response checked</th><th title="Optional request fields a success test sends">Optional fields</th><th title="Bad request">400</th><th title="Not authenticated">401</th><th title="Forbidden">403</th><th title="Not found">404</th><th title="Conflict">409</th></tr></thead>{''.join(body)}</table></div>
   </section>
   <section class="method" aria-labelledby="how">
     <h2 id="how">How this was measured</h2>
     <ul>
       <li>Static analysis of the generated suites, bundled from camunda-hub@{esc(ref)}. It reads the tests that exist; it is not a run result.</li>
-      <li>"Documented" means a response code in the OpenAPI spec for that operation. 500 is excluded because it cannot be provoked on purpose.</li>
-      <li>A code counts as asserted if any positive, lifecycle or negative test expects it. Optional fields are counted at the top level of the request body only.</li>
+      <li>"The spec lists" means a response code in the OpenAPI spec for that endpoint. 500 is left out because it cannot be provoked on purpose.</li>
+      <li>A response counts as tested if any success, lifecycle or negative test expects it. Optional fields are counted at the top level of the request body only.</li>
     </ul>
   </section>
 </main>
