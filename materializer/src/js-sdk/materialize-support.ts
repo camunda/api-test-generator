@@ -356,9 +356,9 @@ export function seedBinding(varName: string, opts?: { unique?: boolean }): strin
       // witness steps (#159). Simplified relative to the Playwright
       // reference (materializer/src/playwright/support/await-eventually.ts):
       // the JS SDK client throws on non-2xx rather than returning a
-      // structural response object, so a thrown error is treated the same
-      // as a false predicate (transient/indexer-lag) and retried within
-      // budget, then rethrown on timeout.
+      // structural response object, so a thrown transient error (404/429/503
+      // or the SDK's own consistency timeout) is retried within budget like a
+      // false predicate; any other error is rethrown immediately.
       relativePath: 'support/await-eventually.ts',
       content: `// Eventual-consistency polling helper for witness reads emitted from
 // planner-annotated \`eventualWaitsAfter\` steps. Vendored (not imported from
@@ -393,12 +393,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Mirrors the SDK's own eventual poller (404 not-yet-indexed, 429/503 backpressure).
+const RETRYABLE_STATUSES = new Set([404, 429, 503]);
+
+function isRetryable(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  if ('name' in err && err.name === 'EventualConsistencyTimeoutError') return true;
+  return 'status' in err && typeof err.status === 'number' && RETRYABLE_STATUSES.has(err.status);
+}
+
 /**
  * Invoke \`fetch\` repeatedly until \`predicate\` returns true or the budget is
- * exhausted. A thrown error from \`fetch\` (e.g. a 404 while the indexer
- * catches up) is treated as a transient failure and retried within budget;
- * the last error is rethrown once the budget is exhausted (or a generic
- * timeout error if no attempt ever threw).
+ * exhausted. Transient errors (see \`isRetryable\`) are retried within budget
+ * and the last one rethrown on exhaustion; any other error (auth, validation,
+ * 5xx, client-side) is rethrown immediately.
  */
 export async function awaitEventually<T>(
   fetch: () => Promise<T>,
@@ -418,6 +426,7 @@ export async function awaitEventually<T>(
       if (predicate(body)) return body;
       lastError = undefined;
     } catch (err) {
+      if (!isRetryable(err)) throw err;
       lastError = err;
     }
 
@@ -462,11 +471,6 @@ export async function awaitEventually<T>(
   export class Camunda8 {
     constructor(config?: Camunda8ClientConfiguration);
     getOrchestrationClusterApiClientLoose(): OrchestrationClusterApiClientLoose;
-  }
-
-  /** Thrown by the SDK on non-2xx responses; \`status\` carries the HTTP status code. */
-  export interface HttpSdkError extends Error {
-    status?: number;
   }
 }
 `,

@@ -38,7 +38,7 @@ const SAMPLE_COLLECTION: EndpointScenarioCollection = {
           method: 'GET',
           pathTemplate: '/users/{widgetId}',
           expect: { status: 200 },
-          extract: [{ fieldPath: 'data.id', bind: 'widgetId' }],
+          extract: [{ fieldPath: 'id', bind: 'widgetId' }],
         } satisfies RequestStep,
       ],
     },
@@ -307,7 +307,43 @@ describe('JavaScript SDK Emitter', () => {
       "import { describe, it, expect, beforeEach } from 'vitest';",
     );
     expect(files[0].content).toContain("import { Camunda8 } from '@camunda8/sdk';");
-    expect(files[0].content).toContain("import type { HttpSdkError } from '@camunda8/sdk';");
+    // `HttpSdkError` is not exported by the real @camunda8/sdk (its export is `HTTPError`).
+    expect(files[0].content).not.toContain('HttpSdkError');
+  });
+
+  test('error-expected step asserts success-path failure outside the try block', () => {
+    const collection: EndpointScenarioCollection = {
+      endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{widgetId}' },
+      requiredSemanticTypes: [],
+      optionalSemanticTypes: [],
+      scenarios: [
+        {
+          id: 'sc1',
+          name: 'not found',
+          description: 'Fetch a missing user',
+          operations: [{ operationId: 'getUser', method: 'GET', path: '/users/{widgetId}' }],
+          producedSemanticTypes: [],
+          satisfiedSemanticTypes: [],
+          requestPlan: [
+            {
+              operationId: 'getUser',
+              method: 'GET',
+              pathTemplate: '/users/{widgetId}',
+              expect: { status: 404 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const output = renderJsSuite(collection, { mode: 'feature' });
+
+    // An expect.fail inside the try is swallowed by its own catch, replacing the
+    // "request succeeded" message with a misleading status mismatch.
+    const tryBlocks = output.match(/try \{[\s\S]*?\} catch/g) ?? [];
+    expect(tryBlocks.length).toBeGreaterThan(0);
+    for (const block of tryBlocks) expect(block).not.toContain('expect.fail');
+    expect(output).toContain("expect.fail('Expected 404 but request succeeded')");
+    expect(output).toContain('expect(sdkError1?.status).toBe(404);');
   });
 
   test('rendered suite builds a flat input object and renders extract bindings', () => {
@@ -317,7 +353,8 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).toContain('const input1 = {');
     expect(output).toContain("widgetId: ctx['widgetIdVar'],");
     expect(output).not.toContain('expect(response1.status).toBe(200);');
-    expect(output).toContain("ctx['widgetId'] = response1?.data?.id;");
+    expect(output).toContain("ctx['widgetId'] = response1?.id;");
+    expect(output).not.toContain('response1?.data');
   });
 
   test('scenario using an operationId with no backing SDK method is emitted as a skipped test', () => {

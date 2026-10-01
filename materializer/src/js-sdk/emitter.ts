@@ -148,7 +148,6 @@ export function renderJsSuite(
   lines.push('');
   lines.push("import { describe, it, expect, beforeEach } from 'vitest';");
   lines.push("import { Camunda8 } from '@camunda8/sdk';");
-  lines.push("import type { HttpSdkError } from '@camunda8/sdk';");
   const needsSeeding = collection.scenarios.some(
     (scenario) => computeScenarioSeedLines(scenario, '', globalContextSeeds).length > 0,
   );
@@ -401,15 +400,19 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
   lines.push(`      const call${stepNum} = client.${method}.bind(client) as SdkCall;`);
 
   if (isErrorExpected) {
+    // The SDK's thrown HTTP error carries `status`; expect.fail stays outside
+    // the try so its own catch can't swallow it.
+    const errorVar = `sdkError${stepNum}`;
+    lines.push(`      let ${errorVar}: { status?: number } | undefined;`);
     lines.push('      try {');
-    lines.push(
-      `        const ${responseVar} = await call${stepNum}(input${stepNum}, consistency${stepNum});`,
-    );
-    lines.push(`        expect.fail('Expected ${expectedStatus} but request succeeded');`);
+    lines.push(`        await call${stepNum}(input${stepNum}, consistency${stepNum});`);
     lines.push('      } catch (error) {');
-    lines.push('        const sdkError = error as HttpSdkError;');
-    lines.push(`        expect(sdkError.status).toBe(${expectedStatus});`);
+    lines.push(`        ${errorVar} = error as { status?: number };`);
     lines.push('      }');
+    lines.push(
+      `      if (${errorVar} === undefined) expect.fail('Expected ${expectedStatus} but request succeeded');`,
+    );
+    lines.push(`      expect(${errorVar}?.status).toBe(${expectedStatus});`);
   } else {
     lines.push(
       `      const ${responseVar} = await call${stepNum}(input${stepNum}, consistency${stepNum});`,
@@ -432,8 +435,8 @@ function renderRequestStep(lines: string[], step: RequestStep, stepIndex: number
  * Render a planner-annotated eventual-state wait (#159) as a sibling block
  * immediately after its producer step. Polls the witness operation via the
  * real SDK client (through the vendored `awaitEventually` helper, which
- * treats a thrown `HttpSdkError` the same as a false predicate) until the
- * predicate field matches or the wait budget is exhausted.
+ * treats a thrown transient SDK error the same as a false predicate) until
+ * the predicate field matches or the wait budget is exhausted.
  */
 function renderEventualWait(
   lines: string[],

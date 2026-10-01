@@ -1,9 +1,11 @@
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   JS_SDK_FIXTURES_DIR_NAME,
+  loadJsProjectScaffoldingFiles,
   materializeSdkFixtures,
 } from '../../materializer/src/js-sdk/materialize-support.ts';
 import {
@@ -274,6 +276,79 @@ describe('materializeSdkFixtures', () => {
     } finally {
       await fs.rm(source, { recursive: true, force: true });
     }
+  });
+});
+
+type SdkAwaitEventually = (
+  fetch: () => Promise<unknown>,
+  predicate: (body: unknown) => boolean,
+  options: { operationId: string; waitUpToMs?: number; pollIntervalMs?: number },
+) => Promise<unknown>;
+
+describe('JS SDK support/await-eventually.ts retry policy', () => {
+  let tmp: string;
+  let awaitEventually: SdkAwaitEventually;
+  const options = { operationId: 'getThing', waitUpToMs: 2_000, pollIntervalMs: 10 };
+
+  function sdkError(status: number | undefined, name = 'Error'): Error {
+    return Object.assign(new Error(`SDK failure ${status ?? 'statusless'}`), { status, name });
+  }
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'js-sdk-await-eventually-'));
+    const file = loadJsProjectScaffoldingFiles().find(
+      (f) => f.relativePath === 'support/await-eventually.ts',
+    );
+    if (!file) throw new Error('support/await-eventually.ts is not emitted');
+    const target = path.join(tmp, 'await-eventually.ts');
+    await fs.writeFile(target, file.content, 'utf8');
+    // biome-ignore lint/plugin: runtime contract boundary for a dynamically imported generated module
+    const mod = (await import(pathToFileURL(target).href)) as {
+      awaitEventually: SdkAwaitEventually;
+    };
+    awaitEventually = mod.awaitEventually;
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  test.each([400, 401, 403, 409, 500])('fails fast on non-retryable HTTP %i', async (status) => {
+    const error = sdkError(status);
+    let calls = 0;
+    const fetch = async (): Promise<unknown> => {
+      calls++;
+      throw error;
+    };
+    await expect(awaitEventually(fetch, () => true, options)).rejects.toBe(error);
+    expect(calls).toBe(1);
+  });
+
+  test('fails fast on a client-side CamundaValidationError (no HTTP status)', async () => {
+    const error = sdkError(undefined, 'CamundaValidationError');
+    let calls = 0;
+    const fetch = async (): Promise<unknown> => {
+      calls++;
+      throw error;
+    };
+    await expect(awaitEventually(fetch, () => true, options)).rejects.toBe(error);
+    expect(calls).toBe(1);
+  });
+
+  test.each([
+    ['HTTP 404', sdkError(404)],
+    ['HTTP 429', sdkError(429)],
+    ['HTTP 503', sdkError(503)],
+    ['SDK EventualConsistencyTimeoutError', sdkError(undefined, 'EventualConsistencyTimeoutError')],
+  ])('retries transient %s until the predicate passes', async (_label, error) => {
+    let calls = 0;
+    const fetch = async (): Promise<unknown> => {
+      calls++;
+      if (calls < 3) throw error;
+      return { ok: true };
+    };
+    await expect(awaitEventually(fetch, () => true, options)).resolves.toEqual({ ok: true });
+    expect(calls).toBe(3);
   });
 });
 
