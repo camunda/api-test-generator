@@ -124,6 +124,7 @@ To re-run in CI without a new push, dispatch `trigger-api-test-generator.yml` in
   at 07:00 UTC, listing issues whose camunda-hub PR has merged and whose issue is still open,
   oldest merge first. Silent when there is nothing overdue.
 - **Cleanup:** an issue closes by itself on a green run, or when that PR is closed without merging.
+  If the gap comes back on a later push, the same issue is reopened.
   The PR comment is marked resolved on a green run too. A failed run that is merely classified
   differently proves nothing about the earlier gap, so it changes neither.
 - **Try it without posting:** run the digest workflow by hand (it is a dry run by default).

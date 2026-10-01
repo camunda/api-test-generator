@@ -570,7 +570,8 @@ A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is 
 the camunda-hub PR's author** (once, and only if unassigned, so a manual reassignment sticks;
 bots and users without access here are skipped with a warning). It is edited in place on later
 pushes and closed on a green run (a failed run that is merely classified differently proves
-nothing, so it leaves the issue open); the sticky PR comment is marked resolved on a green run too. The issue contains only sanitized operation
+nothing, so it leaves the issue open); the sticky PR comment is marked resolved on a green run too. If the gap comes back, the same
+issue is reopened rather than a second one opened. The issue contains only sanitized operation
 ids and our own classification, never the PR author's free text. Once the camunda-hub PR
 merges the gap is live on Hub main, so
 [hub-generator-gap-digest.yml](.github/workflows/hub-generator-gap-digest.yml) (weekdays 07:00 UTC,
