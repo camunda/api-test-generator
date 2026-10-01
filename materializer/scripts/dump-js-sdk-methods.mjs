@@ -9,7 +9,7 @@
 // Run whenever @camunda8/sdk is bumped (materializer/package.json
 // devDependency): `npm run js-sdk:dump-methods --workspace materializer`
 // ---------------------------------------------------------------------------
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -17,6 +17,32 @@ import { Camunda8 } from '@camunda8/sdk';
 
 const require = createRequire(import.meta.url);
 const sdkVersion = require('@camunda8/sdk/package.json').version;
+// @camunda8/sdk only declares a range (`>=8.8.4 <9.0.0`) for its
+// orchestration-cluster-api dependency, so the actually-installed version is
+// what the method inventory above truly reflects. Recorded here so the
+// generated project's package.json can pin it via `overrides`, keeping a
+// fresh `npm install` of the generated project reproducible against this
+// inventory (Copilot PR #575 review).
+//
+// The package doesn't export its own `package.json` (no matching `exports`
+// entry), so `require('<pkg>/package.json')` 404s — resolve its main entry
+// instead and walk up to the nearest package.json.
+function resolveInstalledVersion(pkgName) {
+  let dir = path.dirname(require.resolve(pkgName));
+  while (true) {
+    const candidate = path.join(dir, 'package.json');
+    try {
+      const pkg = JSON.parse(readFileSync(candidate, 'utf8'));
+      if (pkg.name === pkgName) return pkg.version;
+    } catch {
+      // not here — keep walking up
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`Could not locate package.json for ${pkgName}`);
+    dir = parent;
+  }
+}
+const ocaVersion = resolveInstalledVersion('@camunda8/orchestration-cluster-api');
 
 // Utility/lifecycle methods on the client that aren't OpenAPI operations —
 // never real operationId targets, so excluding them keeps the known-methods
@@ -66,6 +92,6 @@ const outPath = path.join(
 const sorted = [...methods].sort();
 writeFileSync(
   outPath,
-  `${JSON.stringify({ sdkVersion, methods: sorted }, null, 2)}\n`,
+  `${JSON.stringify({ sdkVersion, ocaVersion, methods: sorted }, null, 2)}\n`,
 );
-console.log(`Wrote ${sorted.length} methods (sdkVersion ${sdkVersion}) to ${outPath}`);
+console.log(`Wrote ${sorted.length} methods (sdkVersion ${sdkVersion}, ocaVersion ${ocaVersion}) to ${outPath}`);

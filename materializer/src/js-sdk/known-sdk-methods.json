@@ -1,5 +1,6 @@
 {
   "sdkVersion": "8.8.13",
+  "ocaVersion": "8.8.5",
   "methods": [
     "activateAdHocSubProcessActivities",
     "activateJobs",

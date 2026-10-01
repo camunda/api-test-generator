@@ -278,6 +278,37 @@ const HOSTILE_OPERATION_ID_COLLECTION: EndpointScenarioCollection = {
   ],
 };
 
+// Regression fixture (Copilot PR #575 review): a hostile/malformed
+// operationId embedding `*/`, which would otherwise terminate the file's
+// `/** ... */` header block comment early and corrupt the rest of the
+// generated file.
+const BLOCK_COMMENT_HOSTILE_COLLECTION: EndpointScenarioCollection = {
+  endpoint: { operationId: 'getThing*/process.exit(1);/*', method: 'GET', path: '/thing/{id}' },
+  requiredSemanticTypes: [],
+  optionalSemanticTypes: [],
+  scenarios: [
+    {
+      id: 'sc1',
+      name: 'happy path',
+      description: 'An operationId embedding a block-comment terminator',
+      operations: [
+        { operationId: 'getThing*/process.exit(1);/*', method: 'GET', path: '/thing/{id}' },
+      ],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      requestPlan: [
+        {
+          operationId: 'getThing*/process.exit(1);/*',
+          method: 'GET',
+          pathTemplate: '/thing/{id}',
+          pathParams: [{ name: 'id', var: 'idVar' }],
+          expect: { status: 200 },
+        } satisfies RequestStep,
+      ],
+    },
+  ],
+};
+
 describe('JavaScript SDK Emitter', () => {
   test('factory creates emitter with correct metadata', () => {
     const emitter = createJsSdkEmitter();
@@ -377,6 +408,18 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).not.toMatch(/\/\/ SKIPPED: no method 'getNonexistent$/m);
   });
 
+  test('a `*/` embedded in the operationId does not terminate the file header block comment early', () => {
+    const output = renderJsSuite(BLOCK_COMMENT_HOSTILE_COLLECTION, { mode: 'feature' });
+
+    // The header block comment must still open and close exactly once at
+    // the top of the file -- the escaped `*\/` must land inside it rather
+    // than closing the comment, which would otherwise leave
+    // `process.exit(1);/*` as live, unparsable/executable top-level code.
+    const headerMatch = output.match(/^\/\*\*[\s\S]*?\*\//);
+    if (!headerMatch) throw new Error('no header block comment found');
+    expect(headerMatch[0]).toContain('getThing*\\/process.exit(1);/*');
+  });
+
   test('a __PENDING__ binding with a planner seedBindings entry is seeded via seedBinding(), not left undefined', () => {
     const output = renderJsSuite(PENDING_BINDING_COLLECTION, { mode: 'feature' });
 
@@ -422,10 +465,12 @@ describe('JavaScript SDK Emitter', () => {
     expect(output).not.toContain("import { File } from 'node:buffer';");
   });
 
-  // Regression (Copilot PR #575 review): the `File` global is only stable
-  // on `node:buffer` from Node 18.13 -- the generated project's documented/
-  // enforced minimum must match, not the earlier general ">=18" claim.
-  test('scaffolded package.json declares an engines.node minimum of >=18.13.0', () => {
+  // Regression (Copilot PR #575 review): p-retry@7.1.1 (a transitive
+  // @camunda8/sdk dependency, see package-lock.json) declares
+  // `engines.node: >=20`, a stricter floor than the earlier ">=18.13"
+  // claim (itself needed only for the `File` global) -- the generated
+  // project's documented/enforced minimum must match the stricter one.
+  test('scaffolded package.json declares an engines.node minimum of >=20', () => {
     const files = loadJsProjectScaffoldingFiles();
     const packageJsonFile = files.find((f) => f.relativePath === 'package.json');
     if (!packageJsonFile) throw new Error('package.json not found in scaffolding files');
@@ -439,14 +484,41 @@ describe('JavaScript SDK Emitter', () => {
     ) {
       throw new Error('package.json has no engines field');
     }
-    expect(parsed.engines).toEqual({ node: '>=18.13.0' });
+    expect(parsed.engines).toEqual({ node: '>=20' });
   });
 
-  test('scaffolded README documents the >=18.13 Node minimum', () => {
+  // Regression (Copilot PR #575 review): @camunda8/sdk only declares a range
+  // (`>=8.8.4 <9.0.0`) for its @camunda8/orchestration-cluster-api
+  // dependency -- the client whose method surface was inventoried into
+  // known-sdk-methods.json -- so an unpinned `npm install` of the generated
+  // project could resolve a different OCA client than the one the
+  // inventory reflects. The generated package.json must pin it via
+  // `overrides` to the exact inventoried version.
+  test('scaffolded package.json pins the transitive OCA client via overrides', () => {
+    const files = loadJsProjectScaffoldingFiles();
+    const packageJsonFile = files.find((f) => f.relativePath === 'package.json');
+    if (!packageJsonFile) throw new Error('package.json not found in scaffolding files');
+    const parsed: unknown = JSON.parse(packageJsonFile.content);
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('overrides' in parsed) ||
+      typeof parsed.overrides !== 'object' ||
+      parsed.overrides === null ||
+      !('@camunda8/orchestration-cluster-api' in parsed.overrides)
+    ) {
+      throw new Error(
+        'package.json has no overrides entry for @camunda8/orchestration-cluster-api',
+      );
+    }
+    expect(typeof parsed.overrides['@camunda8/orchestration-cluster-api']).toBe('string');
+  });
+
+  test('scaffolded README documents the >=20 Node minimum', () => {
     const files = loadJsProjectScaffoldingFiles();
     const readmeFile = files.find((f) => f.relativePath === 'README.md');
     if (!readmeFile) throw new Error('README.md not found in scaffolding files');
-    expect(readmeFile.content).toContain('Node.js >=18.13');
+    expect(readmeFile.content).toContain('Node.js >=20');
     expect(readmeFile.content).not.toContain('Node.js >=18\n');
   });
 
