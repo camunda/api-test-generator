@@ -544,6 +544,57 @@ token for either repo) runs a Claude agent to distinguish a real hub
 regression from api-test-generator simply not yet modeling a new/changed
 endpoint shape (comparing the PR's spec diff against `main`), and a Slack
 alert to `#camunda-hub-pr-e2e-results` states that verdict on failure.
+For how to read and debug a result, see
+[docs/hub-pr-check-cookbook.md](docs/hub-pr-check-cookbook.md).
+
+Two behaviours are ported from camunda-hub's AlwaysGreen triage
+(`.github/scripts/alwaysgreen/` there). `classify` first runs
+[scripts/triage/hub-pr-evidence.ts](scripts/triage/hub-pr-evidence.ts), which parses
+the Playwright reports into per-spec attempt histories (including whether any
+attempt passed) and fingerprints the failing set; the agent is handed that
+parsed evidence instead of raw reports. There is no retry-based "flaky" verdict
+as in AlwaysGreen: Playwright exits 0 when a retry passes and `classify` only
+runs after a failed run, so it could never fire for a real flaky run. `report`
+then posts through
+[scripts/triage/slack-thread.ts](scripts/triage/slack-thread.ts): one thread per
+day, one reply per (PR, fingerprint), edited in place when the same failure
+re-runs (an edit does not re-page) and a new reply only when the failure changes.
+Racing PRs that each create the day's parent converge on the earliest one (the
+loser deletes its own); the reply lookup is paginated and fails closed.
+Any threading failure (unresolvable channel name, missing Slack history scope) falls
+back to a plain post, so an alert is never lost to the threading logic.
+
+A PR-caused generator gap (the same `caused_by_pr` condition as the comment) is also tracked: the
+`generator-gap-tracker` job keeps one issue per camunda-hub PR
+(`[hub-pr-check] Generator gap on camunda-hub#N`, labels `generator-gap` + `hub`), **assigned to
+the camunda-hub PR's author** (once, and only if unassigned, so a manual reassignment sticks;
+bots and users without access here are skipped with a warning). It is edited in place on later
+pushes and closed on a green run (a failed run that is merely classified differently proves
+nothing, so it leaves the issue open); the sticky PR comment is marked resolved on a green run too. The issue contains only sanitized operation
+ids and our own classification, never the PR author's free text. Once the camunda-hub PR
+merges the gap is live on Hub main, so
+[hub-generator-gap-digest.yml](.github/workflows/hub-generator-gap-digest.yml) (weekdays 07:00 UTC,
+`scripts/triage/hub-gap-digest.ts`) posts one Slack message to `#camunda-hub-pr-e2e-results`
+listing those issues that are still open (merge age, issue age, assignee), and closes issues whose
+camunda-hub PR was closed without merging. It posts nothing on days with nothing overdue; a manual
+`workflow_dispatch` is a dry run by default.
+Both scripts run under plain `node` (type stripping, no `npm ci`) and are covered
+by `tests/triage/`. Not ported, deliberately: AlwaysGreen's fix-agent dispatch
+caps/dedupe (this classifier is read-only and opens nothing) and its
+platform-noise prefilter (the Hub PR check already routes startup and pre-suite
+failures deterministically).
+
+Only when the PR's own spec change is what breaks the generator — a
+high-confidence `generator-gap` with `caused_by_pr: true` (every affected
+operationId new or changed by the PR, per the spec diff) — `report` also leaves
+one sticky comment on the camunda-hub PR (marker
+`api-test-generator:hub-pr-check:generator-gap`, edited in place) saying
+api-test-generator must be updated first and linking the coverage-gap tracking
+issue; the reverse of AlwaysGreen's "hub PR must not merge first" note on a
+shared-repo fix PR. Every other failure — a gap on an untouched operation,
+product, infra, flaky, unknown — is Slack-only. The comment needs Issues or
+Pull requests: write for the qa-processes App on camunda-hub; without it the
+step only warns.
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check

@@ -60,6 +60,8 @@ jobs:
       # EXISTING behavior (still alerts) rather than silently dropping a
       # real signal.
       is_draft: ${{ steps.draft.outputs.is_draft || 'false' }}
+      # Empty for a bot, a lookup failure or anything that is not a plain GitHub login.
+      pr_author: ${{ steps.draft.outputs.pr_author }}
     steps:
       # Every payload validator below matches the WHOLE string with bash's
       # `[[ =~ ]]`, never `printf | grep -qE`. `grep` is line-oriented: ^ and $
@@ -201,7 +203,14 @@ jobs:
           PR_NUMBER: ${{ steps.prnum.outputs.pr_number }}
         run: |
           set -euo pipefail
-          is_draft=$(gh pr view "$PR_NUMBER" --repo camunda/camunda-hub --json isDraft --jq .isDraft 2>/dev/null || echo "")
+          info=$(gh pr view "$PR_NUMBER" --repo camunda/camunda-hub --json isDraft,author 2>/dev/null || echo '{}')
+          is_draft=$(jq -r '.isDraft // empty' <<<"$info")
+          # Only a plain login can be assigned a tracking issue; bots ("app/renovate",
+          # "dependabot[bot]") and anything odd are dropped rather than escaped.
+          author=$(jq -r '.author.login // empty' <<<"$info")
+          if [[ "$author" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]]; then
+            echo "pr_author=$author" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$is_draft" = "true" ]; then
             echo "is_draft=true" >> "$GITHUB_OUTPUT"
           else
@@ -280,6 +289,9 @@ jobs:
       category: ${{ steps.parse.outputs.category }}
       confidence: ${{ steps.parse.outputs.confidence }}
       summary: ${{ steps.parse.outputs.summary }}
+      fingerprint: ${{ steps.evidence.outputs.fingerprint }}
+      caused_by_pr: ${{ steps.parse.outputs.caused_by_pr }}
+      affected_operation_ids: ${{ steps.parse.outputs.affected_operation_ids }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -318,6 +330,35 @@ jobs:
           else
             echo "Report evidence present."
           fi
+
+      # Node 22 runs the evidence script directly (type stripping, no npm install) and is also
+      # what the Claude Code CLI below needs.
+      - name: Setup Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Ported from camunda-hub's AlwaysGreen triage (classify.py): the agent is handed the
+      # reports already parsed into per-spec attempt histories instead of re-parsing raw JSON, and
+      # the failing set is fingerprinted so `report` can edit one Slack reply in place for a
+      # repeated failure on a PR instead of paging again on every push. There is no retry-based
+      # verdict: Playwright exits 0 when a retry passes and this job only runs after a failed run,
+      # so such a verdict could never fire for a real flaky run and could only hide another failure.
+      - name: Extract deterministic evidence from the reports
+        id: evidence
+        continue-on-error: true
+        env:
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/triage/hub-pr-evidence.ts \
+            --reports test-results/e2e-camunda-hub \
+            --unmapped "$UNMAPPED" \
+            --pr "$PR_NUMBER" --sha "$SHA" \
+            --out "${GITHUB_WORKSPACE}/hub-pr-evidence.json"
 
       # Contents:Read only — same token type _hub-suite-run.yml itself already
       # uses to clone for generation, never a write-capable App token.
@@ -426,13 +467,6 @@ jobs:
           secrets: |
             secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
 
-      - name: Setup Node.js 22 (for Claude Code CLI)
-        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
-        continue-on-error: true
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-
       # Pinned version — same as triage-camunda-hub-nightly.yml. Bump intentionally.
       - name: Install Claude Code CLI
         if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
@@ -471,6 +505,9 @@ jobs:
           # needs to be handed to the agent directly rather than left for it
           # to infer from reports that won't mention it.
           UNMAPPED_OPERATIONS: ${{ needs.run.outputs.unmapped_operations }}
+          # Reports already parsed into per-spec attempt histories (see the evidence step).
+          # Absent if that step failed; the agent then falls back to the raw reports.
+          EVIDENCE_FILE: ${{ github.workspace }}/hub-pr-evidence.json
         run: |
           set -euo pipefail
           rm -f /tmp/hub-pr-classification.json
@@ -500,8 +537,14 @@ jobs:
 
           Inputs:
           - Playwright/JUnit reports: ${REPORTS_DIR} (pw-positive.json, pw-secured.json,
-            pw-rbac.json, junit + HTML reports with traces/screenshots for failing tests)
-            — may be absent if the artifact upload/download itself failed; say so if so.
+            pw-rbac.json, junit + HTML reports). Traces and screenshots are NOT captured; the
+            evidence is the request.json / response.json attachments embedded in the JSON
+            and HTML reports. May be absent if the artifact upload/download itself failed;
+            say so if so.
+          - Parsed evidence: ${EVIDENCE_FILE} -- every failing spec with its per-attempt
+            statuses (\`deterministic: true\` = no attempt passed) and cleaned error. Prefer
+            it to re-parsing the Playwright JSON; use the embedded request.json /
+            response.json attachments for request/response detail. If the file is absent, parse the reports yourself.
           - OpenAPI spec AT THIS PR's SHA: ${SPEC_DIR}/*.yaml (may be absent if the
             camunda-hub clone step failed; treat as unavailable, don't guess).
           - Spec diff (this PR's sha vs its BASE branch, ${baseline}), OpenAPI dir
@@ -531,8 +574,9 @@ jobs:
              them yet. This is NOT a hub bug. Only fall through to the steps below
              if UNMAPPED_OPERATIONS is empty, OR the run has ADDITIONAL failing
              tests beyond just the unmapped ones (classify those the normal way).
-          1. Parse the reports and enumerate every failing test, with its request/
-             response evidence from the trace/HTML report.
+          1. Enumerate every failing test (from the parsed evidence, falling back to the
+             reports), with its request/response evidence from the embedded request.json / response.json
+             attachments.
           2. Resolve each failing operationId in the OpenAPI spec at this PR's sha.
           3. Check the spec diff: is this operationId's definition NEW or CHANGED by
              this PR? If yes, and the failure looks like the generated test's
@@ -572,10 +616,20 @@ jobs:
              category and note it is already tracked in your summary.
           6. If Hub failed to boot, a suite produced no report, or the failure is
              clearly environmental -> category "infra".
-          7. If a test passed on a Playwright retry -> category "flaky".
+          7. If a test passed on a Playwright retry -> category "flaky". A failing spec
+             with \`deterministic: false\` (some attempt passed) is flakiness evidence,
+             not a defect -- never classify it "product" on its own.
           8. If you genuinely cannot tell from the evidence (including: reports or
              spec were unavailable above) -> category "unknown" with confidence "low"
              and say what evidence was missing — never guess "product".
+
+          "caused_by_pr" decides whether the camunda-hub PR author is told on their PR
+          (otherwise only the internal Slack channel hears about it), so be strict. Set it
+          true ONLY when category is "generator-gap" AND every affected operationId is
+          NEW or CHANGED by this PR in the spec diff (steps 0 and 3): the author's own spec
+          change is what the generator cannot yet handle. Set it false for everything else,
+          including a generator gap on an operation this PR did not touch, an unmapped
+          operation that already existed on the base, and any doubt.
 
           Write your answer to /tmp/hub-pr-classification.json as EXACTLY this shape,
           nothing else:
@@ -583,7 +637,8 @@ jobs:
             "category": "product|generator-gap|infra|flaky|unknown",
             "confidence": "high|medium|low",
             "summary": "<one sentence, under 200 chars, no line breaks>",
-            "affected_operation_ids": ["..."]
+            "affected_operation_ids": ["..."],
+            "caused_by_pr": true|false
           }
           EOF
           )
@@ -600,6 +655,8 @@ jobs:
         run: |
           set -euo pipefail
           f=/tmp/hub-pr-classification.json
+          caused_by_pr=false
+          affected_ops=""
           if [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
             category=$(jq -r '.category // "unknown"' "$f")
             confidence=$(jq -r '.confidence // "low"' "$f")
@@ -607,6 +664,12 @@ jobs:
             # not a looser bound that would let a non-compliant response
             # through longer than what we actually asked for.
             summary=$(jq -r '.summary // ""' "$f" | tr '\n' ' ' | cut -c1-200)
+            # Strictly the boolean true; a string "true" or anything else is false.
+            caused_by_pr=$(jq -r 'if .caused_by_pr == true then "true" else "false" end' "$f")
+            # operationIds come from the PR's own spec: keep only identifier characters.
+            affected_ops=$(jq -r '[.affected_operation_ids[]? | strings | gsub("[^A-Za-z0-9_.-]"; "")] | map(select(length > 0)) | join(",")' "$f" | cut -c1-300)
+            # A PR-caused claim without the operations that support it is a malformed result.
+            if [ -z "$affected_ops" ]; then caused_by_pr=false; fi
           else
             category="unknown"
             confidence="low"
@@ -636,6 +699,13 @@ jobs:
             echo "category=${category}"
             echo "confidence=${confidence}"
             echo "summary=${summary}"
+            # Only a confident generator-gap can be pinned on the PR's own change.
+            if [ "$category" = "generator-gap" ] && [ "$confidence" = "high" ]; then
+              echo "caused_by_pr=${caused_by_pr}"
+            else
+              echo "caused_by_pr=false"
+            fi
+            echo "affected_operation_ids=${affected_ops}"
           } >> "$GITHUB_OUTPUT"
 
   # #480: when the generated hub suite fails BECAUSE of an unmapped
@@ -770,9 +840,135 @@ jobs:
           rm -f "$body_file"
           echo "issue_url=${issue_url}" >> "$GITHUB_OUTPUT"
 
+  # A generator gap the camunda-hub PR itself caused (classify's caused_by_pr) is a work item for
+  # THIS repo, but until now it lived only in Slack and a PR comment. Keep one tracking issue per
+  # camunda-hub PR, assigned to that PR's author (they know the change best), updated in place on
+  # later pushes and closed when a push clears the gap. hub-generator-gap-digest.yml nags daily
+  # once the camunda-hub PR has merged and the issue is still open. Deterministic: no agent, and
+  # the issue holds only sanitized operation ids plus our own classification, never the author's
+  # free text.
+  generator-gap-tracker:
+    name: Track a PR-caused generator gap as an issue
+    needs: [validate, run, classify]
+    if: always() && needs.validate.result == 'success' && needs.validate.outputs.pr_number != '' && needs.validate.outputs.is_draft != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      issue_url: ${{ steps.gap-issue.outputs.issue_url }}
+    steps:
+      - name: Mint qa-processes App token (api-test-generator issues)
+        id: gap-token
+        continue-on-error: true
+        uses: camunda/infra-global-github-actions/generate-github-app-token-from-vault-secrets@7a9c6f3e477321400802c88290068f88a7ed5684
+        with:
+          github-app-id-vault-key: GITHUB_APP_ID
+          github-app-id-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          github-app-private-key-vault-key: GITHUB_APP_SECRET
+          github-app-private-key-vault-path: secret/data/products/qa/ci/github.com/apps/camunda/qa-processes
+          vault-auth-method: approle
+          vault-auth-role-id: ${{ secrets.VAULT_ROLE_ID }}
+          vault-auth-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          owner: camunda
+          repositories: api-test-generator
+
+      - name: Open, update or close the generator-gap issue
+        id: gap-issue
+        if: steps.gap-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.gap-token.outputs.token }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_RESULT: ${{ needs.run.result }}
+          CAUSED: ${{ needs.classify.outputs.caused_by_pr }}
+          OPS: ${{ needs.classify.outputs.affected_operation_ids }}
+          SUMMARY: ${{ needs.classify.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          repo=camunda/api-test-generator
+          title="[hub-pr-check] Generator gap on camunda-hub#${PR_NUMBER}"
+          gh label create generator-gap --repo "$repo" --color D93F0B \
+            --description "camunda-hub PR changed the API in a way the generated hub suite does not handle yet" 2>/dev/null || true
+
+          existing=$(gh issue list --repo "$repo" --state open --label generator-gap \
+            --search "in:title \"${title}\"" --json number,title \
+            --jq "[.[] | select(.title == \"${title}\") | .number] | first // empty")
+
+          # Open only on a confident, PR-caused gap. Close only on a GREEN run: caused_by_pr is false
+          # for every low-confidence or unknown classification too, so a later failed run that is
+          # merely uncertain does not show the tracked operations are fine. Anything else leaves
+          # the issue as it is.
+          if [ "$CAUSED" = "true" ]; then
+            mode=open
+          elif [ "$RUN_RESULT" = "success" ]; then
+            mode=close
+          else
+            mode=keep
+          fi
+          echo "mode=${mode} existing=${existing:-none}"
+
+          if [ "$mode" = "close" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --repo "$repo" \
+                --comment "No longer a generator gap as of camunda-hub#${PR_NUMBER}@${SHA:0:12} (run: ${RUN_URL})." >/dev/null
+            fi
+            echo "issue_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$mode" = "keep" ]; then
+            echo "issue_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Untrusted-derived text: identifier characters only, no mentions, markup or backticks.
+          clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
+          body_file="$(mktemp)"
+          {
+            echo "camunda/camunda-hub#${PR_NUMBER} changes the API in a way the generated hub suite cannot handle yet, so the \`api-test-generator/hub-suite\` check cannot validate it."
+            echo
+            echo "**Operation(s):** \`$(clean "$OPS" 300)\`"
+            echo
+            echo "**Classifier:** $(clean "$SUMMARY" 200)"
+            echo
+            echo "camunda-hub PR: https://github.com/camunda/camunda-hub/pull/${PR_NUMBER}"
+            echo "Latest run: ${RUN_URL}"
+            echo
+            echo "### What to do"
+            echo
+            echo "Update the generator so the operation(s) above get correct generated tests (see \`docs/hub-pr-check-cookbook.md\`). It is assigned to the author of the camunda-hub PR, who knows the change best; ask in #camunda-hub-pr-e2e-results if you need help."
+            echo
+            echo "Once camunda-hub#${PR_NUMBER} merges, the nightly will see the same gap on \`main\` and a daily digest will keep listing this issue until it is closed."
+            echo
+            echo "🤖 Opened/updated automatically by \`hub-pr-check.yml\`. Closes itself on a later green run of the camunda-hub PR."
+          } > "$body_file"
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$repo" --body-file "$body_file" --add-label generator-gap --add-label hub >/dev/null
+            number="$existing"
+            echo "Updated generator-gap issue #${number}."
+          else
+            url=$(gh issue create --repo "$repo" --title "$title" --body-file "$body_file" \
+              --label generator-gap --label hub)
+            number="${url##*/}"
+            echo "Opened ${url}"
+          fi
+
+          # Assign the camunda-hub PR author, once and only if nobody is assigned yet, so a manual
+          # reassignment sticks. GitHub rejects a user without access to this repo: warn, do not fail.
+          if [ -n "$PR_AUTHOR" ]; then
+            assigned=$(gh issue view "$number" --repo "$repo" --json assignees --jq '.assignees | length')
+            if [ "$assigned" = "0" ]; then
+              gh issue edit "$number" --repo "$repo" --add-assignee "$PR_AUTHOR" >/dev/null \
+                || echo "::warning::Could not assign ${PR_AUTHOR} (no access to ${repo}?)"
+            fi
+          fi
+          rm -f "$body_file"
+          echo "issue_url=https://github.com/${repo}/issues/${number}" >> "$GITHUB_OUTPUT"
+
   # Report the run's pass/fail back onto the camunda-hub PR as a commit status.
   report:
-    needs: [validate, run, classify, coverage-gap-tracker]
+    needs: [validate, run, classify, coverage-gap-tracker, generator-gap-tracker]
     # Report whenever the SHA was valid (whatever the run result). If validate
     # failed there's no real commit to post a status on, so skip.
     if: always() && needs.validate.result == 'success'
@@ -875,6 +1071,103 @@ jobs:
             -f description="$description" >/dev/null
           echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
+      # Ported from camunda-hub's AlwaysGreen fix agent, whose shared-repo fix PRs must say the
+      # hub PR "must not merge first": here the roles are reversed. Only when the PR's OWN spec
+      # change is what the generator cannot yet handle (classify's caused_by_pr, high-confidence
+      # generator-gap) is the author told on their own PR; every other failure, including a gap
+      # on an operation the PR did not touch, goes to Slack only. The author is told with a link to the api-test-generator issue that has to be resolved
+      # first, instead of finding out from a red status. One comment per PR, edited in place so
+      # a dozen pushes leave one comment. Never fails the check: the qa-processes App may lack
+      # Issues/Pull requests: write on camunda-hub (unconfirmed), in which case it just warns.
+      - name: Tell the camunda-hub PR author the generator must be updated first
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.pr_number != '' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          steps.status-token.outputs.token != '' &&
+          needs.classify.outputs.category == 'generator-gap' &&
+          needs.classify.outputs.caused_by_pr == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.status-token.outputs.token }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CATEGORY: ${{ needs.classify.outputs.category }}
+          SUMMARY: ${{ needs.classify.outputs.summary }}
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url || needs.coverage-gap-tracker.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+          marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
+          # SUMMARY and UNMAPPED derive from the PR's own spec and the agent's reading of it:
+          # no mentions, no markup, no backticks that could close a code span.
+          clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
+          body_file="$(mktemp)"
+          {
+            echo "$marker"
+            echo "### Generated hub suite: update api-test-generator first"
+            echo
+            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` looks like the **test generator not yet handling this PR's API change**, not a Hub bug. [Run](${RUN_URL})."
+            if [ -n "$SUMMARY" ] && [ "$CATEGORY" = "generator-gap" ]; then
+              echo
+              echo "> $(clean "$SUMMARY" 200)"
+            fi
+            if [ -n "$UNMAPPED" ]; then
+              echo
+              echo "Operation(s) with no generated test: \`$(clean "$UNMAPPED" 300)\`"
+            fi
+            echo
+            if [ -n "$ISSUE_URL" ]; then
+              echo "api-test-generator must be updated first (tracked at ${ISSUE_URL}); until then this check cannot validate the affected operations."
+            else
+              echo "api-test-generator must be updated first; until then this check cannot validate the affected operations."
+            fi
+            echo
+            echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"
+          } > "$body_file"
+
+          existing=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${existing}" -F body=@"$body_file" >/dev/null
+            echo "Updated comment ${existing} on camunda-hub#${PR_NUMBER}."
+          else
+            gh api -X POST "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
+            echo "Commented on camunda-hub#${PR_NUMBER}."
+          fi
+
+      # The sticky comment above is only ever rewritten by a run that still qualifies. When a later
+      # push goes green, the old "update api-test-generator first" note would otherwise stay on the PR
+      # saying something the latest status no longer supports. Only a green run counts as proof (a
+      # failed run that is merely classified differently proves nothing about the earlier gap).
+      - name: Mark a stale generator-gap comment as resolved
+        if: >-
+          always() && needs.run.result == 'success' &&
+          needs.validate.outputs.pr_number != '' &&
+          steps.status-token.outputs.token != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.status-token.outputs.token }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
+          id=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
+          [ -n "$id" ] || { echo "No sticky comment to resolve."; exit 0; }
+          body_file="$(mktemp)"
+          {
+            echo "$marker"
+            echo "### Generated hub suite: resolved"
+            echo
+            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier note that api-test-generator had to be updated first no longer applies. [Run](${RUN_URL})."
+          } > "$body_file"
+          gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
+          echo "Marked comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
+
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
       # regression may have been introduced" framing verbatim: that alert
@@ -920,11 +1213,16 @@ jobs:
           # one, e.g. an unprovisioned App token, or there's nothing to link
           # because UNMAPPED is empty).
           ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
+          # The generator-gap issue (a PR-caused gap), assigned to the camunda-hub PR author.
+          GAP_ISSUE_URL: ${{ needs.generator-gap-tracker.outputs.issue_url }}
           # #480 — see "Report status..." above. Whenever COVERAGE_GAP_ONLY
           # is true, that run gets reported as "success" on the camunda-hub
           # PR, not "failure" — the headline here must not contradict that
           # by shouting "Failed" for something we just decided isn't one.
           COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
+          # Identity of "this same failure on this PR" (failing specs + unmapped ops). Empty if
+          # classify was skipped or the evidence step failed.
+          FINGERPRINT: ${{ needs.classify.outputs.fingerprint }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
@@ -1028,6 +1326,13 @@ jobs:
             fi
           fi
 
+          # A generator gap the camunda-hub PR itself caused has its own issue, assigned to the
+          # PR's author; the URL is built by our workflow from a validated number, never from
+          # the PR's text.
+          if [ -n "$GAP_ISSUE_URL" ]; then
+            verdict=$(printf '%s\n:bookmark_tabs: Generator fix tracked at %s (assigned to the PR author)' "$verdict" "$GAP_ISSUE_URL")
+          fi
+
           # Built via printf %s placeholders, not a literal multi-line
           # string — this run: block is YAML-indented, and a bash string
           # spanning literal source lines would bake that indentation into
@@ -1054,6 +1359,18 @@ jobs:
             source_line=$(printf 'camunda/camunda-hub @ %s (PR number unavailable)' "$sha_code")
           fi
 
+          # One Slack reply per (PR, failure). The same failure on a later push edits that reply
+          # in place and does not page again; a different failure gets a new reply and does.
+          # Startup and pre-suite failures have no failing specs, so their identity is the category.
+          # For a suite failure with no fingerprint (the evidence step failed) sameness cannot be
+          # established, so fall back to the commit: every push then gets its own reply instead of
+          # silently editing an unrelated one.
+          case "$CATEGORY" in
+            startup | presuite) fp="none-${CATEGORY}" ;;
+            *) fp="${FINGERPRINT:-sha-${SHA:0:12}}" ;;
+          esac
+          echo "marker=hub-pr:${PR_NUMBER:-${SHA:0:12}}:fp:${fp}" >> "$GITHUB_OUTPUT"
+
           text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s\n\n%s\n\n%s please take a look.' \
             "$headline" "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
 
@@ -1079,22 +1396,36 @@ jobs:
           vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
-      # toJSON() properly encodes the text (quotes/newlines) rather than
-      # manual \n concatenation — necessary now that the message can embed
-      # agent-produced free text (SUMMARY), which manual string-building
-      # can't safely guarantee is JSON-clean.
+      - name: Setup Node.js 22 (for the Slack thread script)
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Threaded, not a fresh top-level message per run (ported from camunda-hub's AlwaysGreen
+      # slack_thread.py): one parent per day, one reply per (PR, failure fingerprint), edited in
+      # place on re-runs. A single PR can trigger a dozen+ runs (#514). The script never fails
+      # the job -- a Slack outage must not turn the check red -- and falls back to a plain post
+      # when the bot cannot resolve the channel name to an id.
       - name: Notify Slack (generated hub suite failed on camunda-hub PR)
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
-        uses: slackapi/slack-github-action@v2
-        with:
-          method: chat.postMessage
-          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
-          payload: |
-            {
-              "channel": "#camunda-hub-pr-e2e-results",
-              "text": ${{ toJSON(steps.msg.outputs.text) }}
-            }
+        env:
+          SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          ALERT_TEXT: ${{ steps.msg.outputs.text }}
+          ALERT_MARKER: ${{ steps.msg.outputs.marker }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ALERT_TEXT" > "${RUNNER_TEMP}/slack-alert.txt"
+          node scripts/triage/slack-thread.ts \
+            --channel "#camunda-hub-pr-e2e-results" \
+            --date "$(date -u +%Y-%m-%d)" \
+            --marker "$ALERT_MARKER" \
+            --text-file "${RUNNER_TEMP}/slack-alert.txt"
