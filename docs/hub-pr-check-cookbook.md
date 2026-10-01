@@ -52,8 +52,7 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 
 When the generator gap is caused by the PR's own spec change, an issue
 `[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo and assigned to the
-camunda-hub PR's author. It is edited in place on later pushes and closes itself when a push clears
-the gap.
+camunda-hub PR's author. It is edited in place on later pushes and closes itself on a green run.
 
 Slack is one thread per day with one reply per (PR, failure fingerprint). The same failure on a
 later push edits its reply in place and does not page again; a different failure gets a new reply.
@@ -66,7 +65,8 @@ later push edits its reply in place and does not page again; a different failure
    `pw-rbac.json` (+ `.junit.xml`, HTML reports) and `pw-*.stderr.log`. A directory with only logs
    means Playwright died before writing a report: look at the stderr log, not at the PR.
 3. **Find the failing tests.** Playwright nests `suites[].suites[].specs[]`. A spec with
-   `ok: false` failed every attempt. The negative suite attaches `request.json` / `response.json`
+   `ok: false` ended in an unexpected outcome; its per-attempt `results[].status` shows whether any
+   attempt passed (a mix is flakiness evidence, all-failed is deterministic). The negative suite attaches `request.json` / `response.json`
    inline in the JSON report: that exchange is the real evidence.
 4. **Resolve the operation in the spec.** The PR's spec is `restapi/public-api/src/main/resources/
    openapi/v2` in camunda-hub. Diff it against the PR's base (not `main`: camunda-hub stacks work).
@@ -123,6 +123,7 @@ To re-run in CI without a new push, dispatch `trigger-api-test-generator.yml` in
 - **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays
   at 07:00 UTC, listing issues whose camunda-hub PR has merged and whose issue is still open,
   oldest merge first. Silent when there is nothing overdue.
-- **Cleanup:** an issue closes by itself when a later push to the camunda-hub PR clears the gap, or
-  when that PR is closed without merging.
+- **Cleanup:** an issue closes by itself on a green run, or when that PR is closed without merging.
+  The PR comment is marked resolved on a green run too. A failed run that is merely classified
+  differently proves nothing about the earlier gap, so it changes neither.
 - **Try it without posting:** run the digest workflow by hand (it is a dry run by default).

@@ -875,7 +875,6 @@ jobs:
           PR_AUTHOR: ${{ needs.validate.outputs.pr_author }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_RESULT: ${{ needs.run.result }}
-          CLASSIFY_RESULT: ${{ needs.classify.result }}
           CAUSED: ${{ needs.classify.outputs.caused_by_pr }}
           OPS: ${{ needs.classify.outputs.affected_operation_ids }}
           SUMMARY: ${{ needs.classify.outputs.summary }}
@@ -891,12 +890,13 @@ jobs:
             --search "in:title \"${title}\"" --json number,title \
             --jq "[.[] | select(.title == \"${title}\") | .number] | first // empty")
 
-          # Open only on a confident, PR-caused gap. Close only when this run PROVES it is gone:
-          # a green run, or a classified failure that is not PR-caused. Anything unproven (classify
-          # skipped or crashed, Hub failed to start) leaves the issue as it is.
+          # Open only on a confident, PR-caused gap. Close only on a GREEN run: caused_by_pr is false
+          # for every low-confidence or unknown classification too, so a later failed run that is
+          # merely uncertain does not show the tracked operations are fine. Anything else leaves
+          # the issue as it is.
           if [ "$CAUSED" = "true" ]; then
             mode=open
-          elif [ "$RUN_RESULT" = "success" ] || { [ "$CLASSIFY_RESULT" = "success" ] && [ "$CAUSED" != "true" ]; }; then
+          elif [ "$RUN_RESULT" = "success" ]; then
             mode=close
           else
             mode=keep
@@ -935,7 +935,7 @@ jobs:
             echo
             echo "Once camunda-hub#${PR_NUMBER} merges, the nightly will see the same gap on \`main\` and a daily digest will keep listing this issue until it is closed."
             echo
-            echo "🤖 Opened/updated automatically by \`hub-pr-check.yml\`. Closes itself if a later push to the camunda-hub PR clears the gap."
+            echo "🤖 Opened/updated automatically by \`hub-pr-check.yml\`. Closes itself on a later green run of the camunda-hub PR."
           } > "$body_file"
 
           if [ -n "$existing" ]; then
@@ -1132,6 +1132,37 @@ jobs:
             echo "Commented on camunda-hub#${PR_NUMBER}."
           fi
 
+      # The sticky comment above is only ever rewritten by a run that still qualifies. When a later
+      # push goes green, the old "update api-test-generator first" note would otherwise stay on the PR
+      # saying something the latest status no longer supports. Only a green run counts as proof (a
+      # failed run that is merely classified differently proves nothing about the earlier gap).
+      - name: Mark a stale generator-gap comment as resolved
+        if: >-
+          always() && needs.run.result == 'success' &&
+          needs.validate.outputs.pr_number != '' &&
+          steps.status-token.outputs.token != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.status-token.outputs.token }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
+          id=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
+          [ -n "$id" ] || { echo "No sticky comment to resolve."; exit 0; }
+          body_file="$(mktemp)"
+          {
+            echo "$marker"
+            echo "### Generated hub suite: resolved"
+            echo
+            echo "The latest \`api-test-generator/hub-suite\` run on \`${SHA:0:12}\` passed, so the earlier note that api-test-generator had to be updated first no longer applies. [Run](${RUN_URL})."
+          } > "$body_file"
+          gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${id}" -F body=@"$body_file" >/dev/null
+          echo "Marked comment ${id} on camunda-hub#${PR_NUMBER} as resolved."
+
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
       # regression may have been introduced" framing verbatim: that alert
@@ -1325,10 +1356,14 @@ jobs:
 
           # One Slack reply per (PR, failure). The same failure on a later push edits that reply
           # in place and does not page again; a different failure gets a new reply and does.
-          # Startup and pre-suite failures have no failing specs to fingerprint, so their state
-          # is part of the identity instead.
-          fp="${FINGERPRINT:-none}"
-          case "$CATEGORY" in startup | presuite) fp="${fp}-${CATEGORY}" ;; esac
+          # Startup and pre-suite failures have no failing specs, so their identity is the category.
+          # For a suite failure with no fingerprint (the evidence step failed) sameness cannot be
+          # established, so fall back to the commit: every push then gets its own reply instead of
+          # silently editing an unrelated one.
+          case "$CATEGORY" in
+            startup | presuite) fp="none-${CATEGORY}" ;;
+            *) fp="${FINGERPRINT:-sha-${SHA:0:12}}" ;;
+          esac
           echo "marker=hub-pr:${PR_NUMBER:-${SHA:0:12}}:fp:${fp}" >> "$GITHUB_OUTPUT"
 
           text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s\n\n%s\n\n%s please take a look.' \
