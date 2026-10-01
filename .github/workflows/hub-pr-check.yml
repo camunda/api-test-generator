@@ -920,6 +920,70 @@ jobs:
             -f description="$description" >/dev/null
           echo "Reported '${state}' (${description}) on camunda-hub@${SHA:0:12}"
 
+      # Ported from camunda-hub's AlwaysGreen fix agent, whose shared-repo fix PRs must say the
+      # hub PR "must not merge first": here the roles are reversed. When the failure is the
+      # generator not yet modelling this PR's endpoint shape (not a hub bug), the author is told
+      # on their own PR, with a link to the api-test-generator issue that has to be resolved
+      # first, instead of finding out from a red status. One comment per PR, edited in place so
+      # a dozen pushes leave one comment. Never fails the check: the qa-processes App may lack
+      # Issues/Pull requests: write on camunda-hub (unconfirmed), in which case it just warns.
+      - name: Tell the camunda-hub PR author the generator must be updated first
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.pr_number != '' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          steps.status-token.outputs.token != '' &&
+          (needs.classify.outputs.category == 'generator-gap' || needs.run.outputs.unmapped_operations != '')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.status-token.outputs.token }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CATEGORY: ${{ needs.classify.outputs.category }}
+          SUMMARY: ${{ needs.classify.outputs.summary }}
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          ISSUE_URL: ${{ needs.coverage-gap-tracker.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+          marker='<!-- api-test-generator:hub-pr-check:generator-gap -->'
+          # SUMMARY and UNMAPPED derive from the PR's own spec and the agent's reading of it:
+          # no mentions, no markup, no backticks that could close a code span.
+          clean() { printf '%s' "$1" | tr '\n' ' ' | tr -d '`@<>' | cut -c"1-$2"; }
+          body_file="$(mktemp)"
+          {
+            echo "$marker"
+            echo "### Generated hub suite: update api-test-generator first"
+            echo
+            echo "The \`api-test-generator/hub-suite\` check on \`${SHA:0:12}\` looks like the **test generator not yet handling this PR's API change**, not a Hub bug. [Run](${RUN_URL})."
+            if [ -n "$SUMMARY" ] && [ "$CATEGORY" = "generator-gap" ]; then
+              echo
+              echo "> $(clean "$SUMMARY" 200)"
+            fi
+            if [ -n "$UNMAPPED" ]; then
+              echo
+              echo "Operation(s) with no generated test: \`$(clean "$UNMAPPED" 300)\`"
+            fi
+            echo
+            if [ -n "$ISSUE_URL" ]; then
+              echo "A change in api-test-generator must land first. Tracked at ${ISSUE_URL}; this PR does not need to wait on it to merge, but its check result is not meaningful for the affected operations until then."
+            else
+              echo "A change in api-test-generator must land before this check is meaningful for the affected operations."
+            fi
+            echo
+            echo "_Posted automatically by api-test-generator's Hub PR check; edited in place on later pushes._"
+          } > "$body_file"
+
+          existing=$(gh api "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"${marker}\")) | .id] | first // empty")
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/camunda/camunda-hub/issues/comments/${existing}" -F body=@"$body_file" >/dev/null
+            echo "Updated comment ${existing} on camunda-hub#${PR_NUMBER}."
+          else
+            gh api -X POST "repos/camunda/camunda-hub/issues/${PR_NUMBER}/comments" -F body=@"$body_file" >/dev/null
+            echo "Commented on camunda-hub#${PR_NUMBER}."
+          fi
+
       # Slack heads-up, styled after the AlwaysGreen SaaS-E2E failure alert
       # (camunda/c8-cross-component-e2e-tests) but NOT copying its "a
       # regression may have been introduced" framing verbatim: that alert
