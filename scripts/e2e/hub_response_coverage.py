@@ -274,7 +274,7 @@ def slack(s, prev, args):
     return '\n'.join(lines) + '\n'
 
 
-MARK = {'ok': '✅', 'gap': '❌', 'hold': '⏸️', 'na': '➖'}
+MARK = {'ok': '✅', 'gap': '❌', 'hold': '⏸️', 'na': 'n/a'}
 
 
 def matrix(s, rows):
@@ -285,7 +285,7 @@ def matrix(s, rows):
         'Responses tested, out of those the spec lists: '
         + ' · '.join(f'{NAMES[b]} {c[b][0]} of {c[b][1]}' for b in BUCKETS) + '.', '',
         '✅ tested · ❌ the spec lists it but no test covers it · ⏸️ known and tracked elsewhere (suppressed or excluded) · '
-        '➖ the spec does not list it for this endpoint', '',
+        'n/a the spec does not list this response for the endpoint, so there is nothing to test', '',
         'The **Missing** column lists the response codes that are untested for that endpoint. '
         '**Response checked** is whether a test validates the success response against its schema. '
         '**Optional fields** is how many optional request fields a success test sends.', '',
@@ -294,7 +294,7 @@ def matrix(s, rows):
     ]
     for r in rows:
         cl = r['cells']
-        opt = '➖' if not r['optionalTotal'] else f'{r["optionalSent"]} of {r["optionalTotal"]}'
+        opt = 'n/a' if not r['optionalTotal'] else f'{r["optionalSent"]} of {r["optionalTotal"]}'
         missing = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if cl.get(b) == 'gap') or '—'
         out.append(f'| `{r["operationId"]}` | {r["method"]} {r["path"]} | '
                    + ' | '.join([MARK[cl.get('2xx', 'na')], MARK[r['shape']], opt]
