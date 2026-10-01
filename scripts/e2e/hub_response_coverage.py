@@ -83,9 +83,47 @@ def load_spec_operations(spec):
 
 
 # ----------------------------------------------------------------- positive ----
+# The emitter writes JSON.stringify output (double quotes, 4-space indent, one-line evidence
+# objects) and a formatter pass rewrites it afterwards. Both shapes must parse, so quotes can be
+# either kind and nothing here depends on indentation or line breaks.
+Q = r'''["']'''
 EVIDENCE_RE = re.compile(
-    r"operationId: '(\w+)',\s*method: '\w+',\s*url,\s*headers,(?:\s*body: (\w+),)?\s*expectedStatus: (\d+)", re.S)
-VALIDATE_RE = re.compile(r"path: '([^']+)',\s*method: '(\w+)',\s*status: '(\d+)'", re.S)
+    rf'operationId:\s*{Q}(\w+){Q},\s*method:\s*{Q}\w+{Q},\s*url,\s*headers,(?:\s*body:\s*(\w+),)?\s*expectedStatus:\s*(\d+)',
+    re.S)
+VALIDATE_RE = re.compile(
+    rf'path:\s*{Q}([^\'"]+){Q},\s*method:\s*{Q}(\w+){Q},\s*status:\s*{Q}(\d+){Q}', re.S)
+KEY_RE = re.compile(r'''(?:^|,)\s*(?:(\w+)|["'](\w+)["'])\s*:''')
+
+
+def top_level_keys(src, start):
+    """Keys of the object literal whose '{' is at src[start]; nested values and strings are skipped."""
+    depth, i, flat = 0, start, []
+    while i < len(src):
+        ch = src[i]
+        if ch in '"\'':
+            j = i + 1
+            while j < len(src) and src[j] != ch:
+                j += 2 if src[j] == '\\' else 1
+            if depth == 1:
+                # A string is a key only if a ':' follows it; as a value, mask it so commas or
+                # colons inside the text cannot be read as keys.
+                is_key = re.match(r'\s*:', src[j + 1:j + 20]) is not None
+                flat.append(src[i:j + 1] if is_key else 'S')
+            i = j + 1
+            continue
+        if ch in '{[(':
+            depth += 1
+            if depth == 1:
+                i += 1
+                continue
+        elif ch in '}])':
+            depth -= 1
+            if depth == 0:
+                break
+        if depth == 1:
+            flat.append(ch)
+        i += 1
+    return {a or b for a, b in KEY_RE.findall(''.join(flat))}
 
 
 def scan_positive(pw_dir, ops):
@@ -96,14 +134,18 @@ def scan_positive(pw_dir, ops):
     files = glob.glob(f'{pw_dir}/*.spec.ts') + glob.glob(f'{pw_dir}/templates/*/*.spec.ts')
     for f in files:
         src = open(f, encoding='utf-8').read()
-        for op_id, body_var, status in EVIDENCE_RE.findall(src):
+        for m in EVIDENCE_RE.finditer(src):
+            op_id, body_var, status = m.group(1), m.group(2), m.group(3)
             if op_id not in ops:
                 continue
             asserted[op_id].add(int(status))
-            if body_var:
-                m = re.search(r'const %s(?::[^=]+)? = \{(.*?)\n\s{6}\};' % re.escape(body_var), src, re.S)
-                if m:
-                    sent[op_id] |= set(re.findall(r'^\s{8}(\w+):', m.group(1), re.M))
+            if not body_var or body_var == 'undefined':
+                continue
+            # The same name (body1, body2...) is re-declared per test, so use the nearest
+            # declaration before this assertion, not the first one in the file.
+            decls = list(re.finditer(rf'const {re.escape(body_var)}\b[^=\n]*=\s*(\{{)', src[:m.start()]))
+            if decls:
+                sent[op_id] |= top_level_keys(src, decls[-1].start(1))
         for path, method, status in VALIDATE_RE.findall(src):
             op_id = path_to_op.get((method.upper(), path))
             if op_id:
@@ -113,6 +155,7 @@ def scan_positive(pw_dir, ops):
 
 # ----------------------------------------------------------------- negative ----
 CALL_RE = re.compile(r'assertResponseStatus\(\s*testInfo,\s*res,\s*(\d+),\s*\{([^{}]*)\}', re.S)
+OPERATION_ID_RE = re.compile(rf'operationId:\s*{Q}(\w+){Q}')
 
 
 def scan_negative(rv_dir, ops):
@@ -122,7 +165,7 @@ def scan_negative(rv_dir, ops):
         for f in glob.glob(f'{rv_dir}/{profile}/*-validation-api-tests.spec.ts'):
             src = open(f, encoding='utf-8').read()
             for status, inner in CALL_RE.findall(src):
-                m = re.search(r"operationId:\s*'(\w+)'", inner)
+                m = OPERATION_ID_RE.search(inner)
                 if not m or m.group(1) not in ops:
                     continue
                 asserted[m.group(1)].add(int(status))
