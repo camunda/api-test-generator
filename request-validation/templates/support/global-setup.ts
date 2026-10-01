@@ -265,7 +265,10 @@ async function recordCreatedInstancesForCleanup(processInstanceKeys: readonly st
   try {
     const raw = await fs.readFile(statePath, 'utf8');
     const parsed: unknown = JSON.parse(raw);
-    if (isStringArray(parsed)) retainedKeys = parsed;
+    if (!isStringArray(parsed)) {
+      throw new Error(`cleanup state file has an unexpected shape (not a string array): ${raw.slice(0, 300)}`);
+    }
+    retainedKeys = parsed;
   } catch (err) {
     // Only ENOENT means there's genuinely nothing to merge (no prior run
     // ever recorded anything here). Anything else — EACCES, a transient

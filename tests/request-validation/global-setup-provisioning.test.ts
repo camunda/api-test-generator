@@ -379,6 +379,48 @@ describe('provisionRuntimeKeyFixtures', () => {
     );
   });
 
+  it('throws and cancels both instances when the existing cleanup record is valid JSON but the wrong shape, rather than treating it as empty', async () => {
+    // A valid-JSON-but-wrong-shape record (e.g. `{}` from an unrelated bug,
+    // or a half-applied schema change) must be rejected the same way a
+    // genuinely corrupted one is — isStringArray() returning false is not
+    // an error by itself, so this has to be checked and thrown explicitly,
+    // not inferred from a caught exception (#614's review discussion).
+    // Silently treating it as "nothing retained" would let the write below
+    // permanently overwrite whatever instances it actually recorded.
+    readFileMock.mockImplementation(async (path) => {
+      if (String(path).endsWith('.bpmn')) return Buffer.from('<bpmn/>');
+      if (String(path).endsWith('runtime-key-fixtures-cleanup.json')) {
+        return JSON.stringify({ not: 'a string array' });
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    const cancelledInstanceKeys: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v2/deployments')) return deploymentResponse();
+        if (url.endsWith('/v2/process-instances')) {
+          const body = parseRequestBody(init);
+          const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
+          return jsonResponse({ processInstanceKey: key });
+        }
+        const cancellationMatch = /\/v2\/process-instances\/([^/]+)\/cancellation$/.exec(url);
+        if (cancellationMatch) {
+          cancelledInstanceKeys.push(cancellationMatch[1]);
+          return jsonResponse({});
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await expect(provisionRuntimeKeyFixtures()).rejects.toThrow(/unexpected shape/);
+
+    expect(cancelledInstanceKeys.sort()).toEqual(['PI-SERVICE', 'PI-USERTASK']);
+    expect(writeFileMock).not.toHaveBeenCalled();
+  });
+
   it('throws and cancels both instances when the existing cleanup record exists but fails to read for a reason other than ENOENT, rather than silently overwriting it', async () => {
     // A non-ENOENT merge-read failure (EACCES, a transient I/O error, a
     // corrupted file) must NOT be treated as "nothing to merge" — doing so
