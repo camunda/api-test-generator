@@ -294,6 +294,51 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
     expect(generateNotFoundFakeId(ops, { declared: true })).toHaveLength(0);
   });
 
+  it('skips an operation whose required body has no buildable baseline (oneOf, array or scalar root), in eligibility and in generation alike', () => {
+    const roots: SchemaFragment[] = [
+      { oneOf: [{ type: 'object' }, { type: 'object' }] },
+      { type: 'array', items: { type: 'string' } },
+      { type: 'string' },
+    ];
+    for (const requestBodySchema of roots) {
+      const o = op({
+        ...keyed,
+        operationId: 'oddBody',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema,
+      });
+      expect(isNotFoundEligible(o, { declared: true })).toBe(false);
+      expect(generateNotFoundFakeId([o], { declared: true })).toHaveLength(0);
+    }
+  });
+
+  it('eligibility and generation agree for every operation shape in declared mode', () => {
+    const ops = [
+      op({ ...keyed, operationId: 'a', method: 'DELETE' }),
+      op({
+        ...keyed,
+        operationId: 'b',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema: jsonBody,
+      }),
+      op({ ...keyed, operationId: 'c', method: 'POST', successIsCollection: true }),
+      op({
+        ...keyed,
+        operationId: 'd',
+        method: 'PUT',
+        bodyRequired: true,
+        requestBodySchema: { type: 'string' },
+      }),
+      op({ ...keyed, operationId: 'e', method: 'DELETE', responseCodes: ['204'] }),
+    ];
+    for (const o of ops) {
+      const generated = generateNotFoundFakeId([o], { declared: true }).length === 1;
+      expect(isNotFoundEligible(o, { declared: true }), o.operationId).toBe(generated);
+    }
+  });
+
   it('renders the body and the 404 assertion for a mutating operation', () => {
     const [s] = generateNotFoundFakeId(
       [
