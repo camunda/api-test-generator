@@ -125,7 +125,8 @@ jobs:
         id: slack
         # Only a scheduled run or a non-dry dispatch may post; anything else (a dry run,
         # a test trigger) stays out of the channel.
-        if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+        # TEMPORARY (PR #629): also post from the test push trigger. Remove with the push trigger.
+        if: always() && (github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
         continue-on-error: true
         uses: ./.github/actions/slack-token
         with:
@@ -143,6 +144,10 @@ jobs:
             text="$(cat coverage-report/slack.txt)"
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          # TEMPORARY (PR #629): mark messages from the test push trigger.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            text=":test_tube: _Test run for api-test-generator PR #629 (not the scheduled report)._"$'\n'"$text"
           fi
           {
             echo 'text<<SLACK_MESSAGE_EOF'
