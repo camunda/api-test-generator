@@ -750,6 +750,25 @@ never auto-acted on — there's nothing mechanical to remove for them. Silent
 (no Slack post) when there's nothing to report, matching spec-bump-check's
 non-spammy convention.
 
+The **hub response coverage report**
+([hub-response-coverage.yml](.github/workflows/hub-response-coverage.yml)) is a
+scheduled (Monday 05:00 UTC) + `workflow_dispatch` job that posts a weekly summary to
+`#camunda-hub-nightly-test-results`. It bundles camunda-hub's latest `main` (unpinned,
+like the nightly), generates both suites, and runs
+[`scripts/e2e/hub_response_coverage.py`](scripts/e2e/hub_response_coverage.py), which
+compares every response code the spec documents (2xx/400/401/403/404/409; 500 is
+ignored) against the status codes the generated suites assert, and also counts the
+optional request fields a success-path test sends and the success bodies that are
+schema-validated. This is a different axis from `npm run coverage:report` (which maps
+operations to generated specs). It is static analysis of generated output, needs no
+running Hub, and the script exits non-zero if the generated test format no longer
+parses (so a format change fails the run instead of reporting zeros). The per-operation
+matrix is in the run summary and the `hub-coverage-report` artifact; the previous run's
+`summary.json` supplies the week-over-week delta. A `workflow_dispatch` run defaults to
+`dry_run` (nothing posted). Run it locally after generating with
+`CONFIG=camunda-hub`: `python3 scripts/e2e/hub_response_coverage.py --out /tmp/cov`.
+The gaps it reports are tracked in epic #618.
+
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
 (`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch

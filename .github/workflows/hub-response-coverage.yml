@@ -1,0 +1,159 @@
+# Weekly response-coverage report for the generated camunda-hub suites.
+#
+# For every operation in the latest camunda-hub spec, compares the response codes the
+# spec documents (2xx/400/401/403/404/409) against the status codes the generated
+# suites assert, and posts the totals to #camunda-hub-nightly-test-results with the
+# change since the previous report. Static analysis of generated output — it does not
+# need a running Hub and cannot fail on a flaky backend. The full per-operation matrix
+# is in the run summary and the `hub-coverage-report` artifact.
+#
+# Deterministic: scripts/e2e/hub_response_coverage.py does the analysis; no agent.
+# Same clone/Vault/Slack plumbing as hub-known-issue-reenable-check.yml. The tracking
+# epic for closing the gaps is camunda/api-test-generator#618.
+name: Hub response coverage
+
+on:
+  schedule:
+    # Monday 05:00 UTC — after the 02:00 nightly, 03:00 spec-bump, 04:00 re-enable check.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      hub_ref:
+        description: camunda-hub ref to audit (branch or SHA).
+        default: main
+      dry_run:
+        description: Print the report and the Slack message, post nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read # download the previous run's summary for the week-over-week delta
+  id-token: write # OIDC → Vault (camunda-hub clone token, Slack token)
+
+concurrency:
+  group: hub-response-coverage
+  cancel-in-progress: false
+
+env:
+  TRACKING_URL: https://github.com/camunda/api-test-generator/issues/618
+
+jobs:
+  report:
+    name: Audit documented vs asserted responses
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Mint camunda-hub clone token
+        id: hub-clone-token
+        uses: ./.github/actions/hub-clone-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      # The audit measures what the nightly would run, so it audits camunda-hub's
+      # latest main by default (the nightly is unpinned too), not the spec pin.
+      - name: Clone camunda-hub (sibling ../camunda-hub)
+        uses: ./.github/actions/clone-hub-sibling
+        with:
+          token: ${{ steps.hub-clone-token.outputs.token }}
+          ref: ${{ inputs.hub_ref || 'main' }}
+
+      - name: Bundle spec and generate both suites
+        run: |
+          CONFIG=camunda-hub npm run fetch-spec
+          CONFIG=camunda-hub npm run testsuite:generate
+          CONFIG=camunda-hub npm run generate:request-validation
+
+      - name: Resolve audited camunda-hub commit
+        id: hub-sha
+        run: echo "sha=$(git -C ../camunda-hub rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Best effort: the first run (or an expired artifact) simply has no baseline.
+      - name: Fetch previous report
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev_id=$(gh run list --workflow hub-response-coverage.yml --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$prev_id" ]; then
+            gh run download "$prev_id" --name hub-coverage-report --dir previous
+          fi
+
+      - name: Run the audit
+        run: |
+          python3 scripts/e2e/hub_response_coverage.py \
+            --out coverage-report \
+            --previous previous/summary.json \
+            --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --tracking-url "$TRACKING_URL"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: hub-coverage-report
+          path: coverage-report/
+          retention-days: 90
+
+      - name: Write job summary
+        run: cat coverage-report/matrix.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch Slack bot token from Vault
+        id: slack
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Build Slack message
+        id: message
+        if: always() && steps.slack.outputs.SLACK_BOT_TOKEN != ''
+        run: |
+          set -euo pipefail
+          if [ "${{ job.status }}" = "success" ]; then
+            text="$(cat coverage-report/slack.txt)"
+          else
+            text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          {
+            echo 'text<<SLACK_MESSAGE_EOF'
+            echo "$text"
+            echo 'SLACK_MESSAGE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack
+        if: always() && steps.message.outcome == 'success'
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "text": ${{ toJSON(steps.message.outputs.text) }},
+              "mrkdwn": true
+            }
