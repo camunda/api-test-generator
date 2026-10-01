@@ -16,9 +16,9 @@ first (CONFIG=camunda-hub). Static analysis: it reports what the tests assert, n
 whether they pass.
 
   hub_response_coverage.py --out DIR [--previous prev/summary.json]
-                           [--spec-ref SHA] [--run-url URL] [--tracking-url URL]
+                           [--spec-ref SHA] [--run-url URL] [--tracking-url URL] [--page-url URL]
 
-Writes DIR/summary.json, DIR/matrix.md and DIR/slack.txt. Exits 2 if the generated
+Writes DIR/summary.json, DIR/rows.json, DIR/matrix.md and DIR/slack.txt. Exits 2 if the generated
 output could not be parsed as expected (so a format change fails the run instead
 of reporting zeros).
 """
@@ -160,6 +160,10 @@ def build(args):
     suppressed = set(pos_cov['explicitlySuppressedOpIds'])
     excluded = {e['operationId'] for e in rv_cfg['excludeOperations'] if not e.get('scenarioKinds')}
     held = suppressed | excluded
+    scoped = collections.defaultdict(list)
+    for e in rv_cfg['excludeOperations']:
+        if e.get('scenarioKinds'):
+            scoped[e['operationId']] += e['scenarioKinds']
 
     rows, doc, got = [], collections.Counter(), collections.Counter()
     missing = collections.defaultdict(list)
@@ -187,6 +191,7 @@ def build(args):
         rows.append({
             'operationId': op_id, 'method': o['method'], 'path': o['path'], 'cells': cells,
             'shape': shape, 'optionalSent': sent, 'optionalTotal': len(o['optional']),
+            'notes': sorted(scoped[op_id]),
             'codeGap': any(v == 'gap' for b, v in cells.items() if b != '403'),
             'fullyAsserted': all(v == 'ok' for v in cells.values()),
         })
@@ -237,8 +242,10 @@ def slack(s, prev, args):
     if s['zeroTestOperations']:
         lines.append(':warning: Operations with no test at all: ' + ', '.join(f'`{o}`' for o in s['zeroTestOperations']))
     links = []
+    if args.page_url:
+        links.append(f'<{args.page_url}|Report page>')
     if args.run_url:
-        links.append(f'<{args.run_url}|Full matrix>')
+        links.append(f'<{args.run_url}|Run and matrix>')
     if args.tracking_url:
         links.append(f'<{args.tracking_url}|Tracking epic>')
     if links:
@@ -274,6 +281,7 @@ def main():
     ap.add_argument('--spec-ref', default='')
     ap.add_argument('--run-url', default='')
     ap.add_argument('--tracking-url', default='')
+    ap.add_argument('--page-url', default='')
     args = ap.parse_args()
 
     summary, rows = build(args)
@@ -285,6 +293,7 @@ def main():
             prev = None
     os.makedirs(args.out, exist_ok=True)
     json.dump(summary, open(f'{args.out}/summary.json', 'w'), indent=2)
+    json.dump(rows, open(f'{args.out}/rows.json', 'w'), indent=1)
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     print(open(f'{args.out}/slack.txt').read())

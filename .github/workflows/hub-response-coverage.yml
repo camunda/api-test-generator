@@ -16,6 +16,9 @@ on:
   schedule:
     # Monday 05:00 UTC — after the 02:00 nightly, 03:00 spec-bump, 04:00 re-enable check.
     - cron: '0 5 * * 1'
+  # TEMPORARY while testing PR #629: remove before merge.
+  push:
+    branches: [feat/hub-weekly-response-coverage]
   workflow_dispatch:
     inputs:
       hub_ref:
@@ -37,6 +40,8 @@ concurrency:
 
 env:
   TRACKING_URL: https://github.com/camunda/api-test-generator/issues/618
+  # Stable URL of the Claude page that the weekly routine republishes in place.
+  PAGE_URL: https://claude.ai/code/artifact/5163b3c7-d396-4561-b49d-168fafae0de6
 
 jobs:
   report:
@@ -105,7 +110,11 @@ jobs:
             --previous previous/summary.json \
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --tracking-url "$TRACKING_URL"
+            --tracking-url "$TRACKING_URL" \
+            --page-url "$PAGE_URL"
+
+      - name: Render report page
+        run: python3 scripts/e2e/hub_coverage_page.py --report coverage-report
 
       - name: Upload report
         uses: actions/upload-artifact@v7
