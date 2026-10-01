@@ -280,6 +280,7 @@ jobs:
       category: ${{ steps.parse.outputs.category }}
       confidence: ${{ steps.parse.outputs.confidence }}
       summary: ${{ steps.parse.outputs.summary }}
+      fingerprint: ${{ steps.evidence.outputs.fingerprint }}
     steps:
       - name: Checkout api-test-generator
         uses: actions/checkout@v6
@@ -319,10 +320,40 @@ jobs:
             echo "Report evidence present."
           fi
 
+      # Node 22 runs the evidence script directly (type stripping, no npm install) and is also
+      # what the Claude Code CLI below needs.
+      - name: Setup Node.js 22
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Ported from camunda-hub's AlwaysGreen triage (classify.py): whatever Playwright's own
+      # retry history settles is decided here, deterministically, and the agent only sees what
+      # it cannot. A run where nothing failed outright and a test passed on retry is flaky by
+      # definition -- asking a model to rediscover that costs an API call and can get it wrong.
+      # The same step fingerprints the failing set, so `report` can edit one Slack reply in
+      # place for a repeated failure on a PR instead of paging again on every push.
+      - name: Extract deterministic evidence from the reports
+        id: evidence
+        continue-on-error: true
+        env:
+          UNMAPPED: ${{ needs.run.outputs.unmapped_operations }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SHA: ${{ needs.validate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/triage/hub-pr-evidence.ts \
+            --reports test-results/e2e-camunda-hub \
+            --unmapped "$UNMAPPED" \
+            --pr "$PR_NUMBER" --sha "$SHA" \
+            --out "${GITHUB_WORKSPACE}/hub-pr-evidence.json"
+
       # Contents:Read only — same token type _hub-suite-run.yml itself already
       # uses to clone for generation, never a write-capable App token.
       - name: Mint camunda-hub clone token (read-only)
         id: hub-token
+        if: steps.evidence.outputs.decided != 'true'
         continue-on-error: true
         uses: ./.github/actions/hub-clone-token
         with:
@@ -415,6 +446,7 @@ jobs:
 
       - name: Fetch Anthropic key from Vault
         id: vault
+        if: steps.evidence.outputs.decided != 'true'
         continue-on-error: true
         uses: hashicorp/vault-action@v4
         with:
@@ -425,13 +457,6 @@ jobs:
           jwtGithubAudience: ${{ secrets.VAULT_JWT_AUDIENCE }}
           secrets: |
             secret/data/products/qa/ci/common CLAUDE_API_KEY | ANTHROPIC_API_KEY ;
-
-      - name: Setup Node.js 22 (for Claude Code CLI)
-        if: steps.vault.outputs.ANTHROPIC_API_KEY != ''
-        continue-on-error: true
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
 
       # Pinned version — same as triage-camunda-hub-nightly.yml. Bump intentionally.
       - name: Install Claude Code CLI
@@ -471,6 +496,9 @@ jobs:
           # needs to be handed to the agent directly rather than left for it
           # to infer from reports that won't mention it.
           UNMAPPED_OPERATIONS: ${{ needs.run.outputs.unmapped_operations }}
+          # Reports already parsed into per-spec attempt histories (see the evidence step).
+          # Absent if that step failed; the agent then falls back to the raw reports.
+          EVIDENCE_FILE: ${{ github.workspace }}/hub-pr-evidence.json
         run: |
           set -euo pipefail
           rm -f /tmp/hub-pr-classification.json
@@ -502,6 +530,10 @@ jobs:
           - Playwright/JUnit reports: ${REPORTS_DIR} (pw-positive.json, pw-secured.json,
             pw-rbac.json, junit + HTML reports with traces/screenshots for failing tests)
             — may be absent if the artifact upload/download itself failed; say so if so.
+          - Parsed evidence: ${EVIDENCE_FILE} -- every failing spec with its per-attempt
+            statuses (\`deterministic: true\` = no attempt passed) and cleaned error. Prefer
+            it to re-parsing the Playwright JSON; use the HTML report/traces only for
+            request/response detail. If the file is absent, parse the reports yourself.
           - OpenAPI spec AT THIS PR's SHA: ${SPEC_DIR}/*.yaml (may be absent if the
             camunda-hub clone step failed; treat as unavailable, don't guess).
           - Spec diff (this PR's sha vs its BASE branch, ${baseline}), OpenAPI dir
@@ -531,8 +563,8 @@ jobs:
              them yet. This is NOT a hub bug. Only fall through to the steps below
              if UNMAPPED_OPERATIONS is empty, OR the run has ADDITIONAL failing
              tests beyond just the unmapped ones (classify those the normal way).
-          1. Parse the reports and enumerate every failing test, with its request/
-             response evidence from the trace/HTML report.
+          1. Enumerate every failing test (from the parsed evidence, falling back to the
+             reports), with its request/response evidence from the trace/HTML report.
           2. Resolve each failing operationId in the OpenAPI spec at this PR's sha.
           3. Check the spec diff: is this operationId's definition NEW or CHANGED by
              this PR? If yes, and the failure looks like the generated test's
@@ -572,7 +604,10 @@ jobs:
              category and note it is already tracked in your summary.
           6. If Hub failed to boot, a suite produced no report, or the failure is
              clearly environmental -> category "infra".
-          7. If a test passed on a Playwright retry -> category "flaky".
+          7. A run whose only red tests passed on retry was already classified "flaky"
+             before you were started. If you are here, something failed outright: a failing
+             spec with \`deterministic: false\` (some attempt passed) is flakiness
+             evidence, not a defect -- never classify it "product" on its own.
           8. If you genuinely cannot tell from the evidence (including: reports or
              spec were unavailable above) -> category "unknown" with confidence "low"
              and say what evidence was missing — never guess "product".
@@ -597,10 +632,20 @@ jobs:
       - name: Parse classification (falls back to "unknown" on any failure above)
         id: parse
         if: always()
+        env:
+          # Set only when the evidence step reached a verdict from retry history alone.
+          DECIDED: ${{ steps.evidence.outputs.decided }}
+          DECIDED_CATEGORY: ${{ steps.evidence.outputs.category }}
+          DECIDED_CONFIDENCE: ${{ steps.evidence.outputs.confidence }}
+          DECIDED_SUMMARY: ${{ steps.evidence.outputs.summary }}
         run: |
           set -euo pipefail
           f=/tmp/hub-pr-classification.json
-          if [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
+          if [ "$DECIDED" = "true" ]; then
+            category="$DECIDED_CATEGORY"
+            confidence="$DECIDED_CONFIDENCE"
+            summary=$(printf '%s' "$DECIDED_SUMMARY" | tr '\n' ' ' | cut -c1-200)
+          elif [ -s "$f" ] && jq empty "$f" 2>/dev/null; then
             category=$(jq -r '.category // "unknown"' "$f")
             confidence=$(jq -r '.confidence // "low"' "$f")
             # 200, matching the prompt's own "under 200 chars" contract —
@@ -925,6 +970,9 @@ jobs:
           # PR, not "failure" — the headline here must not contradict that
           # by shouting "Failed" for something we just decided isn't one.
           COVERAGE_GAP_ONLY: ${{ needs.run.outputs.coverage_gap_only }}
+          # Identity of "this same failure on this PR" (failing specs + unmapped ops). Empty if
+          # classify was skipped or the evidence step failed.
+          FINGERPRINT: ${{ needs.classify.outputs.fingerprint }}
         run: |
           set -euo pipefail
           hub_medic='<!subteam^S014VK4482H|hub-medic>'
@@ -1054,6 +1102,14 @@ jobs:
             source_line=$(printf 'camunda/camunda-hub @ %s (PR number unavailable)' "$sha_code")
           fi
 
+          # One Slack reply per (PR, failure). The same failure on a later push edits that reply
+          # in place and does not page again; a different failure gets a new reply and does.
+          # Startup and pre-suite failures have no failing specs to fingerprint, so their state
+          # is part of the identity instead.
+          fp="${FINGERPRINT:-none}"
+          case "$CATEGORY" in startup | presuite) fp="${fp}-${CATEGORY}" ;; esac
+          echo "marker=hub-pr:${PR_NUMBER:-${SHA:0:12}}:fp:${fp}" >> "$GITHUB_OUTPUT"
+
           text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s\n\n%s\n\n%s please take a look.' \
             "$headline" "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$ping")
 
@@ -1079,22 +1135,36 @@ jobs:
           vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
           vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
 
-      # toJSON() properly encodes the text (quotes/newlines) rather than
-      # manual \n concatenation — necessary now that the message can embed
-      # agent-produced free text (SUMMARY), which manual string-building
-      # can't safely guarantee is JSON-clean.
+      - name: Setup Node.js 22 (for the Slack thread script)
+        if: >-
+          always() && needs.run.result == 'failure' &&
+          needs.validate.outputs.is_draft != 'true' &&
+          steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Threaded, not a fresh top-level message per run (ported from camunda-hub's AlwaysGreen
+      # slack_thread.py): one parent per day, one reply per (PR, failure fingerprint), edited in
+      # place on re-runs. A single PR can trigger a dozen+ runs (#514). The script never fails
+      # the job -- a Slack outage must not turn the check red -- and falls back to a plain post
+      # when the bot cannot resolve the channel name to an id.
       - name: Notify Slack (generated hub suite failed on camunda-hub PR)
         if: >-
           always() && needs.run.result == 'failure' &&
           needs.validate.outputs.is_draft != 'true' &&
           steps.slack-secrets.outputs.SLACK_BOT_TOKEN != ''
         continue-on-error: true
-        uses: slackapi/slack-github-action@v2
-        with:
-          method: chat.postMessage
-          token: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
-          payload: |
-            {
-              "channel": "#camunda-hub-pr-e2e-results",
-              "text": ${{ toJSON(steps.msg.outputs.text) }}
-            }
+        env:
+          SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}
+          ALERT_TEXT: ${{ steps.msg.outputs.text }}
+          ALERT_MARKER: ${{ steps.msg.outputs.marker }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ALERT_TEXT" > "${RUNNER_TEMP}/slack-alert.txt"
+          node scripts/triage/slack-thread.ts \
+            --channel "#camunda-hub-pr-e2e-results" \
+            --date "$(date -u +%Y-%m-%d)" \
+            --marker "$ALERT_MARKER" \
+            --text-file "${RUNNER_TEMP}/slack-alert.txt"

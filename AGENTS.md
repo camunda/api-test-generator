@@ -544,6 +544,22 @@ token for either repo) runs a Claude agent to distinguish a real hub
 regression from api-test-generator simply not yet modeling a new/changed
 endpoint shape (comparing the PR's spec diff against `main`), and a Slack
 alert to `#camunda-hub-pr-e2e-results` states that verdict on failure.
+Two behaviours are ported from camunda-hub's AlwaysGreen triage
+(`.github/scripts/alwaysgreen/` there): `classify` first runs
+[scripts/triage/hub-pr-evidence.ts](scripts/triage/hub-pr-evidence.ts), which parses
+the Playwright reports into per-spec attempt histories and decides what retry
+history alone settles — a run whose only red tests passed on retry is `flaky`
+with no agent call (the Vault/clone/agent steps are skipped); otherwise the agent
+is handed the parsed evidence instead of raw reports. The same step fingerprints
+the failing set. `report` then posts through
+[scripts/triage/slack-thread.ts](scripts/triage/slack-thread.ts): one thread per
+day, one reply per (PR, fingerprint), edited in place when the same failure
+re-runs (an edit does not re-page) and a new reply only when the failure changes.
+Both scripts run under plain `node` (type stripping, no `npm ci`) and are covered
+by `tests/triage/`. Not ported, deliberately: AlwaysGreen's fix-agent dispatch
+caps/dedupe (this classifier is read-only and opens nothing) and its
+platform-noise prefilter (the Hub PR check already routes startup and pre-suite
+failures deterministically).
 `_hub-suite-run.yml`'s own coverage-check step (#505) fails ITS job whenever
 an operation has zero generated test at all (a silent ontology gap) — but
 per #480, missing coverage alone must never be REPORTED as a failing check
