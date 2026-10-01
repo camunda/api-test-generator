@@ -124,12 +124,8 @@ def bar_note(b, s):
     open_ = [o for o in miss if o not in held]
     if not miss:
         return 'Every response the spec lists is tested.'
-    if b == '404':
-        return f'{len(miss)} endpoints list a 404 that no test covers.'
-    if b == '403':
-        return f'{len(miss)} endpoints list a 403 that no test covers.'
-    if b == '409':
-        return f'{len(miss)} endpoints list a 409; none is tested.'
+    if b in ('404', '403', '409'):
+        return f'{len(miss)} of {s["codes"][b][1]} endpoints that list a {b} have no test for it.'
     parts = []
     if open_:
         parts.append('Untested: ' + names(open_, 3) + '.')
@@ -154,7 +150,7 @@ def findings(s):
                     f'only covers "not found" for GET requests. Untested: {names(m["404"])}.'))
     if m['409']:
         out.append(('Conflict (409)', issue(620, 621),
-                    f'{len(m["409"])} endpoints list a 409 (conflict) response and none is tested: {names(m["409"])}.'))
+                    f'{len(m["409"])} of {s["codes"]["409"][1]} endpoints that list a 409 (conflict) response have no test for it: {names(m["409"])}.'))
     if m['403']:
         out.append(('Forbidden (403) on writes', issue(622),
                     f'A 403 is tested for {s["codes"]["403"][0]} of {s["codes"]["403"][1]} endpoints that list one. '
