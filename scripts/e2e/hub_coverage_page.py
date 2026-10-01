@@ -19,8 +19,8 @@ BUCKETS = (
     ('2xx', 'Success path'), ('400', 'Validation'), ('401', 'Authentication'),
     ('404', 'Resource not found'), ('403', 'Forbidden'), ('409', 'Conflict'),
 )
-GLYPH = {'ok': '●', 'gap': '×', 'hold': '◇', 'na': '·'}
-LABEL = {'ok': 'tested', 'gap': 'in the spec, but no test', 'hold': 'known and tracked elsewhere', 'na': 'not in the spec'}
+GLYPH = {'ok': '●', 'gap': '×', 'hold': '◇', 'na': 'n/a'}
+LABEL = {'ok': 'tested', 'gap': 'in the spec, but no test', 'hold': 'known and tracked elsewhere', 'na': 'n/a, the spec does not list it for this endpoint'}
 CSS = """
 :root {
   --ground:#F4F7F8; --panel:#FFFFFF; --ink:#12232B; --muted:#566872; --rule:#D6DFE3; --wash:#EAF0F2;
@@ -194,10 +194,10 @@ def render(s, rows):
                 kind = 'ok' if r['optionalSent'] == r['optionalTotal'] else 'gap'
                 tds.append(f'<td class="c {kind} frac" title="Optional request-body fields a success-path test sends"><span>{r["optionalSent"]}/{r["optionalTotal"]}</span></td>')
             else:
-                tds.append('<td class="c na"><span aria-label="not applicable">·</span></td>')
+                tds.append('<td class="c na"><span aria-label="not applicable">n/a</span></td>')
             for b in ('400', '401', '403', '404', '409'):
                 k = c.get(b, 'na')
-                tds.append(cell(k, f'{b}: {LABEL[k]}') if k != 'na' else '<td class="c na"><span aria-label="not documented">·</span></td>')
+                tds.append(cell(k, f'{b}: {LABEL[k]}') if k != 'na' else '<td class="c na"><span aria-label="not listed in the spec">n/a</span></td>')
             note = f'<span class="note">excluded: {esc(", ".join(r["notes"]))}</span>' if r['notes'] else ''
             trs.append(f'<tr data-gap="{int(r["codeGap"])}"><th scope="row"><div class="opc"><span class="m">{esc(r["method"])}</span>'
                        f'<code class="op">{esc(r["operationId"])}</code><span class="path">{esc(r["path"])}</span>{note}</div></th>' + ''.join(tds) + '</tr>')
@@ -222,7 +222,7 @@ def render(s, rows):
   <section aria-labelledby="matrix">
     <h2 id="matrix">Every endpoint</h2>
     <div class="tools">
-      <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">·</i> not in the spec</span></div>
+      <div class="legend"><span><i class="k ok">●</i> tested</span><span><i class="k gap">×</i> in the spec, but no test</span><span><i class="k hold">◇</i> known and tracked elsewhere</span><span><i class="k na">n/a</i> the spec does not list it for this endpoint</span></div>
       <label class="toggle"><input type="checkbox" id="onlygaps"> Only endpoints missing a response test (ignoring 403)</label>
     </div>
     <div class="scroll"><table id="mx"><thead><tr><th>Operation</th><th title="Success-path test">Success</th><th title="A test checks the success response against its schema">Response checked</th><th title="Optional request fields a success test sends">Optional fields</th><th title="Bad request">400</th><th title="Not authenticated">401</th><th title="Forbidden">403</th><th title="Not found">404</th><th title="Conflict">409</th></tr></thead>{''.join(body)}</table></div>
