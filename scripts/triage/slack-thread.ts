@@ -243,19 +243,18 @@ async function main(): Promise<void> {
     });
     console.log(JSON.stringify(result));
   } catch (err) {
-    if (err instanceof ChannelUnresolved) {
-      console.error(`::warning::${err.message} - posting without threading`);
-      const resp = await api.call('chat.postMessage', {
-        channel: arg('channel'),
-        text,
-        unfurl_links: false,
-      });
-      if (!resp.ok) console.error(`::warning::Slack post failed: ${resp.error}`);
-      return;
-    }
-    // Never fatal: a failed post leaves the failure attended but unannounced, and the commit
-    // status and run summary are unaffected.
-    console.error(`::warning::Slack update failed: ${err instanceof Error ? err.message : err}`);
+    // Threading is an optimisation; the alert is not. Whatever failed (channel lookup, a missing
+    // history scope, a Slack error), post the message plainly rather than lose it. A partial
+    // failure can at worst duplicate an alert.
+    console.error(
+      `::warning::Slack threading failed (${err instanceof Error ? err.message : err}) - posting without threading`,
+    );
+    const resp = await api.call('chat.postMessage', {
+      channel: arg('channel'),
+      text,
+      unfurl_links: false,
+    });
+    if (!resp.ok) console.error(`::warning::Slack post failed: ${resp.error}`);
   }
 }
 

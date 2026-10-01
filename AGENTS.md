@@ -561,6 +561,8 @@ day, one reply per (PR, fingerprint), edited in place when the same failure
 re-runs (an edit does not re-page) and a new reply only when the failure changes.
 Racing PRs that each create the day's parent converge on the earliest one (the
 loser deletes its own); the reply lookup is paginated and fails closed.
+Any threading failure (unresolvable channel name, missing Slack history scope) falls
+back to a plain post, so an alert is never lost to the threading logic.
 Both scripts run under plain `node` (type stripping, no `npm ci`) and are covered
 by `tests/triage/`. Not ported, deliberately: AlwaysGreen's fix-agent dispatch
 caps/dedupe (this classifier is read-only and opens nothing) and its
