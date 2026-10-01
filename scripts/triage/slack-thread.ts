@@ -84,22 +84,35 @@ export async function resolveChannel(api: SlackApi, channel: string): Promise<st
   throw new ChannelUnresolved(`channel ${channel} not found`);
 }
 
-export async function findDailyParent(api: SlackApi, channel: string, date: string) {
+// Every bot message carrying the day's marker, earliest first. Only the day itself is read
+// (`oldest`), so a few pages cover even a busy channel. If the page limit runs out before the
+// history does, this throws: a partial list can hide an older parent, so any caller that chose
+// from it could pick a duplicate and split the day's thread. The caller falls back to a plain
+// post, so an alert is never lost to this.
+async function listDailyParents(api: SlackApi, channel: string, date: string): Promise<string[]> {
   const marker = dailyMarker(date);
+  const oldest = String(Date.parse(`${date}T00:00:00Z`) / 1000);
+  const parents: string[] = [];
   let cursor = '';
   for (let page = 0; page < HISTORY_PAGES; page++) {
-    const params: Record<string, string> = { channel, limit: '200' };
+    const params: Record<string, string> = { channel, limit: '200', oldest };
     if (cursor) params.cursor = cursor;
     const resp = must(await api.get('conversations.history', params), 'conversations.history');
-    const ts = findIn(resp.messages ?? [], marker);
-    if (ts) return ts;
+    for (const m of resp.messages ?? []) {
+      if ((m.bot_id || m.app_id) && (m.text ?? '').includes(marker) && m.ts) parents.push(m.ts);
+    }
     cursor = resp.response_metadata?.next_cursor ?? '';
-    if (!cursor) return '';
+    if (!cursor) return parents.sort((a, b) => Number(a) - Number(b));
   }
-  // Returning '' here would post a duplicate parent, so fail closed like every unprovable read.
   throw new Error(
-    `today's parent not found within ${HISTORY_PAGES} pages; refusing to post a second`,
+    `the day's history was not fully read within ${HISTORY_PAGES} pages; refusing to choose a parent`,
   );
+}
+
+// The canonical parent is always the EARLIEST one, so a duplicate left behind by a race (or a
+// failed delete) can never pull later alerts into a second thread.
+export async function findDailyParent(api: SlackApi, channel: string, date: string) {
+  return (await listDailyParents(api, channel, date))[0] ?? '';
 }
 
 // Workflow concurrency is per PR, so two PRs can both see no parent and both create one. Slack
@@ -112,22 +125,10 @@ export async function settleParent(
   date: string,
   ownTs: string,
 ): Promise<string> {
-  const marker = dailyMarker(date);
-  let cursor = '';
-  const parents: string[] = [];
-  for (let page = 0; page < HISTORY_PAGES; page++) {
-    const params: Record<string, string> = { channel, limit: '200' };
-    if (cursor) params.cursor = cursor;
-    const resp = must(await api.get('conversations.history', params), 'conversations.history');
-    for (const m of resp.messages ?? []) {
-      if ((m.bot_id || m.app_id) && (m.text ?? '').includes(marker) && m.ts) parents.push(m.ts);
-    }
-    cursor = resp.response_metadata?.next_cursor ?? '';
-    if (!cursor) break;
-  }
-  const earliest = parents.sort((a, b) => Number(a) - Number(b))[0];
+  const earliest = (await listDailyParents(api, channel, date))[0];
   if (!earliest || earliest === ownTs) return ownTs;
-  // Best effort: a failed delete only leaves an empty duplicate parent, never a lost alert.
+  // Best effort: a failed delete only leaves an empty duplicate parent, never a lost alert, and
+  // findDailyParent keeps choosing the earliest one either way.
   await api.call('chat.delete', { channel, ts: ownTs });
   return earliest;
 }

@@ -891,9 +891,13 @@ jobs:
           gh label create generator-gap --repo "$repo" --color D93F0B \
             --description "camunda-hub PR changed the API in a way the generated hub suite does not handle yet" 2>/dev/null || true
 
-          existing=$(gh issue list --repo "$repo" --state open --label generator-gap \
-            --search "in:title \"${title}\"" --json number,title \
-            --jq "[.[] | select(.title == \"${title}\") | .number] | first // empty")
+          # All states: after a green push closes the tracker, a later push that brings the gap
+          # back must reopen THAT issue, not open a second one with the same title.
+          found=$(gh issue list --repo "$repo" --state all --label generator-gap \
+            --search "in:title \"${title}\"" --json number,title,state \
+            --jq "[.[] | select(.title == \"${title}\")] | sort_by(.state == \"OPEN\" | not) | .[0] // empty | \"\\(.number) \\(.state)\"")
+          existing="${found%% *}"
+          existing_state="${found##* }"
 
           # Open only on a confident, PR-caused gap. Close only on a GREEN run: caused_by_pr is false
           # for every low-confidence or unknown classification too, so a later failed run that is
@@ -909,7 +913,7 @@ jobs:
           echo "mode=${mode} existing=${existing:-none}"
 
           if [ "$mode" = "close" ]; then
-            if [ -n "$existing" ]; then
+            if [ -n "$existing" ] && [ "$existing_state" = "OPEN" ]; then
               gh issue close "$existing" --repo "$repo" \
                 --comment "No longer a generator gap as of camunda-hub#${PR_NUMBER}@${SHA:0:12} (run: ${RUN_URL})." >/dev/null
             fi
@@ -944,6 +948,10 @@ jobs:
           } > "$body_file"
 
           if [ -n "$existing" ]; then
+            if [ "$existing_state" = "CLOSED" ]; then
+              gh issue reopen "$existing" --repo "$repo" \
+                --comment "The generator gap is back as of camunda-hub#${PR_NUMBER}@${SHA:0:12} (run: ${RUN_URL})." >/dev/null
+            fi
             gh issue edit "$existing" --repo "$repo" --body-file "$body_file" --add-label generator-gap --add-label hub >/dev/null
             number="$existing"
             echo "Updated generator-gap issue #${number}."
