@@ -61,6 +61,7 @@ beforeEach(() => {
   vi.resetModules();
   vi.useFakeTimers();
   for (const k of ENV_KEYS) delete process.env[k];
+  delete process.env.RV_FIXTURE_ENV_FILE;
 });
 
 afterEach(() => {
@@ -68,6 +69,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   for (const k of ENV_KEYS) delete process.env[k];
+  delete process.env.RV_FIXTURE_ENV_FILE;
 });
 
 async function loadProvisionRuntimeKeyFixtures() {
@@ -141,6 +143,62 @@ describe('provisionRuntimeKeyFixtures', () => {
     expect(process.env.RV_FIXTURE_JOB_KEY).toBe('JOB-1');
     // Prefers the user task's elementInstanceKey over the job's.
     expect(process.env.RV_FIXTURE_ELEMENT_INSTANCE_KEY).toBe('EI-USERTASK');
+  });
+
+  it('shell-quotes discovered values before writing them to RV_FIXTURE_ENV_FILE, rather than JSON-quoting them', async () => {
+    // run-oca.sh later `source`s this file into bash. JSON.stringify only
+    // escapes quotes/backslashes/control chars — it does nothing to `$`,
+    // backticks, or `;`, so a broker-returned value containing a command
+    // substitution would execute when sourced. Single-quoting it is immune
+    // to shell expansion entirely (#614's review discussion). Includes an
+    // embedded single quote too, to exercise the escape path, not just the
+    // wrap.
+    const maliciousJobKey = "it's $(touch /tmp/rv-fixture-test-pwned) `also-this`";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/deployments')) return deploymentResponse();
+      if (url.endsWith('/v2/process-instances')) {
+        const body = parseRequestBody(init);
+        const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
+        return jsonResponse({ processInstanceKey: key });
+      }
+      if (url.endsWith('/v2/user-tasks/search')) {
+        return jsonResponse({
+          items: [{ userTaskKey: 'UT-1', elementInstanceKey: 'EI-USERTASK' }],
+        });
+      }
+      if (url.endsWith('/v2/jobs/activation')) {
+        return jsonResponse({ jobs: [{ jobKey: maliciousJobKey, elementInstanceKey: 'EI-JOB' }] });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.RV_FIXTURE_ENV_FILE = '/fake/rv-fixtures.env';
+    const fs = await import('node:fs');
+    const writeFileMock = vi.mocked(fs.promises.writeFile);
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await provisionRuntimeKeyFixtures();
+
+    const envFileCall = writeFileMock.mock.calls.find(
+      (call) => call[0] === '/fake/rv-fixtures.env',
+    );
+    expect(envFileCall).toBeDefined();
+    const written = String(envFileCall?.[1]);
+    expect(written).toContain(
+      "export RV_FIXTURE_JOB_KEY='it'\\''s $(touch /tmp/rv-fixture-test-pwned) `also-this`'\n",
+    );
+
+    // Prove it end-to-end: actually source the generated line in a real
+    // shell and confirm the command inside it never ran, and the variable
+    // comes back out exactly as the literal string that went in.
+    const { execFileSync } = await import('node:child_process');
+    const roundTripped = execFileSync(
+      'bash',
+      ['-c', `${written}\nprintf '%s' "$RV_FIXTURE_JOB_KEY"`],
+      { encoding: 'utf8' },
+    );
+    expect(roundTripped).toBe(maliciousJobKey);
   });
 
   it('throws when the BPMN deployment fails, rather than falling back to fillers', async () => {

@@ -561,11 +561,24 @@ export async function provisionRuntimeKeyFixtures(): Promise<void> {
  * shell before invoking curl_compare.py; omitted (the default), this is a
  * no-op for every other invocation style.
  */
+/**
+ * Quotes a value for safe inclusion in a POSIX shell `export KEY=<value>`
+ * line that will later be `source`d. `JSON.stringify` is JSON quoting, not
+ * shell quoting — it does nothing to `$`, backticks, or `;`, so a value
+ * containing e.g. `$(...)` would be executed by the shell that sources this
+ * file. Single-quoting is immune to all of that (bash performs no expansion
+ * inside single quotes at all); the only character that needs escaping is a
+ * literal single quote itself, closed/reopened around an escaped one.
+ */
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 async function persistDiscoveredFixtures(): Promise<void> {
   const dest = process.env.RV_FIXTURE_ENV_FILE;
   if (!dest) return;
   const lines = Object.values(RUNTIME_KEY_ENV_VARS)
-    .map((envVar) => `export ${envVar}=${JSON.stringify(process.env[envVar] ?? '')}\n`)
+    .map((envVar) => `export ${envVar}=${shellSingleQuote(process.env[envVar] ?? '')}\n`)
     .join('');
   await fs.writeFile(dest, lines, 'utf8');
 }
