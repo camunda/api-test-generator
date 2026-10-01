@@ -15,6 +15,7 @@ import { materializeFixtures } from '../playwright/materialize-support.js';
 
 interface KnownSdkMethods {
   sdkVersion: string;
+  ocaVersion: string;
   methods: string[];
 }
 
@@ -110,9 +111,12 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
           type: 'module',
           // Node 18.0-18.12 lack the `File` global on `node:buffer` (only
           // stable there since 18.13) -- multipart file-upload scenarios
-          // import it explicitly (Copilot PR #575 review).
+          // import it explicitly. The pinned @camunda8/sdk's p-retry
+          // dependency itself declares `engines.node: >=20`, which is the
+          // stricter of the two floors, so that's what's advertised here
+          // (Copilot PR #575 review).
           engines: {
-            node: '>=18.13.0',
+            node: '>=20',
           },
           scripts: {
             test: 'vitest run',
@@ -126,6 +130,15 @@ export function loadJsProjectScaffoldingFiles(): EmittedFile[] {
           },
           dependencies: {
             '@camunda8/sdk': knownSdkMethods.sdkVersion,
+          },
+          // Pins the transitive client whose method surface was inventoried
+          // into known-sdk-methods.json: @camunda8/sdk only declares a range
+          // (`>=8.8.4 <9.0.0`) for @camunda8/orchestration-cluster-api, so an
+          // unpinned `npm install` of the generated project could resolve a
+          // newer OCA client than the one the inventory reflects, making the
+          // emitted skip decisions non-reproducible (Copilot PR #575 review).
+          overrides: {
+            '@camunda8/orchestration-cluster-api': knownSdkMethods.ocaVersion,
           },
         },
         null,
@@ -486,7 +499,7 @@ export async function awaitEventually<T>(
         '',
         '### Prerequisites',
         '',
-        '- Node.js >=18.13 (`File` global on `node:buffer`, used for multipart file-upload scenarios, is only stable from this version)',
+        "- Node.js >=20 (the pinned `@camunda8/sdk`'s `p-retry` dependency requires >=20; this also covers the `File` global on `node:buffer`, used for multipart file-upload scenarios, which is only stable from Node 18.13)",
         '- A running Camunda instance (default: http://localhost:8080)',
         '',
         '### Installation',
