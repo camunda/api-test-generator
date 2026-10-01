@@ -4,6 +4,8 @@ import type {
   SchemaFragment,
   ValidationScenario,
 } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { isMultipartOnly } from '../util/multipartSkip.js';
 import {
   buildValidValue,
   isUrlCollapsingPathSegment,
@@ -14,6 +16,8 @@ import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /** `notFoundMode: 'declared'` — trust the contract's 404 for any method and response shape (see config.ts). */
+  declared?: boolean;
 }
 
 // A syntactically-valid Camunda key (Java long serialized as string) that is
@@ -128,12 +132,19 @@ export function fakePathParamValue(p: ParameterModel): string | undefined {
  *   - the operation does not require a request body — v1 sends no body, so a
  *     required-body op would 400 on the missing body before the lookup runs.
  */
-export function isNotFoundEligible(op: OperationModel): boolean {
-  if (op.method.toUpperCase() !== 'GET') return false;
+export function isNotFoundEligible(op: OperationModel, opts?: { declared?: boolean }): boolean {
+  const declared = opts?.declared === true;
+  if (!declared && op.method.toUpperCase() !== 'GET') return false;
   if (!op.parameters.some((p) => p.in === 'path')) return false;
   if (!op.responseCodes?.includes('404')) return false;
-  if (op.successIsCollection) return false;
-  if (op.bodyRequired) return false;
+  if (!declared && op.successIsCollection) return false;
+  if (op.bodyRequired) {
+    // Read-only mode sends no body, so a required body would 400 before the lookup.
+    // Declared mode sends a valid JSON baseline body instead; a multipart body
+    // can't be built from the schema alone.
+    if (!declared) return false;
+    if (!op.requestBodySchema || isMultipartOnly(op)) return false;
+  }
   return true;
 }
 
@@ -141,7 +152,11 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (!isNotFoundEligible(op)) continue;
+    if (!isNotFoundEligible(op, { declared: opts.declared })) continue;
+    // A required JSON body must be valid, or the server answers 400 before it looks the
+    // resource up. Skip the operation rather than emit a flaky 404 when none can be built.
+    const requestBody = op.bodyRequired ? buildBaselineBody(op) : undefined;
+    if (op.bodyRequired && requestBody === undefined) continue;
     const pathParams = op.parameters.filter((p) => p.in === 'path');
     const params: Record<string, string> = {};
     let allFaked = true;
@@ -170,6 +185,7 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
       type: 'not-found-fake-id',
       target,
       params: Object.keys(params).length ? params : undefined,
+      ...(requestBody !== undefined ? { requestBody, bodyEncoding: 'json' as const } : {}),
       expectedStatus: 404,
       description: `Nonexistent ${target} returns 404`,
       headersAuth: true,

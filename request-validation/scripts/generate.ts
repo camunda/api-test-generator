@@ -166,6 +166,7 @@ async function main() {
     unenforcedStringFormats: [],
     authAbsentMode: 'conditional',
     authDenyMode: 'slice',
+    notFoundMode: 'read-only',
     independentAuthGateMode: 'unavailable',
   };
   if (repoRoot) {
@@ -179,7 +180,7 @@ async function main() {
   }
   console.log(
     `[generate] Active config: ${configName} ` +
-      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode}, independentAuthGateMode=${rvConfig.independentAuthGateMode})`,
+      `(enumCaseInsensitive=${rvConfig.enumCaseInsensitive}, unenforcedStringFormats=[${rvConfig.unenforcedStringFormats.join(',')}], authAbsentMode=${rvConfig.authAbsentMode}, authDenyMode=${rvConfig.authDenyMode}, notFoundMode=${rvConfig.notFoundMode}, independentAuthGateMode=${rvConfig.independentAuthGateMode})`,
   );
   const { specPath, specProvenance, source } = resolveSpecSource();
   console.log(`[generate] Using spec from ${source}: ${specPath}`);
@@ -390,6 +391,7 @@ async function main() {
     scenarios.push(
       ...generateNotFoundFakeId(model.operations, {
         onlyOperations: opts.onlyOperations,
+        declared: rvConfig.notFoundMode === 'declared',
       }),
     );
   }
@@ -1229,7 +1231,7 @@ async function main() {
       }
       // not-found-fake-id (#381) — reuses the exact eligibility check
       // notFoundFakeId.ts's own generator calls.
-      if (isNotFoundEligible(op)) {
+      if (isNotFoundEligible(op, { declared: rvConfig.notFoundMode === 'declared' })) {
         applicable.add('not-found-fake-id');
       }
       // Pagination kinds (#501) — reuse the same shape-detection helpers their

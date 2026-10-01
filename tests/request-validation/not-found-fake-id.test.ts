@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
   fakePathParamValue,
   generateNotFoundFakeId,
   isNotFoundEligible,
 } from '../../request-validation/src/analysis/notFoundFakeId.js';
+import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitter.js';
-import type { OperationModel, ParameterModel } from '../../request-validation/src/model/types.js';
+import type {
+  OperationModel,
+  ParameterModel,
+  SchemaFragment,
+} from '../../request-validation/src/model/types.js';
 
 /**
  * Layer-2 fixtures for the 404 fake-ID emitter (issue #381, split from #279).
@@ -200,5 +208,135 @@ describe('request-validation: 404 fake-ID emitter rendering (#381)', () => {
     expect(code).toContain('buildUrl("/groups/{groupId}"');
     expect(code).toContain(s.params?.groupId ?? '__missing__');
     expect(code).not.toContain('data: requestBody');
+  });
+});
+
+describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
+  const keyed = {
+    operationId: 'x',
+    path: '/things/{thingKey}',
+    parameters: [pathParam('thingKey', longKeySchema)],
+  };
+  const jsonBody: SchemaFragment = {
+    type: 'object',
+    required: ['name'],
+    properties: { name: { type: 'string' }, note: { type: 'string' } },
+  };
+
+  it('default mode leaves mutating, body-requiring and collection operations alone', () => {
+    const ops = [
+      op({
+        ...keyed,
+        operationId: 'patchThing',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema: jsonBody,
+      }),
+      op({ ...keyed, operationId: 'deleteThing', method: 'DELETE' }),
+      op({ ...keyed, operationId: 'searchThings', method: 'POST', successIsCollection: true }),
+    ];
+    expect(generateNotFoundFakeId(ops, {})).toHaveLength(0);
+    expect(ops.some((o) => isNotFoundEligible(o))).toBe(false);
+  });
+
+  it('covers a body-less DELETE with no request body', () => {
+    const out = generateNotFoundFakeId(
+      [op({ ...keyed, operationId: 'deleteThing', method: 'DELETE' })],
+      { declared: true },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].method).toBe('DELETE');
+    expect(out[0].requestBody).toBeUndefined();
+    expect(out[0].expectedStatus).toBe(404);
+  });
+
+  it('sends a valid baseline body for an operation that requires one', () => {
+    const out = generateNotFoundFakeId(
+      [
+        op({
+          ...keyed,
+          operationId: 'patchThing',
+          method: 'PATCH',
+          bodyRequired: true,
+          requestBodySchema: jsonBody,
+        }),
+      ],
+      { declared: true },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].bodyEncoding).toBe('json');
+    // The required field is present; the server validates the body before the lookup, so an
+    // empty or invalid one would answer 400 instead of 404.
+    expect(out[0].requestBody).toMatchObject({ name: expect.any(String) });
+  });
+
+  it('trusts a declared 404 on a collection (search) operation', () => {
+    const out = generateNotFoundFakeId(
+      [op({ ...keyed, operationId: 'searchThings', method: 'POST', successIsCollection: true })],
+      { declared: true },
+    );
+    expect(out).toHaveLength(1);
+  });
+
+  it('still skips an operation with no 404, no path key, or a multipart-only required body', () => {
+    const ops = [
+      op({ ...keyed, operationId: 'no404', method: 'DELETE', responseCodes: ['204'] }),
+      op({ operationId: 'noKey', path: '/things', method: 'POST' }),
+      op({
+        ...keyed,
+        operationId: 'upload',
+        method: 'PUT',
+        bodyRequired: true,
+        requestBodySchema: jsonBody,
+        mediaTypes: ['multipart/form-data'],
+      }),
+    ];
+    expect(generateNotFoundFakeId(ops, { declared: true })).toHaveLength(0);
+  });
+
+  it('renders the body and the 404 assertion for a mutating operation', () => {
+    const [s] = generateNotFoundFakeId(
+      [
+        op({
+          ...keyed,
+          operationId: 'patchThing',
+          method: 'PATCH',
+          bodyRequired: true,
+          requestBodySchema: jsonBody,
+        }),
+      ],
+      { declared: true },
+    );
+    const code = renderScenarioForTest(s, 'patchThing - Nonexistent thingKey returns 404');
+    expect(code).toContain('404');
+    expect(code).toContain('requestBody');
+    expect(code).toContain('request.patch');
+  });
+});
+
+describe('request-validation: notFoundMode config', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-notfound-'));
+  const cfgDir = path.join(tmpRoot, 'configs', 'probe');
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(path.join(tmpRoot, 'configs.json'), '{}');
+  afterAll(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+  const write = (cfg: unknown) =>
+    fs.writeFileSync(path.join(cfgDir, 'request-validation.json'), JSON.stringify(cfg));
+
+  it("defaults to 'read-only' so existing configs keep their output", () => {
+    write({});
+    expect(loadRequestValidationConfig(tmpRoot, 'probe').notFoundMode).toBe('read-only');
+  });
+
+  it("accepts 'declared'", () => {
+    write({ notFoundMode: 'declared' });
+    expect(loadRequestValidationConfig(tmpRoot, 'probe').notFoundMode).toBe('declared');
+  });
+
+  it('rejects any other value with an actionable message', () => {
+    write({ notFoundMode: 'everything' });
+    expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(
+      /notFoundMode.*read-only.*declared/,
+    );
   });
 });
