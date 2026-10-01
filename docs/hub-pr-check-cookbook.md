@@ -1,13 +1,12 @@
 # Hub PR Check Cookbook
 
 > **Goal:** understand and debug any `api-test-generator/hub-suite` result on a camunda-hub PR
-> without asking for help. Modelled on AlwaysGreen's CI debugging cookbook
-> (`c8-cross-component-e2e-tests/docs/ci-debugging-cookbook.md`).
+> without asking for help.
 
 ## What this check is
 
 The suite is **generated fresh from each PR's own OpenAPI spec** and run against that PR's image.
-Unlike AlwaysGreen's fixed E2E suite, red does not always mean "the PR broke Hub": it is just as
+Because the suite changes with every PR, red does not always mean "the PR broke Hub": it is just as
 likely that api-test-generator does not yet model a new or changed endpoint. The `classify` job
 exists to tell those apart.
 
