@@ -113,7 +113,9 @@ function buildSpec(spec: Record<string, Json>): SpecEvidence {
     title: typeof spec.title === 'string' ? spec.title : '',
     project: isRecord(chosen) && typeof chosen.projectName === 'string' ? chosen.projectName : '',
     statuses,
-    deterministic: statuses.length > 0 && statuses.every((s) => FAILED_ATTEMPT_STATUSES.has(s)),
+    // "No attempt passed", computed from the absence of `passed`: a sequence such as
+    // failed, skipped has no passing attempt and is not flakiness evidence.
+    deterministic: statuses.length > 0 && !statuses.includes('passed'),
     error: cleanError(isRecord(source?.error) ? source.error.message : ''),
   };
 }
@@ -138,14 +140,26 @@ export function buildEvidence(reports: Json[]): Evidence {
 // Identity of "the same failure" on one PR, so repeated pushes with the same failing set
 // collapse into one alert. The category is deliberately not an input: the agent can word the
 // same failure differently between runs, and that must not re-page.
-export function fingerprint(pr: string, evidence: Evidence, unmapped: string): string {
+//
+// Deduplication is only valid when a failing set (or unmapped operations) was actually observed.
+// With no readable report, or a failed run that shows no failing spec, sameness cannot be
+// established, so the fingerprint is salted with the commit and every push stays distinct.
+export function fingerprint(pr: string, evidence: Evidence, unmapped: string, salt = ''): string {
   const failing = evidence.failing.map((s) => `${s.file}::${s.title}`).sort();
   const ops = unmapped
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .sort();
-  const joined = ['hub-pr', pr, ...failing, '|', ...ops].join('::');
+  const observed = failing.length > 0 || ops.length > 0;
+  const joined = [
+    'hub-pr',
+    pr,
+    ...failing,
+    '|',
+    ...ops,
+    ...(observed ? [] : ['unobserved', salt]),
+  ].join('::');
   return createHash('sha256').update(joined).digest('hex').slice(0, 8);
 }
 
@@ -176,7 +190,7 @@ function arg(name: string): string {
 function main(): void {
   const evidence = buildEvidence(readReports(arg('reports')));
   const unmapped = arg('unmapped');
-  const fp = fingerprint(arg('pr') || arg('sha'), evidence, unmapped);
+  const fp = fingerprint(arg('pr') || arg('sha'), evidence, unmapped, arg('sha'));
   writeFileSync(arg('out'), `${JSON.stringify({ ...evidence, fingerprint: fp }, null, 2)}\n`);
 
   // Every value is an enum literal, hex digest or a newline-stripped string, so none can inject

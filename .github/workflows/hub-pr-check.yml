@@ -537,12 +537,14 @@ jobs:
 
           Inputs:
           - Playwright/JUnit reports: ${REPORTS_DIR} (pw-positive.json, pw-secured.json,
-            pw-rbac.json, junit + HTML reports with traces/screenshots for failing tests)
-            — may be absent if the artifact upload/download itself failed; say so if so.
+            pw-rbac.json, junit + HTML reports). Traces and screenshots are NOT captured; the
+            evidence is the request.json / response.json attachments embedded in the JSON
+            and HTML reports. May be absent if the artifact upload/download itself failed;
+            say so if so.
           - Parsed evidence: ${EVIDENCE_FILE} -- every failing spec with its per-attempt
             statuses (\`deterministic: true\` = no attempt passed) and cleaned error. Prefer
-            it to re-parsing the Playwright JSON; use the HTML report/traces only for
-            request/response detail. If the file is absent, parse the reports yourself.
+            it to re-parsing the Playwright JSON; use the embedded request.json /
+            response.json attachments for request/response detail. If the file is absent, parse the reports yourself.
           - OpenAPI spec AT THIS PR's SHA: ${SPEC_DIR}/*.yaml (may be absent if the
             camunda-hub clone step failed; treat as unavailable, don't guess).
           - Spec diff (this PR's sha vs its BASE branch, ${baseline}), OpenAPI dir
@@ -573,7 +575,8 @@ jobs:
              if UNMAPPED_OPERATIONS is empty, OR the run has ADDITIONAL failing
              tests beyond just the unmapped ones (classify those the normal way).
           1. Enumerate every failing test (from the parsed evidence, falling back to the
-             reports), with its request/response evidence from the trace/HTML report.
+             reports), with its request/response evidence from the embedded request.json / response.json
+             attachments.
           2. Resolve each failing operationId in the OpenAPI spec at this PR's sha.
           3. Check the spec diff: is this operationId's definition NEW or CHANGED by
              this PR? If yes, and the failure looks like the generated test's
@@ -665,6 +668,8 @@ jobs:
             caused_by_pr=$(jq -r 'if .caused_by_pr == true then "true" else "false" end' "$f")
             # operationIds come from the PR's own spec: keep only identifier characters.
             affected_ops=$(jq -r '[.affected_operation_ids[]? | strings | gsub("[^A-Za-z0-9_.-]"; "")] | map(select(length > 0)) | join(",")' "$f" | cut -c1-300)
+            # A PR-caused claim without the operations that support it is a malformed result.
+            if [ -z "$affected_ops" ]; then caused_by_pr=false; fi
           else
             category="unknown"
             confidence="low"

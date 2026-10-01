@@ -66,7 +66,7 @@ later push edits its reply in place and does not page again; a different failure
    means Playwright died before writing a report: look at the stderr log, not at the PR.
 3. **Find the failing tests.** Playwright nests `suites[].suites[].specs[]`. A spec with
    `ok: false` ended in an unexpected outcome; its per-attempt `results[].status` shows whether any
-   attempt passed (a mix is flakiness evidence, all-failed is deterministic). The negative suite attaches `request.json` / `response.json`
+   attempt passed (a passed attempt is flakiness evidence; none passed is deterministic). The negative suite attaches `request.json` / `response.json`
    inline in the JSON report: that exchange is the real evidence.
 4. **Resolve the operation in the spec.** The PR's spec is `restapi/public-api/src/main/resources/
    openapi/v2` in camunda-hub. Diff it against the PR's base (not `main`: camunda-hub stacks work).

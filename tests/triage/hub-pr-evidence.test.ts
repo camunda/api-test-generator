@@ -41,6 +41,11 @@ describe('buildEvidence', () => {
     expect(ev.failing[0]?.deterministic).toBe(true);
   });
 
+  it('treats a sequence with no passed attempt as deterministic even if not all failed', () => {
+    const ev = buildEvidence([report(spec('a', false, ['failed', 'skipped']))]);
+    expect(ev.failing[0]?.deterministic).toBe(true);
+  });
+
   it('does not call a mixed spec deterministic', () => {
     const ev = buildEvidence([report(spec('a', false, ['failed', 'passed', 'failed']))]);
     expect(ev.failing[0]?.deterministic).toBe(false);
@@ -79,5 +84,15 @@ describe('fingerprint', () => {
 
   it('includes unmapped operations', () => {
     expect(fingerprint('7', failing, 'op')).not.toBe(fingerprint('7', failing, ''));
+  });
+
+  it('salts a fingerprint with no observed failures so each push stays distinct', () => {
+    const none = buildEvidence([]);
+    expect(fingerprint('7', none, '', 'sha1')).not.toBe(fingerprint('7', none, '', 'sha2'));
+    expect(fingerprint('7', none, '', 'sha1')).toBe(fingerprint('7', none, '', 'sha1'));
+  });
+
+  it('does not salt when a failing set was observed', () => {
+    expect(fingerprint('7', failing, '', 'sha1')).toBe(fingerprint('7', failing, '', 'sha2'));
   });
 });
