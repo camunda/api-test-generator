@@ -86,13 +86,15 @@ jobs:
         id: hub-sha
         run: echo "sha=$(git -C ../camunda-hub rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # Best effort: the first run (or an expired artifact) simply has no baseline.
+      # Baseline = the previous *scheduled* report, so a dry-run dispatch or a run against another
+      # hub_ref never becomes the comparison point. Best effort: the first run (or an expired
+      # artifact) simply has no baseline.
       - name: Fetch previous report
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prev_id=$(gh run list --workflow hub-response-coverage.yml --status success --limit 1 \
+          prev_id=$(gh run list --workflow hub-response-coverage.yml --event schedule --status success --limit 1 \
             --json databaseId --jq '.[0].databaseId // empty')
           if [ -n "$prev_id" ]; then
             gh run download "$prev_id" --name hub-coverage-report --dir previous

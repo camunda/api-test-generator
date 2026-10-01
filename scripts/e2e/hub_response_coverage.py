@@ -38,6 +38,14 @@ BUCKETS = ('2xx', '400', '401', '403', '404', '409')
 IGNORED_CODES = {500}
 
 
+def scoped_kind_label(k):
+    """An excludeOperations scenarioKinds entry is a kind name or a {kind, targets|constraintKinds} object."""
+    if isinstance(k, str):
+        return k
+    scope = k.get('targets') or k.get('constraintKinds') or []
+    return f"{k['kind']} ({', '.join(scope)})" if scope else k['kind']
+
+
 def fail(msg):
     print(f'hub_response_coverage: {msg}', file=sys.stderr)
     sys.exit(2)
@@ -206,7 +214,7 @@ def build(args):
     scoped = collections.defaultdict(list)
     for e in rv_cfg['excludeOperations']:
         if e.get('scenarioKinds'):
-            scoped[e['operationId']] += e['scenarioKinds']
+            scoped[e['operationId']] += [scoped_kind_label(k) for k in e['scenarioKinds']]
 
     rows, doc, got = [], collections.Counter(), collections.Counter()
     missing = collections.defaultdict(list)
@@ -214,11 +222,14 @@ def build(args):
         asserted = set(neg_asserted[op_id]) | (set() if op_id in suppressed else set(pos_asserted[op_id]))
         success = [c for c in o['codes'] if 200 <= c < 300]
         shape_codes = [c for c in success if c != 204]
-        cells = {}
+        by_bucket = collections.defaultdict(list)
         for code in o['codes']:
-            b = bucket(code)
+            by_bucket[bucket(code)].append(code)
+        cells = {}
+        for b, codes in by_bucket.items():
+            # One cell per endpoint and bucket: tested only if every documented code in it is.
             doc[b] += 1
-            if code in asserted:
+            if all(c in asserted for c in codes):
                 got[b] += 1
                 cells[b] = 'ok'
             else:
