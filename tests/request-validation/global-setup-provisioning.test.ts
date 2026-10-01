@@ -267,4 +267,38 @@ describe('provisionRuntimeKeyFixtures', () => {
     expect(cancelledInstanceKeys.sort()).toEqual(['PI-SERVICE', 'PI-USERTASK']);
     expect(process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY).toBeUndefined();
   });
+
+  it('returns quietly without any broker calls when the BPMN fixtures are genuinely missing (ENOENT)', async () => {
+    const fs = await import('node:fs');
+    vi.mocked(fs.promises.readFile).mockRejectedValue(
+      Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await expect(provisionRuntimeKeyFixtures()).resolves.toBeUndefined();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY).toBeUndefined();
+  });
+
+  it('throws when the vendored BPMN fixture exists but fails to read for a reason other than ENOENT', async () => {
+    const fs = await import('node:fs');
+    vi.mocked(fs.promises.readFile).mockRejectedValue(
+      Object.assign(new Error('EACCES'), { code: 'EACCES' }),
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    // Not swallowed like ENOENT: generate.ts already confirmed this config is
+    // opted in, so a non-ENOENT read failure here means something is broken,
+    // not "feature not applicable" — falling back to fillers would silently
+    // regress to the 404-masking bug this PR fixes (#614's review discussion).
+    await expect(provisionRuntimeKeyFixtures()).rejects.toThrow(/EACCES/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(process.env.RV_FIXTURE_PROCESS_INSTANCE_KEY).toBeUndefined();
+  });
 });
