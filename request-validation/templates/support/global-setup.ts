@@ -235,8 +235,47 @@ function cleanupStatePath(): string {
   return path.resolve(here, '..', RUNTIME_KEY_CLEANUP_STATE_FILE);
 }
 
+/** Exported so global-teardown.ts uses this exact same shape check rather
+ *  than a second copy that could drift. */
+export function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((item) => typeof item === 'string');
+}
+
+/**
+ * Records this run's created instance keys for global-teardown.ts to act
+ * on, merging in whatever a PRIOR run's teardown may have retained as still
+ * -outstanding (a cancellation that didn't succeed). Overwriting unconditionally
+ * would silently lose track of those: teardown only ever rewrites this file
+ * with the keys still left after ITS OWN cancellation attempts, so without
+ * the merge here, the very next run's setup would blow that record away the
+ * moment it records its own (unrelated) keys — and if that next run then
+ * succeeds outright, teardown deletes the file, permanently losing the
+ * earlier leak with nothing left to retry against (#614's review discussion).
+ *
+ * Writes via a temp file + rename rather than a direct `writeFile`, so a
+ * process kill mid-write can never leave this file truncated/corrupted —
+ * `rename` is atomic on the same filesystem, meaning the real path is
+ * always either the complete previous content or the complete new content,
+ * never something in between that a later read can't parse back into a key
+ * list to retry.
+ */
 async function recordCreatedInstancesForCleanup(processInstanceKeys: readonly string[]): Promise<void> {
-  await fs.writeFile(cleanupStatePath(), JSON.stringify(processInstanceKeys), 'utf8');
+  const statePath = cleanupStatePath();
+  let retainedKeys: string[] = [];
+  try {
+    const raw = await fs.readFile(statePath, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (isStringArray(parsed)) retainedKeys = parsed;
+  } catch {
+    // Missing, or present but corrupted/unreadable — either way there's
+    // nothing recoverable to merge in, so proceed with just this run's own
+    // keys rather than blocking the fatal persist-then-cancel path on a
+    // prior run's unrelated problem.
+  }
+  const merged = Array.from(new Set([...retainedKeys, ...processInstanceKeys]));
+  const tmpPath = `${statePath}.${process.pid}.tmp`;
+  await fs.writeFile(tmpPath, JSON.stringify(merged), 'utf8');
+  await fs.rename(tmpPath, statePath);
 }
 
 function isCreateProcessInstanceResponse(v: unknown): v is { processInstanceKey: string } {

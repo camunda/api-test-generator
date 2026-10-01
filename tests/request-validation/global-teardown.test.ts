@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let readFileMock: ReturnType<typeof vi.fn>;
 let writeFileMock: ReturnType<typeof vi.fn>;
+let renameMock: ReturnType<typeof vi.fn>;
 let rmMock: ReturnType<typeof vi.fn>;
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -35,6 +36,7 @@ vi.mock('node:fs', async (importOriginal) => {
       ...actual.promises,
       readFile: vi.fn(),
       writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
       rm: vi.fn(async () => undefined),
     },
   };
@@ -45,9 +47,11 @@ beforeEach(async () => {
   const fs = await import('node:fs');
   readFileMock = vi.mocked(fs.promises.readFile);
   writeFileMock = vi.mocked(fs.promises.writeFile);
+  renameMock = vi.mocked(fs.promises.rename);
   rmMock = vi.mocked(fs.promises.rm);
   readFileMock.mockReset();
   writeFileMock.mockReset().mockResolvedValue(undefined);
+  renameMock.mockReset().mockResolvedValue(undefined);
   rmMock.mockReset();
 });
 
@@ -125,11 +129,17 @@ describe('globalTeardown', () => {
 
     // The state file is rewritten with only the key that's still
     // outstanding, not deleted — a future teardown/retry has it to act on.
+    // Via a temp file + rename (atomic), not a direct write — this record
+    // is the only retry path for PI-FAILS, so a truncated direct write
+    // would itself turn the transient cancellation failure into a
+    // permanent, untracked leak (#614's review discussion).
     expect(writeFileMock).toHaveBeenCalledWith(
-      expect.any(String),
+      expect.stringMatching(/\.tmp$/),
       JSON.stringify(['PI-FAILS']),
       'utf8',
     );
+    const [tmpPath] = writeFileMock.mock.calls[0];
+    expect(renameMock).toHaveBeenCalledWith(tmpPath, expect.not.stringMatching(/\.tmp$/));
     expect(rmMock).not.toHaveBeenCalled();
   });
 

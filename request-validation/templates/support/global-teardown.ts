@@ -27,11 +27,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authHeaders } from './env';
-import { RUNTIME_KEY_CLEANUP_STATE_FILE, cancelProcessInstance, errnoCode } from './global-setup';
-
-function isStringArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.every((item) => typeof item === 'string');
-}
+import {
+  RUNTIME_KEY_CLEANUP_STATE_FILE,
+  cancelProcessInstance,
+  errnoCode,
+  isStringArray,
+} from './global-setup';
 
 async function globalTeardown(): Promise<void> {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -79,7 +80,17 @@ async function globalTeardown(): Promise<void> {
   // whole `npx playwright test` run's exit code, matching this suite's
   // fail-loud-on-broker-problems design elsewhere (#614's review
   // discussion) instead of letting broker state silently accumulate.
-  await fs.writeFile(statePath, JSON.stringify(remaining), 'utf8').catch(() => undefined);
+  //
+  // Via a temp file + rename, not a direct write: this record is the ONLY
+  // retry path for whatever's left in `remaining`, so a process kill
+  // mid-write truncating it would itself turn a transient cancellation
+  // failure into a permanent, untracked broker leak — the one outcome this
+  // whole retry mechanism exists to prevent (#614's review discussion).
+  const tmpPath = `${statePath}.${process.pid}.tmp`;
+  await fs
+    .writeFile(tmpPath, JSON.stringify(remaining), 'utf8')
+    .then(() => fs.rename(tmpPath, statePath))
+    .catch(() => undefined);
   throw new Error(
     `[runtime-key fixtures] failed to cancel ${remaining.length} process instance(s) during teardown: ` +
       `${remaining.join(', ')}. They remain on the broker and in the cleanup state file for a future run to retry.`,

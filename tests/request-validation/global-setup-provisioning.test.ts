@@ -34,6 +34,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *      — on an otherwise-successful run that file is the only thing
  *      global-teardown.ts has to act on, so a silent write failure would
  *      leak both instances with nothing left to retry against (#614's
+ *      review discussion);
+ *   6. a prior run's retained (still-outstanding) keys are merged into,
+ *      not overwritten by, this run's own cleanup-state write (#614's
  *      review discussion).
  */
 
@@ -43,9 +46,10 @@ vi.mock('node:fs', async (importOriginal) => {
     ...actual,
     promises: {
       ...actual.promises,
-      readFile: vi.fn(async () => Buffer.from('<bpmn/>')),
-      writeFile: vi.fn(async () => undefined),
-      rm: vi.fn(async () => undefined),
+      readFile: vi.fn(),
+      writeFile: vi.fn(),
+      rename: vi.fn(),
+      rm: vi.fn(),
     },
   };
 });
@@ -57,11 +61,33 @@ const ENV_KEYS = [
   'RV_FIXTURE_ELEMENT_INSTANCE_KEY',
 ] as const;
 
-beforeEach(() => {
+// `vi.restoreAllMocks()` does NOT undo a `.mockImplementation()` set during
+// a test's body for a plain `vi.fn()` (confirmed directly: it leaks into
+// later tests) — only `.mockReset()` does. Named references reset and
+// re-seeded with their default behavior in `beforeEach`, rather than relying
+// on `afterEach`'s restore, are what actually isolates tests that need a
+// custom fs mock (e.g. the cleanup-state merge test below) from every other
+// test in this file.
+let readFileMock: ReturnType<typeof vi.fn>;
+let writeFileMock: ReturnType<typeof vi.fn>;
+let renameMock: ReturnType<typeof vi.fn>;
+let rmMock: ReturnType<typeof vi.fn>;
+
+beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
   for (const k of ENV_KEYS) delete process.env[k];
   delete process.env.RV_FIXTURE_ENV_FILE;
+
+  const fs = await import('node:fs');
+  readFileMock = vi.mocked(fs.promises.readFile);
+  writeFileMock = vi.mocked(fs.promises.writeFile);
+  renameMock = vi.mocked(fs.promises.rename);
+  rmMock = vi.mocked(fs.promises.rm);
+  readFileMock.mockReset().mockResolvedValue(Buffer.from('<bpmn/>'));
+  writeFileMock.mockReset().mockResolvedValue(undefined);
+  renameMock.mockReset().mockResolvedValue(undefined);
+  rmMock.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -291,6 +317,56 @@ describe('provisionRuntimeKeyFixtures', () => {
       'PDK-SERVICE',
       'PDK-USERTASK',
     ]);
+  });
+
+  it("merges a prior run's retained (still-outstanding) keys into the new cleanup-state write, rather than overwriting them", async () => {
+    // Simulates teardown having retained 'PI-LEAKED-FROM-PRIOR-RUN' in the
+    // state file after a cancellation that didn't succeed last run. This
+    // run's own recordCreatedInstancesForCleanup write must not blow that
+    // away the moment it records its own, unrelated keys (#614's review
+    // discussion) — the two sets of keys have nothing to do with each
+    // other, and only the merge preserves teardown's one remaining chance
+    // to retry the leaked one.
+    readFileMock.mockImplementation(async (path) => {
+      if (String(path).endsWith('.bpmn')) return Buffer.from('<bpmn/>');
+      if (String(path).endsWith('runtime-key-fixtures-cleanup.json')) {
+        return JSON.stringify(['PI-LEAKED-FROM-PRIOR-RUN']);
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v2/deployments')) return deploymentResponse();
+        if (url.endsWith('/v2/process-instances')) {
+          const body = parseRequestBody(init);
+          const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
+          return jsonResponse({ processInstanceKey: key });
+        }
+        if (url.endsWith('/v2/user-tasks/search')) {
+          return jsonResponse({
+            items: [{ userTaskKey: 'UT-1', elementInstanceKey: 'EI-USERTASK' }],
+          });
+        }
+        if (url.endsWith('/v2/jobs/activation')) {
+          return jsonResponse({ jobs: [{ jobKey: 'JOB-1', elementInstanceKey: 'EI-JOB' }] });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await provisionRuntimeKeyFixtures();
+
+    const tmpCall = writeFileMock.mock.calls.find((call) =>
+      String(call[0]).includes('runtime-key-fixtures-cleanup.json'),
+    );
+    expect(tmpCall).toBeDefined();
+    const writtenKeys: unknown = JSON.parse(String(tmpCall?.[1]));
+    expect(writtenKeys).toEqual(
+      expect.arrayContaining(['PI-LEAKED-FROM-PRIOR-RUN', 'PI-USERTASK', 'PI-SERVICE']),
+    );
   });
 
   it('throws and cancels both instances when persisting the cleanup state fails, rather than continuing silently', async () => {
