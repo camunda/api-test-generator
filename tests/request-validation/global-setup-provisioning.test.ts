@@ -84,7 +84,17 @@ beforeEach(async () => {
   writeFileMock = vi.mocked(fs.promises.writeFile);
   renameMock = vi.mocked(fs.promises.rename);
   rmMock = vi.mocked(fs.promises.rm);
-  readFileMock.mockReset().mockResolvedValue(Buffer.from('<bpmn/>'));
+  // BPMN fixture reads succeed by default; the cleanup-state merge-read
+  // defaults to ENOENT (no state file yet — the realistic starting point
+  // for almost every test here) rather than a blanket resolved value, since
+  // recordCreatedInstancesForCleanup now rethrows any non-ENOENT read
+  // failure instead of swallowing it (#614's review discussion) — a flat
+  // `<bpmn/>` buffer for that path would fail its JSON.parse and incorrectly
+  // trip that path in every test that doesn't care about this behavior.
+  readFileMock.mockReset().mockImplementation(async (path) => {
+    if (String(path).endsWith('.bpmn')) return Buffer.from('<bpmn/>');
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  });
   writeFileMock.mockReset().mockResolvedValue(undefined);
   renameMock.mockReset().mockResolvedValue(undefined);
   rmMock.mockReset().mockResolvedValue(undefined);
@@ -367,6 +377,45 @@ describe('provisionRuntimeKeyFixtures', () => {
     expect(writtenKeys).toEqual(
       expect.arrayContaining(['PI-LEAKED-FROM-PRIOR-RUN', 'PI-USERTASK', 'PI-SERVICE']),
     );
+  });
+
+  it('throws and cancels both instances when the existing cleanup record exists but fails to read for a reason other than ENOENT, rather than silently overwriting it', async () => {
+    // A non-ENOENT merge-read failure (EACCES, a transient I/O error, a
+    // corrupted file) must NOT be treated as "nothing to merge" — doing so
+    // would let the write below permanently overwrite whatever a prior
+    // run's failed teardown had retained there (#614's review discussion).
+    readFileMock.mockImplementation(async (path) => {
+      if (String(path).endsWith('.bpmn')) return Buffer.from('<bpmn/>');
+      if (String(path).endsWith('runtime-key-fixtures-cleanup.json')) {
+        throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    const cancelledInstanceKeys: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v2/deployments')) return deploymentResponse();
+        if (url.endsWith('/v2/process-instances')) {
+          const body = parseRequestBody(init);
+          const key = body.processDefinitionKey === 'PDK-USERTASK' ? 'PI-USERTASK' : 'PI-SERVICE';
+          return jsonResponse({ processInstanceKey: key });
+        }
+        const cancellationMatch = /\/v2\/process-instances\/([^/]+)\/cancellation$/.exec(url);
+        if (cancellationMatch) {
+          cancelledInstanceKeys.push(cancellationMatch[1]);
+          return jsonResponse({});
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    const provisionRuntimeKeyFixtures = await loadProvisionRuntimeKeyFixtures();
+    await expect(provisionRuntimeKeyFixtures()).rejects.toThrow(/EACCES/);
+
+    expect(cancelledInstanceKeys.sort()).toEqual(['PI-SERVICE', 'PI-USERTASK']);
+    expect(writeFileMock).not.toHaveBeenCalled();
   });
 
   it('throws and cancels both instances when persisting the cleanup state fails, rather than continuing silently', async () => {

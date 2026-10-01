@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../../request-validation/src/model/types.js';
+import { RUNTIME_KEY_FIXTURE_NAMES } from '../../request-validation/src/runtimeKeyFixtureNames.js';
 import { RUNTIME_KEY_ENV_VARS } from '../../request-validation/templates/support/global-setup.js';
 
 /**
@@ -200,5 +201,18 @@ describe('request-validation: resource-fixture emit (#352)', () => {
     expect(out).toContain(
       'const requestBody = {projectKey: process.env["RV_FIXTURE_PROJECT_KEY"] || "x"}',
     );
+  });
+
+  it("generate.ts/qaEmitter.ts's RUNTIME_KEY_FIXTURE_NAMES stays in sync with global-setup.ts's RUNTIME_KEY_ENV_VARS keys (#614)", () => {
+    // generate.ts and qaEmitter.ts can't import global-setup.ts's own
+    // RUNTIME_KEY_ENV_VARS directly without pulling that vendored template
+    // file (and its deliberately extension-less internal imports) into
+    // request-validation's own `tsc -p .` build graph — breaking the
+    // compiled generator (ERR_MODULE_NOT_FOUND) — so RUNTIME_KEY_FIXTURE_NAMES
+    // in src/ is a second, independent copy of the same 4 names. This is
+    // the one guard keeping that copy from silently drifting the way three
+    // unenforced hand-typed arrays previously could (#614's review
+    // discussion).
+    expect(Object.keys(RUNTIME_KEY_ENV_VARS).sort()).toEqual([...RUNTIME_KEY_FIXTURE_NAMES].sort());
   });
 });

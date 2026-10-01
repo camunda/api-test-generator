@@ -266,11 +266,17 @@ async function recordCreatedInstancesForCleanup(processInstanceKeys: readonly st
     const raw = await fs.readFile(statePath, 'utf8');
     const parsed: unknown = JSON.parse(raw);
     if (isStringArray(parsed)) retainedKeys = parsed;
-  } catch {
-    // Missing, or present but corrupted/unreadable — either way there's
-    // nothing recoverable to merge in, so proceed with just this run's own
-    // keys rather than blocking the fatal persist-then-cancel path on a
-    // prior run's unrelated problem.
+  } catch (err) {
+    // Only ENOENT means there's genuinely nothing to merge (no prior run
+    // ever recorded anything here). Anything else — EACCES, a transient
+    // I/O error, a corrupted/wrong-shape file — means an existing record
+    // may still hold instances a prior run's teardown couldn't cancel;
+    // swallowing it here would let the write below permanently overwrite
+    // that record with just this run's own keys, losing them for good.
+    // Let it propagate: the caller already cancels this run's own created
+    // instances and throws on any failure here, which is exactly the
+    // right outcome for "can't safely persist cleanup state."
+    if (errnoCode(err) !== 'ENOENT') throw err;
   }
   const merged = Array.from(new Set([...retainedKeys, ...processInstanceKeys]));
   const tmpPath = `${statePath}.${process.pid}.tmp`;
