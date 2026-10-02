@@ -88,18 +88,47 @@ jobs:
         run: echo "sha=$(git -C ../camunda-hub rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Baseline = the previous *scheduled* report, so a dry-run dispatch or a run against another
-      # hub_ref never becomes the comparison point. Best effort: the first run (or an expired
-      # artifact) simply has no baseline.
+      # hub_ref never becomes the comparison point. No earlier run (the first one) or one old
+      # enough that its artifact has expired is fine: the history simply starts here. A run that
+      # should still have its artifact but cannot be downloaded is NOT fine: carrying on would
+      # replace the accumulated history.csv with a one-row file that every later run inherits, so
+      # retry and then fail the run (a re-run recovers; a silent reset cannot be undone).
       - name: Fetch previous report
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prev_id=$(gh run list --workflow hub-response-coverage.yml --event schedule --status success --limit 1 \
-            --json databaseId --jq '.[0].databaseId // empty')
-          if [ -n "$prev_id" ]; then
-            gh run download "$prev_id" --name hub-coverage-report --dir previous
+          set -uo pipefail
+          # A failed lookup is not "no previous run": only an empty answer is.
+          if ! prev=$(gh run list --workflow hub-response-coverage.yml --event schedule \
+            --status success --limit 1 --json databaseId,createdAt \
+            --jq '.[0] | select(. != null) | "\(.databaseId) \(.createdAt)"'); then
+            echo "::error::Could not list previous reports. Failing instead of restarting history.csv."
+            exit 1
           fi
+          read -r prev_id prev_date <<< "$prev"
+          if [ -z "${prev_id:-}" ]; then
+            echo "No previous scheduled report: the history starts with this run."
+            exit 0
+          fi
+          age_days=$(( ( $(date +%s) - $(date -d "$prev_date" +%s) ) / 86400 ))
+          # Artifact retention is 90 days; leave a margin so a near-expiry artifact is not a failure.
+          if [ "$age_days" -ge 85 ]; then
+            echo "::warning::Previous scheduled report is $age_days days old and its artifact has likely expired: the history restarts with this run."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if gh run download "$prev_id" --name hub-coverage-report --dir previous; then
+              break
+            fi
+            echo "Download of the previous report failed (attempt $attempt of 3)."
+            sleep $((attempt * 10))
+          done
+          if [ ! -f previous/summary.json ]; then
+            echo "::error::Could not download the previous report (run $prev_id, $age_days days old). Failing instead of restarting history.csv; re-run once GitHub artifacts are reachable."
+            exit 1
+          fi
+          # The previous run predates history.csv (first run after this feature shipped): start it here.
+          [ -f previous/history.csv ] || echo "Previous report has no history.csv: the history starts with this run."
 
       - name: Run the audit
         run: |
