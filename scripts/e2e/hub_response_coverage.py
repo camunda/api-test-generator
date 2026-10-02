@@ -454,7 +454,9 @@ def matrix(s, rows):
         '**Optional fields** is how many optional request fields a success test sends.', '',
         '**Bad-request kinds** is whether the negative suite has at least one test for each kind of bad request the '
         'generator can apply to the endpoint (missing or wrong fields, bad values, no login); the number is kinds '
-        'covered out of kinds that apply. It does not count how many tests there are for each kind.', '',
+        'covered out of kinds that apply. It does not count how many tests there are for each kind. The kinds that '
+        'apply come from the generator\'s own rules; for request-body kinds they can include a check the generator '
+        'cannot build, so a gap there is an upper bound.', '',
         '| Endpoint | Request | Success | Response checked | Optional fields | Bad-request kinds | 400 | 401 | 403 | 404 | 409 | Missing |',
         '|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|',
     ]

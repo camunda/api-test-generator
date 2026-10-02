@@ -799,7 +799,12 @@ entirely, and `operationsWithNoScenarios` for endpoints whose scenarios were all
 missing an applicable *kind* of bad-request test (it counts kinds with at least one scenario,
 not how many tests each kind has). That column is only as complete as the generator's own
 applicability rules (see "every new request-validation scenario kind needs an applicability
-rule"). Each scheduled run also appends a row to `history.csv` in the artifact. This is a different axis from `npm run coverage:report` (which maps
+rule"). The parameter kinds (`param-missing`, `param-type-mismatch`, `param-enum-violation`,
+`param-constraint-violation`) reuse their generators' exact eligibility, so they are accurate.
+The body-schema kinds (`allof-*`, `oneof-*`, `format-invalid`, `nested-additional-prop`,
+`additional-prop-general`, `missing-body`, `constraint-violation`, ...) are still derived from
+schema features, not from each generator's own gate, so for them the column can report a check the
+generator cannot build; treat those as an upper bound until each reuses its generator's eligibility. Each scheduled run also appends a row to `history.csv` in the artifact. This is a different axis from `npm run coverage:report` (which maps
 operations to generated specs). It is static analysis of generated output, needs no
 running Hub, and the script exits non-zero if the generated test format no longer
 parses (so a format change fails the run instead of reporting zeros). The per-operation

@@ -21,14 +21,54 @@ function buildQueryParamMap(op: OperationModel): Record<string, string> {
   return q;
 }
 
+/**
+ * What each parameter generator can actually produce, written once. The generators below and the
+ * per-operation applicability rules in `generate.ts` (which COVERAGE.json's `missingApplicableKinds`
+ * is measured against) both call these, so an operation is never reported as missing a check the
+ * generator cannot build. The applicability rules used to read the parameters more loosely (a
+ * required path parameter counted for param-missing, although a path parameter cannot be omitted).
+ */
+
+/** A required parameter that can be left out of the request. A path parameter cannot be omitted. */
+function isOmittableParam(p: ParameterModel): boolean {
+  return Boolean(p.required) && p.in !== 'path';
+}
+
+/** The schema type a type-mismatch scenario would break for `p`, or undefined if none can be built. */
+function typeMismatchTargetType(p: ParameterModel): string | undefined {
+  if (!p.schema?.type) return undefined;
+  if (p.in === 'path') return undefined; // path params often strictly string serialized
+  const paramType = Array.isArray(p.schema.type) ? p.schema.type[0] : p.schema.type;
+  // Plain string parameters without enum/format have no real type mismatch.
+  if (paramType === 'string' && !p.schema.enum && !p.schema.format) return undefined;
+  return wrongTypeValue(paramType) === undefined ? undefined : paramType;
+}
+
+/** A parameter with an enum that is sent in the query or a header (not the path). */
+function isEnumViolationParam(p: ParameterModel): boolean {
+  const e = p.schema?.enum;
+  return Array.isArray(e) && e.length > 0 && p.in !== 'path';
+}
+
+export function isParamMissingEligible(op: OperationModel): boolean {
+  return op.parameters.some(isOmittableParam);
+}
+
+export function isParamTypeMismatchEligible(op: OperationModel): boolean {
+  return op.parameters.some((p) => typeMismatchTargetType(p) !== undefined);
+}
+
+export function isParamEnumViolationEligible(op: OperationModel): boolean {
+  return op.parameters.some(isEnumViolationParam);
+}
+
 export function generateParamMissing(ops: OperationModel[], opts: Opts): ValidationScenario[] {
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
-      if (!p.required) continue;
-      if (p.in === 'path') continue; // can't "omit" path param without changing path shape
+      if (!isOmittableParam(p)) continue; // a path param can't be omitted without changing the path shape
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       let params: Record<string, string> | undefined;
       if (p.in === 'query') {
@@ -63,14 +103,8 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
-      if (!p.schema?.type) continue;
-      if (p.in === 'path') continue; // path params often strictly string serialized
+      if (typeMismatchTargetType(p) === undefined) continue;
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
-      const paramType = Array.isArray(p.schema.type) ? p.schema.type[0] : p.schema.type;
-      // Skip plain string parameters without enum/format; no real type mismatch possible.
-      if (paramType === 'string' && !p.schema.enum && !p.schema.format) continue;
-      const wrong = wrongTypeValue(paramType);
-      if (wrong === undefined) continue;
       // Start with all required query params (so we don't unintentionally create identical empty queries)
       let params: Record<string, string> | undefined;
       if (p.in === 'query') {
@@ -120,9 +154,9 @@ export function generateParamEnumViolation(
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
+      if (!isEnumViolationParam(p)) continue;
       const e = p.schema?.enum;
-      if (!Array.isArray(e) || !e.length) continue;
-      if (p.in === 'path') continue;
+      if (!Array.isArray(e)) continue;
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       let invalid = '__INVALID_ENUM__';
       if (typeof e[0] === 'string') {

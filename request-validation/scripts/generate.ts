@@ -61,6 +61,9 @@ import {
   generateParamEnumViolation,
   generateParamMissing,
   generateParamTypeMismatch,
+  isParamEnumViolationEligible,
+  isParamMissingEligible,
+  isParamTypeMismatchEligible,
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
@@ -1272,12 +1275,12 @@ async function main() {
       rvConfig.independentAuthGateMode === 'unavailable' && op.independentAuthGate === true;
     if (!skipNonAuthApplicability) {
       // Parameters applicability
-      const requiredParams = op.parameters.filter((p) => p.required);
-      if (requiredParams.length) applicable.add('param-missing');
-      if (op.parameters.some((p) => p.schema && (p.schema.type || p.schema.enum)))
-        applicable.add('param-type-mismatch');
-      if (op.parameters.some((p) => Array.isArray(p.schema?.enum)))
-        applicable.add('param-enum-violation');
+      // The three simple parameter kinds reuse the exact per-parameter rules their generators
+      // call (parameters.ts), so a path parameter or a plain string no longer makes an operation
+      // look as if it were missing a check the generator cannot build.
+      if (isParamMissingEligible(op)) applicable.add('param-missing');
+      if (isParamTypeMismatchEligible(op)) applicable.add('param-type-mismatch');
+      if (isParamEnumViolationEligible(op)) applicable.add('param-enum-violation');
       // param-constraint-violation reuses the exact eligibility check
       // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
       // which merges the allOf chain — a flat p.schema.* read misses
