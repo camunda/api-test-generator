@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { generateAuthDeny } from '../../request-validation/src/analysis/authDeny.js';
+import {
+  generateAuthDeny,
+  isAuthDenyEligible,
+} from '../../request-validation/src/analysis/authDeny.js';
 import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitter.js';
 import type { OperationModel } from '../../request-validation/src/model/types.js';
 
@@ -225,5 +228,84 @@ describe('request-validation: auth-deny all-secured mode', () => {
   it('does NOT use the OCA slice in all-secured mode (slice ops without `secured` are skipped)', () => {
     // `ops` (the slice fixtures) carry no `secured` field, so all-secured emits nothing for them.
     expect(generateAuthDeny(ops, { allSecured: true })).toHaveLength(0);
+  });
+});
+
+describe('request-validation: auth-deny fixtures mode', () => {
+  const objectBody = {
+    type: 'object',
+    required: ['name'],
+    properties: { name: { type: 'string' } },
+  };
+  const keyed = (extra: Partial<OperationModel>): OperationModel => ({
+    operationId: 'op',
+    method: 'PATCH',
+    path: '/projects/{projectKey}',
+    tags: [],
+    parameters: [{ name: 'projectKey', in: 'path', required: true }],
+    secured: true,
+    ...extra,
+  });
+  const fixtureNames = new Set(['projectKey']);
+  const run = (op: OperationModel) =>
+    generateAuthDeny([op], { allSecured: true, fixtureNames }).map((s) => s.operationId);
+
+  it('targets a keyed op whose path key has a fixture, marking the key for substitution', () => {
+    const [s] = generateAuthDeny([keyed({})], { allSecured: true, fixtureNames });
+    expect(s.expectedStatus).toBe(403);
+    expect(s.headersAuth).toBe(false);
+    expect(s.params).toEqual({ projectKey: 'x' });
+    expect(s.requestBody).toBeUndefined();
+  });
+
+  it('sends a valid baseline body when one is required', () => {
+    const [s] = generateAuthDeny([keyed({ bodyRequired: true, requestBodySchema: objectBody })], {
+      allSecured: true,
+      fixtureNames,
+    });
+    expect(s.requestBody).toEqual({ name: 'x' });
+    expect(s.bodyEncoding).toBe('json');
+  });
+
+  it('still excludes what cannot reach the authority check', () => {
+    // a path key with no fixture resolves to nothing: 404 first
+    expect(run(keyed({ parameters: [{ name: 'otherKey', in: 'path', required: true }] }))).toEqual(
+      [],
+    );
+    // a required body with no schema, or one that has no object baseline
+    expect(run(keyed({ bodyRequired: true }))).toEqual([]);
+    expect(
+      run(keyed({ bodyRequired: true, requestBodySchema: { type: 'array', items: {} } })),
+    ).toEqual([]);
+    // required non-path parameter, and not secured
+    expect(
+      run(
+        keyed({
+          parameters: [
+            { name: 'projectKey', in: 'path', required: true },
+            { name: 'q', in: 'query', required: true },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+    expect(run(keyed({ secured: false }))).toEqual([]);
+  });
+
+  it('is eligibility-consistent with generation', () => {
+    for (const op of [
+      keyed({}),
+      keyed({ bodyRequired: true, requestBodySchema: objectBody }),
+      keyed({ bodyRequired: true }),
+      keyed({ parameters: [{ name: 'otherKey', in: 'path', required: true }] }),
+    ]) {
+      const eligible = isAuthDenyEligible(op, { allSecured: true, fixtureNames });
+      expect(generateAuthDeny([op], { allSecured: true, fixtureNames }).length).toBe(
+        eligible ? 1 : 0,
+      );
+    }
+  });
+
+  it('without fixture names behaves as before (keyless, no required body)', () => {
+    expect(generateAuthDeny([keyed({})], { allSecured: true })).toHaveLength(0);
   });
 });

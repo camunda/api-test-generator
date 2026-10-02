@@ -286,6 +286,18 @@ fixtures and named invariants point directly at the broken property.
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
 
+### 403 (auth-deny) scenarios
+
+`authDenyMode` in `configs/<config>/request-validation.json` chooses which operations get a
+"principal without grants is denied" test (rbac profile): `slice` (OCA read allowlist),
+`all-secured` (keyless operations only), and `fixtures` (Hub). A server that checks the body
+(400) and the resource (404) before authorization only reaches the 403 for an otherwise valid
+request, so `fixtures` adds every secured operation whose path keys all have a
+`resourceFixtures` entry and whose required JSON body is a buildable baseline. Body key fields
+with a fixture are substituted as in any other scenario. An operation that still cannot reach
+the check is excluded with `excludeOperations` (`scenarioKinds: ["auth-deny"]`) and a reason.
+A denied request must not change a fixture, so a passing run leaves the shared fixtures intact.
+
 ### Conflict (409) scenarios
 
 A 409 needs setup state, so it is asserted in the positive feature suite, not the

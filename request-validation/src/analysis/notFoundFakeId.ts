@@ -174,7 +174,7 @@ function satisfiesSchema(schema: SchemaFragment, body: unknown): boolean {
  * Either way the server would answer 400 instead of exercising the 404, so the operation is
  * not eligible, rather than emitted as a test that fails for the wrong reason.
  */
-function buildableBody(op: OperationModel): Record<string, unknown> | undefined {
+export function buildableBody(op: OperationModel): Record<string, unknown> | undefined {
   const body = buildBaselineBody(op);
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
   if (!op.requestBodySchema || !satisfiesSchema(op.requestBodySchema, body)) return undefined;
