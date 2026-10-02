@@ -785,7 +785,8 @@ compares every response code the spec documents (2xx/400/401/403/404/409; 500 is
 ignored) against the status codes the generated suites assert, and also counts the
 optional request fields a success-path test sends and the success bodies that are
 schema-validated, and reads the negative suite's `COVERAGE.json` (`applicableKindCount`,
-`presentKindCount`, `missingApplicableKinds`, `kindAliases`) to report which endpoints are
+`presentKindCount`, `missingApplicableKinds`, `kindAliases`, and `operationsWithNoScenarios` for
+endpoints whose scenarios were all excluded by config) to report which endpoints are
 missing an applicable *kind* of bad-request test (it counts kinds with at least one scenario,
 not how many tests each kind has). That column is only as complete as the generator's own
 applicability rules (see "every new request-validation scenario kind needs an applicability

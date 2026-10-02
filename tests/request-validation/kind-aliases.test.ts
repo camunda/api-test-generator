@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { computeKindCoverage } from '../../request-validation/src/analysis/kindCoverage.js';
+import {
+  computeKindCoverage,
+  listOperationsWithoutScenarios,
+} from '../../request-validation/src/analysis/kindCoverage.js';
 import {
   KIND_ALIASES,
   normalizeKind,
@@ -72,6 +75,42 @@ describe('request-validation: per-operation kind coverage', () => {
     const result = computeKindCoverage([], ['format-invalid']);
     expect([...result.applicable]).toEqual(['format-invalid']);
     expect(result.missingApplicable).toEqual([]);
+  });
+});
+
+describe('request-validation: operations with no scenario left', () => {
+  const byOperation = {
+    createFolder: {
+      applicable: new Set(['missing-required', 'type-mismatch']),
+      missingApplicable: [],
+    },
+    zeta: {
+      applicable: new Set(['auth-absent', 'format-invalid']),
+      missingApplicable: ['format-invalid', 'auth-absent'],
+    },
+    alpha: { applicable: new Set(['auth-absent']), missingApplicable: ['auth-absent'] },
+  };
+
+  it('lists an operation whose scenarios were all excluded, with the kinds that apply to it', () => {
+    const result = listOperationsWithoutScenarios(byOperation, new Set(['createFolder']));
+    expect(result.map((o) => o.operationId)).toEqual(['alpha', 'zeta']);
+    expect(result[1]).toEqual({
+      operationId: 'zeta',
+      applicableKindCount: 2,
+      presentKindCount: 0,
+      missingApplicableKinds: ['format-invalid', 'auth-absent'],
+    });
+  });
+
+  it('leaves out an operation that still has a scenario', () => {
+    const result = listOperationsWithoutScenarios(byOperation, new Set(['createFolder', 'zeta']));
+    expect(result.map((o) => o.operationId)).toEqual(['alpha']);
+  });
+
+  it('lists nothing when every operation has a scenario', () => {
+    expect(listOperationsWithoutScenarios(byOperation, new Set(Object.keys(byOperation)))).toEqual(
+      [],
+    );
   });
 });
 

@@ -24,7 +24,11 @@ import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
 import { generateExplicitNullRequired } from '../src/analysis/explicitNullRequired.js';
-import { computeKindCoverage } from '../src/analysis/kindCoverage.js';
+import {
+  computeKindCoverage,
+  listOperationsWithoutScenarios,
+  type OperationWithoutScenarios,
+} from '../src/analysis/kindCoverage.js';
 import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
@@ -1093,6 +1097,8 @@ async function main() {
       onlyOperations: string[] | null;
     };
     operations: OpCoverage[];
+    /** Operations with no scenario left (absent from `operations`), with the kinds that apply to them. */
+    operationsWithNoScenarios?: OperationWithoutScenarios[];
     endpointTotals?: {
       totalOps: number;
       coveredOps: number;
@@ -1397,6 +1403,10 @@ async function main() {
       missingApplicableKinds: appl.missingApplicable,
     };
   });
+  coverage.operationsWithNoScenarios = listOperationsWithoutScenarios(
+    applicabilityPerOp,
+    new Set(Object.keys(opScenarioKinds)),
+  );
   await fs.promises.writeFile(
     path.join(opts.outDir, 'COVERAGE.json'),
     JSON.stringify(coverage, null, 2),
