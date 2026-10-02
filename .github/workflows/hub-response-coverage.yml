@@ -5,7 +5,8 @@
 # suites assert, and posts the totals to #camunda-hub-nightly-test-results with the
 # change since the previous report. Static analysis of generated output — it does not
 # need a running Hub and cannot fail on a flaky backend. The full per-operation matrix
-# is in the run summary and the `hub-coverage-report` artifact.
+# is in the run summary and the `hub-coverage-report` artifact, whose `history.csv` carries
+# one row of headline numbers per scheduled report so the trend can be read in one file.
 #
 # Deterministic: scripts/e2e/hub_response_coverage.py does the analysis; no agent.
 # Same clone/Vault/Slack plumbing as hub-known-issue-reenable-check.yml. The tracking
@@ -105,6 +106,7 @@ jobs:
           python3 scripts/e2e/hub_response_coverage.py \
             --out coverage-report \
             --previous previous/summary.json \
+            --previous-history previous/history.csv \
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --tracking-url "$TRACKING_URL"
