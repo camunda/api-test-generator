@@ -530,24 +530,69 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       .map((f) => readRequired(join(rbac, f)))
       .join('\n');
     const denied = (opId: string) => corpus.includes(`test('${opId} - Denied (no permission)'`);
-    // One keyed read, write, delete and restore per resource family, plus a create that
-    // carries a body key.
-    for (const opId of [
-      'getFile',
-      'updateFile',
-      'createFile',
-      'deleteFile',
-      'restoreFile',
-      'createFolder',
-      'updateProject',
-      'deleteProject',
-      'updateWorkspace',
-      'createVersion',
-    ]) {
-      expect(denied(opId), `${opId} has no 403 test`).toBe(true);
+    // The full surface, derived from the spec and the fixture config rather than from the
+    // generator: every secured operation with no required non-path parameter whose path keys
+    // all have a fixture. Each must assert a 403 unless it is listed with the reason it cannot.
+    const NO_DENY_TEST: Record<string, string> = {
+      addMember: 'baseline email is invalid; Hub validates the format before authorization (400)',
+      ingestCatalogAssets: 'multipart-only body, no baseline to send',
+    };
+    const config: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/request-validation.json')),
+    );
+    const fixtureNames = new Set(
+      isRecord(config)
+        ? [
+            ...Object.keys(isRecord(config.resourceFixtures) ? config.resourceFixtures : {}),
+            ...Object.keys(
+              isRecord(config.pathResourceFixtures) ? config.pathResourceFixtures : {},
+            ),
+          ]
+        : [],
+    );
+    const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const candidates: string[] = [];
+    if (isRecord(bundle) && isRecord(bundle.paths)) {
+      const globalSecurity = Array.isArray(bundle.security) ? bundle.security : [];
+      for (const item of Object.values(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
+          if (typeof opDef.operationId !== 'string') continue;
+          const security = Array.isArray(opDef.security) ? opDef.security : globalSecurity;
+          if (
+            security.length === 0 ||
+            security.some((r) => isRecord(r) && Object.keys(r).length === 0)
+          )
+            continue;
+          const params = [
+            ...(Array.isArray(item.parameters) ? item.parameters : []),
+            ...(Array.isArray(opDef.parameters) ? opDef.parameters : []),
+          ].filter(isRecord);
+          if (params.some((p) => p.required === true && p.in !== 'path')) continue;
+          const pathKeys = params.filter((p) => p.in === 'path').map((p) => String(p.name));
+          if (pathKeys.some((k) => !fixtureNames.has(k))) continue;
+          candidates.push(opDef.operationId);
+        }
+      }
     }
-    // addMember is excluded: its baseline email is invalid, so it answers 400 before authz.
-    expect(denied('addMember')).toBe(false);
-    expect(corpus.match(/ - Denied \(no permission\)'/g)?.length ?? 0).toBeGreaterThan(50);
+    expect(
+      candidates.length,
+      'found suspiciously few deny candidates - did the spec parse?',
+    ).toBeGreaterThan(50);
+    expect(
+      candidates.filter((id) => !denied(id) && !(id in NO_DENY_TEST)),
+      'operations that can reach the authority check but have no 403 test',
+    ).toEqual([]);
+    for (const id of Object.keys(NO_DENY_TEST)) {
+      expect(denied(id), `${id} is listed as having no 403 test but has one`).toBe(false);
+    }
+    const generated = new Set(
+      [...corpus.matchAll(/test\('(\w+) - Denied \(no permission\)'/g)].map((m) => m[1]),
+    );
+    expect(
+      [...generated].filter((id) => !candidates.includes(id)),
+      '403 tests for operations outside the derived surface',
+    ).toEqual([]);
   });
 });
