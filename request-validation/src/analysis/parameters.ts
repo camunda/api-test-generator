@@ -37,17 +37,19 @@ function isOmittableParam(p: ParameterModel): boolean {
 /** The schema type a type-mismatch scenario would break for `p`, or undefined if none can be built. */
 function typeMismatchTargetType(p: ParameterModel): string | undefined {
   if (!p.schema?.type) return undefined;
-  if (p.in === 'path') return undefined; // path params often strictly string serialized
+  // Only a query value is rendered as the bad value the scenario sends (a header or cookie would be
+  // written into the URL instead), and path params are often strictly string serialized.
+  if (p.in !== 'query') return undefined;
   const paramType = Array.isArray(p.schema.type) ? p.schema.type[0] : p.schema.type;
   // Plain string parameters without enum/format have no real type mismatch.
   if (paramType === 'string' && !p.schema.enum && !p.schema.format) return undefined;
   return wrongTypeValue(paramType) === undefined ? undefined : paramType;
 }
 
-/** A parameter with an enum that is sent in the query or a header (not the path). */
+/** A query parameter with an enum. Only a query value is rendered as the bad value the scenario sends. */
 function isEnumViolationParam(p: ParameterModel): boolean {
   const e = p.schema?.enum;
-  return Array.isArray(e) && e.length > 0 && p.in !== 'path';
+  return Array.isArray(e) && e.length > 0 && p.in === 'query';
 }
 
 export function isParamMissingEligible(op: OperationModel): boolean {
@@ -103,29 +105,27 @@ export function generateParamTypeMismatch(ops: OperationModel[], opts: Opts): Va
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     let produced = 0;
     for (const p of op.parameters) {
-      if (typeMismatchTargetType(p) === undefined) continue;
+      const paramType = typeMismatchTargetType(p);
+      if (paramType === undefined) continue;
       if (opts.capPerOperation && produced >= opts.capPerOperation) break;
       // Start with all required query params (so we don't unintentionally create identical empty queries)
-      let params: Record<string, string> | undefined;
-      if (p.in === 'query') {
-        const allQ = buildQueryParamMap(op);
-        // Overwrite the specific param with wrong typed value (stringified to keep buildUrl logic simple)
-        if (p.schema?.type === 'boolean') {
-          allQ[p.name] = 'notBoolean';
-        } else if (p.schema?.type === 'integer' || p.schema?.type === 'number') {
-          allQ[p.name] = 'NaNValue';
-        } else if (p.schema?.type === 'string') {
-          // If we reached here we have format/enum; provide a clearly invalid token
-          allQ[p.name] = '__INVALID_STRING__';
-        } else if (p.schema?.type === 'array') {
-          allQ[p.name] = 'notArray';
-        } else if (p.schema?.type === 'object') {
-          allQ[p.name] = 'notObject';
-        }
-        params = allQ;
-      } else {
-        params = buildParams(op.path, {}); // no query mutation for non-query params
+      const allQ = buildQueryParamMap(op);
+      // Overwrite the specific param with a wrong typed value (stringified to keep buildUrl logic simple).
+      // Branch on the type the eligibility rule resolved, not the raw schema type, which may be a union
+      // such as ['string', 'null'] that matches no branch and would leave the valid value in place.
+      if (paramType === 'boolean') {
+        allQ[p.name] = 'notBoolean';
+      } else if (paramType === 'integer' || paramType === 'number') {
+        allQ[p.name] = 'NaNValue';
+      } else if (paramType === 'string') {
+        // If we reached here we have format/enum; provide a clearly invalid token
+        allQ[p.name] = '__INVALID_STRING__';
+      } else if (paramType === 'array') {
+        allQ[p.name] = 'notArray';
+      } else if (paramType === 'object') {
+        allQ[p.name] = 'notObject';
       }
+      const params: Record<string, string> | undefined = allQ;
       out.push({
         id: makeId([op.operationId, 'paramType', p.in, p.name]),
         operationId: op.operationId,
@@ -169,9 +169,7 @@ export function generateParamEnumViolation(
         path: op.path,
         type: 'param-enum-violation',
         target: `${p.in}.${p.name}`,
-        params: buildParams(op.path, {
-          extraQuery: p.in === 'query' ? { [p.name]: String(invalid) } : undefined,
-        }),
+        params: buildParams(op.path, { extraQuery: { [p.name]: String(invalid) } }),
         expectedStatus: 400,
         description: `Enum violation for ${p.in} parameter ${p.name}`,
         headersAuth: true,

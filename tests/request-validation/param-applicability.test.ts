@@ -56,6 +56,13 @@ const FIXTURES: Record<string, ParameterModel[]> = {
   ],
   'query param with no schema type': [param('x', 'query', false, {})],
   'query param with an unmappable type': [param('x', 'query', false, { type: 'null' })],
+  'header with a type': [param('h', 'header', false, { type: 'integer' })],
+  'cookie with a type': [param('c', 'cookie', false, { type: 'integer' })],
+  'query string-or-null with an enum': [
+    param('u', 'query', false, { type: ['string', 'null'], enum: ['x'] }),
+  ],
+  'query array': [param('a', 'query', false, { type: 'array' })],
+  'query object': [param('o', 'query', false, { type: 'object' })],
 };
 
 describe('parameter kinds: applicability matches what the generator can build', () => {
@@ -73,6 +80,44 @@ describe('parameter kinds: applicability matches what the generator can build', 
       );
     });
   }
+
+  it('every scenario it emits actually sends a bad value for its parameter', () => {
+    // A scenario that leaves the valid value in place tests nothing and would be counted as coverage.
+    const badTypeValues = new Set([
+      'NaNValue',
+      'notBoolean',
+      '__INVALID_STRING__',
+      'notArray',
+      'notObject',
+    ]);
+    for (const [label, parameters] of Object.entries(FIXTURES)) {
+      const o = op(parameters);
+      for (const s of generateParamTypeMismatch([o], {})) {
+        const name = s.target?.split('.')[1] ?? '';
+        expect(badTypeValues.has(String(s.params?.[name])), `${label}: ${name}`).toBe(true);
+      }
+      for (const s of generateParamEnumViolation([o], {})) {
+        const name = s.target?.split('.')[1] ?? '';
+        expect(String(s.params?.[name]), `${label}: ${name}`).toMatch(/_X$|^__INVALID_ENUM__$/);
+      }
+    }
+  });
+
+  it('sends the bad value for a parameter typed as a union (first member decides)', () => {
+    const o = op([param('u', 'query', false, { type: ['string', 'null'], enum: ['x'] })]);
+    const [s] = generateParamTypeMismatch([o], {});
+    expect(s?.params?.u).toBe('__INVALID_STRING__');
+  });
+
+  it('builds nothing for header or cookie parameters, whose bad value cannot be sent', () => {
+    for (const where of ['header', 'cookie'] as const) {
+      const o = op([param('v', where, false, { type: 'integer', enum: [1, 2] })]);
+      expect(isParamTypeMismatchEligible(o), `${where} type`).toBe(false);
+      expect(isParamEnumViolationEligible(o), `${where} enum`).toBe(false);
+      expect(generateParamTypeMismatch([o], {})).toEqual([]);
+      expect(generateParamEnumViolation([o], {})).toEqual([]);
+    }
+  });
 
   it('does not count a required path parameter as an omittable one', () => {
     const o = op([param('id', 'path', true, { type: 'string' })]);
