@@ -672,8 +672,13 @@ export interface GlobalContextSeed {
    * Scope, confirmed live (see #404):
    *  - A REQUIRED occurrence of the field name is never affected.
    *  - A NESTED occurrence (fieldPath contains `.`, e.g. a search filter
-   *    field) behaves differently — never validated regardless of value —
-   *    and is handled separately; this gate does not apply to it.
+   *    field) behaves differently — a malformed-but-correctly-typed STRING
+   *    value is never validated, always a non-matching filter predicate —
+   *    and is handled separately; this gate does not apply to it. This does
+   *    NOT extend to a wrong-TYPE value (a number/boolean/object in place of
+   *    the declared string), which still fails JSON deserialization before
+   *    any field-level or capability check runs, regardless of nesting —
+   *    the generator that produces those mutations is never gated either.
    *  - A FLAT optional occurrence with a non-blank value is always
    *    rejected while the capability is off, independent of the value's
    *    own shape (garbage length, bad pattern, or a well-formed value) —
