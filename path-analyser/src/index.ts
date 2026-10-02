@@ -13,7 +13,13 @@ import {
   getTemplateScenariosRootDir,
   getVariantOutputDir,
 } from './configResolver.js';
-import { applyConflictReplay, loadConflictReplay } from './conflictReplay.js';
+import {
+  applyConflictReplay,
+  buildConflictSequenceScenarios,
+  loadConflictReplay,
+  loadConflictSequences,
+  validateConflictSequences,
+} from './conflictReplay.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
@@ -33,6 +39,7 @@ import type {
   ArtifactRegistryEntry,
   DomainSemantics,
   EndpointScenario,
+  EndpointScenarioCollection,
   GenerationSummary,
   GenerationSummaryEntry,
   OperationGraph,
@@ -99,6 +106,8 @@ async function main() {
 
   const graph = await loadGraph(baseDir);
   applyConflictReplay(graph, loadConflictReplay(getActiveConfigDir(repoRoot)));
+  const conflictSequences = loadConflictSequences(getActiveConfigDir(repoRoot));
+  validateConflictSequences(graph, conflictSequences);
   // Build canonical deep schema shapes (requests + responses)
   const canonical = await buildCanonicalShapes(path.resolve(baseDir, '../'));
   // Drift guard: every response-side semantic leaf reported by the
@@ -502,10 +511,21 @@ async function main() {
     // when this endpoint has at least one optional sub-shape, so the
     // variant-output directory remains a clear signal of which endpoints
     // have populated-shape coverage.
-    if (op.optionalSubShapes?.length) {
-      const variantCollection = generateOptionalSubShapeVariants(graph, op.operationId, {
-        maxVariantsPerEndpoint: plannerConfig.maxVariantsPerEndpoint,
-      });
+    const conflictScenarios = canonicalForEndpoint
+      ? buildConflictSequenceScenarios(canonicalForEndpoint, conflictSequences, graph)
+      : [];
+    if (op.optionalSubShapes?.length || conflictScenarios.length) {
+      const variantCollection: EndpointScenarioCollection = op.optionalSubShapes?.length
+        ? generateOptionalSubShapeVariants(graph, op.operationId, {
+            maxVariantsPerEndpoint: plannerConfig.maxVariantsPerEndpoint,
+          })
+        : {
+            endpoint: featureCollection.endpoint,
+            requiredSemanticTypes: featureCollection.requiredSemanticTypes,
+            optionalSemanticTypes: featureCollection.optionalSemanticTypes,
+            scenarios: [],
+          };
+      variantCollection.scenarios.push(...conflictScenarios);
       // Augment with response shape (when available) so downstream codegen
       // has the same metadata as base/feature scenarios. The requestPlan
       // call is intentionally unconditional — variant scenarios for

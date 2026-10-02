@@ -302,8 +302,17 @@ annotation (Hub) switches it on per operation in
   bumped the revision, and an update that changes nothing keeps it.
 - Verify a new entry live before adding it. The Hub invariant checks that every
   entry has a generated test asserting 409 and that the spec documents that 409.
-- Triggers other than "repeat the same call" (soft-deleted state, name clashes) are
-  not expressible here.
+- `sequences` covers a conflict that needs other calls first:
+  `{ name, operationId, before: [operationId, ...], reason }` runs the `before`
+  operations after the target's own setup chain and then the target, which must
+  answer 409 (a `<operation>.variant.spec.ts` test named `409 conflict - <name>`).
+  Hub uses it for restoring something whose parent is deleted, and for permanently
+  deleting something that was deleted along with its parent.
+- `untested` lists operations that document a 409 but have no test yet, each with a
+  tracking issue. The Hub invariant fails for any documented 409 that is neither
+  tested nor listed.
+- A conflict that needs a different kind of fixture (an element-template file) is not
+  expressible yet.
 
 ### Coverage has two axes: presence and completeness
 

@@ -462,4 +462,62 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       }
     }
   });
+  it('every operation that documents a 409 has a conflict test or a tracked reason it has none (#621)', () => {
+    const raw: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/conflict-replay.json')),
+    );
+    const listed = (key: string): Record<string, unknown>[] =>
+      isRecord(raw) && Array.isArray(raw[key]) ? raw[key].filter(isRecord) : [];
+    const tested = new Set<unknown>([
+      ...listed('replay').map((e) => e.operationId),
+      ...listed('sequences').map((e) => e.operationId),
+    ]);
+    const untested = listed('untested');
+    for (const e of untested) {
+      expect(e.issue, `${String(e.operationId)}: untested needs a tracking issue URL`).toMatch(
+        /^https:\/\/github\.com\/.+\/issues\/\d+$/,
+      );
+      expect(
+        tested.has(e.operationId),
+        `${String(e.operationId)} is both tested and untested`,
+      ).toBe(false);
+    }
+    const untestedIds = new Set(untested.map((e) => e.operationId));
+    const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const documented: string[] = [];
+    if (isRecord(bundle) && isRecord(bundle.paths)) {
+      for (const item of Object.values(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
+          if (
+            typeof opDef.operationId === 'string' &&
+            isRecord(opDef.responses) &&
+            '409' in opDef.responses
+          )
+            documented.push(opDef.operationId);
+        }
+      }
+    }
+    expect(
+      documented.length,
+      'found no operation documenting a 409 - did the spec parse?',
+    ).toBeGreaterThan(5);
+    expect(
+      documented.filter((id) => !tested.has(id) && !untestedIds.has(id)),
+      'operations documenting a 409 with neither a conflict test nor an untested entry',
+    ).toEqual([]);
+    expect(
+      [...untestedIds].filter((id) => typeof id !== 'string' || !documented.includes(id)),
+      'untested entries for operations that no longer document a 409',
+    ).toEqual([]);
+    // Each sequence must have produced its generated test asserting 409.
+    for (const seq of listed('sequences')) {
+      const id = String(seq.operationId);
+      const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
+      const at = spec.indexOf(`409 conflict - ${String(seq.name).replace(/-/g, ' ')}`);
+      expect(at, `${id}: no "${String(seq.name)}" conflict test generated`).toBeGreaterThan(-1);
+      expect(spec.slice(at), `${id}: the last call does not assert 409`).toContain('toBe(409)');
+    }
+  });
 });

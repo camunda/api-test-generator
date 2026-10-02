@@ -4,10 +4,17 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   applyConflictReplay,
+  buildConflictSequenceScenarios,
   loadConflictReplay,
+  loadConflictSequences,
+  validateConflictSequences,
 } from '../../../path-analyser/src/conflictReplay.ts';
 import { generateFeatureCoverageForEndpoint } from '../../../path-analyser/src/featureCoverageGenerator.ts';
-import type { OperationGraph, OperationNode } from '../../../path-analyser/src/types.ts';
+import type {
+  EndpointScenario,
+  OperationGraph,
+  OperationNode,
+} from '../../../path-analyser/src/types.ts';
 
 const dirs: string[] = [];
 function configDir(content?: string): string {
@@ -96,5 +103,52 @@ describe('conflict-replay.json', () => {
       secondStatus: 409,
       changeBody: { name: 'x' },
     });
+  });
+});
+
+describe('conflict-replay.json sequences', () => {
+  const seq = { name: 'gone', operationId: 'restore', before: ['delete'], reason: 'r' };
+
+  it('is optional, and loads valid entries', () => {
+    expect(loadConflictSequences(configDir())).toEqual([]);
+    expect(loadConflictSequences(configDir(JSON.stringify({ replay: [] })))).toEqual([]);
+    expect(loadConflictSequences(configDir(JSON.stringify({ sequences: [seq] })))).toEqual([seq]);
+  });
+
+  it.each([
+    ['not an array', { sequences: {} }],
+    ['no setup operations', { sequences: [{ ...seq, before: [] }] }],
+    ['empty operation name', { sequences: [{ ...seq, before: [''] }] }],
+    ['missing name', { sequences: [{ ...seq, name: undefined }] }],
+    ['missing reason', { sequences: [{ ...seq, reason: '' }] }],
+    ['repeated name for one operation', { sequences: [seq, seq] }],
+  ])('rejects: %s', (_label, content) => {
+    expect(() => loadConflictSequences(configDir(JSON.stringify(content)))).toThrow();
+  });
+
+  it('fails for an operation the spec does not have, whether target or setup', () => {
+    const g = graphOf(node('restore'), node('delete'));
+    expect(() => validateConflictSequences(g, [seq])).not.toThrow();
+    expect(() => validateConflictSequences(g, [{ ...seq, before: ['nope'] }])).toThrow(/nope/);
+    expect(() => validateConflictSequences(g, [{ ...seq, operationId: 'nope2' }])).toThrow(/nope2/);
+  });
+
+  it('puts the setup operations before the target, which must answer 409', () => {
+    const g = graphOf(node('createX'), node('delete'), node('restore'));
+    const ref = (id: string) => ({ operationId: id, method: 'POST', path: `/${id}` });
+    const chain: EndpointScenario = {
+      id: 'scenario-1',
+      operations: [ref('createX'), ref('restore')],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+      bindings: { aVar: 'a' },
+    };
+    const out = buildConflictSequenceScenarios(chain, [seq, { ...seq, operationId: 'other' }], g);
+    expect(out).toHaveLength(1);
+    expect(out[0].operations.map((o) => o.operationId)).toEqual(['createX', 'delete', 'restore']);
+    expect(out[0].expectedResult).toEqual({ kind: 'error', code: '409' });
+    expect(out[0].bindings).toEqual({ aVar: 'a' });
+    expect(out[0].bindings).not.toBe(chain.bindings);
+    expect(chain.operations).toHaveLength(2);
   });
 });

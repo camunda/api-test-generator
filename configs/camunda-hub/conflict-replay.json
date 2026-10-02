@@ -1,5 +1,5 @@
 {
-  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why.",
+  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why. sequences: operations run between the target's own setup chain and the target, to leave the target in a state that conflicts (verified live against camunda/hub:SNAPSHOT, which answers 409 for each). untested: operations that document a 409 but have no conflict test yet, each with the tracking issue that says why; the Hub invariant requires every documented 409 to be tested or listed here.",
   "replay": [
     {
       "operationId": "requestProjectSnapshotReview",
@@ -11,6 +11,78 @@
       "changeBody": {
         "name": "renamed-by-conflict-replay"
       }
+    }
+  ],
+  "sequences": [
+    {
+      "name": "project-deleted",
+      "operationId": "restoreFile",
+      "before": [
+        "deleteFile",
+        "deleteProject"
+      ],
+      "reason": "A deleted file cannot be restored while its project is deleted."
+    },
+    {
+      "name": "project-deleted",
+      "operationId": "restoreFolder",
+      "before": [
+        "deleteFolder",
+        "deleteProject"
+      ],
+      "reason": "A deleted folder cannot be restored while its project is deleted."
+    },
+    {
+      "name": "workspace-deleted",
+      "operationId": "restoreProject",
+      "before": [
+        "deleteProject",
+        "deleteWorkspace"
+      ],
+      "reason": "A deleted project cannot be restored while its workspace is deleted."
+    },
+    {
+      "name": "not-a-deletion-root",
+      "operationId": "permanentlyDeleteFolder",
+      "before": [
+        "deleteProject"
+      ],
+      "reason": "A folder deleted along with its project is not a deletion root, so it cannot be permanently deleted on its own."
+    },
+    {
+      "name": "not-a-deletion-root",
+      "operationId": "permanentlyDeleteProject",
+      "before": [
+        "deleteWorkspace"
+      ],
+      "reason": "A project deleted along with its workspace is not a deletion root, so it cannot be permanently deleted on its own."
+    }
+  ],
+  "untested": [
+    {
+      "operationId": "createVersion",
+      "issue": "https://github.com/camunda/api-test-generator/issues/637",
+      "reason": "Reproducible only on an element-template file; the fixture file is BPMN."
+    },
+    {
+      "operationId": "restoreVersion",
+      "issue": "https://github.com/camunda/api-test-generator/issues/637",
+      "reason": "Reproducible only on an element-template file; the fixture file is BPMN."
+    },
+    {
+      "operationId": "updateVersion",
+      "issue": "https://github.com/camunda/api-test-generator/issues/638",
+      "reason": "Documented 409 could not be provoked on a live Hub."
+    },
+    {
+      "operationId": "updateProject",
+      "issue": "https://github.com/camunda/api-test-generator/issues/638",
+      "reason": "The documented conflict needs a migration-created catch-all project, which the public API cannot create."
+    },
+    {
+      "operationId": "restoreProjectSnapshot",
+      "issue": "https://github.com/camunda/api-test-generator/issues/638",
+      "reason": "Documented 409 could not be provoked on a live Hub."
     }
   ]
 }
