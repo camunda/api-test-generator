@@ -150,22 +150,12 @@ run_rv() { # profile
   # RV_FIXTURE_ENV_FILE: global-setup.ts's runtime-key provisioning sets
   # RV_FIXTURE_* env vars only inside this Playwright/Node process — that
   # never propagates to curl_compare.py, spawned as a separate child process
-  # of THIS script after Playwright exits. Without this, curl_compare.py's
-  # own `node -e` evaluation of the emitted `process.env["RV_FIXTURE_..."] ||
-  # "<filler>"` expressions would see the filler and replay every
-  # fixture-substituted request differently from what Playwright actually
-  # sent. Have global-setup.ts write what it discovered here; source it back
-  # into this shell below so curl_compare.py inherits the same real values.
+  # of THIS script after Playwright exits. Have global-setup.ts write what it
+  # discovered here; load_rv_fixture_env (called from the main loop, for
+  # every invocation that touches this profile — not just this one) sources
+  # it back so curl_compare.py inherits the same real values.
   local rv_fixture_env_file="$ABS_OUT/rv-fixtures-$p.env"
   rm -f "$rv_fixture_env_file"
-  # Clear any RV_FIXTURE_* this shell inherited from a PRIOR profile's run —
-  # the loop below reuses one shell across profiles. Without this, a profile
-  # whose own provisioning fails before global-setup.ts ever writes its env
-  # file (e.g. a discovery timeout) would silently keep sourcing the
-  # previous profile's real keys instead of having none, so curl_compare.py
-  # would replay this profile's requests against a DIFFERENT profile's
-  # broker resources instead of failing cleanly.
-  while IFS= read -r v; do unset "$v"; done < <(compgen -v RV_FIXTURE_ || true)
   if env CORE_APPLICATION_URL="$CORE_URL" RV_PROFILE="$p" CONFIG="$CONFIG" \
     RV_FIXTURE_ENV_FILE="$rv_fixture_env_file" \
     ${basic[@]+"${basic[@]}"} \
@@ -182,13 +172,27 @@ run_rv() { # profile
       tail -n 30 "$pw_err" | sed 's/^/    /'
     fi
   fi
-  # Present regardless of pass/fail above — global-setup.ts writes it once
-  # provisioning itself succeeds, independent of whether individual test
-  # assertions later failed. Absent for a config/profile that doesn't use
-  # runtime-key fixtures at all (e.g. rbac, or camunda-hub) — nothing to do.
+}
+
+# Clears any RV_FIXTURE_* this shell has (inherited from a prior profile's
+# iteration, or a stale export left in the environment) and sources this
+# profile's persisted fixture env file, if one exists — regardless of
+# whether run_rv() just regenerated it in THIS invocation or it's left over
+# from an earlier one. Called unconditionally per profile, not from inside
+# run_rv(): `STEPS=curl` alone (the documented re-curl-only flow, see
+# README.md) never calls run_rv at all, so without this living outside that
+# function, curl_compare.py would never see the real discovered keys and
+# would replay every fixture-substituted request with the filler instead,
+# reintroducing the false 404s this whole mechanism exists to fix (#614's
+# review discussion).
+load_rv_fixture_env() { # profile
+  local p="$1" rv_fixture_env_file="$ABS_OUT/rv-fixtures-$1.env"
+  while IFS= read -r v; do unset "$v"; done < <(compgen -v RV_FIXTURE_ || true)
   if [ -f "$rv_fixture_env_file" ]; then
     # shellcheck disable=SC1090
     source "$rv_fixture_env_file"
+  elif step curl && ! step run; then
+    echo "  ⚠ no persisted fixture env for profile '$p' (run with STEPS including 'run' first) — curl-compare will use filler values for fixture-substituted requests"
   fi
 }
 
@@ -196,6 +200,7 @@ run_rv() { # profile
 for p in $RV_PROFILES; do
   echo "── request-validation: $p ───────────────"
   if step run; then run_rv "$p"; fi
+  load_rv_fixture_env "$p"
   if step curl; then
     # Tee the report to a file as well as the terminal. pipefail makes the
     # pipeline's status the oracle's (not tee's), so a mismatch still records
