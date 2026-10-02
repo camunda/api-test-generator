@@ -930,6 +930,59 @@ describe('Python SDK Emitter', () => {
       expect(output).not.toContain('assert_response_shape(response_data_1,');
     });
   });
+
+  describe('detailContains assertion on an error step (#404)', () => {
+    const collectionWithDetailContains: EndpointScenarioCollection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          expectedResult: { kind: 'error', code: '400' },
+          requestPlan: [
+            {
+              operationId: 'createWidget',
+              method: 'POST',
+              pathTemplate: '/widgets',
+              bodyKind: 'json',
+              bodyTemplate: { name: 'widget-1' },
+              expect: { status: 400, detailContains: 'multi-tenancy is disabled' },
+            },
+          ],
+        },
+      ],
+    };
+
+    test('parses the response body and asserts detail contains the substring', () => {
+      const output = renderPythonSuite(collectionWithDetailContains);
+      expect(output).toContain('response_data_1 = response_1.json()');
+      expect(output).toContain(
+        "assert isinstance(response_data_1, dict) and 'multi-tenancy is disabled' in response_data_1.get('detail', '')",
+      );
+    });
+
+    test('omits the assertion entirely when detailContains is not set', () => {
+      const withoutDetail: EndpointScenarioCollection = {
+        ...collectionWithDetailContains,
+        scenarios: [
+          {
+            ...collectionWithDetailContains.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'createWidget',
+                method: 'POST',
+                pathTemplate: '/widgets',
+                bodyKind: 'json',
+                bodyTemplate: { name: 'widget-1' },
+                expect: { status: 400 },
+              },
+            ],
+          },
+        ],
+      };
+      const output = renderPythonSuite(withoutDetail);
+      expect(output).not.toContain("in response_data_1.get('detail', '')");
+    });
+  });
 });
 
 // Regression (Copilot PR #574 review): embedded `${var}` bindings mixed with

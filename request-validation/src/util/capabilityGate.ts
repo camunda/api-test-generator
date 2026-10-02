@@ -51,18 +51,43 @@ export function loadCapabilityGates(
       `Failed to parse ${seedsPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  if (!isPlainObject(parsed) || !Array.isArray(parsed.seeds)) return out;
-  for (const entry of parsed.seeds) {
-    if (
-      isPlainObject(entry) &&
-      typeof entry.fieldName === 'string' &&
-      isPlainObject(entry.capabilityGate) &&
-      typeof entry.capabilityGate.disabledDetailContains === 'string'
-    ) {
-      out.set(entry.fieldName, {
-        disabledDetailContains: entry.capabilityGate.disabledDetailContains,
-      });
+  // Structural validation, not just a best-effort read: a typo'd or
+  // wrong-shaped `capabilityGate` entry must fail loudly rather than
+  // silently disabling gating — generating the exact known-bad tenant
+  // scenarios this file exists to prevent, with no signal anything is
+  // wrong (Copilot review). path-analyser's loader
+  // (`path-analyser/src/ontology/loader.ts`) validates the full ABox
+  // against the canonical ajv schema; request-validation is an independent
+  // pipeline that doesn't share that machinery, so this mirrors just the
+  // structural shape this one field needs, rather than importing it.
+  if (!isPlainObject(parsed)) {
+    throw new Error(`Malformed ${seedsPath}: expected a JSON object at the root.`);
+  }
+  if (!Array.isArray(parsed.seeds)) {
+    throw new Error(`Malformed ${seedsPath}: expected "seeds" to be an array.`);
+  }
+  for (const [i, entry] of parsed.seeds.entries()) {
+    if (!isPlainObject(entry)) {
+      throw new Error(`Malformed ${seedsPath}: seeds[${i}] must be an object.`);
     }
+    if (typeof entry.fieldName !== 'string' || entry.fieldName.length === 0) {
+      throw new Error(`Malformed ${seedsPath}: seeds[${i}].fieldName must be a non-empty string.`);
+    }
+    if (entry.capabilityGate === undefined) continue;
+    if (!isPlainObject(entry.capabilityGate)) {
+      throw new Error(`Malformed ${seedsPath}: seeds[${i}].capabilityGate must be an object.`);
+    }
+    if (
+      typeof entry.capabilityGate.disabledDetailContains !== 'string' ||
+      entry.capabilityGate.disabledDetailContains.length === 0
+    ) {
+      throw new Error(
+        `Malformed ${seedsPath}: seeds[${i}].capabilityGate.disabledDetailContains must be a non-empty string.`,
+      );
+    }
+    out.set(entry.fieldName, {
+      disabledDetailContains: entry.capabilityGate.disabledDetailContains,
+    });
   }
   return out;
 }

@@ -386,6 +386,13 @@ async function main() {
       }),
     );
     if (opts.deep) {
+      // #404 — deliberately NOT passed `capabilityGates`. A wrong-TYPE
+      // mutation (a number/boolean/object in place of a declared string)
+      // fails JSON deserialization before any field-level or capability
+      // check runs, regardless of whether the field is flat or nested
+      // (e.g. filter.tenantId) — confirmed live, this generator's
+      // scenarios are unaffected by multi-tenancy being disabled either
+      // way, so there is nothing to gate here.
       scenarios.push(
         ...generateBodyTypeMismatch(model.operations, {
           capPerOperation: opts.maxTypeMismatch,

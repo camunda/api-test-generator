@@ -10804,9 +10804,17 @@ describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)',
         seenFlatGated++;
         // The request body literal is inline in the block; a blank-like
         // value would appear as `tenantId: ''` / `tenantId: '\n'` etc. —
-        // detect any quoted value that is empty or whitespace-only.
+        // detect any quoted value that is empty or whitespace-only. The
+        // captured group is the SOURCE text of a single-quoted JS string
+        // literal, so a mutation like `'\n'` captures as the two literal
+        // characters backslash + `n`, not an actual newline — unescape the
+        // common sequences before judging blankness, or a real newline
+        // value would silently slip past `.trim()` (Copilot review).
         const bodyFieldMatch = block.match(new RegExp(`${leaf}:\\s*'([^']*)'`));
-        const value = bodyFieldMatch?.[1];
+        const rawValue = bodyFieldMatch?.[1];
+        const value = rawValue?.replace(/\\(n|t|r|\\|')/g, (_m, c: string) =>
+          c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === '\\' ? '\\' : "'",
+        );
         if (value !== undefined && value.trim() === '') {
           offenders.push({ file: f, title, reason: `blank-like value ${JSON.stringify(value)}` });
           continue;

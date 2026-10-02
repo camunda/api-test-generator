@@ -238,5 +238,44 @@ describe('request-validation: capability-gated fields (#404)', () => {
       fs.writeFileSync(path.join(ontologyDir, 'global-context-seeds.json'), '{not json');
       expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(/Failed to parse/);
     });
+
+    it('throws when "seeds" is not an array, rather than silently disabling gating', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({ version: 1, seeds: {} }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(/"seeds" to be an array/);
+    });
+
+    it('throws when a capabilityGate entry is structurally malformed, rather than silently skipping it', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({
+          version: 1,
+          seeds: [
+            {
+              binding: 'tenantIdVar',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar',
+              // Typo: the real key is `disabledDetailContains`.
+              capabilityGate: { disabledDetail: 'multi-tenancy is disabled' },
+            },
+          ],
+        }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
+        /capabilityGate\.disabledDetailContains must be a non-empty string/,
+      );
+    });
+
+    it('throws when a seed entry is missing fieldName', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({ version: 1, seeds: [{ binding: 'x', seedRule: 'x' }] }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
+        /fieldName must be a non-empty string/,
+      );
+    });
   });
 });
