@@ -764,7 +764,11 @@ like the nightly), generates both suites, and runs
 compares every response code the spec documents (2xx/400/401/403/404/409; 500 is
 ignored) against the status codes the generated suites assert, and also counts the
 optional request fields a success-path test sends and the success bodies that are
-schema-validated. This is a different axis from `npm run coverage:report` (which maps
+schema-validated, and reads the negative suite's `COVERAGE.json` (`applicableKindCount`,
+`presentKindCount`, `missingApplicableKinds`) to report which endpoints lack a bad-request
+test the generator could apply. That last column is only as complete as the generator's own
+applicability rules (see "every new request-validation scenario kind needs an applicability
+rule"). Each scheduled run also appends a row to `history.csv` in the artifact. This is a different axis from `npm run coverage:report` (which maps
 operations to generated specs). It is static analysis of generated output, needs no
 running Hub, and the script exits non-zero if the generated test format no longer
 parses (so a format change fails the run instead of reporting zeros). The per-operation

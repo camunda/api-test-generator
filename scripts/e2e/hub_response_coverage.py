@@ -186,6 +186,38 @@ def scan_negative(rv_dir, ops):
 
 
 # --------------------------------------------------------------------- main ----
+# Plain-language names for the request checks the negative suite generates, for the Slack message.
+CHECK_NAMES = {
+    'missing-required': 'a missing required field', 'missing-required-combo': 'several missing required fields',
+    'explicit-null-required': 'a required field set to null', 'missing-body': 'a missing request body',
+    'type-mismatch': 'a value of the wrong type', 'body-top-type-mismatch': 'a body of the wrong type',
+    'constraint-violation': 'a value outside its limits', 'enum-violation': 'a value outside the allowed list',
+    'format-invalid': 'a badly formatted value', 'malformed-json-body': 'a body that is not valid JSON',
+    'additional-prop': 'an unexpected extra field', 'auth-absent': 'no login', 'auth-invalid': 'a bad login',
+}
+
+
+def scoped_kind_names(entries):
+    """Kind names from an excludeOperations scenarioKinds list (strings or {kind, ...} objects)."""
+    return {k if isinstance(k, str) else k['kind'] for k in entries}
+
+
+def request_check_state(rv_op, whole_op_excluded, held_kinds):
+    """How well an endpoint's request checks are covered, from the negative suite's own coverage data.
+
+    rv_op is the endpoint's entry in request-validation/COVERAGE.json, or None when the negative suite
+    generated no scenario for it at all. Returns (state, present, applicable, missing_kinds)."""
+    if rv_op is None:
+        return ('hold' if whole_op_excluded else 'gap'), 0, 0, []
+    missing = [k for k in rv_op.get('missingApplicableKinds', []) if k not in held_kinds]
+    held = [k for k in rv_op.get('missingApplicableKinds', []) if k in held_kinds]
+    applicable = rv_op.get('applicableKindCount', 0)
+    present = rv_op.get('presentKindCount', 0)
+    if missing:
+        return 'gap', present, applicable, missing
+    return ('hold' if (held and not present) else 'ok'), present, applicable, []
+
+
 def build(args):
     gen = os.path.join(ROOT, 'generated', CONFIG)
     pw_dir, rv_dir = f'{gen}/playwright', f'{gen}/request-validation'
@@ -217,9 +249,12 @@ def build(args):
     tracked = suppressed | excluded  # known and tracked elsewhere; used only to annotate lists
     held_cells = collections.defaultdict(list)
     scoped = collections.defaultdict(list)
+    held_kinds = collections.defaultdict(set)
     for e in rv_cfg['excludeOperations']:
         if e.get('scenarioKinds'):
             scoped[e['operationId']] += [scoped_kind_label(k) for k in e['scenarioKinds']]
+            held_kinds[e['operationId']] |= scoped_kind_names(e['scenarioKinds'])
+    rv_ops = {o['operationId']: o for o in rv_cov['operations']}
 
     rows, doc, got = [], collections.Counter(), collections.Counter()
     missing = collections.defaultdict(list)
@@ -252,9 +287,13 @@ def build(args):
         else:
             shape = 'ok' if pos_validated[op_id] & set(shape_codes) else 'gap'
         sent = sum(1 for p in o['optional'] if p in pos_sent[op_id])
+        req_state, req_present, req_applicable, req_missing = request_check_state(
+            rv_ops.get(op_id), op_id in excluded, held_kinds[op_id])
         rows.append({
             'operationId': op_id, 'method': o['method'], 'path': o['path'], 'cells': cells,
             'shape': shape, 'optionalSent': sent, 'optionalTotal': len(o['optional']),
+            'requestChecks': req_state, 'requestPresent': req_present, 'requestApplicable': req_applicable,
+            'requestMissing': req_missing,
             'notes': sorted(scoped[op_id]),
             'optionalMissing': [] if op_id in suppressed else [p for p in o['optional'] if p not in pos_sent[op_id]],
             'fullyTestedExcept403': all(v == 'ok' for b, v in cells.items() if b != '403'),
@@ -272,6 +311,8 @@ def build(args):
         'fullyAsserted': sum(r['fullyAsserted'] for r in rows),
         'opsMissingResponseTest': sum(r['codeGap'] for r in rows),
         'optionalFields': [opt_sent, opt_total],
+        'requestChecks': [sum(r['requestChecks'] == 'ok' for r in rows), sum(r['requestChecks'] != 'hold' for r in rows)],
+        'requestCheckGaps': {r['operationId']: r['requestMissing'] for r in rows if r['requestChecks'] == 'gap'},
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
         'trackedOperations': sorted(tracked),
         'heldCells': {b: sorted(held_cells[b]) for b in BUCKETS},
@@ -302,6 +343,20 @@ def meter(got, doc, width=10):
     return '▰' * filled + '▱' * (width - filled)
 
 
+def request_gap_summary(s):
+    """Which bad-request tests are missing most often, in plain words."""
+    gaps = s['requestCheckGaps']
+    none_at_all = sorted(op for op, kinds in gaps.items() if not kinds)
+    counts = collections.Counter(k for kinds in gaps.values() for k in kinds)
+    parts = []
+    if none_at_all:
+        parts.append(f'{len(none_at_all)} {"endpoint has" if len(none_at_all) == 1 else "endpoints have"} no bad-request test at all')
+    if counts:
+        top = ', '.join(f'{CHECK_NAMES.get(k, k)} ({n})' for k, n in counts.most_common(3))
+        parts.append(f'most often missing elsewhere: {top}')
+    return ('; '.join(parts)[0].upper() + '; '.join(parts)[1:] + '.') if parts else 'Nothing is missing.'
+
+
 def slack(s, prev, args):
     c = s['codes']
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
@@ -326,6 +381,8 @@ def slack(s, prev, args):
         f'and {len(s["shapeUnvalidated"])} endpoints never check the shape of the success response.',
         f'{s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
         f'(403 is tracked separately; 500 errors are not counted).',
+        f'*{s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints* have every bad-request test the generator '
+        f'can apply (missing or wrong fields, bad values, no login). {request_gap_summary(s)}',
     ]
     if prev:
         new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
@@ -360,15 +417,21 @@ def matrix(s, rows):
         'The **Missing** column lists the response codes that are untested for that endpoint. '
         '**Response checked** is whether a test validates the success response against its schema. '
         '**Optional fields** is how many optional request fields a success test sends.', '',
-        '| Endpoint | Request | Success | Response checked | Optional fields | 400 | 401 | 403 | 404 | 409 | Missing |',
-        '|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|',
+        '**Bad-request tests** is whether the negative suite has every test the generator can apply to the endpoint '
+        '(missing or wrong fields, bad values, no login); the number is tests present out of tests that apply.', '',
+        '| Endpoint | Request | Success | Response checked | Optional fields | Bad-request tests | 400 | 401 | 403 | 404 | 409 | Missing |',
+        '|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|',
     ]
     for r in rows:
         cl = r['cells']
         opt = 'n/a' if not r['optionalTotal'] else f'{r["optionalSent"]} of {r["optionalTotal"]}'
         missing = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if cl.get(b) == 'gap') or '—'
+        req = MARK[r['requestChecks']] + (f' {r["requestPresent"]} of {r["requestApplicable"]}' if r['requestApplicable'] else '')
+        if r['requestMissing']:
+            note = 'bad-request: ' + ', '.join(r['requestMissing'])
+            missing = note if missing == '—' else f'{missing} · {note}'
         out.append(f'| `{r["operationId"]}` | {r["method"]} {r["path"]} | '
-                   + ' | '.join([MARK[cl.get('2xx', 'na')], MARK[r['shape']], opt]
+                   + ' | '.join([MARK[cl.get('2xx', 'na')], MARK[r['shape']], opt, req]
                                 + [MARK[cl.get(b, 'na')] for b in ('400', '401', '403', '404', '409')])
                    + f' | {missing} |')
     return '\n'.join(out) + '\n'
@@ -383,6 +446,7 @@ def history_row(s, args):
         'zeroTestOperations': len(s['zeroTestOperations']),
         'optionalSent': s['optionalFields'][0], 'optionalTotal': s['optionalFields'][1],
         'shapeUnvalidated': len(s['shapeUnvalidated']),
+        'requestChecksFull': s['requestChecks'][0], 'requestChecksEndpoints': s['requestChecks'][1],
     }
     for b in BUCKETS:
         row[f'{b}_tested'], row[f'{b}_documented'] = s['codes'][b]
@@ -414,7 +478,8 @@ def history_markdown(path, last=8):
     with open(path, newline='') as f:
         rows = list(csv.DictReader(f))[-last:]
     cols = [('date', 'Date')] + [(f'{b}_tested', NAMES[b].split(' (')[-1].rstrip(')') + ' tested') for b in BUCKETS] \
-        + [('fullyAsserted', 'Fully tested endpoints'), ('operations', 'Endpoints')]
+        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'Full bad-request tests'),
+           ('operations', 'Endpoints')]
     out = [f'## Coverage history (last {len(rows)} reports)', '',
            '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]
     for r in rows:
