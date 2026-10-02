@@ -1,4 +1,4 @@
-import { normalizeKind, type ValidationScenario } from '../model/types.js';
+import { normalizeKind } from '../model/types.js';
 
 export interface KindCoverage {
   /** Kinds that should have a scenario for the operation (aliases resolved, present kinds included). */
@@ -63,6 +63,12 @@ export function listOperationsWithoutScenarios(
     .sort((a, b) => a.operationId.localeCompare(b.operationId));
 }
 
+/** What the coverage calculation needs of a scenario: which operation it belongs to and its kind. */
+export interface ScenarioKindRef {
+  operationId: string;
+  type: string;
+}
+
 /**
  * For each operation, the kinds that existed before a filter and have no scenario left after it
  * (kind names as COVERAGE.json reports them). A scoped exclusion that only narrows a kind (one
@@ -70,12 +76,10 @@ export function listOperationsWithoutScenarios(
  * is not held either, so a regression cannot hide behind an exclusion that does not cover it.
  */
 export function kindsRemovedEntirely(
-  before: readonly Pick<ValidationScenario, 'operationId' | 'type'>[],
-  after: readonly Pick<ValidationScenario, 'operationId' | 'type'>[],
+  before: readonly ScenarioKindRef[],
+  after: readonly ScenarioKindRef[],
 ): Record<string, string[]> {
-  const kindsByOperation = (
-    scenarios: readonly Pick<ValidationScenario, 'operationId' | 'type'>[],
-  ) => {
+  const kindsByOperation = (scenarios: readonly ScenarioKindRef[]) => {
     const result = new Map<string, Set<string>>();
     for (const s of scenarios) {
       const kinds = result.get(s.operationId) ?? new Set<string>();
