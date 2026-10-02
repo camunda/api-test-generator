@@ -225,9 +225,12 @@ CHECK_NAMES = {
 }
 
 
-def scoped_kind_names(entries):
-    """Kind names from an excludeOperations scenarioKinds list (strings or {kind, ...} objects)."""
-    return {k if isinstance(k, str) else k['kind'] for k in entries}
+def scoped_kind_names(entries, aliases):
+    """Kind names from an excludeOperations scenarioKinds list (strings or {kind, ...} objects), under
+    the names COVERAGE.json uses. `aliases` is COVERAGE.json's own kindAliases table, so there is no
+    second alias list here to drift from the generator's."""
+    names = {k if isinstance(k, str) else k['kind'] for k in entries}
+    return {aliases.get(n, n) for n in names}
 
 
 def request_check_state(rv_op, whole_op_excluded, held_kinds):
@@ -279,10 +282,11 @@ def build(args):
     held_cells = collections.defaultdict(list)
     scoped = collections.defaultdict(list)
     held_kinds = collections.defaultdict(set)
+    kind_aliases = rv_cov.get('kindAliases', {})
     for e in rv_cfg['excludeOperations']:
         if e.get('scenarioKinds'):
             scoped[e['operationId']] += [scoped_kind_label(k) for k in e['scenarioKinds']]
-            held_kinds[e['operationId']] |= scoped_kind_names(e['scenarioKinds'])
+            held_kinds[e['operationId']] |= scoped_kind_names(e['scenarioKinds'], kind_aliases)
     rv_ops = {o['operationId']: o for o in rv_cov['operations']}
 
     rows, doc, got = [], collections.Counter(), collections.Counter()
@@ -373,13 +377,13 @@ def meter(got, doc, width=10):
 
 
 def request_gap_summary(s):
-    """Which bad-request tests are missing most often, in plain words."""
+    """Which kinds of bad-request test are missing most often, in plain words."""
     gaps = s['requestCheckGaps']
     none_at_all = sorted(op for op, kinds in gaps.items() if not kinds)
     counts = collections.Counter(k for kinds in gaps.values() for k in kinds)
     parts = []
     if none_at_all:
-        parts.append(f'{len(none_at_all)} {"endpoint has" if len(none_at_all) == 1 else "endpoints have"} no bad-request test at all')
+        parts.append(f'{len(none_at_all)} {"endpoint has" if len(none_at_all) == 1 else "endpoints have"} no bad-request test of any kind')
     if counts:
         top = ', '.join(f'{CHECK_NAMES.get(k, k)} ({n})' for k, n in counts.most_common(3))
         parts.append(f'most often missing elsewhere: {top}')
@@ -410,8 +414,8 @@ def slack(s, prev, args):
         f'and {len(s["shapeUnvalidated"])} endpoints never check the shape of the success response.',
         f'{s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
         f'(403 is tracked separately; 500 errors are not counted).',
-        f'*{s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints* have every bad-request test the generator '
-        f'can apply (missing or wrong fields, bad values, no login). {request_gap_summary(s)}',
+        f'*{s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints* have at least one test for every kind of '
+        f'bad request the generator can apply (missing or wrong fields, bad values, no login). {request_gap_summary(s)}',
     ]
     if prev:
         new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
@@ -446,9 +450,10 @@ def matrix(s, rows):
         'The **Missing** column lists the response codes that are untested for that endpoint. '
         '**Response checked** is whether a test validates the success response against its schema. '
         '**Optional fields** is how many optional request fields a success test sends.', '',
-        '**Bad-request tests** is whether the negative suite has every test the generator can apply to the endpoint '
-        '(missing or wrong fields, bad values, no login); the number is tests present out of tests that apply.', '',
-        '| Endpoint | Request | Success | Response checked | Optional fields | Bad-request tests | 400 | 401 | 403 | 404 | 409 | Missing |',
+        '**Bad-request kinds** is whether the negative suite has at least one test for each kind of bad request the '
+        'generator can apply to the endpoint (missing or wrong fields, bad values, no login); the number is kinds '
+        'covered out of kinds that apply. It does not count how many tests there are for each kind.', '',
+        '| Endpoint | Request | Success | Response checked | Optional fields | Bad-request kinds | 400 | 401 | 403 | 404 | 409 | Missing |',
         '|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|',
     ]
     for r in rows:
@@ -507,7 +512,7 @@ def history_markdown(path, last=8):
     with open(path, newline='') as f:
         rows = list(csv.DictReader(f))[-last:]
     cols = [('date', 'Date')] + [(f'{b}_tested', NAMES[b].split(' (')[-1].rstrip(')') + ' tested') for b in BUCKETS] \
-        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'Full bad-request tests'),
+        + [('fullyAsserted', 'Fully tested endpoints'), ('requestChecksFull', 'All bad-request kinds covered'),
            ('operations', 'Endpoints')]
     out = [f'## Coverage history (last {len(rows)} reports)', '',
            '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]

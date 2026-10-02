@@ -68,7 +68,7 @@ import {
   scopeRuleMatches,
   toScopeRule,
 } from '../src/excludeScoping.js';
-import { normalizeKind, type ValidationScenario } from '../src/model/types.js';
+import { KIND_ALIASES, normalizeKind, type ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
 import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
@@ -1047,6 +1047,8 @@ async function main() {
     specCommit: string | undefined;
     totalScenarios: number;
     scenarioKinds: string[];
+    /** Scenario kinds counted under another kind's name; consumers must resolve names through it. */
+    kindAliases: Record<string, string>;
     generationOptions: {
       deep: boolean | undefined;
       maxMissing: number | null;
@@ -1089,6 +1091,7 @@ async function main() {
     specCommit,
     totalScenarios: deduped.length,
     scenarioKinds: allKinds,
+    kindAliases: { ...KIND_ALIASES },
     generationOptions: {
       deep: opts.deep,
       maxMissing: opts.maxMissing ?? null,
