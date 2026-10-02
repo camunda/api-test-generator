@@ -523,4 +523,31 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       expect(spec.slice(at), `${id}: the last call does not assert 409`).toContain('toBe(409)');
     }
   });
+  it('keyed and write operations assert a 403 for a principal without grants (#622)', () => {
+    const rbac = join(getRequestValidationSuiteDir(REPO_ROOT), 'rbac');
+    const corpus = readdirSync(rbac)
+      .filter((f) => f.endsWith('-validation-api-tests.spec.ts'))
+      .map((f) => readRequired(join(rbac, f)))
+      .join('\n');
+    const denied = (opId: string) => corpus.includes(`test('${opId} - Denied (no permission)'`);
+    // One keyed read, write, delete and restore per resource family, plus a create that
+    // carries a body key.
+    for (const opId of [
+      'getFile',
+      'updateFile',
+      'createFile',
+      'deleteFile',
+      'restoreFile',
+      'createFolder',
+      'updateProject',
+      'deleteProject',
+      'updateWorkspace',
+      'createVersion',
+    ]) {
+      expect(denied(opId), `${opId} has no 403 test`).toBe(true);
+    }
+    // addMember is excluded: its baseline email is invalid, so it answers 400 before authz.
+    expect(denied('addMember')).toBe(false);
+    expect(corpus.match(/ - Denied \(no permission\)'/g)?.length ?? 0).toBeGreaterThan(50);
+  });
 });

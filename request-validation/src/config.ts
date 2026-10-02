@@ -90,8 +90,15 @@ export interface RequestValidationConfig {
    *   contains `{param}`), required-body ops (`bodyRequired: true`), and ops
    *   with required non-path parameters (query/header/cookie — missing param →
    *   400 before authz). The surviving surface is search/list/info endpoints.
+   * - `'fixtures'` — `'all-secured'` plus the operations a real fixture lets past those
+   *   checks: every path parameter has an entry in `resourceFixtures` /
+   *   `pathResourceFixtures` (so the key resolves and the 404 is out of the way), and a
+   *   required JSON body is a buildable baseline (so the 400 is too). The reduced-permission
+   *   principal then reaches the authority check and gets 403. Body key fields that have a
+   *   fixture are filled the same way as in every other scenario. Operations that still
+   *   cannot reach the check stay out via `excludeOperations` (scenarioKinds: ["auth-deny"]).
    */
-  authDenyMode: 'slice' | 'all-secured';
+  authDenyMode: 'slice' | 'all-secured' | 'fixtures';
   /**
    * Which operations get a "nonexistent path key returns 404" scenario.
    *
@@ -427,9 +434,9 @@ export function loadRequestValidationConfig(
   }
   if ('authDenyMode' in parsed) {
     const v = parsed.authDenyMode;
-    if (v !== 'slice' && v !== 'all-secured') {
+    if (v !== 'slice' && v !== 'all-secured' && v !== 'fixtures') {
       throw new Error(
-        `Invalid ${configPath}: "authDenyMode" must be "slice" or "all-secured", got ${JSON.stringify(v)}.`,
+        `Invalid ${configPath}: "authDenyMode" must be "slice", "all-secured" or "fixtures", got ${JSON.stringify(v)}.`,
       );
     }
     merged.authDenyMode = v;

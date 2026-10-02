@@ -1,8 +1,16 @@
 import type { OperationModel, ValidationScenario } from '../model/types.js';
+import { isMultipartOnly } from '../util/multipartSkip.js';
 import { makeId } from './common.js';
+import { buildableBody } from './notFoundFakeId.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /**
+   * `authDenyMode: 'fixtures'`: also target keyed and bodied operations. Needs
+   * `allSecured` and the names that have a resource fixture (path-parameter fixtures
+   * merged over the base ones).
+   */
+  fixtureNames?: ReadonlySet<string>;
   /**
    * When `true` (config `authDenyMode: 'all-secured'`), target `secured`
    * operations that can reach the authority check without real fixtures: keyless
@@ -93,12 +101,16 @@ export function isAuthDenyEligible(op: OperationModel, opts: Opts): boolean {
   // assert an unreachable 403. See OperationModel.independentAuthGate.
   if (op.independentAuthGate === true) return false;
   if (opts.allSecured) {
-    return (
-      op.secured === true &&
-      !op.path.includes('{') &&
-      op.bodyRequired !== true &&
-      !op.parameters.some((p) => p.required && p.in !== 'path')
-    );
+    if (op.secured !== true) return false;
+    if (op.parameters.some((p) => p.required && p.in !== 'path')) return false;
+    const fixtures = opts.fixtureNames;
+    if (!fixtures) return !op.path.includes('{') && op.bodyRequired !== true;
+    if (op.parameters.some((p) => p.in === 'path' && !fixtures.has(p.name))) return false;
+    if (op.bodyRequired === true) {
+      if (!op.requestBodySchema || isMultipartOnly(op)) return false;
+      if (buildableBody(op) === undefined) return false;
+    }
+    return true;
   }
   return !!SLICE[op.operationId];
 }
@@ -153,13 +165,22 @@ function generateAuthDenyAllSecured(ops: OperationModel[], opts: Opts): Validati
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
     if (!isAuthDenyEligible(op, opts)) continue;
+    // With fixtures the request is otherwise valid: 'x' marks each path key for the emitter's
+    // fixture substitution, and a required body is the baseline body.
+    const pathParams: Record<string, string> = {};
+    if (opts.fixtureNames) {
+      for (const p of op.parameters) if (p.in === 'path') pathParams[p.name] = 'x';
+    }
+    const requestBody =
+      opts.fixtureNames && op.bodyRequired === true ? buildableBody(op) : undefined;
     out.push({
       id: makeId([op.operationId, 'auth-deny']),
       operationId: op.operationId,
       method: op.method,
       path: op.path,
       type: 'auth-deny',
-      params: undefined,
+      params: Object.keys(pathParams).length ? pathParams : undefined,
+      ...(requestBody !== undefined ? { requestBody, bodyEncoding: 'json' as const } : {}),
       expectedStatus: DENY_STATUS,
       description:
         'Request by a principal lacking the required permission is denied with 403 (rbac mode)',

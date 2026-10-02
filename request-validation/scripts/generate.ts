@@ -163,6 +163,14 @@ function parseArgs(): CliOptions {
   };
 }
 
+/** Names with a resource fixture, for `authDenyMode: 'fixtures'`; undefined in the other modes. */
+function denyFixtureNames(config: RequestValidationConfig): ReadonlySet<string> | undefined {
+  if (config.authDenyMode !== 'fixtures') return undefined;
+  return new Set(
+    Object.keys({ ...(config.resourceFixtures ?? {}), ...(config.pathResourceFixtures ?? {}) }),
+  );
+}
+
 async function main() {
   const opts = parseArgs();
   // Per-config request-validation settings live at <repoRoot>/configs/<name>/request-validation.json.
@@ -424,7 +432,8 @@ async function main() {
     scenarios.push(
       ...generateAuthDeny(model.operations, {
         onlyOperations: opts.onlyOperations,
-        allSecured: rvConfig.authDenyMode === 'all-secured',
+        allSecured: rvConfig.authDenyMode !== 'slice',
+        fixtureNames: denyFixtureNames(rvConfig),
       }),
     );
   }
@@ -1386,7 +1395,12 @@ async function main() {
     // auth-deny (#462) — mode-dependent eligibility, same isAuthDenyEligible
     // authDeny.ts's own generators call (already excludes independentAuthGate
     // operations regardless of this loop).
-    if (isAuthDenyEligible(op, { allSecured: rvConfig.authDenyMode === 'all-secured' })) {
+    if (
+      isAuthDenyEligible(op, {
+        allSecured: rvConfig.authDenyMode !== 'slice',
+        fixtureNames: denyFixtureNames(rvConfig),
+      })
+    ) {
       applicable.add('auth-deny');
     }
     // Both sides go through the same alias normalization (see kindCoverage.ts).
