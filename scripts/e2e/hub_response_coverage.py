@@ -211,7 +211,8 @@ def request_check_state(rv_op, whole_op_excluded, held_kinds):
         return ('hold' if whole_op_excluded else 'gap'), 0, 0, []
     missing = [k for k in rv_op.get('missingApplicableKinds', []) if k not in held_kinds]
     held = [k for k in rv_op.get('missingApplicableKinds', []) if k in held_kinds]
-    applicable = rv_op.get('applicableKindCount', 0)
+    # Held kinds are neither tested nor missing, so they do not count towards "applicable" either.
+    applicable = rv_op.get('applicableKindCount', 0) - len(held)
     present = rv_op.get('presentKindCount', 0)
     if missing:
         return 'gap', present, applicable, missing

@@ -67,7 +67,7 @@ import {
   scopeRuleMatches,
   toScopeRule,
 } from '../src/excludeScoping.js';
-import type { ValidationScenario } from '../src/model/types.js';
+import { normalizeKind, type ValidationScenario } from '../src/model/types.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
 import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
@@ -1021,12 +1021,9 @@ async function main() {
   );
   // Coverage report per operation & kind
   // Normalize kinds to avoid double counting (treat body-top-type-mismatch as type-mismatch)
-  const kindAlias: Record<string, string> = {
-    'body-top-type-mismatch': 'type-mismatch',
-  };
   const normalizedScenarios = deduped.map((s) => ({
     ...s,
-    type: kindAlias[s.type] || s.type,
+    type: normalizeKind(s.type),
   }));
   const allKinds = Array.from(new Set(normalizedScenarios.map((s) => s.type))).sort();
   interface OpCoverage {
@@ -1320,6 +1317,15 @@ async function main() {
     // operations regardless of this loop).
     if (isAuthDenyEligible(op, { allSecured: rvConfig.authDenyMode === 'all-secured' })) {
       applicable.add('auth-deny');
+    }
+    // `present` is keyed by the normalized kind names, so the applicable set must be too:
+    // otherwise an aliased kind (body-top-type-mismatch) is always reported as missing.
+    for (const k of Array.from(applicable)) {
+      const normalized = normalizeKind(k);
+      if (normalized !== k) {
+        applicable.delete(k);
+        applicable.add(normalized);
+      }
     }
     // Include actually present kinds in applicability to prevent >100%
     for (const pk of present) if (!applicable.has(pk)) applicable.add(pk);
