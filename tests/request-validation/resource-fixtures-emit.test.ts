@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitter.js';
 import type { ValidationScenario } from '../../request-validation/src/model/types.js';
+import { RUNTIME_KEY_FIXTURE_NAMES } from '../../request-validation/src/runtimeKeyFixtureNames.js';
+import { RUNTIME_KEY_ENV_VARS } from '../../request-validation/templates/support/global-setup.js';
 
 /**
  * Layer-2 fixture for issue #352 (resource fixtures).
@@ -21,7 +23,12 @@ import type { ValidationScenario } from '../../request-validation/src/model/type
  *   2. body field filler → env lookup (using the base map);
  *   3. a deliberately-malformed value on a fixture field is left intact;
  *   4. the `'1'` filler (constraintViolations/parameters) is substituted too;
- *   5. pathResourceFixtures override applies to path params only, not the body.
+ *   5. pathResourceFixtures override applies to path params only, not the body;
+ *   6. camunda-oca's userTaskKey/jobKey/elementInstanceKey/processInstanceKey
+ *      (#614) are pathResourceFixtures-ONLY (no base resourceFixtures entry) —
+ *      the path param must still get the env lookup, and a body field sharing
+ *      one of these names must NOT, or a typo/wiring regression here would
+ *      silently restore the pre-#614 404-masking behaviour with no signal.
  */
 
 function scenario(overrides: Partial<ValidationScenario>): ValidationScenario {
@@ -40,6 +47,17 @@ function scenario(overrides: Partial<ValidationScenario>): ValidationScenario {
 
 const FIX = { fileKey: 'RV_FIXTURE_FILE_KEY', projectKey: 'RV_FIXTURE_PROJECT_KEY' };
 
+function toStringRecord(fixtures: unknown): Record<string, string> {
+  if (typeof fixtures !== 'object' || fixtures === null) {
+    throw new Error('expected a fixture map object');
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fixtures)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
 /** The real camunda-hub `resourceFixtures` map, string-valued entries only. */
 function loadHubResourceFixtures(): Record<string, string> {
   const raw: unknown = JSON.parse(
@@ -49,14 +67,19 @@ function loadHubResourceFixtures(): Record<string, string> {
     typeof raw === 'object' && raw !== null && 'resourceFixtures' in raw
       ? raw.resourceFixtures
       : undefined;
-  if (typeof fixtures !== 'object' || fixtures === null) {
-    throw new Error('configs/camunda-hub/request-validation.json has no resourceFixtures object');
-  }
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(fixtures)) {
-    if (typeof v === 'string') out[k] = v;
-  }
-  return out;
+  return toStringRecord(fixtures);
+}
+
+/** The real camunda-oca `pathResourceFixtures` map, string-valued entries only. */
+function loadOcaPathResourceFixtures(): Record<string, string> {
+  const raw: unknown = JSON.parse(
+    readFileSync(join(process.cwd(), 'configs/camunda-oca/request-validation.json'), 'utf8'),
+  );
+  const fixtures =
+    typeof raw === 'object' && raw !== null && 'pathResourceFixtures' in raw
+      ? raw.pathResourceFixtures
+      : undefined;
+  return toStringRecord(fixtures);
 }
 
 describe('request-validation: resource-fixture emit (#352)', () => {
@@ -109,6 +132,58 @@ describe('request-validation: resource-fixture emit (#352)', () => {
     expect(out).toContain('process.env["RV_FIXTURE_CATALOG_ASSET_KEY"] || "x"');
   });
 
+  // Representative path template for each of camunda-oca's four
+  // pathResourceFixtures-only runtime keys (#614). The expected env var name
+  // for each comes from RUNTIME_KEY_ENV_VARS — support/global-setup.ts's own
+  // exported contract for what it actually sets — NOT from `ocaFixtures`
+  // itself: asserting a config value against itself can't catch a typo in
+  // that same value (a prior version of this test did exactly that and a
+  // reviewer caught it — see #614's review discussion).
+  const ocaFixtures = loadOcaPathResourceFixtures();
+  const OCA_RUNTIME_KEYS: ReadonlyArray<[key: keyof typeof RUNTIME_KEY_ENV_VARS, path: string]> = [
+    ['processInstanceKey', '/process-instances/{processInstanceKey}/incidents/search'],
+    ['userTaskKey', '/user-tasks/{userTaskKey}/assignment'],
+    ['jobKey', '/jobs/{jobKey}/completion'],
+    ['elementInstanceKey', '/element-instances/{elementInstanceKey}/variables'],
+  ];
+
+  it.each(
+    OCA_RUNTIME_KEYS,
+  )("camunda-oca: pathResourceFixtures.%s matches global-setup.ts's RUNTIME_KEY_ENV_VARS contract and substitutes the path param (#614)", (key, path) => {
+    // userTaskKey/jobKey/elementInstanceKey/processInstanceKey are deliberately
+    // pathResourceFixtures-ONLY for camunda-oca (see that config's $comment):
+    // putting them in the base resourceFixtures map would make generate.ts's
+    // #427 authz-resolved-body-field logic drop body-type-mismatch coverage for
+    // every unrelated operation with a same-named body field (e.g.
+    // createAgentInstance's jobKey/elementInstanceKey).
+    expect(ocaFixtures[key]).toBe(RUNTIME_KEY_ENV_VARS[key]);
+    const out = renderScenarioForTest(
+      scenario({ method: 'POST', path, params: { [key]: 'x' } }),
+      'probe',
+      {}, // no base resourceFixtures
+      ocaFixtures, // path-only override
+    );
+    expect(out).toMatch(new RegExp(`buildUrl\\([^)]*${RUNTIME_KEY_ENV_VARS[key]}`, 's'));
+  });
+
+  it.each(
+    OCA_RUNTIME_KEYS,
+  )("camunda-oca: a body field sharing pathResourceFixtures-only %s's name is NOT substituted (#614)", (key) => {
+    const out = renderScenarioForTest(
+      scenario({
+        method: 'POST',
+        path: '/agent-instances',
+        params: undefined,
+        requestBody: { [key]: 'x' },
+      }),
+      'probe',
+      {}, // no base resourceFixtures
+      ocaFixtures,
+    );
+    expect(out).toContain(`"${key}": "x"`);
+    expect(out).not.toContain(RUNTIME_KEY_ENV_VARS[key]);
+  });
+
   it('applies pathResourceFixtures override to the PATH param only, not the body', () => {
     const out = renderScenarioForTest(
       scenario({
@@ -126,5 +201,18 @@ describe('request-validation: resource-fixture emit (#352)', () => {
     expect(out).toContain(
       'const requestBody = {projectKey: process.env["RV_FIXTURE_PROJECT_KEY"] || "x"}',
     );
+  });
+
+  it("generate.ts/qaEmitter.ts's RUNTIME_KEY_FIXTURE_NAMES stays in sync with global-setup.ts's RUNTIME_KEY_ENV_VARS keys (#614)", () => {
+    // generate.ts and qaEmitter.ts can't import global-setup.ts's own
+    // RUNTIME_KEY_ENV_VARS directly without pulling that vendored template
+    // file (and its deliberately extension-less internal imports) into
+    // request-validation's own `tsc -p .` build graph — breaking the
+    // compiled generator (ERR_MODULE_NOT_FOUND) — so RUNTIME_KEY_FIXTURE_NAMES
+    // in src/ is a second, independent copy of the same 4 names. This is
+    // the one guard keeping that copy from silently drifting the way three
+    // unenforced hand-typed arrays previously could (#614's review
+    // discussion).
+    expect(Object.keys(RUNTIME_KEY_ENV_VARS).sort()).toEqual([...RUNTIME_KEY_FIXTURE_NAMES].sort());
   });
 });

@@ -12,9 +12,17 @@ export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
-  // Provisions the zero-grant RBAC deny-test probe user (#359). No-op unless
-  // RV_PROFILE=rbac, so the unsecured/secured suites are unaffected.
+  // For `unsecured`/`secured`: provisions real userTaskKey/jobKey/
+  // elementInstanceKey/processInstanceKey fixtures so by-key/by-instance
+  // operations don't 404 on a filler placeholder before reaching the
+  // validation a scenario targets (see support/global-setup.ts). For
+  // `rbac`: provisions the zero-grant deny-test probe user (#359) instead.
   globalSetup: './support/global-setup',
+  // Cancels the process instances global-setup.ts created, once the whole
+  // suite finishes — a successful run otherwise leaves them (and the job
+  // under the service-task one) running on the broker forever. No-op for
+  // `rbac` or any config that never created anything.
+  globalTeardown: './support/global-teardown',
   // `list` for an immediately-readable inline summary; `json` so
   // `npm run summarize` can produce a grouped failure breakdown;
   // `html` so `npx playwright show-report` opens the full failure detail

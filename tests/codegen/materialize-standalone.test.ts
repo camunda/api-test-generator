@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
+  FIXTURES_DIR_NAME,
   materializeStandalone,
   SCRIPTS_DIR_NAME,
+  STANDALONE_FIXTURE_FILES,
   STANDALONE_ROOT_FILES,
   STANDALONE_SCRIPT_FILES,
   STANDALONE_SUPPORT_FILES,
@@ -124,6 +126,53 @@ describe('materializeStandalone', () => {
       }
     } finally {
       await fs.rm(fakeSrc, { recursive: true, force: true });
+    }
+  });
+
+  test('vendors STANDALONE_FIXTURE_FILES from fixturesSourceDir into <outDir>/fixtures/', async () => {
+    const fakeFixtures = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-standalone-fixtures-'));
+    try {
+      for (const relPath of STANDALONE_FIXTURE_FILES) {
+        const dest = path.join(fakeFixtures, relPath);
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        await fs.writeFile(dest, `<!-- fake-fixture-${relPath} -->`, 'utf8');
+      }
+
+      await materializeStandalone(tmp, undefined, true, fakeFixtures);
+
+      for (const relPath of STANDALONE_FIXTURE_FILES) {
+        const content = await fs.readFile(path.join(tmp, FIXTURES_DIR_NAME, relPath), 'utf8');
+        expect(content).toBe(`<!-- fake-fixture-${relPath} -->`);
+      }
+    } finally {
+      await fs.rm(fakeFixtures, { recursive: true, force: true });
+    }
+  });
+
+  test('omitting fixturesSourceDir skips fixture vendoring entirely (e.g. camunda-hub)', async () => {
+    await materializeStandalone(tmp);
+    expect(existsSync(path.join(tmp, FIXTURES_DIR_NAME))).toBe(false);
+  });
+
+  test('a fixturesSourceDir missing one of STANDALONE_FIXTURE_FILES skips just that file, not the whole materialization', async () => {
+    const fakeFixtures = await fs.mkdtemp(path.join(os.tmpdir(), 'mat-standalone-fixtures-'));
+    try {
+      // Provide only the first fixture file, omit the rest.
+      const [firstOnly] = STANDALONE_FIXTURE_FILES;
+      const dest = path.join(fakeFixtures, firstOnly);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.writeFile(dest, '<!-- only-this-one -->', 'utf8');
+
+      await materializeStandalone(tmp, undefined, true, fakeFixtures);
+
+      expect(await fs.readFile(path.join(tmp, FIXTURES_DIR_NAME, firstOnly), 'utf8')).toBe(
+        '<!-- only-this-one -->',
+      );
+      for (const relPath of STANDALONE_FIXTURE_FILES.slice(1)) {
+        expect(existsSync(path.join(tmp, FIXTURES_DIR_NAME, relPath))).toBe(false);
+      }
+    } finally {
+      await fs.rm(fakeFixtures, { recursive: true, force: true });
     }
   });
 
