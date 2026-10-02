@@ -81,6 +81,12 @@ export const GlobalContextSeedSchema = z
     fieldName: z.string().min(1),
     seedRule: z.string().min(1),
     omitWhenUnbound: z.boolean().optional(),
+    capabilityGate: z
+      .object({
+        disabledDetailContains: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     rationale: z.string().optional(),
   })
   .strict();

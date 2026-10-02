@@ -23,6 +23,13 @@ export interface WalkNode {
   items?: WalkNode;
   constraints?: Record<string, unknown>;
   raw?: SchemaFragment; // original raw schema node for advanced constraints
+  // Was this node's own `key` listed in its PARENT's `required` array? (Not
+  // to be confused with `required` above, which is this node's OWN
+  // children's required-name list.) Undefined at the root, which has no
+  // parent. Lets a generator distinguish e.g. an optional scoping `tenantId`
+  // field from a required one of the same name without re-deriving the
+  // parent/child relationship itself (#404).
+  requiredByParent?: boolean;
 }
 
 export interface SchemaWalkResult {
@@ -99,7 +106,12 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
     if (Array.isArray(schema.enum)) merged.enum = schema.enum.slice();
     return merged;
   }
-  function visit(schema: SchemaFragment, pointer: string, key?: string): WalkNode {
+  function visit(
+    schema: SchemaFragment,
+    pointer: string,
+    key?: string,
+    requiredByParent?: boolean,
+  ): WalkNode {
     const effective = mergeAllOf(schema);
     // For allOf-wrapped primitives we expose the *merged* fragment via `raw`
     // so downstream code that reads `node.raw.{format,multipleOf,enum,…}`
@@ -117,13 +129,15 @@ export function buildWalk(op: OperationModel): SchemaWalkResult | undefined {
       enum: Array.isArray(effective.enum) ? effective.enum.slice() : undefined,
       constraints: extractConstraints(effective),
       raw,
+      requiredByParent,
     };
     byPointer.set(pointer, node);
     if (effective.type === 'object' && effective.properties) {
       node.properties = {};
+      const ownRequired = Array.isArray(effective.required) ? effective.required : [];
       for (const [k, v] of Object.entries(effective.properties)) {
         const childPtr = `${pointer}/properties/${escapeJsonPointer(k)}`;
-        node.properties[k] = visit(v, childPtr, k);
+        node.properties[k] = visit(v, childPtr, k, ownRequired.includes(k));
       }
     }
     if (effective.type === 'array' && effective.items) {
