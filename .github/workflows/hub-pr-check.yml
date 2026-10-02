@@ -1384,7 +1384,9 @@ jobs:
           case "$CATEGORY" in
             startup | presuite) fp="none-${CATEGORY}" ;;
             *)
-              if [ "$OBSERVED" = "true" ]; then
+              # UNMAPPED comes straight from the suite run, so a coverage gap still counts as
+              # evidence when the evidence step itself failed and left OBSERVED empty.
+              if [ "$OBSERVED" = "true" ] || [ -n "$UNMAPPED" ]; then
                 fp="${FINGERPRINT:-sha-${SHA:0:12}}"
               else
                 fp="noevidence"
@@ -1465,11 +1467,13 @@ jobs:
           seen=$(printf '%s' "$result" | jq -r '.seen // empty' 2>/dev/null || true)
           echo "seen=${seen}" >> "$GITHUB_OUTPUT"
 
-      # The one place a no-evidence failure pings anybody: the 3rd time today on this PR. A single
-      # new reply (its own marker), so it is posted once and not re-posted by later pushes.
+      # The one place a no-evidence failure pings anybody: from the 3rd time today on this PR. It is
+      # a threshold, not "exactly 3", so a cancelled or crashed 3rd run cannot cost the day its page,
+      # and it is ONE reply with its own marker: later runs edit it, which does not ping again.
       - name: Escalate a repeated no-evidence failure
         if: >-
-          always() && steps.notify.outputs.seen == '3' && steps.msg.outputs.mode == 'streak'
+          always() && fromJSON(steps.notify.outputs.seen || '0') >= 3 &&
+          steps.msg.outputs.mode == 'streak'
         continue-on-error: true
         env:
           SLACK_TOKEN: ${{ steps.slack-secrets.outputs.SLACK_BOT_TOKEN }}

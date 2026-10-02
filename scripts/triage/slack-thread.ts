@@ -163,7 +163,9 @@ export async function findReply(
 
 // How many times this reply has been written today, carried in its own body so Slack is the only
 // state. Lets a caller tell "first time" from "keeps happening" without a database.
-const SEEN = /`seen:(\d{1,6})`/;
+// Anchored to the END of the reply: `upsert` always writes it last, after text a PR author can
+// influence, so a `seen:N` inside that text can never be mistaken for the counter.
+const SEEN = /`seen:(\d{1,6})`\s*$/;
 
 export function seenCount(text: string): number {
   const m = SEEN.exec(text);

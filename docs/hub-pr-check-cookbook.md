@@ -47,7 +47,7 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 | Pre-suite failure | `failure` | yes, test-automation-medic | no |
 | product (high confidence) | `failure` | yes, hub-medic + test-automation-medic | no |
 | product (lower), infra, flaky, unknown, **with evidence** (a failing spec or unmapped operations) | `failure` | yes, test-automation-medic | no |
-| any failure with **no evidence** (no readable report, nothing says what failed) | `failure` | one quiet reply per PR per day, nobody pinged until the 3rd time that day | no |
+| any **suite** failure with **no evidence** (the suite ran but left no readable report, and nothing says what failed; not startup or pre-suite) | `failure` | one quiet reply per PR per day, nobody pinged until the 3rd time that day | no |
 | generator-gap on an operation the PR did not touch | `failure` | yes, test-automation-medic | no |
 | generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment |
 

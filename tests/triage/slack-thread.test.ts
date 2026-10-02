@@ -290,4 +290,17 @@ describe('seen counter', () => {
     expect(seenCount('x `hub-pr:7:fp:y` `seen:4`')).toBe(4);
     expect(seenCount('no counter here')).toBe(0);
   });
+
+  it('ignores a counter-looking token inside the reply text', () => {
+    expect(seenCount('op `seen:9` and more\n`hub-pr:7:fp:y` `seen:2`')).toBe(2);
+    expect(seenCount('op `seen:9` only, no real counter')).toBe(0);
+  });
+
+  it('cannot be forced by text that contains a counter', async () => {
+    const { api } = fakeSlack();
+    const marker = replyMarker('7', 'noevidence');
+    const first = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
+    const second = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
+    expect([first.seen, second.seen]).toEqual([1, 2]);
+  });
 });
