@@ -1,7 +1,11 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildEvidence,
   cleanError,
+  collectEvidence,
   fingerprint,
   isObserved,
   junitFailures,
@@ -132,5 +136,23 @@ describe('junitFailures', () => {
 
   it('finds nothing in an all-passing report', () => {
     expect(junitFailures('<testsuite><testcase classname="a" name="ok"/></testsuite>')).toEqual([]);
+  });
+});
+
+describe('collectEvidence', () => {
+  it('applies the JUnit fallback per profile, not only when no JSON failed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ev-'));
+    writeFileSync(
+      join(dir, 'pw-positive.json'),
+      JSON.stringify(report(spec('a', false, ['failed']))),
+    );
+    writeFileSync(join(dir, 'pw-rbac.json'), '{corrupt');
+    writeFileSync(
+      join(dir, 'pw-rbac.junit.xml'),
+      '<testsuite><testcase classname="b.spec.ts" name="B"><failure/></testcase></testsuite>',
+    );
+    const titles = collectEvidence(dir).failing.map((f) => f.title);
+    expect(titles).toContain('a');
+    expect(titles).toContain('B');
   });
 });

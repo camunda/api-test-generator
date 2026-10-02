@@ -191,41 +191,44 @@ export function junitFailures(xml: string): SpecEvidence[] {
   return out;
 }
 
-function readJunitFailures(dir: string): SpecEvidence[] {
+// One Playwright profile writes pw-<profile>.json and pw-<profile>.junit.xml. The fallback is
+// applied per profile: a corrupt or failure-less JSON for one profile must not hide the failures
+// only its JUnit shows, just because another profile's JSON did report a failure.
+export function collectEvidence(dir: string): Evidence {
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
-    return [];
+    names = [];
   }
-  return names
-    .filter((n) => /^pw-.*\.junit\.xml$/.test(n))
-    .flatMap((n) => {
-      try {
-        return junitFailures(readFileSync(join(dir, n), 'utf8'));
-      } catch {
-        return [];
-      }
-    });
-}
-
-function readReports(dir: string): Json[] {
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
+  const profiles = new Set<string>();
+  for (const n of names) {
+    const m = /^(pw-.*?)(?:\.junit\.xml|\.json)$/.exec(n);
+    if (m?.[1]) profiles.add(m[1]);
   }
-  const out: Json[] = [];
-  for (const name of names) {
-    if (!/^pw-.*\.json$/.test(name)) continue;
+  const merged: Evidence = { reportsPresent: false, total: 0, failing: [], flaky: [] };
+  for (const profile of [...profiles].sort()) {
+    let report: Json | undefined;
     try {
-      out.push(JSON.parse(readFileSync(join(dir, name), 'utf8')));
+      report = JSON.parse(readFileSync(join(dir, `${profile}.json`), 'utf8'));
     } catch {
-      // A half-written report is no evidence; the others still count.
+      // Missing or half-written: no evidence from the JSON; the JUnit report may still count.
     }
+    const ev = buildEvidence(report === undefined ? [] : [report]);
+    if (ev.failing.length === 0) {
+      try {
+        ev.failing.push(...junitFailures(readFileSync(join(dir, `${profile}.junit.xml`), 'utf8')));
+      } catch {
+        // No JUnit either.
+      }
+      if (ev.failing.length > 0) ev.reportsPresent = true;
+    }
+    merged.reportsPresent ||= ev.reportsPresent;
+    merged.total += ev.total;
+    merged.failing.push(...ev.failing);
+    merged.flaky.push(...ev.flaky);
   }
-  return out;
+  return merged;
 }
 
 function arg(name: string): string {
@@ -234,12 +237,7 @@ function arg(name: string): string {
 }
 
 function main(): void {
-  const evidence = buildEvidence(readReports(arg('reports')));
-  if (evidence.failing.length === 0) {
-    const fromJunit = readJunitFailures(arg('reports'));
-    evidence.failing.push(...fromJunit);
-    if (fromJunit.length > 0) evidence.reportsPresent = true;
-  }
+  const evidence = collectEvidence(arg('reports'));
   const unmapped = arg('unmapped');
   const fp = fingerprint(arg('pr') || arg('sha'), evidence, unmapped, arg('sha'));
   writeFileSync(arg('out'), `${JSON.stringify({ ...evidence, fingerprint: fp }, null, 2)}\n`);
