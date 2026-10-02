@@ -9,6 +9,7 @@ import {
   resolveChannel,
   type SlackApi,
   type SlackMessage,
+  seenCount,
   settleParent,
   upsert,
 } from '../../scripts/triage/slack-thread.ts';
@@ -180,7 +181,7 @@ describe('findReply', () => {
         };
       },
     };
-    expect(await findReply(impl, 'C1', '0', marker)).toBe('2');
+    expect((await findReply(impl, 'C1', '0', marker))?.ts).toBe('2');
   });
 
   it('fails closed instead of reporting "not found" when pages run out', async () => {
@@ -265,5 +266,28 @@ describe('findDailyParent', () => {
     await expect(settleParent(impl, 'C1', base.date, '9')).rejects.toThrow(
       /refusing to choose a parent/,
     );
+  });
+});
+
+describe('seen counter', () => {
+  it('counts how many times the same reply was written, starting at 1', async () => {
+    const { api } = fakeSlack();
+    const marker = replyMarker('7', 'noevidence');
+    const first = await upsert(api, { ...base, marker, text: 'a' });
+    const second = await upsert(api, { ...base, marker, text: 'b' });
+    const third = await upsert(api, { ...base, marker, text: 'c' });
+    expect([first.seen, second.seen, third.seen]).toEqual([1, 2, 3]);
+  });
+
+  it('counts each PR and failure separately', async () => {
+    const { api } = fakeSlack();
+    await upsert(api, { ...base, marker: replyMarker('7', 'noevidence'), text: 'a' });
+    const other = await upsert(api, { ...base, marker: replyMarker('8', 'noevidence'), text: 'a' });
+    expect(other.seen).toBe(1);
+  });
+
+  it('reads the counter back out of a reply body', () => {
+    expect(seenCount('x `hub-pr:7:fp:y` `seen:4`')).toBe(4);
+    expect(seenCount('no counter here')).toBe(0);
   });
 });

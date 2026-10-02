@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildEvidence, cleanError, fingerprint } from '../../scripts/triage/hub-pr-evidence.ts';
+import {
+  buildEvidence,
+  cleanError,
+  fingerprint,
+  isObserved,
+} from '../../scripts/triage/hub-pr-evidence.ts';
 
 function spec(title: string, ok: boolean, statuses: string[], error?: string) {
   return {
@@ -94,5 +99,20 @@ describe('fingerprint', () => {
 
   it('does not salt when a failing set was observed', () => {
     expect(fingerprint('7', failing, '', 'sha1')).toBe(fingerprint('7', failing, '', 'sha2'));
+  });
+});
+
+describe('isObserved', () => {
+  it('is true when a spec failed', () => {
+    expect(isObserved(buildEvidence([report(spec('a', false, ['failed']))]), '')).toBe(true);
+  });
+
+  it('is true when operations have no test', () => {
+    expect(isObserved(buildEvidence([]), 'newOp')).toBe(true);
+  });
+
+  it('is false when nothing says what failed', () => {
+    expect(isObserved(buildEvidence([]), '')).toBe(false);
+    expect(isObserved(buildEvidence([report(spec('a', true, ['passed']))]), '  ')).toBe(false);
   });
 });

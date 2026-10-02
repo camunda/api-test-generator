@@ -46,7 +46,8 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 | Startup failure | `failure` | yes, hub-medic + test-automation-medic | no |
 | Pre-suite failure | `failure` | yes, test-automation-medic | no |
 | product (high confidence) | `failure` | yes, hub-medic + test-automation-medic | no |
-| product (lower), infra, flaky, unknown | `failure` | yes, test-automation-medic | no |
+| product (lower), infra, flaky, unknown, **with evidence** (a failing spec or unmapped operations) | `failure` | yes, test-automation-medic | no |
+| any failure with **no evidence** (no readable report, nothing says what failed) | `failure` | one quiet reply per PR per day, nobody pinged until the 3rd time that day | no |
 | generator-gap on an operation the PR did not touch | `failure` | yes, test-automation-medic | no |
 | generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment |
 
@@ -54,8 +55,18 @@ When the generator gap is caused by the PR's own spec change, an issue
 `[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo and assigned to the
 camunda-hub PR's author. It is edited in place on later pushes and closes itself on a green run.
 
-Slack is one thread per day with one reply per (PR, failure fingerprint). The same failure on a
-later push edits its reply in place and does not page again; a different failure gets a new reply.
+Slack is one thread per day with one reply per (PR, failure). What counts as "the same failure":
+
+- **With evidence** (a failing spec or operations with no test): the fingerprint of the failing set.
+  The same set on a later push edits its reply in place and does not page again; a different set
+  gets a new reply and pages.
+- **Startup or pre-suite failure:** the category. One reply per PR per day, paged once.
+- **No evidence** (the suite produced no report, or a failure outside the tests): these cannot be
+  told apart from the previous push's, and paging per push is what flooded the channel. They share
+  one reply per PR per day, edited with the latest run, and nobody is pinged. If the same PR fails
+  this way a 3rd time that day, one extra reply pings test-automation-medic, because by then it is
+  the pipeline, not the PR. The counter lives in the reply itself (`seen:N`) and counts failures
+  that day, not strictly consecutive ones.
 
 ## Debugging steps
 

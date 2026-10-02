@@ -137,6 +137,13 @@ export function buildEvidence(reports: Json[]): Evidence {
   return evidence;
 }
 
+// True when the run left evidence of WHAT failed: a failing spec, or operations with no test.
+// Without it the run is "no evidence" (no readable report, or a failure outside the tests), and
+// the alert policy treats it differently: it cannot be told apart from the last push's failure.
+export function isObserved(evidence: Evidence, unmapped: string): boolean {
+  return evidence.failing.length > 0 || unmapped.trim() !== '';
+}
+
 // Identity of "the same failure" on one PR, so repeated pushes with the same failing set
 // collapse into one alert. The category is deliberately not an input: the agent can word the
 // same failure differently between runs, and that must not re-page.
@@ -199,6 +206,7 @@ function main(): void {
     `fingerprint=${fp}`,
     `failing=${evidence.failing.length}`,
     `flaky=${evidence.flaky.length}`,
+    `observed=${isObserved(evidence, unmapped)}`,
   ];
   const out = process.env.GITHUB_OUTPUT;
   if (out) appendFileSync(out, `${lines.join('\n')}\n`);
