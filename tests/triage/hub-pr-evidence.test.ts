@@ -156,3 +156,13 @@ describe('collectEvidence', () => {
     expect(titles).toContain('B');
   });
 });
+
+describe('junitFailures identity', () => {
+  it('reduces Playwright composite names to the JSON file::title identity', () => {
+    const xml =
+      '<testsuite><testcase classname="[positive] › ops/a.spec.ts:12:5" ' +
+      'name="Suite › inner › does the thing"><failure/></testcase></testsuite>';
+    const [f] = junitFailures(xml);
+    expect(`${f?.file}::${f?.title}`).toBe('ops/a.spec.ts::does the thing');
+  });
+});

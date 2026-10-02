@@ -173,15 +173,32 @@ export function fingerprint(pr: string, evidence: Evidence, unmapped: string, sa
 // JUnit fallback for a run whose JSON report is missing or corrupt: the classifier reads the JUnit
 // report too, so a failing testcase there is evidence of WHAT failed just like a failing JSON spec.
 // Only names are taken; the XML is never trusted beyond that.
+function unescapeXml(v: string): string {
+  return v
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
 export function junitFailures(xml: string): SpecEvidence[] {
   const out: SpecEvidence[] = [];
   const cases = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
   for (const m of xml.matchAll(cases)) {
     if (!/<(?:failure|error)\b/.test(m[2] ?? '')) continue;
     const attr = (n: string) => new RegExp(`\\b${n}="([^"]*)"`).exec(m[1] ?? '')?.[1] ?? '';
+    const parts = (v: string) => unescapeXml(v).split(' › ');
+    // Playwright's JUnit classname/name are composites ("project › file › describe › title"),
+    // while the JSON path identifies a failure by `spec.file` + `spec.title`. Reduce both to that
+    // identity so the same failing test fingerprints identically whichever report was readable.
+    const file = parts(attr('classname') || attr('file'))
+      .map((x) => x.replace(/:\d+(?::\d+)?$/, ''))
+      .find((x) => /\.[cm]?[jt]sx?$/.test(x));
+    const title = parts(attr('name')).at(-1) ?? '';
     out.push({
-      file: attr('classname') || attr('file'),
-      title: attr('name'),
+      file: file ?? attr('classname') ?? '',
+      title,
       project: '',
       statuses: ['failed'],
       deterministic: false,
