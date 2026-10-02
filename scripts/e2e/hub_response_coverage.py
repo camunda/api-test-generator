@@ -499,7 +499,8 @@ def issue_body(s, rows, args):
         lines.append(f'| `{r["operationId"]}` | {codes} | {kinds} |')
     if len(gaps) > 100:
         lines.append(f'| …and {len(gaps) - 100} more (see the full table in the run) | | |')
-    lines += ['', request_gap_summary(s)]
+    lines += ['', 'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps']
+                                           else 'every kind that applies is covered.')]
     if args.run_url:
         lines += ['', f'Full table: {args.run_url}']
     return '\n'.join(lines) + '\n'

@@ -151,21 +151,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          num=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" \
-            --json number,title --jq "[.[] | select(.title == \"$ISSUE_TITLE\") | .number] | first // empty")
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # All states, open first: a gap that comes back after the issue was closed reopens that
+          # issue instead of starting a second one.
+          found=$(gh issue list --state all --limit 100 --search "in:title \"$ISSUE_TITLE\"" \
+            --json number,title,state --jq "[.[] | select(.title == \"$ISSUE_TITLE\")] | sort_by(.state != \"OPEN\") | first // empty | \"\(.number) \(.state)\"")
+          num=${found% *}
+          state=${found#* }
           if [ -s coverage-report/issue.md ]; then
-            if [ -n "$num" ]; then
-              gh issue edit "$num" --body-file coverage-report/issue.md
-              gh issue comment "$num" --body "Re-checked on $(date -u +%F): still missing. See the updated list above. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              url="${{ github.server_url }}/${{ github.repository }}/issues/$num"
-            else
+            if [ -z "$found" ]; then
               url=$(gh issue create --title "$ISSUE_TITLE" --body-file coverage-report/issue.md \
                 --label missing-coverage --label auto-generated --label hub)
+            else
+              [ "$state" = "OPEN" ] || gh issue reopen "$num"
+              gh issue edit "$num" --body-file coverage-report/issue.md
+              gh issue comment "$num" --body "Re-checked on $(date -u +%F): still missing. See the updated list above. $run_url"
+              url="${{ github.server_url }}/${{ github.repository }}/issues/$num"
             fi
             echo "$url" > coverage-report/issue-url.txt
-          elif [ -n "$num" ]; then
+          elif [ -n "$found" ] && [ "$state" = "OPEN" ]; then
             gh issue close "$num" --reason completed \
               --comment "Nothing is missing any more in the weekly check on $(date -u +%F), so this is closed automatically."
+            echo "${{ github.server_url }}/${{ github.repository }}/issues/$num" > coverage-report/issue-url.txt
           fi
 
       - name: Render report page
