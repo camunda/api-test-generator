@@ -13,6 +13,7 @@ import {
   getTemplateScenariosRootDir,
   getVariantOutputDir,
 } from './configResolver.js';
+import { applyConflictReplay, loadConflictReplay } from './conflictReplay.js';
 import { writeExtractionOutputs } from './extractSchemas.js';
 import { generateFeatureCoverageForEndpoint } from './featureCoverageGenerator.js';
 import { loadGraph, loadOpenApiSemanticHints } from './graphLoader.js';
@@ -97,6 +98,7 @@ async function main() {
   await mkdir(variantDir, { recursive: true });
 
   const graph = await loadGraph(baseDir);
+  applyConflictReplay(graph, loadConflictReplay(getActiveConfigDir(repoRoot)));
   // Build canonical deep schema shapes (requests + responses)
   const canonical = await buildCanonicalShapes(path.resolve(baseDir, '../'));
   // Drift guard: every response-side semantic leaf reported by the
@@ -819,6 +821,10 @@ function buildRequestPlan(
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
     if (isFinal && scenario.duplicateTest) {
+      const changeBody = scenario.duplicateTest.changeBody;
+      if (changeBody && isPlainRecord(step.bodyTemplate)) {
+        step.bodyTemplate = { ...step.bodyTemplate, ...changeBody };
+      }
       const dup: RequestStep = {
         ...step,
         expect: {

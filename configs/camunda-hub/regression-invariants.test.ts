@@ -417,4 +417,49 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     ).toBeGreaterThan(30);
     expect(missing, 'operations with a documented 404 but no not-found test').toEqual([]);
   });
+  it('conflict-replay operations assert a 409 on the repeated call and document that 409 (#620)', () => {
+    const raw: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/conflict-replay.json')),
+    );
+    const replay = isRecord(raw) && Array.isArray(raw.replay) ? raw.replay : [];
+    const ids = replay.map((e) => (isRecord(e) ? e.operationId : undefined));
+    // The two cases confirmed live against camunda/hub:SNAPSHOT.
+    expect(ids).toContain('requestProjectSnapshotReview');
+    expect(ids).toContain('updateFile');
+    const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const documented409 = new Set<string>();
+    if (isRecord(bundle) && isRecord(bundle.paths)) {
+      for (const item of Object.values(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
+          if (
+            typeof opDef.operationId === 'string' &&
+            isRecord(opDef.responses) &&
+            '409' in opDef.responses
+          )
+            documented409.add(opDef.operationId);
+        }
+      }
+    }
+    for (const id of ids) {
+      if (typeof id !== 'string') continue;
+      expect(
+        documented409.has(id),
+        `${id} is in conflict-replay.json but the spec documents no 409`,
+      ).toBe(true);
+      const spec = readGeneratedSpec(`${id}.feature.spec.ts`);
+      const at = spec.indexOf(`${id} - duplicate conflict`);
+      expect(at, `${id}: no "duplicate conflict" test generated`).toBeGreaterThan(-1);
+      expect(spec.slice(at), `${id}: the repeated call does not assert 409`).toContain('toBe(409)');
+      const entry = replay.find((e) => isRecord(e) && e.operationId === id);
+      const changeBody = isRecord(entry) && isRecord(entry.changeBody) ? entry.changeBody : {};
+      for (const [field, value] of Object.entries(changeBody)) {
+        expect(
+          spec.slice(at),
+          `${id}: the changeBody value for ${field} is not in the generated request`,
+        ).toContain(`${field}: ${JSON.stringify(value).replace(/^"|"$/g, "'")}`);
+      }
+    }
+  });
 });

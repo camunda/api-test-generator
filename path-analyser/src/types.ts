@@ -108,6 +108,8 @@ export interface OperationNode extends OperationRef {
     duplicatePolicy: string; // e.g. ignore
     appliesWhen: string; // e.g. key-present
   };
+  // Set from the config's conflict-replay.json; see conflictReplay.ts.
+  conflictReplay?: { changeBody?: Record<string, unknown> };
   // Response semantic-type entries keyed by status code, sourced from the
   // semantic-graph extractor. Each entry captures the field path (which may
   // be nested, e.g. `metadata.processInstanceKey`) and the semantic type
@@ -365,6 +367,7 @@ export interface EndpointScenario {
     secondStatus?: number; // expected status of second (final) call
     keyFields?: string[]; // key fields driving duplication
     windowField?: string; // name of TTL window field if conditional
+    changeBody?: Record<string, unknown>; // body fields set on the final call so the first one actually changes state
   };
 }
 
@@ -404,6 +407,7 @@ export interface FeatureVariantSpec {
     mode: 'conditional' | 'conflict';
     policy: string;
     secondStatus?: number;
+    changeBody?: Record<string, unknown>;
   };
   // #288 Phase 3b — opt out of the canonical chain inheritance.
   // Defaults to true (omitted ⇒ inherit). The only current consumer
