@@ -1,5 +1,15 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildEvidence, cleanError, fingerprint } from '../../scripts/triage/hub-pr-evidence.ts';
+import {
+  buildEvidence,
+  cleanError,
+  collectEvidence,
+  fingerprint,
+  isObserved,
+  junitFailures,
+} from '../../scripts/triage/hub-pr-evidence.ts';
 
 function spec(title: string, ok: boolean, statuses: string[], error?: string) {
   return {
@@ -94,5 +104,65 @@ describe('fingerprint', () => {
 
   it('does not salt when a failing set was observed', () => {
     expect(fingerprint('7', failing, '', 'sha1')).toBe(fingerprint('7', failing, '', 'sha2'));
+  });
+});
+
+describe('isObserved', () => {
+  it('is true when a spec failed', () => {
+    expect(isObserved(buildEvidence([report(spec('a', false, ['failed']))]), '')).toBe(true);
+  });
+
+  it('is true when operations have no test', () => {
+    expect(isObserved(buildEvidence([]), 'newOp')).toBe(true);
+  });
+
+  it('is false when nothing says what failed', () => {
+    expect(isObserved(buildEvidence([]), '')).toBe(false);
+    expect(isObserved(buildEvidence([report(spec('a', true, ['passed']))]), '  ')).toBe(false);
+  });
+});
+
+describe('junitFailures', () => {
+  it('reports testcases that carry a failure or error element', () => {
+    const xml =
+      '<testsuite><testcase classname="a.spec.ts" name="ok"/>' +
+      '<testcase classname="b.spec.ts" name="bad"><failure message="x"/></testcase>' +
+      '<testcase classname="c.spec.ts" name="boom"><error/></testcase></testsuite>';
+    expect(junitFailures(xml).map((f) => `${f.file}::${f.title}`)).toEqual([
+      'b.spec.ts::bad',
+      'c.spec.ts::boom',
+    ]);
+  });
+
+  it('finds nothing in an all-passing report', () => {
+    expect(junitFailures('<testsuite><testcase classname="a" name="ok"/></testsuite>')).toEqual([]);
+  });
+});
+
+describe('collectEvidence', () => {
+  it('applies the JUnit fallback per profile, not only when no JSON failed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ev-'));
+    writeFileSync(
+      join(dir, 'pw-positive.json'),
+      JSON.stringify(report(spec('a', false, ['failed']))),
+    );
+    writeFileSync(join(dir, 'pw-rbac.json'), '{corrupt');
+    writeFileSync(
+      join(dir, 'pw-rbac.junit.xml'),
+      '<testsuite><testcase classname="b.spec.ts" name="B"><failure/></testcase></testsuite>',
+    );
+    const titles = collectEvidence(dir).failing.map((f) => f.title);
+    expect(titles).toContain('a');
+    expect(titles).toContain('B');
+  });
+});
+
+describe('junitFailures identity', () => {
+  it('reduces Playwright composite names to the JSON file::title identity', () => {
+    const xml =
+      '<testsuite><testcase classname="[positive] › ops/a.spec.ts:12:5" ' +
+      'name="Suite › inner › does the thing"><failure/></testcase></testsuite>';
+    const [f] = junitFailures(xml);
+    expect(`${f?.file}::${f?.title}`).toBe('ops/a.spec.ts::does the thing');
   });
 });

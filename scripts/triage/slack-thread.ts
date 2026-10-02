@@ -46,9 +46,13 @@ export function dailyMarker(date: string): string {
   return `${DAILY_MARKER_PREFIX}${date}`;
 }
 
-// Newest bot message containing the marker. Bot-only, so a human quoting it cannot capture it.
+// Newest bot message whose script-owned trailer is the marker. Bot-only, so a human quoting it
+// cannot capture it, and trailer-only, so text a PR author can influence earlier in the same
+// message cannot either: `upsert` always writes the marker last, optionally followed by `seen:N`.
 export function findIn(messages: SlackMessage[], marker: string): string {
-  const hits = messages.filter((m) => (m.bot_id || m.app_id) && (m.text ?? '').includes(marker));
+  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const trailer = new RegExp(`\`${escaped}\`(?:\\s+\`seen:\\d{1,6}\`)?\\s*$`);
+  const hits = messages.filter((m) => (m.bot_id || m.app_id) && trailer.test(m.text ?? ''));
   hits.sort((a, b) => Number(a.ts ?? 0) - Number(b.ts ?? 0));
   return hits.at(-1)?.ts ?? '';
 }
@@ -99,7 +103,7 @@ async function listDailyParents(api: SlackApi, channel: string, date: string): P
     if (cursor) params.cursor = cursor;
     const resp = must(await api.get('conversations.history', params), 'conversations.history');
     for (const m of resp.messages ?? []) {
-      if ((m.bot_id || m.app_id) && (m.text ?? '').includes(marker) && m.ts) parents.push(m.ts);
+      if (m.ts && findIn([m], marker)) parents.push(m.ts);
     }
     cursor = resp.response_metadata?.next_cursor ?? '';
     if (!cursor) return parents.sort((a, b) => Number(a) - Number(b));
@@ -135,33 +139,47 @@ export async function settleParent(
 
 // conversations.replies is cursor-paginated; reading one page would miss an older matching reply
 // once the day's thread outgrows it and post the same failure again.
+export interface Reply {
+  ts: string;
+  text: string;
+}
+
 export async function findReply(
   api: SlackApi,
   channel: string,
   parentTs: string,
   marker: string,
-): Promise<string> {
+): Promise<Reply | null> {
   let cursor = '';
   for (let page = 0; page < HISTORY_PAGES; page++) {
     const params: Record<string, string> = { channel, ts: parentTs, limit: '200' };
     if (cursor) params.cursor = cursor;
     const resp = must(await api.get('conversations.replies', params), 'conversations.replies');
-    const ts = findIn(
-      (resp.messages ?? []).filter((m) => m.ts !== parentTs),
-      marker,
-    );
-    if (ts) return ts;
+    const messages = (resp.messages ?? []).filter((m) => m.ts !== parentTs);
+    const ts = findIn(messages, marker);
+    if (ts) return { ts, text: messages.find((m) => m.ts === ts)?.text ?? '' };
     cursor = resp.response_metadata?.next_cursor ?? '';
-    if (!cursor) return '';
+    if (!cursor) return null;
   }
-  // Returning '' would post a duplicate and re-page, so fail closed like findDailyParent.
+  // Returning null would post a duplicate and re-page, so fail closed like findDailyParent.
   throw new Error(`reply not found within ${HISTORY_PAGES} pages; refusing to post a duplicate`);
+}
+
+// How many times this reply has been written today, carried in its own body so Slack is the only
+// state. Lets a caller tell "first time" from "keeps happening" without a database.
+// Anchored to the END of the reply: `upsert` always writes it last, after text a PR author can
+// influence, so a `seen:N` inside that text can never be mistaken for the counter.
+const SEEN = /`seen:(\d{1,6})`\s*$/;
+
+export function seenCount(text: string): number {
+  const m = SEEN.exec(text);
+  return m?.[1] ? Number(m[1]) : 0;
 }
 
 export async function upsert(
   api: SlackApi,
   args: { channel: string; date: string; marker: string; text: string },
-): Promise<{ action: 'posted' | 'updated'; replyTs: string }> {
+): Promise<{ action: 'posted' | 'updated'; replyTs: string; seen: number }> {
   const { date, marker } = args;
   const channel = await resolveChannel(api, args.channel);
   let parentTs = await findDailyParent(api, channel, date);
@@ -177,16 +195,17 @@ export async function upsert(
     parentTs = await settleParent(api, channel, date, resp.ts ?? '');
   }
 
-  // The marker rides in the body so the next run can find this reply again.
-  const body = `${args.text}\n\`${marker}\``;
   const existing = await findReply(api, channel, parentTs, marker);
+  const seen = seenCount(existing?.text ?? '') + 1;
+  // The marker rides in the body so the next run can find this reply again.
+  const body = `${args.text}\n\`${marker}\` \`seen:${seen}\``;
 
   if (existing) {
     must(
-      await api.call('chat.update', { channel, ts: existing, text: body, unfurl_links: false }),
+      await api.call('chat.update', { channel, ts: existing.ts, text: body, unfurl_links: false }),
       'chat.update',
     );
-    return { action: 'updated', replyTs: existing };
+    return { action: 'updated', replyTs: existing.ts, seen };
   }
   const resp = must(
     await api.call('chat.postMessage', {
@@ -197,7 +216,7 @@ export async function upsert(
     }),
     'chat.postMessage',
   );
-  return { action: 'posted', replyTs: resp.ts ?? '' };
+  return { action: 'posted', replyTs: resp.ts ?? '', seen };
 }
 
 function slackApi(token: string): SlackApi {

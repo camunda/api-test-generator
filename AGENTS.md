@@ -559,6 +559,11 @@ then posts through
 [scripts/triage/slack-thread.ts](scripts/triage/slack-thread.ts): one thread per
 day, one reply per (PR, fingerprint), edited in place when the same failure
 re-runs (an edit does not re-page) and a new reply only when the failure changes.
+A failure with no evidence of what failed (no readable report, nothing failing, no unmapped
+operations; `observed=false` from `hub-pr-evidence.ts`) cannot be told apart from the previous
+push's, so it shares one quiet reply per PR per day and pings nobody until it has happened 3 times
+that day (the reply carries a hidden `seen:N` counter), when one extra reply pings
+test-automation-medic. This mirrors AlwaysGreen's rule that one failure is not a page.
 Racing PRs that each create the day's parent converge on the earliest one (the
 loser deletes its own); the reply lookup is paginated and fails closed.
 Any threading failure (unresolvable channel name, missing Slack history scope) falls

@@ -9,6 +9,7 @@ import {
   resolveChannel,
   type SlackApi,
   type SlackMessage,
+  seenCount,
   settleParent,
   upsert,
 } from '../../scripts/triage/slack-thread.ts';
@@ -99,6 +100,19 @@ describe('findIn', () => {
   it('ignores human messages that quote a marker', () => {
     expect(findIn([{ ts: '1', text: 'hub-pr:7:fp:a' }], 'hub-pr:7:fp:a')).toBe('');
   });
+
+  it('ignores a marker quoted inside a bot message body', () => {
+    const text = 'op `hub-pr:7:escalated` here\n`hub-pr:7:fp:a` `seen:1`';
+    expect(findIn([{ ts: '1', bot_id: 'B', text }], 'hub-pr:7:escalated')).toBe('');
+  });
+
+  it('matches the trailer with and without the counter', () => {
+    const messages = [
+      { ts: '1', bot_id: 'B', text: 'x\n`m` `seen:2`' },
+      { ts: '2', bot_id: 'B', text: 'y\n`m`' },
+    ];
+    expect(findIn(messages, 'm')).toBe('2');
+  });
 });
 
 describe('resolveChannel', () => {
@@ -165,7 +179,7 @@ describe('findReply', () => {
     const marker = replyMarker('7', 'aaaa1111');
     const pages: Record<string, SlackMessage[]> = {
       '': [{ ts: '1', bot_id: 'B1', text: 'other' }],
-      next: [{ ts: '2', bot_id: 'B1', text: marker }],
+      next: [{ ts: '2', bot_id: 'B1', text: `body\n\`${marker}\` \`seen:1\`` }],
     };
     const impl: SlackApi = {
       async call() {
@@ -180,7 +194,7 @@ describe('findReply', () => {
         };
       },
     };
-    expect(await findReply(impl, 'C1', '0', marker)).toBe('2');
+    expect((await findReply(impl, 'C1', '0', marker))?.ts).toBe('2');
   });
 
   it('fails closed instead of reporting "not found" when pages run out', async () => {
@@ -265,5 +279,41 @@ describe('findDailyParent', () => {
     await expect(settleParent(impl, 'C1', base.date, '9')).rejects.toThrow(
       /refusing to choose a parent/,
     );
+  });
+});
+
+describe('seen counter', () => {
+  it('counts how many times the same reply was written, starting at 1', async () => {
+    const { api } = fakeSlack();
+    const marker = replyMarker('7', 'noevidence');
+    const first = await upsert(api, { ...base, marker, text: 'a' });
+    const second = await upsert(api, { ...base, marker, text: 'b' });
+    const third = await upsert(api, { ...base, marker, text: 'c' });
+    expect([first.seen, second.seen, third.seen]).toEqual([1, 2, 3]);
+  });
+
+  it('counts each PR and failure separately', async () => {
+    const { api } = fakeSlack();
+    await upsert(api, { ...base, marker: replyMarker('7', 'noevidence'), text: 'a' });
+    const other = await upsert(api, { ...base, marker: replyMarker('8', 'noevidence'), text: 'a' });
+    expect(other.seen).toBe(1);
+  });
+
+  it('reads the counter back out of a reply body', () => {
+    expect(seenCount('x `hub-pr:7:fp:y` `seen:4`')).toBe(4);
+    expect(seenCount('no counter here')).toBe(0);
+  });
+
+  it('ignores a counter-looking token inside the reply text', () => {
+    expect(seenCount('op `seen:9` and more\n`hub-pr:7:fp:y` `seen:2`')).toBe(2);
+    expect(seenCount('op `seen:9` only, no real counter')).toBe(0);
+  });
+
+  it('cannot be forced by text that contains a counter', async () => {
+    const { api } = fakeSlack();
+    const marker = replyMarker('7', 'noevidence');
+    const first = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
+    const second = await upsert(api, { ...base, marker, text: 'ids: `seen:2`' });
+    expect([first.seen, second.seen]).toEqual([1, 2]);
   });
 });

@@ -137,6 +137,13 @@ export function buildEvidence(reports: Json[]): Evidence {
   return evidence;
 }
 
+// True when the run left evidence of WHAT failed: a failing spec, or operations with no test.
+// Without it the run is "no evidence" (no readable report, or a failure outside the tests), and
+// the alert policy treats it differently: it cannot be told apart from the last push's failure.
+export function isObserved(evidence: Evidence, unmapped: string): boolean {
+  return evidence.failing.length > 0 || unmapped.trim() !== '';
+}
+
 // Identity of "the same failure" on one PR, so repeated pushes with the same failing set
 // collapse into one alert. The category is deliberately not an input: the agent can word the
 // same failure differently between runs, and that must not re-page.
@@ -163,23 +170,82 @@ export function fingerprint(pr: string, evidence: Evidence, unmapped: string, sa
   return createHash('sha256').update(joined).digest('hex').slice(0, 8);
 }
 
-function readReports(dir: string): Json[] {
+// JUnit fallback for a run whose JSON report is missing or corrupt: the classifier reads the JUnit
+// report too, so a failing testcase there is evidence of WHAT failed just like a failing JSON spec.
+// Only names are taken; the XML is never trusted beyond that.
+function unescapeXml(v: string): string {
+  return v
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+export function junitFailures(xml: string): SpecEvidence[] {
+  const out: SpecEvidence[] = [];
+  const cases = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+  for (const m of xml.matchAll(cases)) {
+    if (!/<(?:failure|error)\b/.test(m[2] ?? '')) continue;
+    const attr = (n: string) => new RegExp(`\\b${n}="([^"]*)"`).exec(m[1] ?? '')?.[1] ?? '';
+    const parts = (v: string) => unescapeXml(v).split(' › ');
+    // Playwright's JUnit classname/name are composites ("project › file › describe › title"),
+    // while the JSON path identifies a failure by `spec.file` + `spec.title`. Reduce both to that
+    // identity so the same failing test fingerprints identically whichever report was readable.
+    const file = parts(attr('classname') || attr('file'))
+      .map((x) => x.replace(/:\d+(?::\d+)?$/, ''))
+      .find((x) => /\.[cm]?[jt]sx?$/.test(x));
+    const title = parts(attr('name')).at(-1) ?? '';
+    out.push({
+      file: file ?? attr('classname') ?? '',
+      title,
+      project: '',
+      statuses: ['failed'],
+      deterministic: false,
+      error: '',
+    });
+  }
+  return out;
+}
+
+// One Playwright profile writes pw-<profile>.json and pw-<profile>.junit.xml. The fallback is
+// applied per profile: a corrupt or failure-less JSON for one profile must not hide the failures
+// only its JUnit shows, just because another profile's JSON did report a failure.
+export function collectEvidence(dir: string): Evidence {
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
-    return [];
+    names = [];
   }
-  const out: Json[] = [];
-  for (const name of names) {
-    if (!/^pw-.*\.json$/.test(name)) continue;
+  const profiles = new Set<string>();
+  for (const n of names) {
+    const m = /^(pw-.*?)(?:\.junit\.xml|\.json)$/.exec(n);
+    if (m?.[1]) profiles.add(m[1]);
+  }
+  const merged: Evidence = { reportsPresent: false, total: 0, failing: [], flaky: [] };
+  for (const profile of [...profiles].sort()) {
+    let report: Json | undefined;
     try {
-      out.push(JSON.parse(readFileSync(join(dir, name), 'utf8')));
+      report = JSON.parse(readFileSync(join(dir, `${profile}.json`), 'utf8'));
     } catch {
-      // A half-written report is no evidence; the others still count.
+      // Missing or half-written: no evidence from the JSON; the JUnit report may still count.
     }
+    const ev = buildEvidence(report === undefined ? [] : [report]);
+    if (ev.failing.length === 0) {
+      try {
+        ev.failing.push(...junitFailures(readFileSync(join(dir, `${profile}.junit.xml`), 'utf8')));
+      } catch {
+        // No JUnit either.
+      }
+      if (ev.failing.length > 0) ev.reportsPresent = true;
+    }
+    merged.reportsPresent ||= ev.reportsPresent;
+    merged.total += ev.total;
+    merged.failing.push(...ev.failing);
+    merged.flaky.push(...ev.flaky);
   }
-  return out;
+  return merged;
 }
 
 function arg(name: string): string {
@@ -188,7 +254,7 @@ function arg(name: string): string {
 }
 
 function main(): void {
-  const evidence = buildEvidence(readReports(arg('reports')));
+  const evidence = collectEvidence(arg('reports'));
   const unmapped = arg('unmapped');
   const fp = fingerprint(arg('pr') || arg('sha'), evidence, unmapped, arg('sha'));
   writeFileSync(arg('out'), `${JSON.stringify({ ...evidence, fingerprint: fp }, null, 2)}\n`);
@@ -199,6 +265,7 @@ function main(): void {
     `fingerprint=${fp}`,
     `failing=${evidence.failing.length}`,
     `flaky=${evidence.flaky.length}`,
+    `observed=${isObserved(evidence, unmapped)}`,
   ];
   const out = process.env.GITHUB_OUTPUT;
   if (out) appendFileSync(out, `${lines.join('\n')}\n`);
