@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -371,5 +371,50 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       requestStep.indexOf("test.step('createProjectSnapshot'"),
       'a second createProjectSnapshot must not appear between the review request and the submission',
     ).toBe(-1);
+  });
+
+  // #619 — Hub answers a nonexistent path key with a clean 404 on every method and on
+  // list/search operations under a missing parent, so notFoundMode is 'declared' and every
+  // operation with a path key that documents a 404 gets a "Nonexistent <key> returns 404" test.
+  // Pin it from the spec itself so a new operation, or a change to the mode, cannot silently
+  // drop one. An operation that is deliberately skipped must be listed here with its reason.
+  it('every operation with a path key that documents a 404 has a not-found test (#619)', () => {
+    // purgeFile is idempotent by contract (204 for a file that never existed); its 404 means
+    // "belongs to another organization", which no fake key can provoke.
+    const NO_NOT_FOUND_TEST = new Set(['purgeFile']);
+    const secured = join(getRequestValidationSuiteDir(REPO_ROOT), 'secured');
+    const corpus = readdirSync(secured)
+      .filter((f) => f.endsWith('-validation-api-tests.spec.ts'))
+      .map((f) => readRequired(join(secured, f)))
+      .join('\n');
+    const raw: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const missing: string[] = [];
+    let checked = 0;
+    if (isRecord(raw) && isRecord(raw.paths)) {
+      for (const [urlPath, item] of Object.entries(raw.paths)) {
+        if (!urlPath.includes('{') || !isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
+          const opId = opDef.operationId;
+          if (typeof opId !== 'string' || !isRecord(opDef.responses) || !('404' in opDef.responses))
+            continue;
+          if (NO_NOT_FOUND_TEST.has(opId)) {
+            expect(
+              corpus,
+              `${opId} is listed as having no not-found test but has one`,
+            ).not.toContain(`test('${opId} - Nonexistent`);
+            continue;
+          }
+          checked++;
+          if (!corpus.includes(`test('${opId} - Nonexistent`)) missing.push(opId);
+        }
+      }
+    }
+    // Guards against a vacuous pass: the spec has dozens of keyed operations documenting a 404.
+    expect(
+      checked,
+      'found suspiciously few keyed 404 operations - did the spec parse?',
+    ).toBeGreaterThan(30);
+    expect(missing, 'operations with a documented 404 but no not-found test').toEqual([]);
   });
 });

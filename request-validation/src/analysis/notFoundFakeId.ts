@@ -1,9 +1,12 @@
+import { Ajv } from 'ajv';
 import type {
   OperationModel,
   ParameterModel,
   SchemaFragment,
   ValidationScenario,
 } from '../model/types.js';
+import { buildBaselineBody } from '../schema/baseline.js';
+import { isMultipartOnly } from '../util/multipartSkip.js';
 import {
   buildValidValue,
   isUrlCollapsingPathSegment,
@@ -14,6 +17,8 @@ import { makeId } from './common.js';
 
 interface Opts {
   onlyOperations?: Set<string>;
+  /** `notFoundMode: 'declared'` — trust the contract's 404 for any method and response shape (see config.ts). */
+  declared?: boolean;
 }
 
 // A syntactically-valid Camunda key (Java long serialized as string) that is
@@ -111,6 +116,71 @@ export function fakePathParamValue(p: ParameterModel): string | undefined {
   return undefined;
 }
 
+// Structural check for a baseline body. Formats are not checked (validateFormats: false): the
+// builder cannot synthesise a value for an arbitrary format, and the server may not enforce
+// one before the lookup (Hub answers 404 for addMember's `email: "x"`). Everything else the
+// schema says about the value - pattern, length and numeric bounds, minItems, enum - is.
+const baselineValidator = new Ajv({ strict: false, validateFormats: false });
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Specs are OpenAPI 3.0, Ajv speaks draft-07: a `nullable` with no `type` beside it (how key
+ * fields are modelled) is a compile error there, and `exclusiveMinimum: true` is a boolean
+ * where draft-07 wants the bound. Only a boolean counts as the keyword, so a property that
+ * happens to be named `nullable` is left alone.
+ */
+function forAjv(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(forAjv);
+  if (!isRecord(node)) return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) out[k] = forAjv(v);
+  if (typeof out.nullable === 'boolean' && out.type === undefined) delete out.nullable;
+  for (const [flag, bound] of [
+    ['exclusiveMinimum', 'minimum'],
+    ['exclusiveMaximum', 'maximum'],
+  ] as const) {
+    if (typeof out[flag] !== 'boolean') continue;
+    if (out[flag] === true && typeof out[bound] === 'number') {
+      out[flag] = out[bound];
+      delete out[bound];
+    } else {
+      delete out[flag];
+    }
+  }
+  return out;
+}
+
+function satisfiesSchema(schema: SchemaFragment, body: unknown): boolean {
+  try {
+    const translated = forAjv(schema);
+    if (!isRecord(translated)) return false;
+    return baselineValidator.compile(translated)(body) === true;
+  } catch {
+    return false; // a schema we cannot compile even after translation: validity cannot be established
+  }
+}
+
+/**
+ * The JSON body a required-body operation is sent in a 404 scenario, or undefined when none
+ * can be built. A body is unusable when:
+ *  - the baseline builder cannot produce one: it returns undefined for roots it cannot walk
+ *    (oneOf, array, scalar) and null (or a bare primitive) for an allOf it cannot resolve to
+ *    an object, and the emitter treats a null body as "no body";
+ *  - it violates the schema's structural constraints (the builder emits 'x' for strings and 1
+ *    for numbers whatever the pattern or bounds say).
+ * Either way the server would answer 400 instead of exercising the 404, so the operation is
+ * not eligible, rather than emitted as a test that fails for the wrong reason.
+ */
+function buildableBody(op: OperationModel): Record<string, unknown> | undefined {
+  const body = buildBaselineBody(op);
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
+  if (!op.requestBodySchema || !satisfiesSchema(op.requestBodySchema, body)) return undefined;
+  return body;
+}
+
 /**
  * Eligibility for a fake-ID 404 test (#381):
  *   - the operation is a GET (read-by-key). v1 is scoped to safe, idempotent
@@ -128,12 +198,23 @@ export function fakePathParamValue(p: ParameterModel): string | undefined {
  *   - the operation does not require a request body — v1 sends no body, so a
  *     required-body op would 400 on the missing body before the lookup runs.
  */
-export function isNotFoundEligible(op: OperationModel): boolean {
-  if (op.method.toUpperCase() !== 'GET') return false;
+export function isNotFoundEligible(op: OperationModel, opts?: { declared?: boolean }): boolean {
+  const declared = opts?.declared === true;
+  if (!declared && op.method.toUpperCase() !== 'GET') return false;
   if (!op.parameters.some((p) => p.in === 'path')) return false;
   if (!op.responseCodes?.includes('404')) return false;
-  if (op.successIsCollection) return false;
-  if (op.bodyRequired) return false;
+  if (!declared && op.successIsCollection) return false;
+  if (op.bodyRequired) {
+    // Read-only mode sends no body, so a required body would 400 before the lookup.
+    // Declared mode sends a valid JSON baseline body instead. A multipart body can't be
+    // built from the schema alone, and a root that is not an object (oneOf, array, scalar,
+    // or an allOf that does not resolve to an object) has no body to send. Deciding that
+    // here keeps coverage applicability and scenario generation in step: an operation
+    // counted as applicable always gets its scenario.
+    if (!declared) return false;
+    if (!op.requestBodySchema || isMultipartOnly(op)) return false;
+    if (buildableBody(op) === undefined) return false;
+  }
   return true;
 }
 
@@ -141,7 +222,10 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
   const out: ValidationScenario[] = [];
   for (const op of ops) {
     if (opts.onlyOperations && !opts.onlyOperations.has(op.operationId)) continue;
-    if (!isNotFoundEligible(op)) continue;
+    if (!isNotFoundEligible(op, { declared: opts.declared })) continue;
+    // A required JSON body must be valid, or the server answers 400 before it looks the
+    // resource up (isNotFoundEligible already ruled out operations with no buildable body).
+    const requestBody = op.bodyRequired ? buildableBody(op) : undefined;
     const pathParams = op.parameters.filter((p) => p.in === 'path');
     const params: Record<string, string> = {};
     let allFaked = true;
@@ -170,6 +254,7 @@ export function generateNotFoundFakeId(ops: OperationModel[], opts: Opts): Valid
       type: 'not-found-fake-id',
       target,
       params: Object.keys(params).length ? params : undefined,
+      ...(requestBody !== undefined ? { requestBody, bodyEncoding: 'json' as const } : {}),
       expectedStatus: 404,
       description: `Nonexistent ${target} returns 404`,
       headersAuth: true,

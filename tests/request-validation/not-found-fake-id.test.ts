@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
   fakePathParamValue,
   generateNotFoundFakeId,
   isNotFoundEligible,
 } from '../../request-validation/src/analysis/notFoundFakeId.js';
+import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 import { renderScenarioForTest } from '../../request-validation/src/emit/qaEmitter.js';
-import type { OperationModel, ParameterModel } from '../../request-validation/src/model/types.js';
+import type {
+  OperationModel,
+  ParameterModel,
+  SchemaFragment,
+} from '../../request-validation/src/model/types.js';
 
 /**
  * Layer-2 fixtures for the 404 fake-ID emitter (issue #381, split from #279).
@@ -200,5 +208,231 @@ describe('request-validation: 404 fake-ID emitter rendering (#381)', () => {
     expect(code).toContain('buildUrl("/groups/{groupId}"');
     expect(code).toContain(s.params?.groupId ?? '__missing__');
     expect(code).not.toContain('data: requestBody');
+  });
+});
+
+describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
+  const keyed = {
+    operationId: 'x',
+    path: '/things/{thingKey}',
+    parameters: [pathParam('thingKey', longKeySchema)],
+  };
+  const jsonBody: SchemaFragment = {
+    type: 'object',
+    required: ['name'],
+    properties: { name: { type: 'string' }, note: { type: 'string' } },
+  };
+
+  it('default mode leaves mutating, body-requiring and collection operations alone', () => {
+    const ops = [
+      op({
+        ...keyed,
+        operationId: 'patchThing',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema: jsonBody,
+      }),
+      op({ ...keyed, operationId: 'deleteThing', method: 'DELETE' }),
+      op({ ...keyed, operationId: 'searchThings', method: 'POST', successIsCollection: true }),
+    ];
+    expect(generateNotFoundFakeId(ops, {})).toHaveLength(0);
+    expect(ops.some((o) => isNotFoundEligible(o))).toBe(false);
+  });
+
+  it('covers a body-less DELETE with no request body', () => {
+    const out = generateNotFoundFakeId(
+      [op({ ...keyed, operationId: 'deleteThing', method: 'DELETE' })],
+      { declared: true },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].method).toBe('DELETE');
+    expect(out[0].requestBody).toBeUndefined();
+    expect(out[0].expectedStatus).toBe(404);
+  });
+
+  it('sends a valid baseline body for an operation that requires one', () => {
+    const out = generateNotFoundFakeId(
+      [
+        op({
+          ...keyed,
+          operationId: 'patchThing',
+          method: 'PATCH',
+          bodyRequired: true,
+          requestBodySchema: jsonBody,
+        }),
+      ],
+      { declared: true },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].bodyEncoding).toBe('json');
+    // The required field is present; the server validates the body before the lookup, so an
+    // empty or invalid one would answer 400 instead of 404.
+    expect(out[0].requestBody).toMatchObject({ name: expect.any(String) });
+  });
+
+  it('trusts a declared 404 on a collection (search) operation', () => {
+    const out = generateNotFoundFakeId(
+      [op({ ...keyed, operationId: 'searchThings', method: 'POST', successIsCollection: true })],
+      { declared: true },
+    );
+    expect(out).toHaveLength(1);
+  });
+
+  it('still skips an operation with no 404, no path key, or a multipart-only required body', () => {
+    const ops = [
+      op({ ...keyed, operationId: 'no404', method: 'DELETE', responseCodes: ['204'] }),
+      op({ operationId: 'noKey', path: '/things', method: 'POST' }),
+      op({
+        ...keyed,
+        operationId: 'upload',
+        method: 'PUT',
+        bodyRequired: true,
+        requestBodySchema: jsonBody,
+        mediaTypes: ['multipart/form-data'],
+      }),
+    ];
+    expect(generateNotFoundFakeId(ops, { declared: true })).toHaveLength(0);
+  });
+
+  it('skips an operation whose required body has no buildable baseline (oneOf, array, scalar or unresolvable allOf root), in eligibility and in generation alike', () => {
+    const roots: SchemaFragment[] = [
+      { oneOf: [{ type: 'object' }, { type: 'object' }] },
+      { type: 'array', items: { type: 'string' } },
+      { type: 'string' },
+      // an allOf the baseline builder cannot resolve to an object: a wrapped oneOf yields
+      // null (the emitter would send no body), a lone primitive yields a bare string
+      { allOf: [{ oneOf: [{ type: 'object' }, { type: 'object' }] }] },
+      { allOf: [{ type: 'string' }] },
+    ];
+    for (const requestBodySchema of roots) {
+      const o = op({
+        ...keyed,
+        operationId: 'oddBody',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema,
+      });
+      expect(isNotFoundEligible(o, { declared: true })).toBe(false);
+      expect(generateNotFoundFakeId([o], { declared: true })).toHaveLength(0);
+    }
+  });
+
+  it("skips a required body whose placeholder values break the schema's limits, but not satisfiable constraints or formats", () => {
+    const withProp = (prop: SchemaFragment): SchemaFragment => ({
+      type: 'object',
+      required: ['v'],
+      properties: { v: prop },
+    });
+    const unusable: SchemaFragment[] = [
+      withProp({ type: 'string', pattern: '^[0-9]+$' }), // 'x' is not numeric
+      withProp({ type: 'string', minLength: 5 }),
+      withProp({ type: 'integer', minimum: 10 }), // the builder emits 1
+      withProp({ type: 'array', minItems: 2, items: { type: 'string' } }), // one item
+    ];
+    for (const requestBodySchema of unusable) {
+      const o = op({
+        ...keyed,
+        operationId: 'constrained',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema,
+      });
+      expect(isNotFoundEligible(o, { declared: true })).toBe(false);
+      expect(generateNotFoundFakeId([o], { declared: true })).toHaveLength(0);
+    }
+    // Limits the placeholder does satisfy, and formats (which are deliberately not checked),
+    // stay eligible.
+    const usable: SchemaFragment[] = [
+      withProp({ type: 'string', minLength: 1, maxLength: 255 }),
+      withProp({ type: 'integer', format: 'int32' }),
+      withProp({ type: 'string', format: 'uuid' }),
+      withProp({ type: 'string', format: 'email' }),
+      // OpenAPI 3.0 spellings Ajv would reject as written
+      withProp({ nullable: true, minLength: 1 }),
+      withProp({ type: 'integer', minimum: 0, exclusiveMinimum: true }),
+    ];
+    for (const requestBodySchema of usable) {
+      const o = op({
+        ...keyed,
+        operationId: 'ok',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema,
+      });
+      expect(isNotFoundEligible(o, { declared: true })).toBe(true);
+      expect(generateNotFoundFakeId([o], { declared: true })).toHaveLength(1);
+    }
+  });
+
+  it('eligibility and generation agree for every operation shape in declared mode', () => {
+    const ops = [
+      op({ ...keyed, operationId: 'a', method: 'DELETE' }),
+      op({
+        ...keyed,
+        operationId: 'b',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema: jsonBody,
+      }),
+      op({ ...keyed, operationId: 'c', method: 'POST', successIsCollection: true }),
+      op({
+        ...keyed,
+        operationId: 'd',
+        method: 'PUT',
+        bodyRequired: true,
+        requestBodySchema: { type: 'string' },
+      }),
+      op({ ...keyed, operationId: 'e', method: 'DELETE', responseCodes: ['204'] }),
+    ];
+    for (const o of ops) {
+      const generated = generateNotFoundFakeId([o], { declared: true }).length === 1;
+      expect(isNotFoundEligible(o, { declared: true }), o.operationId).toBe(generated);
+    }
+  });
+
+  it('renders the body and the 404 assertion for a mutating operation', () => {
+    const [s] = generateNotFoundFakeId(
+      [
+        op({
+          ...keyed,
+          operationId: 'patchThing',
+          method: 'PATCH',
+          bodyRequired: true,
+          requestBodySchema: jsonBody,
+        }),
+      ],
+      { declared: true },
+    );
+    const code = renderScenarioForTest(s, 'patchThing - Nonexistent thingKey returns 404');
+    expect(code).toContain('404');
+    expect(code).toContain('requestBody');
+    expect(code).toContain('request.patch');
+  });
+});
+
+describe('request-validation: notFoundMode config', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-notfound-'));
+  const cfgDir = path.join(tmpRoot, 'configs', 'probe');
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(path.join(tmpRoot, 'configs.json'), '{}');
+  afterAll(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+  const write = (cfg: unknown) =>
+    fs.writeFileSync(path.join(cfgDir, 'request-validation.json'), JSON.stringify(cfg));
+
+  it("defaults to 'read-only' so existing configs keep their output", () => {
+    write({});
+    expect(loadRequestValidationConfig(tmpRoot, 'probe').notFoundMode).toBe('read-only');
+  });
+
+  it("accepts 'declared'", () => {
+    write({ notFoundMode: 'declared' });
+    expect(loadRequestValidationConfig(tmpRoot, 'probe').notFoundMode).toBe('declared');
+  });
+
+  it('rejects any other value with an actionable message', () => {
+    write({ notFoundMode: 'everything' });
+    expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(
+      /notFoundMode.*read-only.*declared/,
+    );
   });
 });

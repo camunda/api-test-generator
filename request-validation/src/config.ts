@@ -93,6 +93,27 @@ export interface RequestValidationConfig {
    */
   authDenyMode: 'slice' | 'all-secured';
   /**
+   * Which operations get a "nonexistent path key returns 404" scenario.
+   *
+   * - `'read-only'` (default) — GET operations that return a single resource.
+   *   The OCA engine surfaces a missing key on a command endpoint as a 503 or a
+   *   400, not a clean 404, and its list/search endpoints return an empty 200
+   *   for a missing parent, so neither is eligible there.
+   * - `'declared'` — every operation that takes a path key and declares a 404,
+   *   whatever its method or response shape: trust the contract. For an
+   *   operation with a required JSON body the scenario sends a valid baseline
+   *   body (the server validates the body before it looks the resource up, so
+   *   an invalid one would 400). Right for an API that resolves path keys with a
+   *   plain lookup before acting and answers 404 for a missing parent, as Hub
+   *   does. An operation is skipped, and not counted as applicable, when its
+   *   required body cannot be built into a valid request: a multipart body, a
+   *   JSON body whose root is not an object (oneOf, array, scalar, or an allOf
+   *   that does not resolve to an object), or a body whose generated placeholder
+   *   values break the schema's pattern, length, numeric or item-count limits.
+   *   String formats (uuid, email, ...) are not checked.
+   */
+  notFoundMode: 'read-only' | 'declared';
+  /**
    * Whether a real credential set is available at runtime for operations
    * with `OperationModel.independentAuthGate` (e.g. the Orchestration
    * Cluster REST API's cluster-admin operations — see that field's doc
@@ -248,6 +269,7 @@ const DEFAULTS: RequestValidationConfig = {
   unenforcedStringFormats: [],
   authAbsentMode: 'conditional',
   authDenyMode: 'slice',
+  notFoundMode: 'read-only',
   independentAuthGateMode: 'unavailable',
 };
 
@@ -411,6 +433,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.authDenyMode = v;
+  }
+  if ('notFoundMode' in parsed) {
+    const v = parsed.notFoundMode;
+    if (v !== 'read-only' && v !== 'declared') {
+      throw new Error(
+        `Invalid ${configPath}: "notFoundMode" must be "read-only" or "declared", got ${JSON.stringify(v)}.`,
+      );
+    }
+    merged.notFoundMode = v;
   }
   if ('independentAuthGateMode' in parsed) {
     const v = parsed.independentAuthGateMode;
