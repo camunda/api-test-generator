@@ -19,10 +19,10 @@ whether they pass.
                            [--previous-history prev/history.csv]
                            [--spec-ref SHA] [--run-url URL] [--tracking-url URL]
 
-Writes DIR/summary.json, DIR/rows.json, DIR/matrix.md, DIR/slack.txt and DIR/history.csv
-(the previous history plus one row for this run). Exits 2 if the generated
-output could not be parsed as expected (so a format change fails the run instead
-of reporting zeros).
+Writes DIR/summary.json, DIR/rows.json, DIR/matrix.md, DIR/slack.txt, DIR/history.csv (the
+previous history plus one row for this run) and DIR/history.md (its latest rows as a table).
+Exits 2 if the generated output could not be parsed as expected (so a format change fails the
+run instead of reporting zeros).
 """
 import argparse
 import collections
@@ -404,6 +404,21 @@ def write_history(path, previous_path, row):
             w.writerow({k: r.get(k, '') for k in row})
 
 
+def history_markdown(path, last=8):
+    """The most recent history rows as a table for the run summary, newest last."""
+    with open(path, newline='') as f:
+        rows = list(csv.DictReader(f))[-last:]
+    cols = [('date', 'Date')] + [(f'{b}_tested', NAMES[b].split(' (')[-1].rstrip(')') + ' tested') for b in BUCKETS] \
+        + [('fullyAsserted', 'Fully tested endpoints'), ('operations', 'Endpoints')]
+    out = [f'## Coverage history (last {len(rows)} reports)', '',
+           '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]
+    for r in rows:
+        out.append('| ' + ' | '.join(
+            f'{r[k]} of {r[k.replace("_tested", "_documented")]}' if k.endswith('_tested') else r[k]
+            for k, _ in cols) + ' |')
+    return '\n'.join(out) + '\n'
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--out', required=True)
@@ -427,6 +442,7 @@ def main():
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
+    open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))
     print(open(f'{args.out}/slack.txt').read())
 
 

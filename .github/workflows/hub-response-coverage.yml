@@ -122,7 +122,7 @@ jobs:
           retention-days: 90
 
       - name: Write job summary
-        run: cat coverage-report/matrix.md >> "$GITHUB_STEP_SUMMARY"
+        run: cat coverage-report/history.md coverage-report/matrix.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fetch Slack bot token from Vault
         id: slack
