@@ -4,6 +4,7 @@ import {
   cleanError,
   fingerprint,
   isObserved,
+  junitFailures,
 } from '../../scripts/triage/hub-pr-evidence.ts';
 
 function spec(title: string, ok: boolean, statuses: string[], error?: string) {
@@ -114,5 +115,22 @@ describe('isObserved', () => {
   it('is false when nothing says what failed', () => {
     expect(isObserved(buildEvidence([]), '')).toBe(false);
     expect(isObserved(buildEvidence([report(spec('a', true, ['passed']))]), '  ')).toBe(false);
+  });
+});
+
+describe('junitFailures', () => {
+  it('reports testcases that carry a failure or error element', () => {
+    const xml =
+      '<testsuite><testcase classname="a.spec.ts" name="ok"/>' +
+      '<testcase classname="b.spec.ts" name="bad"><failure message="x"/></testcase>' +
+      '<testcase classname="c.spec.ts" name="boom"><error/></testcase></testsuite>';
+    expect(junitFailures(xml).map((f) => `${f.file}::${f.title}`)).toEqual([
+      'b.spec.ts::bad',
+      'c.spec.ts::boom',
+    ]);
+  });
+
+  it('finds nothing in an all-passing report', () => {
+    expect(junitFailures('<testsuite><testcase classname="a" name="ok"/></testsuite>')).toEqual([]);
   });
 });

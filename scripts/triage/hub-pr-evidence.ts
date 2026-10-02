@@ -170,6 +170,45 @@ export function fingerprint(pr: string, evidence: Evidence, unmapped: string, sa
   return createHash('sha256').update(joined).digest('hex').slice(0, 8);
 }
 
+// JUnit fallback for a run whose JSON report is missing or corrupt: the classifier reads the JUnit
+// report too, so a failing testcase there is evidence of WHAT failed just like a failing JSON spec.
+// Only names are taken; the XML is never trusted beyond that.
+export function junitFailures(xml: string): SpecEvidence[] {
+  const out: SpecEvidence[] = [];
+  const cases = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+  for (const m of xml.matchAll(cases)) {
+    if (!/<(?:failure|error)\b/.test(m[2] ?? '')) continue;
+    const attr = (n: string) => new RegExp(`\\b${n}="([^"]*)"`).exec(m[1] ?? '')?.[1] ?? '';
+    out.push({
+      file: attr('classname') || attr('file'),
+      title: attr('name'),
+      project: '',
+      statuses: ['failed'],
+      deterministic: false,
+      error: '',
+    });
+  }
+  return out;
+}
+
+function readJunitFailures(dir: string): SpecEvidence[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => /^pw-.*\.junit\.xml$/.test(n))
+    .flatMap((n) => {
+      try {
+        return junitFailures(readFileSync(join(dir, n), 'utf8'));
+      } catch {
+        return [];
+      }
+    });
+}
+
 function readReports(dir: string): Json[] {
   let names: string[];
   try {
@@ -196,6 +235,11 @@ function arg(name: string): string {
 
 function main(): void {
   const evidence = buildEvidence(readReports(arg('reports')));
+  if (evidence.failing.length === 0) {
+    const fromJunit = readJunitFailures(arg('reports'));
+    evidence.failing.push(...fromJunit);
+    if (fromJunit.length > 0) evidence.reportsPresent = true;
+  }
   const unmapped = arg('unmapped');
   const fp = fingerprint(arg('pr') || arg('sha'), evidence, unmapped, arg('sha'));
   writeFileSync(arg('out'), `${JSON.stringify({ ...evidence, fingerprint: fp }, null, 2)}\n`);
