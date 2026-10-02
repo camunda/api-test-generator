@@ -282,6 +282,8 @@ export interface EndpointScenario {
   // Issue #37: which optional sub-shape this variant populates and which
   // semantic-typed leaves it sets (one leaf per variant in iteration 1).
   // Codegen uses this to synthesize the populated body.
+  /** A search-paging variant (see searchPaging.ts): body fields merged into the final request, and what to assert. */
+  searchPaging?: { body: Record<string, unknown>; checks: SearchPagingChecks };
   populatesSubShape?: {
     rootPath: string; // e.g. "startInstructions[]"
     leafPaths: string[]; // semantic-typed leaves to populate
@@ -542,6 +544,25 @@ export interface RequestStep {
    * (#304). Absent / false ⇒ no 409 declared.
    */
   declares409?: boolean;
+  /** A search step sent with `page`/`sort`: what the emitter asserts about the response. */
+  searchChecks?: SearchPagingChecks;
+}
+
+/** Response assertions for a search request that carries `page` and `sort`. */
+export interface SearchPagingChecks {
+  /** The `page.limit` sent: the response holds at most this many items. */
+  limit: number;
+  /**
+   * When set, `items` must be ordered by this field (compared as plain strings), and the same
+   * query in the opposite direction must come back in the opposite order, so a server that
+   * ignores `sort` cannot pass.
+   */
+  order?: { field: string; direction: 'ASC' | 'DESC' };
+  /**
+   * The request started at this offset (`page.from`). With `order`, the items must equal the
+   * same slice of an unpaged query with the same sort.
+   */
+  offset?: { from: number };
 }
 
 /**

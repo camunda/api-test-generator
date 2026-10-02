@@ -34,6 +34,11 @@ import {
   generateScenariosForEndpoint,
 } from './scenarioGenerator.js';
 import { instantiateAllTemplates } from './scenarioTemplateInstantiator.js';
+import {
+  buildSearchPagingScenarios,
+  loadSearchPaging,
+  validateSearchPaging,
+} from './searchPaging.js';
 import { computeSeedBindings } from './seedBindings.js';
 import type {
   ArtifactRegistryEntry,
@@ -108,6 +113,8 @@ async function main() {
   applyConflictReplay(graph, loadConflictReplay(getActiveConfigDir(repoRoot)));
   const conflictSequences = loadConflictSequences(getActiveConfigDir(repoRoot));
   validateConflictSequences(graph, conflictSequences);
+  const searchPaging = loadSearchPaging(getActiveConfigDir(repoRoot));
+  if (searchPaging) validateSearchPaging(graph, searchPaging);
   // Build canonical deep schema shapes (requests + responses)
   const canonical = await buildCanonicalShapes(path.resolve(baseDir, '../'));
   // Drift guard: every response-side semantic leaf reported by the
@@ -512,7 +519,10 @@ async function main() {
     // variant-output directory remains a clear signal of which endpoints
     // have populated-shape coverage.
     const conflictScenarios = canonicalForEndpoint
-      ? buildConflictSequenceScenarios(canonicalForEndpoint, conflictSequences, graph)
+      ? [
+          ...buildConflictSequenceScenarios(canonicalForEndpoint, conflictSequences, graph),
+          ...(searchPaging ? buildSearchPagingScenarios(canonicalForEndpoint, searchPaging) : []),
+        ]
       : [];
     if (op.optionalSubShapes?.length || conflictScenarios.length) {
       const variantCollection: EndpointScenarioCollection = op.optionalSubShapes?.length
@@ -840,6 +850,10 @@ function buildRequestPlan(
     }
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
+    if (isFinal && scenario.searchPaging && isPlainRecord(step.bodyTemplate)) {
+      step.bodyTemplate = { ...step.bodyTemplate, ...scenario.searchPaging.body };
+      step.searchChecks = scenario.searchPaging.checks;
+    }
     if (isFinal && scenario.duplicateTest) {
       const changeBody = scenario.duplicateTest.changeBody;
       if (changeBody && isPlainRecord(step.bodyTemplate)) {

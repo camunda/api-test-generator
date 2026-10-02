@@ -595,4 +595,102 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       '403 tests for operations outside the derived surface',
     ).toEqual([]);
   });
+  it('every search operation sends page and sort in a success-path test, and asserts them (#623)', () => {
+    const raw: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/search-paging.json')),
+    );
+    const searches =
+      isRecord(raw) && Array.isArray(raw.searches) ? raw.searches.filter(isRecord) : [];
+    const limit = isRecord(raw) ? raw.limit : undefined;
+    const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const schemas =
+      isRecord(bundle) && isRecord(bundle.components) && isRecord(bundle.components.schemas)
+        ? bundle.components.schemas
+        : {};
+    const resolve = (node: unknown): Record<string, unknown> => {
+      let cur = node;
+      while (isRecord(cur) && typeof cur.$ref === 'string')
+        cur = schemas[cur.$ref.split('/').pop() ?? ''];
+      return isRecord(cur) ? cur : {};
+    };
+    // Derived from the spec: an operation whose JSON request body takes both `page` and `sort`.
+    const searchOps: string[] = [];
+    if (isRecord(bundle) && isRecord(bundle.paths)) {
+      for (const item of Object.values(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
+          const content =
+            isRecord(opDef.requestBody) && isRecord(opDef.requestBody.content)
+              ? opDef.requestBody.content
+              : {};
+          const json = isRecord(content['application/json']) ? content['application/json'] : {};
+          const props = resolve(json.schema).properties;
+          if (
+            isRecord(props) &&
+            'page' in props &&
+            'sort' in props &&
+            typeof opDef.operationId === 'string'
+          )
+            searchOps.push(opDef.operationId);
+        }
+      }
+    }
+    expect(
+      searchOps.length,
+      'found suspiciously few search operations - did the spec parse?',
+    ).toBeGreaterThan(10);
+    const configured = searches.map((e) => String(e.operationId));
+    expect(
+      searchOps.filter((id) => !configured.includes(id)),
+      'search operations with no paging test',
+    ).toEqual([]);
+    expect(
+      configured.filter((id) => !searchOps.includes(id)),
+      'paging entries for operations that are not searches',
+    ).toEqual([]);
+    for (const entry of searches) {
+      const id = String(entry.operationId);
+      const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
+      // Each test is read on its own: the offset test repeats the sort fields, so a slice running
+      // into it would let it satisfy assertions meant for the limit and sort test.
+      const segment = (title: string): string => {
+        const start = spec.indexOf(title);
+        if (start < 0) return '';
+        const next = spec.indexOf('\n  test(', start + 1);
+        return spec.slice(start, next < 0 ? undefined : next);
+      };
+      const test = segment('page and sort (limit');
+      expect(test, `${id}: no paging test generated`).not.toBe('');
+      expect(test, `${id}: limit not asserted`).toContain(`toBeLessThanOrEqual(${String(limit)})`);
+      expect(test, `${id}: page not sent`).toContain(`limit: ${String(limit)}`);
+      const sort = isRecord(entry.sort) ? entry.sort : {};
+      expect(test, `${id}: sort not sent`).toContain(`field: '${String(sort.field)}'`);
+      expect(test, `${id}: sort direction not sent`).toContain(`order: '${String(sort.order)}'`);
+      const offsetTest = segment('page offset (from');
+      expect(offsetTest, `${id}: no offset test generated`).not.toBe('');
+      expect(offsetTest, `${id}: offset not sent`).toContain(
+        `from: ${String(isRecord(raw) ? raw.offsetFrom : '')}`,
+      );
+      // The offset test compares two queries made a moment apart, so it sorts ascending
+      // (an item created in between lands after the slice) when the order is checked.
+      const offsetOrder = entry.checkOrder === true ? 'ASC' : String(sort.order);
+      expect(offsetTest, `${id}: offset sort not sent`).toContain(`order: '${offsetOrder}'`);
+      if (entry.checkOrder === true) {
+        expect(test, `${id}: order not asserted`).toContain('[...values].sort()');
+        expect(test, `${id}: opposite order not compared`).toContain('reversedValues');
+        expect(offsetTest, `${id}: offset slice not compared`).toContain('unpaged');
+      }
+      if (isRecord(entry.filter)) {
+        expect(test, `${id}: filter not sent`).toContain('filter:');
+        expect(offsetTest, `${id}: filter not sent with the offset`).toContain('filter:');
+      }
+    }
+    expect(
+      searches
+        .filter((e) => isRecord(e.filter))
+        .map((e) => e.operationId)
+        .sort(),
+    ).toEqual(['searchCatalogAssets', 'searchWorkspaces']);
+  });
 });
