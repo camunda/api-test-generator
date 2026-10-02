@@ -824,10 +824,10 @@ matrix is in the run summary and the `hub-coverage-report` artifact; the previou
 `summary.json` supplies the week-over-week delta. A `workflow_dispatch` run defaults to
 `dry_run` (nothing posted). Run it locally after generating with
 `CONFIG=camunda-hub`: `python3 scripts/e2e/hub_response_coverage.py --out /tmp/cov`.
-The gaps it reports are tracked in epic #618. The workflow also renders the report as a
+The workflow owns one rolling issue titled `[hub-response-coverage] Endpoints missing response or bad-request tests` (labels `missing-coverage`, `auto-generated`, `hub`): a scheduled or non-dry run opens it, or rewrites the open one in place with a dated "re-checked" comment, while any endpoint lacks a response or bad-request test, and closes it when nothing is missing (`issue.md` is empty then). Each API area (the spec's first tag) with a gap also gets its own issue, `[hub-response-coverage] <Area>: missing response or bad-request tests`: found by exact title in any state, rewritten in place, reopened if a gap returns, closed when the area is clean, at most 10 brand-new ones per run (`areas.json` lists them); the Slack message adds an "Area issues:" line linking each one. The manual epic #618 is not read or touched. The workflow also renders the report as a
 self-contained page (`scripts/e2e/hub_coverage_page.py`, text derived from the numbers) into the
 `hub-coverage-report` artifact as `page.html`, which can be published as a Claude page by hand (use `--fragment` for the wrapper-free form the Artifact tool expects).
-The Slack message links to the run (matrix) and the tracking epic only.
+The Slack message links to the run (matrix), that issue, and the per-area issues.
 
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
