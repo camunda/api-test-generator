@@ -491,7 +491,7 @@ def issue_body(s, rows, args):
         '_Kept up to date by the weekly **Hub response coverage** workflow. It is rewritten every Monday and '
         'closed automatically once nothing is missing. Please do not edit it by hand._', '',
         f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists; '
-        f'**{len(gaps)}** still have something missing. Each area of the API with a gap also has its own issue.', '',
+        f'**{len(gaps)}** still have something missing. Areas of the API with a gap get their own issues, opened gradually (at most 10 new ones per week), so an area may not have one yet.', '',
     ]
     lines += gap_table(gaps)
     lines += ['', 'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps']

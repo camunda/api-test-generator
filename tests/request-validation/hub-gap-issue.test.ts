@@ -60,6 +60,8 @@ describe('weekly coverage gap issue body', () => {
     expect(body).not.toContain('`b`');
     expect(body).toContain('Bad-request tests: every kind that applies is covered.');
     expect(body).not.toContain('Nothing is missing');
+    expect(body).toContain('opened gradually');
+    expect(body).not.toContain('also has its own issue');
   });
 
   it('lists a bad-request-only gap', () => {
