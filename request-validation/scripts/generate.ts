@@ -24,6 +24,12 @@ import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
 import { generateExplicitNullRequired } from '../src/analysis/explicitNullRequired.js';
+import {
+  computeKindCoverage,
+  kindsRemovedEntirely,
+  listOperationsWithoutScenarios,
+  type OperationWithoutScenarios,
+} from '../src/analysis/kindCoverage.js';
 import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
@@ -55,6 +61,9 @@ import {
   generateParamEnumViolation,
   generateParamMissing,
   generateParamTypeMismatch,
+  isParamEnumViolationEligible,
+  isParamMissingEligible,
+  isParamTypeMismatchEligible,
 } from '../src/analysis/parameters.js';
 import { generateTypeMismatch } from '../src/analysis/typeMismatch.js';
 import { generateUnionViolations } from '../src/analysis/unionViolations.js';
@@ -68,7 +77,7 @@ import {
   scopeRuleMatches,
   toScopeRule,
 } from '../src/excludeScoping.js';
-import type { ValidationScenario } from '../src/model/types.js';
+import { normalizeKind, type ValidationScenario } from '../src/model/types.js';
 import { RUNTIME_KEY_FIXTURE_NAMES } from '../src/runtimeKeyFixtureNames.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
@@ -667,6 +676,7 @@ async function main() {
   // validation and silently exclude nothing. So each rule is checked here,
   // before filtering, against the scenarios it could apply to; one that
   // matches none is surfaced loudly rather than left as a quiet no-op.
+  let heldKindsByOperation: Record<string, string[]> = {};
   if (scopedExcludes.length > 0) {
     const scopedByOp = new Map<string, ScopeRule[]>();
     for (const e of scopedExcludes) {
@@ -693,8 +703,23 @@ async function main() {
       }
     }
     const before = scenarios.length;
+    const scenariosBeforeScopedExcludes = scenarios;
     scenarios = scenarios.filter(
       (s) => !scopedByOp.get(s.operationId)?.some((r) => scopeRuleMatches(r, s)),
+    );
+    const wholeKindExclusions = new Map<string, Set<string>>();
+    for (const [operationId, rules] of scopedByOp) {
+      for (const rule of rules) {
+        if (rule.targets !== undefined || rule.constraintKinds !== undefined) continue;
+        const kinds = wholeKindExclusions.get(operationId) ?? new Set<string>();
+        kinds.add(normalizeKind(rule.kind));
+        wholeKindExclusions.set(operationId, kinds);
+      }
+    }
+    heldKindsByOperation = kindsRemovedEntirely(
+      scenariosBeforeScopedExcludes,
+      scenarios,
+      wholeKindExclusions,
     );
     console.log(
       `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
@@ -1057,12 +1082,9 @@ async function main() {
   );
   // Coverage report per operation & kind
   // Normalize kinds to avoid double counting (treat body-top-type-mismatch as type-mismatch)
-  const kindAlias: Record<string, string> = {
-    'body-top-type-mismatch': 'type-mismatch',
-  };
   const normalizedScenarios = deduped.map((s) => ({
     ...s,
-    type: kindAlias[s.type] || s.type,
+    type: normalizeKind(s.type),
   }));
   const allKinds = Array.from(new Set(normalizedScenarios.map((s) => s.type))).sort();
   interface OpCoverage {
@@ -1093,6 +1115,15 @@ async function main() {
       onlyOperations: string[] | null;
     };
     operations: OpCoverage[];
+    /**
+     * Per operation, the kinds a whole-kind exclusion removed entirely (they existed before the filter,
+     * none is left, and a rule with no target or constraint scope names them). A kind a scoped rule only
+     * narrows is never listed, nor is one that was never generated, so a real gap cannot hide behind an
+     * exclusion that does not cover it.
+     */
+    heldKindsByOperation: Record<string, string[]>;
+    /** Operations with no scenario left (absent from `operations`), with the kinds that apply to them. */
+    operationsWithNoScenarios?: OperationWithoutScenarios[];
     endpointTotals?: {
       totalOps: number;
       coveredOps: number;
@@ -1127,6 +1158,7 @@ async function main() {
     specCommit,
     totalScenarios: deduped.length,
     scenarioKinds: allKinds,
+    heldKindsByOperation,
     generationOptions: {
       deep: opts.deep,
       maxMissing: opts.maxMissing ?? null,
@@ -1243,12 +1275,12 @@ async function main() {
       rvConfig.independentAuthGateMode === 'unavailable' && op.independentAuthGate === true;
     if (!skipNonAuthApplicability) {
       // Parameters applicability
-      const requiredParams = op.parameters.filter((p) => p.required);
-      if (requiredParams.length) applicable.add('param-missing');
-      if (op.parameters.some((p) => p.schema && (p.schema.type || p.schema.enum)))
-        applicable.add('param-type-mismatch');
-      if (op.parameters.some((p) => Array.isArray(p.schema?.enum)))
-        applicable.add('param-enum-violation');
+      // The three simple parameter kinds reuse the exact per-parameter rules their generators
+      // call (parameters.ts), so a path parameter or a plain string no longer makes an operation
+      // look as if it were missing a check the generator cannot build.
+      if (isParamMissingEligible(op)) applicable.add('param-missing');
+      if (isParamTypeMismatchEligible(op)) applicable.add('param-type-mismatch');
+      if (isParamEnumViolationEligible(op)) applicable.add('param-enum-violation');
       // param-constraint-violation reuses the exact eligibility check
       // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
       // which merges the allOf chain — a flat p.schema.* read misses
@@ -1357,18 +1389,19 @@ async function main() {
     if (isAuthDenyEligible(op, { allSecured: rvConfig.authDenyMode === 'all-secured' })) {
       applicable.add('auth-deny');
     }
-    // Include actually present kinds in applicability to prevent >100%
-    for (const pk of present) if (!applicable.has(pk)) applicable.add(pk);
-    const rawPct = present.size ? (present.size / allKinds.length) * 100 : 0;
-    const applicablePct = applicable.size
-      ? Math.min(100, (present.size / applicable.size) * 100)
+    // Both sides go through the same alias normalization (see kindCoverage.ts).
+    const {
+      applicable: normalizedApplicable,
+      present: normalizedPresent,
+      missingApplicable,
+    } = computeKindCoverage(applicable, present);
+    const rawPct = normalizedPresent.size ? (normalizedPresent.size / allKinds.length) * 100 : 0;
+    const applicablePct = normalizedApplicable.size
+      ? Math.min(100, (normalizedPresent.size / normalizedApplicable.size) * 100)
       : 0;
-    const missingApplicable = Array.from(applicable)
-      .filter((k) => !present.has(k))
-      .sort();
     applicabilityPerOp[op.operationId] = {
-      applicable,
-      present,
+      applicable: normalizedApplicable,
+      present: normalizedPresent,
       rawPct,
       applicablePct,
       missingApplicable,
@@ -1395,6 +1428,10 @@ async function main() {
       missingApplicableKinds: appl.missingApplicable,
     };
   });
+  coverage.operationsWithNoScenarios = listOperationsWithoutScenarios(
+    applicabilityPerOp,
+    new Set(Object.keys(opScenarioKinds)),
+  );
   await fs.promises.writeFile(
     path.join(opts.outDir, 'COVERAGE.json'),
     JSON.stringify(coverage, null, 2),

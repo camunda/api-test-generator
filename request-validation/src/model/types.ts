@@ -181,6 +181,22 @@ export const SCENARIO_KINDS = [
 
 export type ScenarioKind = (typeof SCENARIO_KINDS)[number];
 
+/**
+ * Scenario kinds that COVERAGE.json counts under another kind's name, so one scenario is not
+ * double counted (a `body-top-type-mismatch` scenario is reported as `type-mismatch`). The
+ * "present" side and the "applicable" side of the coverage report must both go through this map;
+ * if only one does, `missingApplicableKinds` lists the aliased kind as missing for every
+ * operation that takes it, even though its scenarios exist.
+ */
+export const KIND_ALIASES: Readonly<Record<string, string>> = {
+  'body-top-type-mismatch': 'type-mismatch',
+};
+
+/** The kind name COVERAGE.json uses for `kind` (itself unless it is aliased). */
+export function normalizeKind(kind: string): string {
+  return KIND_ALIASES[kind] ?? kind;
+}
+
 export interface ValidationScenario {
   id: string;
   operationId: string;
