@@ -9,8 +9,10 @@
 # one row of headline numbers per scheduled report so the trend can be read in one file.
 #
 # Deterministic: scripts/e2e/hub_response_coverage.py does the analysis; no agent.
-# Same clone/Vault/Slack plumbing as hub-known-issue-reenable-check.yml. The tracking
-# epic for closing the gaps is camunda/api-test-generator#618.
+# Same clone/Vault/Slack plumbing as hub-known-issue-reenable-check.yml. The workflow owns one
+# rolling issue (exact title below): opened or rewritten each week while endpoints still lack a
+# response or bad-request test, closed once nothing is missing. The older manual epic
+# camunda/api-test-generator#618 is not read or touched.
 name: Hub response coverage
 
 on:
@@ -30,6 +32,7 @@ on:
 permissions:
   contents: read
   actions: read # download the previous run's summary for the week-over-week delta
+  issues: write # open / update / close the rolling coverage-gap issue
   id-token: write # OIDC → Vault (camunda-hub clone token, Slack token)
 
 concurrency:
@@ -37,7 +40,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TRACKING_URL: https://github.com/camunda/api-test-generator/issues/618
+  ISSUE_TITLE: '[hub-response-coverage] Endpoints missing response or bad-request tests'
 
 jobs:
   report:
@@ -137,8 +140,33 @@ jobs:
             --previous previous/summary.json \
             --previous-history previous/history.csv \
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
-            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --tracking-url "$TRACKING_URL"
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      # Same gate as Slack: a dry run or a test trigger never touches issues. An existing open
+      # issue is rewritten in place (never a second one); an empty issue.md means nothing is
+      # missing, so the open issue is closed. The issue URL goes into the Slack message.
+      - name: Open, update or close the coverage-gap issue
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          num=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" \
+            --json number,title --jq "[.[] | select(.title == \"$ISSUE_TITLE\") | .number] | first // empty")
+          if [ -s coverage-report/issue.md ]; then
+            if [ -n "$num" ]; then
+              gh issue edit "$num" --body-file coverage-report/issue.md
+              gh issue comment "$num" --body "Re-checked on $(date -u +%F): still missing. See the updated list above. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              url="${{ github.server_url }}/${{ github.repository }}/issues/$num"
+            else
+              url=$(gh issue create --title "$ISSUE_TITLE" --body-file coverage-report/issue.md \
+                --label missing-coverage --label auto-generated --label hub)
+            fi
+            echo "$url" > coverage-report/issue-url.txt
+          elif [ -n "$num" ]; then
+            gh issue close "$num" --reason completed \
+              --comment "Nothing is missing any more in the weekly check on $(date -u +%F), so this is closed automatically."
+          fi
 
       - name: Render report page
         run: python3 scripts/e2e/hub_coverage_page.py --report coverage-report
@@ -173,6 +201,9 @@ jobs:
           set -euo pipefail
           if [ "${{ job.status }}" = "success" ]; then
             text="$(cat coverage-report/slack.txt)"
+            if [ -s coverage-report/issue-url.txt ]; then
+              text="$text"$'\n'"<$(cat coverage-report/issue-url.txt)|Tracking issue>"
+            fi
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi

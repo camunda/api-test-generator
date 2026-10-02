@@ -475,6 +475,36 @@ def matrix(s, rows):
     return '\n'.join(out) + '\n'
 
 
+def gap_rows(rows):
+    """Endpoints with at least one missing response test or missing kind of bad-request test."""
+    return [r for r in rows
+            if r['requestChecks'] == 'gap' or any(v == 'gap' for v in r['cells'].values())]
+
+
+def issue_body(s, rows, args):
+    """Body of the rolling GitHub issue, or '' when nothing is missing (the workflow then closes it)."""
+    gaps = gap_rows(rows)
+    if not gaps:
+        return ''
+    lines = [
+        '_Kept up to date by the weekly **Hub response coverage** workflow. It is rewritten every Monday and '
+        'closed automatically once nothing is missing. Please do not edit it by hand._', '',
+        f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists; '
+        f'**{len(gaps)}** still have something missing.', '',
+        '| Endpoint | Missing responses | Missing bad-request tests |', '|---|---|---|',
+    ]
+    for r in gaps[:100]:
+        codes = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if r['cells'].get(b) == 'gap') or '—'
+        kinds = ', '.join(r['requestMissing']) or '—'
+        lines.append(f'| `{r["operationId"]}` | {codes} | {kinds} |')
+    if len(gaps) > 100:
+        lines.append(f'| …and {len(gaps) - 100} more (see the full table in the run) | | |')
+    lines += ['', request_gap_summary(s)]
+    if args.run_url:
+        lines += ['', f'Full table: {args.run_url}']
+    return '\n'.join(lines) + '\n'
+
+
 def history_row(s, args):
     """One CSV row of the headline numbers, so a trend can be read without opening every report."""
     row = {
@@ -550,6 +580,7 @@ def main():
     json.dump(rows, open(f'{args.out}/rows.json', 'w'), indent=1)
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
+    open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
     write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
     open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))
     print(open(f'{args.out}/slack.txt').read())
