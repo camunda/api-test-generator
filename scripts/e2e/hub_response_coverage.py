@@ -88,6 +88,7 @@ def load_spec_operations(spec):
             ops[op['operationId']] = {
                 'method': method.upper(),
                 'path': path,
+                'area': (op.get('tags') or ['Other'])[0],
                 'codes': sorted(int(c) for c in op['responses'] if c.isdigit() and int(c) not in IGNORED_CODES),
                 'optional': [p for p in props if p not in required],
             }
@@ -324,7 +325,7 @@ def build(args):
         req_state, req_present, req_applicable, req_missing = request_check_state(
             rv_ops.get(op_id) or rv_no_scenarios.get(op_id), op_id in excluded, held_kinds.get(op_id, set()))
         rows.append({
-            'operationId': op_id, 'method': o['method'], 'path': o['path'], 'cells': cells,
+            'operationId': op_id, 'method': o['method'], 'path': o['path'], 'area': o['area'], 'cells': cells,
             'shape': shape, 'optionalSent': sent, 'optionalTotal': len(o['optional']),
             'requestChecks': req_state, 'requestPresent': req_present, 'requestApplicable': req_applicable,
             'requestMissing': req_missing,
@@ -490,20 +491,49 @@ def issue_body(s, rows, args):
         '_Kept up to date by the weekly **Hub response coverage** workflow. It is rewritten every Monday and '
         'closed automatically once nothing is missing. Please do not edit it by hand._', '',
         f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists; '
-        f'**{len(gaps)}** still have something missing.', '',
-        '| Endpoint | Missing responses | Missing bad-request tests |', '|---|---|---|',
+        f'**{len(gaps)}** still have something missing. Each area of the API with a gap also has its own issue.', '',
     ]
+    lines += gap_table(gaps)
+    lines += ['', 'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps']
+                                           else 'every kind that applies is covered.')]
+    if args.run_url:
+        lines += ['', f'Full table: {args.run_url}']
+    return '\n'.join(lines) + '\n'
+
+
+def gap_table(gaps):
+    lines = ['| Endpoint | Missing responses | Missing bad-request tests |', '|---|---|---|']
     for r in gaps[:100]:
         codes = ', '.join(('success' if b == '2xx' else b) for b in BUCKETS if r['cells'].get(b) == 'gap') or '—'
         kinds = ', '.join(r['requestMissing']) or '—'
         lines.append(f'| `{r["operationId"]}` | {codes} | {kinds} |')
     if len(gaps) > 100:
         lines.append(f'| …and {len(gaps) - 100} more (see the full table in the run) | | |')
-    lines += ['', 'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps']
-                                           else 'every kind that applies is covered.')]
-    if args.run_url:
-        lines += ['', f'Full table: {args.run_url}']
-    return '\n'.join(lines) + '\n'
+    return lines
+
+
+AREA_TITLE_PREFIX = '[hub-response-coverage] '
+
+
+def area_issues(rows, args):
+    """(title, body) per API area (the spec's first tag) that has at least one endpoint with a gap."""
+    by_area = collections.defaultdict(list)
+    for r in gap_rows(rows):
+        by_area[r.get('area', 'Other')].append(r)
+    out = []
+    for area in sorted(by_area):
+        gaps = by_area[area]
+        lines = [
+            '_Kept up to date by the weekly **Hub response coverage** workflow: rewritten every Monday, '
+            'closed automatically once this area has nothing missing, reopened if a gap returns. '
+            'Please do not edit it by hand._', '',
+            f'**{len(gaps)}** {"endpoint" if len(gaps) == 1 else "endpoints"} in the **{area}** area '
+            'still miss a response test or a bad-request test.', '',
+        ] + gap_table(gaps)
+        if args.run_url:
+            lines += ['', f'Full table: {args.run_url}']
+        out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n'))
+    return out
 
 
 def history_row(s, args):
@@ -582,6 +612,12 @@ def main():
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
+    os.makedirs(f'{args.out}/areas', exist_ok=True)
+    index = []
+    for n, (title, body) in enumerate(area_issues(rows, args)):
+        open(f'{args.out}/areas/area-{n}.md', 'w').write(body)
+        index.append({'title': title, 'file': f'{args.out}/areas/area-{n}.md'})
+    json.dump(index, open(f'{args.out}/areas.json', 'w'), indent=1)
     write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
     open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))
     print(open(f'{args.out}/slack.txt').read())

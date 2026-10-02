@@ -11,7 +11,8 @@
 # Deterministic: scripts/e2e/hub_response_coverage.py does the analysis; no agent.
 # Same clone/Vault/Slack plumbing as hub-known-issue-reenable-check.yml. The workflow owns one
 # rolling issue (exact title below): opened or rewritten each week while endpoints still lack a
-# response or bad-request test, closed once nothing is missing. The older manual epic
+# response or bad-request test, closed once nothing is missing; each API area with a gap also gets
+# its own issue ("[hub-response-coverage] <Area>: missing response or bad-request tests"). The older manual epic
 # camunda/api-test-generator#618 is not read or touched.
 name: Hub response coverage
 
@@ -174,6 +175,56 @@ jobs:
               --comment "Nothing is missing any more in the weekly check on $(date -u +%F), so this is closed automatically."
             echo "${{ github.server_url }}/${{ github.repository }}/issues/$num" > coverage-report/issue-url.txt
           fi
+
+      # One issue per API area (the spec's first tag) that has a gap, same rules as the summary issue:
+      # found by exact title in any state, rewritten in place, reopened if the gap returns, closed when
+      # the area is clean. At most MAX_NEW_AREA_ISSUES brand-new issues per run so the first run cannot
+      # flood the repo; the rest follow on later Mondays (the summary issue lists every gap meanwhile).
+      - name: Open, update or close the per-area issues
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_NEW_AREA_ISSUES: '10'
+        run: |
+          set -euo pipefail
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          today=$(date -u +%F)
+          prefix='[hub-response-coverage] '
+          # Every existing coverage issue (any state), newest first, so duplicates resolve to one.
+          existing=$(gh issue list --state all --limit 300 --search "in:title \"$prefix\"" \
+            --json number,title,state)
+          new=0
+          current=$(mktemp)
+          while read -r entry; do
+            title=$(jq -r '.title' <<< "$entry")
+            file=$(jq -r '.file' <<< "$entry")
+            echo "$title" >> "$current"
+            found=$(jq -r --arg t "$title" '[.[] | select(.title == $t)] | sort_by(.state != "OPEN") | first // empty | "\(.number) \(.state)"' <<< "$existing")
+            if [ -z "$found" ]; then
+              if [ "$new" -ge "$MAX_NEW_AREA_ISSUES" ]; then
+                echo "Cap reached: '$title' will be opened on a later run."
+                continue
+              fi
+              gh issue create --title "$title" --body-file "$file" \
+                --label missing-coverage --label auto-generated --label hub
+              new=$((new + 1))
+            else
+              num=${found% *}
+              state=${found#* }
+              [ "$state" = "OPEN" ] || gh issue reopen "$num"
+              gh issue edit "$num" --body-file "$file"
+              gh issue comment "$num" --body "Re-checked on $today: still missing. $run_url"
+            fi
+          done < <(jq -c '.[]' coverage-report/areas.json)
+          # Close open area issues whose area no longer has a gap (the summary issue is not one).
+          jq -r --arg p "$prefix" --arg s "$ISSUE_TITLE" \
+            '.[] | select(.state == "OPEN" and (.title | startswith($p)) and .title != $s and (.title | contains(": missing response or bad-request tests"))) | "\(.number)\t\(.title)"' \
+            <<< "$existing" | while IFS=$'\t' read -r num title; do
+            if ! grep -qxF "$title" "$current"; then
+              gh issue close "$num" --reason completed \
+                --comment "Nothing is missing in this area any more in the weekly check on $today, so this is closed automatically."
+            fi
+          done
 
       - name: Render report page
         run: python3 scripts/e2e/hub_coverage_page.py --report coverage-report
