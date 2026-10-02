@@ -26,6 +26,7 @@ import { generateEnumViolations } from '../src/analysis/enumViolations.js';
 import { generateExplicitNullRequired } from '../src/analysis/explicitNullRequired.js';
 import {
   computeKindCoverage,
+  kindsRemovedEntirely,
   listOperationsWithoutScenarios,
   type OperationWithoutScenarios,
 } from '../src/analysis/kindCoverage.js';
@@ -73,7 +74,7 @@ import {
   scopeRuleMatches,
   toScopeRule,
 } from '../src/excludeScoping.js';
-import { KIND_ALIASES, normalizeKind, type ValidationScenario } from '../src/model/types.js';
+import { normalizeKind, type ValidationScenario } from '../src/model/types.js';
 import { RUNTIME_KEY_FIXTURE_NAMES } from '../src/runtimeKeyFixtureNames.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
@@ -672,6 +673,7 @@ async function main() {
   // validation and silently exclude nothing. So each rule is checked here,
   // before filtering, against the scenarios it could apply to; one that
   // matches none is surfaced loudly rather than left as a quiet no-op.
+  let heldKindsByOperation: Record<string, string[]> = {};
   if (scopedExcludes.length > 0) {
     const scopedByOp = new Map<string, ScopeRule[]>();
     for (const e of scopedExcludes) {
@@ -698,9 +700,11 @@ async function main() {
       }
     }
     const before = scenarios.length;
+    const scenariosBeforeScopedExcludes = scenarios;
     scenarios = scenarios.filter(
       (s) => !scopedByOp.get(s.operationId)?.some((r) => scopeRuleMatches(r, s)),
     );
+    heldKindsByOperation = kindsRemovedEntirely(scenariosBeforeScopedExcludes, scenarios);
     console.log(
       `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
     );
@@ -1087,8 +1091,6 @@ async function main() {
     specCommit: string | undefined;
     totalScenarios: number;
     scenarioKinds: string[];
-    /** Scenario kinds counted under another kind's name; consumers must resolve names through it. */
-    kindAliases: Record<string, string>;
     generationOptions: {
       deep: boolean | undefined;
       maxMissing: number | null;
@@ -1097,6 +1099,12 @@ async function main() {
       onlyOperations: string[] | null;
     };
     operations: OpCoverage[];
+    /**
+     * Per operation, the kinds a scoped exclusion removed entirely (they existed before the filter and
+     * none is left). A kind a scoped exclusion only narrows is not listed, and neither is one that was
+     * never generated, so a real gap cannot hide behind an exclusion that does not cover it.
+     */
+    heldKindsByOperation: Record<string, string[]>;
     /** Operations with no scenario left (absent from `operations`), with the kinds that apply to them. */
     operationsWithNoScenarios?: OperationWithoutScenarios[];
     endpointTotals?: {
@@ -1133,7 +1141,7 @@ async function main() {
     specCommit,
     totalScenarios: deduped.length,
     scenarioKinds: allKinds,
-    kindAliases: { ...KIND_ALIASES },
+    heldKindsByOperation,
     generationOptions: {
       deep: opts.deep,
       maxMissing: opts.maxMissing ?? null,

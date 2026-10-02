@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   computeKindCoverage,
+  kindsRemovedEntirely,
   listOperationsWithoutScenarios,
 } from '../../request-validation/src/analysis/kindCoverage.js';
 import {
@@ -111,6 +112,49 @@ describe('request-validation: operations with no scenario left', () => {
     expect(listOperationsWithoutScenarios(byOperation, new Set(Object.keys(byOperation)))).toEqual(
       [],
     );
+  });
+});
+
+describe('request-validation: kinds a scoped exclusion removed entirely', () => {
+  const scenario = (operationId: string, type: string) => ({ operationId, type });
+
+  it('holds a kind when the exclusion removed every scenario of it', () => {
+    const before = [scenario('op', 'format-invalid'), scenario('op', 'missing-required')];
+    const after = [scenario('op', 'missing-required')];
+    expect(kindsRemovedEntirely(before, after)).toEqual({ op: ['format-invalid'] });
+  });
+
+  it('does not hold a kind the exclusion only narrowed (a sibling scenario is left)', () => {
+    const before = [scenario('op', 'constraint-violation'), scenario('op', 'constraint-violation')];
+    const after = [scenario('op', 'constraint-violation')];
+    expect(kindsRemovedEntirely(before, after)).toEqual({});
+  });
+
+  it('does not hold a kind that was never generated, so a regression cannot hide', () => {
+    const before = [scenario('op', 'missing-required')];
+    const after = [scenario('op', 'missing-required')];
+    expect(kindsRemovedEntirely(before, after)).toEqual({});
+  });
+
+  it('keeps operations apart and sorts the held kinds', () => {
+    const before = [
+      scenario('a', 'union'),
+      scenario('a', 'enum-violation'),
+      scenario('b', 'union'),
+    ];
+    const after = [scenario('b', 'union')];
+    expect(kindsRemovedEntirely(before, after)).toEqual({ a: ['enum-violation', 'union'] });
+  });
+
+  it('reports an aliased kind under the name COVERAGE.json uses', () => {
+    const before = [scenario('op', 'body-top-type-mismatch')];
+    expect(kindsRemovedEntirely(before, [])).toEqual({ op: ['type-mismatch'] });
+  });
+
+  it('does not hold the canonical kind while another scenario still counts under it', () => {
+    const before = [scenario('op', 'body-top-type-mismatch'), scenario('op', 'type-mismatch')];
+    const after = [scenario('op', 'type-mismatch')];
+    expect(kindsRemovedEntirely(before, after)).toEqual({});
   });
 });
 
