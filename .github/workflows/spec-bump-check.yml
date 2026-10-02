@@ -585,6 +585,37 @@ jobs:
               "text": ${{ steps.slack-payload.outputs.text_json }}
             }
 
+      # --- Failure alert (both legs) ------------------------------------------
+      # A leg that fails before it reaches the drift steps (e.g. the hub clone
+      # token losing access, which broke every hub run 2026-09-17..09-30) used to
+      # be visible only in the Actions tab, so drift detection could be dead for
+      # weeks without anyone noticing. Say so in the channel the drift alerts use.
+      # Non-blocking: a Vault/Slack hiccup must not mask the real failure.
+      - name: Fetch Slack bot token from Vault (leg failure)
+        id: slack-failure-secrets
+        if: failure()
+        continue-on-error: true
+        uses: ./.github/actions/slack-token
+        with:
+          vault-url: ${{ secrets.VAULT_ADDR }}
+          vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+          vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+          vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
+
+      - name: Notify Slack (leg failure)
+        if: failure() && steps.slack-failure-secrets.outputs.SLACK_BOT_TOKEN != ''
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ steps.slack-failure-secrets.outputs.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "#camunda-hub-nightly-test-results",
+              "text": ${{ toJSON(format(':warning: *Spec-bump check failed for {0}* - a step failed, so the drift result for this config may be missing or incomplete. Check the run before trusting it. <{1}/{2}/actions/runs/{3}|Open the run>', matrix.config, github.server_url, github.repository, github.run_id)) }},
+              "mrkdwn": true
+            }
+
       # Public config (oca): the spec is camunda/camunda's public OpenAPI, so
       # uploading the full bundle + generated suite for debugging leaks nothing.
       - name: Upload generated outputs

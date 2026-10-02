@@ -16,14 +16,18 @@ first (CONFIG=camunda-hub). Static analysis: it reports what the tests assert, n
 whether they pass.
 
   hub_response_coverage.py --out DIR [--previous prev/summary.json]
+                           [--previous-history prev/history.csv]
                            [--spec-ref SHA] [--run-url URL] [--tracking-url URL]
 
-Writes DIR/summary.json, DIR/rows.json, DIR/matrix.md and DIR/slack.txt. Exits 2 if the generated
-output could not be parsed as expected (so a format change fails the run instead
-of reporting zeros).
+Writes DIR/summary.json, DIR/rows.json, DIR/matrix.md, DIR/slack.txt, DIR/history.csv (the
+previous history plus one row for this run) and DIR/history.md (its latest rows as a table).
+Exits 2 if the generated output could not be parsed as expected (so a format change fails the
+run instead of reporting zeros).
 """
 import argparse
 import collections
+import csv
+import datetime
 import glob
 import json
 import os
@@ -370,10 +374,62 @@ def matrix(s, rows):
     return '\n'.join(out) + '\n'
 
 
+def history_row(s, args):
+    """One CSV row of the headline numbers, so a trend can be read without opening every report."""
+    row = {
+        'date': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d'),
+        'specRef': args.spec_ref[:12], 'operations': s['operations'], 'negativeTests': s['negativeTests'],
+        'fullyAsserted': s['fullyAsserted'], 'opsMissingResponseTest': s['opsMissingResponseTest'],
+        'zeroTestOperations': len(s['zeroTestOperations']),
+        'optionalSent': s['optionalFields'][0], 'optionalTotal': s['optionalFields'][1],
+        'shapeUnvalidated': len(s['shapeUnvalidated']),
+    }
+    for b in BUCKETS:
+        row[f'{b}_tested'], row[f'{b}_documented'] = s['codes'][b]
+    return row
+
+
+def write_history(path, previous_path, row):
+    """Carry the previous file forward and append this run's row, so the history survives the
+    artifact retention window as long as the report keeps running. The header is the previous
+    header plus any new columns, so a metric that is later renamed or dropped keeps its old values
+    (blank in the newer rows) instead of being erased from the record."""
+    rows, header = [], []
+    if previous_path and os.path.exists(previous_path):
+        with open(previous_path, newline='') as f:
+            reader = csv.DictReader(f)
+            header = list(reader.fieldnames or [])
+            rows = list(reader)
+    header += [k for k in row if k not in header]
+    rows.append({k: str(v) for k, v in row.items()})
+    with open(path, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, '') for k in header})
+
+
+def history_markdown(path, last=8):
+    """The most recent history rows as a table for the run summary, newest last."""
+    with open(path, newline='') as f:
+        rows = list(csv.DictReader(f))[-last:]
+    cols = [('date', 'Date')] + [(f'{b}_tested', NAMES[b].split(' (')[-1].rstrip(')') + ' tested') for b in BUCKETS] \
+        + [('fullyAsserted', 'Fully tested endpoints'), ('operations', 'Endpoints')]
+    out = [f'## Coverage history (last {len(rows)} reports)', '',
+           '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]
+    for r in rows:
+        out.append('| ' + ' | '.join(
+            ('—' if not r.get(k) else f'{r[k]} of {r.get(k.replace("_tested", "_documented"), "")}')
+            if k.endswith('_tested') else (r.get(k) or '—')
+            for k, _ in cols) + ' |')
+    return '\n'.join(out) + '\n'
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--out', required=True)
     ap.add_argument('--previous')
+    ap.add_argument('--previous-history', help='history.csv from the previous scheduled report')
     ap.add_argument('--spec-ref', default='')
     ap.add_argument('--run-url', default='')
     ap.add_argument('--tracking-url', default='')
@@ -391,6 +447,8 @@ def main():
     json.dump(rows, open(f'{args.out}/rows.json', 'w'), indent=1)
     open(f'{args.out}/matrix.md', 'w').write(matrix(summary, rows))
     open(f'{args.out}/slack.txt', 'w').write(slack(summary, prev, args))
+    write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
+    open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))
     print(open(f'{args.out}/slack.txt').read())
 
 
