@@ -698,19 +698,45 @@ function renderScenarioTest(
       body.push(`    }`);
     }
     if (step.searchChecks && isFinal && !isErrorScenario) {
-      const { limit, order } = step.searchChecks;
+      const { limit, order, offset } = step.searchChecks;
+      const reqBody = `body${idx + 1}`;
+      const ascending = (dir: 'ASC' | 'DESC') =>
+        `[...values].sort()${dir === 'DESC' ? '.reverse()' : ''}`;
       body.push(`    {`);
       body.push(`      const page = await ${varName}.json();`);
       body.push(`      expect(Array.isArray(page.items)).toBe(true);`);
       body.push(`      expect(page.items.length).toBeLessThanOrEqual(${limit});`);
       if (order) {
         const field = JSON.stringify(order.field);
+        const read = `(r: { items: Record<string, unknown>[] }) => r.items.map((i) => i[${field}])`;
+        body.push(`      const read = ${read};`);
+        body.push(`      const values = read(page);`);
+        // A missing or misspelled field would give undefined values that sort as equal.
         body.push(
-          `      const values: string[] = page.items.map((i: Record<string, string>) => i[${field}]);`,
+          `      expect(values.every((v) => typeof v === 'string' && v !== '')).toBe(true);`,
         );
-        body.push(
-          `      expect(values).toEqual([...values].sort()${order.direction === 'DESC' ? '.reverse()' : ''});`,
-        );
+        body.push(`      expect(values).toEqual(${ascending(order.direction)});`);
+        if (offset) {
+          const from = offset.from;
+          body.push(
+            `      const unpaged = await request.post(url, { headers, data: { ...${reqBody}, page: { limit: ${from + limit} } } });`,
+          );
+          body.push(`      expect(unpaged.status()).toBe(200);`);
+          // Prefix compare: an item created between the two queries may extend the unpaged list.
+          body.push(
+            `      expect(read(await unpaged.json()).slice(${from}, ${from + limit}).slice(0, values.length)).toEqual(values);`,
+          );
+        } else {
+          const opposite = order.direction === 'ASC' ? 'DESC' : 'ASC';
+          body.push(
+            `      const reversed = await request.post(url, { headers, data: { ...${reqBody}, sort: [{ field: ${field}, order: '${opposite}' }] } });`,
+          );
+          body.push(`      expect(reversed.status()).toBe(200);`);
+          body.push(`      const reversedValues = read(await reversed.json());`);
+          body.push(
+            `      expect(reversedValues).toEqual([...reversedValues].sort()${opposite === 'DESC' ? '.reverse()' : ''});`,
+          );
+        }
       }
       body.push(`    }`);
     }

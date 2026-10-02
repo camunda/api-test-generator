@@ -1,6 +1,7 @@
 {
-  "$comment": "Search operations that also get a success-path test sending page.limit and a sort, asserting at most `limit` items and, when checkOrder is true, items ordered by the sort field. checkOrder is only true for timestamp fields: their ISO-8601 values order the same in JavaScript as on the server, while names depend on the database collation. searchCatalogAssets and searchWorkspaces also send a filter (name exists), since no other success test of theirs does.",
+  "$comment": "Search operations that also get a success-path test sending page.limit and a sort, asserting at most `limit` items and, when checkOrder is true, items ordered by the sort field. checkOrder is only true for timestamp fields: their ISO-8601 values order the same in JavaScript as on the server, while names depend on the database collation. searchCatalogAssets and searchWorkspaces also send a filter (name exists), since no other success test of theirs does. Each search also gets a page-offset test (page.from = offsetFrom) that, where the order is checked, compares its items with the same slice of an unpaged query. The order test sends the opposite sort too and expects the opposite order, so a server that ignores sort cannot pass.",
   "limit": 2,
+  "offsetFrom": 1,
   "searches": [
     {
       "operationId": "searchCatalogAssets",

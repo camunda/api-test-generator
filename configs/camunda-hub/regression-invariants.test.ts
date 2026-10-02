@@ -659,8 +659,16 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       expect(test, `${id}: page not sent`).toContain(`limit: ${String(limit)}`);
       const sort = isRecord(entry.sort) ? entry.sort : {};
       expect(test, `${id}: sort not sent`).toContain(`field: '${String(sort.field)}'`);
+      expect(test, `${id}: sort direction not sent`).toContain(`order: '${String(sort.order)}'`);
+      const offsetAt = spec.indexOf('page offset (from');
+      expect(offsetAt, `${id}: no offset test generated`).toBeGreaterThan(-1);
+      expect(spec.slice(offsetAt), `${id}: offset not sent`).toContain(
+        `from: ${String(isRecord(raw) ? raw.offsetFrom : '')}`,
+      );
       if (entry.checkOrder === true) {
         expect(test, `${id}: order not asserted`).toContain('[...values].sort()');
+        expect(test, `${id}: opposite order not compared`).toContain('reversedValues');
+        expect(spec.slice(offsetAt), `${id}: offset slice not compared`).toContain('unpaged');
       }
       if (isRecord(entry.filter)) expect(test, `${id}: filter not sent`).toContain('filter:');
     }

@@ -26,6 +26,21 @@ const entry: SearchPagingEntry = {
   sort: { field: 'created', order: 'DESC' },
   checkOrder: true,
 };
+const head = { limit: 2, offsetFrom: 1 };
+
+function chainFor(...ids: string[]): EndpointScenario {
+  return {
+    id: 'scenario-1',
+    operations: ids.map((operationId) => ({
+      operationId,
+      method: 'POST',
+      path: `/${operationId}`,
+    })),
+    producedSemanticTypes: [],
+    satisfiedSemanticTypes: [],
+    bindings: { aVar: 'a' },
+  };
+}
 
 describe('search-paging.json', () => {
   it('is optional', () => {
@@ -34,21 +49,23 @@ describe('search-paging.json', () => {
 
   it('loads a valid file', () => {
     const f = {
-      limit: 2,
+      ...head,
       searches: [entry, { ...entry, operationId: 'searchB', filter: { x: 1 } }],
     };
     expect(loadSearchPaging(configDir(f))).toEqual(f);
   });
 
   it.each([
-    ['no searches array', { limit: 2 }],
-    ['limit missing', { searches: [] }],
-    ['limit not positive', { limit: 0, searches: [] }],
-    ['missing sort field', { limit: 2, searches: [{ ...entry, sort: { order: 'ASC' } }] }],
-    ['bad sort order', { limit: 2, searches: [{ ...entry, sort: { field: 'a', order: 'UP' } }] }],
-    ['checkOrder not boolean', { limit: 2, searches: [{ ...entry, checkOrder: 'yes' }] }],
-    ['filter not an object', { limit: 2, searches: [{ ...entry, filter: [] }] }],
-    ['repeated operation', { limit: 2, searches: [entry, entry] }],
+    ['no searches array', head],
+    ['limit missing', { offsetFrom: 1, searches: [] }],
+    ['limit not positive', { limit: 0, offsetFrom: 1, searches: [] }],
+    ['offsetFrom missing', { limit: 2, searches: [] }],
+    ['offsetFrom not positive', { limit: 2, offsetFrom: 0, searches: [] }],
+    ['missing sort field', { ...head, searches: [{ ...entry, sort: { order: 'ASC' } }] }],
+    ['bad sort order', { ...head, searches: [{ ...entry, sort: { field: 'a', order: 'UP' } }] }],
+    ['checkOrder not boolean', { ...head, searches: [{ ...entry, checkOrder: 'yes' }] }],
+    ['filter not an object', { ...head, searches: [{ ...entry, filter: [] }] }],
+    ['repeated operation', { ...head, searches: [entry, entry] }],
   ])('rejects: %s', (_label, content) => {
     expect(() => loadSearchPaging(configDir(content))).toThrow();
   });
@@ -56,39 +73,25 @@ describe('search-paging.json', () => {
   it('fails for an operation the spec does not have', () => {
     // biome-ignore lint/plugin: the fixture only populates the field under test
     const graph = { operations: { searchA: {} } } as unknown as OperationGraph;
-    const config = { limit: 2, searches: [entry] };
-    expect(() => validateSearchPaging(graph, config)).not.toThrow();
+    expect(() => validateSearchPaging(graph, { ...head, searches: [entry] })).not.toThrow();
     expect(() =>
-      validateSearchPaging(graph, {
-        limit: 2,
-        searches: [{ ...entry, operationId: 'gone' }],
-      }),
+      validateSearchPaging(graph, { ...head, searches: [{ ...entry, operationId: 'gone' }] }),
     ).toThrow(/gone/);
   });
 
-  it('builds one variant for the target with page, sort, filter and checks', () => {
-    const ref = (id: string) => ({ operationId: id, method: 'POST', path: `/${id}` });
-    const chain: EndpointScenario = {
-      id: 'scenario-1',
-      operations: [ref('createX'), ref('searchA')],
-      producedSemanticTypes: [],
-      satisfiedSemanticTypes: [],
-      bindings: { aVar: 'a' },
+  it('builds the limit/sort variant and the offset variant for the target only', () => {
+    const chain = chainFor('createX', 'searchA');
+    const config = {
+      limit: 3,
+      offsetFrom: 2,
+      searches: [
+        { ...entry, filter: { name: { $exists: true } } },
+        { ...entry, operationId: 'other' },
+      ],
     };
-    const config = loadSearchPaging(
-      configDir({
-        limit: 3,
-        searches: [
-          { ...entry, filter: { name: { $exists: true } } },
-          { ...entry, operationId: 'other' },
-        ],
-      }),
-    );
-    expect(config).not.toBeNull();
-    if (!config) return;
-    const [v, ...rest] = buildSearchPagingScenarios(chain, config);
+    const [paging, offset, ...rest] = buildSearchPagingScenarios(chain, config);
     expect(rest).toEqual([]);
-    expect(v.searchPaging).toEqual({
+    expect(paging.searchPaging).toEqual({
       body: {
         page: { limit: 3 },
         sort: [{ field: 'created', order: 'DESC' }],
@@ -96,21 +99,27 @@ describe('search-paging.json', () => {
       },
       checks: { limit: 3, order: { field: 'created', direction: 'DESC' } },
     });
-    expect(v.operations.map((o) => o.operationId)).toEqual(['createX', 'searchA']);
-    expect(v.bindings).not.toBe(chain.bindings);
+    // Ascending: an item created between the two compared queries lands after the slice.
+    expect(offset.searchPaging).toEqual({
+      body: {
+        page: { from: 2, limit: 3 },
+        sort: [{ field: 'created', order: 'ASC' }],
+        filter: { name: { $exists: true } },
+      },
+      checks: { limit: 3, order: { field: 'created', direction: 'ASC' }, offset: { from: 2 } },
+    });
+    expect(paging.id).not.toBe(offset.id);
+    expect(paging.operations.map((o) => o.operationId)).toEqual(['createX', 'searchA']);
+    expect(paging.bindings).not.toBe(chain.bindings);
   });
 
-  it('asserts no order when the sort field is not comparable', () => {
-    const chain: EndpointScenario = {
-      id: 's',
-      operations: [{ operationId: 'searchA', method: 'POST', path: '/a' }],
-      producedSemanticTypes: [],
-      satisfiedSemanticTypes: [],
-    };
-    const [v] = buildSearchPagingScenarios(chain, {
-      limit: 2,
-      searches: [{ ...entry, checkOrder: false }],
+  it('asserts no order, and keeps the configured sort, when the field is not comparable', () => {
+    const [paging, offset] = buildSearchPagingScenarios(chainFor('searchA'), {
+      ...head,
+      searches: [{ ...entry, sort: { field: 'name', order: 'DESC' }, checkOrder: false }],
     });
-    expect(v.searchPaging?.checks).toEqual({ limit: 2 });
+    expect(paging.searchPaging?.checks).toEqual({ limit: 2 });
+    expect(offset.searchPaging?.checks).toEqual({ limit: 2, offset: { from: 1 } });
+    expect(offset.searchPaging?.body.sort).toEqual([{ field: 'name', order: 'DESC' }]);
   });
 });

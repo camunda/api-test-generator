@@ -293,7 +293,11 @@ materialisation behaviour.
 checkOrder, filter? }] }`) gives each listed search operation a success-path variant,
 `page and sort (limit N, <field> <ORDER>)` in its `<operation>.variant.spec.ts`. It sends
 `page.limit`, `sort` and, when listed, a `filter`, then asserts at most `limit` items and, when
-`checkOrder` is true, items ordered by the sort field. Only timestamp fields set `checkOrder`: their
+`checkOrder` is true, items ordered by the sort field, with the opposite sort coming back in the
+opposite order (so a server that ignores `sort` fails). A second variant, `page offset (from N, …)`,
+sends `page.from` and, when `checkOrder` is true, compares its items with the same slice of an
+unpaged query (ascending, so an item created in between cannot shift the slice). Only timestamp
+fields set `checkOrder`: their
 ISO-8601 values order the same in JavaScript as on the server, while names depend on the database
 collation. The Hub invariant derives the search operations from the spec (a JSON body taking both
 `page` and `sort`), so a new search operation fails until it is listed.

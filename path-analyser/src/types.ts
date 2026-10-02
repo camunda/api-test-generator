@@ -552,8 +552,17 @@ export interface RequestStep {
 export interface SearchPagingChecks {
   /** The `page.limit` sent: the response holds at most this many items. */
   limit: number;
-  /** When set, `items` must be ordered by this field (compared as plain strings). */
+  /**
+   * When set, `items` must be ordered by this field (compared as plain strings), and the same
+   * query in the opposite direction must come back in the opposite order, so a server that
+   * ignores `sort` cannot pass.
+   */
   order?: { field: string; direction: 'ASC' | 'DESC' };
+  /**
+   * The request started at this offset (`page.from`). With `order`, the items must equal the
+   * same slice of an unpaged query with the same sort.
+   */
+  offset?: { from: number };
 }
 
 /**

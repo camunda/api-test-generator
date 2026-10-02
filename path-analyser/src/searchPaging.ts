@@ -17,6 +17,8 @@ export interface SearchPagingEntry {
 
 export interface SearchPagingConfig {
   limit: number;
+  /** The `page.from` of the offset variant. */
+  offsetFrom: number;
   searches: SearchPagingEntry[];
 }
 
@@ -47,6 +49,10 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) {
     throw new Error(`${p}: "limit" must be a positive integer.`);
   }
+  const offsetFrom = raw.offsetFrom;
+  if (typeof offsetFrom !== 'number' || !Number.isInteger(offsetFrom) || offsetFrom < 1) {
+    throw new Error(`${p}: "offsetFrom" must be a positive integer.`);
+  }
   const seen = new Set<string>();
   const searches = raw.searches.map((e, i): SearchPagingEntry => {
     const rec = isRecord(e) ? e : {};
@@ -74,7 +80,7 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
       ...(isRecord(rec.filter) ? { filter: rec.filter } : {}),
     };
   });
-  return { limit, searches };
+  return { limit, offsetFrom, searches };
 }
 
 /** Fails generation for an entry naming an operation the spec does not have. */
@@ -87,34 +93,58 @@ export function validateSearchPaging(graph: OperationGraph, config: SearchPaging
   }
 }
 
-/** The paging variant for `chain`'s target operation, or none when it has no entry. */
+/** The paging variants for `chain`'s target operation: limit and sort, and an offset page. */
 export function buildSearchPagingScenarios(
   chain: EndpointScenario,
   config: SearchPagingConfig,
 ): EndpointScenario[] {
   const target = chain.operations[chain.operations.length - 1];
-  return config.searches
-    .filter((s) => s.operationId === target?.operationId)
-    .map((s) => ({
+  const out: EndpointScenario[] = [];
+  for (const s of config.searches) {
+    if (s.operationId !== target?.operationId) continue;
+    const sort = [{ field: s.sort.field, order: s.sort.order }];
+    const filter = s.filter ? { filter: s.filter } : {};
+    const order = s.checkOrder ? { order: { field: s.sort.field, direction: s.sort.order } } : {};
+    const base = {
       ...chain,
-      id: `${chain.id}:paging`,
-      name: `page and sort (limit ${config.limit}, ${s.sort.field} ${s.sort.order})`,
-      description: `Sends page.limit ${config.limit} and sort ${s.sort.field} ${s.sort.order}${s.filter ? ' with a filter' : ''}; the response holds at most ${config.limit} items${s.checkOrder ? ` ordered by ${s.sort.field}` : ''}.`,
       strategy: 'featureCoverage' as const,
-      variantKey: 'paging',
-      searchPaging: {
-        body: {
-          page: { limit: config.limit },
-          sort: [{ field: s.sort.field, order: s.sort.order }],
-          ...(s.filter ? { filter: s.filter } : {}),
-        },
-        checks: {
-          limit: config.limit,
-          ...(s.checkOrder ? { order: { field: s.sort.field, direction: s.sort.order } } : {}),
-        },
-      },
       bindings: { ...(chain.bindings ?? {}) },
       requestPlan: undefined,
       seedBindings: undefined,
-    }));
+    };
+    out.push({
+      ...base,
+      id: `${chain.id}:paging`,
+      name: `page and sort (limit ${config.limit}, ${s.sort.field} ${s.sort.order})`,
+      description: `Sends page.limit ${config.limit} and sort ${s.sort.field} ${s.sort.order}${s.filter ? ' with a filter' : ''}; the response holds at most ${config.limit} items${s.checkOrder ? `, ordered by ${s.sort.field}, and the opposite sort comes back in the opposite order` : ''}.`,
+      variantKey: 'paging',
+      searchPaging: {
+        body: { page: { limit: config.limit }, sort, ...filter },
+        checks: { limit: config.limit, ...order },
+      },
+    });
+    // The offset test compares two queries made a moment apart. Ascending, an item created
+    // in between lands after the compared slice; descending, it would shift every position.
+    const offsetOrder = 'ASC' as const;
+    const offsetSort = s.checkOrder ? [{ field: s.sort.field, order: offsetOrder }] : sort;
+    const offsetChecks = s.checkOrder
+      ? { order: { field: s.sort.field, direction: offsetOrder } }
+      : {};
+    out.push({
+      ...base,
+      id: `${chain.id}:paging-offset`,
+      name: `page offset (from ${config.offsetFrom}, limit ${config.limit}, ${s.sort.field} ${s.checkOrder ? offsetOrder : s.sort.order})`,
+      description: `Sends page.from ${config.offsetFrom} and page.limit ${config.limit}${s.checkOrder ? '; the items match the same slice of an unpaged query sorted the same way' : ''}.`,
+      variantKey: 'paging-offset',
+      searchPaging: {
+        body: {
+          page: { from: config.offsetFrom, limit: config.limit },
+          sort: offsetSort,
+          ...filter,
+        },
+        checks: { limit: config.limit, ...offsetChecks, offset: { from: config.offsetFrom } },
+      },
+    });
+  }
+  return out;
 }
