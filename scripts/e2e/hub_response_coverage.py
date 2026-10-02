@@ -391,17 +391,22 @@ def history_row(s, args):
 
 def write_history(path, previous_path, row):
     """Carry the previous file forward and append this run's row, so the history survives the
-    artifact retention window as long as the report keeps running."""
-    rows = []
+    artifact retention window as long as the report keeps running. The header is the previous
+    header plus any new columns, so a metric that is later renamed or dropped keeps its old values
+    (blank in the newer rows) instead of being erased from the record."""
+    rows, header = [], []
     if previous_path and os.path.exists(previous_path):
         with open(previous_path, newline='') as f:
-            rows = [r for r in csv.DictReader(f)]
+            reader = csv.DictReader(f)
+            header = list(reader.fieldnames or [])
+            rows = list(reader)
+    header += [k for k in row if k not in header]
     rows.append({k: str(v) for k, v in row.items()})
     with open(path, 'w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=list(row))
+        w = csv.DictWriter(f, fieldnames=header)
         w.writeheader()
         for r in rows:
-            w.writerow({k: r.get(k, '') for k in row})
+            w.writerow({k: r.get(k, '') for k in header})
 
 
 def history_markdown(path, last=8):
@@ -414,7 +419,8 @@ def history_markdown(path, last=8):
            '| ' + ' | '.join(h for _, h in cols) + ' |', '|' + '---|' * len(cols)]
     for r in rows:
         out.append('| ' + ' | '.join(
-            f'{r[k]} of {r[k.replace("_tested", "_documented")]}' if k.endswith('_tested') else r[k]
+            ('—' if not r.get(k) else f'{r[k]} of {r.get(k.replace("_tested", "_documented"), "")}')
+            if k.endswith('_tested') else (r.get(k) or '—')
             for k, _ in cols) + ' |')
     return '\n'.join(out) + '\n'
 
