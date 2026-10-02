@@ -516,7 +516,7 @@ AREA_TITLE_PREFIX = '[hub-response-coverage] '
 
 
 def area_issues(rows, args):
-    """(title, body) per API area (the spec's first tag) that has at least one endpoint with a gap."""
+    """(title, body, area, gap count) per API area (the spec's first tag) with at least one endpoint gap."""
     by_area = collections.defaultdict(list)
     for r in gap_rows(rows):
         by_area[r.get('area', 'Other')].append(r)
@@ -532,7 +532,7 @@ def area_issues(rows, args):
         ] + gap_table(gaps)
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
-        out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n'))
+        out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n', area, len(gaps)))
     return out
 
 
@@ -614,9 +614,9 @@ def main():
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
     os.makedirs(f'{args.out}/areas', exist_ok=True)
     index = []
-    for n, (title, body) in enumerate(area_issues(rows, args)):
+    for n, (title, body, area, count) in enumerate(area_issues(rows, args)):
         open(f'{args.out}/areas/area-{n}.md', 'w').write(body)
-        index.append({'title': title, 'file': f'{args.out}/areas/area-{n}.md'})
+        index.append({'title': title, 'file': f'{args.out}/areas/area-{n}.md', 'area': area, 'gaps': count})
     json.dump(index, open(f'{args.out}/areas.json', 'w'), indent=1)
     write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
     open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))

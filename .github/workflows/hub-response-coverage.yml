@@ -199,14 +199,16 @@ jobs:
             title=$(jq -r '.title' <<< "$entry")
             file=$(jq -r '.file' <<< "$entry")
             echo "$title" >> "$current"
+            label="$(jq -r '"\(.area) (\(.gaps))"' <<< "$entry")"
             found=$(jq -r --arg t "$title" '[.[] | select(.title == $t)] | sort_by(.state != "OPEN") | first // empty | "\(.number) \(.state)"' <<< "$existing")
             if [ -z "$found" ]; then
               if [ "$new" -ge "$MAX_NEW_AREA_ISSUES" ]; then
                 echo "Cap reached: '$title' will be opened on a later run."
+                echo "$label" >> coverage-report/area-links.txt
                 continue
               fi
-              gh issue create --title "$title" --body-file "$file" \
-                --label missing-coverage --label auto-generated --label hub
+              url=$(gh issue create --title "$title" --body-file "$file" \
+                --label missing-coverage --label auto-generated --label hub)
               new=$((new + 1))
             else
               num=${found% *}
@@ -214,7 +216,9 @@ jobs:
               [ "$state" = "OPEN" ] || gh issue reopen "$num"
               gh issue edit "$num" --body-file "$file"
               gh issue comment "$num" --body "Re-checked on $today: still missing. $run_url"
+              url="${{ github.server_url }}/${{ github.repository }}/issues/$num"
             fi
+            echo "<$url|$label>" >> coverage-report/area-links.txt
           done < <(jq -c '.[]' coverage-report/areas.json)
           # Close open area issues whose area no longer has a gap (the summary issue is not one).
           jq -r --arg p "$prefix" --arg s "$ISSUE_TITLE" \
@@ -261,6 +265,9 @@ jobs:
             text="$(cat coverage-report/slack.txt)"
             if [ -s coverage-report/issue-url.txt ]; then
               text="$text"$'\n'"<$(cat coverage-report/issue-url.txt)|Tracking issue>"
+            fi
+            if [ -s coverage-report/area-links.txt ]; then
+              text="$text"$'\n'"Area issues: $(paste -sd'\t' coverage-report/area-links.txt | sed 's/\t/ · /g')"
             fi
           else
             text=":warning: *camunda-hub response coverage* could not run this week — see ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
