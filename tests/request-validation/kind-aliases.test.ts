@@ -115,25 +115,45 @@ describe('request-validation: operations with no scenario left', () => {
   });
 });
 
-describe('request-validation: kinds a scoped exclusion removed entirely', () => {
+describe('request-validation: kinds a whole-kind exclusion removed entirely', () => {
   const scenario = (operationId: string, type: string) => ({ operationId, type });
+  const wholeKind = (entries: Record<string, string[]>) =>
+    new Map(Object.entries(entries).map(([op, kinds]) => [op, new Set(kinds)]));
 
-  it('holds a kind when the exclusion removed every scenario of it', () => {
+  it('holds a kind when a whole-kind rule removed every scenario of it', () => {
     const before = [scenario('op', 'format-invalid'), scenario('op', 'missing-required')];
     const after = [scenario('op', 'missing-required')];
-    expect(kindsRemovedEntirely(before, after)).toEqual({ op: ['format-invalid'] });
+    expect(kindsRemovedEntirely(before, after, wholeKind({ op: ['format-invalid'] }))).toEqual({
+      op: ['format-invalid'],
+    });
+  });
+
+  it('does not hold a kind that only a scoped rule touched, even if nothing of it is left', () => {
+    // A rule for "target A" removed the only scenario; "target B" should have remained but stopped being
+    // generated. That regression must show as a gap, so a scoped rule never holds the kind.
+    const before = [scenario('op', 'constraint-violation')];
+    expect(kindsRemovedEntirely(before, [], wholeKind({}))).toEqual({});
+  });
+
+  it('holds only the whole-kind-excluded kind when a scoped kind also has nothing left', () => {
+    // Same operation: format-invalid is excluded as a whole kind; constraint-violation only by a scoped
+    // rule, and nothing of it is left either. Only the first may be held.
+    const before = [scenario('op', 'format-invalid'), scenario('op', 'constraint-violation')];
+    expect(kindsRemovedEntirely(before, [], wholeKind({ op: ['format-invalid'] }))).toEqual({
+      op: ['format-invalid'],
+    });
   });
 
   it('does not hold a kind the exclusion only narrowed (a sibling scenario is left)', () => {
     const before = [scenario('op', 'constraint-violation'), scenario('op', 'constraint-violation')];
     const after = [scenario('op', 'constraint-violation')];
-    expect(kindsRemovedEntirely(before, after)).toEqual({});
+    expect(kindsRemovedEntirely(before, after, wholeKind({}))).toEqual({});
   });
 
-  it('does not hold a kind that was never generated, so a regression cannot hide', () => {
+  it('does not hold a whole-kind exclusion for a kind that was never generated', () => {
     const before = [scenario('op', 'missing-required')];
     const after = [scenario('op', 'missing-required')];
-    expect(kindsRemovedEntirely(before, after)).toEqual({});
+    expect(kindsRemovedEntirely(before, after, wholeKind({ op: ['format-invalid'] }))).toEqual({});
   });
 
   it('keeps operations apart and sorts the held kinds', () => {
@@ -143,18 +163,21 @@ describe('request-validation: kinds a scoped exclusion removed entirely', () => 
       scenario('b', 'union'),
     ];
     const after = [scenario('b', 'union')];
-    expect(kindsRemovedEntirely(before, after)).toEqual({ a: ['enum-violation', 'union'] });
+    const rules = wholeKind({ a: ['union', 'enum-violation'], b: ['union'] });
+    expect(kindsRemovedEntirely(before, after, rules)).toEqual({ a: ['enum-violation', 'union'] });
   });
 
   it('reports an aliased kind under the name COVERAGE.json uses', () => {
     const before = [scenario('op', 'body-top-type-mismatch')];
-    expect(kindsRemovedEntirely(before, [])).toEqual({ op: ['type-mismatch'] });
+    expect(kindsRemovedEntirely(before, [], wholeKind({ op: ['type-mismatch'] }))).toEqual({
+      op: ['type-mismatch'],
+    });
   });
 
   it('does not hold the canonical kind while another scenario still counts under it', () => {
     const before = [scenario('op', 'body-top-type-mismatch'), scenario('op', 'type-mismatch')];
     const after = [scenario('op', 'type-mismatch')];
-    expect(kindsRemovedEntirely(before, after)).toEqual({});
+    expect(kindsRemovedEntirely(before, after, wholeKind({ op: ['type-mismatch'] }))).toEqual({});
   });
 });
 

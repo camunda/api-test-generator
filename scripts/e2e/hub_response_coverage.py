@@ -239,7 +239,11 @@ def request_check_state(rv_op, whole_op_excluded, held_kinds):
     present = rv_op.get('presentKindCount', 0)
     if missing:
         return 'gap', present, applicable, missing
-    return ('hold' if (held and not present) else 'ok'), present, applicable, []
+    if not present:
+        # No scenario at all and nothing left to flag: a gap, unless config held what applies. An endpoint
+        # that no applicability rule recognises must not read as fully covered.
+        return ('hold' if (held or whole_op_excluded) else 'gap'), present, applicable, []
+    return 'ok', present, applicable, []
 
 
 def build(args):
@@ -384,7 +388,7 @@ def request_gap_summary(s):
         parts.append(f'{len(none_at_all)} {"endpoint has" if len(none_at_all) == 1 else "endpoints have"} no bad-request test of any kind')
     if counts:
         top = ', '.join(f'{CHECK_NAMES.get(k, k)} ({n})' for k, n in counts.most_common(3))
-        parts.append(f'most often missing elsewhere: {top}')
+        parts.append(f'most often missing{" elsewhere" if none_at_all else ""}: {top}')
     return ('; '.join(parts)[0].upper() + '; '.join(parts)[1:] + '.') if parts else 'Nothing is missing.'
 
 

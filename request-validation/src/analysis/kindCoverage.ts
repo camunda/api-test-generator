@@ -70,14 +70,20 @@ export interface ScenarioKindRef {
 }
 
 /**
- * For each operation, the kinds that existed before a filter and have no scenario left after it
- * (kind names as COVERAGE.json reports them). A scoped exclusion that only narrows a kind (one
- * target of several) leaves siblings behind, so it holds nothing; a kind that was never generated
- * is not held either, so a regression cannot hide behind an exclusion that does not cover it.
+ * For each operation, the kinds that a whole-kind exclusion removed entirely: the kind existed before
+ * the filter, has no scenario left after it, and a rule with no target or constraint scope names it
+ * (kind names as COVERAGE.json reports them).
+ *
+ * A rule scoped to some targets is deliberately never counted. It leaves the other targets of the
+ * kind running, and the generator cannot tell "the scoped rule removed every scenario" from "a sibling
+ * target that should remain stopped being generated", so holding the kind could hide that regression.
+ * Such a kind shows as a gap instead, which is the safe way to be wrong. A kind that was never
+ * generated is not held either.
  */
 export function kindsRemovedEntirely(
   before: readonly ScenarioKindRef[],
   after: readonly ScenarioKindRef[],
+  wholeKindExclusions: ReadonlyMap<string, ReadonlySet<string>>,
 ): Record<string, string[]> {
   const kindsByOperation = (scenarios: readonly ScenarioKindRef[]) => {
     const result = new Map<string, Set<string>>();
@@ -92,7 +98,11 @@ export function kindsRemovedEntirely(
   const kindsAfter = kindsByOperation(after);
   const removed: Record<string, string[]> = {};
   for (const [operationId, kinds] of kindsBefore) {
-    const gone = [...kinds].filter((kind) => !kindsAfter.get(operationId)?.has(kind)).sort();
+    const excludedWhole = wholeKindExclusions.get(operationId);
+    if (!excludedWhole) continue;
+    const gone = [...kinds]
+      .filter((kind) => excludedWhole.has(kind) && !kindsAfter.get(operationId)?.has(kind))
+      .sort();
     if (gone.length > 0) removed[operationId] = gone;
   }
   return removed;

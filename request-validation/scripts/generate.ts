@@ -704,7 +704,20 @@ async function main() {
     scenarios = scenarios.filter(
       (s) => !scopedByOp.get(s.operationId)?.some((r) => scopeRuleMatches(r, s)),
     );
-    heldKindsByOperation = kindsRemovedEntirely(scenariosBeforeScopedExcludes, scenarios);
+    const wholeKindExclusions = new Map<string, Set<string>>();
+    for (const [operationId, rules] of scopedByOp) {
+      for (const rule of rules) {
+        if (rule.targets !== undefined || rule.constraintKinds !== undefined) continue;
+        const kinds = wholeKindExclusions.get(operationId) ?? new Set<string>();
+        kinds.add(normalizeKind(rule.kind));
+        wholeKindExclusions.set(operationId, kinds);
+      }
+    }
+    heldKindsByOperation = kindsRemovedEntirely(
+      scenariosBeforeScopedExcludes,
+      scenarios,
+      wholeKindExclusions,
+    );
     console.log(
       `[generate] excluded ${before - scenarios.length} scenario(s) via scoped exclude-operations entries`,
     );
@@ -1100,9 +1113,10 @@ async function main() {
     };
     operations: OpCoverage[];
     /**
-     * Per operation, the kinds a scoped exclusion removed entirely (they existed before the filter and
-     * none is left). A kind a scoped exclusion only narrows is not listed, and neither is one that was
-     * never generated, so a real gap cannot hide behind an exclusion that does not cover it.
+     * Per operation, the kinds a whole-kind exclusion removed entirely (they existed before the filter,
+     * none is left, and a rule with no target or constraint scope names them). A kind a scoped rule only
+     * narrows is never listed, nor is one that was never generated, so a real gap cannot hide behind an
+     * exclusion that does not cover it.
      */
     heldKindsByOperation: Record<string, string[]>;
     /** Operations with no scenario left (absent from `operations`), with the kinds that apply to them. */
