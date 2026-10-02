@@ -100,6 +100,19 @@ describe('findIn', () => {
   it('ignores human messages that quote a marker', () => {
     expect(findIn([{ ts: '1', text: 'hub-pr:7:fp:a' }], 'hub-pr:7:fp:a')).toBe('');
   });
+
+  it('ignores a marker quoted inside a bot message body', () => {
+    const text = 'op `hub-pr:7:escalated` here\n`hub-pr:7:fp:a` `seen:1`';
+    expect(findIn([{ ts: '1', bot_id: 'B', text }], 'hub-pr:7:escalated')).toBe('');
+  });
+
+  it('matches the trailer with and without the counter', () => {
+    const messages = [
+      { ts: '1', bot_id: 'B', text: 'x\n`m` `seen:2`' },
+      { ts: '2', bot_id: 'B', text: 'y\n`m`' },
+    ];
+    expect(findIn(messages, 'm')).toBe('2');
+  });
 });
 
 describe('resolveChannel', () => {
@@ -166,7 +179,7 @@ describe('findReply', () => {
     const marker = replyMarker('7', 'aaaa1111');
     const pages: Record<string, SlackMessage[]> = {
       '': [{ ts: '1', bot_id: 'B1', text: 'other' }],
-      next: [{ ts: '2', bot_id: 'B1', text: marker }],
+      next: [{ ts: '2', bot_id: 'B1', text: `body\n\`${marker}\` \`seen:1\`` }],
     };
     const impl: SlackApi = {
       async call() {

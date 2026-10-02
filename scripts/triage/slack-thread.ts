@@ -46,9 +46,13 @@ export function dailyMarker(date: string): string {
   return `${DAILY_MARKER_PREFIX}${date}`;
 }
 
-// Newest bot message containing the marker. Bot-only, so a human quoting it cannot capture it.
+// Newest bot message whose script-owned trailer is the marker. Bot-only, so a human quoting it
+// cannot capture it, and trailer-only, so text a PR author can influence earlier in the same
+// message cannot either: `upsert` always writes the marker last, optionally followed by `seen:N`.
 export function findIn(messages: SlackMessage[], marker: string): string {
-  const hits = messages.filter((m) => (m.bot_id || m.app_id) && (m.text ?? '').includes(marker));
+  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const trailer = new RegExp(`\`${escaped}\`(?:\\s+\`seen:\\d{1,6}\`)?\\s*$`);
+  const hits = messages.filter((m) => (m.bot_id || m.app_id) && trailer.test(m.text ?? ''));
   hits.sort((a, b) => Number(a.ts ?? 0) - Number(b.ts ?? 0));
   return hits.at(-1)?.ts ?? '';
 }
@@ -99,7 +103,7 @@ async function listDailyParents(api: SlackApi, channel: string, date: string): P
     if (cursor) params.cursor = cursor;
     const resp = must(await api.get('conversations.history', params), 'conversations.history');
     for (const m of resp.messages ?? []) {
-      if ((m.bot_id || m.app_id) && (m.text ?? '').includes(marker) && m.ts) parents.push(m.ts);
+      if (m.ts && findIn([m], marker)) parents.push(m.ts);
     }
     cursor = resp.response_metadata?.next_cursor ?? '';
     if (!cursor) return parents.sort((a, b) => Number(a) - Number(b));

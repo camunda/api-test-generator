@@ -1484,7 +1484,7 @@ jobs:
           set -euo pipefail
           ta_medic='<!subteam^S09UF0EV0HG|test-automation-medic>'
           pr_ref="${PR_NUMBER:+<https://github.com/camunda/camunda-hub/pull/${PR_NUMBER}|#${PR_NUMBER}>}"
-          printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and the suite never produced a report. That points at the pipeline (Hub start, artifact upload or the runner) rather than at the PR. <%s|Latest run>\n\n%s please take a look.\n' \
+          printf ':rotating_light: *Generated hub suite keeps failing without any test evidence* — camunda-hub PR %s has failed 3 times today and none of those runs left evidence of a failing test. That points at the pipeline (Hub start, report upload, run summary or the runner) rather than at the PR. <%s|Latest run>\n\n%s please take a look.\n' \
             "${pr_ref:-(PR number unavailable)}" "$RUN_URL" "$ta_medic" > "${RUNNER_TEMP}/escalation.txt"
           node scripts/triage/slack-thread.ts \
             --channel "#camunda-hub-pr-e2e-results" \
