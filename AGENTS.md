@@ -53,6 +53,7 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/camunda-oca/fixtures/` | Deployment-artifact fixture registry + BPMN/DMN/Form files for camunda-oca (#221 / Lift 11) |
 | `configs/camunda-hub/spec-pin.json` | Pinned `specRef` (a `camunda/camunda-hub` SHA) + `expectedSpecHash` for camunda-hub. **Local-bundle mode — see Spec pin.** |
 | `configs/camunda-hub/positive-suppress.json` | Per-op positive-suite suppressions for camunda-hub (upstream-blocked / opt-in ops), each with an optional `knownIssue { summary, url }` surfaced in the nightly |
+| `configs/camunda-hub/conflict-replay.json` | Operations whose feature scenario is followed by an identical second call that must return 409 (`{ operationId, reason, changeBody? }`), for specs that carry no `x-operation-kind` |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
@@ -284,6 +285,25 @@ fixtures and named invariants point directly at the broken property.
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
+
+### Conflict (409) scenarios
+
+A 409 needs setup state, so it is asserted in the positive feature suite, not the
+single-request negative suite. The planner already appends a second, identical call
+to an operation's final step and expects 409 when the operation's
+`x-operation-kind.duplicatePolicy` is `conflict`. A spec that carries no such
+annotation (Hub) switches it on per operation in
+`configs/<config>/conflict-replay.json`: `{ operationId, reason, changeBody? }`.
+
+- The generated test is `feature-N - <op> - duplicate conflict`. An unknown
+  `operationId` fails generation.
+- `changeBody` sets body fields on the call before it is replayed. Use it when the
+  conflict is an optimistic lock: `updateFile` returns 409 only if the first call
+  bumped the revision, and an update that changes nothing keeps it.
+- Verify a new entry live before adding it. The Hub invariant checks that every
+  entry has a generated test asserting 409 and that the spec documents that 409.
+- Triggers other than "repeat the same call" (soft-deleted state, name clashes) are
+  not expressible here.
 
 ### Coverage has two axes: presence and completeness
 

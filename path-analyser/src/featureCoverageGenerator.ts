@@ -119,7 +119,12 @@ export function generateFeatureCoverageForEndpoint(
       artifactSemantics: [],
       expectedResult: 'error',
       negative: true,
-      duplicateTest: { mode: 'conflict', policy: meta.duplicatePolicy, secondStatus: 409 },
+      duplicateTest: {
+        mode: 'conflict',
+        policy: meta.duplicatePolicy,
+        secondStatus: 409,
+        changeBody: endpoint.conflictReplay?.changeBody,
+      },
     });
   }
   // Conditional idempotency duplicate: second call should be ignored (reuse 200 with same response semantics)
@@ -248,6 +253,7 @@ function buildScenarioFromVariant(
       mode: variant.duplicateTest.mode,
       policy: variant.duplicateTest.policy,
       secondStatus: variant.duplicateTest.secondStatus,
+      changeBody: variant.duplicateTest.changeBody,
       keyFields: endpoint.conditionalIdempotency?.keyFields,
       windowField: endpoint.conditionalIdempotency?.window?.field,
     };

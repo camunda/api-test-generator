@@ -1,0 +1,16 @@
+{
+  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why.",
+  "replay": [
+    {
+      "operationId": "requestProjectSnapshotReview",
+      "reason": "A second review request for the same snapshot returns 409 ('A review request for the same process application version already exists'); verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "operationId": "updateFile",
+      "reason": "The replayed PATCH reuses the revision captured at create time. The first call renames the file so it really changes state and bumps the revision (an update that changes nothing keeps it), which makes the replay stale: 409. Verified live against camunda/hub:SNAPSHOT.",
+      "changeBody": {
+        "name": "renamed-by-conflict-replay"
+      }
+    }
+  ]
+}
