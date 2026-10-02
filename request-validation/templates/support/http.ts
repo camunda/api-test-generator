@@ -103,6 +103,7 @@ function validateProblemDetailShape(
   body: unknown,
   expectedStatus: number,
   parseError: string | undefined,
+  expectDetailContains?: string,
 ): string[] {
   if (parseError) return [`response body is not valid JSON: ${parseError}`];
   if (body === undefined) return ['response body is empty; expected a ProblemDetail object'];
@@ -122,6 +123,14 @@ function validateProblemDetailShape(
     errors.push(`ProblemDetail.status missing or not a number (got ${JSON.stringify(body.status)})`);
   } else if (body.status !== expectedStatus) {
     errors.push(`ProblemDetail.status (${body.status}) does not match the HTTP status (${expectedStatus})`);
+  }
+  // #404 — pin WHY the request was rejected, not just that it was (e.g. a
+  // capability-gated field's rejection must actually say "multi-tenancy is
+  // disabled", not just happen to be a 400 for an unrelated reason).
+  if (expectDetailContains && typeof body.detail === 'string' && !body.detail.includes(expectDetailContains)) {
+    errors.push(
+      `ProblemDetail.detail (${JSON.stringify(body.detail)}) does not contain ${JSON.stringify(expectDetailContains)}`,
+    );
   }
   return errors;
 }
@@ -185,6 +194,12 @@ export async function assertResponseStatus(
      * `expected` is not itself 2xx.
      */
     expectEmptyItems?: boolean;
+    /**
+     * Also assert the error body's `detail` contains this substring
+     * (ignored when `expected` is not itself an error status). Pins WHY a
+     * request was rejected, not just that it was — see #404.
+     */
+    expectDetailContains?: string;
   },
 ): Promise<void> {
   const actual = res.status();
@@ -225,7 +240,7 @@ export async function assertResponseStatus(
       }
     }
     shapeErrors = shouldCheckShape
-      ? validateProblemDetailShape(bodyJson, expected, parseError)
+      ? validateProblemDetailShape(bodyJson, expected, parseError, opts?.expectDetailContains)
       : validateEmptyItemsShape(bodyJson, parseError);
   }
 

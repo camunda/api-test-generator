@@ -187,15 +187,28 @@ function buildFile(
         'they are not supported in legacy QA-tree mode (--no-standalone / --qa-import-depth).',
     );
   }
-  // pagination-offset-past-total relies on assertResponseStatus's
-  // expectEmptyItems opt, which only exists in the vendored standalone
-  // support module (see http.ts). Same guard shape as auth-deny above.
-  const usesEmptyItemsCheck = scenarios.some((s) => s.type === 'pagination-offset-past-total');
+  // pagination-offset-past-total (and any scenario setting expectEmptyItems
+  // directly, e.g. constraintViolations.ts's capability-gate case, #404)
+  // relies on assertResponseStatus's expectEmptyItems opt, which only exists
+  // in the vendored standalone support module (see http.ts). Same guard
+  // shape as auth-deny above.
+  const usesEmptyItemsCheck = scenarios.some(
+    (s) => s.type === 'pagination-offset-past-total' || s.expectEmptyItems,
+  );
   if (usesEmptyItemsCheck && !standalone) {
     throw new Error(
-      'pagination-offset-past-total scenarios require the standalone support module ' +
-        "(assertResponseStatus's expectEmptyItems); they are not supported in legacy QA-tree " +
-        'mode (--no-standalone / --qa-import-depth).',
+      'pagination-offset-past-total (or any expectEmptyItems) scenarios require the standalone ' +
+        "support module (assertResponseStatus's expectEmptyItems); they are not supported in " +
+        'legacy QA-tree mode (--no-standalone / --qa-import-depth).',
+    );
+  }
+  // expectDetailContains (#404) is the same standalone-only shape.
+  const usesDetailContainsCheck = scenarios.some((s) => s.expectDetailContains);
+  if (usesDetailContainsCheck && !standalone) {
+    throw new Error(
+      "expectDetailContains scenarios require the standalone support module (assertResponseStatus's " +
+        'expectDetailContains); they are not supported in legacy QA-tree mode ' +
+        '(--no-standalone / --qa-import-depth).',
     );
   }
   // A serverOverride operation (e.g. a cluster-admin op) emits a 4-arg
@@ -543,7 +556,10 @@ function renderScenario(
     // genuinely empty page, not a ProblemDetail — see http.ts.
     const assertOptFields: string[] = [];
     if (skipProblemDetailShape) assertOptFields.push('skipProblemDetailShape: true');
-    if (s.type === 'pagination-offset-past-total') assertOptFields.push('expectEmptyItems: true');
+    if (s.type === 'pagination-offset-past-total' || s.expectEmptyItems)
+      assertOptFields.push('expectEmptyItems: true');
+    if (s.expectDetailContains)
+      assertOptFields.push(`expectDetailContains: ${JSON.stringify(s.expectDetailContains)}`);
     const assertOpts = assertOptFields.length ? `, { ${assertOptFields.join(', ')} }` : '';
     lines.push(
       `    await assertResponseStatus(testInfo, res, ${s.expectedStatus}, { ${ctxParts.join(', ')} }${assertOpts});`,

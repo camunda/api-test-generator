@@ -272,3 +272,75 @@ describe('assertResponseStatus — expectEmptyItems check', () => {
     expect(textSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * expectDetailContains (#404) — pins WHY a request was rejected, not just
+ * that it was (e.g. a capability-gated field's rejection must actually say
+ * "multi-tenancy is disabled", not just happen to be a 400 for an unrelated
+ * reason).
+ */
+describe('assertResponseStatus — expectDetailContains check', () => {
+  it('passes silently when detail contains the expected substring', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({
+      type: 'about:blank',
+      title: 'Bad Request',
+      status: 400,
+      detail: 'Expected ... but multi-tenancy is disabled',
+      instance: '/api/v2/x',
+    });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, body), 400, ctx, {
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails when detail does not contain the expected substring', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, VALID_PROBLEM_DETAIL_400), 400, ctx, {
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).rejects.toThrow(/ProblemDetail\.detail .* does not contain/);
+  });
+
+  it('is ignored for a non-error expected status (2xx)', async () => {
+    // expectDetailContains only makes sense alongside the ProblemDetail
+    // shape check, which itself only runs for an error `expected` status —
+    // a caller combining it with a 2xx expectation must not get a check it
+    // never asked for.
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(200, ''), 200, ctx, {
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still fails on a status mismatch even when detail would have matched', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({
+      type: 'about:blank',
+      title: 'Bad Request',
+      status: 400,
+      detail: 'but multi-tenancy is disabled',
+      instance: '/api/v2/x',
+    });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(500, body), 400, ctx, {
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('does not report a spurious violation when detail itself is missing (already reported by the shape check)', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400 });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, body), 400, ctx, {
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).rejects.toThrow(/ProblemDetail\.detail missing or not a string/);
+  });
+});

@@ -888,6 +888,7 @@ export interface GlobalContextSeedsViews {
     fieldName: string;
     seedRule: string;
     omitWhenUnbound?: boolean;
+    capabilityGate?: { disabledDetailContains: string };
     rationale?: string;
   }>;
 }
@@ -902,6 +903,7 @@ export function deriveGlobalContextSeedsViews(repoRoot: string): GlobalContextSe
       seedRule: s.seedRule,
     };
     if (s.omitWhenUnbound !== undefined) entry.omitWhenUnbound = s.omitWhenUnbound;
+    if (s.capabilityGate !== undefined) entry.capabilityGate = s.capabilityGate;
     if (s.rationale !== undefined) entry.rationale = s.rationale;
     return entry;
   });

@@ -106,6 +106,20 @@ export const globalContextSeedsSchema = {
           description:
             "If true, the materializer skips the universal-seed prologue for this entry AND skips it in the per-scenario `seedBindings` loop for consumer-only scenarios. The binding is seeded only when the scenario must mint a fresh value to send (currently: ops that declare HTTP 409, via the emitter's `uniqueBindings` set — see #320). When left unseeded, the binding stays `undefined` and the request field is omitted on the wire so the server applies its own default (#342). Replaces the legacy `defaultSentinel`/`stripFromMultipartWhenDefault` mechanism, which sent a literal sentinel value on the wire and broke re-runnability for producer ops like `createTenant`.",
         },
+        capabilityGate: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['disabledDetailContains'],
+          description:
+            "Declares this field represents a server capability the target environment may have disabled (e.g. tenantId under single-tenant mode, #404). Consulted by generators that deliberately populate a FLAT (non-nested) optional occurrence with an explicit value — path-analyser's optional-subshape variant planner, and request-validation's constraint-violation generator — to flip their expectation to the confirmed disabled-capability rejection (400, detail containing `disabledDetailContains`) instead of the field's normal behaviour. A REQUIRED occurrence is never affected. A NESTED occurrence (e.g. a search filter field) is handled separately, never validated regardless of value. A FLAT occurrence with a BLANK/whitespace value is silently normalized to a default and the request proceeds to whatever outcome is normal for that operation — not a rejection, and not generalizable per-operation, so generators exclude that case entirely rather than guess.",
+          properties: {
+            disabledDetailContains: {
+              type: 'string',
+              minLength: 1,
+              description: "Substring the rejection response's `detail` must contain.",
+            },
+          },
+        },
         rationale: {
           type: 'string',
           description: 'Free-form documentation for maintainers.',

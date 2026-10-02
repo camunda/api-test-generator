@@ -256,6 +256,17 @@ export function renderInlineStepLines({
     `    await attachEvidenceOnFailure(testInfo, ${varName}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.method.toUpperCase())}, url, headers, body: ${evidenceBody}, expectedStatus: ${step.expect.status} });`,
   );
   lines.push(`    expect(${varName}.status()).toBe(${step.expect.status});`);
+  if (step.expect.detailContains) {
+    // #404 — pin WHY the request was rejected (e.g. "multi-tenancy is
+    // disabled"), not just that it was. Guards against this assertion
+    // coincidentally passing for an unrelated reason.
+    lines.push(`    {`);
+    lines.push(`      const detailBody = await ${varName}.json().catch(() => undefined);`);
+    lines.push(
+      `      expect(typeof detailBody?.detail === 'string' && detailBody.detail.includes(${JSON.stringify(step.expect.detailContains)}), \`expected detail to contain ${JSON.stringify(step.expect.detailContains)}, got: \${JSON.stringify(detailBody)}\`).toBe(true);`,
+    );
+    lines.push(`    }`);
+  }
   return lines;
 }
 

@@ -16,6 +16,7 @@ import {
   getSpecBundleDir,
   getVariantOutputDir,
 } from '../../path-analyser/src/configResolver.js';
+import { loadGlobalContextSeedsAbox } from '../../path-analyser/src/ontology/loader.js';
 import { loadRequestValidationConfig } from '../../request-validation/src/config.js';
 
 /**
@@ -10635,5 +10636,267 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
       offenders,
       'Emitted C# file(s) are missing the CamundaIntegrationTests namespace declaration.',
     ).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capability-gated fields flip the expectation, never silently skip (#404)
+// ---------------------------------------------------------------------------
+//
+// path-analyser's optional-subshape variant planner and request-validation's
+// `constraint-violation` generator both deliberately populate an optional
+// `tenantId` occurrence with an explicit value. Confirmed live, and directly
+// by the Camunda team: with multi-tenancy disabled, a FLAT occurrence with a
+// non-blank value is always rejected (400, detail contains "multi-tenancy is
+// disabled") regardless of the value's own shape; a blank/whitespace-only
+// value is silently normalized to the default tenant and the request
+// proceeds to whatever that operation's own outcome is (not generalizable,
+// so excluded rather than guessed); a NESTED occurrence (a search filter
+// field) is a different, separately-confirmed case — never validated
+// regardless of value, always 200 with empty results. A REQUIRED occurrence
+// of the field name is unaffected by any of this.
+//
+// `configs/camunda-oca/ontology/global-context-seeds.json` marks `tenantId`
+// with a `capabilityGate` entry for exactly this reason. These invariants
+// pin the observable result on the real bundled spec.
+describeForThisConfig('bundled-spec invariants: capability-gated fields (#404)', () => {
+  function loadGatedFieldNames(): Set<string> {
+    const abox = loadGlobalContextSeedsAbox(REPO_ROOT);
+    return new Set((abox?.seeds ?? []).filter((s) => s.capabilityGate).map((s) => s.fieldName));
+  }
+
+  it('sanity: the bundled spec has at least one capability-gated field', () => {
+    expect(loadGatedFieldNames().size).toBeGreaterThan(0);
+  });
+
+  it('every generated optional-subshape variant for a gated FLAT field expects the capability rejection', () => {
+    if (!existsSync(VARIANT_SCENARIOS_DIR)) {
+      throw new Error(
+        `Variant scenarios directory not found at ${VARIANT_SCENARIOS_DIR}. Run 'npm run pipeline' first.`,
+      );
+    }
+    const gatedFieldNames = loadGatedFieldNames();
+    interface VariantFile {
+      endpoint?: { operationId?: string };
+      scenarios?: {
+        id: string;
+        populatesSubShape?: { leafPaths?: string[] };
+        expectedResult?: { kind: string; code?: string; detailContains?: string };
+      }[];
+    }
+    const flatOffenders: {
+      file: string;
+      operationId: string;
+      scenarioId: string;
+      leafPath: string;
+    }[] = [];
+    const nestedOffenders: {
+      file: string;
+      operationId: string;
+      scenarioId: string;
+      leafPath: string;
+    }[] = [];
+    let flatSeen = 0;
+    let nestedSeen = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const parsed = JSON.parse(
+        readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8'),
+      ) as VariantFile;
+      const opId = parsed.endpoint?.operationId ?? '(unknown)';
+      for (const s of parsed.scenarios ?? []) {
+        for (const leafPath of s.populatesSubShape?.leafPaths ?? []) {
+          const leaf = leafPath.split('.').pop()?.replace(/\[\]$/, '');
+          if (!leaf || !gatedFieldNames.has(leaf)) continue;
+          const isNested = leafPath.includes('.');
+          if (isNested) {
+            nestedSeen++;
+            // A nested occurrence is a different, unaffected case — must NOT
+            // be flipped to an error expectation.
+            if (s.expectedResult !== undefined) {
+              nestedOffenders.push({ file: f, operationId: opId, scenarioId: s.id, leafPath });
+            }
+          } else {
+            flatSeen++;
+            const er = s.expectedResult;
+            if (
+              er?.kind !== 'error' ||
+              er.code !== '400' ||
+              !er.detailContains ||
+              er.detailContains.length === 0
+            ) {
+              flatOffenders.push({ file: f, operationId: opId, scenarioId: s.id, leafPath });
+            }
+          }
+        }
+      }
+    }
+    // Sanity floor so this invariant doesn't pass vacuously if the bundled
+    // spec's tenantId usage disappears.
+    expect(flatSeen, 'expected at least one FLAT gated variant leaf').toBeGreaterThan(0);
+    expect(nestedSeen, 'expected at least one NESTED gated variant leaf').toBeGreaterThan(0);
+    expect(
+      flatOffenders,
+      'A variant populating a FLAT capability-gated field must expect the confirmed rejection ' +
+        '(400, detail containing the gate text) — see #404.',
+    ).toEqual([]);
+    expect(
+      nestedOffenders,
+      'A variant populating a NESTED occurrence of a capability-gated field (a search filter) ' +
+        'must NOT be flipped to an error expectation — it is a different, unaffected case (#404).',
+    ).toEqual([]);
+  });
+
+  it('no generated request-validation scenario targets a FLAT gated field with a blank/whitespace mutation value', () => {
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) {
+      throw new Error(
+        `Generated request-validation directory not found at ${REQUEST_VALIDATION_DIR}. ` +
+          `Run 'npm run generate:request-validation' (or 'npm run pipeline') first.`,
+      );
+    }
+    const gatedFieldNames = loadGatedFieldNames();
+    // Only an OPTIONAL occurrence of a gated field is affected — a REQUIRED
+    // occurrence (e.g. createTenant's own tenantId) is a different,
+    // unaffected case covered by its own invariant further down. Derive
+    // "required at this op" from the graph rather than re-deriving it from
+    // generated text, so this can't drift from the generator's own check.
+    const graph = loadGraph();
+    const requiredFlatByOp = new Map<string, Set<string>>();
+    for (const op of graph.operations) {
+      for (const e of op.requestBodySemanticTypes ?? []) {
+        if (!e.required || typeof e.fieldPath !== 'string' || e.fieldPath.includes('.')) continue;
+        if (!gatedFieldNames.has(e.fieldPath)) continue;
+        const set = requiredFlatByOp.get(op.operationId) ?? new Set<string>();
+        set.add(e.fieldPath);
+        requiredFlatByOp.set(op.operationId, set);
+      }
+    }
+    // Matches one emitted `test('<title>', async ... => { ... });` block,
+    // capturing its title and full body so the request body and asserted
+    // opts can be inspected — same convention as the multipart invariant
+    // above, widened to capture the body between the markers.
+    const TEST_BLOCK = /test\('([^']*Constraint violation [^']*)',[^]*?\n {2}}\);/g;
+    const offenders: { file: string; title: string; reason: string }[] = [];
+    let seenFlatGated = 0;
+    for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+      if (!f.endsWith('-validation-api-tests.spec.ts')) continue;
+      const text = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+      for (const match of text.matchAll(TEST_BLOCK)) {
+        const title = match[1];
+        const block = match[0];
+        const targetMatch = title.match(/Constraint violation\s+(\S+)/);
+        const target = targetMatch?.[1];
+        if (!target) continue;
+        const leaf = target.split('.').pop();
+        if (!leaf || !gatedFieldNames.has(leaf)) continue;
+        const isNested = target.includes('.');
+        if (isNested) continue; // different, separately-asserted case below
+        const opIdMatch = title.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\s+-\s+/);
+        if (opIdMatch && requiredFlatByOp.get(opIdMatch[1])?.has(leaf)) continue; // required, unaffected
+        seenFlatGated++;
+        // The request body literal is inline in the block; a blank-like
+        // value would appear as `tenantId: ''` / `tenantId: '\n'` etc. —
+        // detect any quoted value that is empty or whitespace-only. The
+        // captured group is the SOURCE text of a single-quoted JS string
+        // literal, so a mutation like `'\n'` captures as the two literal
+        // characters backslash + `n`, not an actual newline — unescape the
+        // common sequences before judging blankness, or a real newline
+        // value would silently slip past `.trim()` (Copilot review).
+        const bodyFieldMatch = block.match(new RegExp(`${leaf}:\\s*'([^']*)'`));
+        const rawValue = bodyFieldMatch?.[1];
+        const value = rawValue?.replace(/\\(n|t|r|\\|')/g, (_m, c: string) =>
+          c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === '\\' ? '\\' : "'",
+        );
+        if (value !== undefined && value.trim() === '') {
+          offenders.push({ file: f, title, reason: `blank-like value ${JSON.stringify(value)}` });
+          continue;
+        }
+        if (!block.includes('expectDetailContains')) {
+          offenders.push({ file: f, title, reason: 'missing expectDetailContains opt' });
+        }
+      }
+    }
+    expect(
+      seenFlatGated,
+      'expected at least one FLAT gated constraint-violation scenario',
+    ).toBeGreaterThan(0);
+    expect(
+      offenders,
+      'A constraint-violation scenario targeting a FLAT capability-gated field must never use a ' +
+        'blank/whitespace mutation value, and every surviving mutation must assert ' +
+        'expectDetailContains — see #404.',
+    ).toEqual([]);
+  });
+
+  it('every generated request-validation scenario targeting a NESTED gated field expects 200 + empty items', () => {
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) return;
+    const gatedFieldNames = loadGatedFieldNames();
+    const TEST_BLOCK = /test\('([^']*Constraint violation [^']*)',[^]*?\n {2}}\);/g;
+    const offenders: { file: string; title: string }[] = [];
+    let seenNestedGated = 0;
+    for (const f of readdirSync(REQUEST_VALIDATION_DIR)) {
+      if (!f.endsWith('-validation-api-tests.spec.ts')) continue;
+      const text = readFileSync(join(REQUEST_VALIDATION_DIR, f), 'utf8');
+      for (const match of text.matchAll(TEST_BLOCK)) {
+        const title = match[1];
+        const block = match[0];
+        const targetMatch = title.match(/Constraint violation\s+(\S+)/);
+        const target = targetMatch?.[1];
+        if (!target?.includes('.')) continue;
+        const leaf = target.split('.').pop();
+        if (!leaf || !gatedFieldNames.has(leaf)) continue;
+        seenNestedGated++;
+        if (!block.includes('expectEmptyItems') || !/,\s*200,/.test(block)) {
+          offenders.push({ file: f, title });
+        }
+      }
+    }
+    if (seenNestedGated === 0) return; // nothing to assert for this bundled spec
+    expect(
+      offenders,
+      'A constraint-violation scenario targeting a NESTED occurrence of a capability-gated field ' +
+        'must expect 200 with expectEmptyItems — see #404.',
+    ).toEqual([]);
+  });
+
+  it('a REQUIRED occurrence of a gated field name (e.g. createTenant.tenantId) remains fully exercised, untouched', () => {
+    const REQUEST_VALIDATION_DIR = join(
+      REPO_ROOT,
+      'generated',
+      CONFIG_NAME,
+      'request-validation',
+      'unsecured',
+    );
+    if (!existsSync(REQUEST_VALIDATION_DIR)) return;
+    const path = join(REQUEST_VALIDATION_DIR, 'tenants-validation-api-tests.spec.ts');
+    if (!existsSync(path)) return;
+    const text = readFileSync(path, 'utf8');
+    const matches = [...text.matchAll(/createTenant - Constraint violation tenantId \(#\d+\)/g)];
+    expect(
+      matches.length,
+      'expected createTenant.tenantId constraint-violation coverage',
+    ).toBeGreaterThan(0);
+    for (const m of matches) {
+      const idx = text.indexOf(m[0]);
+      const block = text.slice(idx, text.indexOf('});', idx) + 3);
+      expect(block, `${m[0]} must not carry the capability-gate opts`).not.toContain(
+        'expectDetailContains',
+      );
+    }
   });
 });

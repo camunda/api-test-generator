@@ -241,4 +241,19 @@ export interface ValidationScenario {
    */
   constraintKind?: string;
   constraintOrigin?: 'body' | 'param';
+  /**
+   * Also assert the response body's `items` array is empty (status < 400
+   * only). Generic sibling of the kind-specific handling
+   * `pagination-offset-past-total` already gets in qaEmitter.ts; set this
+   * directly on the scenario instead for any other kind that needs it
+   * (e.g. constraintViolations.ts's nested-field capability-gate case,
+   * #404).
+   */
+  expectEmptyItems?: boolean;
+  /**
+   * Also assert the response body's `detail` contains this substring
+   * (status >= 400 only) — pins WHY a request was rejected, not just that
+   * it was. See constraintViolations.ts's capability-gate case (#404).
+   */
+  expectDetailContains?: string;
 }
