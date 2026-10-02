@@ -317,6 +317,53 @@ describe("request-validation: 404 fake-ID in notFoundMode 'declared'", () => {
     }
   });
 
+  it("skips a required body whose placeholder values break the schema's limits, but not satisfiable constraints or formats", () => {
+    const withProp = (prop: SchemaFragment): SchemaFragment => ({
+      type: 'object',
+      required: ['v'],
+      properties: { v: prop },
+    });
+    const unusable: SchemaFragment[] = [
+      withProp({ type: 'string', pattern: '^[0-9]+$' }), // 'x' is not numeric
+      withProp({ type: 'string', minLength: 5 }),
+      withProp({ type: 'integer', minimum: 10 }), // the builder emits 1
+      withProp({ type: 'array', minItems: 2, items: { type: 'string' } }), // one item
+    ];
+    for (const requestBodySchema of unusable) {
+      const o = op({
+        ...keyed,
+        operationId: 'constrained',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema,
+      });
+      expect(isNotFoundEligible(o, { declared: true })).toBe(false);
+      expect(generateNotFoundFakeId([o], { declared: true })).toHaveLength(0);
+    }
+    // Limits the placeholder does satisfy, and formats (which are deliberately not checked),
+    // stay eligible.
+    const usable: SchemaFragment[] = [
+      withProp({ type: 'string', minLength: 1, maxLength: 255 }),
+      withProp({ type: 'integer', format: 'int32' }),
+      withProp({ type: 'string', format: 'uuid' }),
+      withProp({ type: 'string', format: 'email' }),
+      // OpenAPI 3.0 spellings Ajv would reject as written
+      withProp({ nullable: true, minLength: 1 }),
+      withProp({ type: 'integer', minimum: 0, exclusiveMinimum: true }),
+    ];
+    for (const requestBodySchema of usable) {
+      const o = op({
+        ...keyed,
+        operationId: 'ok',
+        method: 'PATCH',
+        bodyRequired: true,
+        requestBodySchema,
+      });
+      expect(isNotFoundEligible(o, { declared: true })).toBe(true);
+      expect(generateNotFoundFakeId([o], { declared: true })).toHaveLength(1);
+    }
+  });
+
   it('eligibility and generation agree for every operation shape in declared mode', () => {
     const ops = [
       op({ ...keyed, operationId: 'a', method: 'DELETE' }),

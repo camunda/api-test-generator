@@ -106,9 +106,11 @@ export interface RequestValidationConfig {
    *   an invalid one would 400). Right for an API that resolves path keys with a
    *   plain lookup before acting and answers 404 for a missing parent, as Hub
    *   does. An operation is skipped, and not counted as applicable, when its
-   *   required body cannot be built into a valid request: a multipart body, or a
+   *   required body cannot be built into a valid request: a multipart body, a
    *   JSON body whose root is not an object (oneOf, array, scalar, or an allOf
-   *   that does not resolve to an object).
+   *   that does not resolve to an object), or a body whose generated placeholder
+   *   values break the schema's pattern, length, numeric or item-count limits.
+   *   String formats (uuid, email, ...) are not checked.
    */
   notFoundMode: 'read-only' | 'declared';
   /**

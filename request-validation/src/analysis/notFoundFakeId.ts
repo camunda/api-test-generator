@@ -1,3 +1,4 @@
+import { Ajv } from 'ajv';
 import type {
   OperationModel,
   ParameterModel,
@@ -115,16 +116,69 @@ export function fakePathParamValue(p: ParameterModel): string | undefined {
   return undefined;
 }
 
+// Structural check for a baseline body. Formats are not checked (validateFormats: false): the
+// builder cannot synthesise a value for an arbitrary format, and the server may not enforce
+// one before the lookup (Hub answers 404 for addMember's `email: "x"`). Everything else the
+// schema says about the value - pattern, length and numeric bounds, minItems, enum - is.
+const baselineValidator = new Ajv({ strict: false, validateFormats: false });
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Specs are OpenAPI 3.0, Ajv speaks draft-07: a `nullable` with no `type` beside it (how key
+ * fields are modelled) is a compile error there, and `exclusiveMinimum: true` is a boolean
+ * where draft-07 wants the bound. Only a boolean counts as the keyword, so a property that
+ * happens to be named `nullable` is left alone.
+ */
+function forAjv(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(forAjv);
+  if (!isRecord(node)) return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) out[k] = forAjv(v);
+  if (typeof out.nullable === 'boolean' && out.type === undefined) delete out.nullable;
+  for (const [flag, bound] of [
+    ['exclusiveMinimum', 'minimum'],
+    ['exclusiveMaximum', 'maximum'],
+  ] as const) {
+    if (typeof out[flag] !== 'boolean') continue;
+    if (out[flag] === true && typeof out[bound] === 'number') {
+      out[flag] = out[bound];
+      delete out[bound];
+    } else {
+      delete out[flag];
+    }
+  }
+  return out;
+}
+
+function satisfiesSchema(schema: SchemaFragment, body: unknown): boolean {
+  try {
+    const translated = forAjv(schema);
+    if (!isRecord(translated)) return false;
+    return baselineValidator.compile(translated)(body) === true;
+  } catch {
+    return false; // a schema we cannot compile even after translation: validity cannot be established
+  }
+}
+
 /**
  * The JSON body a required-body operation is sent in a 404 scenario, or undefined when none
- * can be built. The baseline builder returns undefined for roots it cannot walk (oneOf,
- * array, scalar) and null (or a bare primitive) for an allOf it cannot resolve to an object;
- * none of those is a body we can send, and the emitter treats a null body as "no body",
- * which would answer 400 instead of exercising the 404.
+ * can be built. A body is unusable when:
+ *  - the baseline builder cannot produce one: it returns undefined for roots it cannot walk
+ *    (oneOf, array, scalar) and null (or a bare primitive) for an allOf it cannot resolve to
+ *    an object, and the emitter treats a null body as "no body";
+ *  - it violates the schema's structural constraints (the builder emits 'x' for strings and 1
+ *    for numbers whatever the pattern or bounds say).
+ * Either way the server would answer 400 instead of exercising the 404, so the operation is
+ * not eligible, rather than emitted as a test that fails for the wrong reason.
  */
 function buildableBody(op: OperationModel): Record<string, unknown> | undefined {
   const body = buildBaselineBody(op);
-  return typeof body === 'object' && body !== null && !Array.isArray(body) ? body : undefined;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
+  if (!op.requestBodySchema || !satisfiesSchema(op.requestBodySchema, body)) return undefined;
+  return body;
 }
 
 /**
