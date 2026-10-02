@@ -24,6 +24,7 @@ import { generateDeepMissingRequired } from '../src/analysis/deepMissingRequired
 import { generateDiscriminatorMismatch } from '../src/analysis/discriminatorMismatch.js';
 import { generateEnumViolations } from '../src/analysis/enumViolations.js';
 import { generateExplicitNullRequired } from '../src/analysis/explicitNullRequired.js';
+import { computeKindCoverage } from '../src/analysis/kindCoverage.js';
 import { generateMalformedJsonBody } from '../src/analysis/malformedJsonBody.js';
 import { generateMissingRequired } from '../src/analysis/missingRequired.js';
 import { generateMissingRequiredCombos } from '../src/analysis/missingRequiredCombos.js';
@@ -1318,27 +1319,19 @@ async function main() {
     if (isAuthDenyEligible(op, { allSecured: rvConfig.authDenyMode === 'all-secured' })) {
       applicable.add('auth-deny');
     }
-    // `present` is keyed by the normalized kind names, so the applicable set must be too:
-    // otherwise an aliased kind (body-top-type-mismatch) is always reported as missing.
-    for (const k of Array.from(applicable)) {
-      const normalized = normalizeKind(k);
-      if (normalized !== k) {
-        applicable.delete(k);
-        applicable.add(normalized);
-      }
-    }
-    // Include actually present kinds in applicability to prevent >100%
-    for (const pk of present) if (!applicable.has(pk)) applicable.add(pk);
-    const rawPct = present.size ? (present.size / allKinds.length) * 100 : 0;
-    const applicablePct = applicable.size
-      ? Math.min(100, (present.size / applicable.size) * 100)
+    // Both sides go through the same alias normalization (see kindCoverage.ts).
+    const {
+      applicable: normalizedApplicable,
+      present: normalizedPresent,
+      missingApplicable,
+    } = computeKindCoverage(applicable, present);
+    const rawPct = normalizedPresent.size ? (normalizedPresent.size / allKinds.length) * 100 : 0;
+    const applicablePct = normalizedApplicable.size
+      ? Math.min(100, (normalizedPresent.size / normalizedApplicable.size) * 100)
       : 0;
-    const missingApplicable = Array.from(applicable)
-      .filter((k) => !present.has(k))
-      .sort();
     applicabilityPerOp[op.operationId] = {
-      applicable,
-      present,
+      applicable: normalizedApplicable,
+      present: normalizedPresent,
       rawPct,
       applicablePct,
       missingApplicable,
