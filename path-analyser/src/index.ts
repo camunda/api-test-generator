@@ -737,6 +737,11 @@ export function buildRequestPlan(
           isFinal,
           successStatusByOp[opRef.operationId],
         ),
+        ...(isFinal &&
+        scenario.expectedResult?.kind === 'error' &&
+        scenario.expectedResult.detailContains
+          ? { detailContains: scenario.expectedResult.detailContains }
+          : {}),
       },
     };
     // #304: stamp 409-declaration so the emitter can flag client-minted

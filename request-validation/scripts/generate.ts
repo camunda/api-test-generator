@@ -81,6 +81,7 @@ import { normalizeKind, type ValidationScenario } from '../src/model/types.js';
 import { RUNTIME_KEY_FIXTURE_NAMES } from '../src/runtimeKeyFixtureNames.js';
 import { loadSpec } from '../src/spec/loader.js';
 import { resolveSpecSource } from '../src/spec/source.js';
+import { loadCapabilityGates } from '../src/util/capabilityGate.js';
 import { isMultipartOnly, shouldSkipForMultipart } from '../src/util/multipartSkip.js';
 
 interface CliOptions {
@@ -189,9 +190,15 @@ async function main() {
     independentAuthGateMode: 'unavailable',
   };
   let fixturesSourceDir: string | undefined;
+  let capabilityGates: Map<string, { disabledDetailContains: string }> = new Map();
   if (repoRoot) {
     configName = getActiveConfigName(repoRoot);
     rvConfig = loadRequestValidationConfig(repoRoot, configName);
+    // Field names configs/<config>/ontology/global-context-seeds.json marks
+    // `capabilityGate` — e.g. `tenantId` under single-tenant mode (#404).
+    // Shared with path-analyser's variant planner, which reads the same
+    // file through its own ABox-merge machinery.
+    capabilityGates = loadCapabilityGates(repoRoot, configName);
     // A config opts into support/global-setup.ts's runtime-key provisioning
     // by mapping any of these names in resourceFixtures/pathResourceFixtures
     // (userTaskKey/jobKey/elementInstanceKey have no create endpoint of their
@@ -456,6 +463,7 @@ async function main() {
         ...generateConstraintViolations(model.operations, {
           capPerOperation: undefined,
           onlyOperations: opts.onlyOperations,
+          capabilityGates,
         }),
       );
     }

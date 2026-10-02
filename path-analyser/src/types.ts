@@ -277,7 +277,17 @@ export interface EndpointScenario {
   // Feature coverage strategy additions
   strategy?: 'integrationPath' | 'featureCoverage' | 'optionalSubShapeVariant';
   variantKey?: string; // structured key summarizing variant dimensions
-  expectedResult?: { kind: 'nonEmpty' | 'empty' | 'error'; code?: string };
+  expectedResult?: {
+    kind: 'nonEmpty' | 'empty' | 'error';
+    code?: string;
+    /**
+     * Substring the final step's response `detail` must contain, asserted
+     * alongside the status override above. Used by the environment-gated
+     * optional-subshape variant mechanism (#404) to pin WHY the request is
+     * rejected (e.g. "multi-tenancy is disabled"), not just that it is.
+     */
+    detailContains?: string;
+  };
   coverageTags?: string[]; // dimension tags e.g. optional:FormKey, disjunction:alt-1
   // Issue #37: which optional sub-shape this variant populates and which
   // semantic-typed leaves it sets (one leaf per variant in iteration 1).
@@ -526,7 +536,11 @@ export interface RequestStep {
   bodyTemplate?: unknown; // object with ${var} placeholders
   bodyKind?: 'json' | 'multipart';
   multipartTemplate?: unknown; // object suitable for Playwright multipart option
-  expect: { status: number };
+  expect: {
+    status: number;
+    /** Substring this step's response `detail` must contain, when set. See {@link EndpointScenario.expectedResult.detailContains}. */
+    detailContains?: string;
+  };
   extract?: { fieldPath: string; bind: string; semantic?: string; note?: string }[];
   notes?: string;
   // Optional: expected slices in deployments[] for createDeployment responses, derived from domain sidecar
@@ -684,8 +698,41 @@ export interface GlobalContextSeed {
    * its own default (#342).
    */
   omitWhenUnbound?: boolean;
+  /**
+   * Declares that this field represents a server capability the target
+   * environment may have disabled (e.g. `tenantId` under single-tenant
+   * mode, #404). Consulted by generators that deliberately populate a
+   * FLAT (non-nested) optional occurrence of the field with an explicit
+   * value — the path-analyser optional-subshape variant planner, and
+   * request-validation's `constraint-violation` generator — to flip their
+   * expectation from the field's normal behaviour to the confirmed
+   * disabled-capability rejection: `400` with `detail` containing
+   * {@link CapabilityGate.disabledDetailContains}.
+   *
+   * Scope, confirmed live (see #404):
+   *  - A REQUIRED occurrence of the field name is never affected.
+   *  - A NESTED occurrence (fieldPath contains `.`, e.g. a search filter
+   *    field) behaves differently — never validated regardless of value —
+   *    and is handled separately; this gate does not apply to it.
+   *  - A FLAT optional occurrence with a non-blank value is always
+   *    rejected while the capability is off, independent of the value's
+   *    own shape (garbage length, bad pattern, or a well-formed value) —
+   *    safe to generalize structurally.
+   *  - A FLAT optional occurrence with a BLANK/whitespace-only value is
+   *    silently normalized to a default and the request proceeds to
+   *    whatever that operation's own outcome is for a capability-omitted
+   *    request — NOT a rejection, and not generalizable per-operation, so
+   *    generators exclude this case entirely rather than guess an
+   *    outcome.
+   */
+  capabilityGate?: CapabilityGate;
   /** Free-form documentation for maintainers. */
   rationale?: string;
+}
+
+export interface CapabilityGate {
+  /** Substring the rejection response's `detail` must contain. */
+  disabledDetailContains: string;
 }
 
 export interface SemanticTypeSpec {
