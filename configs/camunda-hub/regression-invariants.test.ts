@@ -514,6 +514,9 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     // Each sequence must have produced its generated test asserting 409.
     for (const seq of listed('sequences')) {
       const id = String(seq.operationId);
+      expect(documented.includes(id), `${id} has a sequence but the spec documents no 409`).toBe(
+        true,
+      );
       const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
       const at = spec.indexOf(`409 conflict - ${String(seq.name).replace(/-/g, ' ')}`);
       expect(at, `${id}: no "${String(seq.name)}" conflict test generated`).toBeGreaterThan(-1);

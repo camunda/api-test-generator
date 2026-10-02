@@ -57,9 +57,10 @@ export function loadConflictReplay(configDir: string): ConflictReplayEntry[] {
   const file = readConflictFile(configDir);
   if (!file) return [];
   const { p, raw } = file;
+  if (raw.replay === undefined) return [];
   const list = raw.replay;
   if (!Array.isArray(list)) {
-    throw new Error(`${p}: expected a JSON object with a "replay" array.`);
+    throw new Error(`${p}: "replay" must be an array.`);
   }
   const out: ConflictReplayEntry[] = [];
   list.forEach((e, i) => {
@@ -165,8 +166,14 @@ export function buildConflictSequenceScenarios(
       operations: [
         ...chain.operations.slice(0, -1),
         ...seq.before.map((id) => {
-          const { operationId, method, path: opPath } = graph.operations[id];
-          return { operationId, method, path: opPath };
+          const {
+            operationId,
+            method,
+            path: opPath,
+            eventuallyConsistent,
+            serverOverride,
+          } = graph.operations[id];
+          return { operationId, method, path: opPath, eventuallyConsistent, serverOverride };
         }),
         target,
       ],
