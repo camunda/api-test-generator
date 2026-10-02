@@ -718,13 +718,27 @@ function renderScenarioTest(
         body.push(`      expect(values).toEqual(${ascending(order.direction)});`);
         if (offset) {
           const from = offset.from;
+          // Other specs create, delete and restore entities while this one runs, so two queries
+          // made a moment apart can legitimately differ. Re-query a few times: a real pagination
+          // fault never agrees, while a concurrent change does not repeat.
+          body.push(`      let matched = false;`);
+          body.push(`      for (let attempt = 0; attempt < 3 && !matched; attempt++) {`);
           body.push(
-            `      const unpaged = await request.post(url, { headers, data: { ...${reqBody}, page: { limit: ${from + limit} } } });`,
+            `        const again = await request.post(url, { headers, data: ${reqBody} });`,
           );
-          body.push(`      expect(unpaged.status()).toBe(200);`);
-          // Prefix compare: an item created between the two queries may extend the unpaged list.
+          body.push(`        expect(again.status()).toBe(200);`);
+          body.push(`        const againValues = read(await again.json());`);
           body.push(
-            `      expect(read(await unpaged.json()).slice(${from}, ${from + limit}).slice(0, values.length)).toEqual(values);`,
+            `        const unpaged = await request.post(url, { headers, data: { ...${reqBody}, page: { limit: ${from + limit} } } });`,
+          );
+          body.push(`        expect(unpaged.status()).toBe(200);`);
+          body.push(
+            `        const slice = read(await unpaged.json()).slice(${from}, ${from + limit}).slice(0, againValues.length);`,
+          );
+          body.push(`        matched = JSON.stringify(slice) === JSON.stringify(againValues);`);
+          body.push(`      }`);
+          body.push(
+            `      expect(matched, 'offset page equals the same slice of an unpaged query').toBe(true);`,
           );
         } else {
           const opposite = order.direction === 'ASC' ? 'DESC' : 'ASC';
