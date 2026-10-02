@@ -595,4 +595,80 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       '403 tests for operations outside the derived surface',
     ).toEqual([]);
   });
+  it('every search operation sends page and sort in a success-path test, and asserts them (#623)', () => {
+    const raw: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/search-paging.json')),
+    );
+    const searches =
+      isRecord(raw) && Array.isArray(raw.searches) ? raw.searches.filter(isRecord) : [];
+    const limit = isRecord(raw) ? raw.limit : undefined;
+    const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const schemas =
+      isRecord(bundle) && isRecord(bundle.components) && isRecord(bundle.components.schemas)
+        ? bundle.components.schemas
+        : {};
+    const resolve = (node: unknown): Record<string, unknown> => {
+      let cur = node;
+      while (isRecord(cur) && typeof cur.$ref === 'string')
+        cur = schemas[cur.$ref.split('/').pop() ?? ''];
+      return isRecord(cur) ? cur : {};
+    };
+    // Derived from the spec: an operation whose JSON request body takes both `page` and `sort`.
+    const searchOps: string[] = [];
+    if (isRecord(bundle) && isRecord(bundle.paths)) {
+      for (const item of Object.values(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
+          const content =
+            isRecord(opDef.requestBody) && isRecord(opDef.requestBody.content)
+              ? opDef.requestBody.content
+              : {};
+          const json = isRecord(content['application/json']) ? content['application/json'] : {};
+          const props = resolve(json.schema).properties;
+          if (
+            isRecord(props) &&
+            'page' in props &&
+            'sort' in props &&
+            typeof opDef.operationId === 'string'
+          )
+            searchOps.push(opDef.operationId);
+        }
+      }
+    }
+    expect(
+      searchOps.length,
+      'found suspiciously few search operations - did the spec parse?',
+    ).toBeGreaterThan(10);
+    const configured = searches.map((e) => String(e.operationId));
+    expect(
+      searchOps.filter((id) => !configured.includes(id)),
+      'search operations with no paging test',
+    ).toEqual([]);
+    expect(
+      configured.filter((id) => !searchOps.includes(id)),
+      'paging entries for operations that are not searches',
+    ).toEqual([]);
+    for (const entry of searches) {
+      const id = String(entry.operationId);
+      const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
+      const at = spec.indexOf('page and sort (limit');
+      expect(at, `${id}: no paging test generated`).toBeGreaterThan(-1);
+      const test = spec.slice(at);
+      expect(test, `${id}: limit not asserted`).toContain(`toBeLessThanOrEqual(${String(limit)})`);
+      expect(test, `${id}: page not sent`).toContain(`limit: ${String(limit)}`);
+      const sort = isRecord(entry.sort) ? entry.sort : {};
+      expect(test, `${id}: sort not sent`).toContain(`field: '${String(sort.field)}'`);
+      if (entry.checkOrder === true) {
+        expect(test, `${id}: order not asserted`).toContain('[...values].sort()');
+      }
+      if (isRecord(entry.filter)) expect(test, `${id}: filter not sent`).toContain('filter:');
+    }
+    expect(
+      searches
+        .filter((e) => isRecord(e.filter))
+        .map((e) => e.operationId)
+        .sort(),
+    ).toEqual(['searchCatalogAssets', 'searchWorkspaces']);
+  });
 });

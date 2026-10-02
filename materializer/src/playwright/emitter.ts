@@ -697,6 +697,23 @@ function renderScenarioTest(
       body.push(`      throw e;`);
       body.push(`    }`);
     }
+    if (step.searchChecks && isFinal && !isErrorScenario) {
+      const { limit, order } = step.searchChecks;
+      body.push(`    {`);
+      body.push(`      const page = await ${varName}.json();`);
+      body.push(`      expect(Array.isArray(page.items)).toBe(true);`);
+      body.push(`      expect(page.items.length).toBeLessThanOrEqual(${limit});`);
+      if (order) {
+        const field = JSON.stringify(order.field);
+        body.push(
+          `      const values: string[] = page.items.map((i: Record<string, string>) => i[${field}]);`,
+        );
+        body.push(
+          `      expect(values).toEqual([...values].sort()${order.direction === 'DESC' ? '.reverse()' : ''});`,
+        );
+      }
+      body.push(`    }`);
+    }
     // Extraction. `extractInto` is the vendored helper from support/seeding.ts;
     // it skips the assignment when the value is `undefined` so seeded bindings
     // and earlier extracts in the same scenario aren't clobbered by a later step

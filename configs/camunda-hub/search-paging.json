@@ -1,0 +1,128 @@
+{
+  "$comment": "Search operations that also get a success-path test sending page.limit and a sort, asserting at most `limit` items and, when checkOrder is true, items ordered by the sort field. checkOrder is only true for timestamp fields: their ISO-8601 values order the same in JavaScript as on the server, while names depend on the database collation. searchCatalogAssets and searchWorkspaces also send a filter (name exists), since no other success test of theirs does.",
+  "limit": 2,
+  "searches": [
+    {
+      "operationId": "searchCatalogAssets",
+      "sort": {
+        "field": "created",
+        "order": "DESC"
+      },
+      "checkOrder": true,
+      "filter": {
+        "name": {
+          "$exists": true
+        }
+      }
+    },
+    {
+      "operationId": "searchCatalogAssetFileUsages",
+      "sort": {
+        "field": "name",
+        "order": "ASC"
+      },
+      "checkOrder": false
+    },
+    {
+      "operationId": "searchCatalogAssetProjectUsages",
+      "sort": {
+        "field": "name",
+        "order": "ASC"
+      },
+      "checkOrder": false
+    },
+    {
+      "operationId": "searchProjectCatalogAssetUsages",
+      "sort": {
+        "field": "name",
+        "order": "ASC"
+      },
+      "checkOrder": false
+    },
+    {
+      "operationId": "searchFiles",
+      "sort": {
+        "field": "created",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchRecentlyDeletedFiles",
+      "sort": {
+        "field": "deleted",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchRecentlyDeletedFolders",
+      "sort": {
+        "field": "deleted",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchProjects",
+      "sort": {
+        "field": "created",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchRecentlyDeletedProjects",
+      "sort": {
+        "field": "deleted",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchProjectSnapshots",
+      "sort": {
+        "field": "created",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchVersions",
+      "sort": {
+        "field": "created",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchWorkspaces",
+      "sort": {
+        "field": "created",
+        "order": "DESC"
+      },
+      "checkOrder": true,
+      "filter": {
+        "name": {
+          "$exists": true
+        }
+      }
+    },
+    {
+      "operationId": "searchRecentlyDeletedWorkspaces",
+      "sort": {
+        "field": "deleted",
+        "order": "DESC"
+      },
+      "checkOrder": true
+    },
+    {
+      "operationId": "searchMembers",
+      "sort": {
+        "field": "name",
+        "order": "ASC"
+      },
+      "checkOrder": false
+    }
+  ]
+}

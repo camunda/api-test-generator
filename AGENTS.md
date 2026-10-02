@@ -54,6 +54,7 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/camunda-hub/spec-pin.json` | Pinned `specRef` (a `camunda/camunda-hub` SHA) + `expectedSpecHash` for camunda-hub. **Local-bundle mode — see Spec pin.** |
 | `configs/camunda-hub/positive-suppress.json` | Per-op positive-suite suppressions for camunda-hub (upstream-blocked / opt-in ops), each with an optional `knownIssue { summary, url }` surfaced in the nightly |
 | `configs/camunda-hub/conflict-replay.json` | Operations whose feature scenario is followed by an identical second call that must return 409 (`{ operationId, reason, changeBody? }`), for specs that carry no `x-operation-kind` |
+| `configs/camunda-hub/search-paging.json` | Search operations that get a success-path test with `page` and `sort` (and a `filter` where listed), asserting the limit and order |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
@@ -285,6 +286,17 @@ fixtures and named invariants point directly at the broken property.
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
+
+### Search paging and sort scenarios
+
+`configs/<config>/search-paging.json` (`{ limit, searches: [{ operationId, sort: { field, order },
+checkOrder, filter? }] }`) gives each listed search operation a success-path variant,
+`page and sort (limit N, <field> <ORDER>)` in its `<operation>.variant.spec.ts`. It sends
+`page.limit`, `sort` and, when listed, a `filter`, then asserts at most `limit` items and, when
+`checkOrder` is true, items ordered by the sort field. Only timestamp fields set `checkOrder`: their
+ISO-8601 values order the same in JavaScript as on the server, while names depend on the database
+collation. The Hub invariant derives the search operations from the spec (a JSON body taking both
+`page` and `sort`), so a new search operation fails until it is listed.
 
 ### 403 (auth-deny) scenarios
 
