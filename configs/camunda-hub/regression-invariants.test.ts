@@ -652,25 +652,39 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     for (const entry of searches) {
       const id = String(entry.operationId);
       const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
-      const at = spec.indexOf('page and sort (limit');
-      expect(at, `${id}: no paging test generated`).toBeGreaterThan(-1);
-      const test = spec.slice(at);
+      // Each test is read on its own: the offset test repeats the sort fields, so a slice running
+      // into it would let it satisfy assertions meant for the limit and sort test.
+      const segment = (title: string): string => {
+        const start = spec.indexOf(title);
+        if (start < 0) return '';
+        const next = spec.indexOf('\n  test(', start + 1);
+        return spec.slice(start, next < 0 ? undefined : next);
+      };
+      const test = segment('page and sort (limit');
+      expect(test, `${id}: no paging test generated`).not.toBe('');
       expect(test, `${id}: limit not asserted`).toContain(`toBeLessThanOrEqual(${String(limit)})`);
       expect(test, `${id}: page not sent`).toContain(`limit: ${String(limit)}`);
       const sort = isRecord(entry.sort) ? entry.sort : {};
       expect(test, `${id}: sort not sent`).toContain(`field: '${String(sort.field)}'`);
       expect(test, `${id}: sort direction not sent`).toContain(`order: '${String(sort.order)}'`);
-      const offsetAt = spec.indexOf('page offset (from');
-      expect(offsetAt, `${id}: no offset test generated`).toBeGreaterThan(-1);
-      expect(spec.slice(offsetAt), `${id}: offset not sent`).toContain(
+      const offsetTest = segment('page offset (from');
+      expect(offsetTest, `${id}: no offset test generated`).not.toBe('');
+      expect(offsetTest, `${id}: offset not sent`).toContain(
         `from: ${String(isRecord(raw) ? raw.offsetFrom : '')}`,
       );
+      // The offset test compares two queries made a moment apart, so it sorts ascending
+      // (an item created in between lands after the slice) when the order is checked.
+      const offsetOrder = entry.checkOrder === true ? 'ASC' : String(sort.order);
+      expect(offsetTest, `${id}: offset sort not sent`).toContain(`order: '${offsetOrder}'`);
       if (entry.checkOrder === true) {
         expect(test, `${id}: order not asserted`).toContain('[...values].sort()');
         expect(test, `${id}: opposite order not compared`).toContain('reversedValues');
-        expect(spec.slice(offsetAt), `${id}: offset slice not compared`).toContain('unpaged');
+        expect(offsetTest, `${id}: offset slice not compared`).toContain('unpaged');
       }
-      if (isRecord(entry.filter)) expect(test, `${id}: filter not sent`).toContain('filter:');
+      if (isRecord(entry.filter)) {
+        expect(test, `${id}: filter not sent`).toContain('filter:');
+        expect(offsetTest, `${id}: filter not sent with the offset`).toContain('filter:');
+      }
     }
     expect(
       searches
