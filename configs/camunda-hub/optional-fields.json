@@ -1,5 +1,5 @@
 {
-  "$comment": "Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue. before: setup calls run between the target's own chain and the target; extractAs stores a response field under another variable so a second resource does not overwrite the first one's key; an echo value \"${xVar}\" is the value stored in that variable.",
+  "$comment": "Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue. before: setup calls run between the target's own chain and the target; extractAs stores a response field under another variable so a second resource does not overwrite the first one's key; an echo value \"${xVar}\" is the value stored in that variable. readBack: a GET run after the target whose response must echo the given values, proving the change persisted and not only that the request was echoed. A readBack echo field may be a dotted path into a wrapped resource, such as folder.parentFolderKey.",
   "variants": [
     {
       "operationId": "createWorkspace",
@@ -19,6 +19,12 @@
       },
       "echo": {
         "description": "Updated optional description."
+      },
+      "readBack": {
+        "operationId": "getWorkspace",
+        "echo": {
+          "workspace.description": "Updated optional description."
+        }
       }
     },
     {
@@ -41,6 +47,12 @@
       },
       "echo": {
         "description": "Updated version description."
+      },
+      "readBack": {
+        "operationId": "getVersion",
+        "echo": {
+          "description": "Updated version description."
+        }
       }
     },
     {
@@ -61,6 +73,12 @@
       },
       "echo": {
         "description": "Updated snapshot description."
+      },
+      "readBack": {
+        "operationId": "getProjectSnapshot",
+        "echo": {
+          "projectSnapshot.description": "Updated snapshot description."
+        }
       }
     },
     {
@@ -79,6 +97,12 @@
       },
       "echo": {
         "parentFolderKey": "${otherFolderKeyVar}"
+      },
+      "readBack": {
+        "operationId": "getFolder",
+        "echo": {
+          "folder.parentFolderKey": "${otherFolderKeyVar}"
+        }
       }
     },
     {
@@ -97,6 +121,12 @@
       },
       "echo": {
         "parentFolderKey": null
+      },
+      "readBack": {
+        "operationId": "getFolder",
+        "echo": {
+          "folder.parentFolderKey": null
+        }
       }
     },
     {

@@ -752,7 +752,11 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
         return ref ? `ctx.${ref[1]}` : JSON.stringify(value).replaceAll('"', "'");
       };
       // The formatter may write ctx.xVar or ctx['xVar'] and either quote style; compare one form.
-      const normalised = test.replaceAll('"', "'").replace(/ctx\['(\w+)'\]/g, 'ctx.$1');
+      // The formatter may write ctx.xVar or ctx['xVar'], a.b or a['b'], and either quote style.
+      const normalised = test
+        .replaceAll('"', "'")
+        .replace(/ctx\['(\w+)'\]/g, 'ctx.$1')
+        .replace(/\['(\w+)'\]/g, '.$1');
       for (const [field, value] of Object.entries(isRecord(v.body) ? v.body : {})) {
         expect(normalised, `${id}: ${field} not sent`).toContain(`${field}: ${render(value)}`);
       }
@@ -760,6 +764,25 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
         expect(normalised, `${id}: ${field} not checked in the response`).toContain(
           `echoed.${field}).toEqual(${render(value)})`,
         );
+      }
+      // A read-back runs after the update and echoes the values again: once for the update's own
+      // response and once for the read, so the change is shown to have persisted.
+      if (isRecord(v.readBack)) {
+        const readOp = String(v.readBack.operationId);
+        const stepAt = normalised.indexOf(`test.step('${readOp}'`);
+        expect(stepAt, `${id}: read-back ${readOp} step not generated`).toBeGreaterThan(-1);
+        expect(stepAt, `${id}: read-back ${readOp} runs before the update`).toBeGreaterThan(
+          normalised.indexOf(`test.step('${id}'`),
+        );
+        for (const [field, value] of Object.entries(
+          isRecord(v.readBack.echo) ? v.readBack.echo : {},
+        )) {
+          const check = `echoed.${field}).toEqual(${render(value)})`;
+          expect(
+            normalised.indexOf(check, stepAt),
+            `${id}: read-back ${readOp} does not check ${field}`,
+          ).toBeGreaterThan(-1);
+        }
       }
       // Each setup call runs, and its renamed key is stored under the chosen variable.
       for (const step of Array.isArray(v.before) ? v.before : []) {

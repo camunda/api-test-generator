@@ -289,7 +289,14 @@ export interface EndpointScenario {
   stepExtractAs?: Record<number, Record<string, string>>;
   searchPaging?: { body: Record<string, unknown>; checks: SearchPagingChecks };
   /** An optional-fields variant (see optionalFields.ts): body fields merged into the final request, and the response fields that must echo them. */
-  optionalFields?: { body: Record<string, unknown>; echo: Record<string, unknown> };
+  optionalFields?: {
+    body: Record<string, unknown>;
+    echo: Record<string, unknown>;
+    /** Index in `operations` of the target the body is merged into (it is not last when there is a read-back). */
+    targetIndex: number;
+    /** A GET after the target; the final step, whose response must echo these values. */
+    readBackEcho?: Record<string, unknown>;
+  };
   populatesSubShape?: {
     rootPath: string; // e.g. "startInstructions[]"
     leafPaths: string[]; // semantic-typed leaves to populate

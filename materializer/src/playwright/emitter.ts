@@ -697,21 +697,24 @@ function renderScenarioTest(
       body.push(`      throw e;`);
       body.push(`    }`);
     }
-    if (step.echoChecks && isFinal && !isErrorScenario) {
+    if (step.echoChecks && !isErrorScenario) {
       body.push(`    {`);
       body.push(`      const echoed = await ${varName}.json();`);
       for (const [field, value] of Object.entries(step.echoChecks)) {
         // "${xVar}" is the value stored in ctx.xVar by an earlier step.
         const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
         const expected = ref ? `ctx[${JSON.stringify(ref[1])}]` : JSON.stringify(value);
+        // A dotted field ("folder.parentFolderKey") reaches into a wrapped resource.
+        const segments = field.split('.');
+        const access = segments.map((k) => `[${JSON.stringify(k)}]`).join('');
         // undefined equals undefined, so a missing field or an unstored variable must fail first.
-        body.push(`      expect(echoed).toHaveProperty([${JSON.stringify(field)}]);`);
+        body.push(`      expect(echoed).toHaveProperty(${JSON.stringify(segments)});`);
         if (ref) {
           body.push(
             `      expect(ctx[${JSON.stringify(ref[1])}], ${JSON.stringify(`${ref[1]} was never stored`)}).toBeDefined();`,
           );
         }
-        body.push(`      expect(echoed[${JSON.stringify(field)}]).toEqual(${expected});`);
+        body.push(`      expect(echoed${access}).toEqual(${expected});`);
       }
       body.push(`    }`);
     }

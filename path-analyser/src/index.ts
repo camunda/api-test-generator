@@ -864,10 +864,12 @@ function buildRequestPlan(
     step.extract = applyStepExtractAs(step.extract, scenario.stepExtractAs, steps.length);
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
-    if (isFinal && scenario.optionalFields && isPlainRecord(step.bodyTemplate)) {
-      step.bodyTemplate = { ...step.bodyTemplate, ...scenario.optionalFields.body };
-      step.echoChecks = scenario.optionalFields.echo;
+    const optional = scenario.optionalFields;
+    if (optional && steps.length - 1 === optional.targetIndex && isPlainRecord(step.bodyTemplate)) {
+      step.bodyTemplate = { ...step.bodyTemplate, ...optional.body };
+      step.echoChecks = optional.echo;
     }
+    if (optional?.readBackEcho && isFinal) step.echoChecks = optional.readBackEcho;
     if (isFinal && scenario.searchPaging && isPlainRecord(step.bodyTemplate)) {
       step.bodyTemplate = { ...step.bodyTemplate, ...scenario.searchPaging.body };
       step.searchChecks = scenario.searchPaging.checks;

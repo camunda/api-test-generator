@@ -92,7 +92,7 @@ describe('optional-fields.json', () => {
       graph,
     );
     expect(out).toHaveLength(1);
-    expect(out[0].optionalFields).toEqual({ body: v.body, echo: v.echo });
+    expect(out[0].optionalFields).toEqual({ body: v.body, echo: v.echo, targetIndex: 1 });
     expect(out[0].operations.map((o) => o.operationId)).toEqual(['setup', 'createX']);
     expect(out[0].bindings).not.toBe(chain.bindings);
   });
@@ -163,5 +163,68 @@ describe('optional-fields.json', () => {
     expect(out.operations.map((o) => o.operationId)).toEqual(['setup', 'a', 'b', 'createX']);
     expect(out.stepBodies).toEqual({ 1: { k: 1 } });
     expect(out.stepExtractAs).toEqual({ 2: { id: 'otherVar' } });
+  });
+
+  it.each([
+    ['readBack not an object', { variants: [{ ...v, readBack: 'x' }] }],
+    ['readBack without an operation', { variants: [{ ...v, readBack: { echo: { a: 1 } } }] }],
+    [
+      'readBack with an empty echo',
+      { variants: [{ ...v, readBack: { operationId: 'g', echo: {} } }] },
+    ],
+  ])('rejects: %s', (_label, content) => {
+    expect(() => loadOptionalFields(configDir(content))).toThrow();
+  });
+
+  it('rejects a read-back that repeats the target or a setup call', () => {
+    // biome-ignore lint/plugin: the fixture only populates the field under test
+    const graph = { operations: { createX: {}, a: {}, g: {} } } as unknown as OperationGraph;
+    const echo = { d: 1 };
+    expect(() =>
+      validateOptionalFields(graph, {
+        variants: [{ ...v, readBack: { operationId: 'createX', echo } }],
+      }),
+    ).toThrow(/read-back must differ/);
+    expect(() =>
+      validateOptionalFields(graph, {
+        variants: [{ ...v, before: [{ operationId: 'a' }], readBack: { operationId: 'a', echo } }],
+      }),
+    ).toThrow(/read-back must differ/);
+    expect(() =>
+      validateOptionalFields(graph, { variants: [{ ...v, readBack: { operationId: 'g', echo } }] }),
+    ).not.toThrow();
+    expect(() =>
+      validateOptionalFields(graph, {
+        variants: [{ ...v, readBack: { operationId: 'nope', echo } }],
+      }),
+    ).toThrow(/nope/);
+  });
+
+  it('appends the read-back after the target and marks the target by position', () => {
+    const ref = (id: string) => ({ operationId: id, method: 'GET', path: `/${id}` });
+    // biome-ignore lint/plugin: the fixture only populates the fields under test
+    const graph = {
+      operations: { createX: ref('createX'), a: ref('a'), g: ref('g') },
+    } as unknown as OperationGraph;
+    const chain: EndpointScenario = {
+      id: 's',
+      operations: [ref('setup'), ref('createX')],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+    };
+    const [out] = buildOptionalFieldsScenarios(
+      chain,
+      {
+        variants: [
+          { ...v, before: [{ operationId: 'a' }], readBack: { operationId: 'g', echo: { d: 2 } } },
+        ],
+      },
+      graph,
+    );
+    expect(out.operations.map((o) => o.operationId)).toEqual(['setup', 'a', 'createX', 'g']);
+    expect(out.optionalFields).toMatchObject({ targetIndex: 2, readBackEcho: { d: 2 } });
+    const [plain] = buildOptionalFieldsScenarios(chain, { variants: [v] }, graph);
+    expect(plain.optionalFields?.targetIndex).toBe(1);
+    expect(plain.optionalFields?.readBackEcho).toBeUndefined();
   });
 });

@@ -313,6 +313,12 @@ resource does not overwrite the first one's key. In a `body` or `echo` value, th
 the value stored in `xVar` at runtime, and `null` is allowed. Hub uses it to move a folder under another
 folder and to the project root.
 
+`readBack: { operationId, echo }` adds a GET after the target whose response must echo the given values,
+which shows the change persisted rather than only that the request was echoed. An echo field may be a
+dotted path (`folder.parentFolderKey`) because the get operations wrap the resource. The read-back is the
+last step, so it must differ from the target and its setup calls. Hub uses it on the folder, workspace,
+version and snapshot updates.
+
 ### Search paging and sort scenarios
 
 `configs/<config>/search-paging.json` (`{ limit, offsetFrom, searches: [{ operationId, sort: { field, order },

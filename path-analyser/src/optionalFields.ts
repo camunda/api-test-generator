@@ -24,6 +24,8 @@ export interface OptionalFieldsEntry {
   echo: Record<string, unknown>;
   /** Setup calls between the target's own chain and the target. */
   before: OptionalFieldsSetup[];
+  /** A GET run after the target; its response must echo these values, proving the change persisted. */
+  readBack?: { operationId: string; echo: Record<string, unknown> };
 }
 
 export interface OptionalFieldsConfig {
@@ -61,6 +63,7 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
     const rec = isRecord(e) ? e : {};
     const { operationId, name, body, echo } = rec;
     const before = parseSetup(p, i, rec.before);
+    const readBack = parseReadBack(p, i, rec.readBack);
     if (
       typeof operationId !== 'string' ||
       !operationId ||
@@ -78,9 +81,25 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
     const key = `${operationId}/${name}`;
     if (seen.has(key)) throw new Error(`${p}: variants[${i}] repeats ${key}.`);
     seen.add(key);
-    return { operationId, name, body, echo, before };
+    return { operationId, name, body, echo, before, ...(readBack ? { readBack } : {}) };
   });
   return { variants };
+}
+
+function parseReadBack(p: string, i: number, raw: unknown): OptionalFieldsEntry['readBack'] {
+  if (raw === undefined) return undefined;
+  if (
+    !isRecord(raw) ||
+    typeof raw.operationId !== 'string' ||
+    !raw.operationId ||
+    !isRecord(raw.echo) ||
+    Object.keys(raw.echo).length === 0
+  ) {
+    throw new Error(
+      `${p}: variants[${i}].readBack must be { operationId, echo: {...} } with non-empty values.`,
+    );
+  }
+  return { operationId: raw.operationId, echo: raw.echo };
 }
 
 function parseSetup(p: string, i: number, raw: unknown): OptionalFieldsSetup[] {
@@ -124,8 +143,25 @@ export function validateOptionalFields(graph: OperationGraph, config: OptionalFi
       `optional-fields.json: a setup call cannot be the target operation itself: ${samePrimary.map((v) => `${v.operationId}/${v.name}`).join(', ')}.`,
     );
   }
+  // The read-back is the last step, which the planner finds by operationId, so it must not repeat
+  // an earlier operation of the variant.
+  const clash = config.variants.filter(
+    (v) =>
+      v.readBack &&
+      (v.readBack.operationId === v.operationId ||
+        v.before.some((b) => b.operationId === v.readBack?.operationId)),
+  );
+  if (clash.length) {
+    throw new Error(
+      `optional-fields.json: a read-back must differ from the target and its setup calls: ${clash.map((v) => `${v.operationId}/${v.name}`).join(', ')}.`,
+    );
+  }
   const unknown = config.variants
-    .flatMap((v) => [v.operationId, ...v.before.map((b) => b.operationId)])
+    .flatMap((v) => [
+      v.operationId,
+      ...v.before.map((b) => b.operationId),
+      ...(v.readBack ? [v.readBack.operationId] : []),
+    ])
     .filter((id) => !graph.operations[id]);
   if (unknown.length) {
     throw new Error(
@@ -166,13 +202,38 @@ export function buildOptionalFieldsScenarios(
             return { operationId, method, path: opPath, eventuallyConsistent, serverOverride };
           }),
           target,
+          ...(v.readBack
+            ? [
+                (() => {
+                  const {
+                    operationId,
+                    method,
+                    path: opPath,
+                    eventuallyConsistent,
+                    serverOverride,
+                  } = graph.operations[v.readBack.operationId];
+                  return {
+                    operationId,
+                    method,
+                    path: opPath,
+                    eventuallyConsistent,
+                    serverOverride,
+                  };
+                })(),
+              ]
+            : []),
         ],
         id: `${chain.id}:optional:${v.name}`,
         name: `optional fields - ${v.name}`,
         description: `Sends ${Object.keys(v.body).join(', ')} and expects the response to echo ${Object.keys(v.echo).join(', ')}.`,
         strategy: 'featureCoverage' as const,
         variantKey: `optional=${v.name}`,
-        optionalFields: { body: v.body, echo: v.echo },
+        optionalFields: {
+          body: v.body,
+          echo: v.echo,
+          targetIndex: first + v.before.length,
+          ...(v.readBack ? { readBackEcho: v.readBack.echo } : {}),
+        },
         bindings: { ...(chain.bindings ?? {}) },
         requestPlan: undefined,
         seedBindings: undefined,
