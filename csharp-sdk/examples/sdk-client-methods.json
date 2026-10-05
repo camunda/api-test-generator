@@ -3854,5 +3854,99 @@
       ],
       "returnType": "System.Threading.Tasks.Task"
     }
+  ],
+  "derivedTypes": [
+    {
+      "name": "Camunda.Orchestration.Sdk.AuthorizationIdBasedRequest",
+      "baseType": "Camunda.Orchestration.Sdk.AuthorizationRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.AuthorizationPropertyBasedRequest",
+      "baseType": "Camunda.Orchestration.Sdk.AuthorizationRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.CancelSdkException",
+      "baseType": "Camunda.Orchestration.Sdk.CamundaSdkException"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.CursorBackwardPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.CursorForwardPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.DecisionEvaluationById",
+      "baseType": "Camunda.Orchestration.Sdk.DecisionEvaluationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.DecisionEvaluationByKey",
+      "baseType": "Camunda.Orchestration.Sdk.DecisionEvaluationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.DirectAncestorKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.AncestorScopeInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.EventualConsistencyTimeoutException",
+      "baseType": "Camunda.Orchestration.Sdk.CamundaSdkException"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.HttpSdkException",
+      "baseType": "Camunda.Orchestration.Sdk.CamundaSdkException"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.InferredAncestorKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.AncestorScopeInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.JobResultAdHocSubProcess",
+      "baseType": "Camunda.Orchestration.Sdk.JobResult"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.JobResultUserTask",
+      "baseType": "Camunda.Orchestration.Sdk.JobResult"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.LimitPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.OffsetPagination",
+      "baseType": "Camunda.Orchestration.Sdk.SearchQueryPageRequest"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstructionById",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstructionByKey",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceCreationInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceCreationTerminateInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceCreationRuntimeInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateByIdInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateByKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.ProcessInstanceModificationTerminateInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.SourceElementIdInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.SourceElementInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.SourceElementInstanceKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.SourceElementInstruction"
+    },
+    {
+      "name": "Camunda.Orchestration.Sdk.UseSourceParentKeyInstruction",
+      "baseType": "Camunda.Orchestration.Sdk.AncestorScopeInstruction"
+    }
   ]
 }
