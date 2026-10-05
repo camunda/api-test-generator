@@ -421,19 +421,19 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('weekly Slack message', () => {
-  it('has a success-path section and an error-path section, each holding its own lines', () => {
+  it('has a positive-tests section and a negative-tests section, each holding its own lines', () => {
     const text = slackText(baseSummary(), null);
     const at = (needle: string) => text.indexOf(needle);
-    expect(at('When the request is right')).toBeGreaterThan(-1);
-    expect(at('When the request is wrong')).toBeGreaterThan(at('When the request is right'));
+    expect(at('Positive tests')).toBeGreaterThan(-1);
+    expect(at('Negative tests')).toBeGreaterThan(at('Positive tests'));
     // success lines sit before the error heading, error lines after it
     for (const ok of [
       'Success (2xx): 10 of 10',
       'Optional request fields sent in a success test: 6 of 9',
       'never check the shape',
     ]) {
-      expect(at(ok)).toBeGreaterThan(at('When the request is right'));
-      expect(at(ok)).toBeLessThan(at('When the request is wrong'));
+      expect(at(ok)).toBeGreaterThan(at('Positive tests'));
+      expect(at(ok)).toBeLessThan(at('Negative tests'));
     }
     for (const bad of [
       'Bad request (400): 4 of 5',
@@ -443,7 +443,7 @@ describe('weekly Slack message', () => {
       'Conflict (409): 1 of 3',
       'Every kind of bad request tested: 5 of 10',
     ]) {
-      expect(at(bad)).toBeGreaterThan(at('When the request is wrong'));
+      expect(at(bad)).toBeGreaterThan(at('Negative tests'));
     }
   });
 
@@ -479,22 +479,27 @@ describe('weekly Slack message', () => {
     expect(slackText(baseSummary(), baseSummary())).not.toContain('the success response: 3 (');
   });
 
-  it('keeps the roll-ups that mix both paths under their own heading, after the error section', () => {
+  it('keeps the roll-ups that mix positive and negative under their own heading, after the negative section', () => {
     // 2xx is the worst bucket here, so the "biggest gaps" line names a success-path count
     const text = slackText(
       baseSummary({ codes: { ...baseSummary().codes, '2xx': [2, 10], '409': [3, 3] } }),
       null,
     );
     const at = (needle: string) => text.indexOf(needle);
-    expect(at('*Across both paths*')).toBeGreaterThan(at('Every kind of bad request tested'));
+    expect(at('*Across positive and negative tests*')).toBeGreaterThan(
+      at('Every kind of bad request tested'),
+    );
     for (const mixed of [
       'Biggest gaps: Success (2xx), 8 untested',
       'endpoints are missing a test for a success',
     ]) {
-      expect(at(mixed)).toBeGreaterThan(at('*Across both paths*'));
+      expect(at(mixed)).toBeGreaterThan(at('*Across positive and negative tests*'));
     }
     // and nothing mixed is left between the error heading and the roll-up heading
-    const errorSection = text.slice(at('When the request is wrong'), at('*Across both paths*'));
+    const errorSection = text.slice(
+      at('Negative tests'),
+      at('*Across positive and negative tests*'),
+    );
     expect(errorSection).not.toContain('Biggest gaps');
     expect(errorSection).not.toContain('Success (2xx)');
   });

@@ -422,14 +422,14 @@ def slack(s, prev, args):
         f'*{s["fullyAsserted"]} of {s["operations"]} endpoints* have a test for every response the API spec lists'
         f'{since_last(s["fullyAsserted"], pf)}. A number in brackets is the change since the last report.',
         '',
-        ':white_check_mark: *When the request is right (success path)*',
+        ':white_check_mark: *Positive tests* (the request is right)',
         line('2xx'),
         f'• Optional request fields sent in a success test: {s["optionalFields"][0]} of {s["optionalFields"][1]}'
         f'{change(s["optionalFields"][0], opt_before)}',
         f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}'
         f'{change(len(s["shapeUnvalidated"]), shape_before)}',
         '',
-        ':no_entry: *When the request is wrong (error path)*',
+        ':no_entry: *Negative tests* (the request is wrong)',
     ]
     lines += [line(b) for b in BUCKETS if b != '2xx']
     lines += [
@@ -438,7 +438,7 @@ def slack(s, prev, args):
         '',
         # These roll up both paths (the success answer is one of the responses counted), so they are not
         # shown under either section above.
-        ':clipboard: *Across both paths*',
+        ':clipboard: *Across positive and negative tests*',
     ]
     if worst:
         lines.append('• Biggest gaps: ' + ' · '.join(f'{NAMES[b]}, {c[b][1] - c[b][0]} untested' for b in worst))
