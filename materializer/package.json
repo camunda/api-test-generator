@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-support-templates.js",
     "codegen:playwright": "npm run prebuild && tsx src/index.ts",
     "codegen:playwright:all": "npm run prebuild && tsx src/index.ts --all",
+    "js-sdk:dump-methods": "node scripts/dump-js-sdk-methods.mjs",
     "clean": "rimraf dist || rm -rf dist"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "node": ">=22.0.0"
   },
   "devDependencies": {
+    "@camunda8/sdk": "^8.8.0",
     "@types/mustache": "^4.2.6",
     "@types/node": "^24.12.2",
     "assert-json-body": "^1.7.1"
