@@ -421,6 +421,8 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
     createMissing: ['ProjectSnapshot', 'Version'],
     restore: [4, 5],
     restoreMissing: ['Version'],
+    edge: [1, 2],
+    edgeMissing: ['addTag'],
     known: ['Version'],
   },
   zeroTestOperations: [],
@@ -503,6 +505,7 @@ describe('weekly Slack message', () => {
     expect(text).toContain(
       'Lifecycle tests (delete, restore): 4 of 5 resources. Missing: Version (known, tracked)',
     );
+    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links. Missing: addTag');
     expect(at('Lifecycle tests (create, read, delete)')).toBeGreaterThan(at('Positive tests'));
     expect(at('Lifecycle tests (create, read, delete)')).toBeLessThan(at('Negative tests'));
     const full = baseSummary({
@@ -511,6 +514,8 @@ describe('weekly Slack message', () => {
         createMissing: [],
         restore: [5, 5],
         restoreMissing: [],
+        edge: [2, 2],
+        edgeMissing: [],
         known: [],
       },
     });
@@ -525,12 +530,47 @@ describe('weekly Slack message', () => {
         createMissing: [],
         restore: [4, 5],
         restoreMissing: [],
+        edge: [0, 2],
+        edgeMissing: [],
         known: [],
       },
     });
     const text = slackText(baseSummary(), prev);
     expect(text).toContain('(create, read, delete): 4 of 6 resources (+1)');
     expect(text).not.toContain('(delete, restore): 4 of 5 resources (');
+    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links (+1)');
+  });
+
+  it('links the tracking issues next to an endpoint with no test at all', () => {
+    const text = slackText(
+      baseSummary({
+        zeroTestOperations: ['a', 'b', 'c'],
+        trackedOperations: ['a', 'b'],
+        trackedUrls: {
+          a: [
+            'https://github.com/camunda/camunda-hub/issues/25907',
+            'https://github.com/camunda/camunda-hub/issues/26448',
+          ],
+        },
+      }),
+      null,
+    );
+    expect(text).toContain(
+      '`a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>)',
+    );
+    // tracked but no URL on record, and not tracked at all
+    expect(text).toContain('`b` (known, tracked), `c`');
+    expect(text).not.toContain('`c` (');
+  });
+
+  it('shows no change for a lifecycle count a previous report did not have yet', () => {
+    const { edge: _edge, edgeMissing: _edgeMissing, ...lifecycle } = baseSummary().lifecycle;
+    const text = slackText(baseSummary(), baseSummary({ lifecycle }));
+    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links. Missing: addTag');
+    // counts the older report did have still show their change
+    expect(slackText(baseSummary(), baseSummary({ lifecycle: undefined }))).toContain(
+      'Lifecycle tests (add, remove): 1 of 2 links. Missing',
+    );
   });
 
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
@@ -653,6 +693,72 @@ describe('lifecycle resources found in the spec', () => {
       const out = JSON.parse(execFileSync('python3', ['-B', '-c', code], { encoding: 'utf8' }));
       // created, restorable, restored
       expect(out).toEqual([['File', 'Tag'], ['Doc', 'File'], ['File']]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const py = (body: string, input: unknown): unknown =>
+    JSON.parse(
+      execFileSync(
+        'python3',
+        [
+          '-B',
+          '-c',
+          [
+            'import sys, json, importlib.util',
+            `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
+            'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+            'd = json.load(sys.stdin)',
+            body,
+          ].join('\n'),
+        ],
+        { input: JSON.stringify(input), encoding: 'utf8' },
+      ),
+    );
+
+  it('finds add-and-remove pairs on nested paths only', () => {
+    const pairs = py('sys.stdout.write(json.dumps(h.edge_pairs(d)))', {
+      addMember: { method: 'POST', path: '/workspaces/{workspaceKey}/members' },
+      removeMember: { method: 'DELETE', path: '/workspaces/{workspaceKey}/members/{email}' },
+      // a nested POST with nothing to remove
+      restoreFile: { method: 'POST', path: '/files/{fileKey}/restoration' },
+      // a nested item that can be read by key is a resource, not a link
+      createDocument: { method: 'POST', path: '/projects/{projectKey}/documents' },
+      getDocument: { method: 'GET', path: '/projects/{projectKey}/documents/{documentKey}' },
+      deleteDocument: { method: 'DELETE', path: '/projects/{projectKey}/documents/{documentKey}' },
+      // a top-level create/delete pair is a resource, not a link
+      createFile: { method: 'POST', path: '/files' },
+      deleteFile: { method: 'DELETE', path: '/files/{fileKey}' },
+    });
+    expect(pairs).toEqual({ addMember: 'removeMember' });
+  });
+
+  it('counts a link only when an ontology edge names both operations and its file was generated', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'edges-'));
+    try {
+      mkdirSync(join(dir, 'templates', 'EdgeLifecycle'), { recursive: true });
+      writeFileSync(join(dir, 'templates', 'EdgeLifecycle', 'Member.lifecycle.spec.ts'), '');
+      writeFileSync(join(dir, 'templates', 'EdgeLifecycle', 'WrongPair.lifecycle.spec.ts'), '');
+      const out = py(`sys.stdout.write(json.dumps(h.scan_edges(d['dir'], d['pairs'], d['cfg'])))`, {
+        dir,
+        pairs: {
+          addMember: 'removeMember',
+          addTag: 'removeTag',
+          addRole: 'removeRole',
+          addGroup: 'removeGroup',
+        },
+        cfg: {
+          edges: [
+            { name: 'Member', establishedBy: 'addMember', revokedBy: 'removeMember' },
+            // names the add operation but not the matching remove: does not count
+            { name: 'WrongPair', establishedBy: 'addRole', revokedBy: 'removeOther' },
+            // named in the ontology but no file was generated
+            { name: 'Tag', establishedBy: 'addTag', revokedBy: 'removeTag' },
+          ],
+        },
+      });
+      expect(out).toEqual(['addMember']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

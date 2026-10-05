@@ -939,6 +939,7 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
             'fullyAssertedOperations',
             'lifecycleCreateCovered',
             'lifecycleRestoreCovered',
+            'lifecycleEdgeCovered',
           ] as const
         ).map((k) => [k, floors[k]] as const),
       ].filter(([, v]) => !isFloor(v));
@@ -978,6 +979,11 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
           'resources with a delete-restore flow test',
           pair(lifecycle.restore),
           Number(floors.lifecycleRestoreCovered),
+        ],
+        [
+          'add-and-remove links with a flow test',
+          pair(lifecycle.edge),
+          Number(floors.lifecycleEdgeCovered),
         ],
       ];
       for (const [label, actual, floor] of single) {

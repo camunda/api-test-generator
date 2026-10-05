@@ -122,6 +122,34 @@ def lifecycle_resources(ops):
     return found
 
 
+def edge_pairs(ops):
+    """Links the API lets a client add and remove: a POST on a nested path (/workspaces/{key}/members) whose
+    sub-path has a DELETE but no GET (/workspaces/{key}/members/{email}). Maps the add operation to the remove one."""
+    by_path = collections.defaultdict(dict)
+    for op_id, o in ops.items():
+        by_path[o['path']][o['method']] = op_id
+    pairs = {}
+    for path, methods in by_path.items():
+        add = methods.get('POST')
+        if not add or '{' not in path:
+            continue
+        item = next((m for p, m in by_path.items()
+                     if 'DELETE' in m and re.fullmatch(re.escape(path) + r'/\{\w+\}', p)), None)
+        # An item that can also be read by key is a nested resource, counted with the resources.
+        if item and 'GET' not in item:
+            pairs[add] = item['DELETE']
+    return pairs
+
+
+def scan_edges(pw_dir, pairs, edge_cfg):
+    """Which add/remove pairs have a generated flow test: an edge in the ontology that names both operations
+    and whose EdgeLifecycle file was generated."""
+    names = {(e.get('establishedBy'), e.get('revokedBy')): e['name'] for e in edge_cfg.get('edges', [])}
+    return sorted(add for add, remove in pairs.items()
+                  if (add, remove) in names
+                  and os.path.exists(f'{pw_dir}/templates/EdgeLifecycle/{names[(add, remove)]}.lifecycle.spec.ts'))
+
+
 def scan_lifecycle(pw_dir, resources):
     """Which resources have a generated create-read-delete test and a generated delete-restore test."""
     tdir = f'{pw_dir}/templates'
@@ -315,6 +343,12 @@ def build(args):
     suppressed = set(pos_cov['explicitlySuppressedOpIds'])
     excluded = {e['operationId'] for e in rv_cfg['excludeOperations'] if not e.get('scenarioKinds')}
     tracked = suppressed | excluded  # known and tracked elsewhere; used only to annotate lists
+    supp_cfg = json.load(open(os.path.join(ROOT, 'configs', CONFIG, 'positive-suppress.json')))
+    tracked_urls = collections.defaultdict(list)
+    for e in supp_cfg.get('suppress', []) + [x for x in rv_cfg['excludeOperations'] if not x.get('scenarioKinds')]:
+        url = (e.get('knownIssue') or {}).get('url')
+        if url and url not in tracked_urls[e['operationId']]:
+            tracked_urls[e['operationId']].append(url)
     held_cells = collections.defaultdict(list)
     scoped = collections.defaultdict(list)
     for e in rv_cfg['excludeOperations']:
@@ -377,11 +411,16 @@ def build(args):
 
     resources = lifecycle_resources(ops)
     created, restorable, restored = scan_lifecycle(pw_dir, resources)
+    edges = edge_pairs(ops)
+    edge_cfg = json.load(open(os.path.join(ROOT, 'configs', CONFIG, 'ontology', 'edges.json')))
+    linked = scan_edges(pw_dir, edges, edge_cfg)
     lifecycle = {
         'create': [len(created), len(resources)],
         'createMissing': sorted(set(resources) - set(created)),
         'restore': [len(restored), len(restorable)],
         'restoreMissing': sorted(set(restorable) - set(restored)),
+        'edge': [len(linked), len(edges)],
+        'edgeMissing': sorted(set(edges) - set(linked)),
         'known': sorted(n for n, r in resources.items() if r['create'] in tracked),
     }
     # A flow test can only exist if the resource's own create operation is tested at all.
@@ -404,6 +443,7 @@ def build(args):
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
         'lifecycle': lifecycle,
         'trackedOperations': sorted(tracked),
+        'trackedUrls': {op: tracked_urls[op] for op in sorted(tracked_urls)},
         'heldCells': {b: sorted(held_cells[b]) for b in BUCKETS},
         'optionalMissing': {r['operationId']: r['optionalMissing'] for r in rows if r['optionalMissing']},
         # Suppression explains zero coverage; it is not evidence of a test, so it stays in the list.
@@ -444,10 +484,20 @@ def change(now, before):
     return f' ({"+" if now > before else "-"}{abs(now - before)})'
 
 
+def known_note(urls):
+    """' (known, tracked: camunda-hub#25907, ...)' with each issue linked, or ' (known, tracked)' when there is no URL."""
+    def label(u):
+        m = re.search(r'github\.com/[^/]+/([^/]+)/(?:issues|pull)/(\d+)', u)
+        return f'<{u}|{m.group(1)}#{m.group(2)}>' if m else f'<{u}|issue>'
+    return f' (known, tracked: {", ".join(label(u) for u in urls)})' if urls else ' (known, tracked)'
+
+
 def flow_line(kind, label, s, prev, unit='resources'):
     """'Lifecycle tests (...): 4 of 6 resources (+1). Missing: A, B (known, tracked).' or without the tail."""
     got, total = s['lifecycle'][kind]
-    before = prev['lifecycle'][kind][0] if prev and 'lifecycle' in prev else None
+    # A previous report from before this metric existed has no entry for it: no comparison, not an error.
+    old = prev.get('lifecycle', {}).get(kind) if prev else None
+    before = old[0] if old else None
     missing = s['lifecycle'][kind + 'Missing']
     known = set(s['lifecycle']['known'])
     tail = ('. Missing: ' + ', '.join(n + (' (known, tracked)' if n in known else '') for n in missing)) if missing else ''
@@ -484,6 +534,7 @@ def slack(s, prev, args):
         f'{change(len(s["shapeUnvalidated"]), shape_before)}',
         flow_line('create', 'Lifecycle tests (create, read, delete)', s, prev),
         flow_line('restore', 'Lifecycle tests (delete, restore)', s, prev),
+        flow_line('edge', 'Lifecycle tests (add, remove)', s, prev, unit='links'),
         '',
         ':no_entry: *Negative tests* (the request is wrong)',
     ]
@@ -513,8 +564,9 @@ def slack(s, prev, args):
             lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
     if s['zeroTestOperations']:
         tracked = set(s['trackedOperations'])
+        urls = s.get('trackedUrls', {})
         lines.append(':warning: Endpoints with no test at all: '
-                     + ', '.join(f'`{o}`' + (' (known, tracked)' if o in tracked else '') for o in s['zeroTestOperations']))
+                     + ', '.join(f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '') for o in s['zeroTestOperations']))
     links = []
     if args.run_url:
         links.append(f'<{args.run_url}|Full table>')
@@ -642,6 +694,7 @@ def history_row(s, args):
         'requestChecksFull': s['requestChecks'][0], 'requestChecksEndpoints': s['requestChecks'][1],
         'lifecycleCreate': s['lifecycle']['create'][0], 'lifecycleCreateTotal': s['lifecycle']['create'][1],
         'lifecycleRestore': s['lifecycle']['restore'][0], 'lifecycleRestoreTotal': s['lifecycle']['restore'][1],
+        'lifecycleEdge': s['lifecycle']['edge'][0], 'lifecycleEdgeTotal': s['lifecycle']['edge'][1],
     }
     for b in BUCKETS:
         row[f'{b}_tested'], row[f'{b}_documented'] = s['codes'][b]
