@@ -473,6 +473,32 @@ describe('weekly Slack message', () => {
     expect(text).not.toMatch(/Bad request \(400\): 4 of 5 \(/);
   });
 
+  it('shows the change in endpoints that never check the success shape, too', () => {
+    const prev = baseSummary({ shapeUnvalidated: ['a', 'b', 'c', 'd', 'e'] });
+    expect(slackText(baseSummary(), prev)).toContain('the success response: 3 (-2)');
+    expect(slackText(baseSummary(), baseSummary())).not.toContain('the success response: 3 (');
+  });
+
+  it('keeps the roll-ups that mix both paths under their own heading, after the error section', () => {
+    // 2xx is the worst bucket here, so the "biggest gaps" line names a success-path count
+    const text = slackText(
+      baseSummary({ codes: { ...baseSummary().codes, '2xx': [2, 10], '409': [3, 3] } }),
+      null,
+    );
+    const at = (needle: string) => text.indexOf(needle);
+    expect(at('*Across both paths*')).toBeGreaterThan(at('Every kind of bad request tested'));
+    for (const mixed of [
+      'Biggest gaps: Success (2xx), 8 untested',
+      'endpoints are missing a test for a success',
+    ]) {
+      expect(at(mixed)).toBeGreaterThan(at('*Across both paths*'));
+    }
+    // and nothing mixed is left between the error heading and the roll-up heading
+    const errorSection = text.slice(at('When the request is wrong'), at('*Across both paths*'));
+    expect(errorSection).not.toContain('Biggest gaps');
+    expect(errorSection).not.toContain('Success (2xx)');
+  });
+
   it('shows no change figures at all for the first report', () => {
     const text = slackText(baseSummary(), null);
     expect(text).not.toMatch(/of \d+ \([+-]\d+\)/);

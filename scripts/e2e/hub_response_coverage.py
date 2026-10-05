@@ -414,6 +414,7 @@ def slack(s, prev, args):
     worst = [b for b in ranked[:2] if c[b][0] < c[b][1]]
     opt_before = prev['optionalFields'][0] if prev and 'optionalFields' in prev else None
     req_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
+    shape_before = len(prev['shapeUnvalidated']) if prev and 'shapeUnvalidated' in prev else None
     lines = [
         ':bar_chart: *Hub API test coverage* (weekly)',
         f'{ref} · {s["operations"]} endpoints · {s["negativeTests"]} negative tests',
@@ -425,7 +426,8 @@ def slack(s, prev, args):
         line('2xx'),
         f'• Optional request fields sent in a success test: {s["optionalFields"][0]} of {s["optionalFields"][1]}'
         f'{change(s["optionalFields"][0], opt_before)}',
-        f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}',
+        f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}'
+        f'{change(len(s["shapeUnvalidated"]), shape_before)}',
         '',
         ':no_entry: *When the request is wrong (error path)*',
     ]
@@ -434,11 +436,14 @@ def slack(s, prev, args):
         f'• Every kind of bad request tested: {s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints'
         f'{change(s["requestChecks"][0], req_before)}. {request_gap_summary(s)}',
         '',
+        # These roll up both paths (the success answer is one of the responses counted), so they are not
+        # shown under either section above.
+        ':clipboard: *Across both paths*',
     ]
     if worst:
-        lines.append('*Biggest gaps:* ' + ' · '.join(f'{NAMES[b]}, {c[b][1] - c[b][0]} untested' for b in worst))
+        lines.append('• Biggest gaps: ' + ' · '.join(f'{NAMES[b]}, {c[b][1] - c[b][0]} untested' for b in worst))
     lines += [
-        f'{s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
+        f'• {s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
         f'(403 is tracked separately; 500 errors are not counted).',
     ]
     if prev:
