@@ -8,6 +8,7 @@ const WRITE_METHODS = new Set(['post', 'patch', 'put']);
 
 interface Candidate {
   field: string;
+  minLength?: number;
   maxLength?: number;
 }
 
@@ -89,10 +90,14 @@ export function findWriteOperations(spec: unknown): SpecWriteOperation[] {
           s.enum !== undefined
         )
           continue;
-        if (typeof s.minLength === 'number' && s.minLength > 40) continue;
+        const minLength = typeof s.minLength === 'number' ? s.minLength : undefined;
+        const maxLength = typeof s.maxLength === 'number' ? s.maxLength : undefined;
+        // No string satisfies a minimum above the maximum (the limits of every allOf branch apply).
+        if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) continue;
         candidates.push({
           field,
-          ...(typeof s.maxLength === 'number' ? { maxLength: s.maxLength } : {}),
+          ...(minLength !== undefined ? { minLength } : {}),
+          ...(maxLength !== undefined ? { maxLength } : {}),
         });
       }
       if (candidates.length === 0) continue;
@@ -118,12 +123,13 @@ export function findWriteOperations(spec: unknown): SpecWriteOperation[] {
   return out;
 }
 
-/** A value that fits the field: text naming the field, cut to its maximum length. */
+/** A value that fits the field: text naming the field, cut to its maximum length and padded to its minimum. */
 function valueFor(c: Candidate): string {
-  const text = `Optional ${c.field} sent by the generated suite.`;
-  return c.maxLength !== undefined && c.maxLength < text.length
-    ? text.slice(0, Math.max(1, c.maxLength))
-    : text;
+  let text = `Optional ${c.field} sent by the generated suite.`;
+  if (c.maxLength !== undefined && text.length > c.maxLength) text = text.slice(0, c.maxLength);
+  // Pad up to the minimum; the minimum never exceeds the maximum (see findWriteOperations).
+  if (c.minLength !== undefined && text.length < c.minLength) text = text.padEnd(c.minLength, 'x');
+  return text;
 }
 
 /**
@@ -162,6 +168,7 @@ export function deriveOptionalFields(
     config.variants.filter((v) => v.name === DERIVED_VARIANT_NAME).map((v) => v.operationId),
   );
   const derived: OptionalFieldsEntry[] = [];
+  const unreadable: string[] = [];
   for (const op of found) {
     if (excludedOps.has(op.operationId) || own.has(op.operationId)) continue;
     const fields = op.candidates.filter((c) => !excludedFields.has(`${op.operationId}.${c.field}`));
@@ -172,6 +179,8 @@ export function deriveOptionalFields(
     for (const c of fields) {
       const where = op.readBack?.locations[c.field];
       if (where) readBackEcho[where] = body[c.field];
+      // An update that is not read back would claim persistence coverage it does not have.
+      else if (op.method !== 'post') unreadable.push(`${op.operationId}.${c.field}`);
     }
     derived.push({
       operationId: op.operationId,
@@ -184,6 +193,11 @@ export function deriveOptionalFields(
         ? { readBack: { operationId: op.readBack.operationId, echo: readBackEcho } }
         : {}),
     });
+  }
+  if (unreadable.length) {
+    throw new Error(
+      `optional-fields.json: no GET on the same path returns these updated fields under a unique name, so they cannot be read back: ${unreadable.join(', ')}. Exclude each with a reason, or add the GET.`,
+    );
   }
   return { ...config, variants: [...config.variants, ...derived] };
 }

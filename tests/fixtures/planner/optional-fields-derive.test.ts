@@ -201,3 +201,109 @@ describe('auto and exclude in optional-fields.json', () => {
     expect(() => loadOptionalFields(configDir(content))).toThrow();
   });
 });
+
+describe('values that fit every length limit', () => {
+  const specFor = (field: unknown): unknown => ({
+    paths: {
+      '/x': {
+        post: {
+          operationId: 'makeX',
+          requestBody: body({ f: field }),
+          responses: ok({ f: str() }),
+        },
+      },
+    },
+    components: {
+      schemas: { Short: { type: 'string', maxLength: 8 }, Long: { type: 'string', minLength: 3 } },
+    },
+  });
+  const valueOf = (field: unknown): string => {
+    const [v] = deriveOptionalFields(base, specFor(field)).variants;
+    return String(v.body.f);
+  };
+
+  it('intersects allOf limits: the smallest maximum and the largest minimum win', () => {
+    const [op] = findWriteOperations(
+      specFor({
+        allOf: [
+          { type: 'string', maxLength: 100, minLength: 2 },
+          { $ref: '#/components/schemas/Short' },
+          { $ref: '#/components/schemas/Long' },
+        ],
+      }),
+    );
+    expect(op.candidates).toEqual([{ field: 'f', minLength: 3, maxLength: 8 }]);
+    expect(
+      valueOf({
+        allOf: [{ type: 'string', maxLength: 100 }, { $ref: '#/components/schemas/Short' }],
+      }),
+    ).toHaveLength(8);
+  });
+
+  it('pads up to the minimum length', () => {
+    expect(valueOf({ type: 'string', minLength: 80 })).toHaveLength(80);
+    expect(valueOf({ type: 'string', minLength: 200, maxLength: 255 })).toHaveLength(200);
+  });
+
+  it('allows an empty value when the maximum is zero', () => {
+    expect(valueOf({ type: 'string', maxLength: 0 })).toBe('');
+  });
+
+  it('leaves out a field whose minimum is above its maximum', () => {
+    expect(findWriteOperations(specFor({ type: 'string', minLength: 10, maxLength: 5 }))).toEqual(
+      [],
+    );
+  });
+});
+
+describe('an update must be readable back', () => {
+  const update = (getProps: Record<string, unknown> | null) => ({
+    paths: {
+      '/y/{key}': {
+        ...(getProps ? { get: { operationId: 'getY', responses: ok(getProps) } } : {}),
+        patch: {
+          operationId: 'updateY',
+          requestBody: body({ note: str() }),
+          responses: ok({ note: str() }),
+        },
+      },
+    },
+  });
+
+  it('derives with a read-back when the GET returns the field', () => {
+    const [v] = deriveOptionalFields(base, update({ note: str() })).variants;
+    expect(v.readBack?.operationId).toBe('getY');
+  });
+
+  it('fails, naming the field, when there is no GET on the path', () => {
+    expect(() => deriveOptionalFields(base, update(null))).toThrow(/updateY\.note/);
+  });
+
+  it('fails when the GET does not return the field, or returns it under two wrappers', () => {
+    expect(() => deriveOptionalFields(base, update({ other: str() }))).toThrow(/updateY\.note/);
+    const twice = {
+      a: { type: 'object', properties: { note: str() } },
+      b: { type: 'object', properties: { note: str() } },
+    };
+    expect(() => deriveOptionalFields(base, update(twice))).toThrow(/updateY\.note/);
+  });
+
+  it('passes once the field or the operation is excluded', () => {
+    expect(
+      deriveOptionalFields(
+        { ...base, exclude: [{ operationId: 'updateY', field: 'note', reason: 'r' }] },
+        update(null),
+      ).variants,
+    ).toEqual([]);
+    expect(
+      deriveOptionalFields(
+        { ...base, exclude: [{ operationId: 'updateY', reason: 'r' }] },
+        update(null),
+      ).variants,
+    ).toEqual([]);
+  });
+
+  it('needs no read-back for a create', () => {
+    expect(() => deriveOptionalFields(base, spec)).not.toThrow();
+  });
+});

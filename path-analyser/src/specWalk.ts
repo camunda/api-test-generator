@@ -53,8 +53,8 @@ export function follow(spec: Record<string, unknown>, node: unknown): Record<str
 
 /**
  * A schema with its `$ref`s followed and its `allOf` branches merged in: the union of their
- * `properties` and `required`, and the first `enum`, `items`, `type`, `format`, `pattern` and
- * length limits found. Enough to read which properties a request
+ * `properties` and `required`, the first `enum`, `items`, `type`, `format` and `pattern` found, and
+ * the tightest `minLength` and `maxLength` (the largest minimum and the smallest maximum). Enough to read which properties a request
  * body takes and what a sort item's `field` may be, however the spec composes them.
  */
 export function flatten(
@@ -76,8 +76,21 @@ export function flatten(
       if (merged.enum === undefined && part.enum !== undefined) merged.enum = part.enum;
       if (merged.items === undefined && part.items !== undefined) merged.items = part.items;
       // Scalar facts a branch contributes when the node itself does not state them.
-      for (const key of ['type', 'format', 'pattern', 'minLength', 'maxLength']) {
+      for (const key of ['type', 'format', 'pattern']) {
         if (merged[key] === undefined && part[key] !== undefined) merged[key] = part[key];
+      }
+      // allOf is an intersection, so the tightest length limits win, not the first ones found.
+      if (typeof part.maxLength === 'number') {
+        merged.maxLength =
+          typeof merged.maxLength === 'number'
+            ? Math.min(merged.maxLength, part.maxLength)
+            : part.maxLength;
+      }
+      if (typeof part.minLength === 'number') {
+        merged.minLength =
+          typeof merged.minLength === 'number'
+            ? Math.max(merged.minLength, part.minLength)
+            : part.minLength;
       }
       if (Array.isArray(part.required)) required.push(...part.required);
     }
