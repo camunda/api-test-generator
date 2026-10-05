@@ -109,7 +109,11 @@ function loadCsharpMap(repoRoot: string): CsharpOperationMap {
 
 function loadCsharpDiscriminators(repoRoot: string) {
   const specPath = path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json');
-  if (!fsSync.existsSync(specPath)) return {};
+  if (!fsSync.existsSync(specPath)) {
+    throw new Error(
+      `C# SDK discriminator spec is missing at ${specPath}; run npm run fetch-spec:ref first.`,
+    );
+  }
   const bundle: unknown = JSON.parse(fsSync.readFileSync(specPath, 'utf-8'));
   return buildCsharpDiscriminatorTable(bundle);
 }
@@ -433,14 +437,16 @@ interface TargetRunEnv {
  * The Playwright emitter is already registered at module level (it has no
  * file-system dependencies).
  */
-function registerSdkEmitters(repoRoot: string): void {
+function registerSdkEmitters(repoRoot: string, includeCsharp: boolean): void {
   registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
   registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
-  registerEmitter(
-    createCsharpEmitter(loadCsharpMap(repoRoot), {
-      discriminators: loadCsharpDiscriminators(repoRoot),
-    }),
-  );
+  if (includeCsharp) {
+    registerEmitter(
+      createCsharpEmitter(loadCsharpMap(repoRoot), {
+        discriminators: loadCsharpDiscriminators(repoRoot),
+      }),
+    );
+  }
 }
 
 /**
@@ -462,7 +468,6 @@ function printTargetsJson(): void {
 async function run() {
   const { target, positional, help, allTargets, listTargets } = parseCliArgs(process.argv.slice(2));
   const repoRoot = findRepoRoot(process.cwd());
-  registerSdkEmitters(repoRoot);
 
   // `list-targets` is a pure registry projection — it needs neither a
   // positional nor the active config, so handle it before any other gate.
@@ -480,6 +485,7 @@ async function run() {
     );
     process.exit(1);
   }
+  registerSdkEmitters(repoRoot, target === 'csharp-sdk' || allTargets);
 
   // loadGraph / loadGlobalContextSeeds were carved out of the original
   // path-analyser CLI and still take `baseDir = <repoRoot>/path-analyser`
