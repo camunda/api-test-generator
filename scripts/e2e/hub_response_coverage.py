@@ -365,15 +365,6 @@ NAMES = {
 }
 
 
-def since_last(now, before, noun='endpoints'):
-    if before is None:
-        return ''
-    d = now - before
-    if d == 0:
-        return ' (same as last report)'
-    return f' ({"up" if d > 0 else "down"} {abs(d)} since last report)'
-
-
 def meter(got, doc, width=10):
     filled = width if not doc else round(width * got / doc)
     return '▰' * filled + '▱' * (width - filled)
@@ -420,7 +411,7 @@ def slack(s, prev, args):
         f'{ref} · {s["operations"]} endpoints · {s["negativeTests"]} negative tests',
         '',
         f'*{s["fullyAsserted"]} of {s["operations"]} endpoints* have a test for every response the API spec lists'
-        f'{since_last(s["fullyAsserted"], pf)}. A number in brackets is the change since the last report.',
+        f'{change(s["fullyAsserted"], pf)}. A number in brackets is the change since the last report.',
         '',
         ':white_check_mark: *Positive tests* (the request is right)',
         line('2xx'),
@@ -514,8 +505,8 @@ AREA_INDEX_MARKER = '<!-- AREA_INDEX -->'
 def issue_body(s, rows, args):
     """Body of the rolling tracking issue, or '' when nothing is missing (the workflow then closes it).
 
-    The endpoint tables live in the per-area issues; this one is the index. The area-issues script
-    replaces AREA_INDEX_MARKER with one line per area (a link to its issue)."""
+    The endpoint tables live in the per-area issues; this one is the index. The body is rendered by
+    hub-coverage-summary-issue.sh, which replaces AREA_INDEX_MARKER with the area-index.md lines that hub-coverage-area-issues.sh writes (one per area, a link to its issue)."""
     gaps = gap_rows(rows)
     if not gaps:
         return ''

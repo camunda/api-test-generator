@@ -473,6 +473,18 @@ describe('weekly Slack message', () => {
     expect(text).not.toMatch(/Bad request \(400\): 4 of 5 \(/);
   });
 
+  it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
+    const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
+    expect(up).toContain(
+      '*8 of 10 endpoints* have a test for every response the API spec lists (+1).',
+    );
+    const down = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 9 }));
+    expect(down).toContain('lists (-1).');
+    const same = slackText(baseSummary(), baseSummary());
+    expect(same).toContain('the API spec lists. A number in brackets');
+    expect(same).not.toContain('since last report');
+  });
+
   it('shows the change in endpoints that never check the success shape, too', () => {
     const prev = baseSummary({ shapeUnvalidated: ['a', 'b', 'c', 'd', 'e'] });
     expect(slackText(baseSummary(), prev)).toContain('the success response: 3 (-2)');
