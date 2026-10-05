@@ -1077,13 +1077,29 @@ function setLeafPlaceholder(root: Record<string, unknown>, path: string, value: 
   }
 }
 
-function aliasProducerExtractsToPlaceholders(
+export function aliasProducerExtractsToPlaceholders(
   scenario: EndpointScenario,
   steps: RequestStep[],
   graph: OperationGraph,
 ): void {
-  if (steps.length < 2) return;
-  const finalStep = steps[steps.length - 1];
+  // The last step consumes the chain; so does the logical target of an optional-fields variant
+  // when a read-back follows it.
+  const targetIndex = scenario.optionalFields?.targetIndex;
+  const consumers = new Set([steps.length - 1]);
+  if (targetIndex !== undefined && targetIndex < steps.length) consumers.add(targetIndex);
+  for (const consumer of [...consumers].sort((a, b) => a - b)) {
+    aliasForConsumer(scenario, steps, graph, consumer);
+  }
+}
+
+function aliasForConsumer(
+  scenario: EndpointScenario,
+  steps: RequestStep[],
+  graph: OperationGraph,
+  consumerIndex: number,
+): void {
+  if (consumerIndex < 1) return;
+  const finalStep = steps[consumerIndex];
   const placeholders = [...finalStep.pathTemplate.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
   if (placeholders.length === 0) return;
   const finalNode = graph.operations[finalStep.operationId];
@@ -1098,7 +1114,7 @@ function aliasProducerExtractsToPlaceholders(
     // Walk earlier steps to find an extract bound under the semanticType-
     // derived var. Prefer the most recent such extract so the alias points
     // at the freshest production in the chain.
-    for (let i = steps.length - 2; i >= 0; i--) {
+    for (let i = consumerIndex - 1; i >= 0; i--) {
       const earlier = steps[i];
       const sourceExtract = (earlier.extract ?? []).find((e) => e.bind === semanticVar);
       if (!sourceExtract) continue;
