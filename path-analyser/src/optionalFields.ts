@@ -114,6 +114,16 @@ function parseSetup(p: string, i: number, raw: unknown): OptionalFieldsSetup[] {
 
 /** Fails generation for an entry naming an operation the spec does not have. */
 export function validateOptionalFields(graph: OperationGraph, config: OptionalFieldsConfig): void {
+  // The planner finds the final step by its operationId, so a setup call to the target itself would
+  // be taken for the final step too and receive the optional fields.
+  const samePrimary = config.variants.filter((v) =>
+    v.before.some((b) => b.operationId === v.operationId),
+  );
+  if (samePrimary.length) {
+    throw new Error(
+      `optional-fields.json: a setup call cannot be the target operation itself: ${samePrimary.map((v) => `${v.operationId}/${v.name}`).join(', ')}.`,
+    );
+  }
   const unknown = config.variants
     .flatMap((v) => [v.operationId, ...v.before.map((b) => b.operationId)])
     .filter((id) => !graph.operations[id]);

@@ -207,6 +207,13 @@ describe('conflict-replay.json sequences', () => {
     expect(applyStepExtractAs(undefined, renames, 2)).toBeUndefined();
   });
 
+  it('rejects a setup call to the target operation itself', () => {
+    const g = graphOf(node('restore'));
+    expect(() => validateConflictSequences(g, [{ ...seq, before: ['restore'] }])).toThrow(
+      /target operation itself/,
+    );
+  });
+
   it('fails for an operation the spec does not have, whether target or setup', () => {
     const g = graphOf(node('restore'), node('delete'));
     expect(() => validateConflictSequences(g, [seq])).not.toThrow();

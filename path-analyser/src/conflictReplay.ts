@@ -187,6 +187,14 @@ export function validateConflictSequences(
   graph: OperationGraph,
   sequences: ConflictSequenceEntry[],
 ): void {
+  // The planner finds the final step by its operationId, so a setup call to the target itself would
+  // be taken for the final step too.
+  const same = sequences.filter((s) => s.before.includes(s.operationId));
+  if (same.length) {
+    throw new Error(
+      `conflict-replay.json: a setup call cannot be the target operation itself: ${same.map((s) => `${s.operationId}/${s.name}`).join(', ')}.`,
+    );
+  }
   const unknown = new Set<string>();
   for (const seq of sequences) {
     for (const id of [seq.operationId, ...seq.before]) {

@@ -115,6 +115,14 @@ describe('optional-fields.json', () => {
     ]);
   });
 
+  it('rejects a setup call to the target operation itself', () => {
+    // biome-ignore lint/plugin: the fixture only populates the field under test
+    const graph = { operations: { createX: {} } } as unknown as OperationGraph;
+    expect(() =>
+      validateOptionalFields(graph, { variants: [{ ...v, before: [{ operationId: 'createX' }] }] }),
+    ).toThrow(/target operation itself/);
+  });
+
   it('validates setup operations against the spec too', () => {
     // biome-ignore lint/plugin: the fixture only populates the field under test
     const graph = { operations: { createX: {}, a: {} } } as unknown as OperationGraph;

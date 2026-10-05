@@ -704,6 +704,13 @@ function renderScenarioTest(
         // "${xVar}" is the value stored in ctx.xVar by an earlier step.
         const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
         const expected = ref ? `ctx[${JSON.stringify(ref[1])}]` : JSON.stringify(value);
+        // undefined equals undefined, so a missing field or an unstored variable must fail first.
+        body.push(`      expect(echoed).toHaveProperty([${JSON.stringify(field)}]);`);
+        if (ref) {
+          body.push(
+            `      expect(ctx[${JSON.stringify(ref[1])}], ${JSON.stringify(`${ref[1]} was never stored`)}).toBeDefined();`,
+          );
+        }
         body.push(`      expect(echoed[${JSON.stringify(field)}]).toEqual(${expected});`);
       }
       body.push(`    }`);
