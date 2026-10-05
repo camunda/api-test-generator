@@ -1,35 +1,17 @@
 {
-  "$comment": "Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue. before: setup calls run between the target's own chain and the target; extractAs stores a response field under another variable so a second resource does not overwrite the first one's key; an echo value \"${xVar}\" is the value stored in that variable. readBack: a GET run after the target whose response must echo the given values, proving the change persisted and not only that the request was echoed. A readBack echo field may be a dotted path into a wrapped resource, such as folder.parentFolderKey.",
+  "$comment": "With auto set, every create/update operation in the spec that has optional plain-string request fields its success response echoes under the same name gets an 'optional strings' variant: it sends a value for each such field and asserts the response echoes it, and for PATCH/PUT also reads the resource back through the GET on the same path (a field inside a wrapper object is addressed as wrapper.field, such as folder.name). A new create or update operation is covered by the next generation with no edit here. 'variants' holds what the rule cannot derive: explicit variants (a variant of an operation named 'optional strings' replaces the derived one), and 'exclude' lists operations or single fields that get no derived variant, each with the reason. Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue. before: setup calls run between the target's own chain and the target; extractAs stores a response field under another variable so a second resource does not overwrite the first one's key; an echo value \"${xVar}\" is the value stored in that variable. readBack: a GET run after the target whose response must echo the given values, proving the change persisted and not only that the request was echoed. A readBack echo field may be a dotted path into a wrapped resource, such as folder.parentFolderKey.",
+  "auto": true,
+  "exclude": [
+    {
+      "operationId": "updateFile",
+      "field": "content",
+      "reason": "Hub validates a file's content against its type, so an arbitrary string is rejected with 400."
+    }
+  ],
   "variants": [
     {
-      "operationId": "createWorkspace",
-      "name": "description",
-      "body": {
-        "description": "Created with an optional description."
-      },
-      "echo": {
-        "description": "Created with an optional description."
-      }
-    },
-    {
-      "operationId": "updateWorkspace",
-      "name": "description",
-      "body": {
-        "description": "Updated optional description."
-      },
-      "echo": {
-        "description": "Updated optional description."
-      },
-      "readBack": {
-        "operationId": "getWorkspace",
-        "echo": {
-          "workspace.description": "Updated optional description."
-        }
-      }
-    },
-    {
       "operationId": "createVersion",
-      "name": "description",
+      "name": "optional strings",
       "body": {
         "description": "Version with an optional description.",
         "organizationPublic": false
@@ -37,48 +19,6 @@
       "echo": {
         "description": "Version with an optional description.",
         "organizationPublic": false
-      }
-    },
-    {
-      "operationId": "updateVersion",
-      "name": "description",
-      "body": {
-        "description": "Updated version description."
-      },
-      "echo": {
-        "description": "Updated version description."
-      },
-      "readBack": {
-        "operationId": "getVersion",
-        "echo": {
-          "description": "Updated version description."
-        }
-      }
-    },
-    {
-      "operationId": "createProjectSnapshot",
-      "name": "description",
-      "body": {
-        "description": "Snapshot with an optional description."
-      },
-      "echo": {
-        "description": "Snapshot with an optional description."
-      }
-    },
-    {
-      "operationId": "updateProjectSnapshot",
-      "name": "description",
-      "body": {
-        "description": "Updated snapshot description."
-      },
-      "echo": {
-        "description": "Updated snapshot description."
-      },
-      "readBack": {
-        "operationId": "getProjectSnapshot",
-        "echo": {
-          "projectSnapshot.description": "Updated snapshot description."
-        }
       }
     },
     {
@@ -127,16 +67,6 @@
         "echo": {
           "folder.parentFolderKey": null
         }
-      }
-    },
-    {
-      "operationId": "submitProjectSnapshotReview",
-      "name": "comment",
-      "body": {
-        "comment": "Reviewed by the generated suite."
-      },
-      "echo": {
-        "comment": "Reviewed by the generated suite."
       }
     },
     {

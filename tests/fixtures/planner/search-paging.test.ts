@@ -7,10 +7,10 @@ import {
   deriveSearchPaging,
   findSearchOperations,
   loadSearchPaging,
-  loadSpecDocument,
   type SearchPagingEntry,
   validateSearchPaging,
 } from '../../../path-analyser/src/searchPaging.ts';
+import { loadSpecDocument } from '../../../path-analyser/src/specWalk.ts';
 import type { EndpointScenario, OperationGraph } from '../../../path-analyser/src/types.ts';
 
 const dirs: string[] = [];
