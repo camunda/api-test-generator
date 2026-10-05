@@ -33,7 +33,7 @@ Positive tests (the request is right)
 • Optional request fields sent in a success test: 63 of 68
 • Endpoints that never check the shape of the success response: 0
 • Resources with a create, read and delete flow test: 4 of 6. Missing: ProjectSnapshot, Version
-• Resources with a delete and restore flow test: 4 of 6. Missing: ProjectSnapshot, Version
+• Resources with a delete and restore flow test: 4 of 4
 
 Negative tests (the request is wrong)
 • Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
