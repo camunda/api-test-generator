@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -415,6 +416,13 @@ const baseSummary = (over: Record<string, unknown> = {}) => ({
   requestCheckGaps: {},
   requestNoTests: [],
   shapeUnvalidated: ['a', 'b', 'c'],
+  lifecycle: {
+    create: [4, 6],
+    createMissing: ['ProjectSnapshot', 'Version'],
+    restore: [4, 5],
+    restoreMissing: ['Version'],
+    known: ['Version'],
+  },
   zeroTestOperations: [],
   trackedOperations: [],
   ...over,
@@ -486,6 +494,45 @@ describe('weekly Slack message', () => {
     expect(slackText(baseSummary(), baseSummary())).not.toMatch(/untested \(/);
   });
 
+  it('lists the lifecycle tests per resource under the positive tests, naming what is missing', () => {
+    const text = slackText(baseSummary(), null);
+    const at = (needle: string) => text.indexOf(needle);
+    expect(text).toContain(
+      'Lifecycle tests (create, read, delete): 4 of 6 resources. Missing: ProjectSnapshot, Version (known, tracked)',
+    );
+    expect(text).toContain(
+      'Lifecycle tests (delete, restore): 4 of 5 resources. Missing: Version (known, tracked)',
+    );
+    expect(at('Lifecycle tests (create, read, delete)')).toBeGreaterThan(at('Positive tests'));
+    expect(at('Lifecycle tests (create, read, delete)')).toBeLessThan(at('Negative tests'));
+    const full = baseSummary({
+      lifecycle: {
+        create: [6, 6],
+        createMissing: [],
+        restore: [5, 5],
+        restoreMissing: [],
+        known: [],
+      },
+    });
+    expect(slackText(full, null)).toContain('(create, read, delete): 6 of 6 resources\n');
+    expect(slackText(full, null)).not.toContain('Missing:');
+  });
+
+  it('shows the change in resources with a lifecycle test', () => {
+    const prev = baseSummary({
+      lifecycle: {
+        create: [3, 6],
+        createMissing: [],
+        restore: [4, 5],
+        restoreMissing: [],
+        known: [],
+      },
+    });
+    const text = slackText(baseSummary(), prev);
+    expect(text).toContain('(create, read, delete): 4 of 6 resources (+1)');
+    expect(text).not.toContain('(delete, restore): 4 of 5 resources (');
+  });
+
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
     const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
     expect(up).toContain(
@@ -539,5 +586,75 @@ describe('weekly Slack message', () => {
     expect(text).toContain('A number in brackets is the change since the last report.');
     expect(text).toContain('<http://run|Full table>');
     expect(text).toContain('<http://track|Tracking epic>');
+  });
+});
+
+describe('lifecycle resources found in the spec', () => {
+  const resources = (ops: Record<string, { method: string; path: string }>) => {
+    const code = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
+      'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+      'sys.stdout.write(json.dumps(h.lifecycle_resources(json.load(sys.stdin))))',
+    ].join('\n');
+    return JSON.parse(
+      execFileSync('python3', ['-B', '-c', code], { input: JSON.stringify(ops), encoding: 'utf8' }),
+    );
+  };
+
+  it('needs create, read-by-key and delete, and marks a restore only when a delete is soft', () => {
+    const found = resources({
+      createFile: { method: 'POST', path: '/files' },
+      getFile: { method: 'GET', path: '/files/{fileKey}' },
+      deleteFile: { method: 'DELETE', path: '/files/{fileKey}' },
+      restoreFile: { method: 'POST', path: '/files/{fileKey}/restoration' },
+      searchRecentlyDeletedFiles: { method: 'POST', path: '/files/recently-deleted/search' },
+      // a restoration endpoint with no recently-deleted search restores a state, not a deleted entity
+      createVersion: { method: 'POST', path: '/versions' },
+      getVersion: { method: 'GET', path: '/versions/{versionKey}' },
+      deleteVersion: { method: 'DELETE', path: '/versions/{versionKey}' },
+      restoreVersion: { method: 'POST', path: '/versions/{versionKey}/restoration' },
+      // a resource scoped by a parent key is still a resource
+      createDocument: { method: 'POST', path: '/projects/{projectKey}/documents' },
+      getDocument: { method: 'GET', path: '/projects/{projectKey}/documents/{documentKey}' },
+      deleteDocument: { method: 'DELETE', path: '/projects/{projectKey}/documents/{documentKey}' },
+      createTag: { method: 'POST', path: '/tags' },
+      getTag: { method: 'GET', path: '/tags/{tagKey}' },
+      deleteTag: { method: 'DELETE', path: '/tags/{tagKey}' },
+      // no read by key: not a resource
+      createClusterRegistration: { method: 'POST', path: '/clusters' },
+      removeClusterRegistration: { method: 'DELETE', path: '/clusters/{clusterId}' },
+      // a search is not a create
+      searchThings: { method: 'POST', path: '/things/search' },
+    });
+    expect(found).toEqual({
+      File: { create: 'createFile', restores: true },
+      Version: { create: 'createVersion', restores: false },
+      Document: { create: 'createDocument', restores: false },
+      Tag: { create: 'createTag', restores: false },
+    });
+  });
+
+  it('counts a resource only when its own lifecycle test file was generated', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lifecycle-'));
+    try {
+      for (const f of ['EntityLifecycle/File', 'EntityLifecycle/Tag', 'RestoreLifecycle/File']) {
+        mkdirSync(join(dir, 'templates', f.split('/')[0]), { recursive: true });
+        writeFileSync(join(dir, 'templates', `${f}.lifecycle.spec.ts`), '');
+      }
+      const code = [
+        'import sys, json, importlib.util',
+        `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
+        'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+        "res = {'File': {'create': 'createFile', 'restores': True}, 'Tag': {'create': 'createTag', 'restores': False},",
+        "       'Doc': {'create': 'createDoc', 'restores': True}}",
+        `sys.stdout.write(json.dumps(h.scan_lifecycle(${JSON.stringify(dir)}, res)))`,
+      ].join('\n');
+      const out = JSON.parse(execFileSync('python3', ['-B', '-c', code], { encoding: 'utf8' }));
+      // created, restorable, restored
+      expect(out).toEqual([['File', 'Tag'], ['Doc', 'File'], ['File']]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

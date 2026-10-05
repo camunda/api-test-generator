@@ -32,6 +32,8 @@ Positive tests (the request is right)
 • Success (2xx): 64 of 66
 • Optional request fields sent in a success test: 63 of 68
 • Endpoints that never check the shape of the success response: 0
+• Lifecycle tests (create, read, delete): 4 of 6 resources. Missing: ProjectSnapshot, Version
+• Lifecycle tests (delete, restore): 4 of 4 resources
 
 Negative tests (the request is wrong)
 • Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
@@ -44,6 +46,12 @@ Across positive and negative tests
 
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
+- A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
+  restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
+  `.../recently-deleted/search` endpoint. A restoration endpoint alone does not count (restoring a version or a snapshot does not undelete anything). A lifecycle test is the generated test for it
+  (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`, and `RestoreLifecycle/` for restore).
+  A resource with no such test is listed as missing. The lifecycle lines count whole journeys, so they do not show up in the per-endpoint issues.
+  A new resource needs an entry in `configs/camunda-hub/ontology/entity-kinds.json` to get its lifecycle tests.
 - 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
 - "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has.
   It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound.

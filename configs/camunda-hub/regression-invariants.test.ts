@@ -921,6 +921,7 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       const pair = (v: unknown): number =>
         Array.isArray(v) && typeof v[0] === 'number' ? v[0] : -1;
       const codes = isRecord(summary.codes) ? summary.codes : {};
+      const lifecycle = isRecord(summary.lifecycle) ? summary.lifecycle : {};
       const floorCodes = isRecord(floors.assertedByStatus) ? floors.assertedByStatus : {};
       // Every bucket the report counts needs a numeric floor, or its guard would silently go missing.
       expect(
@@ -931,9 +932,15 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
         typeof v === 'number' && Number.isInteger(v) && v >= 0;
       const badFloors = [
         ...Object.entries(floorCodes).map(([k, v]) => [`assertedByStatus.${k}`, v] as const),
-        ...(['optionalFieldsSent', 'requestChecksCovered', 'fullyAssertedOperations'] as const).map(
-          (k) => [k, floors[k]] as const,
-        ),
+        ...(
+          [
+            'optionalFieldsSent',
+            'requestChecksCovered',
+            'fullyAssertedOperations',
+            'lifecycleCreateCovered',
+            'lifecycleRestoreCovered',
+          ] as const
+        ).map((k) => [k, floors[k]] as const),
       ].filter(([, v]) => !isFloor(v));
       expect(
         badFloors.map(([k]) => k),
@@ -961,6 +968,16 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
           'fully asserted operations',
           Number(summary.fullyAsserted),
           Number(floors.fullyAssertedOperations),
+        ],
+        [
+          'resources with a create-read-delete flow test',
+          pair(lifecycle.create),
+          Number(floors.lifecycleCreateCovered),
+        ],
+        [
+          'resources with a delete-restore flow test',
+          pair(lifecycle.restore),
+          Number(floors.lifecycleRestoreCovered),
         ],
       ];
       for (const [label, actual, floor] of single) {
