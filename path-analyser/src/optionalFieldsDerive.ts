@@ -47,12 +47,17 @@ function locate(
   props: Record<string, unknown>,
   field: string,
 ): string | undefined {
-  if (field in props) return field;
+  if (field in props) return isWriteOnly(spec, props[field]) ? undefined : field;
   const inside = Object.entries(props).filter(([, v]) => {
     const inner = flatten(spec, v).properties;
-    return isRecord(inner) && field in inner;
+    return isRecord(inner) && field in inner && !isWriteOnly(spec, inner[field]);
   });
   return inside.length === 1 ? `${inside[0][0]}.${field}` : undefined;
+}
+
+/** A write-only property is accepted in a request but never returned, so it cannot be echoed or read back. */
+function isWriteOnly(spec: Record<string, unknown>, schema: unknown): boolean {
+  return flatten(spec, schema).writeOnly === true;
 }
 
 /** Every create/update operation whose body has optional plain-string fields echoed by its response. */
@@ -83,6 +88,9 @@ export function findWriteOperations(spec: unknown): SpecWriteOperation[] {
       for (const [field, schema] of Object.entries(properties)) {
         if (required.has(field) || !(field in echoed)) continue;
         const s = flatten(spec, schema);
+        // A read-only property is set by the server, so sending it is wrong; a write-only one is
+        // not returned, so there is nothing to echo.
+        if (s.readOnly === true || isWriteOnly(spec, echoed[field])) continue;
         if (
           s.type !== 'string' ||
           s.format !== undefined ||

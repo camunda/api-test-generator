@@ -350,3 +350,101 @@ describe('required fields contributed through allOf', () => {
     expect(Object.keys(v.body)).toEqual(['note']);
   });
 });
+
+describe('a property declared by more than one allOf branch', () => {
+  const schemas = {
+    Limited: {
+      type: 'object',
+      properties: { description: { type: 'string', maxLength: 8, minLength: 2 } },
+    },
+    Redeclared: { type: 'object', properties: { description: { type: 'string' } } },
+    Tighter: { type: 'object', properties: { description: { type: 'string', maxLength: 5 } } },
+  };
+  const withBranches = (...names: string[]) => ({
+    paths: {
+      '/w': {
+        post: {
+          operationId: 'makeW',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: { allOf: names.map((n) => ({ $ref: `#/components/schemas/${n}` })) },
+              },
+            },
+          },
+          responses: ok({ description: str() }),
+        },
+      },
+    },
+    components: { schemas },
+  });
+
+  it('keeps the limits of the earlier declaration when a later branch redeclares the field', () => {
+    const [op] = findWriteOperations(withBranches('Limited', 'Redeclared'));
+    expect(op.candidates).toEqual([{ field: 'description', minLength: 2, maxLength: 8 }]);
+  });
+
+  it('keeps them in either order, and intersects limits declared in both', () => {
+    expect(findWriteOperations(withBranches('Redeclared', 'Limited'))[0].candidates).toEqual([
+      { field: 'description', minLength: 2, maxLength: 8 },
+    ]);
+    expect(findWriteOperations(withBranches('Limited', 'Tighter'))[0].candidates).toEqual([
+      { field: 'description', minLength: 2, maxLength: 5 },
+    ]);
+  });
+
+  it('derives a value that satisfies every declaration', () => {
+    const [v] = deriveOptionalFields(
+      base,
+      withBranches('Limited', 'Tighter', 'Redeclared'),
+    ).variants;
+    expect(String(v.body.description).length).toBeLessThanOrEqual(5);
+    expect(String(v.body.description).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('readOnly and writeOnly properties', () => {
+  // An update with a GET on the same path; `getResponse` is what that GET returns.
+  const op = (
+    request: Record<string, unknown>,
+    response: Record<string, unknown>,
+    getResponse: Record<string, unknown> = { note: str() },
+  ) => ({
+    paths: {
+      '/r/{key}': {
+        get: { operationId: 'getR', responses: ok(getResponse) },
+        patch: { operationId: 'updateR', requestBody: body(request), responses: ok(response) },
+      },
+    },
+    components: {
+      schemas: { Ro: { type: 'string', readOnly: true }, Wo: { type: 'string', writeOnly: true } },
+    },
+  });
+
+  it('does not send a readOnly field, including one marked through allOf', () => {
+    const request = {
+      note: str(),
+      created: str({ readOnly: true }),
+      viaRef: { allOf: [{ $ref: '#/components/schemas/Ro' }] },
+    };
+    const [o] = findWriteOperations(op(request, { note: str(), created: str(), viaRef: str() }));
+    expect(o.candidates.map((c) => c.field)).toEqual(['note']);
+  });
+
+  it('does not expect a writeOnly field back, including one marked through allOf', () => {
+    const request = { note: str(), secret: str(), viaRef: str() };
+    const response = {
+      note: str(),
+      secret: str({ writeOnly: true }),
+      viaRef: { allOf: [{ $ref: '#/components/schemas/Wo' }] },
+    };
+    const [o] = findWriteOperations(op(request, response));
+    expect(o.candidates.map((c) => c.field)).toEqual(['note']);
+  });
+
+  it('does not read a field back from a GET that marks it writeOnly', () => {
+    // the GET returns note as writeOnly: there is nowhere to read it back
+    const spec = op({ note: str() }, { note: str() }, { note: str({ writeOnly: true }) });
+    expect(() => deriveOptionalFields(base, spec)).toThrow(/updateR\.note/);
+  });
+});

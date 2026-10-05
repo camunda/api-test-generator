@@ -54,7 +54,9 @@ export function follow(spec: Record<string, unknown>, node: unknown): Record<str
 /**
  * A schema with its `$ref`s followed and its `allOf` branches merged in: the union of their
  * `properties` and `required`, the first `enum`, `items`, `type`, `format` and `pattern` found, and
- * the tightest `minLength` and `maxLength` (the largest minimum and the smallest maximum). Enough to read which properties a request
+ * the tightest `minLength` and `maxLength` (the largest minimum and the smallest maximum), and
+ * `readOnly`/`writeOnly` if any branch sets them. A property declared by more than one branch is
+ * combined with `allOf`, so every declaration applies. Enough to read which properties a request
  * body takes and what a sort item's `field` may be, however the spec composes them.
  */
 export function flatten(
@@ -72,7 +74,20 @@ export function flatten(
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
       const part = flatten(spec, branch, depth + 1);
-      if (isRecord(part.properties)) Object.assign(properties, part.properties);
+      if (isRecord(part.properties)) {
+        for (const [key, incoming] of Object.entries(part.properties)) {
+          // A property declared by two branches must satisfy both, so combine them with allOf
+          // instead of letting the later one replace the earlier one's constraints.
+          properties[key] =
+            key in properties && properties[key] !== incoming
+              ? { allOf: [properties[key], incoming] }
+              : incoming;
+        }
+      }
+      // readOnly / writeOnly apply as soon as any branch says so.
+      for (const flag of ['readOnly', 'writeOnly']) {
+        if (part[flag] === true) merged[flag] = true;
+      }
       if (merged.enum === undefined && part.enum !== undefined) merged.enum = part.enum;
       if (merged.items === undefined && part.items !== undefined) merged.items = part.items;
       // Scalar facts a branch contributes when the node itself does not state them.
