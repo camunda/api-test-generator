@@ -16,6 +16,9 @@ export interface OptionalFieldsConfig {
   variants: OptionalFieldsEntry[];
 }
 
+/** A name ends up in a scenario ID and a generated test title, so it must be quote-safe. */
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]*$/;
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -47,14 +50,14 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
       typeof operationId !== 'string' ||
       !operationId ||
       typeof name !== 'string' ||
-      !name ||
+      !SAFE_NAME.test(name) ||
       !isRecord(body) ||
       Object.keys(body).length === 0 ||
       !isRecord(echo) ||
       Object.keys(echo).length === 0
     ) {
       throw new Error(
-        `${p}: variants[${i}] must be { operationId, name, body: {...}, echo: {...} } with non-empty values.`,
+        `${p}: variants[${i}] must be { operationId, name, body: {...}, echo: {...} } with non-empty values; name may only use letters, digits, space, '.', '_' and '-'.`,
       );
     }
     const key = `${operationId}/${name}`;

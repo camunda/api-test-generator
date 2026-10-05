@@ -37,6 +37,8 @@ describe('optional-fields.json', () => {
   it.each([
     ['no variants array', {}],
     ['missing name', { variants: [{ ...v, name: '' }] }],
+    ['name with an apostrophe', { variants: [{ ...v, name: "owner's description" }] }],
+    ['name with a backslash', { variants: [{ ...v, name: 'a\\b' }] }],
     ['empty body', { variants: [{ ...v, body: {} }] }],
     ['empty echo', { variants: [{ ...v, echo: {} }] }],
     ['body not an object', { variants: [{ ...v, body: [1] }] }],

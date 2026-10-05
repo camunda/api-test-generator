@@ -49,6 +49,9 @@ function readConflictFile(configDir: string): { p: string; raw: Record<string, u
   return { p, raw };
 }
 
+/** A sequence name ends up in a scenario ID and a generated test title, so it must be quote-safe. */
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]*$/;
+
 function nonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
 }
@@ -92,6 +95,7 @@ export function loadConflictSequences(configDir: string): ConflictSequenceEntry[
     const { name, operationId, before, reason } = rec;
     if (
       !nonEmptyString(name) ||
+      !SAFE_NAME.test(name) ||
       !nonEmptyString(operationId) ||
       !nonEmptyString(reason) ||
       !Array.isArray(before) ||
