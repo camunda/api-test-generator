@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
+import { buildCsharpDiscriminatorTable } from '../../materializer/src/csharp-sdk/discriminators.js';
 import {
   type CsharpOperationMap,
   createCsharpEmitter,
@@ -81,6 +83,20 @@ const OPERATION_MAP: CsharpOperationMap = {
       label: 'Create process instance',
     },
   ],
+  completeJob: [
+    {
+      file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+      region: 'CompleteJobAsync',
+      label: 'Complete job',
+    },
+  ],
+  modifyProcessInstance: [
+    {
+      file: 'src/Camunda.Orchestration.RestSdk/Client/OrchestrationClusterClient.cs',
+      region: 'ModifyProcessInstanceAsync',
+      label: 'Modify process instance',
+    },
+  ],
   createDeployment: [
     {
       file: 'Deployment.cs',
@@ -109,6 +125,27 @@ const OPERATION_MAP: CsharpOperationMap = {
       label: 'Cancel process instance',
     },
   ],
+  getUser: [
+    {
+      file: 'User.cs',
+      region: 'GetUserAsync',
+      label: 'Get user',
+    },
+  ],
+  getGlobalTaskListener: [
+    {
+      file: 'GlobalTaskListener.cs',
+      region: 'GetGlobalTaskListenerAsync',
+      label: 'Get global task listener',
+    },
+  ],
+  migrateProcessInstance: [
+    {
+      file: 'Migration.cs',
+      region: 'MigrateProcessInstanceAsync',
+      label: 'Migrate process instance',
+    },
+  ],
 };
 
 const EMIT_CTX = {
@@ -120,9 +157,25 @@ const EMIT_CTX = {
   resolveConfigPath: (rel: string) => rel,
 } as const;
 
+const CSHARP_DISCRIMINATORS = buildCsharpDiscriminatorTable(
+  (() => {
+    const bundle: unknown = JSON.parse(
+      readFileSync(
+        new URL('../../spec/camunda-oca/bundled/rest-api.bundle.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    return bundle;
+  })(),
+);
+
+function createSpecEmitter(mapping: CsharpOperationMap = OPERATION_MAP) {
+  return createCsharpEmitter(mapping, { discriminators: CSHARP_DISCRIMINATORS });
+}
+
 describe('C# SDK Emitter', () => {
   test('resolves the SDK method name from the operation-map region field', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
 
     expect(files).toHaveLength(1);
@@ -132,7 +185,7 @@ describe('C# SDK Emitter', () => {
   test('never emits a stringified object for a mapped operation', async () => {
     // Regression for the array-of-objects map value being interpolated raw,
     // producing `await Client.[object Object](...)`.
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
 
     expect(files[0].content).not.toContain('[object Object]');
@@ -146,7 +199,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('uses the published request DTO name instead of the mechanical operationId name', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const jobsCollection: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
       requiredSemanticTypes: [],
@@ -171,7 +224,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('passes an empty query object when a search body template is absent', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const processDefinitionsCollection: EndpointScenarioCollection = {
       endpoint: {
         operationId: 'searchProcessDefinitions',
@@ -213,7 +266,7 @@ describe('C# SDK Emitter', () => {
     // the request could even be sent when a consumer scenario legitimately
     // never seeded tenantIdVar; a nullable lookup preserves null and lets
     // the broker apply its default instead.
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const deploymentCollection: EndpointScenarioCollection = {
       endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
       requiredSemanticTypes: [],
@@ -262,7 +315,7 @@ describe('C# SDK Emitter', () => {
     };
 
     test('does not seed an omitWhenUnbound binding via SeedBindingIfMissing when it is not client-minted/unique (consumer case)', async () => {
-      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const emitter = createSpecEmitter();
       const collection: EndpointScenarioCollection = {
         ...SAMPLE_COLLECTION,
         scenarios: [
@@ -285,7 +338,7 @@ describe('C# SDK Emitter', () => {
     });
 
     test('seeds an omitWhenUnbound binding with unique: true when it is client-minted and the consuming step declares 409 (producer case)', async () => {
-      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const emitter = createSpecEmitter();
       const collection: EndpointScenarioCollection = {
         ...SAMPLE_COLLECTION,
         scenarios: [
@@ -323,7 +376,7 @@ describe('C# SDK Emitter', () => {
     // via RequireBinding unconditionally, throwing for a consumer scenario
     // that never seeded an optional binding instead of omitting the field.
     test('omits a JSON body field with an unbound omitWhenUnbound binding instead of throwing via RequireBinding (consumer case)', async () => {
-      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const emitter = createSpecEmitter();
       const collection: EndpointScenarioCollection = {
         ...SAMPLE_COLLECTION,
         scenarios: [
@@ -364,7 +417,7 @@ describe('C# SDK Emitter', () => {
     // the `if (local is not null)` check could ever run. Only a genuinely
     // null-tolerant lookup lets the field be omitted.
     test('uses a nullable GetBindingOrNull lookup (not a throwing RequireBinding) for an unbound omitWhenUnbound multipart field', async () => {
-      const emitter = createCsharpEmitter(OPERATION_MAP);
+      const emitter = createSpecEmitter();
       const collection: EndpointScenarioCollection = {
         endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
         requiredSemanticTypes: [],
@@ -398,7 +451,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('derives request path parameters from the path template when step.pathParams is absent', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const requestWithPathParam: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
       requiredSemanticTypes: [],
@@ -439,7 +492,7 @@ describe('C# SDK Emitter', () => {
     // compile with CS1503 ("cannot convert from 'object' to '<KeyType>'") --
     // this was reproduced against the real 9.2.2 Camunda.Orchestration.Sdk
     // package (44 CS1503 errors across every key-typed path parameter).
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const requestWithPathParam: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/{jobKey}/search' },
       requiredSemanticTypes: [],
@@ -473,13 +526,359 @@ describe('C# SDK Emitter', () => {
     expect(files[0].content).not.toContain('RequireBinding(ctx, "jobKeyVar")');
   });
 
+  test('preserves the supported JobResult userTask discriminator', async () => {
+    const emitter = createSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'completeJob',
+              bodyKind: 'json',
+              bodyTemplate: { result: { denied: true } },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["type"] = "userTask"');
+  });
+
+  test('preserves the supported JobResult adHocSubProcess discriminator', async () => {
+    const emitter = createSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'completeJob',
+              bodyKind: 'json',
+              bodyTemplate: { result: { activateElements: [] } },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["type"] = "adHocSubProcess"');
+  });
+
+  test('preserves the creation terminate discriminator', async () => {
+    const emitter = createSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              bodyKind: 'json',
+              bodyTemplate: { runtimeInstructions: [{ afterElementId: 'element-1' }] },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["type"] = "TERMINATE_PROCESS_INSTANCE"');
+  });
+
+  test('preserves sourceType byId and byKey discriminators', async () => {
+    const emitter = createSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'modifyProcessInstance',
+              bodyKind: 'json',
+              bodyTemplate: {
+                moveInstructions: [{ sourceElementInstruction: { sourceElementId: 'element-1' } }],
+              },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["sourceType"] = "byId"');
+    const byKeyFiles = await emitter.emit(
+      {
+        ...collection,
+        scenarios: [
+          {
+            ...collection.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                operationId: 'modifyProcessInstance',
+                bodyKind: 'json',
+                bodyTemplate: {
+                  moveInstructions: [
+                    { sourceElementInstruction: { sourceElementInstanceKey: '1' } },
+                  ],
+                },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(byKeyFiles[0].content).toContain('["sourceType"] = "byKey"');
+  });
+
+  test('preserves the direct ancestor scope discriminator', async () => {
+    const emitter = createSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'modifyProcessInstance',
+              bodyKind: 'json',
+              bodyTemplate: {
+                moveInstructions: [
+                  { ancestorScopeInstruction: { ancestorElementInstanceKey: '1' } },
+                ],
+              },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["ancestorScopeType"] = "direct"');
+  });
+
+  test('does not add a JobResult discriminator to a searchJobs filter', async () => {
+    const emitter = createSpecEmitter();
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...SEARCH_JOBS_REQUEST_STEP,
+                bodyTemplate: { deniedReason: 'not allowed' },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).not.toContain('["type"] = "userTask"');
+  });
+
+  test('does not add an ancestor discriminator to an activate instruction', async () => {
+    const emitter = createSpecEmitter();
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyTemplate: {
+                  result: { activateElements: [{ ancestorElementInstanceKey: '1' }] },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).not.toContain('["ancestorScopeType"] = "direct"');
+  });
+
+  test('does not add a source discriminator to a migration mapping', async () => {
+    const emitter = createSpecEmitter();
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'migrateProcessInstance', method: 'POST', path: '/migration' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                operationId: 'migrateProcessInstance',
+                bodyTemplate: { mappingInstructions: [{ sourceElementId: 'element-1' }] },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).not.toContain('["sourceType"] = "byId"');
+  });
+
+  test('wraps id only for global task listener operations', async () => {
+    const emitter = createCsharpEmitter({
+      ...OPERATION_MAP,
+      getUser: [
+        {
+          file: 'User.cs',
+          region: 'GetUserAsync',
+        },
+      ],
+      getGlobalTaskListener: [
+        {
+          file: 'GlobalTaskListener.cs',
+          region: 'GetGlobalTaskListenerAsync',
+        },
+      ],
+    });
+    const user = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{id}' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'getUser',
+                method: 'GET',
+                pathTemplate: '/users/{id}',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(user[0].content).toContain('RequireStringBinding(ctx, "idVar")');
+    expect(user[0].content).not.toContain('GlobalListenerId.AssumeExists');
+
+    const listener = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        endpoint: {
+          operationId: 'getGlobalTaskListener',
+          method: 'GET',
+          path: '/global-task-listeners/{id}',
+        },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'getGlobalTaskListener',
+                method: 'GET',
+                pathTemplate: '/global-task-listeners/{id}',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(listener[0].content).toContain('GlobalListenerId.AssumeExists');
+  });
+
+  test('adds consistency to a successful 2xx read whose status is not 200', async () => {
+    const emitter = createSpecEmitter();
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'getUser', method: 'GET', path: '/users/{username}' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'getUser',
+                method: 'GET',
+                pathTemplate: '/users/{username}',
+                expect: { status: 201 },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('consistency: new()');
+  });
+
+  test('covers usage and global statistics time windows and the terminate converter', async () => {
+    const emitter = createCsharpEmitter({
+      ...OPERATION_MAP,
+      getUsageMetrics: [{ file: 'Usage.cs', region: 'GetUsageMetricsAsync' }],
+    });
+    const usage = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        endpoint: { operationId: 'getUsageMetrics', method: 'GET', path: '/usage' },
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                operationId: 'getUsageMetrics',
+                method: 'GET',
+                pathTemplate: '/usage',
+                expect: { status: 200 },
+              },
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(usage[0].content).toContain(
+      'startTime: DateTimeOffset.UtcNow.AddDays(-1), endTime: DateTimeOffset.UtcNow',
+    );
+    expect(
+      readFileSync(
+        new URL(
+          '../../materializer/src/csharp-sdk/project-templates/TestFixtureBase.cs',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    ).toContain('ProcessInstanceModificationTerminateInstructionConverterFactory');
+  });
+
   test('falls back to a plain string binding for a path parameter with no published C# key-type mapping', async () => {
     // Regression (Copilot PR #573 review): not every path parameter is a
     // strongly-typed key struct -- e.g. the real getUser operation's
     // `/users/{username}` takes a plain string. Throwing on every unmapped
     // name made generation fail entirely for such operations instead of
     // emitting the (perfectly valid) string-argument call.
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const requestWithUnknownPathParam: EndpointScenarioCollection = {
       endpoint: { operationId: 'searchJobs', method: 'POST', path: '/widgets/{widgetId}/search' },
       requiredSemanticTypes: [],
@@ -513,7 +912,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('passes path parameters before the request body to SDK methods', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const collection: EndpointScenarioCollection = {
       endpoint: {
         operationId: 'cancelProcessInstance',
@@ -688,7 +1087,7 @@ describe('C# SDK Emitter', () => {
     // once both files are compiled into the same project (C# classes
     // share one namespace across all files, unlike Playwright's
     // file-scoped `test.describe` blocks).
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const featureFiles = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
     const variantFiles = await emitter.emit(SAMPLE_COLLECTION, { ...EMIT_CTX, mode: 'variant' });
 
@@ -706,7 +1105,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('renders the RANDOM placeholder through the seeding helper instead of ctx["RANDOM"]', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const randomCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
@@ -726,14 +1125,14 @@ describe('C# SDK Emitter', () => {
   });
 
   test('does not import the obsolete RestSdk.Models namespace', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
 
     expect(files[0].content).not.toContain('using Camunda.Orchestration.RestSdk.Models;');
   });
 
   test('uses CamundaSdkException for generated error-path assertions', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const errorCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
@@ -758,7 +1157,7 @@ describe('C# SDK Emitter', () => {
     // already completed, so ThrowsAnyAsync could not observe it -- a
     // correctness bug that happened to produce no compile error (just an
     // unawaited-call warning) and was never caught by a generated scenario.
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const errorCollection: EndpointScenarioCollection = {
       ...SAMPLE_COLLECTION,
       scenarios: [
@@ -880,7 +1279,7 @@ describe('C# SDK Emitter', () => {
     // FileNotFoundException before the SDK call is even made. The base
     // class's ResolveFixturePath already implements the correct multi
     // -candidate fallback (BaseDirectory, three levels up, cwd); reuse it.
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const files = await emitter.emit(
       {
         endpoint: { operationId: 'createDeployment', method: 'POST', path: '/deployments' },
@@ -971,7 +1370,7 @@ describe('C# SDK Emitter', () => {
   });
 
   test('throws when a witness operationId has no published C# SDK method mapping', async () => {
-    const emitter = createCsharpEmitter(OPERATION_MAP);
+    const emitter = createSpecEmitter();
     const collection: EndpointScenarioCollection = {
       endpoint: {
         operationId: 'createProcessInstance',
