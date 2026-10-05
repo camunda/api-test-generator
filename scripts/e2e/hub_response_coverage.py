@@ -393,32 +393,53 @@ def request_gap_summary(s):
     return ('; '.join(parts)[0].upper() + '; '.join(parts)[1:] + '.') if parts else 'Nothing is missing.'
 
 
+def change(now, before):
+    """' (+2)' / ' (-1)' against the previous report, or '' when there is none or nothing changed."""
+    if before is None or now == before:
+        return ''
+    return f' ({"+" if now > before else "-"}{abs(now - before)})'
+
+
 def slack(s, prev, args):
     c = s['codes']
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
     pf = prev['fullyAsserted'] if prev else None
+    pc = prev['codes'] if prev else {}
+
+    def line(b):
+        before = pc.get(b, [None])[0] if prev else None
+        return f'• {NAMES[b]}: {c[b][0]} of {c[b][1]}{change(c[b][0], before)}  {meter(*c[b])}'
+
     ranked = sorted((b for b in BUCKETS if c[b][1]), key=lambda b: c[b][0] / c[b][1])
     worst = [b for b in ranked[:2] if c[b][0] < c[b][1]]
+    opt_before = prev['optionalFields'][0] if prev and 'optionalFields' in prev else None
+    req_before = prev['requestChecks'][0] if prev and 'requestChecks' in prev else None
     lines = [
         ':bar_chart: *Hub API test coverage* (weekly)',
         f'{ref} · {s["operations"]} endpoints · {s["negativeTests"]} negative tests',
         '',
         f'*{s["fullyAsserted"]} of {s["operations"]} endpoints* have a test for every response the API spec lists'
-        f'{since_last(s["fullyAsserted"], pf)}.',
+        f'{since_last(s["fullyAsserted"], pf)}. A number in brackets is the change since the last report.',
         '',
-        '*Responses tested, out of those the spec lists*',
+        ':white_check_mark: *When the request is right (success path)*',
+        line('2xx'),
+        f'• Optional request fields sent in a success test: {s["optionalFields"][0]} of {s["optionalFields"][1]}'
+        f'{change(s["optionalFields"][0], opt_before)}',
+        f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}',
+        '',
+        ':no_entry: *When the request is wrong (error path)*',
     ]
-    lines += [f'• {NAMES[b]}: {c[b][0]} of {c[b][1]}  {meter(*c[b])}' for b in BUCKETS]
-    lines += ['']
+    lines += [line(b) for b in BUCKETS if b != '2xx']
+    lines += [
+        f'• Every kind of bad request tested: {s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints'
+        f'{change(s["requestChecks"][0], req_before)}. {request_gap_summary(s)}',
+        '',
+    ]
     if worst:
         lines.append('*Biggest gaps:* ' + ' · '.join(f'{NAMES[b]}, {c[b][1] - c[b][0]} untested' for b in worst))
     lines += [
-        f'Also: {s["optionalFields"][0]} of {s["optionalFields"][1]} optional request fields are used in a success test, '
-        f'and {len(s["shapeUnvalidated"])} endpoints never check the shape of the success response.',
         f'{s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
         f'(403 is tracked separately; 500 errors are not counted).',
-        f'*{s["requestChecks"][0]} of {s["requestChecks"][1]} endpoints* have at least one test for every kind of '
-        f'bad request the generator can apply (missing or wrong fields, bad values, no login). {request_gap_summary(s)}',
     ]
     if prev:
         new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))
@@ -482,8 +503,14 @@ def gap_rows(rows):
             if r['requestChecks'] == 'gap' or any(v == 'gap' for v in r['cells'].values())]
 
 
+AREA_INDEX_MARKER = '<!-- AREA_INDEX -->'
+
+
 def issue_body(s, rows, args):
-    """Body of the rolling GitHub issue, or '' when nothing is missing (the workflow then closes it)."""
+    """Body of the rolling tracking issue, or '' when nothing is missing (the workflow then closes it).
+
+    The endpoint tables live in the per-area issues; this one is the index. The area-issues script
+    replaces AREA_INDEX_MARKER with one line per area (a link to its issue)."""
     gaps = gap_rows(rows)
     if not gaps:
         return ''
@@ -491,11 +518,11 @@ def issue_body(s, rows, args):
         '_Kept up to date by the weekly **Hub response coverage** workflow. It is rewritten every Monday and '
         'closed automatically once nothing is missing. Please do not edit it by hand._', '',
         f'**{s["fullyAsserted"]} of {s["operations"]} endpoints** have a test for every response the API spec lists; '
-        f'**{len(gaps)}** still have something missing. Areas of the API with a gap get their own issues, opened gradually (at most 10 new ones per week), so an area may not have one yet.', '',
+        f'**{len(gaps)}** still have something missing. The endpoints are listed in one issue per area of the API, '
+        'opened gradually (at most 10 new ones per week); an area that has no issue yet is listed here with its endpoints.',
+        '', AREA_INDEX_MARKER, '',
+        'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps'] else 'every kind that applies is covered.'),
     ]
-    lines += gap_table(gaps)
-    lines += ['', 'Bad-request tests: ' + (request_gap_summary(s) if s['requestCheckGaps']
-                                           else 'every kind that applies is covered.')]
     if args.run_url:
         lines += ['', f'Full table: {args.run_url}']
     return '\n'.join(lines) + '\n'
@@ -516,7 +543,7 @@ AREA_TITLE_PREFIX = '[hub-response-coverage] '
 
 
 def area_issues(rows, args):
-    """(title, body, area, gap count) per API area (the spec's first tag) with at least one endpoint gap."""
+    """(title, body, area, gap count, endpoint ids) per API area (the spec's first tag) with at least one endpoint gap."""
     by_area = collections.defaultdict(list)
     for r in gap_rows(rows):
         by_area[r.get('area', 'Other')].append(r)
@@ -532,7 +559,8 @@ def area_issues(rows, args):
         ] + gap_table(gaps)
         if args.run_url:
             lines += ['', f'Full table: {args.run_url}']
-        out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n', area, len(gaps)))
+        out.append((f'{AREA_TITLE_PREFIX}{area}: missing response or bad-request tests', '\n'.join(lines) + '\n', area,
+                    len(gaps), [g['operationId'] for g in gaps]))
     return out
 
 
@@ -614,9 +642,10 @@ def main():
     open(f'{args.out}/issue.md', 'w').write(issue_body(summary, rows, args))
     os.makedirs(f'{args.out}/areas', exist_ok=True)
     index = []
-    for n, (title, body, area, count) in enumerate(area_issues(rows, args)):
+    for n, (title, body, area, count, endpoints) in enumerate(area_issues(rows, args)):
         open(f'{args.out}/areas/area-{n}.md', 'w').write(body)
-        index.append({'title': title, 'file': f'{args.out}/areas/area-{n}.md', 'area': area, 'gaps': count})
+        index.append({'title': title, 'file': f'{args.out}/areas/area-{n}.md', 'area': area, 'gaps': count,
+                      'endpoints': endpoints})
     json.dump(index, open(f'{args.out}/areas.json', 'w'), indent=1)
     write_history(f'{args.out}/history.csv', args.previous_history, history_row(summary, args))
     open(f'{args.out}/history.md', 'w').write(history_markdown(f'{args.out}/history.csv'))

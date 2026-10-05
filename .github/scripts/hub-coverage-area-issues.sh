@@ -5,7 +5,9 @@
 #
 # Inputs (environment): ISSUE_TITLE (the summary issue, never touched here), MAX_NEW_AREA_ISSUES,
 # REPORT_DIR (holds areas.json), REPO_URL, RUN_URL.
-# Appends one Slack-formatted entry per area to REPORT_DIR/area-links.txt.
+# Appends one Slack-formatted entry per area to REPORT_DIR/area-links.txt, and one markdown line per
+# area to REPORT_DIR/area-index.md (a link to its issue; an area with no issue yet lists its endpoints),
+# which the summary script puts into the tracking issue.
 set -euo pipefail
 
 today=$(date -u +%F)
@@ -26,6 +28,7 @@ while read -r entry; do
     if [ "$new" -ge "${MAX_NEW_AREA_ISSUES:-10}" ]; then
       echo "Cap reached: '$title' will be opened on a later run."
       echo "$label" >> "$REPORT_DIR/area-links.txt"
+      jq -r '"- **\(.area)**: \(.gaps) \(if .gaps == 1 then "endpoint" else "endpoints" end) (its issue opens on a later run): " + ([(.endpoints // [])[] | "`" + . + "`"] | join(", "))' <<< "$entry" >> "$REPORT_DIR/area-index.md"
       continue
     fi
     url=$(gh issue create --title "$title" --body-file "$file" \
@@ -40,6 +43,7 @@ while read -r entry; do
     url="$REPO_URL/issues/$num"
   fi
   echo "<$url|$label>" >> "$REPORT_DIR/area-links.txt"
+  jq -r --arg n "${url##*/}" '"- [ ] #\($n) **\(.area)**: \(.gaps) \(if .gaps == 1 then "endpoint" else "endpoints" end)"' <<< "$entry" >> "$REPORT_DIR/area-index.md"
 done < <(jq -c '.[]' "$REPORT_DIR/areas.json")
 
 # Close open area issues whose area no longer has a gap (the summary issue is not one).

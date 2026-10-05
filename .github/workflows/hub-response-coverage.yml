@@ -143,22 +143,11 @@ jobs:
             --spec-ref "${{ steps.hub-sha.outputs.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-      # Same gate as Slack: a dry run or a test trigger never touches issues. An existing open
-      # issue is rewritten in place (never a second one); an empty issue.md means nothing is
-      # missing, so the open issue is closed. The issue URL goes into the Slack message.
-      - name: Open, update or close the coverage-gap issue
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPORT_DIR: coverage-report
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: bash .github/scripts/hub-coverage-summary-issue.sh
-
       # One issue per API area (the spec's first tag) that has a gap, same rules as the summary issue:
       # found by exact title in any state, rewritten in place, reopened if the gap returns, closed when
       # the area is clean. At most MAX_NEW_AREA_ISSUES brand-new issues per run so the first run cannot
-      # flood the repo; the rest follow on later Mondays (the summary issue lists every gap meanwhile).
+      # flood the repo; the rest follow on later Mondays (the tracking issue lists their endpoints meanwhile).
+      # Runs before the tracking issue, which links to these issues.
       - name: Open, update or close the per-area issues
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
         env:
@@ -168,6 +157,19 @@ jobs:
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash .github/scripts/hub-coverage-area-issues.sh
+
+      # Same gate as Slack: a dry run or a test trigger never touches issues. An existing open
+      # issue is rewritten in place (never a second one); an empty issue.md means nothing is
+      # missing, so the open issue is closed. It is an index of the area issues above. The issue URL goes
+      # into the Slack message.
+      - name: Open, update or close the coverage-gap issue
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_DIR: coverage-report
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/hub-coverage-summary-issue.sh
 
       - name: Render report page
         run: python3 scripts/e2e/hub_coverage_page.py --report coverage-report
