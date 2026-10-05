@@ -6,3 +6,9 @@ external-spec/
 test-results/
 *.tsbuildinfo
 .claw/
+materializer/src/csharp-sdk/project-templates/obj/
+materializer/src/csharp-sdk/project-templates/bin/
+generated/**/obj/
+generated/**/bin/
+csharp-sdk/**/obj/
+csharp-sdk/**/bin/
