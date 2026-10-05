@@ -288,6 +288,15 @@ fixtures and named invariants point directly at the broken property.
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
 
+### Response validation in lifecycle suites
+
+Lifecycle template suites (`EntityLifecycle`, `RestoreLifecycle`, `EdgeLifecycle`) call
+`validateResponse` after a step whose route has a 200 schema in the suite's `responses.json`, the
+same check the per-endpoint feature specs make. The materializer reads `responses.json` after
+extracting it and passes the routes (`METHOD /path 200`) to the template emitter, so there is no
+separate list to maintain. A mismatch fails the lifecycle test with the response attached as
+evidence; fix the spec or file an issue rather than loosening the check.
+
 ### Optional-field scenarios
 
 `configs/<config>/optional-fields.json` (`{ variants: [{ operationId, name, body, echo }], untested?: [...] }`)

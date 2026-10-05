@@ -47,7 +47,7 @@ import {
   materializeSupport,
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
-import { emitTemplateSuites } from './playwright/templateEmitter.js';
+import { emitTemplateSuites, loadValidatedRoutes } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
 import {
   materializePythonFixtures,
@@ -827,6 +827,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
         // the field.
         omitWhenUnbound: s.omitWhenUnbound,
       }));
+      const validatedRoutes = await loadValidatedRoutes(outDir);
       for (const templateName of templateNames) {
         const templateOutDir = path.join(outDir, templateOutputDir(templateName));
         // Wipe the per-template subdir for the same reason the parent
@@ -838,6 +839,7 @@ async function runForTarget(emitter: EmitterStrategy, env: TargetRunEnv): Promis
           outDir: templateOutDir,
           globalContextSeeds: seedsArg,
           clientMintedFixtures: readClientMintedFixtures(emitterConfig),
+          validatedRoutes,
         });
         lifecycleCount += written.length;
       }
