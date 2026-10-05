@@ -691,6 +691,10 @@ describe('lifecycle resources found in the spec', () => {
       removeMember: { method: 'DELETE', path: '/workspaces/{workspaceKey}/members/{email}' },
       // a nested POST with nothing to remove
       restoreFile: { method: 'POST', path: '/files/{fileKey}/restoration' },
+      // a nested item that can be read by key is a resource, not a link
+      createDocument: { method: 'POST', path: '/projects/{projectKey}/documents' },
+      getDocument: { method: 'GET', path: '/projects/{projectKey}/documents/{documentKey}' },
+      deleteDocument: { method: 'DELETE', path: '/projects/{projectKey}/documents/{documentKey}' },
       // a top-level create/delete pair is a resource, not a link
       createFile: { method: 'POST', path: '/files' },
       deleteFile: { method: 'DELETE', path: '/files/{fileKey}' },

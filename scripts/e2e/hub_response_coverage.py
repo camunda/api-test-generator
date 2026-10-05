@@ -124,7 +124,7 @@ def lifecycle_resources(ops):
 
 def edge_pairs(ops):
     """Links the API lets a client add and remove: a POST on a nested path (/workspaces/{key}/members) whose
-    sub-path has a DELETE (/workspaces/{key}/members/{email}). Maps the add operation to the remove one."""
+    sub-path has a DELETE but no GET (/workspaces/{key}/members/{email}). Maps the add operation to the remove one."""
     by_path = collections.defaultdict(dict)
     for op_id, o in ops.items():
         by_path[o['path']][o['method']] = op_id
@@ -133,10 +133,11 @@ def edge_pairs(ops):
         add = methods.get('POST')
         if not add or '{' not in path:
             continue
-        remove = next((m['DELETE'] for p, m in by_path.items()
-                       if 'DELETE' in m and re.fullmatch(re.escape(path) + r'/\{\w+\}', p)), None)
-        if remove:
-            pairs[add] = remove
+        item = next((m for p, m in by_path.items()
+                     if 'DELETE' in m and re.fullmatch(re.escape(path) + r'/\{\w+\}', p)), None)
+        # An item that can also be read by key is a nested resource, counted with the resources.
+        if item and 'GET' not in item:
+            pairs[add] = item['DELETE']
     return pairs
 
 
