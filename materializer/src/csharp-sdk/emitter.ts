@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
@@ -29,7 +30,7 @@ import {
 
 export type { CsharpOperationMap, CsharpOperationMapEntry };
 
-const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
+export const CSHARP_REQUEST_TYPE_BY_OPERATION: Readonly<Record<string, string>> = {
   createDeployment: 'DeploymentRequest',
   createUser: 'UserRequest',
   createTenant: 'TenantCreateRequest',
@@ -139,7 +140,7 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
 // parameters previously passed the raw `object` returned by `RequireBinding`
 // straight into the SDK call, which fails to compile with CS1503
 // ("cannot convert from 'object' to '<KeyType>'") against the real SDK.
-const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
+export const CSHARP_PATH_PARAM_KEY_TYPE: Readonly<Record<string, string>> = {
   auditLogKey: 'AuditLogKey',
   decisionDefinitionKey: 'DecisionDefinitionKey',
   decisionRequirementsKey: 'DecisionRequirementsKey',
@@ -163,6 +164,16 @@ const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
+export const CSHARP_ONEOF_REQUEST_TYPES: Readonly<Record<string, readonly string[]>> = {
+  createAuthorization: ['AuthorizationIdBasedRequest', 'AuthorizationPropertyBasedRequest'],
+  updateAuthorization: ['AuthorizationIdBasedRequest', 'AuthorizationPropertyBasedRequest'],
+  evaluateDecision: ['DecisionEvaluationById', 'DecisionEvaluationByKey'],
+  createProcessInstance: [
+    'ProcessInstanceCreationInstructionById',
+    'ProcessInstanceCreationInstructionByKey',
+  ],
+};
+
 export interface SdkMethodParameter {
   name: string;
   type: string;
@@ -178,13 +189,24 @@ export interface SdkMethodDescription {
 export interface SdkMethodManifest {
   sdkVersion: string;
   methods: SdkMethodDescription[];
+  derivedTypes: SdkDerivedType[];
+}
+
+export interface SdkDerivedType {
+  name: string;
+  baseType: string;
 }
 
 function isSdkMethodManifest(value: unknown): value is SdkMethodManifest {
-  if (!isRecord(value) || typeof value.sdkVersion !== 'string' || !Array.isArray(value.methods)) {
+  if (
+    !isRecord(value) ||
+    typeof value.sdkVersion !== 'string' ||
+    !Array.isArray(value.methods) ||
+    !Array.isArray(value.derivedTypes)
+  ) {
     return false;
   }
-  return value.methods.every((method) => {
+  const validMethods = value.methods.every((method) => {
     if (
       !isRecord(method) ||
       typeof method.name !== 'string' ||
@@ -203,17 +225,32 @@ function isSdkMethodManifest(value: unknown): value is SdkMethodManifest {
       )
     );
   });
+  const validDerivedTypes = value.derivedTypes.every(
+    (derivedType) =>
+      isRecord(derivedType) &&
+      typeof derivedType.name === 'string' &&
+      typeof derivedType.baseType === 'string',
+  );
+  return validMethods && validDerivedTypes;
 }
 
 function loadSdkMethodManifest(): SdkMethodManifest {
-  const path = fileURLToPath(
-    new URL('../../../csharp-sdk/examples/sdk-client-methods.json', import.meta.url),
-  );
-  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-  if (!isSdkMethodManifest(parsed)) {
-    throw new Error(`Invalid C# SDK method manifest at ${path}`);
+  let directory = path.dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const manifestPath = path.join(directory, 'csharp-sdk', 'examples', 'sdk-client-methods.json');
+    if (existsSync(manifestPath)) {
+      const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (!isSdkMethodManifest(parsed)) {
+        throw new Error(`Invalid C# SDK method manifest at ${manifestPath}`);
+      }
+      return parsed;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      throw new Error(`Could not find C# SDK method manifest from ${directory}`);
+    }
+    directory = parent;
   }
-  return parsed;
 }
 
 export const CSHARP_SDK_METHOD_MANIFEST = loadSdkMethodManifest();
@@ -917,21 +954,21 @@ function resolveRequestTypeName(step: RequestStep): string | undefined {
   if (step.operationId === 'createProcessInstance') {
     const body = step.bodyTemplate;
     if (isRecord(body) && 'processDefinitionKey' in body) {
-      return 'ProcessInstanceCreationInstructionByKey';
+      return CSHARP_ONEOF_REQUEST_TYPES.createProcessInstance[1];
     }
-    return 'ProcessInstanceCreationInstructionById';
+    return CSHARP_ONEOF_REQUEST_TYPES.createProcessInstance[0];
   }
   if (step.operationId === 'createAuthorization' || step.operationId === 'updateAuthorization') {
     const body = step.bodyTemplate;
     return isRecord(body) && 'resourcePropertyName' in body
-      ? 'AuthorizationPropertyBasedRequest'
-      : 'AuthorizationIdBasedRequest';
+      ? CSHARP_ONEOF_REQUEST_TYPES[step.operationId][1]
+      : CSHARP_ONEOF_REQUEST_TYPES[step.operationId][0];
   }
   if (step.operationId === 'evaluateDecision') {
     const body = step.bodyTemplate;
     return isRecord(body) && 'decisionDefinitionKey' in body
-      ? 'DecisionEvaluationByKey'
-      : 'DecisionEvaluationById';
+      ? CSHARP_ONEOF_REQUEST_TYPES.evaluateDecision[1]
+      : CSHARP_ONEOF_REQUEST_TYPES.evaluateDecision[0];
   }
   return CSHARP_REQUEST_TYPE_BY_OPERATION[step.operationId];
 }
