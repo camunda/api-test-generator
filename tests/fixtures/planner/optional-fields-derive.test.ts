@@ -217,7 +217,7 @@ describe('values that fit every length limit', () => {
       schemas: { Short: { type: 'string', maxLength: 8 }, Long: { type: 'string', minLength: 3 } },
     },
   });
-  const valueOf = (field: unknown): string => {
+  const derivedValue = (field: unknown): string => {
     const [v] = deriveOptionalFields(base, specFor(field)).variants;
     return String(v.body.f);
   };
@@ -234,19 +234,19 @@ describe('values that fit every length limit', () => {
     );
     expect(op.candidates).toEqual([{ field: 'f', minLength: 3, maxLength: 8 }]);
     expect(
-      valueOf({
+      derivedValue({
         allOf: [{ type: 'string', maxLength: 100 }, { $ref: '#/components/schemas/Short' }],
       }),
     ).toHaveLength(8);
   });
 
   it('pads up to the minimum length', () => {
-    expect(valueOf({ type: 'string', minLength: 80 })).toHaveLength(80);
-    expect(valueOf({ type: 'string', minLength: 200, maxLength: 255 })).toHaveLength(200);
+    expect(derivedValue({ type: 'string', minLength: 80 })).toHaveLength(80);
+    expect(derivedValue({ type: 'string', minLength: 200, maxLength: 255 })).toHaveLength(200);
   });
 
   it('allows an empty value when the maximum is zero', () => {
-    expect(valueOf({ type: 'string', maxLength: 0 })).toBe('');
+    expect(derivedValue({ type: 'string', maxLength: 0 })).toBe('');
   });
 
   it('leaves out a field whose minimum is above its maximum', () => {
