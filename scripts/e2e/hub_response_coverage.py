@@ -444,14 +444,14 @@ def change(now, before):
     return f' ({"+" if now > before else "-"}{abs(now - before)})'
 
 
-def flow_line(kind, label, s, prev):
-    """'Resources with a ... flow test: 4 of 6 (+1). Missing: A, B (known, tracked).' or without the tail."""
+def flow_line(kind, label, s, prev, unit='resources'):
+    """'Lifecycle tests (...): 4 of 6 resources (+1). Missing: A, B (known, tracked).' or without the tail."""
     got, total = s['lifecycle'][kind]
     before = prev['lifecycle'][kind][0] if prev and 'lifecycle' in prev else None
     missing = s['lifecycle'][kind + 'Missing']
     known = set(s['lifecycle']['known'])
     tail = ('. Missing: ' + ', '.join(n + (' (known, tracked)' if n in known else '') for n in missing)) if missing else ''
-    return f'• {label}: {got} of {total}{change(got, before)}{tail}'
+    return f'• {label}: {got} of {total} {unit}{change(got, before)}{tail}'
 
 
 def slack(s, prev, args):
@@ -482,8 +482,8 @@ def slack(s, prev, args):
         f'{change(s["optionalFields"][0], opt_before)}',
         f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}'
         f'{change(len(s["shapeUnvalidated"]), shape_before)}',
-        flow_line('create', 'Resources with a create, read and delete flow test', s, prev),
-        flow_line('restore', 'Resources with a delete and restore flow test', s, prev),
+        flow_line('create', 'Lifecycle tests (create, read, delete)', s, prev),
+        flow_line('restore', 'Lifecycle tests (delete, restore)', s, prev),
         '',
         ':no_entry: *Negative tests* (the request is wrong)',
     ]

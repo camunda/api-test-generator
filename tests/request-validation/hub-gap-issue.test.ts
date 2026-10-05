@@ -494,17 +494,17 @@ describe('weekly Slack message', () => {
     expect(slackText(baseSummary(), baseSummary())).not.toMatch(/untested \(/);
   });
 
-  it('lists the flow tests per resource under the positive tests, naming what is missing', () => {
+  it('lists the lifecycle tests per resource under the positive tests, naming what is missing', () => {
     const text = slackText(baseSummary(), null);
     const at = (needle: string) => text.indexOf(needle);
     expect(text).toContain(
-      'Resources with a create, read and delete flow test: 4 of 6. Missing: ProjectSnapshot, Version (known, tracked)',
+      'Lifecycle tests (create, read, delete): 4 of 6 resources. Missing: ProjectSnapshot, Version (known, tracked)',
     );
     expect(text).toContain(
-      'Resources with a delete and restore flow test: 4 of 5. Missing: Version (known, tracked)',
+      'Lifecycle tests (delete, restore): 4 of 5 resources. Missing: Version (known, tracked)',
     );
-    expect(at('create, read and delete flow')).toBeGreaterThan(at('Positive tests'));
-    expect(at('create, read and delete flow')).toBeLessThan(at('Negative tests'));
+    expect(at('Lifecycle tests (create, read, delete)')).toBeGreaterThan(at('Positive tests'));
+    expect(at('Lifecycle tests (create, read, delete)')).toBeLessThan(at('Negative tests'));
     const full = baseSummary({
       lifecycle: {
         create: [6, 6],
@@ -514,11 +514,11 @@ describe('weekly Slack message', () => {
         known: [],
       },
     });
-    expect(slackText(full, null)).toContain('flow test: 6 of 6\n');
+    expect(slackText(full, null)).toContain('(create, read, delete): 6 of 6 resources\n');
     expect(slackText(full, null)).not.toContain('Missing:');
   });
 
-  it('shows the change in resources with a flow test', () => {
+  it('shows the change in resources with a lifecycle test', () => {
     const prev = baseSummary({
       lifecycle: {
         create: [3, 6],
@@ -529,8 +529,8 @@ describe('weekly Slack message', () => {
       },
     });
     const text = slackText(baseSummary(), prev);
-    expect(text).toContain('delete flow test: 4 of 6 (+1)');
-    expect(text).not.toContain('delete and restore flow test: 4 of 5 (');
+    expect(text).toContain('(create, read, delete): 4 of 6 resources (+1)');
+    expect(text).not.toContain('(delete, restore): 4 of 5 resources (');
   });
 
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
