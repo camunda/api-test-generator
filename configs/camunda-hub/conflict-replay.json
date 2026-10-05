@@ -1,5 +1,5 @@
 {
-  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why. sequences: operations run between the target's own setup chain and the target, to leave the target in a state that conflicts (verified live against camunda/hub:SNAPSHOT, which answers 409 for each). untested: operations that document a 409 but have no conflict test yet, each with the tracking issue that says why; the Hub invariant requires every documented 409 to be tested or listed here.",
+  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why. sequences: operations run between the target's own setup chain and the target, to leave the target in a state that makes it answer a given status, verified live against camunda/hub:SNAPSHOT. An entry answers 409 by default (a conflict, such as restoring under a deleted parent) or, with expectStatus 400, a state precondition (such as permanently deleting a live folder that still has files). A before entry may be { operationId, body } to merge body fields over that step. The first sentence of this comment describes `replay`; `sequences` and `untested` are about 409 unless an entry says otherwise. untested: operations that document a 409 but have no conflict test yet, each with the tracking issue that says why; the Hub invariant requires every documented 409 to be tested or listed here.",
   "replay": [
     {
       "operationId": "requestProjectSnapshotReview",
@@ -56,6 +56,38 @@
         "deleteWorkspace"
       ],
       "reason": "A project deleted along with its workspace is not a deletion root, so it cannot be permanently deleted on its own."
+    },
+    {
+      "name": "folder-has-files",
+      "operationId": "permanentlyDeleteFolder",
+      "expectStatus": 400,
+      "before": [
+        {
+          "operationId": "createFile",
+          "body": {
+            "folderKey": "${folderKeyVar}"
+          }
+        }
+      ],
+      "reason": "A live folder that still contains a live file cannot be permanently deleted (\"The folder must be empty\"); verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "project-has-files",
+      "operationId": "permanentlyDeleteProject",
+      "expectStatus": 400,
+      "before": [
+        "createFile"
+      ],
+      "reason": "A live project that still contains a live file cannot be permanently deleted; verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "workspace-not-empty",
+      "operationId": "permanentlyDeleteWorkspace",
+      "expectStatus": 400,
+      "before": [
+        "createProject"
+      ],
+      "reason": "A live workspace that still contains a project cannot be permanently deleted (\"The workspace must be empty\"); verified live against camunda/hub:SNAPSHOT."
     }
   ],
   "untested": [

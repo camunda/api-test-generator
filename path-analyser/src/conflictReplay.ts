@@ -24,6 +24,13 @@ export interface ConflictSequenceEntry {
   operationId: string;
   /** Operations run, in order, after the target's own setup chain and before the target. */
   before: string[];
+  /**
+   * Body fields merged over the generated body of a `before` operation, by its index in
+   * `before`. Values may reference earlier results as "${folderKeyVar}".
+   */
+  bodies: Record<number, Record<string, unknown>>;
+  /** The status the target must answer: 409 (default) or 400 for a state precondition. */
+  expectStatus: 409 | 400;
   reason: string;
 }
 
@@ -92,24 +99,42 @@ export function loadConflictSequences(configDir: string): ConflictSequenceEntry[
   const seen = new Set<string>();
   list.forEach((e, i) => {
     const rec = isRecord(e) ? e : {};
-    const { name, operationId, before, reason } = rec;
+    const { name, operationId, before: rawBefore, reason } = rec;
+    const expectStatus = rec.expectStatus === undefined ? 409 : rec.expectStatus;
+    const entries: unknown[] = Array.isArray(rawBefore) ? rawBefore : [];
+    const before: string[] = [];
+    const bodies: Record<number, Record<string, unknown>> = {};
+    for (const [bi, item] of entries.entries()) {
+      if (typeof item === 'string') before.push(item);
+      else if (isRecord(item) && nonEmptyString(item.operationId)) {
+        before.push(item.operationId);
+        if (item.body !== undefined) {
+          if (!isRecord(item.body)) {
+            throw new Error(
+              `${p}: sequences[${i}].before[${bi}].body must be an object when present.`,
+            );
+          }
+          bodies[bi] = item.body;
+        }
+      } else before.push('');
+    }
     if (
       !nonEmptyString(name) ||
       !SAFE_NAME.test(name) ||
       !nonEmptyString(operationId) ||
       !nonEmptyString(reason) ||
-      !Array.isArray(before) ||
       before.length === 0 ||
-      !before.every(nonEmptyString)
+      !before.every(nonEmptyString) ||
+      (expectStatus !== 409 && expectStatus !== 400)
     ) {
       throw new Error(
-        `${p}: sequences[${i}] must be { name, operationId, before: [operationId, ...], reason } with non-empty values.`,
+        `${p}: sequences[${i}] must be { name, operationId, before: [operationId | { operationId, body }, ...], reason, expectStatus?: 400 | 409 } with non-empty values.`,
       );
     }
     const key = `${operationId}/${name}`;
     if (seen.has(key)) throw new Error(`${p}: sequences[${i}] repeats ${key}.`);
     seen.add(key);
-    out.push({ name, operationId, before: [...before], reason });
+    out.push({ name, operationId, before, bodies, expectStatus, reason });
   });
   return out;
 }
@@ -127,6 +152,20 @@ export function applyConflictReplay(graph: OperationGraph, entries: ConflictRepl
     op.operationMetadata = { ...op.operationMetadata, duplicatePolicy: 'conflict' };
     if (e.changeBody) op.conflictReplay = { changeBody: e.changeBody };
   }
+}
+
+/**
+ * The request body for the step at `index` of a scenario: the generated body with any
+ * sequence override for that step merged over it.
+ */
+export function applyStepBody(
+  bodyTemplate: unknown,
+  stepBodies: Record<number, Record<string, unknown>> | undefined,
+  index: number,
+): unknown {
+  const override = stepBodies?.[index];
+  if (!override || !isRecord(bodyTemplate)) return bodyTemplate;
+  return { ...bodyTemplate, ...override };
 }
 
 /** Fails generation for a sequence that names an operation the spec does not have. */
@@ -162,11 +201,14 @@ export function buildConflictSequenceScenarios(
     .map((seq) => ({
       ...chain,
       id: `${chain.id}:conflict:${seq.name}`,
-      name: `409 conflict - ${seq.name.replace(/-/g, ' ')}`,
-      description: `${seq.reason} Runs ${seq.before.join(', ')} before ${seq.operationId}, which must answer 409.`,
+      name: `${seq.expectStatus} ${seq.expectStatus === 409 ? 'conflict' : 'precondition'} - ${seq.name.replace(/-/g, ' ')}`,
+      description: `${seq.reason} Runs ${seq.before.join(', ')} before ${seq.operationId}, which must answer ${seq.expectStatus}.`,
       strategy: 'featureCoverage' as const,
       variantKey: `conflict=${seq.name}`,
-      expectedResult: { kind: 'error' as const, code: '409' },
+      expectedResult: { kind: 'error' as const, code: String(seq.expectStatus) },
+      stepBodies: Object.fromEntries(
+        Object.entries(seq.bodies).map(([i, b]) => [chain.operations.length - 1 + Number(i), b]),
+      ),
       operations: [
         ...chain.operations.slice(0, -1),
         ...seq.before.map((id) => {

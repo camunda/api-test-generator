@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   applyConflictReplay,
+  applyStepBody,
   buildConflictSequenceScenarios,
+  type ConflictSequenceEntry,
   loadConflictReplay,
   loadConflictSequences,
   validateConflictSequences,
@@ -112,24 +114,82 @@ describe('conflict-replay.json', () => {
 });
 
 describe('conflict-replay.json sequences', () => {
-  const seq = { name: 'gone', operationId: 'restore', before: ['delete'], reason: 'r' };
+  const raw = { name: 'gone', operationId: 'restore', before: ['delete'], reason: 'r' };
+  const seq: ConflictSequenceEntry = { ...raw, bodies: {}, expectStatus: 409 };
 
   it('is optional, and loads valid entries', () => {
     expect(loadConflictSequences(configDir())).toEqual([]);
     expect(loadConflictSequences(configDir(JSON.stringify({ replay: [] })))).toEqual([]);
-    expect(loadConflictSequences(configDir(JSON.stringify({ sequences: [seq] })))).toEqual([seq]);
+    expect(loadConflictSequences(configDir(JSON.stringify({ sequences: [raw] })))).toEqual([seq]);
   });
 
   it.each([
     ['not an array', { sequences: {} }],
-    ['no setup operations', { sequences: [{ ...seq, before: [] }] }],
-    ['empty operation name', { sequences: [{ ...seq, before: [''] }] }],
-    ['missing name', { sequences: [{ ...seq, name: undefined }] }],
-    ['name with an apostrophe', { sequences: [{ ...seq, name: "it's gone" }] }],
-    ['missing reason', { sequences: [{ ...seq, reason: '' }] }],
-    ['repeated name for one operation', { sequences: [seq, seq] }],
+    ['no setup operations', { sequences: [{ ...raw, before: [] }] }],
+    ['empty operation name', { sequences: [{ ...raw, before: [''] }] }],
+    ['setup entry without an operation', { sequences: [{ ...raw, before: [{ body: {} }] }] }],
+    [
+      'setup body not an object',
+      { sequences: [{ ...raw, before: [{ operationId: 'a', body: [] }] }] },
+    ],
+    ['setup body a string', { sequences: [{ ...raw, before: [{ operationId: 'a', body: 'x' }] }] }],
+    ['unsupported status', { sequences: [{ ...raw, expectStatus: 500 }] }],
+    ['missing name', { sequences: [{ ...raw, name: undefined }] }],
+    ['name with an apostrophe', { sequences: [{ ...raw, name: "it's gone" }] }],
+    ['missing reason', { sequences: [{ ...raw, reason: '' }] }],
+    ['repeated name for one operation', { sequences: [raw, raw] }],
   ])('rejects: %s', (_label, content) => {
     expect(() => loadConflictSequences(configDir(JSON.stringify(content)))).toThrow();
+  });
+
+  it('loads a setup body override and an expected 400', () => {
+    const [e] = loadConflictSequences(
+      configDir(
+        JSON.stringify({
+          sequences: [
+            {
+              ...raw,
+              expectStatus: 400,
+              before: ['a', { operationId: 'b', body: { k: 'a value' } }],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(e.before).toEqual(['a', 'b']);
+    expect(e.bodies).toEqual({ 1: { k: 'a value' } });
+    expect(e.expectStatus).toBe(400);
+  });
+
+  it('expects the configured status and keys body overrides by position in the chain', () => {
+    const g = graphOf(node('createX'), node('a'), node('b'), node('restore'));
+    const ref = (id: string) => ({ operationId: id, method: 'POST', path: `/${id}` });
+    const chain: EndpointScenario = {
+      id: 's',
+      operations: [ref('createX'), ref('restore')],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+    };
+    const [out] = buildConflictSequenceScenarios(
+      chain,
+      [{ ...seq, before: ['a', 'b'], bodies: { 1: { k: 'v' } }, expectStatus: 400 }],
+      g,
+    );
+    expect(out.expectedResult).toEqual({ kind: 'error', code: '400' });
+    // operations: createX(0), a(1), b(2), restore(3); the override targets b
+    expect(out.stepBodies).toEqual({ 2: { k: 'v' } });
+    expect(out.name).toContain('400 precondition');
+  });
+
+  it('merges a step override over that step only, leaving other steps and non-object bodies alone', () => {
+    const overrides = { 2: { folderKey: 'a placeholder' } };
+    expect(applyStepBody({ name: 'n', folderKey: null }, overrides, 2)).toEqual({
+      name: 'n',
+      folderKey: 'a placeholder',
+    });
+    expect(applyStepBody({ name: 'n' }, overrides, 1)).toEqual({ name: 'n' });
+    expect(applyStepBody({ name: 'n' }, undefined, 2)).toEqual({ name: 'n' });
+    expect(applyStepBody(undefined, overrides, 2)).toBeUndefined();
   });
 
   it('fails for an operation the spec does not have, whether target or setup', () => {
