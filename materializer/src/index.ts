@@ -33,6 +33,7 @@ import type { EndpointScenarioCollection, GlobalContextSeed } from 'path-analyse
 import { parseCliArgs } from './cli-args.js';
 import { buildCoverage, type CoverageResult, templateOutputDir } from './coverage.js';
 import { buildCoverageSummary, loadSpecOperationIds } from './coverageSummary.js';
+import { buildCsharpDiscriminatorTable } from './csharp-sdk/discriminators.js';
 import { type CsharpOperationMap, createCsharpEmitter } from './csharp-sdk/emitter.js';
 import { materializeCsharpSupport } from './csharp-sdk/materialize-support.js';
 import { createJsSdkEmitter } from './js-sdk/emitter.js';
@@ -104,6 +105,13 @@ function loadCsharpMap(repoRoot: string): CsharpOperationMap {
   } catch {
     return {};
   }
+}
+
+function loadCsharpDiscriminators(repoRoot: string) {
+  const specPath = path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json');
+  if (!fsSync.existsSync(specPath)) return {};
+  const bundle: unknown = JSON.parse(fsSync.readFileSync(specPath, 'utf-8'));
+  return buildCsharpDiscriminatorTable(bundle);
 }
 
 /**
@@ -428,7 +436,11 @@ interface TargetRunEnv {
 function registerSdkEmitters(repoRoot: string): void {
   registerEmitter(createJsSdkEmitter(loadJsSdkMap(repoRoot)));
   registerEmitter(createPythonSdkEmitter(loadPythonSdkMap(repoRoot)));
-  registerEmitter(createCsharpEmitter(loadCsharpMap(repoRoot)));
+  registerEmitter(
+    createCsharpEmitter(loadCsharpMap(repoRoot), {
+      discriminators: loadCsharpDiscriminators(repoRoot),
+    }),
+  );
 }
 
 /**

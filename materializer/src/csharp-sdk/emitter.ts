@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { EmitContext, EmittedFile, EmitterStrategy } from '@camunda8/emitter-sdk';
 import { assertSafeGlobalContextSeeds } from 'path-analyser/ontology/loader';
 import type {
@@ -13,6 +15,11 @@ import type {
 // earlier step, and the consuming step declares HTTP 409). See #342 for the
 // omitWhenUnbound half of the same contract.
 import { computeUniqueBindings } from '../playwright/ctxSeeding.js';
+import {
+  type CsharpDiscriminator,
+  type CsharpDiscriminatorTable,
+  chooseCsharpDiscriminator,
+} from './discriminators.js';
 import {
   type CsharpOperationMap,
   type CsharpOperationMapEntry,
@@ -152,165 +159,100 @@ const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
   adHocSubProcessInstanceKey: 'ElementInstanceKey',
   tenantId: 'TenantId',
   username: 'Username',
-  id: 'GlobalListenerId',
 };
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
-// SDK methods that return a bare (non-generic) `Task` rather than
-// `Task<T>`. Verified by reflecting every public `CamundaClient` method
-// against the real Camunda.Orchestration.Sdk 9.2.2 assembly. Assigning the
-// awaited result of one of these calls to a `var` fails to compile with
-// CS0815 ("Cannot assign void to an implicitly-typed variable") -- these
-// methods have no response body to assert against or extract from.
-const CSHARP_VOID_METHODS = new Set<string>([
-  'ActivateAdHocSubProcessActivitiesAsync',
-  'AssignClientToGroupAsync',
-  'AssignClientToTenantAsync',
-  'AssignGroupToTenantAsync',
-  'AssignMappingRuleToGroupAsync',
-  'AssignMappingRuleToTenantAsync',
-  'AssignRoleToClientAsync',
-  'AssignRoleToGroupAsync',
-  'AssignRoleToMappingRuleAsync',
-  'AssignRoleToTenantAsync',
-  'AssignRoleToUserAsync',
-  'AssignUserTaskAsync',
-  'AssignUserToGroupAsync',
-  'AssignUserToTenantAsync',
-  'CancelBatchOperationAsync',
-  'CancelProcessInstanceAsync',
-  'CompleteJobAsync',
-  'CompleteUserTaskAsync',
-  'CreateElementInstanceVariablesAsync',
-  'DeleteAuthorizationAsync',
-  'DeleteDecisionInstanceAsync',
-  'DeleteDocumentAsync',
-  'DeleteGlobalClusterVariableAsync',
-  'DeleteGlobalTaskListenerAsync',
-  'DeleteGroupAsync',
-  'DeleteMappingRuleAsync',
-  'DeleteProcessInstanceAsync',
-  'DeleteRoleAsync',
-  'DeleteTenantAsync',
-  'DeleteTenantClusterVariableAsync',
-  'DeleteUserAsync',
-  'FailJobAsync',
-  'GetStatusAsync',
-  'MigrateProcessInstanceAsync',
-  'ModifyProcessInstanceAsync',
-  'PinClockAsync',
-  'ResetClockAsync',
-  'ResolveIncidentAsync',
-  'ResumeBatchOperationAsync',
-  'RunWorkersAsync',
-  'StopAllWorkersAsync',
-  'SuspendBatchOperationAsync',
-  'ThrowJobErrorAsync',
-  'UnassignClientFromGroupAsync',
-  'UnassignClientFromTenantAsync',
-  'UnassignGroupFromTenantAsync',
-  'UnassignMappingRuleFromGroupAsync',
-  'UnassignMappingRuleFromTenantAsync',
-  'UnassignRoleFromClientAsync',
-  'UnassignRoleFromGroupAsync',
-  'UnassignRoleFromMappingRuleAsync',
-  'UnassignRoleFromTenantAsync',
-  'UnassignRoleFromUserAsync',
-  'UnassignUserFromGroupAsync',
-  'UnassignUserFromTenantAsync',
-  'UnassignUserTaskAsync',
-  'UpdateAuthorizationAsync',
-  'UpdateJobAsync',
-  'UpdateUserTaskAsync',
-]);
+export interface SdkMethodParameter {
+  name: string;
+  type: string;
+  optional: boolean;
+}
 
-const CSHARP_TIME_WINDOW_ARGS: Record<string, string> = {
-  GetGlobalJobStatisticsAsync: 'from: DateTimeOffset.UtcNow.AddDays(-1), to: DateTimeOffset.UtcNow',
-  GetUsageMetricsAsync:
-    'startTime: DateTimeOffset.UtcNow.AddDays(-1), endTime: DateTimeOffset.UtcNow',
-};
+export interface SdkMethodDescription {
+  name: string;
+  parameters: SdkMethodParameter[];
+  returnType: string;
+}
 
-const CSHARP_CONSISTENCY_METHODS = new Set<string>([
-  'GetAuditLogAsync',
-  'GetAuthorizationAsync',
-  'GetBatchOperationAsync',
-  'GetDecisionDefinitionAsync',
-  'GetDecisionInstanceAsync',
-  'GetDecisionRequirementsAsync',
-  'GetDocumentAsync',
-  'GetElementInstanceAsync',
-  'GetGlobalClusterVariableAsync',
-  'GetGlobalJobStatisticsAsync',
-  'GetGlobalTaskListenerAsync',
-  'GetGroupAsync',
-  'GetIncidentAsync',
-  'GetJobErrorStatisticsAsync',
-  'GetJobTimeSeriesStatisticsAsync',
-  'GetJobTypeStatisticsAsync',
-  'GetJobWorkerStatisticsAsync',
-  'GetMappingRuleAsync',
-  'GetProcessDefinitionAsync',
-  'GetProcessDefinitionInstanceStatisticsAsync',
-  'GetProcessDefinitionInstanceVersionStatisticsAsync',
-  'GetProcessDefinitionMessageSubscriptionStatisticsAsync',
-  'GetProcessDefinitionStatisticsAsync',
-  'GetProcessInstanceAsync',
-  'GetProcessInstanceCallHierarchyAsync',
-  'GetProcessInstanceSequenceFlowsAsync',
-  'GetProcessInstanceStatisticsAsync',
-  'GetProcessInstanceStatisticsByDefinitionAsync',
-  'GetProcessInstanceStatisticsByErrorAsync',
-  'GetRoleAsync',
-  'GetTenantAsync',
-  'GetTenantClusterVariableAsync',
-  'GetUsageMetricsAsync',
-  'GetUserAsync',
-  'GetUserTaskAsync',
-  'GetUserTaskFormAsync',
-  'GetVariableAsync',
-  'SearchAuditLogsAsync',
-  'SearchAuthorizationsAsync',
-  'SearchBatchOperationItemsAsync',
-  'SearchBatchOperationsAsync',
-  'SearchClientsForGroupAsync',
-  'SearchClientsForRoleAsync',
-  'SearchClientsForTenantAsync',
-  'SearchClusterVariablesAsync',
-  'SearchCorrelatedMessageSubscriptionsAsync',
-  'SearchDecisionDefinitionsAsync',
-  'SearchDecisionInstancesAsync',
-  'SearchDecisionRequirementsAsync',
-  'SearchElementInstanceIncidentsAsync',
-  'SearchElementInstancesAsync',
-  'SearchGlobalTaskListenersAsync',
-  'SearchGroupIdsForTenantAsync',
-  'SearchGroupsAsync',
-  'SearchGroupsForRoleAsync',
-  'SearchIncidentsAsync',
-  'SearchJobsAsync',
-  'SearchMappingRuleAsync',
-  'SearchMappingRulesForGroupAsync',
-  'SearchMappingRulesForRoleAsync',
-  'SearchMappingRulesForTenantAsync',
-  'SearchMessageSubscriptionsAsync',
-  'SearchProcessDefinitionsAsync',
-  'SearchProcessInstanceIncidentsAsync',
-  'SearchProcessInstancesAsync',
-  'SearchRolesAsync',
-  'SearchRolesForGroupAsync',
-  'SearchRolesForTenantAsync',
-  'SearchTenantsAsync',
-  'SearchUserTaskAuditLogsAsync',
-  'SearchUserTaskEffectiveVariablesAsync',
-  'SearchUserTaskVariablesAsync',
-  'SearchUserTasksAsync',
-  'SearchUsersAsync',
-  'SearchUsersForGroupAsync',
-  'SearchUsersForRoleAsync',
-  'SearchUsersForTenantAsync',
-  'SearchVariablesAsync',
-]);
+export interface SdkMethodManifest {
+  sdkVersion: string;
+  methods: SdkMethodDescription[];
+}
+
+function isSdkMethodManifest(value: unknown): value is SdkMethodManifest {
+  if (!isRecord(value) || typeof value.sdkVersion !== 'string' || !Array.isArray(value.methods)) {
+    return false;
+  }
+  return value.methods.every((method) => {
+    if (
+      !isRecord(method) ||
+      typeof method.name !== 'string' ||
+      typeof method.returnType !== 'string'
+    ) {
+      return false;
+    }
+    return (
+      Array.isArray(method.parameters) &&
+      method.parameters.every(
+        (parameter) =>
+          isRecord(parameter) &&
+          typeof parameter.name === 'string' &&
+          typeof parameter.type === 'string' &&
+          typeof parameter.optional === 'boolean',
+      )
+    );
+  });
+}
+
+function loadSdkMethodManifest(): SdkMethodManifest {
+  const path = fileURLToPath(
+    new URL('../../../csharp-sdk/examples/sdk-client-methods.json', import.meta.url),
+  );
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (!isSdkMethodManifest(parsed)) {
+    throw new Error(`Invalid C# SDK method manifest at ${path}`);
+  }
+  return parsed;
+}
+
+export const CSHARP_SDK_METHOD_MANIFEST = loadSdkMethodManifest();
+
+export const CSHARP_VOID_METHODS = new Set(
+  CSHARP_SDK_METHOD_MANIFEST.methods
+    .filter((method) => method.returnType === 'System.Threading.Tasks.Task')
+    .map((method) => method.name),
+);
+
+export const CSHARP_CONSISTENCY_METHODS = new Set(
+  CSHARP_SDK_METHOD_MANIFEST.methods
+    .filter((method) => method.parameters.some((parameter) => parameter.name === 'consistency'))
+    .map((method) => method.name),
+);
+
+export const CSHARP_TIME_WINDOW_ARGS: Record<string, string> = Object.fromEntries(
+  CSHARP_SDK_METHOD_MANIFEST.methods
+    .map((method) => [
+      method.name,
+      method.parameters
+        .filter((parameter) => parameter.type === 'System.DateTimeOffset' && !parameter.optional)
+        .map(
+          (parameter, index) =>
+            `${parameter.name}: ${index === 0 ? 'DateTimeOffset.UtcNow.AddDays(-1)' : 'DateTimeOffset.UtcNow'}`,
+        )
+        .join(', '),
+    ])
+    .filter((entry): entry is [string, string] => entry[1].length > 0),
+);
+
+function simpleSdkType(type: string): string | undefined {
+  const match = type.match(/^Camunda\.Orchestration\.Sdk\.([A-Za-z0-9_]+)$/);
+  return match?.[1];
+}
+
+function findSdkMethod(methodName: string): SdkMethodDescription | undefined {
+  return CSHARP_SDK_METHOD_MANIFEST.methods.find((method) => method.name === methodName);
+}
 
 const CSHARP_CONSISTENCY_ARG = 'consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 }';
 
@@ -329,12 +271,16 @@ export function renderCsharpSdkSuite(
     suiteName?: string;
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
+    discriminators?: CsharpDiscriminatorTable;
   },
 ): string {
   return buildSuiteSource(collection, mapping, opts);
 }
 
-export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrategy {
+export function createCsharpEmitter(
+  mapping?: CsharpOperationMap,
+  options: { discriminators?: CsharpDiscriminatorTable } = {},
+): EmitterStrategy {
   const mappingSource: SdkMappingSource = new CsharpOperationMapSource(mapping);
   return {
     id: 'csharp-sdk',
@@ -345,6 +291,7 @@ export function createCsharpEmitter(mapping?: CsharpOperationMap): EmitterStrate
         suiteName: ctx.suiteName,
         mode: ctx.mode,
         globalContextSeeds: ctx.globalContextSeeds,
+        discriminators: options.discriminators,
       });
       return [
         {
@@ -363,6 +310,7 @@ function buildSuiteSource(
     suiteName?: string;
     mode?: 'feature' | 'integration' | 'variant';
     globalContextSeeds?: readonly GlobalContextSeed[];
+    discriminators?: CsharpDiscriminatorTable;
   },
 ): string {
   if (opts.globalContextSeeds !== undefined) {
@@ -397,7 +345,7 @@ function buildSuiteSource(
 
   const seeds = opts.globalContextSeeds ?? [];
   for (const scenario of collection.scenarios) {
-    lines.push(renderScenarioTest(scenario, mapping, seeds));
+    lines.push(renderScenarioTest(scenario, mapping, seeds, opts.discriminators));
   }
 
   lines.push('}');
@@ -409,6 +357,7 @@ function renderScenarioTest(
   s: EndpointScenario,
   mapping: SdkMappingSource,
   globalContextSeeds: readonly GlobalContextSeed[],
+  discriminators?: CsharpDiscriminatorTable,
 ): string {
   const title = `${s.id} - ${escapeQuotes(s.name || 'scenario')}`;
   const methodName = toSafeIdentifier(`Scenario_${s.id}_${s.name || 'scenario'}`);
@@ -589,7 +538,7 @@ function renderScenarioTest(
         const tenantExpr = renderTenantExpr(multipart.fields.tenantId);
         body.push(`        var resourceFiles = ${filesExpr};`);
         body.push(
-          `        var result${idx + 1} = await ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`)};`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `resourceFiles, ${tenantExpr}`, true)};`,
         );
       } else if (emptyDocumentFiles) {
         body.push(`        using var content${idx + 1} = new MultipartFormDataContent();`);
@@ -603,14 +552,14 @@ function renderScenarioTest(
         );
         body.push(`        }`);
         body.push(
-          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`)};`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`, true)};`,
         );
       } else {
         body.push(
           `        using var content${idx + 1} = BuildMultipart(${fieldsVar}, ${filesVar});`,
         );
         body.push(
-          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`)};`,
+          `        var result${idx + 1} = await ${renderClientCall(method, step, `content${idx + 1}`, true)};`,
         );
       }
 
@@ -664,6 +613,8 @@ function renderScenarioTest(
             requireRequestType(step, requestType),
             jsonFields,
             '          ',
+            step.operationId,
+            discriminators,
           ),
         );
         body.push(`          await ${renderClientCall(method, step, requestVar)};`);
@@ -698,19 +649,21 @@ function renderScenarioTest(
           requireRequestType(step, requestType),
           jsonFields,
           '        ',
+          step.operationId,
+          discriminators,
         ),
       );
       body.push(
-        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar, true)};`,
       );
     } else if (shouldPassEmptyRequest) {
       body.push(`        var ${requestVar} = new ${requestType}();`);
       body.push(
-        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar)};`,
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, requestVar, true)};`,
       );
     } else {
       body.push(
-        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step)};`,
+        `        ${isVoidMethod ? '' : `var ${varName} = `}await ${renderClientCall(method, step, undefined, true)};`,
       );
     }
 
@@ -819,15 +772,19 @@ function emitJsonRequestDataLines(
   requestType: string,
   fields: JsonRequestFields,
   indent: string,
+  operationId: string,
+  discriminatorTable: CsharpDiscriminatorTable | undefined,
 ): string[] {
   const dataVar = `${requestVar}Data`;
   const lines = [`${indent}var ${dataVar} = new Dictionary<string, object?>();`];
   if (fields.kind === 'scalar') {
-    lines.push(`${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent)};`);
+    lines.push(
+      `${indent}${dataVar}["body"] = ${renderCsharpValue(fields.value, indent, 'body', discriminatorTable?.[operationId])};`,
+    );
   } else if (fields.kind === 'record') {
     for (const [fieldName, value] of fields.inline) {
       lines.push(
-        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent)};`,
+        `${indent}${dataVar}[${stringLiteral(fieldName)}] = ${renderCsharpValue(value, indent, fieldName, discriminatorTable?.[operationId])};`,
       );
     }
     for (const { fieldName, binding } of fields.deferred) {
@@ -851,14 +808,19 @@ function requireRequestType(step: RequestStep, requestType: string | undefined):
   return requestType;
 }
 
-function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
+function renderClientCall(
+  method: string,
+  step: RequestStep,
+  requestExpression?: string,
+  withConsistency = false,
+): string {
   const call = renderClientCallForPath(
     method,
     step.pathTemplate,
     requestExpression,
     step.pathParams,
   );
-  if (step.expect.status !== 200 || !CSHARP_CONSISTENCY_METHODS.has(method)) return call;
+  if (!withConsistency || !CSHARP_CONSISTENCY_METHODS.has(method)) return call;
   return call.endsWith('()')
     ? `${call.slice(0, -1)}${CSHARP_CONSISTENCY_ARG})`
     : `${call.slice(0, -1)}, ${CSHARP_CONSISTENCY_ARG})`;
@@ -876,7 +838,10 @@ function renderClientCallForPath(
   }
   const argumentsList = derivePathParamNames(pathTemplate).map((rawName) => {
     const name = toCamelCase(rawName);
-    const keyType = CSHARP_PATH_PARAM_KEY_TYPE[name];
+    const sdkParameter = findSdkMethod(method)?.parameters.find(
+      (parameter) => parameter.name === name,
+    );
+    const keyType = simpleSdkType(sdkParameter?.type ?? '') ?? CSHARP_PATH_PARAM_KEY_TYPE[name];
     // The planner/emitter contract (mirrored by the JS SDK emitter's
     // `buildJavaScriptUrlExpression`) lets `RequestStep.pathParams[].var`
     // alias a URL param name to a different ctx binding name; fall back to
@@ -975,7 +940,12 @@ function derivePathParamNames(pathTemplate: string): string[] {
   return [...pathTemplate.matchAll(PATH_PARAM_RE)].map((match) => match[1]);
 }
 
-function renderCsharpValue(value: unknown, indent = ''): string {
+function renderCsharpValue(
+  value: unknown,
+  indent = '',
+  path = '',
+  discriminators: readonly CsharpDiscriminator[] = [],
+): string {
   if (value === null) return 'null';
   if (typeof value === 'string') {
     return renderTemplateString(value);
@@ -984,52 +954,31 @@ function renderCsharpValue(value: unknown, indent = ''): string {
     return String(value);
   }
   if (Array.isArray(value)) {
-    const inner = value.map((v) => renderCsharpValue(v, `${indent}  `)).join(', ');
+    const inner = value
+      .map((v) => renderCsharpValue(v, `${indent}  `, `${path}[]`, discriminators))
+      .join(', ');
     return `new object?[] { ${inner} }`;
   }
   if (isRecord(value)) {
     const entries: string[] = [];
     const fields = Object.entries(value);
-    const discriminator = polymorphicDiscriminator(value);
+    const discriminator = chooseCsharpDiscriminator(value, discriminators, path);
     if (discriminator !== undefined && !Object.hasOwn(value, discriminator.name)) {
       fields.unshift([discriminator.name, discriminator.value]);
     }
     for (const [k, v] of fields) {
-      const rendered = renderCsharpValue(v, `${indent}  `);
+      const rendered = renderCsharpValue(
+        v,
+        `${indent}  `,
+        path ? `${path}.${k}` : k,
+        discriminators,
+      );
       entries.push(`${indent}  [${stringLiteral(k)}] = ${rendered},`);
     }
     if (entries.length === 0) return 'new Dictionary<string, object?>()';
     return `new Dictionary<string, object?>\n${indent}{\n${entries.join('\n')}\n${indent}}`;
   }
   return 'null';
-}
-
-function polymorphicDiscriminator(
-  value: Record<string, unknown>,
-): { name: string; value: string } | undefined {
-  if (Object.hasOwn(value, 'afterElementId')) {
-    return { name: 'type', value: 'TERMINATE_PROCESS_INSTANCE' };
-  }
-  if (Object.hasOwn(value, 'sourceElementId')) {
-    return { name: 'sourceType', value: 'byId' };
-  }
-  if (Object.hasOwn(value, 'sourceElementInstanceKey')) {
-    return { name: 'sourceType', value: 'byKey' };
-  }
-  if (Object.hasOwn(value, 'ancestorElementInstanceKey')) {
-    return { name: 'ancestorScopeType', value: 'direct' };
-  }
-  if (Object.hasOwn(value, 'activateElements')) {
-    return { name: 'type', value: 'adHocSubProcess' };
-  }
-  if (
-    Object.hasOwn(value, 'denied') ||
-    Object.hasOwn(value, 'deniedReason') ||
-    Object.hasOwn(value, 'corrections')
-  ) {
-    return { name: 'type', value: 'userTask' };
-  }
-  return undefined;
 }
 
 function renderTemplateString(value: string): string {
