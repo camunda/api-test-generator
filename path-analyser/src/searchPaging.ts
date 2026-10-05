@@ -1,5 +1,6 @@
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import type { EndpointScenario, OperationGraph } from './types.js';
 
 export interface SearchPagingEntry {
@@ -19,6 +20,14 @@ export interface SearchPagingConfig {
   limit: number;
   /** The `page.from` of the offset variant. */
   offsetFrom: number;
+  /**
+   * Derive an entry for every search operation in the spec (a JSON body that takes both `page` and
+   * `sort`) that has no explicit entry and is not excluded. See {@link deriveSearchPaging}.
+   */
+  auto: boolean;
+  /** Search operations that get no paging test, each with the reason. */
+  exclude: { operationId: string; reason: string }[];
+  /** Explicit entries: exceptions to the derived choice, or everything when `auto` is false. */
   searches: SearchPagingEntry[];
 }
 
@@ -53,6 +62,25 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
   if (typeof offsetFrom !== 'number' || !Number.isInteger(offsetFrom) || offsetFrom < 1) {
     throw new Error(`${p}: "offsetFrom" must be a positive integer.`);
   }
+  if (raw.auto !== undefined && typeof raw.auto !== 'boolean') {
+    throw new Error(`${p}: "auto" must be a boolean when present.`);
+  }
+  const rawExclude = raw.exclude ?? [];
+  if (!Array.isArray(rawExclude)) throw new Error(`${p}: "exclude" must be an array.`);
+  const exclude = rawExclude.map((e, i) => {
+    const rec = isRecord(e) ? e : {};
+    if (
+      typeof rec.operationId !== 'string' ||
+      !rec.operationId ||
+      typeof rec.reason !== 'string' ||
+      !rec.reason
+    ) {
+      throw new Error(
+        `${p}: exclude[${i}] must be { operationId, reason } with non-empty strings.`,
+      );
+    }
+    return { operationId: rec.operationId, reason: rec.reason };
+  });
   const seen = new Set<string>();
   const searches = raw.searches.map((e, i): SearchPagingEntry => {
     const rec = isRecord(e) ? e : {};
@@ -80,7 +108,166 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
       ...(isRecord(rec.filter) ? { filter: rec.filter } : {}),
     };
   });
-  return { limit, offsetFrom, searches };
+  // An operation both excluded and listed would be skipped by the derivation yet still emitted from
+  // its explicit entry, contradicting the exclusion.
+  const excludedIds = new Set(exclude.map((e) => e.operationId));
+  const both = searches.filter((e) => excludedIds.has(e.operationId)).map((e) => e.operationId);
+  if (both.length) {
+    throw new Error(
+      `${p}: operationId(s) listed in both "searches" and "exclude": ${both.join(', ')}.`,
+    );
+  }
+  return { limit, offsetFrom, auto: raw.auto === true, exclude, searches };
+}
+
+const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
+
+/** Timestamp fields compare the same in JavaScript as on the server, so their order can be asserted. */
+const TIMESTAMP_FIELDS = ['created', 'updated', 'deleted'];
+
+/** A search operation found in the spec: its JSON body takes both `page` and `sort`. */
+export interface SpecSearchOperation {
+  operationId: string;
+  /** The values of the sort item's `field` enum, in spec order. */
+  sortFields: string[];
+}
+
+/**
+ * The node a local `$ref` (`#/components/schemas/X`, `#/paths/~1files~1search/post/requestBody`, ...)
+ * points to: an RFC 6901 JSON pointer, with `~1` and `~0` unescaped and percent-decoding applied.
+ * Anything that is not a local pointer, or does not resolve, yields undefined.
+ */
+function resolvePointer(spec: Record<string, unknown>, ref: string): unknown {
+  if (!ref.startsWith('#/')) return undefined;
+  let cur: unknown = spec;
+  for (const raw of ref.slice(2).split('/')) {
+    let token = raw;
+    try {
+      token = decodeURIComponent(raw);
+    } catch {
+      // keep the raw token; a malformed escape cannot match a key anyway
+    }
+    token = token.replaceAll('~1', '/').replaceAll('~0', '~');
+    if (Array.isArray(cur)) cur = cur[Number(token)];
+    else if (isRecord(cur)) cur = cur[token];
+    else return undefined;
+  }
+  return cur;
+}
+
+/** Follows `$ref`s until a node that is not a reference. */
+function follow(spec: Record<string, unknown>, node: unknown): Record<string, unknown> {
+  let cur = node;
+  for (let depth = 0; depth < 10 && isRecord(cur) && typeof cur.$ref === 'string'; depth++) {
+    cur = resolvePointer(spec, cur.$ref);
+  }
+  return isRecord(cur) ? cur : {};
+}
+
+/**
+ * A schema with its `$ref`s followed and its `allOf` branches merged in: the union of their
+ * `properties`, and the first `enum` and `items` found. Enough to read which properties a request
+ * body takes and what a sort item's `field` may be, however the spec composes them.
+ */
+function flatten(spec: Record<string, unknown>, node: unknown, depth = 0): Record<string, unknown> {
+  const schema = follow(spec, node);
+  if (depth > 10) return schema;
+  const merged: Record<string, unknown> = { ...schema };
+  const properties: Record<string, unknown> = isRecord(schema.properties)
+    ? { ...schema.properties }
+    : {};
+  if (Array.isArray(schema.allOf)) {
+    for (const branch of schema.allOf) {
+      const part = flatten(spec, branch, depth + 1);
+      if (isRecord(part.properties)) Object.assign(properties, part.properties);
+      if (merged.enum === undefined && part.enum !== undefined) merged.enum = part.enum;
+      if (merged.items === undefined && part.items !== undefined) merged.items = part.items;
+    }
+  }
+  if (Object.keys(properties).length) merged.properties = properties;
+  return merged;
+}
+
+/** Every operation whose JSON request body has both a `page` and a `sort` property. */
+export function findSearchOperations(spec: unknown): SpecSearchOperation[] {
+  if (!isRecord(spec) || !isRecord(spec.paths)) return [];
+  const out: SpecSearchOperation[] = [];
+  for (const item of Object.values(spec.paths)) {
+    if (!isRecord(item)) continue;
+    for (const [key, op] of Object.entries(item)) {
+      // Only HTTP method keys are operations; a path item may also hold `parameters`, `x-*`
+      // extensions and so on, some of which carry an operationId-shaped object.
+      if (!HTTP_METHODS.has(key.toLowerCase())) continue;
+      if (!isRecord(op) || typeof op.operationId !== 'string') continue;
+      const body = follow(spec, op.requestBody);
+      const content = isRecord(body.content) ? body.content : {};
+      const json = isRecord(content['application/json']) ? content['application/json'] : {};
+      const properties = flatten(spec, json.schema).properties;
+      if (!isRecord(properties) || !('page' in properties) || !('sort' in properties)) continue;
+      const sortItem = flatten(spec, flatten(spec, properties.sort).items);
+      const sortItemProps = isRecord(sortItem.properties) ? sortItem.properties : {};
+      const fieldSchema = flatten(spec, sortItemProps.field);
+      const sortFields = Array.isArray(fieldSchema.enum)
+        ? fieldSchema.enum.filter((f): f is string => typeof f === 'string')
+        : [];
+      out.push({ operationId: op.operationId, sortFields });
+    }
+  }
+  return out;
+}
+
+/**
+ * The spec the other readers use: `OPENAPI_SPEC_PATH` when set (resolved against `baseDir`, like
+ * the graph loader), else the active config's bundled spec. JSON or YAML.
+ */
+export function loadSpecDocument(baseDir: string, bundledSpecPath: string): unknown {
+  const override = process.env.OPENAPI_SPEC_PATH;
+  const specPath = override ? path.resolve(baseDir, override) : bundledSpecPath;
+  return parseYaml(fsSync.readFileSync(specPath, 'utf8'));
+}
+
+/**
+ * The effective config: the explicit entries plus, when `auto` is set, one derived entry per search
+ * operation in the spec that is neither listed nor excluded. The derived choice is `created`, else
+ * `updated`, else `deleted` (whichever the sort enum offers), descending, with its order asserted; if there is none, the first
+ * enum field ascending without an order assertion (names sort by the database collation).
+ */
+export function deriveSearchPaging(config: SearchPagingConfig, spec: unknown): SearchPagingConfig {
+  if (!config.auto) return config;
+  const found = findSearchOperations(spec);
+  const known = new Set(found.map((s) => s.operationId));
+  const stale = config.exclude.filter((e) => !known.has(e.operationId)).map((e) => e.operationId);
+  if (stale.length) {
+    throw new Error(
+      `search-paging.json excludes operationId(s) that are not search operations in the spec: ${stale.join(', ')}.`,
+    );
+  }
+  const listed = new Set(config.searches.map((s) => s.operationId));
+  const excluded = new Set(config.exclude.map((e) => e.operationId));
+  const derived: SearchPagingEntry[] = [];
+  for (const op of found) {
+    if (listed.has(op.operationId) || excluded.has(op.operationId)) continue;
+    if (op.sortFields.length === 0) {
+      throw new Error(
+        `search-paging.json: cannot derive a sort for ${op.operationId}, its sort field has no enum. List it in "searches" or "exclude" it.`,
+      );
+    }
+    const timestamp = TIMESTAMP_FIELDS.find((f) => op.sortFields.includes(f));
+    derived.push(
+      timestamp
+        ? {
+            operationId: op.operationId,
+            sort: { field: timestamp, order: 'DESC' },
+            checkOrder: true,
+          }
+        : {
+            operationId: op.operationId,
+            sort: { field: op.sortFields[0], order: 'ASC' },
+            checkOrder: false,
+          },
+    );
+  }
+  return { ...config, searches: [...config.searches, ...derived] };
 }
 
 /** Fails generation for an entry naming an operation the spec does not have. */

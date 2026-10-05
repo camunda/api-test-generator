@@ -335,19 +335,25 @@ version and snapshot updates.
 
 ### Search paging and sort scenarios
 
-`configs/<config>/search-paging.json` (`{ limit, offsetFrom, searches: [{ operationId, sort: { field, order },
-checkOrder, filter? }] }`) gives each listed search operation a success-path variant,
-`page and sort (limit N, <field> <ORDER>)` in its `<operation>.variant.spec.ts`. It sends
-`page.limit`, `sort` and, when listed, a `filter`, then asserts at most `limit` items and, when
-`checkOrder` is true, items ordered by the sort field, with the opposite sort coming back in the
+`configs/<config>/search-paging.json` (`{ limit, offsetFrom, auto, exclude, searches }`) gives search
+operations a success-path variant, `page and sort (limit N, <field> <ORDER>)` in the operation's
+`<operation>.variant.spec.ts`. With `auto: true` every operation whose JSON body takes both `page` and
+`sort` gets one without being listed: a new search operation in the spec is covered by the next
+generation. The sort is `created`, else `updated`, else `deleted` (whichever the sort enum offers),
+descending, with its order asserted; if the enum has none of them, its first value ascending with no
+order assertion, because names sort by the database collation. `searches` then holds only exceptions
+(`{ operationId, sort: { field, order }, checkOrder, filter? }`, for example an operation that also needs
+a `filter` because none of its other success tests sends one), and `exclude`
+(`{ operationId, reason }`) opts an operation out. An operation whose sort has no enum fails generation
+until it is listed or excluded.
+
+The test sends `page.limit`, `sort` and, when listed, a `filter`, then asserts at most `limit` items and,
+when the order is checked, items ordered by the sort field, with the opposite sort coming back in the
 opposite order (so a server that ignores `sort` fails). A second variant, `page offset (from N, …)`,
-sends `page.from` and, when `checkOrder` is true, compares its items with the same slice of an
-unpaged query (ascending, re-queried up to three times because other specs create, delete and
-restore entities while it runs). Only timestamp
-fields set `checkOrder`: their
-ISO-8601 values order the same in JavaScript as on the server, while names depend on the database
-collation. The Hub invariant derives the search operations from the spec (a JSON body taking both
-`page` and `sort`), so a new search operation fails until it is listed.
+sends `page.from` and, when the order is checked, compares its items with the same slice of an unpaged
+query (ascending, re-queried up to three times because other specs create, delete and restore entities
+while it runs). The Hub invariant finds the search operations in the spec on its own and fails for any
+that has no paging test and is not excluded.
 
 ### 403 (auth-deny) scenarios
 
