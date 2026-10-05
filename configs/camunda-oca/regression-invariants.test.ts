@@ -10637,3 +10637,40 @@ describeForThisConfig('bundled-spec invariants: emitted C# SDK suite (#132)', ()
     ).toEqual([]);
   });
 });
+
+describeForThisConfig('variant planning: endpoint-scoped optional leaves are self-sourced', () => {
+  it('a variant leaf the endpoint itself authoritatively returns is sourced from a prior call to that endpoint', async () => {
+    const { loadGraph } = await import('../../path-analyser/src/graphLoader.js');
+    const graph = await loadGraph(join(REPO_ROOT, 'path-analyser'));
+    // Known residual: the planner satisfies these endpoints' cursor via the searchUserTasks step
+    // it already needs for userTaskKey. Remove an entry once its variant self-sources.
+    const KNOWN_RESIDUAL = new Set(['searchUserTaskAuditLogs', 'searchUserTaskVariables']);
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const parsed = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string };
+        scenarios?: { variantKey?: string; operations: { operationId: string }[] }[];
+      };
+      const endpointOp = parsed.endpoint.operationId;
+      if (KNOWN_RESIDUAL.has(endpointOp)) continue;
+      for (const s of parsed.scenarios ?? []) {
+        const semantic = s.variantKey?.split('::').pop();
+        if (!semantic) continue;
+        if (!(graph.producersByType[semantic] ?? []).includes(endpointOp)) continue;
+        if (graph.operations[endpointOp]?.requires.required.includes(semantic)) continue;
+        checked++;
+        const selfCalls = s.operations.filter((o) => o.operationId === endpointOp).length;
+        if (selfCalls < 2) {
+          offenders.push(
+            `${endpointOp} ${s.variantKey}: ${s.operations.map((o) => o.operationId).join(' > ')}`,
+          );
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected cursor variants to be checked').toBeGreaterThan(50);
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
+  });
+});
