@@ -1349,9 +1349,9 @@ jobs:
           # string — this run: block is YAML-indented, and a bash string
           # spanning literal source lines would bake that indentation into
           # every line of the actual Slack message.
-          caller_line=""
+          caller_link=""
           if [ -n "$CALLER_RUN_URL" ]; then
-            caller_line=$(printf '\n• Triggered by: <%s|camunda-hub run>' "$CALLER_RUN_URL")
+            caller_link=$(printf ' · <%s|camunda-hub run>' "$CALLER_RUN_URL")
           fi
 
           # Backtick-wrapped SHA built separately (double-quoted, backticks
@@ -1403,11 +1403,11 @@ jobs:
           else
             closing="${ping} please take a look."
           fi
-          # Same "Run + Cookbook" pair the AlwaysGreen alert ends its links with, so a reader who
-          # does not know this check can find how to read it without asking.
-          cookbook_line=$(printf '\n• Cookbook: <%s|How to read and debug this check>' "$COOKBOOK_URL")
-          text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s%s\n\n%s\n\n%s' \
-            "$headline" "$source_line" "$RUN_URL" "$caller_line" "$cookbook_line" "$verdict" "$closing")
+          # One line of links, like the AlwaysGreen alert's "Run · Cookbook": the run, the camunda-hub
+          # run that triggered it, and the cookbook, so a reader who does not know this check can find
+          # how to read it without asking.
+          text=$(printf '%s\n\n• Source: %s\n• Links: <%s|View run>%s · <%s|Cookbook>\n\n%s\n\n%s' \
+            "$headline" "$source_line" "$RUN_URL" "$caller_link" "$COOKBOOK_URL" "$verdict" "$closing")
 
           # Random delimiter, not a fixed string like "SLACKMSG" — $SUMMARY is
           # agent-produced free text and must never be able to prematurely
