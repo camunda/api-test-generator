@@ -8,7 +8,7 @@
     <bpmn:sequenceFlow id="Flow_to_scriptTask" sourceRef="StartEvent_1" targetRef="ScriptTask_1" />
     <bpmn:scriptTask id="ScriptTask_1" name="Failing FEEL Assertion">
       <bpmn:extensionElements>
-        <zeebe:script expression="assert(missingVariable, missingVariable != null)" resultVariable="scriptResult" />
+        <zeebe:script expression="=assert(missingVariable, missingVariable != null)" resultVariable="scriptResult" />
       </bpmn:extensionElements>
       <bpmn:incoming>Flow_to_scriptTask</bpmn:incoming>
       <bpmn:outgoing>Flow_to_end</bpmn:outgoing>
