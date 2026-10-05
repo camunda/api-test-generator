@@ -178,8 +178,16 @@ export function applyStepExtractAs<T extends { fieldPath: string; bind: string }
   index: number,
 ): T[] | undefined {
   const rename = extractAs?.[index];
-  if (!extract || !rename) return extract;
-  return extract.map((e) => (rename[e.fieldPath] ? { ...e, bind: rename[e.fieldPath] } : e));
+  if (!rename) return extract;
+  // A field with no extract would be a silent no-op, and the variable it was meant to hold would
+  // then be seeded with an unrelated value, so name the mistake instead.
+  const unmatched = Object.keys(rename).filter((f) => !extract?.some((e) => e.fieldPath === f));
+  if (unmatched.length) {
+    throw new Error(
+      `extractAs names response field(s) the step at index ${index} does not extract: ${unmatched.join(', ')}.`,
+    );
+  }
+  return extract?.map((e) => (rename[e.fieldPath] ? { ...e, bind: rename[e.fieldPath] } : e));
 }
 
 /** Fails generation for a sequence that names an operation the spec does not have. */

@@ -204,7 +204,12 @@ describe('conflict-replay.json sequences', () => {
       { fieldPath: 'projectKey', bind: 'projectKeyVar' },
     ]);
     expect(applyStepExtractAs(extract, renames, 1)).toBe(extract);
-    expect(applyStepExtractAs(undefined, renames, 2)).toBeUndefined();
+    expect(applyStepExtractAs(undefined, undefined, 2)).toBeUndefined();
+    // a field that is not extracted by that step is a mistake, not a no-op
+    expect(() => applyStepExtractAs(extract, { 2: { folderKy: 'otherVar' } }, 2)).toThrow(
+      /folderKy/,
+    );
+    expect(() => applyStepExtractAs(undefined, renames, 2)).toThrow(/folderKey/);
   });
 
   it('rejects a setup call to the target operation itself', () => {

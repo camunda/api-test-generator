@@ -703,8 +703,12 @@ function buildRequestPlan(
   const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
   const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
+  // An optional-fields variant with a read-back ends in a GET after the target; the target is
+  // still the logical final step (its body, expected status and oneOf choice are the endpoint's own).
+  const finalIndex = scenario.optionalFields?.targetIndex;
   for (const opRef of scenario.operations) {
-    const isFinal = opRef.operationId === lastOpId;
+    const isFinal =
+      finalIndex === undefined ? opRef.operationId === lastOpId : steps.length === finalIndex;
     const step: RequestStep = {
       operationId: opRef.operationId,
       method: opRef.method,
@@ -869,7 +873,11 @@ function buildRequestPlan(
       step.bodyTemplate = { ...step.bodyTemplate, ...optional.body };
       step.echoChecks = optional.echo;
     }
-    if (optional?.readBackEcho && isFinal) step.echoChecks = optional.readBackEcho;
+    if (optional?.readBackEcho) {
+      if (isFinal) step.validateResponse = true;
+      else if (steps.length - 1 === scenario.operations.length - 1)
+        step.echoChecks = optional.readBackEcho;
+    }
     if (isFinal && scenario.searchPaging && isPlainRecord(step.bodyTemplate)) {
       step.bodyTemplate = { ...step.bodyTemplate, ...scenario.searchPaging.body };
       step.searchChecks = scenario.searchPaging.checks;

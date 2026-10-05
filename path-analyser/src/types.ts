@@ -561,6 +561,8 @@ export interface RequestStep {
   searchChecks?: SearchPagingChecks;
   /** Response fields that must equal these values. */
   echoChecks?: Record<string, unknown>;
+  /** Validate this step's response body against its schema even though it is not the last step. */
+  validateResponse?: boolean;
 }
 
 /** Response assertions for a search request that carries `page` and `sort`. */

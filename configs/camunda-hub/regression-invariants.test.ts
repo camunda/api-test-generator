@@ -769,6 +769,11 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       // response and once for the read, so the change is shown to have persisted.
       if (isRecord(v.readBack)) {
         const readOp = String(v.readBack.operationId);
+        // Both the update and the read-back responses are validated against their schemas.
+        expect(
+          test.split('await validateResponse(').length - 1,
+          `${id}: with a read-back, both the update and the read must validate their response`,
+        ).toBeGreaterThanOrEqual(2);
         const stepAt = normalised.indexOf(`test.step('${readOp}'`);
         expect(stepAt, `${id}: read-back ${readOp} step not generated`).toBeGreaterThan(-1);
         expect(stepAt, `${id}: read-back ${readOp} runs before the update`).toBeGreaterThan(
