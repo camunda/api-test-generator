@@ -122,6 +122,33 @@ def lifecycle_resources(ops):
     return found
 
 
+def edge_pairs(ops):
+    """Links the API lets a client add and remove: a POST on a nested path (/workspaces/{key}/members) whose
+    sub-path has a DELETE (/workspaces/{key}/members/{email}). Maps the add operation to the remove one."""
+    by_path = collections.defaultdict(dict)
+    for op_id, o in ops.items():
+        by_path[o['path']][o['method']] = op_id
+    pairs = {}
+    for path, methods in by_path.items():
+        add = methods.get('POST')
+        if not add or '{' not in path:
+            continue
+        remove = next((m['DELETE'] for p, m in by_path.items()
+                       if 'DELETE' in m and re.fullmatch(re.escape(path) + r'/\{\w+\}', p)), None)
+        if remove:
+            pairs[add] = remove
+    return pairs
+
+
+def scan_edges(pw_dir, pairs, edge_cfg):
+    """Which add/remove pairs have a generated flow test: an edge in the ontology that names both operations
+    and whose EdgeLifecycle file was generated."""
+    names = {(e.get('establishedBy'), e.get('revokedBy')): e['name'] for e in edge_cfg.get('edges', [])}
+    return sorted(add for add, remove in pairs.items()
+                  if (add, remove) in names
+                  and os.path.exists(f'{pw_dir}/templates/EdgeLifecycle/{names[(add, remove)]}.lifecycle.spec.ts'))
+
+
 def scan_lifecycle(pw_dir, resources):
     """Which resources have a generated create-read-delete test and a generated delete-restore test."""
     tdir = f'{pw_dir}/templates'
@@ -377,11 +404,16 @@ def build(args):
 
     resources = lifecycle_resources(ops)
     created, restorable, restored = scan_lifecycle(pw_dir, resources)
+    edges = edge_pairs(ops)
+    edge_cfg = json.load(open(os.path.join(ROOT, 'configs', CONFIG, 'ontology', 'edges.json')))
+    linked = scan_edges(pw_dir, edges, edge_cfg)
     lifecycle = {
         'create': [len(created), len(resources)],
         'createMissing': sorted(set(resources) - set(created)),
         'restore': [len(restored), len(restorable)],
         'restoreMissing': sorted(set(restorable) - set(restored)),
+        'edge': [len(linked), len(edges)],
+        'edgeMissing': sorted(set(edges) - set(linked)),
         'known': sorted(n for n, r in resources.items() if r['create'] in tracked),
     }
     # A flow test can only exist if the resource's own create operation is tested at all.
@@ -484,6 +516,7 @@ def slack(s, prev, args):
         f'{change(len(s["shapeUnvalidated"]), shape_before)}',
         flow_line('create', 'Lifecycle tests (create, read, delete)', s, prev),
         flow_line('restore', 'Lifecycle tests (delete, restore)', s, prev),
+        flow_line('edge', 'Lifecycle tests (add, remove)', s, prev, unit='links'),
         '',
         ':no_entry: *Negative tests* (the request is wrong)',
     ]
@@ -642,6 +675,7 @@ def history_row(s, args):
         'requestChecksFull': s['requestChecks'][0], 'requestChecksEndpoints': s['requestChecks'][1],
         'lifecycleCreate': s['lifecycle']['create'][0], 'lifecycleCreateTotal': s['lifecycle']['create'][1],
         'lifecycleRestore': s['lifecycle']['restore'][0], 'lifecycleRestoreTotal': s['lifecycle']['restore'][1],
+        'lifecycleEdge': s['lifecycle']['edge'][0], 'lifecycleEdgeTotal': s['lifecycle']['edge'][1],
     }
     for b in BUCKETS:
         row[f'{b}_tested'], row[f'{b}_documented'] = s['codes'][b]

@@ -13,6 +13,7 @@
   "fullyAssertedOperations": 56,
   "lifecycleCreateCovered": 4,
   "lifecycleRestoreCovered": 4,
+  "lifecycleEdgeCovered": 1,
   "zeroTestOperations": [
     {
       "operationId": "getClusterUsageMetrics",
