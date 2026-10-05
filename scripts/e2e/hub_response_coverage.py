@@ -432,10 +432,15 @@ def slack(s, prev, args):
         ':clipboard: *Across positive and negative tests*',
     ]
     if worst:
-        lines.append('• Biggest gaps: ' + ' · '.join(f'{NAMES[b]}, {c[b][1] - c[b][0]} untested' for b in worst))
+        def untested(b):
+            before = pc[b][1] - pc[b][0] if b in pc else None
+            return f'{NAMES[b]}, {c[b][1] - c[b][0]} untested{change(c[b][1] - c[b][0], before)}'
+
+        lines.append('• Biggest gaps: ' + ' · '.join(untested(b) for b in worst))
+    missing_before = prev.get('opsMissingResponseTest') if prev else None
     lines += [
-        f'• {s["opsMissingResponseTest"]} endpoints are missing a test for a success, 400, 401, 404 or 409 response '
-        f'(403 is tracked separately; 500 errors are not counted).',
+        f'• {s["opsMissingResponseTest"]} endpoints{change(s["opsMissingResponseTest"], missing_before)} are missing a test '
+        f'for a success, 400, 401, 404 or 409 response (403 is tracked separately; 500 errors are not counted).',
     ]
     if prev:
         new = sorted(set(s['operationIds']) - set(prev.get('operationIds', [])))

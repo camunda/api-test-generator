@@ -473,6 +473,19 @@ describe('weekly Slack message', () => {
     expect(text).not.toMatch(/Bad request \(400\): 4 of 5 \(/);
   });
 
+  it('shows the change on the roll-ups across both kinds of test, too', () => {
+    const prev = baseSummary({
+      opsMissingResponseTest: 5,
+      codes: { ...baseSummary().codes, '409': [0, 3], '404': [2, 4] },
+    });
+    const text = slackText(baseSummary(), prev);
+    // 409: 2 untested now, 3 before; 404: 1 untested now, 2 before
+    expect(text).toContain('Conflict (409), 2 untested (-1)');
+    expect(text).toContain('2 endpoints (-3) are missing a test');
+    expect(slackText(baseSummary(), baseSummary())).toContain('2 endpoints are missing a test');
+    expect(slackText(baseSummary(), baseSummary())).not.toMatch(/untested \(/);
+  });
+
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
     const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
     expect(up).toContain(
