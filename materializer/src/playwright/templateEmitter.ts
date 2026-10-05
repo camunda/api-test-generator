@@ -72,6 +72,66 @@ export interface EmitTemplateSuitesOptions {
    * createFile). Undefined for configs that ship none.
    */
   clientMintedFixtures?: Readonly<Record<string, string>>;
+  /**
+   * Routes whose success response has a schema in `responses.json`, as `METHOD /path/{param} 200`
+   * (see {@link responseRouteKey}). A lifecycle step that calls one of them also runs
+   * `validateResponse`, like the per-endpoint feature specs. Omitted: no body validation.
+   */
+  validatedRoutes?: ReadonlySet<string>;
+}
+
+/** The key {@link EmitTemplateSuitesOptions.validatedRoutes} uses for a route and expected status. */
+export function responseRouteKey(method: string, pathTemplate: string, status: number): string {
+  return `${method.toUpperCase()} ${pathTemplate} ${status}`;
+}
+
+// Set for the duration of one emitTemplateSuites call; the step renderers read it.
+let activeValidatedRoutes: ReadonlySet<string> | undefined;
+
+/**
+ * Validate the response body against its schema after a lifecycle step, when the route has
+ * one. Needs `url` and `headers` locals in scope, which every step renderer declares.
+ */
+function appendResponseValidation(
+  lines: string[],
+  step: RequestStep,
+  respVar: string,
+  idx: number,
+  status: number,
+  indent: string,
+): void {
+  if (!activeValidatedRoutes?.has(responseRouteKey(step.method, step.pathTemplate, status))) return;
+  const method = JSON.stringify(step.method.toUpperCase());
+  const hasBody =
+    (step.bodyKind === 'json' && step.bodyTemplate) ||
+    (step.bodyKind === 'multipart' && step.multipartTemplate);
+  const evidence = `{ operationId: ${JSON.stringify(step.operationId)}, method: ${method}, url, headers, body: ${hasBody ? `body${idx + 1}` : 'undefined'}, expectedStatus: ${status} }`;
+  lines.push(`${indent}try {`);
+  lines.push(
+    `${indent}  await validateResponse({ path: ${JSON.stringify(step.pathTemplate)}, method: ${method}, status: ${JSON.stringify(String(status))} }, ${respVar}, { responsesFilePath: __responsesFile });`,
+  );
+  lines.push(`${indent}} catch (e) {`);
+  lines.push(
+    `${indent}  await attachEvidenceOnFailure(testInfo, ${respVar}, ${evidence}, String(e));`,
+  );
+  lines.push(`${indent}  throw e;`);
+  lines.push(`${indent}}`);
+}
+
+/** Adds the validateResponse import and schema-file constant to a rendered suite that uses them. */
+function withResponseValidationHeader(source: string): string {
+  if (!source.includes('validateResponse(')) return source;
+  const lines = source.split('\n');
+  const firstImport = lines.findIndex((l) => l.startsWith('import '));
+  lines.splice(firstImport + 1, 0, "import { validateResponse } from 'assert-json-body';");
+  const seedAt = lines.findIndex((l) => l.startsWith('initSpecSalt('));
+  lines.splice(
+    seedAt + 1,
+    0,
+    '',
+    `const __responsesFile = \`\${import.meta.dirname}/../../json-body-assertions/responses.json\`;`,
+  );
+  return lines.join('\n');
 }
 
 /**
@@ -122,32 +182,35 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
     throw e;
   }
   const jsonFiles = entries.filter((f) => f.endsWith('.json')).sort();
+  activeValidatedRoutes = opts.validatedRoutes;
   await fs.mkdir(opts.outDir, { recursive: true });
   const written: string[] = [];
-  for (const f of jsonFiles) {
-    // Isolate one bad template file from the rest, mirroring the per-file
-    // try/catch around feature/variant emission in materializer/src/index.ts
-    // (`Skipping file (parse/emission failed): ...`). Before this guard, a
-    // throw here (e.g. resolveScenarioServerOverride rejecting a scenario
-    // that mixes overridden and non-overridden operations) propagated all
-    // the way out of `emitTemplateSuites`, past its uncaught call site in
-    // index.ts, aborting the entire materializer run — including every
-    // already-planned feature/variant/template suite (#564 review).
-    try {
-      const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
-      const parsed = parseTemplateScenarioFile(raw, f);
-      const source = renderLifecycleSuite(
-        parsed,
-        opts.globalContextSeeds,
-        opts.clientMintedFixtures,
-      );
-      const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
-      await fs.writeFile(outPath, source, 'utf8');
-      written.push(outPath);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn('Skipping template file (parse/emission failed):', f, msg);
+  try {
+    for (const f of jsonFiles) {
+      // Isolate one bad template file from the rest, mirroring the per-file
+      // try/catch around feature/variant emission in materializer/src/index.ts
+      // (`Skipping file (parse/emission failed): ...`). Before this guard, a
+      // throw here (e.g. resolveScenarioServerOverride rejecting a scenario
+      // that mixes overridden and non-overridden operations) propagated all
+      // the way out of `emitTemplateSuites`, past its uncaught call site in
+      // index.ts, aborting the entire materializer run — including every
+      // already-planned feature/variant/template suite (#564 review).
+      try {
+        const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
+        const parsed = parseTemplateScenarioFile(raw, f);
+        const source = withResponseValidationHeader(
+          renderLifecycleSuite(parsed, opts.globalContextSeeds, opts.clientMintedFixtures),
+        );
+        const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
+        await fs.writeFile(outPath, source, 'utf8');
+        written.push(outPath);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn('Skipping template file (parse/emission failed):', f, msg);
+      }
     }
+  } finally {
+    activeValidatedRoutes = undefined;
   }
   return written;
 }
@@ -611,6 +674,7 @@ function appendInlineRequestStep(
     shouldAwaitEventually: stepNeedsAwaitForOp(step, ecOps),
   });
   for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  appendResponseValidation(lines, step, respVar, idx, step.expect.status, '      ');
   appendExtracts(lines, step, respVar, idx, '      ');
   lines.push('    });');
   for (const wait of step.eventualWaitsAfter ?? []) {
@@ -690,6 +754,7 @@ function appendObserveByIdStatusStep(
     `      await attachEvidenceOnFailure(testInfo, ${respVar}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.requestPlan.method.toUpperCase())}, url, headers, expectedStatus: ${expectedStatus} });`,
   );
   lines.push(`      expect(${respVar}.status()).toBe(${expectedStatus});`);
+  appendResponseValidation(lines, step.requestPlan, respVar, idx, expectedStatus, '      ');
   lines.push('    });');
 }
 
@@ -745,6 +810,14 @@ function appendObserveMembershipStep(
     awaitEventuallyPredicate: predicateExpr,
   });
   for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
+  appendResponseValidation(
+    lines,
+    step.requestPlan,
+    respVar,
+    idx,
+    step.requestPlan.expect.status,
+    '      ',
+  );
   // Membership assertion (template-unique). Walks the planner-declared
   // arrayPath into the parsed body, projects each element via the
   // `elementField` chain (dotted paths supported), and asserts

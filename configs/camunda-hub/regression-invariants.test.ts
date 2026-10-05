@@ -764,4 +764,53 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       );
     }
   });
+  it('lifecycle steps validate the response body whenever the route has a schema (#626)', () => {
+    const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    const routeOf = new Map<string, string>();
+    if (isRecord(bundle) && isRecord(bundle.paths)) {
+      for (const [urlPath, item] of Object.entries(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const [method, opDef] of Object.entries(item)) {
+          if (
+            HTTP_METHODS.has(method.toLowerCase()) &&
+            isRecord(opDef) &&
+            typeof opDef.operationId === 'string'
+          )
+            routeOf.set(opDef.operationId, `${method.toUpperCase()} ${urlPath}`);
+        }
+      }
+    }
+    const responses: unknown = JSON.parse(
+      readRequired(join(SUITE_DIR, 'json-body-assertions', 'responses.json')),
+    );
+    const withSchema = new Set<string>();
+    for (const e of isRecord(responses) && Array.isArray(responses.responses)
+      ? responses.responses
+      : []) {
+      if (isRecord(e) && e.status === '200')
+        withSchema.add(`${String(e.method)} ${String(e.path)}`);
+    }
+    expect(
+      withSchema.size,
+      'no response schemas found - was responses.json generated?',
+    ).toBeGreaterThan(20);
+    let validated = 0;
+    const missing: string[] = [];
+    for (const dir of [ENTITY_LIFECYCLE, EDGE_LIFECYCLE, 'templates/RestoreLifecycle']) {
+      for (const file of readdirSync(join(SUITE_DIR, dir))) {
+        if (!file.endsWith('.lifecycle.spec.ts')) continue;
+        const source = readGeneratedSpec(`${dir}/${file}`);
+        for (const block of source.split('await test.step(').slice(1)) {
+          if (!/\.status\(\)\)\.toBe\(200\)/.test(block)) continue;
+          const opId = /operationId: '(\w+)'/.exec(block)?.[1];
+          const route = opId ? routeOf.get(opId) : undefined;
+          if (!opId || !route || !withSchema.has(route)) continue;
+          if (block.includes('validateResponse(')) validated++;
+          else missing.push(`${dir}/${file}: ${opId}`);
+        }
+      }
+    }
+    expect(validated, 'no lifecycle step validates its response').toBeGreaterThan(30);
+    expect(missing, 'lifecycle steps with a response schema but no validateResponse').toEqual([]);
+  });
 });
