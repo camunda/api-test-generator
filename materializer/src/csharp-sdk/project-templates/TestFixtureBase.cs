@@ -27,6 +27,7 @@ public abstract class TestFixtureBase
             new StringValueObjectConverterFactory(),
             new WireNameEnumConverterFactory(),
             new ScalarFilterPropertyConverterFactory(),
+            new ProcessInstanceModificationTerminateInstructionConverterFactory(),
         },
     };
 
@@ -592,6 +593,54 @@ public abstract class TestFixtureBase
 
             public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
                 JsonSerializer.Serialize(writer, value, JsonOptionsNoFilterWrap);
+        }
+    }
+
+    private sealed class ProcessInstanceModificationTerminateInstructionConverterFactory
+        : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert) =>
+            typeToConvert == typeof(ProcessInstanceModificationTerminateInstruction);
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options) =>
+            new ProcessInstanceModificationTerminateInstructionConverter();
+
+        private sealed class ProcessInstanceModificationTerminateInstructionConverter
+            : JsonConverter<ProcessInstanceModificationTerminateInstruction>
+        {
+            public override ProcessInstanceModificationTerminateInstruction Read(
+                ref Utf8JsonReader reader,
+                Type typeToConvert,
+                JsonSerializerOptions options
+            )
+            {
+                using var document = JsonDocument.ParseValue(ref reader);
+                var root = document.RootElement;
+                if (root.TryGetProperty("elementId", out _))
+                {
+                    return JsonSerializer.Deserialize<ProcessInstanceModificationTerminateByIdInstruction>(
+                        root.GetRawText(),
+                        JsonOptionsNoFilterWrap
+                    ) ?? throw new JsonException("Could not deserialize terminate-by-id instruction.");
+                }
+                if (root.TryGetProperty("elementInstanceKey", out _))
+                {
+                    return JsonSerializer.Deserialize<ProcessInstanceModificationTerminateByKeyInstruction>(
+                        root.GetRawText(),
+                        JsonOptionsNoFilterWrap
+                    ) ?? throw new JsonException("Could not deserialize terminate-by-key instruction.");
+                }
+                throw new JsonException(
+                    "Terminate instruction must contain elementId or elementInstanceKey."
+                );
+            }
+
+            public override void Write(
+                Utf8JsonWriter writer,
+                ProcessInstanceModificationTerminateInstruction value,
+                JsonSerializerOptions options
+            ) =>
+                JsonSerializer.Serialize(writer, value, value.GetType(), JsonOptionsNoFilterWrap);
         }
     }
 

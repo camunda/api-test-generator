@@ -989,7 +989,12 @@ function renderCsharpValue(value: unknown, indent = ''): string {
   }
   if (isRecord(value)) {
     const entries: string[] = [];
-    for (const [k, v] of Object.entries(value)) {
+    const fields = Object.entries(value);
+    const discriminator = polymorphicDiscriminator(value);
+    if (discriminator !== undefined && !Object.hasOwn(value, discriminator.name)) {
+      fields.unshift([discriminator.name, discriminator.value]);
+    }
+    for (const [k, v] of fields) {
       const rendered = renderCsharpValue(v, `${indent}  `);
       entries.push(`${indent}  [${stringLiteral(k)}] = ${rendered},`);
     }
@@ -997,6 +1002,34 @@ function renderCsharpValue(value: unknown, indent = ''): string {
     return `new Dictionary<string, object?>\n${indent}{\n${entries.join('\n')}\n${indent}}`;
   }
   return 'null';
+}
+
+function polymorphicDiscriminator(
+  value: Record<string, unknown>,
+): { name: string; value: string } | undefined {
+  if (Object.hasOwn(value, 'afterElementId')) {
+    return { name: 'type', value: 'TERMINATE_PROCESS_INSTANCE' };
+  }
+  if (Object.hasOwn(value, 'sourceElementId')) {
+    return { name: 'sourceType', value: 'byId' };
+  }
+  if (Object.hasOwn(value, 'sourceElementInstanceKey')) {
+    return { name: 'sourceType', value: 'byKey' };
+  }
+  if (Object.hasOwn(value, 'ancestorElementInstanceKey')) {
+    return { name: 'ancestorScopeType', value: 'direct' };
+  }
+  if (Object.hasOwn(value, 'activateElements')) {
+    return { name: 'type', value: 'adHocSubProcess' };
+  }
+  if (
+    Object.hasOwn(value, 'denied') ||
+    Object.hasOwn(value, 'deniedReason') ||
+    Object.hasOwn(value, 'corrections')
+  ) {
+    return { name: 'type', value: 'userTask' };
+  }
+  return undefined;
 }
 
 function renderTemplateString(value: string): string {
