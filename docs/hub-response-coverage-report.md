@@ -47,7 +47,8 @@ Across positive and negative tests
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on); it needs a
-  restore flow too if the API has a `.../restoration` endpoint. A flow test is the generated lifecycle test for it
+  restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a
+  `.../recently-deleted/search` endpoint. A restoration endpoint alone does not count (restoring a version or a snapshot does not undelete anything). A flow test is the generated lifecycle test for it
   (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`, and `RestoreLifecycle/` for restore).
   A resource with no such test is listed as missing. These lines count whole flows, so they do not show up in the per-endpoint issues.
   A new resource needs an entry in `configs/camunda-hub/ontology/entity-kinds.json` to get its flow tests.

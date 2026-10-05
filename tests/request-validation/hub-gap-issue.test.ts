@@ -602,12 +602,18 @@ describe('lifecycle resources found in the spec', () => {
     );
   };
 
-  it('needs create, read-by-key and delete, and notes a restore endpoint', () => {
+  it('needs create, read-by-key and delete, and marks a restore only when a delete is soft', () => {
     const found = resources({
       createFile: { method: 'POST', path: '/files' },
       getFile: { method: 'GET', path: '/files/{fileKey}' },
       deleteFile: { method: 'DELETE', path: '/files/{fileKey}' },
       restoreFile: { method: 'POST', path: '/files/{fileKey}/restoration' },
+      searchRecentlyDeletedFiles: { method: 'POST', path: '/files/recently-deleted/search' },
+      // a restoration endpoint with no recently-deleted search restores a state, not a deleted entity
+      createVersion: { method: 'POST', path: '/versions' },
+      getVersion: { method: 'GET', path: '/versions/{versionKey}' },
+      deleteVersion: { method: 'DELETE', path: '/versions/{versionKey}' },
+      restoreVersion: { method: 'POST', path: '/versions/{versionKey}/restoration' },
       createTag: { method: 'POST', path: '/tags' },
       getTag: { method: 'GET', path: '/tags/{tagKey}' },
       deleteTag: { method: 'DELETE', path: '/tags/{tagKey}' },
@@ -619,6 +625,7 @@ describe('lifecycle resources found in the spec', () => {
     });
     expect(found).toEqual({
       File: { create: 'createFile', restores: true },
+      Version: { create: 'createVersion', restores: false },
       Tag: { create: 'createTag', restores: false },
     });
   });

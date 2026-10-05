@@ -100,7 +100,9 @@ def lifecycle_resources(ops):
     """Resources the API lets a client create, read by key and delete, named after their create operation.
 
     A resource is a collection path (/files) with a POST create, whose key path (/files/{fileKey}) has a GET
-    and a DELETE. `restores` are those whose key path also has a POST .../restoration."""
+    and a DELETE. `restores` marks the ones that can be undeleted: the key path has a POST .../restoration and
+    the collection has a POST .../recently-deleted/search, which together mean a delete is soft. A restoration
+    endpoint alone does not count (restoring a version or snapshot does not undelete anything)."""
     by_path = collections.defaultdict(dict)
     for op_id, o in ops.items():
         by_path[o['path']][o['method']] = op_id
@@ -113,7 +115,9 @@ def lifecycle_resources(ops):
         if not item or not {'GET', 'DELETE'} <= set(by_path[item]):
             continue
         found[create[len('create'):]] = {
-            'create': create, 'restores': 'POST' in by_path.get(item + '/restoration', {}),
+            'create': create,
+            'restores': 'POST' in by_path.get(item + '/restoration', {})
+            and 'POST' in by_path.get(path + '/recently-deleted/search', {}),
         }
     return found
 
