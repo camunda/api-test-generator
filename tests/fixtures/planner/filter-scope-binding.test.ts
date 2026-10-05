@@ -85,7 +85,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 describe('nested filter-scope binding (#408 / #168)', () => {
   it('binds a required filter.<key> to its produced var (not placeholder)', () => {
-    expect(fileKeyValue({ producer: true, required: true })).toBe('${fileKeyVar}');
+    expect(fileKeyValue({ producer: true, required: true })).toBe(`\${fileKeyVar}`);
   });
 
   it('leaves the field synthesised when the semantic has no producer', () => {
@@ -95,7 +95,7 @@ describe('nested filter-scope binding (#408 / #168)', () => {
 
   it('leaves an OPTIONAL filter field unbound (preserves #168)', () => {
     // Optional filters are not force-scoped; only required scope fields bind.
-    expect(fileKeyValue({ producer: true, required: false })).not.toBe('${fileKeyVar}');
+    expect(fileKeyValue({ producer: true, required: false })).not.toBe(`\${fileKeyVar}`);
   });
 
   it('binds a required ARRAY filter field (filter.tags[]) despite the [] suffix', () => {
@@ -137,6 +137,6 @@ describe('nested filter-scope binding (#408 / #168)', () => {
     );
     const template = plan?.kind === 'json' ? plan.template : {};
     const filter = template.filter;
-    expect(isRecord(filter) ? filter.tags : undefined).toEqual(['${tagVar}']);
+    expect(isRecord(filter) ? filter.tags : undefined).toEqual([`\${tagVar}`]);
   });
 });

@@ -106,13 +106,13 @@ describe('optional semantic-typed body fields are variant-suite-only (#247)', ()
     // optionality. `updateUser`'s base body is `{ password: "${passwordVar}" }`
     // and must not collapse to `{}`.
     const template = templateFor(graphWith());
-    expect(template.password).toBe('${passwordVar}');
+    expect(template.password).toBe(`\${passwordVar}`);
   });
 
   it('still fills an optional semantic-typed field declared by an ABox valueBinding', () => {
     // Scope guard: an explicit `request.<field>` entry in the ABox is operator
     // intent, not a name collision, and stays honoured.
     const template = templateFor(graphWith({ 'request.tenantId': 'TenantExists.tenantId' }));
-    expect(template.tenantId).toBe('${tenantIdVar}');
+    expect(template.tenantId).toBe(`\${tenantIdVar}`);
   });
 });
