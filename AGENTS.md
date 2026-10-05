@@ -56,6 +56,7 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/camunda-hub/conflict-replay.json` | Operations whose feature scenario is followed by an identical second call that must return 409 (`{ operationId, reason, changeBody? }`), for specs that carry no `x-operation-kind` |
 | `configs/camunda-hub/search-paging.json` | Search operations that get a success-path test with `page` and `sort` (and a `filter` where listed), asserting the limit and order |
 | `configs/camunda-hub/optional-fields.json` | Operations that also get a success-path test sending optional request fields and asserting the response echoes them, plus the optional fields that cannot be tested yet (with an issue) |
+| `configs/camunda-hub/coverage-floors.json` | Floors for the weekly response-coverage numbers, enforced by a Hub invariant, plus the operations allowed to have no test (with a reason) |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
@@ -287,6 +288,16 @@ fixtures and named invariants point directly at the broken property.
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
+
+### Response-coverage floors
+
+`configs/camunda-hub/coverage-floors.json` pins the numbers the weekly report shows (asserted
+responses per status code, request checks covered, optional fields sent, fully asserted operations).
+The Hub invariant `response coverage does not regress` runs `scripts/e2e/hub_response_coverage.py`, the
+report's own script, over the generated suites and fails if a number is below its floor, if an
+operation has no test at all, or if an operation listed in `zeroTestOperations` now has tests. A floor
+is one-way: a PR that closes a gap should raise it, a higher number never fails, and a floor is never
+lowered to make CI pass. A new operation with no test fails until it has one (or is listed with a reason).
 
 ### Response validation in lifecycle suites
 

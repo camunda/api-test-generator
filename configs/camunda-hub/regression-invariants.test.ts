@@ -1,4 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -853,5 +855,86 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     }
     expect(validated, 'no lifecycle step validates its response').toBeGreaterThan(30);
     expect(missing, 'lifecycle steps with a response schema but no validateResponse').toEqual([]);
+  });
+  it('response coverage does not regress (#628)', () => {
+    const floors: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/coverage-floors.json')),
+    );
+    const out = mkdtempSync(join(tmpdir(), 'hub-coverage-'));
+    try {
+      // The same script and data as the weekly report, so the floors and the report cannot drift apart.
+      const run = spawnSync(
+        'python3',
+        [join(REPO_ROOT, 'scripts/e2e/hub_response_coverage.py'), '--out', out],
+        { encoding: 'utf8', env: { ...process.env, CONFIG: 'camunda-hub' } },
+      );
+      expect(run.status, `coverage audit failed to run: ${run.stderr}`).toBe(0);
+      const summary: unknown = JSON.parse(readRequired(join(out, 'summary.json')));
+      expect(isRecord(summary) && isRecord(floors), 'unreadable coverage summary or floors').toBe(
+        true,
+      );
+      if (!isRecord(summary) || !isRecord(floors)) return;
+
+      const pair = (v: unknown): number =>
+        Array.isArray(v) && typeof v[0] === 'number' ? v[0] : -1;
+      const codes = isRecord(summary.codes) ? summary.codes : {};
+      const floorCodes = isRecord(floors.assertedByStatus) ? floors.assertedByStatus : {};
+      expect(Object.keys(floorCodes).length, 'no per-status floors configured').toBeGreaterThan(4);
+      const regressed: string[] = [];
+      for (const [status, floor] of Object.entries(floorCodes)) {
+        const actual = pair(codes[status]);
+        if (typeof floor === 'number' && actual < floor) {
+          regressed.push(`${status}: ${actual} asserted, floor ${floor}`);
+        }
+      }
+      const single: [string, number, number][] = [
+        [
+          'optional request fields sent',
+          pair(summary.optionalFields),
+          Number(floors.optionalFieldsSent),
+        ],
+        [
+          'request checks covered',
+          pair(summary.requestChecks),
+          Number(floors.requestChecksCovered),
+        ],
+        [
+          'fully asserted operations',
+          Number(summary.fullyAsserted),
+          Number(floors.fullyAssertedOperations),
+        ],
+      ];
+      for (const [label, actual, floor] of single) {
+        if (!(actual >= floor)) regressed.push(`${label}: ${actual}, floor ${floor}`);
+      }
+      expect(regressed, 'response coverage dropped below its floor').toEqual([]);
+
+      const allowed = new Set(
+        (Array.isArray(floors.zeroTestOperations) ? floors.zeroTestOperations : [])
+          .filter(isRecord)
+          .map((e) => {
+            expect(
+              typeof e.reason === 'string' && e.reason,
+              `${String(e.operationId)} needs a reason`,
+            ).toBeTruthy();
+            return e.operationId;
+          }),
+      );
+      const zero = Array.isArray(summary.zeroTestOperations) ? summary.zeroTestOperations : [];
+      expect(
+        zero.filter((id) => !allowed.has(id)),
+        'operations with no test at all (add one, or list it in zeroTestOperations with a reason)',
+      ).toEqual([]);
+      expect(
+        [...allowed].filter((id) => !zero.includes(id)),
+        'zeroTestOperations lists operations that now have tests; remove them',
+      ).toEqual([]);
+      expect(summary.requestNoTests, 'operations with no request-validation test').toEqual([]);
+      expect(summary.shapeUnvalidated, 'success responses that are not schema-validated').toEqual(
+        [],
+      );
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
   });
 });
