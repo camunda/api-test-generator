@@ -194,6 +194,34 @@ function createSpecEmitter(mapping: CsharpOperationMap = OPERATION_MAP) {
 }
 
 describe('C# SDK Emitter', () => {
+  test('does not resolve lazy discriminators until the first emit', async () => {
+    let resolveCount = 0;
+    const emitter = createCsharpEmitter(OPERATION_MAP, {
+      discriminators: () => {
+        resolveCount += 1;
+        return CSHARP_DISCRIMINATORS;
+      },
+    });
+
+    expect(resolveCount).toBe(0);
+    await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+    expect(resolveCount).toBe(1);
+  });
+
+  test('caches lazy discriminators across emits', async () => {
+    let resolveCount = 0;
+    const emitter = createCsharpEmitter(OPERATION_MAP, {
+      discriminators: () => {
+        resolveCount += 1;
+        return CSHARP_DISCRIMINATORS;
+      },
+    });
+
+    await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+    await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);
+    expect(resolveCount).toBe(1);
+  });
+
   test('resolves the SDK method name from the operation-map region field', async () => {
     const emitter = createSpecEmitter();
     const files = await emitter.emit(SAMPLE_COLLECTION, EMIT_CTX);

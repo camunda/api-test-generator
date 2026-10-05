@@ -316,9 +316,23 @@ export function renderCsharpSdkSuite(
 
 export function createCsharpEmitter(
   mapping?: CsharpOperationMap,
-  options: { discriminators?: CsharpDiscriminatorTable } = {},
+  options: {
+    discriminators?: CsharpDiscriminatorTable | (() => CsharpDiscriminatorTable);
+  } = {},
 ): EmitterStrategy {
   const mappingSource: SdkMappingSource = new CsharpOperationMapSource(mapping);
+  let resolvedDiscriminators: CsharpDiscriminatorTable | undefined;
+  let discriminatorsResolved = false;
+  const getDiscriminators = (): CsharpDiscriminatorTable | undefined => {
+    if (!discriminatorsResolved) {
+      resolvedDiscriminators =
+        typeof options.discriminators === 'function'
+          ? options.discriminators()
+          : options.discriminators;
+      discriminatorsResolved = true;
+    }
+    return resolvedDiscriminators;
+  };
   return {
     id: 'csharp-sdk',
     name: 'C# SDK (Camunda Orchestration)',
@@ -328,7 +342,7 @@ export function createCsharpEmitter(
         suiteName: ctx.suiteName,
         mode: ctx.mode,
         globalContextSeeds: ctx.globalContextSeeds,
-        discriminators: options.discriminators,
+        discriminators: getDiscriminators(),
       });
       return [
         {
