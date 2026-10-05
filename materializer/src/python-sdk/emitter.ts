@@ -638,7 +638,7 @@ function renderPythonRequestStep(
     }
     lines.push('    )');
   }
-  lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}`);
+  lines.push(`    assert ${responseVar}.status_code == ${step.expect.status}, ${responseVar}.text`);
 
   const needsResponseData =
     (step.extract && step.extract.length > 0) ||
