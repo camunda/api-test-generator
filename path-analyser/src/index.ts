@@ -16,6 +16,7 @@ import {
 import {
   applyConflictReplay,
   applyStepBody,
+  applyStepExtractAs,
   buildConflictSequenceScenarios,
   loadConflictReplay,
   loadConflictSequences,
@@ -531,7 +532,7 @@ async function main() {
           ...buildConflictSequenceScenarios(canonicalForEndpoint, conflictSequences, graph),
           ...(searchPaging ? buildSearchPagingScenarios(canonicalForEndpoint, searchPaging) : []),
           ...(optionalFields
-            ? buildOptionalFieldsScenarios(canonicalForEndpoint, optionalFields)
+            ? buildOptionalFieldsScenarios(canonicalForEndpoint, optionalFields, graph)
             : []),
         ]
       : [];
@@ -702,8 +703,12 @@ function buildRequestPlan(
   const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
   const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
+  // An optional-fields variant with a read-back ends in a GET after the target; the target is
+  // still the logical final step (its body, expected status and oneOf choice are the endpoint's own).
+  const finalIndex = scenario.optionalFields?.targetIndex;
   for (const opRef of scenario.operations) {
-    const isFinal = opRef.operationId === lastOpId;
+    const isFinal =
+      finalIndex === undefined ? opRef.operationId === lastOpId : steps.length === finalIndex;
     const step: RequestStep = {
       operationId: opRef.operationId,
       method: opRef.method,
@@ -860,11 +865,18 @@ function buildRequestPlan(
       }
     }
     step.bodyTemplate = applyStepBody(step.bodyTemplate, scenario.stepBodies, steps.length);
+    step.extract = applyStepExtractAs(step.extract, scenario.stepExtractAs, steps.length);
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
-    if (isFinal && scenario.optionalFields && isPlainRecord(step.bodyTemplate)) {
-      step.bodyTemplate = { ...step.bodyTemplate, ...scenario.optionalFields.body };
-      step.echoChecks = scenario.optionalFields.echo;
+    const optional = scenario.optionalFields;
+    if (optional && steps.length - 1 === optional.targetIndex && isPlainRecord(step.bodyTemplate)) {
+      step.bodyTemplate = { ...step.bodyTemplate, ...optional.body };
+      step.echoChecks = optional.echo;
+    }
+    if (optional?.readBackEcho) {
+      if (isFinal) step.validateResponse = true;
+      else if (steps.length - 1 === scenario.operations.length - 1)
+        step.echoChecks = optional.readBackEcho;
     }
     if (isFinal && scenario.searchPaging && isPlainRecord(step.bodyTemplate)) {
       step.bodyTemplate = { ...step.bodyTemplate, ...scenario.searchPaging.body };
@@ -1065,13 +1077,29 @@ function setLeafPlaceholder(root: Record<string, unknown>, path: string, value: 
   }
 }
 
-function aliasProducerExtractsToPlaceholders(
+export function aliasProducerExtractsToPlaceholders(
   scenario: EndpointScenario,
   steps: RequestStep[],
   graph: OperationGraph,
 ): void {
-  if (steps.length < 2) return;
-  const finalStep = steps[steps.length - 1];
+  // The last step consumes the chain; so does the logical target of an optional-fields variant
+  // when a read-back follows it.
+  const targetIndex = scenario.optionalFields?.targetIndex;
+  const consumers = new Set([steps.length - 1]);
+  if (targetIndex !== undefined && targetIndex < steps.length) consumers.add(targetIndex);
+  for (const consumer of [...consumers].sort((a, b) => a - b)) {
+    aliasForConsumer(scenario, steps, graph, consumer);
+  }
+}
+
+function aliasForConsumer(
+  scenario: EndpointScenario,
+  steps: RequestStep[],
+  graph: OperationGraph,
+  consumerIndex: number,
+): void {
+  if (consumerIndex < 1) return;
+  const finalStep = steps[consumerIndex];
   const placeholders = [...finalStep.pathTemplate.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
   if (placeholders.length === 0) return;
   const finalNode = graph.operations[finalStep.operationId];
@@ -1086,7 +1114,7 @@ function aliasProducerExtractsToPlaceholders(
     // Walk earlier steps to find an extract bound under the semanticType-
     // derived var. Prefer the most recent such extract so the alias points
     // at the freshest production in the chain.
-    for (let i = steps.length - 2; i >= 0; i--) {
+    for (let i = consumerIndex - 1; i >= 0; i--) {
       const earlier = steps[i];
       const sourceExtract = (earlier.extract ?? []).find((e) => e.bind === semanticVar);
       if (!sourceExtract) continue;

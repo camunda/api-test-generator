@@ -2,14 +2,30 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import type { EndpointScenario, OperationGraph } from './types.js';
 
+/** A setup call run after the target's own setup chain and before the target. */
+export interface OptionalFieldsSetup {
+  operationId: string;
+  /** Body fields merged over the generated body; values may reference earlier results as "${xVar}". */
+  body?: Record<string, unknown>;
+  /**
+   * Response field -> variable name to store it under, instead of the planner's default. Lets a
+   * setup call create a second resource without overwriting the first one's key.
+   */
+  extractAs?: Record<string, string>;
+}
+
 export interface OptionalFieldsEntry {
   operationId: string;
   /** Names the variant; unique per operation. */
   name: string;
   /** Optional request fields sent on the final call, merged over the generated body. */
   body: Record<string, unknown>;
-  /** Response fields that must equal these values (the request fields echoed back). */
+  /** Response fields that must equal these values (the request fields echoed back). A string "${xVar}" is the value stored in that variable. */
   echo: Record<string, unknown>;
+  /** Setup calls between the target's own chain and the target. */
+  before: OptionalFieldsSetup[];
+  /** A GET run after the target; its response must echo these values, proving the change persisted. */
+  readBack?: { operationId: string; echo: Record<string, unknown> };
 }
 
 export interface OptionalFieldsConfig {
@@ -46,6 +62,8 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
   const variants = raw.variants.map((e, i): OptionalFieldsEntry => {
     const rec = isRecord(e) ? e : {};
     const { operationId, name, body, echo } = rec;
+    const before = parseSetup(p, i, rec.before);
+    const readBack = parseReadBack(p, i, rec.readBack);
     if (
       typeof operationId !== 'string' ||
       !operationId ||
@@ -63,14 +81,98 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
     const key = `${operationId}/${name}`;
     if (seen.has(key)) throw new Error(`${p}: variants[${i}] repeats ${key}.`);
     seen.add(key);
-    return { operationId, name, body, echo };
+    return { operationId, name, body, echo, before, ...(readBack ? { readBack } : {}) };
   });
   return { variants };
 }
 
+function parseReadBack(p: string, i: number, raw: unknown): OptionalFieldsEntry['readBack'] {
+  if (raw === undefined) return undefined;
+  if (
+    !isRecord(raw) ||
+    typeof raw.operationId !== 'string' ||
+    !raw.operationId ||
+    !isRecord(raw.echo) ||
+    Object.keys(raw.echo).length === 0
+  ) {
+    throw new Error(
+      `${p}: variants[${i}].readBack must be { operationId, echo: {...} } with non-empty values.`,
+    );
+  }
+  return { operationId: raw.operationId, echo: raw.echo };
+}
+
+function parseSetup(p: string, i: number, raw: unknown): OptionalFieldsSetup[] {
+  if (raw === undefined) return [];
+  const bad = (why: string) =>
+    new Error(
+      `${p}: variants[${i}].before ${why}; each must be { operationId, body?, extractAs? }.`,
+    );
+  if (!Array.isArray(raw)) throw bad('must be an array');
+  return raw.map((s): OptionalFieldsSetup => {
+    if (!isRecord(s) || typeof s.operationId !== 'string' || !s.operationId)
+      throw bad('has an entry without an operationId');
+    if (s.body !== undefined && !isRecord(s.body)) throw bad('has a body that is not an object');
+    const names: Record<string, string> = {};
+    if (s.extractAs !== undefined) {
+      if (!isRecord(s.extractAs)) throw bad('has an extractAs that is not an object');
+      for (const [field, name] of Object.entries(s.extractAs)) {
+        if (typeof name !== 'string' || !/^\w+$/.test(name)) {
+          throw bad('has an extractAs that is not a map of response field to variable name');
+        }
+        names[field] = name;
+      }
+    }
+    return {
+      operationId: s.operationId,
+      ...(isRecord(s.body) ? { body: s.body } : {}),
+      ...(Object.keys(names).length ? { extractAs: names } : {}),
+    };
+  });
+}
+
 /** Fails generation for an entry naming an operation the spec does not have. */
 export function validateOptionalFields(graph: OperationGraph, config: OptionalFieldsConfig): void {
-  const unknown = config.variants.map((v) => v.operationId).filter((id) => !graph.operations[id]);
+  // The planner finds the final step by its operationId, so a setup call to the target itself would
+  // be taken for the final step too and receive the optional fields.
+  const samePrimary = config.variants.filter((v) =>
+    v.before.some((b) => b.operationId === v.operationId),
+  );
+  if (samePrimary.length) {
+    throw new Error(
+      `optional-fields.json: a setup call cannot be the target operation itself: ${samePrimary.map((v) => `${v.operationId}/${v.name}`).join(', ')}.`,
+    );
+  }
+  // The read-back is the last step, which the planner finds by operationId, so it must not repeat
+  // an earlier operation of the variant.
+  const clash = config.variants.filter(
+    (v) =>
+      v.readBack &&
+      (v.readBack.operationId === v.operationId ||
+        v.before.some((b) => b.operationId === v.readBack?.operationId)),
+  );
+  if (clash.length) {
+    throw new Error(
+      `optional-fields.json: a read-back must differ from the target and its setup calls: ${clash.map((v) => `${v.operationId}/${v.name}`).join(', ')}.`,
+    );
+  }
+  // A read-back runs after the target and must not change anything.
+  const mutating = config.variants.filter((v) => {
+    const op = v.readBack ? graph.operations[v.readBack.operationId] : undefined;
+    return op !== undefined && op.method.toUpperCase() !== 'GET';
+  });
+  if (mutating.length) {
+    throw new Error(
+      `optional-fields.json: a read-back must be a GET operation: ${mutating.map((v) => `${v.operationId}/${v.name} -> ${v.readBack?.operationId}`).join(', ')}.`,
+    );
+  }
+  const unknown = config.variants
+    .flatMap((v) => [
+      v.operationId,
+      ...v.before.map((b) => b.operationId),
+      ...(v.readBack ? [v.readBack.operationId] : []),
+    ])
+    .filter((id) => !graph.operations[id]);
   if (unknown.length) {
     throw new Error(
       `optional-fields.json lists operationId(s) not present in the spec: ${unknown.join(', ')}.`,
@@ -82,20 +184,71 @@ export function validateOptionalFields(graph: OperationGraph, config: OptionalFi
 export function buildOptionalFieldsScenarios(
   chain: EndpointScenario,
   config: OptionalFieldsConfig,
+  graph: OperationGraph,
 ): EndpointScenario[] {
   const target = chain.operations[chain.operations.length - 1];
   return config.variants
     .filter((v) => v.operationId === target?.operationId)
-    .map((v) => ({
-      ...chain,
-      id: `${chain.id}:optional:${v.name}`,
-      name: `optional fields - ${v.name}`,
-      description: `Sends ${Object.keys(v.body).join(', ')} and expects the response to echo ${Object.keys(v.echo).join(', ')}.`,
-      strategy: 'featureCoverage' as const,
-      variantKey: `optional=${v.name}`,
-      optionalFields: { body: v.body, echo: v.echo },
-      bindings: { ...(chain.bindings ?? {}) },
-      requestPlan: undefined,
-      seedBindings: undefined,
-    }));
+    .map((v) => {
+      const first = chain.operations.length - 1;
+      const stepBodies: Record<number, Record<string, unknown>> = {};
+      const stepExtractAs: Record<number, Record<string, string>> = {};
+      v.before.forEach((b, bi) => {
+        if (b.body) stepBodies[first + bi] = b.body;
+        if (b.extractAs) stepExtractAs[first + bi] = b.extractAs;
+      });
+      return {
+        ...chain,
+        operations: [
+          ...chain.operations.slice(0, -1),
+          ...v.before.map((b) => {
+            const {
+              operationId,
+              method,
+              path: opPath,
+              eventuallyConsistent,
+              serverOverride,
+            } = graph.operations[b.operationId];
+            return { operationId, method, path: opPath, eventuallyConsistent, serverOverride };
+          }),
+          target,
+          ...(v.readBack
+            ? [
+                (() => {
+                  const {
+                    operationId,
+                    method,
+                    path: opPath,
+                    eventuallyConsistent,
+                    serverOverride,
+                  } = graph.operations[v.readBack.operationId];
+                  return {
+                    operationId,
+                    method,
+                    path: opPath,
+                    eventuallyConsistent,
+                    serverOverride,
+                  };
+                })(),
+              ]
+            : []),
+        ],
+        id: `${chain.id}:optional:${v.name}`,
+        name: `optional fields - ${v.name}`,
+        description: `Sends ${Object.keys(v.body).join(', ')} and expects the response to echo ${Object.keys(v.echo).join(', ')}.`,
+        strategy: 'featureCoverage' as const,
+        variantKey: `optional=${v.name}`,
+        optionalFields: {
+          body: v.body,
+          echo: v.echo,
+          targetIndex: first + v.before.length,
+          ...(v.readBack ? { readBackEcho: v.readBack.echo } : {}),
+        },
+        bindings: { ...(chain.bindings ?? {}) },
+        requestPlan: undefined,
+        seedBindings: undefined,
+        ...(Object.keys(stepBodies).length ? { stepBodies } : {}),
+        ...(Object.keys(stepExtractAs).length ? { stepExtractAs } : {}),
+      };
+    });
 }

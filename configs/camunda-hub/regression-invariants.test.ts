@@ -746,16 +746,57 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       );
       const next = spec.indexOf('\n  test(', start + 1);
       const test = spec.slice(start, next < 0 ? undefined : next);
+      // "${xVar}" in a body or echo value is the variable's value at runtime: ctx.xVar.
+      const render = (value: unknown): string => {
+        const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
+        return ref ? `ctx.${ref[1]}` : JSON.stringify(value).replaceAll('"', "'");
+      };
+      // The formatter may write ctx.xVar or ctx['xVar'] and either quote style; compare one form.
+      // The formatter may write ctx.xVar or ctx['xVar'], a.b or a['b'], and either quote style.
+      const normalised = test
+        .replaceAll('"', "'")
+        .replace(/ctx\['(\w+)'\]/g, 'ctx.$1')
+        .replace(/\['(\w+)'\]/g, '.$1');
       for (const [field, value] of Object.entries(isRecord(v.body) ? v.body : {})) {
-        expect(test, `${id}: ${field} not sent`).toContain(
-          `${field}: ${JSON.stringify(value).replace(/^"|"$/g, "'")}`,
-        );
+        expect(normalised, `${id}: ${field} not sent`).toContain(`${field}: ${render(value)}`);
       }
       for (const [field, value] of Object.entries(isRecord(v.echo) ? v.echo : {})) {
-        // The formatter rewrites string quotes, so compare with quotes normalised.
-        expect(test.replaceAll('"', "'"), `${id}: ${field} not checked in the response`).toContain(
-          `echoed.${field}).toEqual(${JSON.stringify(value).replaceAll('"', "'")})`,
+        expect(normalised, `${id}: ${field} not checked in the response`).toContain(
+          `echoed.${field}).toEqual(${render(value)})`,
         );
+      }
+      // A read-back runs after the update and echoes the values again: once for the update's own
+      // response and once for the read, so the change is shown to have persisted.
+      if (isRecord(v.readBack)) {
+        const readOp = String(v.readBack.operationId);
+        // Both the update and the read-back responses are validated against their schemas.
+        expect(
+          test.split('await validateResponse(').length - 1,
+          `${id}: with a read-back, both the update and the read must validate their response`,
+        ).toBeGreaterThanOrEqual(2);
+        const stepAt = normalised.indexOf(`test.step('${readOp}'`);
+        expect(stepAt, `${id}: read-back ${readOp} step not generated`).toBeGreaterThan(-1);
+        expect(stepAt, `${id}: read-back ${readOp} runs before the update`).toBeGreaterThan(
+          normalised.indexOf(`test.step('${id}'`),
+        );
+        for (const [field, value] of Object.entries(
+          isRecord(v.readBack.echo) ? v.readBack.echo : {},
+        )) {
+          const check = `echoed.${field}).toEqual(${render(value)})`;
+          expect(
+            normalised.indexOf(check, stepAt),
+            `${id}: read-back ${readOp} does not check ${field}`,
+          ).toBeGreaterThan(-1);
+        }
+      }
+      // Each setup call runs, and its renamed key is stored under the chosen variable.
+      for (const step of Array.isArray(v.before) ? v.before : []) {
+        if (!isRecord(step)) continue;
+        for (const name of Object.values(isRecord(step.extractAs) ? step.extractAs : {})) {
+          expect(normalised, `${id}: ${String(name)} never stored`).toContain(
+            `extractInto(ctx, '${String(name)}'`,
+          );
+        }
       }
     }
     for (const u of list('untested')) {

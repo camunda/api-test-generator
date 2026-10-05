@@ -1348,3 +1348,115 @@ describe('emitter: initSpecSalt emission (#175)', () => {
     expect(saltPos).toBeLessThan(describePos);
   });
 });
+
+describe('echo checks (optional-field variants)', () => {
+  const echoCollection = (echoChecks: Record<string, unknown>): EndpointScenarioCollection => ({
+    endpoint: { operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'echo',
+        operations: [{ operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' }],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        requestPlan: [
+          {
+            operationId: 'getFolder',
+            method: 'GET',
+            pathTemplate: '/folders/{folderKey}',
+            expect: { status: 200 },
+            echoChecks,
+          },
+        ],
+      },
+    ],
+  });
+  const render = (echoChecks: Record<string, unknown>) =>
+    renderPlaywrightSuite(echoCollection(echoChecks), {
+      suiteName: 'getFolder',
+      mode: 'variant',
+      recordResponses: false,
+    });
+
+  // undefined equals undefined, so each value check must be preceded by a check that the
+  // field exists (and, for a reference, that the variable was stored).
+  test('asserts the field exists before comparing it, for a flat and a dotted path', () => {
+    const src = render({ description: 'd', 'folder.parentFolderKey': 'k' });
+    expect(src).toMatch(/expect\(echoed\)\.toHaveProperty\(\["description"\]\)/);
+    expect(src).toMatch(/expect\(echoed\)\.toHaveProperty\(\["folder","parentFolderKey"\]\)/);
+    expect(src).toMatch(/expect\(echoed\["folder"\]\["parentFolderKey"\]\)\.toEqual\("k"\)/);
+  });
+
+  test('a null expectation still asserts the field is present', () => {
+    const src = render({ 'folder.parentFolderKey': null });
+    const guard = src.indexOf('toHaveProperty(["folder","parentFolderKey"])');
+    const compare = src.indexOf('toEqual(null)');
+    expect(guard).toBeGreaterThan(-1);
+    expect(compare).toBeGreaterThan(guard);
+  });
+
+  test('a variable reference asserts the variable was stored, before the comparison', () => {
+    const src = render({ parentFolderKey: `\${otherFolderKeyVar}` });
+    const stored = src.indexOf(
+      'expect(ctx["otherFolderKeyVar"], "otherFolderKeyVar was never stored").toBeDefined()',
+    );
+    const compare = src.indexOf('toEqual(ctx["otherFolderKeyVar"])');
+    expect(stored).toBeGreaterThan(-1);
+    expect(compare).toBeGreaterThan(stored);
+  });
+
+  test('a literal value emits no stored-variable guard', () => {
+    expect(render({ description: 'd' })).not.toContain('was never stored');
+  });
+});
+
+describe('validateResponse flag as the only validation trigger', () => {
+  const flagged = (flag: boolean): EndpointScenarioCollection => ({
+    endpoint: { operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'flagged',
+        operations: [{ operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' }],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        // no responseShapeFields: only the step flag asks for validation
+        requestPlan: [
+          {
+            operationId: 'getFolder',
+            method: 'GET',
+            pathTemplate: '/folders/{folderKey}',
+            expect: { status: 200 },
+            ...(flag ? { validateResponse: true } : {}),
+          },
+        ],
+      },
+    ],
+  });
+  const render = (flag: boolean) =>
+    renderPlaywrightSuite(flagged(flag), {
+      suiteName: 'getFolder',
+      mode: 'variant',
+      recordResponses: false,
+    });
+
+  test('emits the call together with its import and schema path', () => {
+    const src = render(true);
+    expect(src).toContain('await validateResponse(');
+    expect(src).toContain("import { validateResponse } from 'assert-json-body';");
+    expect(src).toContain('__responsesFile =');
+    expect(src).toContain('attachEvidenceOnFailure');
+    // the evidence helper is imported wherever it is used
+    expect(src).toMatch(/import \{[^}]*attachEvidenceOnFailure[^}]*\} from/);
+  });
+
+  test('without the flag or a response shape, nothing is validated or imported', () => {
+    const src = render(false);
+    expect(src).not.toContain('validateResponse');
+    expect(src).not.toContain('__responsesFile');
+  });
+});

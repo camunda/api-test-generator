@@ -168,11 +168,41 @@ export function applyStepBody(
   return { ...bodyTemplate, ...override };
 }
 
+/**
+ * The extracts of the step at `index`, with the bindings of any response field named in
+ * `extractAs` replaced by the variable chosen for it.
+ */
+export function applyStepExtractAs<T extends { fieldPath: string; bind: string }>(
+  extract: T[] | undefined,
+  extractAs: Record<number, Record<string, string>> | undefined,
+  index: number,
+): T[] | undefined {
+  const rename = extractAs?.[index];
+  if (!rename) return extract;
+  // A field with no extract would be a silent no-op, and the variable it was meant to hold would
+  // then be seeded with an unrelated value, so name the mistake instead.
+  const unmatched = Object.keys(rename).filter((f) => !extract?.some((e) => e.fieldPath === f));
+  if (unmatched.length) {
+    throw new Error(
+      `extractAs names response field(s) the step at index ${index} does not extract: ${unmatched.join(', ')}.`,
+    );
+  }
+  return extract?.map((e) => (rename[e.fieldPath] ? { ...e, bind: rename[e.fieldPath] } : e));
+}
+
 /** Fails generation for a sequence that names an operation the spec does not have. */
 export function validateConflictSequences(
   graph: OperationGraph,
   sequences: ConflictSequenceEntry[],
 ): void {
+  // The planner finds the final step by its operationId, so a setup call to the target itself would
+  // be taken for the final step too.
+  const same = sequences.filter((s) => s.before.includes(s.operationId));
+  if (same.length) {
+    throw new Error(
+      `conflict-replay.json: a setup call cannot be the target operation itself: ${same.map((s) => `${s.operationId}/${s.name}`).join(', ')}.`,
+    );
+  }
   const unknown = new Set<string>();
   for (const seq of sequences) {
     for (const id of [seq.operationId, ...seq.before]) {

@@ -285,9 +285,18 @@ export interface EndpointScenario {
   /** A search-paging variant (see searchPaging.ts): body fields merged into the final request, and what to assert. */
   /** Body fields merged over the generated body of the step at each operation index (see conflictReplay.ts). */
   stepBodies?: Record<number, Record<string, unknown>>;
+  /** Response field -> variable name, per operation index, replacing the planner's default binding (see optionalFields.ts). */
+  stepExtractAs?: Record<number, Record<string, string>>;
   searchPaging?: { body: Record<string, unknown>; checks: SearchPagingChecks };
   /** An optional-fields variant (see optionalFields.ts): body fields merged into the final request, and the response fields that must echo them. */
-  optionalFields?: { body: Record<string, unknown>; echo: Record<string, unknown> };
+  optionalFields?: {
+    body: Record<string, unknown>;
+    echo: Record<string, unknown>;
+    /** Index in `operations` of the target the body is merged into (it is not last when there is a read-back). */
+    targetIndex: number;
+    /** A GET after the target; the final step, whose response must echo these values. */
+    readBackEcho?: Record<string, unknown>;
+  };
   populatesSubShape?: {
     rootPath: string; // e.g. "startInstructions[]"
     leafPaths: string[]; // semantic-typed leaves to populate
@@ -552,6 +561,8 @@ export interface RequestStep {
   searchChecks?: SearchPagingChecks;
   /** Response fields that must equal these values. */
   echoChecks?: Record<string, unknown>;
+  /** Validate this step's response body against its schema even though it is not the last step. */
+  validateResponse?: boolean;
 }
 
 /** Response assertions for a search request that carries `page` and `sort`. */

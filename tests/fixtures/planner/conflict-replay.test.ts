@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   applyConflictReplay,
   applyStepBody,
+  applyStepExtractAs,
   buildConflictSequenceScenarios,
   type ConflictSequenceEntry,
   loadConflictReplay,
@@ -190,6 +191,32 @@ describe('conflict-replay.json sequences', () => {
     expect(applyStepBody({ name: 'n' }, overrides, 1)).toEqual({ name: 'n' });
     expect(applyStepBody({ name: 'n' }, undefined, 2)).toEqual({ name: 'n' });
     expect(applyStepBody(undefined, overrides, 2)).toBeUndefined();
+  });
+
+  it('renames only the extracts named for that step', () => {
+    const extract = [
+      { fieldPath: 'folderKey', bind: 'folderKeyVar' },
+      { fieldPath: 'projectKey', bind: 'projectKeyVar' },
+    ];
+    const renames = { 2: { folderKey: 'otherVar' } };
+    expect(applyStepExtractAs(extract, renames, 2)).toEqual([
+      { fieldPath: 'folderKey', bind: 'otherVar' },
+      { fieldPath: 'projectKey', bind: 'projectKeyVar' },
+    ]);
+    expect(applyStepExtractAs(extract, renames, 1)).toBe(extract);
+    expect(applyStepExtractAs(undefined, undefined, 2)).toBeUndefined();
+    // a field that is not extracted by that step is a mistake, not a no-op
+    expect(() => applyStepExtractAs(extract, { 2: { folderKy: 'otherVar' } }, 2)).toThrow(
+      /folderKy/,
+    );
+    expect(() => applyStepExtractAs(undefined, renames, 2)).toThrow(/folderKey/);
+  });
+
+  it('rejects a setup call to the target operation itself', () => {
+    const g = graphOf(node('restore'));
+    expect(() => validateConflictSequences(g, [{ ...seq, before: ['restore'] }])).toThrow(
+      /target operation itself/,
+    );
   });
 
   it('fails for an operation the spec does not have, whether target or setup', () => {

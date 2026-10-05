@@ -287,9 +287,9 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // so we can conditionally include the import and constant.
   const needsValidation = collection.scenarios.some(
     (s) =>
-      Array.isArray(s.responseShapeFields) &&
-      s.responseShapeFields.length > 0 &&
-      !(s.expectedResult && s.expectedResult.kind === 'error'),
+      !(s.expectedResult && s.expectedResult.kind === 'error') &&
+      ((Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0) ||
+        (s.requestPlan ?? []).some((step) => step.validateResponse)),
   );
 
   // Determine upfront whether any scenario will wrap a step with
@@ -654,7 +654,7 @@ function renderScenarioTest(
     }
     // If this is the final step and scenario expects a success body, validate response shape
     const isErrorScenario = s.expectedResult && s.expectedResult.kind === 'error';
-    if (isFinal && hasShape && !isErrorScenario) {
+    if (((isFinal && hasShape) || step.validateResponse) && !isErrorScenario) {
       // Use JSON.stringify for every value so the emitted route spec is uniformly
       // double-quoted (no mixed single/double quotes) and any special characters
       // in the path template are correctly escaped.
@@ -697,13 +697,24 @@ function renderScenarioTest(
       body.push(`      throw e;`);
       body.push(`    }`);
     }
-    if (step.echoChecks && isFinal && !isErrorScenario) {
+    if (step.echoChecks && !isErrorScenario) {
       body.push(`    {`);
       body.push(`      const echoed = await ${varName}.json();`);
       for (const [field, value] of Object.entries(step.echoChecks)) {
-        body.push(
-          `      expect(echoed[${JSON.stringify(field)}]).toEqual(${JSON.stringify(value)});`,
-        );
+        // "${xVar}" is the value stored in ctx.xVar by an earlier step.
+        const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
+        const expected = ref ? `ctx[${JSON.stringify(ref[1])}]` : JSON.stringify(value);
+        // A dotted field ("folder.parentFolderKey") reaches into a wrapped resource.
+        const segments = field.split('.');
+        const access = segments.map((k) => `[${JSON.stringify(k)}]`).join('');
+        // undefined equals undefined, so a missing field or an unstored variable must fail first.
+        body.push(`      expect(echoed).toHaveProperty(${JSON.stringify(segments)});`);
+        if (ref) {
+          body.push(
+            `      expect(ctx[${JSON.stringify(ref[1])}], ${JSON.stringify(`${ref[1]} was never stored`)}).toBeDefined();`,
+          );
+        }
+        body.push(`      expect(echoed${access}).toEqual(${expected});`);
       }
       body.push(`    }`);
     }
