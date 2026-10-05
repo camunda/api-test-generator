@@ -12,6 +12,9 @@ using System.Text.RegularExpressions;
 using Camunda.Orchestration.Sdk;
 using Xunit;
 
+// One shared broker: parallel test classes trip its backpressure (RESOURCE_EXHAUSTED).
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 namespace CamundaIntegrationTests;
 
 public abstract class TestFixtureBase
@@ -19,7 +22,19 @@ public abstract class TestFixtureBase
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
-        Converters = { new StringValueObjectConverterFactory() },
+        Converters =
+        {
+            new StringValueObjectConverterFactory(),
+            new WireNameEnumConverterFactory(),
+            new ScalarFilterPropertyConverterFactory(),
+        },
+    };
+
+    // Same as JsonOptions minus the filter-property converter, so that converter can delegate.
+    private static readonly JsonSerializerOptions JsonOptionsNoFilterWrap = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new StringValueObjectConverterFactory(), new WireNameEnumConverterFactory() },
     };
 
     protected CamundaClient Client { get; }
@@ -501,6 +516,82 @@ public abstract class TestFixtureBase
                 var raw = (string?)ValueProperty.GetValue(value);
                 writer.WriteStringValue(raw);
             }
+        }
+    }
+
+    /// <summary>
+    /// SDK enums declare their wire names with [JsonPropertyName] on each member
+    /// (e.g. ResourceTypeEnum.AUDITLOG is "AUDIT_LOG"), which JsonStringEnumConverter
+    /// ignores on .NET 8, so planner bodies like {"resourceType": "AUDIT_LOG"} fail to bind.
+    /// </summary>
+    private sealed class WireNameEnumConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert) =>
+            typeToConvert.IsEnum
+            && typeToConvert.GetFields(BindingFlags.Public | BindingFlags.Static)
+                .Any(f => f.GetCustomAttribute<JsonPropertyNameAttribute>() is not null);
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options) =>
+            (JsonConverter)Activator.CreateInstance(
+                typeof(WireNameEnumConverter<>).MakeGenericType(typeToConvert), nonPublic: true)!;
+
+        private sealed class WireNameEnumConverter<T> : JsonConverter<T> where T : struct, Enum
+        {
+            private static readonly Dictionary<string, T> FromWire = typeof(T)
+                .GetFields(BindingFlags.Public | BindingFlags.Static)
+                .ToDictionary(
+                    f => f.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? f.Name,
+                    f => (T)f.GetValue(null)!,
+                    StringComparer.OrdinalIgnoreCase);
+            private static readonly Dictionary<T, string> ToWire =
+                FromWire.ToDictionary(kv => kv.Value, kv => kv.Key);
+
+            public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            {
+                var raw = reader.GetString() ?? throw new JsonException($"Cannot convert null to {typeof(T).Name}.");
+                if (FromWire.TryGetValue(raw, out var byWire)) return byWire;
+                if (Enum.TryParse<T>(raw, ignoreCase: true, out var byName)) return byName;
+                throw new JsonException($"'{raw}' is not a valid {typeof(T).Name}.");
+            }
+
+            public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+                writer.WriteStringValue(ToWire.TryGetValue(value, out var wire) ? wire : value.ToString());
+        }
+    }
+
+    /// <summary>
+    /// The planner emits filter fields as bare scalars ({"processInstanceKey": "123"}) but the
+    /// SDK types them as operator objects (*FilterProperty with $eq/$neq/$in/...). Bind a bare
+    /// scalar as {"$eq": scalar}; objects deserialize normally.
+    /// </summary>
+    private sealed class ScalarFilterPropertyConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert) =>
+            typeToConvert.IsClass
+            && typeToConvert.Name.EndsWith("FilterProperty", StringComparison.Ordinal)
+            && typeToConvert.GetProperty("Eq") is not null;
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options) =>
+            (JsonConverter)Activator.CreateInstance(
+                typeof(ScalarFilterPropertyConverter<>).MakeGenericType(typeToConvert), nonPublic: true)!;
+
+        private sealed class ScalarFilterPropertyConverter<T> : JsonConverter<T> where T : class
+        {
+            private static readonly PropertyInfo EqProperty = typeof(T).GetProperty("Eq")!;
+
+            public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            {
+                if (reader.TokenType == JsonTokenType.StartObject)
+                {
+                    return JsonSerializer.Deserialize<T>(ref reader, JsonOptionsNoFilterWrap);
+                }
+                var instance = Activator.CreateInstance<T>();
+                EqProperty.SetValue(instance, JsonSerializer.Deserialize(ref reader, EqProperty.PropertyType, options));
+                return instance;
+            }
+
+            public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+                JsonSerializer.Serialize(writer, value, JsonOptionsNoFilterWrap);
         }
     }
 

@@ -202,7 +202,9 @@ describe('C# SDK Emitter', () => {
     const files = await emitter.emit(processDefinitionsCollection, EMIT_CTX);
 
     expect(files[0].content).toContain('var request1 = new ProcessDefinitionSearchQuery();');
-    expect(files[0].content).toContain('await Client.SearchProcessDefinitionsAsync(request1);');
+    expect(files[0].content).toContain(
+      'await Client.SearchProcessDefinitionsAsync(request1, consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 });',
+    );
   });
 
   test('uses a nullable GetStringBindingOrNull lookup for deployment tenant IDs', async () => {
@@ -425,7 +427,7 @@ describe('C# SDK Emitter', () => {
     const files = await emitter.emit(requestWithPathParam, EMIT_CTX);
 
     expect(files[0].content).toContain(
-      'await Client.SearchJobsAsync(JobKey.AssumeExists(RequireStringBinding(ctx, "jobKeyVar")), request1);',
+      'await Client.SearchJobsAsync(JobKey.AssumeExists(RequireStringBinding(ctx, "jobKeyVar")), request1, consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 });',
     );
     expect(files[0].content).not.toContain('["jobKey"] = RequireBinding(ctx, "jobKeyVar")');
   });
@@ -466,7 +468,7 @@ describe('C# SDK Emitter', () => {
     const files = await emitter.emit(requestWithPathParam, EMIT_CTX);
 
     expect(files[0].content).toContain(
-      'await Client.SearchJobsAsync(JobKey.AssumeExists(RequireStringBinding(ctx, "jobKeyVar")), request1);',
+      'await Client.SearchJobsAsync(JobKey.AssumeExists(RequireStringBinding(ctx, "jobKeyVar")), request1, consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 });',
     );
     expect(files[0].content).not.toContain('RequireBinding(ctx, "jobKeyVar")');
   });
@@ -506,7 +508,7 @@ describe('C# SDK Emitter', () => {
     const files = await emitter.emit(requestWithUnknownPathParam, EMIT_CTX);
 
     expect(files[0].content).toContain(
-      'await Client.SearchJobsAsync(RequireStringBinding(ctx, "widgetIdVar"), request1);',
+      'await Client.SearchJobsAsync(RequireStringBinding(ctx, "widgetIdVar"), request1, consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 });',
     );
   });
 

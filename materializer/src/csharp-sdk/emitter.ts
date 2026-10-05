@@ -45,18 +45,18 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   searchAuthorizations: 'AuthorizationSearchQuery',
   searchUsers: 'UserSearchQueryRequest',
   searchGroups: 'GroupSearchQueryRequest',
-  searchUsersForGroup: 'GroupUserSearchQueryRequest',
-  searchClientsForGroup: 'GroupClientSearchQueryRequest',
+  searchUsersForGroup: 'SearchUsersForGroupRequest',
+  searchClientsForGroup: 'SearchClientsForGroupRequest',
   searchRolesForGroup: 'RoleSearchQueryRequest',
   searchMappingRulesForGroup: 'MappingRuleSearchQueryRequest',
   searchRoles: 'RoleSearchQueryRequest',
-  searchUsersForRole: 'RoleUserSearchQueryRequest',
+  searchUsersForRole: 'SearchUsersForRoleRequest',
   searchGroupsForRole: 'RoleGroupSearchQueryRequest',
-  searchClientsForRole: 'RoleClientSearchQueryRequest',
+  searchClientsForRole: 'SearchClientsForRoleRequest',
   searchMappingRulesForRole: 'MappingRuleSearchQueryRequest',
   searchTenants: 'TenantSearchQueryRequest',
-  searchUsersForTenant: 'TenantUserSearchQueryRequest',
-  searchClientsForTenant: 'TenantClientSearchQueryRequest',
+  searchUsersForTenant: 'SearchUsersForTenantRequest',
+  searchClientsForTenant: 'SearchClientsForTenantRequest',
   searchGroupIdsForTenant: 'TenantGroupSearchQueryRequest',
   searchRolesForTenant: 'RoleSearchQueryRequest',
   searchMappingRulesForTenant: 'MappingRuleSearchQueryRequest',
@@ -91,6 +91,38 @@ const CSHARP_REQUEST_TYPE_BY_OPERATION: Record<string, string> = {
   getJobErrorStatistics: 'JobErrorStatisticsQuery',
   getJobTimeSeriesStatistics: 'JobTimeSeriesStatisticsQuery',
   getJobWorkerStatistics: 'JobWorkerStatisticsQuery',
+  activateAdHocSubProcessActivities: 'AdHocSubProcessActivateActivitiesInstruction',
+  broadcastSignal: 'SignalBroadcastRequest',
+  cancelProcessInstancesBatchOperation: 'ProcessInstanceCancellationBatchOperationRequest',
+  correlateMessage: 'MessageCorrelationRequest',
+  createAdminUser: 'UserRequest',
+  createElementInstanceVariables: 'SetVariableRequest',
+  createGlobalClusterVariable: 'CreateClusterVariableRequest',
+  createGlobalTaskListener: 'CreateGlobalTaskListenerRequest',
+  createRole: 'RoleCreateRequest',
+  createTenantClusterVariable: 'CreateClusterVariableRequest',
+  deleteDecisionInstance: 'DeleteDecisionInstanceRequest',
+  deleteDecisionInstancesBatchOperation: 'DecisionInstanceDeletionBatchOperationRequest',
+  deleteProcessInstancesBatchOperation: 'ProcessInstanceDeletionBatchOperationRequest',
+  evaluateConditionals: 'ConditionalEvaluationInstruction',
+  evaluateExpression: 'ExpressionEvaluationRequest',
+  migrateProcessInstance: 'ProcessInstanceMigrationInstruction',
+  migrateProcessInstancesBatchOperation: 'ProcessInstanceMigrationBatchOperationRequest',
+  modifyProcessInstancesBatchOperation: 'ProcessInstanceModificationBatchOperationRequest',
+  pinClock: 'ClockPinRequest',
+  publishMessage: 'MessagePublicationRequest',
+  resolveIncidentsBatchOperation: 'ProcessInstanceIncidentResolutionBatchOperationRequest',
+  throwJobError: 'JobErrorRequest',
+  updateGlobalClusterVariable: 'UpdateClusterVariableRequest',
+  updateGlobalTaskListener: 'UpdateGlobalTaskListenerRequest',
+  updateGroup: 'GroupUpdateRequest',
+  updateJob: 'JobUpdateRequest',
+  updateMappingRule: 'MappingRuleUpdateRequest',
+  updateRole: 'RoleUpdateRequest',
+  updateTenant: 'TenantUpdateRequest',
+  updateTenantClusterVariable: 'UpdateClusterVariableRequest',
+  updateUser: 'UserUpdateRequest',
+  updateUserTask: 'UserTaskUpdateRequest',
 };
 
 // operationId-independent map: a path parameter's name (camelCased) to the
@@ -118,6 +150,9 @@ const CSHARP_PATH_PARAM_KEY_TYPE: Record<string, string> = {
   decisionEvaluationInstanceKey: 'DecisionEvaluationInstanceKey',
   decisionEvaluationKey: 'DecisionEvaluationKey',
   adHocSubProcessInstanceKey: 'ElementInstanceKey',
+  tenantId: 'TenantId',
+  username: 'Username',
+  id: 'GlobalListenerId',
 };
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
@@ -189,6 +224,98 @@ const CSHARP_VOID_METHODS = new Set<string>([
   'UpdateJobAsync',
   'UpdateUserTaskAsync',
 ]);
+
+const CSHARP_TIME_WINDOW_ARGS: Record<string, string> = {
+  GetGlobalJobStatisticsAsync: 'from: DateTimeOffset.UtcNow.AddDays(-1), to: DateTimeOffset.UtcNow',
+  GetUsageMetricsAsync:
+    'startTime: DateTimeOffset.UtcNow.AddDays(-1), endTime: DateTimeOffset.UtcNow',
+};
+
+const CSHARP_CONSISTENCY_METHODS = new Set<string>([
+  'GetAuditLogAsync',
+  'GetAuthorizationAsync',
+  'GetBatchOperationAsync',
+  'GetDecisionDefinitionAsync',
+  'GetDecisionInstanceAsync',
+  'GetDecisionRequirementsAsync',
+  'GetDocumentAsync',
+  'GetElementInstanceAsync',
+  'GetGlobalClusterVariableAsync',
+  'GetGlobalJobStatisticsAsync',
+  'GetGlobalTaskListenerAsync',
+  'GetGroupAsync',
+  'GetIncidentAsync',
+  'GetJobErrorStatisticsAsync',
+  'GetJobTimeSeriesStatisticsAsync',
+  'GetJobTypeStatisticsAsync',
+  'GetJobWorkerStatisticsAsync',
+  'GetMappingRuleAsync',
+  'GetProcessDefinitionAsync',
+  'GetProcessDefinitionInstanceStatisticsAsync',
+  'GetProcessDefinitionInstanceVersionStatisticsAsync',
+  'GetProcessDefinitionMessageSubscriptionStatisticsAsync',
+  'GetProcessDefinitionStatisticsAsync',
+  'GetProcessInstanceAsync',
+  'GetProcessInstanceCallHierarchyAsync',
+  'GetProcessInstanceSequenceFlowsAsync',
+  'GetProcessInstanceStatisticsAsync',
+  'GetProcessInstanceStatisticsByDefinitionAsync',
+  'GetProcessInstanceStatisticsByErrorAsync',
+  'GetResourceAsync',
+  'GetResourceContentAsync',
+  'GetRoleAsync',
+  'GetTenantAsync',
+  'GetTenantClusterVariableAsync',
+  'GetTopologyAsync',
+  'GetUsageMetricsAsync',
+  'GetUserAsync',
+  'GetUserTaskAsync',
+  'GetUserTaskFormAsync',
+  'GetVariableAsync',
+  'SearchAuditLogsAsync',
+  'SearchAuthorizationsAsync',
+  'SearchBatchOperationItemsAsync',
+  'SearchBatchOperationsAsync',
+  'SearchClientsForGroupAsync',
+  'SearchClientsForRoleAsync',
+  'SearchClientsForTenantAsync',
+  'SearchClusterVariablesAsync',
+  'SearchCorrelatedMessageSubscriptionsAsync',
+  'SearchDecisionDefinitionsAsync',
+  'SearchDecisionInstancesAsync',
+  'SearchDecisionRequirementsAsync',
+  'SearchElementInstanceIncidentsAsync',
+  'SearchElementInstancesAsync',
+  'SearchGlobalTaskListenersAsync',
+  'SearchGroupIdsForTenantAsync',
+  'SearchGroupsAsync',
+  'SearchGroupsForRoleAsync',
+  'SearchIncidentsAsync',
+  'SearchJobsAsync',
+  'SearchMappingRuleAsync',
+  'SearchMappingRulesForGroupAsync',
+  'SearchMappingRulesForRoleAsync',
+  'SearchMappingRulesForTenantAsync',
+  'SearchMessageSubscriptionsAsync',
+  'SearchProcessDefinitionsAsync',
+  'SearchProcessInstanceIncidentsAsync',
+  'SearchProcessInstancesAsync',
+  'SearchRolesAsync',
+  'SearchRolesForGroupAsync',
+  'SearchRolesForTenantAsync',
+  'SearchTenantsAsync',
+  'SearchUserTaskAuditLogsAsync',
+  'SearchUserTaskEffectiveVariablesAsync',
+  'SearchUserTaskVariablesAsync',
+  'SearchUserTasksAsync',
+  'SearchUsersAsync',
+  'SearchUsersForGroupAsync',
+  'SearchUsersForRoleAsync',
+  'SearchUsersForTenantAsync',
+  'SearchVariablesAsync',
+]);
+
+const CSHARP_CONSISTENCY_ARG = 'consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 }';
 
 export function csharpSdkSuiteFileName(
   collection: EndpointScenarioCollection,
@@ -728,7 +855,16 @@ function requireRequestType(step: RequestStep, requestType: string | undefined):
 }
 
 function renderClientCall(method: string, step: RequestStep, requestExpression?: string): string {
-  return renderClientCallForPath(method, step.pathTemplate, requestExpression, step.pathParams);
+  const call = renderClientCallForPath(
+    method,
+    step.pathTemplate,
+    requestExpression,
+    step.pathParams,
+  );
+  if (step.expect.status !== 200 || !CSHARP_CONSISTENCY_METHODS.has(method)) return call;
+  return call.endsWith('()')
+    ? `${call.slice(0, -1)}${CSHARP_CONSISTENCY_ARG})`
+    : `${call.slice(0, -1)}, ${CSHARP_CONSISTENCY_ARG})`;
 }
 
 function renderClientCallForPath(
@@ -759,6 +895,8 @@ function renderClientCallForPath(
     return `${keyType}.AssumeExists(RequireStringBinding(ctx, ${binding}))`;
   });
   if (requestExpression !== undefined) argumentsList.push(requestExpression);
+  const timeWindow = CSHARP_TIME_WINDOW_ARGS[method];
+  if (timeWindow !== undefined) argumentsList.push(timeWindow);
   return `Client.${method}(${argumentsList.join(', ')})`;
 }
 
@@ -820,6 +958,18 @@ function resolveRequestTypeName(step: RequestStep): string | undefined {
       return 'ProcessInstanceCreationInstructionByKey';
     }
     return 'ProcessInstanceCreationInstructionById';
+  }
+  if (step.operationId === 'createAuthorization' || step.operationId === 'updateAuthorization') {
+    const body = step.bodyTemplate;
+    return isRecord(body) && 'resourcePropertyName' in body
+      ? 'AuthorizationPropertyBasedRequest'
+      : 'AuthorizationIdBasedRequest';
+  }
+  if (step.operationId === 'evaluateDecision') {
+    const body = step.bodyTemplate;
+    return isRecord(body) && 'decisionDefinitionKey' in body
+      ? 'DecisionEvaluationByKey'
+      : 'DecisionEvaluationById';
   }
   return CSHARP_REQUEST_TYPE_BY_OPERATION[step.operationId];
 }
