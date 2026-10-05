@@ -287,9 +287,9 @@ function buildSuiteSource(collection: EndpointScenarioCollection, opts: EmitOpti
   // so we can conditionally include the import and constant.
   const needsValidation = collection.scenarios.some(
     (s) =>
-      Array.isArray(s.responseShapeFields) &&
-      s.responseShapeFields.length > 0 &&
-      !(s.expectedResult && s.expectedResult.kind === 'error'),
+      !(s.expectedResult && s.expectedResult.kind === 'error') &&
+      ((Array.isArray(s.responseShapeFields) && s.responseShapeFields.length > 0) ||
+        (s.requestPlan ?? []).some((step) => step.validateResponse)),
   );
 
   // Determine upfront whether any scenario will wrap a step with

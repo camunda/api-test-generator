@@ -1411,3 +1411,52 @@ describe('echo checks (optional-field variants)', () => {
     expect(render({ description: 'd' })).not.toContain('was never stored');
   });
 });
+
+describe('validateResponse flag as the only validation trigger', () => {
+  const flagged = (flag: boolean): EndpointScenarioCollection => ({
+    endpoint: { operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'flagged',
+        operations: [{ operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' }],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        // no responseShapeFields: only the step flag asks for validation
+        requestPlan: [
+          {
+            operationId: 'getFolder',
+            method: 'GET',
+            pathTemplate: '/folders/{folderKey}',
+            expect: { status: 200 },
+            ...(flag ? { validateResponse: true } : {}),
+          },
+        ],
+      },
+    ],
+  });
+  const render = (flag: boolean) =>
+    renderPlaywrightSuite(flagged(flag), {
+      suiteName: 'getFolder',
+      mode: 'variant',
+      recordResponses: false,
+    });
+
+  test('emits the call together with its import and schema path', () => {
+    const src = render(true);
+    expect(src).toContain('await validateResponse(');
+    expect(src).toContain("import { validateResponse } from 'assert-json-body';");
+    expect(src).toContain('__responsesFile =');
+    expect(src).toContain('attachEvidenceOnFailure');
+    // the evidence helper is imported wherever it is used
+    expect(src).toMatch(/import \{[^}]*attachEvidenceOnFailure[^}]*\} from/);
+  });
+
+  test('without the flag or a response shape, nothing is validated or imported', () => {
+    const src = render(false);
+    expect(src).not.toContain('validateResponse');
+    expect(src).not.toContain('__responsesFile');
+  });
+});
