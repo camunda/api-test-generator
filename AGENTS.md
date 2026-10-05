@@ -884,8 +884,8 @@ never auto-acted on — there's nothing mechanical to remove for them. Silent
 (no Slack post) when there's nothing to report, matching spec-bump-check's
 non-spammy convention.
 
-The **hub response coverage report**
-([hub-response-coverage.yml](.github/workflows/hub-response-coverage.yml)) is a
+The **hub response coverage report** (guide: [docs/hub-response-coverage-report.md](docs/hub-response-coverage-report.md);
+[hub-response-coverage.yml](.github/workflows/hub-response-coverage.yml)) is a
 scheduled (Monday 05:00 UTC) + `workflow_dispatch` job that posts a weekly summary to
 `#camunda-hub-nightly-test-results`. It bundles camunda-hub's latest `main` (unpinned,
 like the nightly), generates both suites, and runs
