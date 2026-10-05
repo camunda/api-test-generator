@@ -16,6 +16,7 @@ import {
 import {
   applyConflictReplay,
   applyStepBody,
+  applyStepExtractAs,
   buildConflictSequenceScenarios,
   loadConflictReplay,
   loadConflictSequences,
@@ -531,7 +532,7 @@ async function main() {
           ...buildConflictSequenceScenarios(canonicalForEndpoint, conflictSequences, graph),
           ...(searchPaging ? buildSearchPagingScenarios(canonicalForEndpoint, searchPaging) : []),
           ...(optionalFields
-            ? buildOptionalFieldsScenarios(canonicalForEndpoint, optionalFields)
+            ? buildOptionalFieldsScenarios(canonicalForEndpoint, optionalFields, graph)
             : []),
         ]
       : [];
@@ -860,6 +861,7 @@ function buildRequestPlan(
       }
     }
     step.bodyTemplate = applyStepBody(step.bodyTemplate, scenario.stepBodies, steps.length);
+    step.extract = applyStepExtractAs(step.extract, scenario.stepExtractAs, steps.length);
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
     if (isFinal && scenario.optionalFields && isPlainRecord(step.bodyTemplate)) {

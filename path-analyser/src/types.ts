@@ -285,6 +285,8 @@ export interface EndpointScenario {
   /** A search-paging variant (see searchPaging.ts): body fields merged into the final request, and what to assert. */
   /** Body fields merged over the generated body of the step at each operation index (see conflictReplay.ts). */
   stepBodies?: Record<number, Record<string, unknown>>;
+  /** Response field -> variable name, per operation index, replacing the planner's default binding (see optionalFields.ts). */
+  stepExtractAs?: Record<number, Record<string, string>>;
   searchPaging?: { body: Record<string, unknown>; checks: SearchPagingChecks };
   /** An optional-fields variant (see optionalFields.ts): body fields merged into the final request, and the response fields that must echo them. */
   optionalFields?: { body: Record<string, unknown>; echo: Record<string, unknown> };

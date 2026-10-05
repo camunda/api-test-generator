@@ -701,9 +701,10 @@ function renderScenarioTest(
       body.push(`    {`);
       body.push(`      const echoed = await ${varName}.json();`);
       for (const [field, value] of Object.entries(step.echoChecks)) {
-        body.push(
-          `      expect(echoed[${JSON.stringify(field)}]).toEqual(${JSON.stringify(value)});`,
-        );
+        // "${xVar}" is the value stored in ctx.xVar by an earlier step.
+        const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
+        const expected = ref ? `ctx[${JSON.stringify(ref[1])}]` : JSON.stringify(value);
+        body.push(`      expect(echoed[${JSON.stringify(field)}]).toEqual(${expected});`);
       }
       body.push(`    }`);
     }

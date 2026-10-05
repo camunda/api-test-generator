@@ -306,6 +306,13 @@ equals the given value in the response. Use it for fields whose persistence the 
 sees. An optional field that cannot be tested (the response has no body, or the fixtures cannot reach
 it) is listed under `untested` with a tracking issue URL, so the gap stays visible.
 
+A variant may also carry `before: [{ operationId, body?, extractAs? }]`: setup calls run after the
+target's own chain and before the target, `body` is merged over that call's generated body, and
+`extractAs: { "<response field>": "<variable>" }` stores that field under another variable so a second
+resource does not overwrite the first one's key. In a `body` or `echo` value, the string `"${xVar}"` is
+the value stored in `xVar` at runtime, and `null` is allowed. Hub uses it to move a folder under another
+folder and to the project root.
+
 ### Search paging and sort scenarios
 
 `configs/<config>/search-paging.json` (`{ limit, offsetFrom, searches: [{ operationId, sort: { field, order },

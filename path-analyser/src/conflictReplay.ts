@@ -168,6 +168,20 @@ export function applyStepBody(
   return { ...bodyTemplate, ...override };
 }
 
+/**
+ * The extracts of the step at `index`, with the bindings of any response field named in
+ * `extractAs` replaced by the variable chosen for it.
+ */
+export function applyStepExtractAs<T extends { fieldPath: string; bind: string }>(
+  extract: T[] | undefined,
+  extractAs: Record<number, Record<string, string>> | undefined,
+  index: number,
+): T[] | undefined {
+  const rename = extractAs?.[index];
+  if (!extract || !rename) return extract;
+  return extract.map((e) => (rename[e.fieldPath] ? { ...e, bind: rename[e.fieldPath] } : e));
+}
+
 /** Fails generation for a sequence that names an operation the spec does not have. */
 export function validateConflictSequences(
   graph: OperationGraph,

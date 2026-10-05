@@ -1,5 +1,5 @@
 {
-  "$comment": "Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue.",
+  "$comment": "Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue. before: setup calls run between the target's own chain and the target; extractAs stores a response field under another variable so a second resource does not overwrite the first one's key; an echo value \"${xVar}\" is the value stored in that variable.",
   "variants": [
     {
       "operationId": "createWorkspace",
@@ -62,6 +62,52 @@
       "echo": {
         "description": "Updated snapshot description."
       }
+    },
+    {
+      "operationId": "updateFolder",
+      "name": "move under another folder",
+      "before": [
+        {
+          "operationId": "createFolder",
+          "extractAs": {
+            "folderKey": "otherFolderKeyVar"
+          }
+        }
+      ],
+      "body": {
+        "parentFolderKey": "${otherFolderKeyVar}"
+      },
+      "echo": {
+        "parentFolderKey": "${otherFolderKeyVar}"
+      }
+    },
+    {
+      "operationId": "updateFolder",
+      "name": "move to project root",
+      "before": [
+        {
+          "operationId": "createFolder",
+          "body": {
+            "parentFolderKey": "${folderKeyVar}"
+          }
+        }
+      ],
+      "body": {
+        "parentFolderKey": null
+      },
+      "echo": {
+        "parentFolderKey": null
+      }
+    },
+    {
+      "operationId": "submitProjectSnapshotReview",
+      "name": "comment",
+      "body": {
+        "comment": "Reviewed by the generated suite."
+      },
+      "echo": {
+        "comment": "Reviewed by the generated suite."
+      }
     }
   ],
   "untested": [
@@ -82,6 +128,12 @@
       "field": "clusterId, profiles, properties",
       "issue": "https://github.com/camunda/api-test-generator/issues/655",
       "reason": "Answers 204 with no body to echo; needs a read-back and cleanup."
+    },
+    {
+      "operationId": "restoreVersion",
+      "field": "version",
+      "issue": "https://github.com/camunda/api-test-generator/issues/655",
+      "reason": "Required only when restoring an element template file; needs an element-template file fixture (same prerequisite as #637)."
     }
   ]
 }
