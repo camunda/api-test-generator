@@ -879,7 +879,23 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
         Array.isArray(v) && typeof v[0] === 'number' ? v[0] : -1;
       const codes = isRecord(summary.codes) ? summary.codes : {};
       const floorCodes = isRecord(floors.assertedByStatus) ? floors.assertedByStatus : {};
-      expect(Object.keys(floorCodes).length, 'no per-status floors configured').toBeGreaterThan(4);
+      // Every bucket the report counts needs a numeric floor, or its guard would silently go missing.
+      expect(
+        Object.keys(floorCodes).sort(),
+        'floors must cover exactly the report status buckets',
+      ).toEqual(Object.keys(codes).sort());
+      const isFloor = (v: unknown): v is number =>
+        typeof v === 'number' && Number.isInteger(v) && v >= 0;
+      const badFloors = [
+        ...Object.entries(floorCodes).map(([k, v]) => [`assertedByStatus.${k}`, v] as const),
+        ...(['optionalFieldsSent', 'requestChecksCovered', 'fullyAssertedOperations'] as const).map(
+          (k) => [k, floors[k]] as const,
+        ),
+      ].filter(([, v]) => !isFloor(v));
+      expect(
+        badFloors.map(([k]) => k),
+        'floors must be non-negative integers',
+      ).toEqual([]);
       const regressed: string[] = [];
       for (const [status, floor] of Object.entries(floorCodes)) {
         const actual = pair(codes[status]);
