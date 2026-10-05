@@ -9,6 +9,8 @@ import {
   getRequestValidationSuiteDir,
   getSpecBundleDir,
 } from '../../path-analyser/src/configResolver.js';
+import { loadOptionalFields } from '../../path-analyser/src/optionalFields.js';
+import { deriveOptionalFields } from '../../path-analyser/src/optionalFieldsDerive.js';
 import {
   deriveSearchPaging,
   findSearchOperations,
@@ -757,8 +759,16 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     );
     const list = (key: string): Record<string, unknown>[] =>
       isRecord(raw) && Array.isArray(raw[key]) ? raw[key].filter(isRecord) : [];
-    const variants = list('variants');
-    expect(variants.length, 'no optional-field variants configured').toBeGreaterThan(5);
+    // The variants the generator used: the explicit ones plus, with `auto`, one derived per create or
+    // update operation with optional string fields its response echoes. Each gets the detailed checks.
+    const loaded = loadOptionalFields(join(REPO_ROOT, 'configs/camunda-hub'));
+    expect(loaded, 'optional-fields.json did not load').not.toBeNull();
+    const variants: Record<string, unknown>[] = loaded
+      ? deriveOptionalFields(loaded, JSON.parse(readRequired(BUNDLED_SPEC_PATH))).variants.map(
+          (v) => ({ ...v }),
+        )
+      : [];
+    expect(variants.length, 'no optional-field variants configured').toBeGreaterThan(10);
     for (const v of variants) {
       const id = String(v.operationId);
       const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
@@ -782,9 +792,13 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       for (const [field, value] of Object.entries(isRecord(v.body) ? v.body : {})) {
         expect(normalised, `${id}: ${field} not sent`).toContain(`${field}: ${render(value)}`);
       }
+      // A long expected value makes the formatter wrap the assertion over lines; drop whitespace and
+      // trailing commas for the comparisons of whole assertions.
+      const squash = (x: string): string => x.replace(/\s+/g, '').replace(/,\)/g, ')');
+      const flat = squash(normalised);
       for (const [field, value] of Object.entries(isRecord(v.echo) ? v.echo : {})) {
-        expect(normalised, `${id}: ${field} not checked in the response`).toContain(
-          `echoed.${field}).toEqual(${render(value)})`,
+        expect(flat, `${id}: ${field} not checked in the response`).toContain(
+          squash(`echoed.${field}).toEqual(${render(value)})`),
         );
       }
       // A read-back runs after the update and echoes the values again: once for the update's own
@@ -796,17 +810,17 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
           test.split('await validateResponse(').length - 1,
           `${id}: with a read-back, both the update and the read must validate their response`,
         ).toBeGreaterThanOrEqual(2);
-        const stepAt = normalised.indexOf(`test.step('${readOp}'`);
+        const stepAt = flat.indexOf(squash(`test.step('${readOp}'`));
         expect(stepAt, `${id}: read-back ${readOp} step not generated`).toBeGreaterThan(-1);
         expect(stepAt, `${id}: read-back ${readOp} runs before the update`).toBeGreaterThan(
-          normalised.indexOf(`test.step('${id}'`),
+          flat.indexOf(squash(`test.step('${id}'`)),
         );
         for (const [field, value] of Object.entries(
           isRecord(v.readBack.echo) ? v.readBack.echo : {},
         )) {
-          const check = `echoed.${field}).toEqual(${render(value)})`;
+          const check = squash(`echoed.${field}).toEqual(${render(value)})`);
           expect(
-            normalised.indexOf(check, stepAt),
+            flat.indexOf(check, stepAt),
             `${id}: read-back ${readOp} does not check ${field}`,
           ).toBeGreaterThan(-1);
         }

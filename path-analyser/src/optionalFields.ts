@@ -1,6 +1,7 @@
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { chainBodyOverrides } from './conflictReplay.js';
+import { isRecord } from './specWalk.js';
 import type { EndpointScenario, OperationGraph } from './types.js';
 
 /** A setup call run after the target's own setup chain and before the target. */
@@ -32,15 +33,19 @@ export interface OptionalFieldsEntry {
 }
 
 export interface OptionalFieldsConfig {
+  /**
+   * Derive a variant, `optional strings`, for every create/update operation in the spec that has
+   * optional plain-string request fields its success response echoes under the same name (see
+   * optionalFieldsDerive.ts).
+   */
+  auto: boolean;
+  /** Operations (or single fields of one) that get no derived variant, each with the reason. */
+  exclude: { operationId: string; field?: string; reason: string }[];
   variants: OptionalFieldsEntry[];
 }
 
 /** A name ends up in a scenario ID and a generated test title, so it must be quote-safe. */
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]*$/;
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
 
 /**
  * `configs/<config>/optional-fields.json` (optional): operations that also get a success-path
@@ -61,6 +66,30 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
   if (!isRecord(raw) || !Array.isArray(raw.variants)) {
     throw new Error(`${p}: expected a JSON object with a "variants" array.`);
   }
+  if (raw.auto !== undefined && typeof raw.auto !== 'boolean') {
+    throw new Error(`${p}: "auto" must be a boolean when present.`);
+  }
+  const rawExclude = raw.exclude ?? [];
+  if (!Array.isArray(rawExclude)) throw new Error(`${p}: "exclude" must be an array.`);
+  const exclude = rawExclude.map((e, i) => {
+    const rec = isRecord(e) ? e : {};
+    if (
+      typeof rec.operationId !== 'string' ||
+      !rec.operationId ||
+      typeof rec.reason !== 'string' ||
+      !rec.reason ||
+      (rec.field !== undefined && (typeof rec.field !== 'string' || !rec.field))
+    ) {
+      throw new Error(
+        `${p}: exclude[${i}] must be { operationId, field?, reason } with non-empty strings.`,
+      );
+    }
+    return {
+      operationId: rec.operationId,
+      reason: rec.reason,
+      ...(typeof rec.field === 'string' ? { field: rec.field } : {}),
+    };
+  });
   const seen = new Set<string>();
   const variants = raw.variants.map((e, i): OptionalFieldsEntry => {
     const rec = isRecord(e) ? e : {};
@@ -105,7 +134,7 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
       ...(readBack ? { readBack } : {}),
     };
   });
-  return { variants };
+  return { auto: raw.auto === true, exclude, variants };
 }
 
 function parseReadBack(p: string, i: number, raw: unknown): OptionalFieldsEntry['readBack'] {
@@ -154,7 +183,10 @@ function parseSetup(p: string, i: number, raw: unknown): OptionalFieldsSetup[] {
 }
 
 /** Fails generation for an entry naming an operation the spec does not have. */
-export function validateOptionalFields(graph: OperationGraph, config: OptionalFieldsConfig): void {
+export function validateOptionalFields(
+  graph: OperationGraph,
+  config: Pick<OptionalFieldsConfig, 'variants'>,
+): void {
   // The planner finds the final step by its operationId, so a setup call to the target itself would
   // be taken for the final step too and receive the optional fields.
   const samePrimary = config.variants.filter((v) =>
@@ -206,7 +238,7 @@ export function validateOptionalFields(graph: OperationGraph, config: OptionalFi
 /** The optional-field variants for `chain`'s target operation. */
 export function buildOptionalFieldsScenarios(
   chain: EndpointScenario,
-  config: OptionalFieldsConfig,
+  config: Pick<OptionalFieldsConfig, 'variants'>,
   graph: OperationGraph,
 ): EndpointScenario[] {
   const target = chain.operations[chain.operations.length - 1];

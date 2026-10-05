@@ -35,7 +35,11 @@ describe('optional-fields.json', () => {
   it('is optional, and loads valid variants', () => {
     expect(loadOptionalFields(configDir())).toBeNull();
     const { before: _b, chainBodies: _c, ...written } = v;
-    expect(loadOptionalFields(configDir({ variants: [written] }))).toEqual({ variants: [v] });
+    expect(loadOptionalFields(configDir({ variants: [written] }))).toEqual({
+      auto: false,
+      exclude: [],
+      variants: [v],
+    });
   });
 
   it.each([

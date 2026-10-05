@@ -37,6 +37,7 @@ import {
   loadOptionalFields,
   validateOptionalFields,
 } from './optionalFields.js';
+import { deriveOptionalFields } from './optionalFieldsDerive.js';
 import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
@@ -46,10 +47,10 @@ import {
   buildSearchPagingScenarios,
   deriveSearchPaging,
   loadSearchPaging,
-  loadSpecDocument,
   validateSearchPaging,
 } from './searchPaging.js';
 import { computeSeedBindings } from './seedBindings.js';
+import { loadSpecDocument } from './specWalk.js';
 import type {
   ArtifactRegistryEntry,
   DomainSemantics,
@@ -131,7 +132,13 @@ async function main() {
       )
     : searchPagingConfig;
   if (searchPaging) validateSearchPaging(graph, searchPaging);
-  const optionalFields = loadOptionalFields(getActiveConfigDir(repoRoot));
+  const optionalFieldsConfig = loadOptionalFields(getActiveConfigDir(repoRoot));
+  const optionalFields = optionalFieldsConfig?.auto
+    ? deriveOptionalFields(
+        optionalFieldsConfig,
+        loadSpecDocument(baseDir, path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json')),
+      )
+    : optionalFieldsConfig;
   if (optionalFields) validateOptionalFields(graph, optionalFields);
   // Build canonical deep schema shapes (requests + responses)
   const canonical = await buildCanonicalShapes(path.resolve(baseDir, '../'));

@@ -310,11 +310,22 @@ evidence; fix the spec or file an issue rather than loosening the check.
 
 ### Optional-field scenarios
 
-`configs/<config>/optional-fields.json` (`{ variants: [{ operationId, name, body, echo }], untested?: [...] }`)
+`configs/<config>/optional-fields.json` (`{ auto, exclude, variants: [{ operationId, name, body, echo }], untested?: [...] }`)
 gives an operation a success-path variant, `optional fields - <name>` in its `<operation>.variant.spec.ts`,
 that merges `body` (optional request fields) over the generated request and asserts each `echo` field
 equals the given value in the response. Use it for fields whose persistence the required-only test never
-sees. An optional field that cannot be tested (the response has no body, or the fixtures cannot reach
+sees.
+
+With `auto: true` the common case needs no entry: every create or update operation in the spec with
+optional plain-string request fields (no `format`, `pattern` or `enum`) that its success response echoes
+under the same name gets an `optional strings` variant. It sends a value for each such field, cut to the
+field's `maxLength`, and asserts the response echoes it; for PATCH and PUT it also reads the resource back
+through the GET on the same path (a field inside a wrapper object is addressed as `wrapper.field`, such as
+`folder.name`). A new create or update operation is covered by the next generation. `exclude`
+(`{ operationId, field?, reason }`) opts an operation or one field out, for example a string the server
+validates (a file's `content`); an exclusion that matches nothing fails generation. An explicit variant
+named `optional strings` for an operation replaces the derived one. `variants` holds what cannot be
+derived. An optional field that cannot be tested (the response has no body, or the fixtures cannot reach
 it) is listed under `untested` with a tracking issue URL, so the gap stays visible.
 
 A variant may also carry `before: [{ operationId, body?, extractAs? }]`: setup calls run after the
