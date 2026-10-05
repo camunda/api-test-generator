@@ -679,6 +679,9 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       if (entry.checkOrder === true) {
         expect(test, `${id}: order not asserted`).toContain('[...values].sort()');
         expect(test, `${id}: opposite order not compared`).toContain('reversedValues');
+        expect(test, `${id}: opposite values not validated`).toContain(
+          "reversedValues.every((v) => typeof v === 'string' && v !== '')",
+        );
         expect(offsetTest, `${id}: offset slice not compared`).toContain('unpaged');
       }
       if (isRecord(entry.filter)) {

@@ -750,6 +750,9 @@ function renderScenarioTest(
           body.push(`      expect(reversed.status()).toBe(200);`);
           body.push(`      const reversedValues = read(await reversed.json());`);
           body.push(
+            `      expect(reversedValues.every((v) => typeof v === 'string' && v !== '')).toBe(true);`,
+          );
+          body.push(
             `      expect(reversedValues).toEqual([...reversedValues].sort()${opposite === 'DESC' ? '.reverse()' : ''});`,
           );
         }
