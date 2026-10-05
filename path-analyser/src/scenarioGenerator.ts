@@ -2210,7 +2210,11 @@ export function generateOptionalSubShapeVariants(
       const endpointIsSoleProducer =
         externalCandidates.length === 0 &&
         (authoritative.includes(endpointOpId) || inclusive.includes(endpointOpId));
-      const producerCandidates = endpointIsSoleProducer ? [endpointOpId] : externalCandidates;
+      const endpointIsAuthoritativeProducer = authoritative.includes(endpointOpId);
+      const producerCandidates =
+        endpointIsSoleProducer || endpointIsAuthoritativeProducer
+          ? [endpointOpId]
+          : externalCandidates;
 
       // #162 PR 4 (suite-partition cut): Try to build a producer-chain
       // variant first (the canonical "warm-up + search + final" pattern
@@ -2361,8 +2365,11 @@ function tryProducerChainVariant(args: {
   const { graph, endpoint, endpointOpId, opts, leaf, producerCandidates } = args;
   const buildAdditional = (candidate: OperationNode): Set<string> => {
     const additional = new Set<string>();
-    for (const opt of candidate.requires.optional) {
-      if (endpoint.produces.includes(opt)) additional.add(opt);
+    // A self warm-up call needs none of the endpoint's own optional inputs.
+    if (candidate.operationId !== endpoint.operationId) {
+      for (const opt of candidate.requires.optional) {
+        if (endpoint.produces.includes(opt)) additional.add(opt);
+      }
     }
     for (const req of candidate.requires.required) additional.add(req);
     additional.add(leaf.semantic);
