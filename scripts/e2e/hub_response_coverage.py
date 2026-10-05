@@ -99,7 +99,7 @@ def load_spec_operations(spec):
 def lifecycle_resources(ops):
     """Resources the API lets a client create, read by key and delete, named after their create operation.
 
-    A resource is a collection path (/files) with a POST create, whose key path (/files/{fileKey}) has a GET
+    A resource is a collection path (/files, or nested like /projects/{key}/docs) with a POST create, whose key path (/files/{fileKey}) has a GET
     and a DELETE. `restores` marks the ones that can be undeleted: the key path has a POST .../restoration and
     the collection has a POST .../recently-deleted/search, which together mean a delete is soft. A restoration
     endpoint alone does not count (restoring a version or snapshot does not undelete anything)."""
@@ -109,7 +109,7 @@ def lifecycle_resources(ops):
     found = {}
     for path, methods in by_path.items():
         create = methods.get('POST')
-        if not create or not create.startswith('create') or '{' in path:
+        if not create or not create.startswith('create'):
             continue
         item = next((p for p in by_path if re.fullmatch(re.escape(path) + r'/\{\w+\}', p)), None)
         if not item or not {'GET', 'DELETE'} <= set(by_path[item]):

@@ -614,6 +614,10 @@ describe('lifecycle resources found in the spec', () => {
       getVersion: { method: 'GET', path: '/versions/{versionKey}' },
       deleteVersion: { method: 'DELETE', path: '/versions/{versionKey}' },
       restoreVersion: { method: 'POST', path: '/versions/{versionKey}/restoration' },
+      // a resource scoped by a parent key is still a resource
+      createDocument: { method: 'POST', path: '/projects/{projectKey}/documents' },
+      getDocument: { method: 'GET', path: '/projects/{projectKey}/documents/{documentKey}' },
+      deleteDocument: { method: 'DELETE', path: '/projects/{projectKey}/documents/{documentKey}' },
       createTag: { method: 'POST', path: '/tags' },
       getTag: { method: 'GET', path: '/tags/{tagKey}' },
       deleteTag: { method: 'DELETE', path: '/tags/{tagKey}' },
@@ -626,6 +630,7 @@ describe('lifecycle resources found in the spec', () => {
     expect(found).toEqual({
       File: { create: 'createFile', restores: true },
       Version: { create: 'createVersion', restores: false },
+      Document: { create: 'createDocument', restores: false },
       Tag: { create: 'createTag', restores: false },
     });
   });
