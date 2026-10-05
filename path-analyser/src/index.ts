@@ -858,6 +858,10 @@ function buildRequestPlan(
         if (extract.length) step.extract = (step.extract || []).concat(extract);
       }
     }
+    const stepBody = scenario.stepBodies?.[steps.length];
+    if (stepBody && isPlainRecord(step.bodyTemplate)) {
+      step.bodyTemplate = { ...step.bodyTemplate, ...stepBody };
+    }
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
     if (isFinal && scenario.optionalFields && isPlainRecord(step.bodyTemplate)) {

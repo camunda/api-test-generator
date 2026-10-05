@@ -470,7 +470,9 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       isRecord(raw) && Array.isArray(raw[key]) ? raw[key].filter(isRecord) : [];
     const tested = new Set<unknown>([
       ...listed('replay').map((e) => e.operationId),
-      ...listed('sequences').map((e) => e.operationId),
+      ...listed('sequences')
+        .filter((e) => (e.expectStatus ?? 409) === 409)
+        .map((e) => e.operationId),
     ]);
     const untested = listed('untested');
     for (const e of untested) {
@@ -511,16 +513,35 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       [...untestedIds].filter((id) => typeof id !== 'string' || !documented.includes(id)),
       'untested entries for operations that no longer document a 409',
     ).toEqual([]);
-    // Each sequence must have produced its generated test asserting 409.
+    // Each sequence must have produced its generated test asserting its status, and the
+    // target must document that status.
+    const documentedStatus = (id: string, status: string): boolean => {
+      if (!isRecord(bundle) || !isRecord(bundle.paths)) return false;
+      for (const item of Object.values(bundle.paths)) {
+        if (!isRecord(item)) continue;
+        for (const opDef of Object.values(item)) {
+          if (isRecord(opDef) && opDef.operationId === id && isRecord(opDef.responses))
+            return status in opDef.responses;
+        }
+      }
+      return false;
+    };
     for (const seq of listed('sequences')) {
       const id = String(seq.operationId);
-      expect(documented.includes(id), `${id} has a sequence but the spec documents no 409`).toBe(
-        true,
-      );
+      const status = String(seq.expectStatus ?? 409);
+      expect(
+        documentedStatus(id, status),
+        `${id} has a sequence but the spec documents no ${status}`,
+      ).toBe(true);
+      const label = status === '409' ? 'conflict' : 'precondition';
       const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
-      const at = spec.indexOf(`409 conflict - ${String(seq.name).replace(/-/g, ' ')}`);
-      expect(at, `${id}: no "${String(seq.name)}" conflict test generated`).toBeGreaterThan(-1);
-      expect(spec.slice(at), `${id}: the last call does not assert 409`).toContain('toBe(409)');
+      const at = spec.indexOf(`${status} ${label} - ${String(seq.name).replace(/-/g, ' ')}`);
+      expect(at, `${id}: no "${String(seq.name)}" ${label} test generated`).toBeGreaterThan(-1);
+      const next = spec.indexOf('\n  test(', at + 1);
+      expect(
+        spec.slice(at, next < 0 ? undefined : next),
+        `${id}: the last call does not assert ${status}`,
+      ).toContain(`toBe(${status})`);
     }
   });
   it('keyed and write operations assert a 403 for a principal without grants (#622)', () => {

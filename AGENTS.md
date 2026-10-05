@@ -347,6 +347,10 @@ annotation (Hub) switches it on per operation in
   answer 409 (a `<operation>.variant.spec.ts` test named `409 conflict - <name>`).
   Hub uses it for restoring something whose parent is deleted, and for permanently
   deleting something that was deleted along with its parent.
+- A `before` entry may be `{ operationId, body }`: `body` is merged over that step's generated
+  body (e.g. `{ "folderKey": "${folderKeyVar}" }` puts the created file inside the created folder).
+  `expectStatus: 400` makes the target answer 400 instead of 409, for a state precondition such as
+  permanently deleting a live folder that still has files; the test is then named `400 precondition - <name>`.
 - `untested` lists operations that document a 409 but have no test yet, each with a
   tracking issue. The Hub invariant fails for any documented 409 that is neither
   tested nor listed.

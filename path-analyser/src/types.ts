@@ -283,6 +283,8 @@ export interface EndpointScenario {
   // semantic-typed leaves it sets (one leaf per variant in iteration 1).
   // Codegen uses this to synthesize the populated body.
   /** A search-paging variant (see searchPaging.ts): body fields merged into the final request, and what to assert. */
+  /** Body fields merged over the generated body of the step at each operation index (see conflictReplay.ts). */
+  stepBodies?: Record<number, Record<string, unknown>>;
   searchPaging?: { body: Record<string, unknown>; checks: SearchPagingChecks };
   /** An optional-fields variant (see optionalFields.ts): body fields merged into the final request, and the response fields that must echo them. */
   optionalFields?: { body: Record<string, unknown>; echo: Record<string, unknown> };

@@ -56,6 +56,38 @@
         "deleteWorkspace"
       ],
       "reason": "A project deleted along with its workspace is not a deletion root, so it cannot be permanently deleted on its own."
+    },
+    {
+      "name": "folder-has-files",
+      "operationId": "permanentlyDeleteFolder",
+      "expectStatus": 400,
+      "before": [
+        {
+          "operationId": "createFile",
+          "body": {
+            "folderKey": "${folderKeyVar}"
+          }
+        }
+      ],
+      "reason": "A live folder that still contains a live file cannot be permanently deleted (\"The folder must be empty\"); verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "project-has-files",
+      "operationId": "permanentlyDeleteProject",
+      "expectStatus": 400,
+      "before": [
+        "createFile"
+      ],
+      "reason": "A live project that still contains a live file cannot be permanently deleted; verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "workspace-not-empty",
+      "operationId": "permanentlyDeleteWorkspace",
+      "expectStatus": 400,
+      "before": [
+        "createProject"
+      ],
+      "reason": "A live workspace that still contains a project cannot be permanently deleted (\"The workspace must be empty\"); verified live against camunda/hub:SNAPSHOT."
     }
   ],
   "untested": [
