@@ -62,3 +62,13 @@ manually-opened PR needs the label added by hand. Without it, the triage
 agent has no way to know your PR already covers the endpoint, and if the
 nightly runs before yours merges, it will open a competing fix PR (the
 two then race to merge, and the loser has to be closed as a duplicate).
+
+## Closing a Hub test-coverage gap
+
+A weekly report lists the camunda-hub endpoints that are missing a test for a documented response
+(success, 400, 401, 404, 409) or for a kind of bad request. Each API area with a gap has its own
+`[hub-response-coverage] <Area>: ...` issue. To close one: add the test (or, if Hub cannot behave as
+the spec says, list the endpoint with a reason instead), regenerate, then raise the matching number in
+`configs/camunda-hub/coverage-floors.json`. A floor only goes up, and CI fails if a PR lowers a number
+below it. See [docs/hub-response-coverage-report.md](docs/hub-response-coverage-report.md) for how to read
+the report and run it locally.
