@@ -307,3 +307,46 @@ describe('an update must be readable back', () => {
     expect(() => deriveOptionalFields(base, spec)).not.toThrow();
   });
 });
+
+describe('required fields contributed through allOf', () => {
+  // The body is `allOf: [Base, Extra]`: `name` is declared required in Base, `note` is optional in
+  // Extra, and `title` is declared in Extra but required in Base. Only `note` may be derived.
+  const composed = {
+    paths: {
+      '/z': {
+        post: {
+          operationId: 'makeZ',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  allOf: [
+                    { $ref: '#/components/schemas/Base' },
+                    { $ref: '#/components/schemas/Extra' },
+                  ],
+                },
+              },
+            },
+          },
+          responses: ok({ name: str(), title: str(), note: str() }),
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Base: { type: 'object', required: ['name', 'title'], properties: { name: str() } },
+        Extra: { type: 'object', properties: { title: str(), note: str() } },
+      },
+    },
+  };
+
+  it('treats a field required by one allOf branch as required, even when another branch declares it', () => {
+    const [op] = findWriteOperations(composed);
+    expect(op.candidates.map((c) => c.field)).toEqual(['note']);
+  });
+
+  it('derives no value for the required fields', () => {
+    const [v] = deriveOptionalFields(base, composed).variants;
+    expect(Object.keys(v.body)).toEqual(['note']);
+  });
+});
