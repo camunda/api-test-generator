@@ -385,3 +385,108 @@ describe('search-paging.json contradictions', () => {
     expect(() => loadSearchPaging(configDir(f))).toThrow(/both "searches" and "exclude"/);
   });
 });
+
+describe('local JSON pointers and path-item keys', () => {
+  const sortItem = {
+    type: 'object',
+    properties: { field: { type: 'string', enum: ['name', 'created'] } },
+  };
+  const searchSchema = {
+    type: 'object',
+    properties: { page: { type: 'object' }, sort: { type: 'array', items: sortItem } },
+  };
+  const spec = {
+    paths: {
+      // a request body that is a reference into another operation, as the bundler emits
+      '/versions': {
+        post: {
+          operationId: 'origin',
+          requestBody: {
+            content: { 'application/json': { schema: searchSchema } },
+          },
+        },
+      },
+      '/versions/{versionKey}': {
+        patch: {
+          operationId: 'viaPathPointer',
+          requestBody: { $ref: '#/paths/~1versions/post/requestBody' },
+        },
+        put: {
+          operationId: 'viaSchemaPathPointer',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/paths/~1versions/post/requestBody/content/application~1json/schema',
+                },
+              },
+            },
+          },
+        },
+        // not operations: path-level keys that happen to be shaped like one
+        'x-internal': {
+          operationId: 'notAnOperation',
+          requestBody: { content: { 'application/json': { schema: searchSchema } } },
+        },
+        parameters: [],
+      },
+      // the path key '/t~x' is written '~1t~0x' in a pointer
+      '/t~x': {
+        post: {
+          operationId: 'tildeSource',
+          requestBody: { content: { 'application/json': { schema: searchSchema } } },
+        },
+      },
+      '/tilde': {
+        post: {
+          operationId: 'tildeBody',
+          requestBody: { $ref: '#/paths/~1t~0x/post/requestBody' },
+        },
+      },
+    },
+  };
+
+  it('resolves a $ref that points into the paths section, with ~1 and ~0 escapes', () => {
+    const ids = findSearchOperations(spec).map((o) => o.operationId);
+    expect(ids).toEqual(
+      expect.arrayContaining(['origin', 'viaPathPointer', 'viaSchemaPathPointer', 'tildeBody']),
+    );
+    expect(
+      findSearchOperations(spec).find((o) => o.operationId === 'viaPathPointer')?.sortFields,
+    ).toEqual(['name', 'created']);
+  });
+
+  it('percent-decodes pointer tokens and ignores references it cannot resolve', () => {
+    const decoded = {
+      paths: {
+        '/a b': {
+          post: {
+            operationId: 'spaced',
+            requestBody: { $ref: '#/paths/~1x/post/requestBody' },
+          },
+        },
+        '/x': {
+          post: {
+            operationId: 'src',
+            requestBody: { content: { 'application/json': { schema: searchSchema } } },
+          },
+        },
+        '/dangling': {
+          post: {
+            operationId: 'dangling',
+            requestBody: { $ref: '#/paths/~1nowhere/post/requestBody' },
+          },
+        },
+        '/remote': { post: { operationId: 'remote', requestBody: { $ref: 'other.yaml#/X' } } },
+      },
+    };
+    const ids = findSearchOperations(decoded).map((o) => o.operationId);
+    expect(ids).toContain('src');
+    expect(ids).not.toContain('dangling');
+    expect(ids).not.toContain('remote');
+  });
+
+  it('only counts HTTP method keys as operations', () => {
+    expect(findSearchOperations(spec).map((o) => o.operationId)).not.toContain('notAnOperation');
+  });
+});

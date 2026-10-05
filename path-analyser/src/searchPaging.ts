@@ -120,6 +120,8 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
   return { limit, offsetFrom, auto: raw.auto === true, exclude, searches };
 }
 
+const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
+
 /** Timestamp fields compare the same in JavaScript as on the server, so their order can be asserted. */
 const TIMESTAMP_FIELDS = ['created', 'updated', 'deleted'];
 
@@ -130,21 +132,34 @@ export interface SpecSearchOperation {
   sortFields: string[];
 }
 
-function componentNamed(spec: Record<string, unknown>, section: string, ref: string): unknown {
-  const components = isRecord(spec.components) ? spec.components : {};
-  const group = isRecord(components[section]) ? components[section] : {};
-  return group[ref.split('/').pop() ?? ''];
+/**
+ * The node a local `$ref` (`#/components/schemas/X`, `#/paths/~1files~1search/post/requestBody`, ...)
+ * points to: an RFC 6901 JSON pointer, with `~1` and `~0` unescaped and percent-decoding applied.
+ * Anything that is not a local pointer, or does not resolve, yields undefined.
+ */
+function resolvePointer(spec: Record<string, unknown>, ref: string): unknown {
+  if (!ref.startsWith('#/')) return undefined;
+  let cur: unknown = spec;
+  for (const raw of ref.slice(2).split('/')) {
+    let token = raw;
+    try {
+      token = decodeURIComponent(raw);
+    } catch {
+      // keep the raw token; a malformed escape cannot match a key anyway
+    }
+    token = token.replaceAll('~1', '/').replaceAll('~0', '~');
+    if (Array.isArray(cur)) cur = cur[Number(token)];
+    else if (isRecord(cur)) cur = cur[token];
+    else return undefined;
+  }
+  return cur;
 }
 
-/** Follows `$ref`s in a component section until a node that is not a reference. */
-function follow(
-  spec: Record<string, unknown>,
-  node: unknown,
-  section: string,
-): Record<string, unknown> {
+/** Follows `$ref`s until a node that is not a reference. */
+function follow(spec: Record<string, unknown>, node: unknown): Record<string, unknown> {
   let cur = node;
   for (let depth = 0; depth < 10 && isRecord(cur) && typeof cur.$ref === 'string'; depth++) {
-    cur = componentNamed(spec, section, cur.$ref);
+    cur = resolvePointer(spec, cur.$ref);
   }
   return isRecord(cur) ? cur : {};
 }
@@ -155,7 +170,7 @@ function follow(
  * body takes and what a sort item's `field` may be, however the spec composes them.
  */
 function flatten(spec: Record<string, unknown>, node: unknown, depth = 0): Record<string, unknown> {
-  const schema = follow(spec, node, 'schemas');
+  const schema = follow(spec, node);
   if (depth > 10) return schema;
   const merged: Record<string, unknown> = { ...schema };
   const properties: Record<string, unknown> = isRecord(schema.properties)
@@ -179,9 +194,12 @@ export function findSearchOperations(spec: unknown): SpecSearchOperation[] {
   const out: SpecSearchOperation[] = [];
   for (const item of Object.values(spec.paths)) {
     if (!isRecord(item)) continue;
-    for (const op of Object.values(item)) {
+    for (const [key, op] of Object.entries(item)) {
+      // Only HTTP method keys are operations; a path item may also hold `parameters`, `x-*`
+      // extensions and so on, some of which carry an operationId-shaped object.
+      if (!HTTP_METHODS.has(key.toLowerCase())) continue;
       if (!isRecord(op) || typeof op.operationId !== 'string') continue;
-      const body = follow(spec, op.requestBody, 'requestBodies');
+      const body = follow(spec, op.requestBody);
       const content = isRecord(body.content) ? body.content : {};
       const json = isRecord(content['application/json']) ? content['application/json'] : {};
       const properties = flatten(spec, json.schema).properties;
