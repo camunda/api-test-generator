@@ -1,5 +1,6 @@
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import type { EndpointScenario, OperationGraph } from './types.js';
 
 export interface SearchPagingEntry {
@@ -107,6 +108,15 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
       ...(isRecord(rec.filter) ? { filter: rec.filter } : {}),
     };
   });
+  // An operation both excluded and listed would be skipped by the derivation yet still emitted from
+  // its explicit entry, contradicting the exclusion.
+  const excludedIds = new Set(exclude.map((e) => e.operationId));
+  const both = searches.filter((e) => excludedIds.has(e.operationId)).map((e) => e.operationId);
+  if (both.length) {
+    throw new Error(
+      `${p}: operationId(s) listed in both "searches" and "exclude": ${both.join(', ')}.`,
+    );
+  }
   return { limit, offsetFrom, auto: raw.auto === true, exclude, searches };
 }
 
@@ -120,15 +130,47 @@ export interface SpecSearchOperation {
   sortFields: string[];
 }
 
-function resolveRef(spec: Record<string, unknown>, node: unknown): Record<string, unknown> {
+function componentNamed(spec: Record<string, unknown>, section: string, ref: string): unknown {
+  const components = isRecord(spec.components) ? spec.components : {};
+  const group = isRecord(components[section]) ? components[section] : {};
+  return group[ref.split('/').pop() ?? ''];
+}
+
+/** Follows `$ref`s in a component section until a node that is not a reference. */
+function follow(
+  spec: Record<string, unknown>,
+  node: unknown,
+  section: string,
+): Record<string, unknown> {
   let cur = node;
   for (let depth = 0; depth < 10 && isRecord(cur) && typeof cur.$ref === 'string'; depth++) {
-    const name = cur.$ref.split('/').pop() ?? '';
-    const components = isRecord(spec.components) ? spec.components : {};
-    const schemas = isRecord(components.schemas) ? components.schemas : {};
-    cur = schemas[name];
+    cur = componentNamed(spec, section, cur.$ref);
   }
   return isRecord(cur) ? cur : {};
+}
+
+/**
+ * A schema with its `$ref`s followed and its `allOf` branches merged in: the union of their
+ * `properties`, and the first `enum` and `items` found. Enough to read which properties a request
+ * body takes and what a sort item's `field` may be, however the spec composes them.
+ */
+function flatten(spec: Record<string, unknown>, node: unknown, depth = 0): Record<string, unknown> {
+  const schema = follow(spec, node, 'schemas');
+  if (depth > 10) return schema;
+  const merged: Record<string, unknown> = { ...schema };
+  const properties: Record<string, unknown> = isRecord(schema.properties)
+    ? { ...schema.properties }
+    : {};
+  if (Array.isArray(schema.allOf)) {
+    for (const branch of schema.allOf) {
+      const part = flatten(spec, branch, depth + 1);
+      if (isRecord(part.properties)) Object.assign(properties, part.properties);
+      if (merged.enum === undefined && part.enum !== undefined) merged.enum = part.enum;
+      if (merged.items === undefined && part.items !== undefined) merged.items = part.items;
+    }
+  }
+  if (Object.keys(properties).length) merged.properties = properties;
+  return merged;
 }
 
 /** Every operation whose JSON request body has both a `page` and a `sort` property. */
@@ -139,15 +181,14 @@ export function findSearchOperations(spec: unknown): SpecSearchOperation[] {
     if (!isRecord(item)) continue;
     for (const op of Object.values(item)) {
       if (!isRecord(op) || typeof op.operationId !== 'string') continue;
-      const body = isRecord(op.requestBody) ? op.requestBody : {};
+      const body = follow(spec, op.requestBody, 'requestBodies');
       const content = isRecord(body.content) ? body.content : {};
       const json = isRecord(content['application/json']) ? content['application/json'] : {};
-      const properties = resolveRef(spec, json.schema).properties;
+      const properties = flatten(spec, json.schema).properties;
       if (!isRecord(properties) || !('page' in properties) || !('sort' in properties)) continue;
-      const sort = resolveRef(spec, properties.sort);
-      const sortItem = resolveRef(spec, sort.items);
+      const sortItem = flatten(spec, flatten(spec, properties.sort).items);
       const sortItemProps = isRecord(sortItem.properties) ? sortItem.properties : {};
-      const fieldSchema = resolveRef(spec, sortItemProps.field);
+      const fieldSchema = flatten(spec, sortItemProps.field);
       const sortFields = Array.isArray(fieldSchema.enum)
         ? fieldSchema.enum.filter((f): f is string => typeof f === 'string')
         : [];
@@ -155,6 +196,16 @@ export function findSearchOperations(spec: unknown): SpecSearchOperation[] {
     }
   }
   return out;
+}
+
+/**
+ * The spec the other readers use: `OPENAPI_SPEC_PATH` when set (resolved against `baseDir`, like
+ * the graph loader), else the active config's bundled spec. JSON or YAML.
+ */
+export function loadSpecDocument(baseDir: string, bundledSpecPath: string): unknown {
+  const override = process.env.OPENAPI_SPEC_PATH;
+  const specPath = override ? path.resolve(baseDir, override) : bundledSpecPath;
+  return parseYaml(fsSync.readFileSync(specPath, 'utf8'));
 }
 
 /**

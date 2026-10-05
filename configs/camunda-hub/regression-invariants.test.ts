@@ -9,7 +9,11 @@ import {
   getRequestValidationSuiteDir,
   getSpecBundleDir,
 } from '../../path-analyser/src/configResolver.js';
-import { deriveSearchPaging, loadSearchPaging } from '../../path-analyser/src/searchPaging.js';
+import {
+  deriveSearchPaging,
+  findSearchOperations,
+  loadSearchPaging,
+} from '../../path-analyser/src/searchPaging.js';
 
 /**
  * Bundled-spec invariants — Layer 3, camunda-hub config (#128).
@@ -675,45 +679,15 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     const searches: Record<string, unknown>[] = loaded
       ? deriveSearchPaging(loaded, bundle).searches.map((e) => ({ ...e }))
       : [];
-    const schemas =
-      isRecord(bundle) && isRecord(bundle.components) && isRecord(bundle.components.schemas)
-        ? bundle.components.schemas
-        : {};
-    const resolve = (node: unknown): Record<string, unknown> => {
-      let cur = node;
-      while (isRecord(cur) && typeof cur.$ref === 'string')
-        cur = schemas[cur.$ref.split('/').pop() ?? ''];
-      return isRecord(cur) ? cur : {};
-    };
-    // Derived from the spec: an operation whose JSON request body takes both `page` and `sort`.
-    const searchOps: string[] = [];
-    if (isRecord(bundle) && isRecord(bundle.paths)) {
-      for (const item of Object.values(bundle.paths)) {
-        if (!isRecord(item)) continue;
-        for (const [method, opDef] of Object.entries(item)) {
-          if (!HTTP_METHODS.has(method.toLowerCase()) || !isRecord(opDef)) continue;
-          const content =
-            isRecord(opDef.requestBody) && isRecord(opDef.requestBody.content)
-              ? opDef.requestBody.content
-              : {};
-          const json = isRecord(content['application/json']) ? content['application/json'] : {};
-          const props = resolve(json.schema).properties;
-          if (
-            isRecord(props) &&
-            'page' in props &&
-            'sort' in props &&
-            typeof opDef.operationId === 'string'
-          )
-            searchOps.push(opDef.operationId);
-        }
-      }
-    }
+    // The spec lookup is the generator's own (it follows $refs, requestBodies and allOf), so this
+    // invariant and the generator agree on what a search operation is; what it checks is that each
+    // one found has its generated tests and nothing excluded does.
+    const searchOps = findSearchOperations(bundle).map((o) => o.operationId);
     expect(
       searchOps.length,
       'found suspiciously few search operations - did the spec parse?',
     ).toBeGreaterThan(10);
     const configured = searches.map((e) => String(e.operationId));
-    // Found independently of the generator's own lookup, so a miss there is noticed.
     expect(
       searchOps.filter((id) => !configured.includes(id) && !excluded.includes(id)),
       'search operations with no paging test (list them under "exclude" with a reason, or fix the derivation)',

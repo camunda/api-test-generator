@@ -46,6 +46,7 @@ import {
   buildSearchPagingScenarios,
   deriveSearchPaging,
   loadSearchPaging,
+  loadSpecDocument,
   validateSearchPaging,
 } from './searchPaging.js';
 import { computeSeedBindings } from './seedBindings.js';
@@ -126,12 +127,7 @@ async function main() {
   const searchPaging = searchPagingConfig?.auto
     ? deriveSearchPaging(
         searchPagingConfig,
-        JSON.parse(
-          fsSync.readFileSync(
-            path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json'),
-            'utf8',
-          ),
-        ),
+        loadSpecDocument(baseDir, path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json')),
       )
     : searchPagingConfig;
   if (searchPaging) validateSearchPaging(graph, searchPaging);

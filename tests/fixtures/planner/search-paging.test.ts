@@ -7,6 +7,7 @@ import {
   deriveSearchPaging,
   findSearchOperations,
   loadSearchPaging,
+  loadSpecDocument,
   type SearchPagingEntry,
   validateSearchPaging,
 } from '../../../path-analyser/src/searchPaging.ts';
@@ -235,5 +236,152 @@ describe('auto and exclude in search-paging.json', () => {
     ['exclude without a reason', { ...head, exclude: [{ operationId: 'a' }], searches: [] }],
   ])('rejects: %s', (_label, content) => {
     expect(() => loadSearchPaging(configDir(content))).toThrow();
+  });
+});
+
+describe('reading search operations through every OpenAPI composition', () => {
+  const spec = {
+    paths: {
+      '/refBody': {
+        post: {
+          operationId: 'viaRequestBodyRef',
+          requestBody: { $ref: '#/components/requestBodies/SearchBody' },
+        },
+      },
+      '/allOfBody': {
+        post: {
+          operationId: 'viaAllOf',
+          requestBody: {
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Composed' } } },
+          },
+        },
+      },
+      '/direct': {
+        post: {
+          operationId: 'direct',
+          requestBody: {
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Plain' } } },
+          },
+        },
+      },
+      '/notSearch': {
+        post: {
+          operationId: 'notSearch',
+          requestBody: {
+            content: {
+              'application/json': { schema: { type: 'object', properties: { page: {} } } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      requestBodies: {
+        SearchBody: {
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/Plain' } } },
+        },
+      },
+      schemas: {
+        FieldName: { type: 'string', enum: ['name', 'created'] },
+        SortItem: {
+          type: 'object',
+          properties: {
+            field: { description: 'sort by', allOf: [{ $ref: '#/components/schemas/FieldName' }] },
+          },
+        },
+        Plain: {
+          type: 'object',
+          properties: {
+            page: { type: 'object' },
+            sort: { type: 'array', items: { $ref: '#/components/schemas/SortItem' } },
+          },
+        },
+        // page comes from one branch, sort from another
+        PageBranch: { type: 'object', properties: { page: { type: 'object' } } },
+        SortBranch: {
+          type: 'object',
+          properties: { sort: { type: 'array', items: { $ref: '#/components/schemas/SortItem' } } },
+        },
+        Composed: {
+          allOf: [
+            { $ref: '#/components/schemas/PageBranch' },
+            { $ref: '#/components/schemas/SortBranch' },
+          ],
+        },
+      },
+    },
+  };
+
+  it('finds an operation whose body is a requestBodies $ref, an allOf of branches, or direct', () => {
+    expect(findSearchOperations(spec)).toEqual([
+      { operationId: 'viaRequestBodyRef', sortFields: ['name', 'created'] },
+      { operationId: 'viaAllOf', sortFields: ['name', 'created'] },
+      { operationId: 'direct', sortFields: ['name', 'created'] },
+    ]);
+  });
+
+  it('reads the sort enum when the field property itself is an allOf of a $ref', () => {
+    // SortItem.field is `allOf: [$ref FieldName]`; every result above carries the enum
+    expect(findSearchOperations(spec).every((o) => o.sortFields.length === 2)).toBe(true);
+  });
+
+  it('does not count an operation that has only one of page and sort', () => {
+    expect(findSearchOperations(spec).map((o) => o.operationId)).not.toContain('notSearch');
+  });
+});
+
+describe('loadSpecDocument', () => {
+  const write = (name: string, text: string): string => {
+    const d = mkdtempSync(join(tmpdir(), 'spec-doc-'));
+    dirs.push(d);
+    writeFileSync(join(d, name), text);
+    return join(d, name);
+  };
+  const withEnv = (value: string | undefined, run: () => void): void => {
+    const before = process.env.OPENAPI_SPEC_PATH;
+    if (value === undefined) delete process.env.OPENAPI_SPEC_PATH;
+    else process.env.OPENAPI_SPEC_PATH = value;
+    try {
+      run();
+    } finally {
+      if (before === undefined) delete process.env.OPENAPI_SPEC_PATH;
+      else process.env.OPENAPI_SPEC_PATH = before;
+    }
+  };
+
+  it('reads the bundled JSON spec when there is no override', () => {
+    const bundled = write('bundle.json', '{"paths":{"/a":{}}}');
+    withEnv(undefined, () =>
+      expect(loadSpecDocument('/unused', bundled)).toEqual({ paths: { '/a': {} } }),
+    );
+  });
+
+  it('uses OPENAPI_SPEC_PATH instead, and parses YAML as the other readers do', () => {
+    const bundled = write('bundle.json', '{"paths":{"/a":{}}}');
+    const custom = write('custom.yaml', 'paths:\n  /b: {}\n');
+    withEnv(custom, () =>
+      expect(loadSpecDocument('/unused', bundled)).toEqual({ paths: { '/b': {} } }),
+    );
+  });
+
+  it('resolves a relative override against the given base directory', () => {
+    const custom = write('custom.yaml', 'paths:\n  /c: {}\n');
+    withEnv('custom.yaml', () =>
+      expect(loadSpecDocument(join(custom, '..'), '/missing.json')).toEqual({
+        paths: { '/c': {} },
+      }),
+    );
+  });
+});
+
+describe('search-paging.json contradictions', () => {
+  it('rejects an operation that is both listed and excluded', () => {
+    const f = {
+      ...head,
+      auto: true,
+      exclude: [{ operationId: 'searchA', reason: 'r' }],
+      searches: [entry],
+    };
+    expect(() => loadSearchPaging(configDir(f))).toThrow(/both "searches" and "exclude"/);
   });
 });
