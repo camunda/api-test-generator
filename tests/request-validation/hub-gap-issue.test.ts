@@ -563,6 +563,16 @@ describe('weekly Slack message', () => {
     expect(text).not.toContain('`c` (');
   });
 
+  it('shows no change for a lifecycle count a previous report did not have yet', () => {
+    const { edge: _edge, edgeMissing: _edgeMissing, ...lifecycle } = baseSummary().lifecycle;
+    const text = slackText(baseSummary(), baseSummary({ lifecycle }));
+    expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links. Missing: addTag');
+    // counts the older report did have still show their change
+    expect(slackText(baseSummary(), baseSummary({ lifecycle: undefined }))).toContain(
+      'Lifecycle tests (add, remove): 1 of 2 links. Missing',
+    );
+  });
+
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
     const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
     expect(up).toContain(
