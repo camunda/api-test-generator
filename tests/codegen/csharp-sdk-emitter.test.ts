@@ -73,6 +73,26 @@ const DEPLOYMENT_REQUEST_STEP: RequestStep = {
   expect: { status: 200 },
 };
 
+function singleStepCollection(step: RequestStep): EndpointScenarioCollection {
+  const endpoint = { operationId: step.operationId, method: step.method, path: step.pathTemplate };
+  return {
+    endpoint,
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'single step',
+        description: 'single step',
+        operations: [endpoint],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        requestPlan: [step],
+      },
+    ],
+  };
+}
+
 // Mirrors the committed csharp-sdk/examples/operation-map.json shape:
 // operationId -> ordered SDK references, each with a `region` (the method name).
 const OPERATION_MAP: CsharpOperationMap = {
@@ -672,74 +692,56 @@ describe('C# SDK Emitter', () => {
   });
 
   test('does not add a JobResult discriminator to a searchJobs filter', async () => {
-    const emitter = createSpecEmitter();
-    const files = await emitter.emit(
-      {
-        ...SAMPLE_COLLECTION,
-        endpoint: { operationId: 'searchJobs', method: 'POST', path: '/jobs/search' },
-        scenarios: [
-          {
-            ...SAMPLE_COLLECTION.scenarios[0],
-            requestPlan: [
-              {
-                ...SEARCH_JOBS_REQUEST_STEP,
-                bodyTemplate: { deniedReason: 'not allowed' },
-              },
-            ],
-          },
-        ],
-      },
+    const files = await createSpecEmitter().emit(
+      singleStepCollection({
+        operationId: 'searchJobs',
+        method: 'POST',
+        pathTemplate: '/jobs/search',
+        bodyKind: 'json',
+        bodyTemplate: { filter: { deniedReason: 'not allowed' } },
+        expect: { status: 200 },
+      }),
       EMIT_CTX,
     );
-    expect(files[0].content).not.toContain('["type"] = "userTask"');
+    expect(files[0].content).toContain('["deniedReason"]');
+    expect(files[0].content).not.toContain('["type"]');
   });
 
   test('does not add an ancestor discriminator to an activate instruction', async () => {
-    const emitter = createSpecEmitter();
-    const files = await emitter.emit(
-      {
-        ...SAMPLE_COLLECTION,
-        scenarios: [
-          {
-            ...SAMPLE_COLLECTION.scenarios[0],
-            requestPlan: [
-              {
-                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-                bodyTemplate: {
-                  result: { activateElements: [{ ancestorElementInstanceKey: '1' }] },
-                },
-              },
-            ],
-          },
-        ],
-      },
+    const files = await createSpecEmitter().emit(
+      singleStepCollection({
+        operationId: 'modifyProcessInstance',
+        method: 'POST',
+        pathTemplate: '/process-instances/{processInstanceKey}/modification',
+        bodyKind: 'json',
+        bodyTemplate: {
+          activateInstructions: [{ elementId: 'task-1', ancestorElementInstanceKey: '1' }],
+        },
+        expect: { status: 204 },
+      }),
       EMIT_CTX,
     );
-    expect(files[0].content).not.toContain('["ancestorScopeType"] = "direct"');
+    expect(files[0].content).toContain('["ancestorElementInstanceKey"]');
+    expect(files[0].content).not.toContain('["ancestorScopeType"]');
   });
 
   test('does not add a source discriminator to a migration mapping', async () => {
-    const emitter = createSpecEmitter();
-    const files = await emitter.emit(
-      {
-        ...SAMPLE_COLLECTION,
-        endpoint: { operationId: 'migrateProcessInstance', method: 'POST', path: '/migration' },
-        scenarios: [
-          {
-            ...SAMPLE_COLLECTION.scenarios[0],
-            requestPlan: [
-              {
-                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-                operationId: 'migrateProcessInstance',
-                bodyTemplate: { mappingInstructions: [{ sourceElementId: 'element-1' }] },
-              },
-            ],
-          },
-        ],
-      },
+    const files = await createSpecEmitter().emit(
+      singleStepCollection({
+        operationId: 'migrateProcessInstance',
+        method: 'POST',
+        pathTemplate: '/process-instances/{processInstanceKey}/migration',
+        bodyKind: 'json',
+        bodyTemplate: {
+          targetProcessDefinitionKey: '1',
+          mappingInstructions: [{ sourceElementId: 'a', targetElementId: 'b' }],
+        },
+        expect: { status: 204 },
+      }),
       EMIT_CTX,
     );
-    expect(files[0].content).not.toContain('["sourceType"] = "byId"');
+    expect(files[0].content).toContain('["sourceElementId"]');
+    expect(files[0].content).not.toContain('["sourceType"]');
   });
 
   test('wraps id only for global task listener operations', async () => {
