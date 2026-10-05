@@ -125,6 +125,7 @@ describe('conflict-replay.json sequences', () => {
     ['no setup operations', { sequences: [{ ...seq, before: [] }] }],
     ['empty operation name', { sequences: [{ ...seq, before: [''] }] }],
     ['missing name', { sequences: [{ ...seq, name: undefined }] }],
+    ['name with an apostrophe', { sequences: [{ ...seq, name: "it's gone" }] }],
     ['missing reason', { sequences: [{ ...seq, reason: '' }] }],
     ['repeated name for one operation', { sequences: [seq, seq] }],
   ])('rejects: %s', (_label, content) => {

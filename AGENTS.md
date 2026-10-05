@@ -55,6 +55,7 @@ npm workspaces monorepo. Node `>=22`.
 | `configs/camunda-hub/positive-suppress.json` | Per-op positive-suite suppressions for camunda-hub (upstream-blocked / opt-in ops), each with an optional `knownIssue { summary, url }` surfaced in the nightly |
 | `configs/camunda-hub/conflict-replay.json` | Operations whose feature scenario is followed by an identical second call that must return 409 (`{ operationId, reason, changeBody? }`), for specs that carry no `x-operation-kind` |
 | `configs/camunda-hub/search-paging.json` | Search operations that get a success-path test with `page` and `sort` (and a `filter` where listed), asserting the limit and order |
+| `configs/camunda-hub/optional-fields.json` | Operations that also get a success-path test sending optional request fields and asserting the response echoes them, plus the optional fields that cannot be tested yet (with an issue) |
 | `configs.json` | Index of named configs (default + per-config metadata) |
 | `spec/<config>/bundled/` | Gitignored bundled-spec output (partitioned by active CONFIG) |
 | `generated/<config>/` | Gitignored generator output (graph, scenarios, playwright suite, request-validation) |
@@ -286,6 +287,15 @@ fixtures and named invariants point directly at the broken property.
 `tests/regression/standalone-suite-imports.test.ts` and the suites under
 `tests/codegen/` and `tests/request-validation/` cover emitter and
 materialisation behaviour.
+
+### Optional-field scenarios
+
+`configs/<config>/optional-fields.json` (`{ variants: [{ operationId, name, body, echo }], untested?: [...] }`)
+gives an operation a success-path variant, `optional fields - <name>` in its `<operation>.variant.spec.ts`,
+that merges `body` (optional request fields) over the generated request and asserts each `echo` field
+equals the given value in the response. Use it for fields whose persistence the required-only test never
+sees. An optional field that cannot be tested (the response has no body, or the fixtures cannot reach
+it) is listed under `untested` with a tracking issue URL, so the gap stays visible.
 
 ### Search paging and sort scenarios
 

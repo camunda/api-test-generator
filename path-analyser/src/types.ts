@@ -284,6 +284,8 @@ export interface EndpointScenario {
   // Codegen uses this to synthesize the populated body.
   /** A search-paging variant (see searchPaging.ts): body fields merged into the final request, and what to assert. */
   searchPaging?: { body: Record<string, unknown>; checks: SearchPagingChecks };
+  /** An optional-fields variant (see optionalFields.ts): body fields merged into the final request, and the response fields that must echo them. */
+  optionalFields?: { body: Record<string, unknown>; echo: Record<string, unknown> };
   populatesSubShape?: {
     rootPath: string; // e.g. "startInstructions[]"
     leafPaths: string[]; // semantic-typed leaves to populate
@@ -546,6 +548,8 @@ export interface RequestStep {
   declares409?: boolean;
   /** A search step sent with `page`/`sort`: what the emitter asserts about the response. */
   searchChecks?: SearchPagingChecks;
+  /** Response fields that must equal these values. */
+  echoChecks?: Record<string, unknown>;
 }
 
 /** Response assertions for a search request that carries `page` and `sort`. */

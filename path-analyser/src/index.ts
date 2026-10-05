@@ -30,6 +30,11 @@ import {
 } from './ontology/loader.js';
 import { isDeploymentGatewayOp, isJobActivatorOp } from './ontology/operationRoles.js';
 import {
+  buildOptionalFieldsScenarios,
+  loadOptionalFields,
+  validateOptionalFields,
+} from './optionalFields.js';
+import {
   generateOptionalSubShapeVariants,
   generateScenariosForEndpoint,
 } from './scenarioGenerator.js';
@@ -115,6 +120,8 @@ async function main() {
   validateConflictSequences(graph, conflictSequences);
   const searchPaging = loadSearchPaging(getActiveConfigDir(repoRoot));
   if (searchPaging) validateSearchPaging(graph, searchPaging);
+  const optionalFields = loadOptionalFields(getActiveConfigDir(repoRoot));
+  if (optionalFields) validateOptionalFields(graph, optionalFields);
   // Build canonical deep schema shapes (requests + responses)
   const canonical = await buildCanonicalShapes(path.resolve(baseDir, '../'));
   // Drift guard: every response-side semantic leaf reported by the
@@ -522,6 +529,9 @@ async function main() {
       ? [
           ...buildConflictSequenceScenarios(canonicalForEndpoint, conflictSequences, graph),
           ...(searchPaging ? buildSearchPagingScenarios(canonicalForEndpoint, searchPaging) : []),
+          ...(optionalFields
+            ? buildOptionalFieldsScenarios(canonicalForEndpoint, optionalFields)
+            : []),
         ]
       : [];
     if (op.optionalSubShapes?.length || conflictScenarios.length) {
@@ -850,6 +860,10 @@ function buildRequestPlan(
     }
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
+    if (isFinal && scenario.optionalFields && isPlainRecord(step.bodyTemplate)) {
+      step.bodyTemplate = { ...step.bodyTemplate, ...scenario.optionalFields.body };
+      step.echoChecks = scenario.optionalFields.echo;
+    }
     if (isFinal && scenario.searchPaging && isPlainRecord(step.bodyTemplate)) {
       step.bodyTemplate = { ...step.bodyTemplate, ...scenario.searchPaging.body };
       step.searchChecks = scenario.searchPaging.checks;

@@ -1,0 +1,87 @@
+{
+  "$comment": "Operations that also get a success-path test sending optional request fields and asserting the response echoes them. Not listed, with the reason: organizationPublic can only be set on element-template versions (Hub rejects any modification on a BPMN file), replaceWorkspaceEnvironments needs an environment that exists in the Hub, and createClusterRegistration answers 204 with no body to echo; all three are tracked in the optional-fields issue.",
+  "variants": [
+    {
+      "operationId": "createWorkspace",
+      "name": "description",
+      "body": {
+        "description": "Created with an optional description."
+      },
+      "echo": {
+        "description": "Created with an optional description."
+      }
+    },
+    {
+      "operationId": "updateWorkspace",
+      "name": "description",
+      "body": {
+        "description": "Updated optional description."
+      },
+      "echo": {
+        "description": "Updated optional description."
+      }
+    },
+    {
+      "operationId": "createVersion",
+      "name": "description",
+      "body": {
+        "description": "Version with an optional description.",
+        "organizationPublic": false
+      },
+      "echo": {
+        "description": "Version with an optional description.",
+        "organizationPublic": false
+      }
+    },
+    {
+      "operationId": "updateVersion",
+      "name": "description",
+      "body": {
+        "description": "Updated version description."
+      },
+      "echo": {
+        "description": "Updated version description."
+      }
+    },
+    {
+      "operationId": "createProjectSnapshot",
+      "name": "description",
+      "body": {
+        "description": "Snapshot with an optional description."
+      },
+      "echo": {
+        "description": "Snapshot with an optional description."
+      }
+    },
+    {
+      "operationId": "updateProjectSnapshot",
+      "name": "description",
+      "body": {
+        "description": "Updated snapshot description."
+      },
+      "echo": {
+        "description": "Updated snapshot description."
+      }
+    }
+  ],
+  "untested": [
+    {
+      "operationId": "updateVersion",
+      "field": "organizationPublic",
+      "issue": "https://github.com/camunda/api-test-generator/issues/655",
+      "reason": "Hub rejects any change to it on a BPMN file; needs an element-template file."
+    },
+    {
+      "operationId": "replaceWorkspaceEnvironments",
+      "field": "environmentIds",
+      "issue": "https://github.com/camunda/api-test-generator/issues/655",
+      "reason": "The Hub has no environments to assign."
+    },
+    {
+      "operationId": "createClusterRegistration",
+      "field": "clusterId, profiles, properties",
+      "issue": "https://github.com/camunda/api-test-generator/issues/655",
+      "reason": "Answers 204 with no body to echo; needs a read-back and cleanup."
+    }
+  ]
+}
