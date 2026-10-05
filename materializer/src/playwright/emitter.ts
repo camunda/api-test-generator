@@ -727,15 +727,17 @@ function renderScenarioTest(
             `        const again = await request.post(url, { headers, data: ${reqBody} });`,
           );
           body.push(`        expect(again.status()).toBe(200);`);
-          body.push(`        const againValues = read(await again.json());`);
+          body.push(`        const againItems = (await again.json()).items;`);
           body.push(
             `        const unpaged = await request.post(url, { headers, data: { ...${reqBody}, page: { limit: ${from + limit} } } });`,
           );
           body.push(`        expect(unpaged.status()).toBe(200);`);
+          // The whole items, not just the sort field: records tied on it are told apart, and an
+          // empty or short page cannot match a full slice.
           body.push(
-            `        const slice = read(await unpaged.json()).slice(${from}, ${from + limit}).slice(0, againValues.length);`,
+            `        const slice = (await unpaged.json()).items.slice(${from}, ${from + limit});`,
           );
-          body.push(`        matched = JSON.stringify(slice) === JSON.stringify(againValues);`);
+          body.push(`        matched = JSON.stringify(slice) === JSON.stringify(againItems);`);
           body.push(`      }`);
           body.push(
             `      expect(matched, 'offset page equals the same slice of an unpaged query').toBe(true);`,
