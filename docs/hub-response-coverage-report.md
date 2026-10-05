@@ -57,6 +57,8 @@ Across positive and negative tests
   `POST /workspaces/{key}/members`, `DELETE /workspaces/{key}/members/{email}`). It counts as covered when an edge in
   `configs/camunda-hub/ontology/edges.json` names both operations (`establishedBy`, `revokedBy`) and its
   `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
+- "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
+  entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
 - 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
 - "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has.
   It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound.

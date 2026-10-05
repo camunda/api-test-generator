@@ -343,6 +343,12 @@ def build(args):
     suppressed = set(pos_cov['explicitlySuppressedOpIds'])
     excluded = {e['operationId'] for e in rv_cfg['excludeOperations'] if not e.get('scenarioKinds')}
     tracked = suppressed | excluded  # known and tracked elsewhere; used only to annotate lists
+    supp_cfg = json.load(open(os.path.join(ROOT, 'configs', CONFIG, 'positive-suppress.json')))
+    tracked_urls = collections.defaultdict(list)
+    for e in supp_cfg.get('suppress', []) + [x for x in rv_cfg['excludeOperations'] if not x.get('scenarioKinds')]:
+        url = (e.get('knownIssue') or {}).get('url')
+        if url and url not in tracked_urls[e['operationId']]:
+            tracked_urls[e['operationId']].append(url)
     held_cells = collections.defaultdict(list)
     scoped = collections.defaultdict(list)
     for e in rv_cfg['excludeOperations']:
@@ -437,6 +443,7 @@ def build(args):
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
         'lifecycle': lifecycle,
         'trackedOperations': sorted(tracked),
+        'trackedUrls': {op: tracked_urls[op] for op in sorted(tracked_urls)},
         'heldCells': {b: sorted(held_cells[b]) for b in BUCKETS},
         'optionalMissing': {r['operationId']: r['optionalMissing'] for r in rows if r['optionalMissing']},
         # Suppression explains zero coverage; it is not evidence of a test, so it stays in the list.
@@ -475,6 +482,14 @@ def change(now, before):
     if before is None or now == before:
         return ''
     return f' ({"+" if now > before else "-"}{abs(now - before)})'
+
+
+def known_note(urls):
+    """' (known, tracked: camunda-hub#25907, ...)' with each issue linked, or ' (known, tracked)' when there is no URL."""
+    def label(u):
+        m = re.search(r'github\.com/[^/]+/([^/]+)/(?:issues|pull)/(\d+)', u)
+        return f'<{u}|{m.group(1)}#{m.group(2)}>' if m else f'<{u}|issue>'
+    return f' (known, tracked: {", ".join(label(u) for u in urls)})' if urls else ' (known, tracked)'
 
 
 def flow_line(kind, label, s, prev, unit='resources'):
@@ -547,8 +562,9 @@ def slack(s, prev, args):
             lines.append('New endpoints since last report: ' + ', '.join(f'`{o}`' for o in new))
     if s['zeroTestOperations']:
         tracked = set(s['trackedOperations'])
+        urls = s.get('trackedUrls', {})
         lines.append(':warning: Endpoints with no test at all: '
-                     + ', '.join(f'`{o}`' + (' (known, tracked)' if o in tracked else '') for o in s['zeroTestOperations']))
+                     + ', '.join(f'`{o}`' + (known_note(urls.get(o, [])) if o in tracked else '') for o in s['zeroTestOperations']))
     links = []
     if args.run_url:
         links.append(f'<{args.run_url}|Full table>')

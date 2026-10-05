@@ -541,6 +541,28 @@ describe('weekly Slack message', () => {
     expect(text).toContain('Lifecycle tests (add, remove): 1 of 2 links (+1)');
   });
 
+  it('links the tracking issues next to an endpoint with no test at all', () => {
+    const text = slackText(
+      baseSummary({
+        zeroTestOperations: ['a', 'b', 'c'],
+        trackedOperations: ['a', 'b'],
+        trackedUrls: {
+          a: [
+            'https://github.com/camunda/camunda-hub/issues/25907',
+            'https://github.com/camunda/camunda-hub/issues/26448',
+          ],
+        },
+      }),
+      null,
+    );
+    expect(text).toContain(
+      '`a` (known, tracked: <https://github.com/camunda/camunda-hub/issues/25907|camunda-hub#25907>, <https://github.com/camunda/camunda-hub/issues/26448|camunda-hub#26448>)',
+    );
+    // tracked but no URL on record, and not tracked at all
+    expect(text).toContain('`b` (known, tracked), `c`');
+    expect(text).not.toContain('`c` (');
+  });
+
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
     const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
     expect(up).toContain(
