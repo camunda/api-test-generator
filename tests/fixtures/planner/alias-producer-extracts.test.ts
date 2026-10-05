@@ -8,6 +8,7 @@ import type {
 
 // The path placeholder {id} is bound under idVar, while the producer extracts the key under the
 // semantic type's variable (thingKeyVar). The helper adds an alias extract so the URL resolves.
+// biome-ignore lint/plugin: the fixture only populates the fields under test
 const graph = {
   operations: {
     createThing: { operationId: 'createThing', pathParameters: [] },
@@ -20,7 +21,6 @@ const graph = {
       pathParameters: [{ name: 'id', semanticType: 'ThingKey' }],
     },
   },
-  // biome-ignore lint/plugin: the fixture only populates the field under test
 } as unknown as OperationGraph;
 
 const step = (
@@ -81,6 +81,7 @@ describe('aliasProducerExtractsToPlaceholders', () => {
   });
 
   it('does nothing when the placeholder variable already matches the semantic one', () => {
+    // biome-ignore lint/plugin: the fixture only populates the fields under test
     const g = {
       operations: {
         ...graph.operations,
@@ -89,7 +90,6 @@ describe('aliasProducerExtractsToPlaceholders', () => {
           pathParameters: [{ name: 'thingKey', semanticType: 'ThingKey' }],
         },
       },
-      // biome-ignore lint/plugin: the fixture only populates the field under test
     } as unknown as OperationGraph;
     const steps = [create(), step('getThing', '/things/{thingKey}')];
     aliasProducerExtractsToPlaceholders(scenario(), steps, g);
