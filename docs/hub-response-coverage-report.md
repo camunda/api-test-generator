@@ -32,6 +32,8 @@ Positive tests (the request is right)
 • Success (2xx): 64 of 66
 • Optional request fields sent in a success test: 63 of 68
 • Endpoints that never check the shape of the success response: 0
+• Resources with a create, read and delete flow test: 4 of 6. Missing: ProjectSnapshot, Version
+• Resources with a delete and restore flow test: 4 of 6. Missing: ProjectSnapshot, Version
 
 Negative tests (the request is wrong)
 • Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
@@ -44,6 +46,11 @@ Across positive and negative tests
 
 - "x of y" means: y endpoints document that response, x of them have a test that asserts it.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
+- A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on); it needs a
+  restore flow too if the API has a `.../restoration` endpoint. A flow test is the generated lifecycle test for it
+  (`generated/camunda-hub/playwright/templates/EntityLifecycle/<Resource>.lifecycle.spec.ts`, and `RestoreLifecycle/` for restore).
+  A resource with no such test is listed as missing. These lines count whole flows, so they do not show up in the per-endpoint issues.
+  A new resource needs an entry in `configs/camunda-hub/ontology/entity-kinds.json` to get its flow tests.
 - 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
 - "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has.
   It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound.

@@ -95,6 +95,41 @@ def load_spec_operations(spec):
     return ops
 
 
+# --------------------------------------------------------------- lifecycle ----
+def lifecycle_resources(ops):
+    """Resources the API lets a client create, read by key and delete, named after their create operation.
+
+    A resource is a collection path (/files) with a POST create, whose key path (/files/{fileKey}) has a GET
+    and a DELETE. `restores` are those whose key path also has a POST .../restoration."""
+    by_path = collections.defaultdict(dict)
+    for op_id, o in ops.items():
+        by_path[o['path']][o['method']] = op_id
+    found = {}
+    for path, methods in by_path.items():
+        create = methods.get('POST')
+        if not create or not create.startswith('create') or '{' in path:
+            continue
+        item = next((p for p in by_path if re.fullmatch(re.escape(path) + r'/\{\w+\}', p)), None)
+        if not item or not {'GET', 'DELETE'} <= set(by_path[item]):
+            continue
+        found[create[len('create'):]] = {
+            'create': create, 'restores': 'POST' in by_path.get(item + '/restoration', {}),
+        }
+    return found
+
+
+def scan_lifecycle(pw_dir, resources):
+    """Which resources have a generated create-read-delete test and a generated delete-restore test."""
+    tdir = f'{pw_dir}/templates'
+    if not os.path.isdir(tdir):
+        fail(f'{tdir} not found - run testsuite:generate first')
+    have = lambda template, name: os.path.exists(f'{tdir}/{template}/{name}.lifecycle.spec.ts')
+    created = sorted(n for n in resources if have('EntityLifecycle', n))
+    restorable = sorted(n for n, r in resources.items() if r['restores'])
+    restored = sorted(n for n in restorable if have('RestoreLifecycle', n))
+    return created, restorable, restored
+
+
 # ----------------------------------------------------------------- positive ----
 # The emitter writes JSON.stringify output (double quotes, 4-space indent, one-line evidence
 # objects) and a formatter pass rewrites it afterwards. Both shapes must parse, so quotes can be
@@ -336,6 +371,19 @@ def build(args):
             'fullyAsserted': all(v == 'ok' for v in cells.values()),
         })
 
+    resources = lifecycle_resources(ops)
+    created, restorable, restored = scan_lifecycle(pw_dir, resources)
+    lifecycle = {
+        'create': [len(created), len(resources)],
+        'createMissing': sorted(set(resources) - set(created)),
+        'restore': [len(restored), len(restorable)],
+        'restoreMissing': sorted(set(restorable) - set(restored)),
+        'known': sorted(n for n, r in resources.items() if r['create'] in tracked),
+    }
+    # A flow test can only exist if the resource's own create operation is tested at all.
+    if not created:
+        fail('found no generated lifecycle tests - did the template output move?')
+
     opt_sent = sum(r['optionalSent'] for r in rows if r['operationId'] not in suppressed)
     opt_total = sum(r['optionalTotal'] for r in rows if r['operationId'] not in suppressed)
     summary = {
@@ -350,6 +398,7 @@ def build(args):
         'requestCheckGaps': {r['operationId']: r['requestMissing'] for r in rows if r['requestChecks'] == 'gap'},
         'requestNoTests': sorted(r['operationId'] for r in rows if r['requestChecks'] == 'gap' and not r['requestPresent']),
         'shapeUnvalidated': sorted(r['operationId'] for r in rows if r['shape'] == 'gap'),
+        'lifecycle': lifecycle,
         'trackedOperations': sorted(tracked),
         'heldCells': {b: sorted(held_cells[b]) for b in BUCKETS},
         'optionalMissing': {r['operationId']: r['optionalMissing'] for r in rows if r['optionalMissing']},
@@ -391,6 +440,16 @@ def change(now, before):
     return f' ({"+" if now > before else "-"}{abs(now - before)})'
 
 
+def flow_line(kind, label, s, prev):
+    """'Resources with a ... flow test: 4 of 6 (+1). Missing: A, B (known, tracked).' or without the tail."""
+    got, total = s['lifecycle'][kind]
+    before = prev['lifecycle'][kind][0] if prev and 'lifecycle' in prev else None
+    missing = s['lifecycle'][kind + 'Missing']
+    known = set(s['lifecycle']['known'])
+    tail = ('. Missing: ' + ', '.join(n + (' (known, tracked)' if n in known else '') for n in missing)) if missing else ''
+    return f'• {label}: {got} of {total}{change(got, before)}{tail}'
+
+
 def slack(s, prev, args):
     c = s['codes']
     ref = f'camunda-hub@{args.spec_ref[:7]}' if args.spec_ref else 'spec ' + s['specHash'].replace('sha256:', '')[:7]
@@ -419,6 +478,8 @@ def slack(s, prev, args):
         f'{change(s["optionalFields"][0], opt_before)}',
         f'• Endpoints that never check the shape of the success response: {len(s["shapeUnvalidated"])}'
         f'{change(len(s["shapeUnvalidated"]), shape_before)}',
+        flow_line('create', 'Resources with a create, read and delete flow test', s, prev),
+        flow_line('restore', 'Resources with a delete and restore flow test', s, prev),
         '',
         ':no_entry: *Negative tests* (the request is wrong)',
     ]
@@ -575,6 +636,8 @@ def history_row(s, args):
         'optionalSent': s['optionalFields'][0], 'optionalTotal': s['optionalFields'][1],
         'shapeUnvalidated': len(s['shapeUnvalidated']),
         'requestChecksFull': s['requestChecks'][0], 'requestChecksEndpoints': s['requestChecks'][1],
+        'lifecycleCreate': s['lifecycle']['create'][0], 'lifecycleCreateTotal': s['lifecycle']['create'][1],
+        'lifecycleRestore': s['lifecycle']['restore'][0], 'lifecycleRestoreTotal': s['lifecycle']['restore'][1],
     }
     for b in BUCKETS:
         row[f'{b}_tested'], row[f'{b}_documented'] = s['codes'][b]

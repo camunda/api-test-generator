@@ -1,5 +1,5 @@
 {
-  "$comment": "Floors for the response-coverage numbers in scripts/e2e/hub_response_coverage.py, the same data as the weekly Slack report. The Hub invariant 'response coverage does not regress' runs the script and fails if an asserted per-status-code total, the request-check, fully-asserted or optional-field number is lower than its floor, or if an operation has no test at all that is not listed in zeroTestOperations with the reason. A floor is one-way: a PR that closes a gap should raise it, but a higher number never fails. Do not lower a floor to make CI pass; add the missing test.",
+  "$comment": "Floors for the response-coverage numbers in scripts/e2e/hub_response_coverage.py, the same data as the weekly Slack report. The Hub invariant 'response coverage does not regress' runs the script and fails if an asserted per-status-code total, the request-check, fully-asserted, optional-field or lifecycle-flow number is lower than its floor, or if an operation has no test at all that is not listed in zeroTestOperations with the reason. A floor is one-way: a PR that closes a gap should raise it, but a higher number never fails. Do not lower a floor to make CI pass; add the missing test.",
   "assertedByStatus": {
     "2xx": 64,
     "400": 35,
@@ -11,6 +11,8 @@
   "optionalFieldsSent": 63,
   "requestChecksCovered": 32,
   "fullyAssertedOperations": 56,
+  "lifecycleCreateCovered": 4,
+  "lifecycleRestoreCovered": 4,
   "zeroTestOperations": [
     {
       "operationId": "getClusterUsageMetrics",
