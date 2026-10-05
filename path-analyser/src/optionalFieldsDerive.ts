@@ -22,12 +22,16 @@ export interface SpecWriteOperation {
   readBack?: { operationId: string; locations: Record<string, string> };
 }
 
+/** Statuses the planner treats as a success with a body (see extractSchemas.ts). */
+const SUPPORTED_SUCCESS = ['200', '201'];
+
 function successProperties(
   spec: Record<string, unknown>,
   op: Record<string, unknown>,
+  codes: string[] = SUPPORTED_SUCCESS,
 ): Record<string, unknown> | null {
   const responses = isRecord(op.responses) ? op.responses : {};
-  for (const code of ['200', '201']) {
+  for (const code of codes) {
     const response = follow(spec, responses[code]);
     const content = isRecord(response.content) ? response.content : {};
     const json = isRecord(content['application/json']) ? content['application/json'] : null;
@@ -60,6 +64,77 @@ function isWriteOnly(spec: Record<string, unknown>, schema: unknown): boolean {
   return flatten(spec, schema).writeOnly === true;
 }
 
+/** The optional plain-string request fields that `echoed` (a success response's properties) returns. */
+function stringCandidates(
+  spec: Record<string, unknown>,
+  properties: Record<string, unknown>,
+  required: Set<unknown>,
+  echoed: Record<string, unknown>,
+): Candidate[] {
+  const candidates: Candidate[] = [];
+  for (const [field, schema] of Object.entries(properties)) {
+    if (required.has(field) || !(field in echoed)) continue;
+    const s = flatten(spec, schema);
+    // A read-only property is set by the server, so sending it is wrong; a write-only one is
+    // not returned, so there is nothing to echo.
+    if (s.readOnly === true || isWriteOnly(spec, echoed[field])) continue;
+    if (
+      s.type !== 'string' ||
+      s.format !== undefined ||
+      s.pattern !== undefined ||
+      s.enum !== undefined
+    )
+      continue;
+    const minLength = typeof s.minLength === 'number' ? s.minLength : undefined;
+    const maxLength = typeof s.maxLength === 'number' ? s.maxLength : undefined;
+    // No string satisfies a minimum above the maximum (the limits of every allOf branch apply).
+    if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) continue;
+    candidates.push({
+      field,
+      ...(minLength !== undefined ? { minLength } : {}),
+      ...(maxLength !== undefined ? { maxLength } : {}),
+    });
+  }
+  return candidates;
+}
+
+/**
+ * Write operations that would qualify but return their JSON body under a 2xx status the planner does
+ * not treat as a success with a body (202, 203, ...). Deriving a test for one would expect the wrong
+ * status, and skipping it silently would lose the coverage the rule promises, so generation names them.
+ */
+export function findUnsupportedSuccessWrites(
+  spec: unknown,
+): { operationId: string; status: string }[] {
+  if (!isRecord(spec) || !isRecord(spec.paths)) return [];
+  const out: { operationId: string; status: string }[] = [];
+  for (const item of Object.values(spec.paths)) {
+    if (!isRecord(item)) continue;
+    for (const [method, op] of Object.entries(item)) {
+      if (!HTTP_METHODS.has(method) || !WRITE_METHODS.has(method)) continue;
+      if (!isRecord(op) || typeof op.operationId !== 'string') continue;
+      if (successProperties(spec, op)) continue; // handled by findWriteOperations
+      const responses = isRecord(op.responses) ? op.responses : {};
+      const others = Object.keys(responses).filter(
+        (c) => /^2\d\d$/.test(c) && !SUPPORTED_SUCCESS.includes(c),
+      );
+      const status = others.find((c) => successProperties(spec, op, [c]));
+      const echoed = status ? successProperties(spec, op, [status]) : null;
+      if (!status || !echoed) continue;
+      const body = follow(spec, op.requestBody);
+      const content = isRecord(body.content) ? body.content : {};
+      const json = isRecord(content['application/json']) ? content['application/json'] : {};
+      const request = flatten(spec, json.schema);
+      const properties = isRecord(request.properties) ? request.properties : {};
+      const required = new Set(Array.isArray(request.required) ? request.required : []);
+      if (stringCandidates(spec, properties, required, echoed).length > 0) {
+        out.push({ operationId: op.operationId, status });
+      }
+    }
+  }
+  return out;
+}
+
 /** Every create/update operation whose body has optional plain-string fields echoed by its response. */
 export function findWriteOperations(spec: unknown): SpecWriteOperation[] {
   if (!isRecord(spec) || !isRecord(spec.paths)) return [];
@@ -84,30 +159,7 @@ export function findWriteOperations(spec: unknown): SpecWriteOperation[] {
       const required = new Set(Array.isArray(request.required) ? request.required : []);
       const echoed = successProperties(spec, op);
       if (!echoed) continue; // no JSON response (204): nothing to echo
-      const candidates: Candidate[] = [];
-      for (const [field, schema] of Object.entries(properties)) {
-        if (required.has(field) || !(field in echoed)) continue;
-        const s = flatten(spec, schema);
-        // A read-only property is set by the server, so sending it is wrong; a write-only one is
-        // not returned, so there is nothing to echo.
-        if (s.readOnly === true || isWriteOnly(spec, echoed[field])) continue;
-        if (
-          s.type !== 'string' ||
-          s.format !== undefined ||
-          s.pattern !== undefined ||
-          s.enum !== undefined
-        )
-          continue;
-        const minLength = typeof s.minLength === 'number' ? s.minLength : undefined;
-        const maxLength = typeof s.maxLength === 'number' ? s.maxLength : undefined;
-        // No string satisfies a minimum above the maximum (the limits of every allOf branch apply).
-        if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) continue;
-        candidates.push({
-          field,
-          ...(minLength !== undefined ? { minLength } : {}),
-          ...(maxLength !== undefined ? { maxLength } : {}),
-        });
-      }
+      const candidates = stringCandidates(spec, properties, required, echoed);
       if (candidates.length === 0) continue;
       const get = method === 'get' ? undefined : getByPath.get(urlPath);
       let readBack: SpecWriteOperation['readBack'];
@@ -153,8 +205,12 @@ export function deriveOptionalFields(
   if (!config.auto) return config;
   const found = findWriteOperations(spec);
   const byId = new Map(found.map((o) => [o.operationId, o]));
+  const unsupported = findUnsupportedSuccessWrites(spec);
+  const unsupportedIds = new Set(unsupported.map((u) => u.operationId));
   for (const e of config.exclude) {
     const op = byId.get(e.operationId);
+    // An operation that cannot be derived because of its success status may still be excluded as a whole.
+    if (!op && e.field === undefined && unsupportedIds.has(e.operationId)) continue;
     if (!op) {
       throw new Error(
         `optional-fields.json excludes ${e.operationId}, which has no derivable optional string fields in the spec.`,
@@ -172,6 +228,12 @@ export function deriveOptionalFields(
   const excludedFields = new Set(
     config.exclude.filter((e) => e.field !== undefined).map((e) => `${e.operationId}.${e.field}`),
   );
+  const unhandled = unsupported.filter((u) => !excludedOps.has(u.operationId));
+  if (unhandled.length) {
+    throw new Error(
+      `optional-fields.json: ${unhandled.map((u) => `${u.operationId} (${u.status})`).join(', ')} return their JSON body under a 2xx status the planner does not treat as a success with a body (200 and 201 are), so no test can be derived. Exclude each with a reason.`,
+    );
+  }
   const own = new Set(
     config.variants.filter((v) => v.name === DERIVED_VARIANT_NAME).map((v) => v.operationId),
   );

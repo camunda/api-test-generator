@@ -6,6 +6,7 @@ import { loadOptionalFields } from '../../../path-analyser/src/optionalFields.ts
 import {
   DERIVED_VARIANT_NAME,
   deriveOptionalFields,
+  findUnsupportedSuccessWrites,
   findWriteOperations,
 } from '../../../path-analyser/src/optionalFieldsDerive.ts';
 
@@ -446,5 +447,63 @@ describe('readOnly and writeOnly properties', () => {
     // the GET returns note as writeOnly: there is nowhere to read it back
     const spec = op({ note: str() }, { note: str() }, { note: str({ writeOnly: true }) });
     expect(() => deriveOptionalFields(base, spec)).toThrow(/updateR\.note/);
+  });
+});
+
+describe('success statuses the planner does not support', () => {
+  const accepted = (status: string, requestProps: Record<string, unknown> = { note: str() }) => ({
+    paths: {
+      '/job': {
+        post: {
+          operationId: 'startJob',
+          requestBody: body(requestProps),
+          responses: { [status]: ok({ note: str() })['200'] },
+        },
+      },
+    },
+  });
+
+  it('names a write operation that returns its echoed body under 202', () => {
+    expect(findUnsupportedSuccessWrites(accepted('202'))).toEqual([
+      { operationId: 'startJob', status: '202' },
+    ]);
+    expect(findWriteOperations(accepted('202'))).toEqual([]);
+  });
+
+  it('fails generation instead of silently skipping it', () => {
+    expect(() => deriveOptionalFields(base, accepted('202'))).toThrow(/startJob \(202\)/);
+  });
+
+  it('passes once the operation is excluded as a whole, and an exclusion of it is not stale', () => {
+    expect(
+      deriveOptionalFields(
+        { ...base, exclude: [{ operationId: 'startJob', reason: 'r' }] },
+        accepted('202'),
+      ).variants,
+    ).toEqual([]);
+  });
+
+  it('does not flag a 200 or 201, a 204, or a 202 with nothing eligible to send', () => {
+    expect(findUnsupportedSuccessWrites(accepted('200'))).toEqual([]);
+    expect(findUnsupportedSuccessWrites(accepted('201'))).toEqual([]);
+    expect(findUnsupportedSuccessWrites(accepted('202', { note: str({ format: 'uri' }) }))).toEqual(
+      [],
+    );
+    expect(() =>
+      deriveOptionalFields(base, accepted('202', { note: str({ format: 'uri' }) })),
+    ).not.toThrow();
+    expect(
+      findUnsupportedSuccessWrites({
+        paths: {
+          '/j': {
+            post: {
+              operationId: 'noBody',
+              requestBody: body({ note: str() }),
+              responses: { '204': {} },
+            },
+          },
+        },
+      }),
+    ).toEqual([]);
   });
 });
