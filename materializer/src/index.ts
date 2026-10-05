@@ -47,7 +47,7 @@ import {
   materializeSupport,
 } from './playwright/materialize-support.js';
 import { loadRoleBundlesForActiveConfig } from './playwright/roleRenderer.js';
-import { emitTemplateSuites, responseRouteKey } from './playwright/templateEmitter.js';
+import { emitTemplateSuites, loadValidatedRoutes } from './playwright/templateEmitter.js';
 import { createPythonSdkEmitter } from './python-sdk/emitter.js';
 import {
   materializePythonFixtures,
@@ -445,35 +445,6 @@ function printTargetsJson(): void {
     sdkMap: e.sdkMap,
   }));
   console.log(JSON.stringify(targets, null, 2));
-}
-
-/**
- * The routes (`METHOD /path 200`) that have a response schema in the suite's `responses.json`,
- * for the lifecycle emitter to validate. Empty when the file is absent or unreadable.
- */
-async function loadValidatedRoutes(outDir: string): Promise<Set<string>> {
-  const routes = new Set<string>();
-  let raw: unknown;
-  try {
-    raw = JSON.parse(
-      await fs.readFile(path.join(outDir, 'json-body-assertions', 'responses.json'), 'utf8'),
-    );
-  } catch {
-    return routes;
-  }
-  const entries =
-    typeof raw === 'object' && raw !== null ? Reflect.get(raw, 'responses') : undefined;
-  if (!Array.isArray(entries)) return routes;
-  for (const e of entries) {
-    if (typeof e !== 'object' || e === null) continue;
-    const method: unknown = Reflect.get(e, 'method');
-    const route: unknown = Reflect.get(e, 'path');
-    const status: unknown = Reflect.get(e, 'status');
-    if (typeof method === 'string' && typeof route === 'string' && typeof status === 'string') {
-      routes.add(responseRouteKey(method, route, Number(status)));
-    }
-  }
-  return routes;
 }
 
 async function run() {

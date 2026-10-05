@@ -8,6 +8,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   emitTemplateSuites,
+  loadValidatedRoutes,
   responseRouteKey,
 } from '../../materializer/src/playwright/templateEmitter.ts';
 
@@ -155,5 +156,44 @@ describe('lifecycle response validation', () => {
     expect(count(src)).toBe(0);
     expect(src).not.toContain('assert-json-body');
     expect(src).not.toContain('__responsesFile');
+  });
+});
+
+describe('lifecycle response validation: state and inputs', () => {
+  it('keeps overlapping emissions independent', async () => {
+    const withRoutes = new Set([responseRouteKey('POST', '/widgets', 200)]);
+    const [a, b] = await Promise.all([emit(withRoutes), emit()]);
+    const [c, d] = await Promise.all([emit(), emit(withRoutes)]);
+    expect([count(a), count(b), count(c), count(d)]).toEqual([1, 0, 0, 1]);
+  });
+
+  async function responsesDir(content: string | undefined): Promise<string> {
+    const outDir = path.join(tempDir, `resp${n++}`);
+    await fs.mkdir(path.join(outDir, 'json-body-assertions'), { recursive: true });
+    if (content !== undefined) {
+      await fs.writeFile(path.join(outDir, 'json-body-assertions', 'responses.json'), content);
+    }
+    return outDir;
+  }
+
+  it('reads only the 200 schemas from responses.json', async () => {
+    const dir = await responsesDir(
+      JSON.stringify({
+        responses: [
+          { path: '/a', method: 'GET', status: '200' },
+          { path: '/a', method: 'GET', status: '404' },
+          { path: '/b', method: 'post', status: '200' },
+        ],
+      }),
+    );
+    expect([...(await loadValidatedRoutes(dir))].sort()).toEqual(['GET /a 200', 'POST /b 200']);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['not JSON', '{'],
+    ['no responses array', '{}'],
+  ])('fails instead of silently skipping validation when responses.json is %s', async (_l, content) => {
+    await expect(loadValidatedRoutes(await responsesDir(content))).rejects.toThrow();
   });
 });

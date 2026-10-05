@@ -85,8 +85,31 @@ export function responseRouteKey(method: string, pathTemplate: string, status: n
   return `${method.toUpperCase()} ${pathTemplate} ${status}`;
 }
 
-// Set for the duration of one emitTemplateSuites call; the step renderers read it.
-let activeValidatedRoutes: ReadonlySet<string> | undefined;
+/**
+ * The routes (`METHOD /path 200`) that have a 200 response schema in the suite's `responses.json`,
+ * for the lifecycle emitter to validate. `materializeResponseSchemas` has just written the file, so
+ * a missing or malformed one is an error rather than a reason to silently skip validation.
+ */
+export async function loadValidatedRoutes(outDir: string): Promise<Set<string>> {
+  const file = path.join(outDir, 'json-body-assertions', 'responses.json');
+  const raw: unknown = JSON.parse(await fs.readFile(file, 'utf8'));
+  const entries =
+    typeof raw === 'object' && raw !== null ? Reflect.get(raw, 'responses') : undefined;
+  if (!Array.isArray(entries)) {
+    throw new Error(`${file}: expected a "responses" array.`);
+  }
+  const routes = new Set<string>();
+  for (const e of entries) {
+    if (typeof e !== 'object' || e === null) continue;
+    const method: unknown = Reflect.get(e, 'method');
+    const route: unknown = Reflect.get(e, 'path');
+    const status: unknown = Reflect.get(e, 'status');
+    if (typeof method === 'string' && typeof route === 'string' && status === '200') {
+      routes.add(responseRouteKey(method, route, 200));
+    }
+  }
+  return routes;
+}
 
 /**
  * Validate the response body against its schema after a lifecycle step, when the route has
@@ -99,8 +122,9 @@ function appendResponseValidation(
   idx: number,
   status: number,
   indent: string,
+  validatedRoutes: ReadonlySet<string> | undefined,
 ): void {
-  if (!activeValidatedRoutes?.has(responseRouteKey(step.method, step.pathTemplate, status))) return;
+  if (!validatedRoutes?.has(responseRouteKey(step.method, step.pathTemplate, status))) return;
   const method = JSON.stringify(step.method.toUpperCase());
   const hasBody =
     (step.bodyKind === 'json' && step.bodyTemplate) ||
@@ -182,35 +206,35 @@ export async function emitTemplateSuites(opts: EmitTemplateSuitesOptions): Promi
     throw e;
   }
   const jsonFiles = entries.filter((f) => f.endsWith('.json')).sort();
-  activeValidatedRoutes = opts.validatedRoutes;
   await fs.mkdir(opts.outDir, { recursive: true });
   const written: string[] = [];
-  try {
-    for (const f of jsonFiles) {
-      // Isolate one bad template file from the rest, mirroring the per-file
-      // try/catch around feature/variant emission in materializer/src/index.ts
-      // (`Skipping file (parse/emission failed): ...`). Before this guard, a
-      // throw here (e.g. resolveScenarioServerOverride rejecting a scenario
-      // that mixes overridden and non-overridden operations) propagated all
-      // the way out of `emitTemplateSuites`, past its uncaught call site in
-      // index.ts, aborting the entire materializer run — including every
-      // already-planned feature/variant/template suite (#564 review).
-      try {
-        const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
-        const parsed = parseTemplateScenarioFile(raw, f);
-        const source = withResponseValidationHeader(
-          renderLifecycleSuite(parsed, opts.globalContextSeeds, opts.clientMintedFixtures),
-        );
-        const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
-        await fs.writeFile(outPath, source, 'utf8');
-        written.push(outPath);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn('Skipping template file (parse/emission failed):', f, msg);
-      }
+  for (const f of jsonFiles) {
+    // Isolate one bad template file from the rest, mirroring the per-file
+    // try/catch around feature/variant emission in materializer/src/index.ts
+    // (`Skipping file (parse/emission failed): ...`). Before this guard, a
+    // throw here (e.g. resolveScenarioServerOverride rejecting a scenario
+    // that mixes overridden and non-overridden operations) propagated all
+    // the way out of `emitTemplateSuites`, past its uncaught call site in
+    // index.ts, aborting the entire materializer run — including every
+    // already-planned feature/variant/template suite (#564 review).
+    try {
+      const raw = await fs.readFile(path.join(opts.scenariosDir, f), 'utf8');
+      const parsed = parseTemplateScenarioFile(raw, f);
+      const source = withResponseValidationHeader(
+        renderLifecycleSuite(
+          parsed,
+          opts.globalContextSeeds,
+          opts.clientMintedFixtures,
+          opts.validatedRoutes,
+        ),
+      );
+      const outPath = path.join(opts.outDir, `${parsed.subjectName}.lifecycle.spec.ts`);
+      await fs.writeFile(outPath, source, 'utf8');
+      written.push(outPath);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('Skipping template file (parse/emission failed):', f, msg);
     }
-  } finally {
-    activeValidatedRoutes = undefined;
   }
   return written;
 }
@@ -245,6 +269,7 @@ function renderLifecycleSuite(
   file: TemplateScenarioFile,
   globalContextSeeds: readonly TemplateGlobalContextSeed[],
   clientMintedFixtures?: Readonly<Record<string, string>>,
+  validatedRoutes?: ReadonlySet<string>,
 ): string {
   const scenario = file.scenario;
   const steps = scenario.steps;
@@ -254,7 +279,12 @@ function renderLifecycleSuite(
   // EntityLifecycle but has its own step sequence, so it renders through a
   // dedicated path rather than the fixed 5-step lifecycle below.
   if (file.templateName === 'RestoreLifecycle') {
-    return renderRestoreLifecycleSuite(file, globalContextSeeds, clientMintedFixtures);
+    return renderRestoreLifecycleSuite(
+      file,
+      globalContextSeeds,
+      clientMintedFixtures,
+      validatedRoutes,
+    );
   }
   // Validate template shape before emit. The L3 invariants already
   // guarantee this on `npm test`, but the emitter is its own entry point
@@ -421,7 +451,14 @@ function renderLifecycleSuite(
   let stepIdx = 0;
   for (const rp of prereq.requestPlan) {
     lines.push('');
-    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    appendInlineRequestStep(
+      lines,
+      rp,
+      stepIdx,
+      `prereq: ${rp.operationId}`,
+      ecOps,
+      validatedRoutes,
+    );
     stepIdx++;
   }
 
@@ -433,12 +470,21 @@ function renderLifecycleSuite(
     stepIdx,
     `invoke (establish): ${establish.operationId}`,
     ecOps,
+    validatedRoutes,
   );
   stepIdx++;
 
   // (5) observe present
   lines.push('');
-  appendObserveStep(lines, observePresent, scenario.bindings, stepIdx, 'observe (present)', ecOps);
+  appendObserveStep(
+    lines,
+    observePresent,
+    scenario.bindings,
+    stepIdx,
+    'observe (present)',
+    ecOps,
+    validatedRoutes,
+  );
   stepIdx++;
 
   // (6) revoke invoke
@@ -449,12 +495,21 @@ function renderLifecycleSuite(
     stepIdx,
     `invoke (revoke): ${revoke.operationId}`,
     ecOps,
+    validatedRoutes,
   );
   stepIdx++;
 
   // (7) observe absent
   lines.push('');
-  appendObserveStep(lines, observeAbsent, scenario.bindings, stepIdx, 'observe (absent)', ecOps);
+  appendObserveStep(
+    lines,
+    observeAbsent,
+    scenario.bindings,
+    stepIdx,
+    'observe (absent)',
+    ecOps,
+    validatedRoutes,
+  );
 
   lines.push('  });');
   lines.push('});');
@@ -477,6 +532,7 @@ function renderRestoreLifecycleSuite(
   file: TemplateScenarioFile,
   globalContextSeeds: readonly TemplateGlobalContextSeed[],
   clientMintedFixtures?: Readonly<Record<string, string>>,
+  validatedRoutes?: ReadonlySet<string>,
 ): string {
   const scenario = file.scenario;
   const steps = scenario.steps;
@@ -584,7 +640,14 @@ function renderRestoreLifecycleSuite(
   let stepIdx = 0;
   for (const rp of prereq.requestPlan) {
     lines.push('');
-    appendInlineRequestStep(lines, rp, stepIdx, `prereq: ${rp.operationId}`, ecOps);
+    appendInlineRequestStep(
+      lines,
+      rp,
+      stepIdx,
+      `prereq: ${rp.operationId}`,
+      ecOps,
+      validatedRoutes,
+    );
     stepIdx++;
   }
   lines.push('');
@@ -594,10 +657,19 @@ function renderRestoreLifecycleSuite(
     stepIdx,
     `invoke (establish): ${establish.operationId}`,
     ecOps,
+    validatedRoutes,
   );
   stepIdx++;
   lines.push('');
-  appendObserveStep(lines, observePresent1, scenario.bindings, stepIdx, 'observe (present)', ecOps);
+  appendObserveStep(
+    lines,
+    observePresent1,
+    scenario.bindings,
+    stepIdx,
+    'observe (present)',
+    ecOps,
+    validatedRoutes,
+  );
   stepIdx++;
   lines.push('');
   appendInlineRequestStep(
@@ -606,10 +678,19 @@ function renderRestoreLifecycleSuite(
     stepIdx,
     `invoke (soft-delete): ${revoke.operationId}`,
     ecOps,
+    validatedRoutes,
   );
   stepIdx++;
   lines.push('');
-  appendObserveStep(lines, observeAbsent, scenario.bindings, stepIdx, 'observe (absent)', ecOps);
+  appendObserveStep(
+    lines,
+    observeAbsent,
+    scenario.bindings,
+    stepIdx,
+    'observe (absent)',
+    ecOps,
+    validatedRoutes,
+  );
   stepIdx++;
   lines.push('');
   appendInlineRequestStep(
@@ -618,6 +699,7 @@ function renderRestoreLifecycleSuite(
     stepIdx,
     `invoke (restore): ${restore.operationId}`,
     ecOps,
+    validatedRoutes,
   );
   stepIdx++;
   lines.push('');
@@ -628,6 +710,7 @@ function renderRestoreLifecycleSuite(
     stepIdx,
     'observe (present, restored)',
     ecOps,
+    validatedRoutes,
   );
 
   lines.push('  });');
@@ -657,6 +740,7 @@ function appendInlineRequestStep(
   idx: number,
   label: string,
   ecOps: ReadonlySet<string>,
+  validatedRoutes?: ReadonlySet<string>,
 ): void {
   const respVar = `resp${idx + 1}`;
   const urlExpr = buildUrlExpression(step.pathTemplate);
@@ -674,7 +758,15 @@ function appendInlineRequestStep(
     shouldAwaitEventually: stepNeedsAwaitForOp(step, ecOps),
   });
   for (const line of reindent(inline, EXTRA_INDENT)) lines.push(line);
-  appendResponseValidation(lines, step, respVar, idx, step.expect.status, '      ');
+  appendResponseValidation(
+    lines,
+    step,
+    respVar,
+    idx,
+    step.expect.status,
+    '      ',
+    validatedRoutes,
+  );
   appendExtracts(lines, step, respVar, idx, '      ');
   lines.push('    });');
   for (const wait of step.eventualWaitsAfter ?? []) {
@@ -689,12 +781,13 @@ function appendObserveStep(
   idx: number,
   label: string,
   ecOps: ReadonlySet<string>,
+  validatedRoutes?: ReadonlySet<string>,
 ): void {
   if (step.assertion.kind === 'statusOnly') {
-    appendObserveByIdStatusStep(lines, step, idx, label, ecOps);
+    appendObserveByIdStatusStep(lines, step, idx, label, ecOps, validatedRoutes);
     return;
   }
-  appendObserveMembershipStep(lines, step, scenarioBindings, idx, label, ecOps);
+  appendObserveMembershipStep(lines, step, scenarioBindings, idx, label, ecOps, validatedRoutes);
 }
 
 /**
@@ -714,6 +807,7 @@ function appendObserveByIdStatusStep(
   idx: number,
   label: string,
   ecOps: ReadonlySet<string>,
+  validatedRoutes?: ReadonlySet<string>,
 ): void {
   if (step.assertion.kind !== 'statusOnly') {
     throw new Error(
@@ -754,7 +848,15 @@ function appendObserveByIdStatusStep(
     `      await attachEvidenceOnFailure(testInfo, ${respVar}, { operationId: ${JSON.stringify(step.operationId)}, method: ${JSON.stringify(step.requestPlan.method.toUpperCase())}, url, headers, expectedStatus: ${expectedStatus} });`,
   );
   lines.push(`      expect(${respVar}.status()).toBe(${expectedStatus});`);
-  appendResponseValidation(lines, step.requestPlan, respVar, idx, expectedStatus, '      ');
+  appendResponseValidation(
+    lines,
+    step.requestPlan,
+    respVar,
+    idx,
+    expectedStatus,
+    '      ',
+    validatedRoutes,
+  );
   lines.push('    });');
 }
 
@@ -765,6 +867,7 @@ function appendObserveMembershipStep(
   idx: number,
   label: string,
   ecOps: ReadonlySet<string>,
+  validatedRoutes?: ReadonlySet<string>,
 ): void {
   if (step.assertion.kind !== 'membership') {
     throw new Error(
@@ -817,6 +920,7 @@ function appendObserveMembershipStep(
     idx,
     step.requestPlan.expect.status,
     '      ',
+    validatedRoutes,
   );
   // Membership assertion (template-unique). Walks the planner-declared
   // arrayPath into the parsed body, projects each element via the
