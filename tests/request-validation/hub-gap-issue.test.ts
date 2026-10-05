@@ -63,36 +63,28 @@ describe('weekly coverage gap issue body', () => {
     expect(issueBody([held])).toBe('');
   });
 
-  it('lists a response-only gap and does not claim bad-request tests are missing', () => {
+  it('is an index, not a second table: counts, the marker for the area links, no endpoint rows', () => {
     const body = issueBody([{ ...ok('a'), cells: { '2xx': 'ok', '404': 'gap' } }, ok('b')]);
-    expect(body).toContain('| `a` | 404 | — |');
-    expect(body).not.toContain('`b`');
+    expect(body).toContain('**1** still have something missing');
+    expect(body).toContain('<!-- AREA_INDEX -->');
+    expect(body).not.toContain('| `a`');
+    expect(body).not.toContain('Missing responses');
+    expect(body).not.toMatch(/^\|/m);
     expect(body).toContain('Bad-request tests: every kind that applies is covered.');
-    expect(body).not.toContain('Nothing is missing');
     expect(body).toContain('opened gradually');
-    expect(body).not.toContain('also has its own issue');
+    expect(body).toContain('Full table: http://run');
   });
 
-  it('lists a bad-request-only gap', () => {
+  it('says which bad-request kinds are missing most often when there are gaps', () => {
     const row: Row = { ...ok('a'), requestChecks: 'gap', requestMissing: ['param-missing'] };
     const body = issueBody([row], { a: ['param-missing'] });
-    expect(body).toContain('| `a` | — | param-missing |');
     expect(body).toContain('Bad-request tests: Most often missing');
-  });
-
-  it('caps the table at 100 endpoints and says how many were left out', () => {
-    const rows = Array.from({ length: 103 }, (_, i) => ({
-      ...ok(`op${i}`),
-      cells: { '2xx': 'gap' },
-    }));
-    const body = issueBody(rows);
-    expect(body.match(/^\| `op/gm)).toHaveLength(100);
-    expect(body).toContain('…and 3 more');
+    expect(body).toContain('<!-- AREA_INDEX -->');
   });
 });
 
 /** Runs area_issues() on made-up rows and returns [title, body] pairs. */
-function areaIssues(rows: Row[]): [string, string][] {
+function areaIssues(rows: Row[]): [string, string, string, number, string[]][] {
   const code = [
     'import sys, json, types, importlib.util',
     `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
@@ -131,6 +123,31 @@ describe('per-area coverage gap issues', () => {
     expect(issues[0][1]).toContain('`f1`');
     expect(issues[0][1]).not.toContain('`m1`');
     expect(issues[1][1]).toContain('**1** endpoint in the **Milestones** area');
+  });
+
+  it('lists a response-only gap and a bad-request-only gap in the area table', () => {
+    const kinds: Row = {
+      ...ok('k'),
+      area: 'Files',
+      requestChecks: 'gap',
+      requestMissing: ['param-missing'],
+    };
+    const [[, body]] = areaIssues([gap('r', 'Files'), kinds, { ...ok('fine'), area: 'Files' }]);
+    expect(body).toContain('| `r` | 404 | — |');
+    expect(body).toContain('| `k` | — | param-missing |');
+    expect(body).not.toContain('`fine`');
+  });
+
+  it('caps an area table at 100 endpoints and says how many were left out', () => {
+    const rows = Array.from({ length: 103 }, (_, i) => gap(`op${i}`, 'Files'));
+    const [[, body]] = areaIssues(rows);
+    expect(body.match(/^\| `op/gm)).toHaveLength(100);
+    expect(body).toContain('…and 3 more');
+  });
+
+  it('hands the endpoint ids to the index, in table order', () => {
+    const issues = areaIssues([gap('f1', 'Files'), gap('f2', 'Files')]);
+    expect(issues[0][4]).toEqual(['f1', 'f2']);
   });
 
   it('files an endpoint without an area under Other', () => {
@@ -201,6 +218,8 @@ fi
       .filter((l) => l && !l.startsWith('gh issue list')),
     issueUrl: read('issue-url.txt').trim(),
     areaLinks: read('area-links.txt').trim().split('\n').filter(Boolean),
+    areaIndex: read('area-index.md').trim().split('\n').filter(Boolean),
+    rendered: read('issue.rendered.md'),
   };
 }
 
@@ -209,6 +228,7 @@ const area = (name: string, gaps = 1) => ({
   file: `$REPORT/areas/${name}.md`,
   area: name,
   gaps,
+  endpoints: Array.from({ length: gaps }, (_, i) => `${name.toLowerCase()}${i + 1}`),
 });
 const areaFiles = (...names: string[]) => ({
   'areas.json': JSON.stringify(names.map((n) => area(n))),
@@ -299,5 +319,225 @@ describe('per-area issue lifecycle (stub gh)', () => {
     const closes = r.calls.filter((c) => c.includes('issue close'));
     expect(closes).toHaveLength(1);
     expect(closes[0]).toContain('issue close 6');
+  });
+});
+
+describe('the tracking issue is an index of the area issues', () => {
+  it('writes one line per area: a link to its issue, or its endpoints when the issue is not open yet', () => {
+    const files = {
+      'areas.json': JSON.stringify([area('New', 1), area('Open', 2), area('Late', 2)]),
+      'areas/New.md': 'b',
+      'areas/Open.md': 'b',
+      'areas/Late.md': 'b',
+    };
+    const r = runIssueScript(
+      'hub-coverage-area-issues.sh',
+      files,
+      [{ number: 5, title: areaTitle('Open'), state: 'OPEN' }],
+      { MAX_NEW_AREA_ISSUES: '1' },
+    );
+    expect(r.areaIndex).toEqual([
+      '- [ ] #101 **New**: 1 endpoint',
+      '- [ ] #5 **Open**: 2 endpoints',
+      '- **Late**: 2 endpoints (its issue opens on a later run): `late1`, `late2`',
+    ]);
+  });
+
+  it('puts that index where the marker is, leaving the rest of the issue as it was', () => {
+    const r = runIssueScript(
+      'hub-coverage-summary-issue.sh',
+      {
+        'issue.md': 'top\n<!-- AREA_INDEX -->\nbottom\n',
+        'area-index.md': '- [ ] #5 **A & B**: 1 endpoint `x`\n- **C**: 2 endpoints\n',
+      },
+      [],
+    );
+    expect(r.rendered).toBe(
+      'top\n- [ ] #5 **A & B**: 1 endpoint `x`\n- **C**: 2 endpoints\nbottom\n',
+    );
+    expect(r.calls[0]).toContain('issue.rendered.md');
+  });
+
+  it('drops the marker line when there is no index, instead of leaving it in the issue', () => {
+    const r = runIssueScript(
+      'hub-coverage-summary-issue.sh',
+      { 'issue.md': 'top\n<!-- AREA_INDEX -->\nbottom\n' },
+      [],
+    );
+    expect(r.rendered).toBe('top\nbottom\n');
+  });
+
+  it('rewrites an existing issue from the rendered body, never the marker version', () => {
+    const r = runIssueScript(
+      'hub-coverage-summary-issue.sh',
+      { 'issue.md': '<!-- AREA_INDEX -->\n', 'area-index.md': '- line\n' },
+      [{ number: 7, title: SUMMARY, state: 'OPEN' }],
+    );
+    const edit = r.calls.find((c) => c.startsWith('gh issue edit 7'));
+    expect(edit).toContain('issue.rendered.md');
+    expect(edit).not.toContain('issue.md ');
+  });
+});
+
+/** Runs slack() on a made-up summary; `prev` is the previous report's summary or null. */
+function slackText(summary: Record<string, unknown>, prev: Record<string, unknown> | null): string {
+  const code = [
+    'import sys, json, types, importlib.util',
+    `spec = importlib.util.spec_from_file_location('h', ${JSON.stringify(script)})`,
+    'h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)',
+    'd = json.load(sys.stdin)',
+    "args = types.SimpleNamespace(spec_ref='abcdef1234', run_url='http://run', tracking_url='http://track')",
+    "sys.stdout.write(h.slack(d['s'], d['p'], args))",
+  ].join('\n');
+  return execFileSync('python3', ['-B', '-c', code], {
+    input: JSON.stringify({ s: summary, p: prev }),
+    encoding: 'utf8',
+  });
+}
+
+const baseSummary = (over: Record<string, unknown> = {}) => ({
+  specHash: 'sha256:abcdef0',
+  operations: 10,
+  operationIds: ['a', 'b'],
+  negativeTests: 50,
+  fullyAsserted: 8,
+  opsMissingResponseTest: 2,
+  codes: {
+    '2xx': [10, 10],
+    '400': [4, 5],
+    '401': [10, 10],
+    '403': [8, 10],
+    '404': [3, 4],
+    '409': [1, 3],
+  },
+  optionalFields: [6, 9],
+  requestChecks: [5, 10],
+  requestCheckGaps: {},
+  requestNoTests: [],
+  shapeUnvalidated: ['a', 'b', 'c'],
+  zeroTestOperations: [],
+  trackedOperations: [],
+  ...over,
+});
+
+describe('weekly Slack message', () => {
+  it('has a positive-tests section and a negative-tests section, each holding its own lines', () => {
+    const text = slackText(baseSummary(), null);
+    const at = (needle: string) => text.indexOf(needle);
+    expect(at('Positive tests')).toBeGreaterThan(-1);
+    expect(at('Negative tests')).toBeGreaterThan(at('Positive tests'));
+    // success lines sit before the error heading, error lines after it
+    for (const ok of [
+      'Success (2xx): 10 of 10',
+      'Optional request fields sent in a success test: 6 of 9',
+      'never check the shape',
+    ]) {
+      expect(at(ok)).toBeGreaterThan(at('Positive tests'));
+      expect(at(ok)).toBeLessThan(at('Negative tests'));
+    }
+    for (const bad of [
+      'Bad request (400): 4 of 5',
+      'Not authenticated (401)',
+      'Forbidden (403)',
+      'Not found (404)',
+      'Conflict (409): 1 of 3',
+      'Every kind of bad request tested: 5 of 10',
+    ]) {
+      expect(at(bad)).toBeGreaterThan(at('Negative tests'));
+    }
+  });
+
+  it('shows the change since the last report on each count, and nothing when there is none', () => {
+    const prev = baseSummary({
+      codes: {
+        '2xx': [9, 10],
+        '400': [4, 5],
+        '401': [10, 10],
+        '403': [8, 10],
+        '404': [3, 4],
+        '409': [1, 3],
+      },
+      optionalFields: [2, 9],
+      requestChecks: [7, 10],
+    });
+    const text = slackText(
+      baseSummary({ codes: { ...baseSummary().codes, '409': [3, 3], '2xx': [10, 10] } }),
+      prev,
+    );
+    expect(text).toContain('Success (2xx): 10 of 10 (+1)');
+    expect(text).toContain('Conflict (409): 3 of 3 (+2)');
+    expect(text).toContain('Optional request fields sent in a success test: 6 of 9 (+4)');
+    expect(text).toContain('Every kind of bad request tested: 5 of 10 endpoints (-2)');
+    // an unchanged count carries no bracket
+    expect(text).toMatch(/Bad request \(400\): 4 of 5 {2}/);
+    expect(text).not.toMatch(/Bad request \(400\): 4 of 5 \(/);
+  });
+
+  it('shows the change on the roll-ups across both kinds of test, too', () => {
+    const prev = baseSummary({
+      opsMissingResponseTest: 5,
+      codes: { ...baseSummary().codes, '409': [0, 3], '404': [2, 4] },
+    });
+    const text = slackText(baseSummary(), prev);
+    // 409: 2 untested now, 3 before; 404: 1 untested now, 2 before
+    expect(text).toContain('Conflict (409), 2 untested (-1)');
+    expect(text).toContain('2 endpoints (-3) are missing a test');
+    expect(slackText(baseSummary(), baseSummary())).toContain('2 endpoints are missing a test');
+    expect(slackText(baseSummary(), baseSummary())).not.toMatch(/untested \(/);
+  });
+
+  it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
+    const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
+    expect(up).toContain(
+      '*8 of 10 endpoints* have a test for every response the API spec lists (+1).',
+    );
+    const down = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 9 }));
+    expect(down).toContain('lists (-1).');
+    const same = slackText(baseSummary(), baseSummary());
+    expect(same).toContain('the API spec lists. A number in brackets');
+    expect(same).not.toContain('since last report');
+  });
+
+  it('shows the change in endpoints that never check the success shape, too', () => {
+    const prev = baseSummary({ shapeUnvalidated: ['a', 'b', 'c', 'd', 'e'] });
+    expect(slackText(baseSummary(), prev)).toContain('the success response: 3 (-2)');
+    expect(slackText(baseSummary(), baseSummary())).not.toContain('the success response: 3 (');
+  });
+
+  it('keeps the roll-ups that mix positive and negative under their own heading, after the negative section', () => {
+    // 2xx is the worst bucket here, so the "biggest gaps" line names a success-path count
+    const text = slackText(
+      baseSummary({ codes: { ...baseSummary().codes, '2xx': [2, 10], '409': [3, 3] } }),
+      null,
+    );
+    const at = (needle: string) => text.indexOf(needle);
+    expect(at('*Across positive and negative tests*')).toBeGreaterThan(
+      at('Every kind of bad request tested'),
+    );
+    for (const mixed of [
+      'Biggest gaps: Success (2xx), 8 untested',
+      'endpoints are missing a test for a success',
+    ]) {
+      expect(at(mixed)).toBeGreaterThan(at('*Across positive and negative tests*'));
+    }
+    // and nothing mixed is left between the error heading and the roll-up heading
+    const errorSection = text.slice(
+      at('Negative tests'),
+      at('*Across positive and negative tests*'),
+    );
+    expect(errorSection).not.toContain('Biggest gaps');
+    expect(errorSection).not.toContain('Success (2xx)');
+  });
+
+  it('shows no change figures at all for the first report', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).not.toMatch(/of \d+ \([+-]\d+\)/);
+  });
+
+  it('explains the bracket and keeps the links', () => {
+    const text = slackText(baseSummary(), null);
+    expect(text).toContain('A number in brackets is the change since the last report.');
+    expect(text).toContain('<http://run|Full table>');
+    expect(text).toContain('<http://track|Tracking epic>');
   });
 });

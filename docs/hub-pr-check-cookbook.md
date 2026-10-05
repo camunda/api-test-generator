@@ -121,6 +121,8 @@ To re-run in CI without a new push, dispatch `trigger-api-test-generator.yml` in
   skipped by design. Mark the PR ready, or dispatch it by hand.
 - *Green despite a coverage gap:* intentional. Missing coverage alone is never a failing check
   (#480); the gap is on the status description, the tracking issue and Slack (yellow headline).
+  The repo-wide view of missing tests (not tied to one PR) is the weekly report, see
+  [hub-response-coverage-report.md](hub-response-coverage-report.md).
 - *Red but "not a Hub bug":* the check is informational, not required, while reliability proves out.
 - *Slack edited instead of a new message:* same PR, same failure fingerprint.
 - *The classifier said `unknown`:* it is told to prefer that over guessing `product`, because

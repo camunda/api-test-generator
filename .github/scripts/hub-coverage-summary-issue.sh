@@ -3,7 +3,9 @@
 # report. Run by .github/workflows/hub-response-coverage.yml; tested against a stub `gh` in
 # tests/request-validation/hub-gap-issue.test.ts.
 #
-# Inputs (environment): ISSUE_TITLE, REPORT_DIR (holds issue.md), REPO_URL, RUN_URL.
+# Inputs (environment): ISSUE_TITLE, REPORT_DIR (holds issue.md, and area-index.md when the per-area
+# script ran first), REPO_URL, RUN_URL. The tracking issue is an index: the marker line in issue.md is
+# replaced by the contents of area-index.md (one line per area, linking its issue).
 # Writes REPORT_DIR/issue-url.txt when there is an issue the Slack message should link to.
 set -euo pipefail
 
@@ -16,12 +18,20 @@ num=${found% *}
 state=${found#* }
 
 if [ -s "$REPORT_DIR/issue.md" ]; then
+  touch "$REPORT_DIR/area-index.md"
+  # awk, not shell substitution: the index holds backticks, #-references and &.
+  # Matching on the file name, not on FNR == NR: with an empty index file that test is also true
+  # for the issue itself, which would then be swallowed.
+  awk -v marker='<!-- AREA_INDEX -->' -v indexfile="$REPORT_DIR/area-index.md" \
+    'FILENAME == indexfile { index_text = index_text $0 "\n"; next }
+    $0 == marker { printf "%s", index_text; next } { print }' \
+    "$REPORT_DIR/area-index.md" "$REPORT_DIR/issue.md" > "$REPORT_DIR/issue.rendered.md"
   if [ -z "$found" ]; then
-    url=$(gh issue create --title "$ISSUE_TITLE" --body-file "$REPORT_DIR/issue.md" \
+    url=$(gh issue create --title "$ISSUE_TITLE" --body-file "$REPORT_DIR/issue.rendered.md" \
       --label missing-coverage --label auto-generated --label hub)
   else
     [ "$state" = "OPEN" ] || gh issue reopen "$num"
-    gh issue edit "$num" --body-file "$REPORT_DIR/issue.md"
+    gh issue edit "$num" --body-file "$REPORT_DIR/issue.rendered.md"
     gh issue comment "$num" --body "Re-checked on $(date -u +%F): still missing. See the updated list above. $RUN_URL"
     url="$REPO_URL/issues/$num"
   fi
