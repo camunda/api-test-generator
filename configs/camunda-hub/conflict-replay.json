@@ -1,5 +1,5 @@
 {
-  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why. sequences: operations run between the target's own setup chain and the target, to leave the target in a state that makes it answer a given status, verified live against camunda/hub:SNAPSHOT. An entry answers 409 by default (a conflict, such as restoring under a deleted parent) or, with expectStatus 400, a state precondition (such as permanently deleting a live folder that still has files). A before entry may be { operationId, body } to merge body fields over that step. The first sentence of this comment describes `replay`; `sequences` and `untested` are about 409 unless an entry says otherwise. untested: operations that document a 409 but have no conflict test yet, each with the tracking issue that says why; the Hub invariant requires every documented 409 to be tested or listed here.",
+  "$comment": "Operations whose feature scenario is followed by a second identical call expecting 409 (the planner's duplicatePolicy 'conflict' replay, switched on here because the Hub spec carries no x-operation-kind). Each needs the repeat to be a real conflict: the reason says why. sequences: operations run between the target's own setup chain and the target, to leave the target in a state that makes it answer a given status, verified live against camunda/hub:SNAPSHOT. An entry answers 409 by default (a conflict, such as restoring under a deleted parent) or, with expectStatus 400, a state precondition (such as permanently deleting a live folder that still has files). A before entry may be { operationId, body } to merge body fields over that step. The first sentence of this comment describes `replay`; `sequences` and `untested` are about 409 unless an entry says otherwise. untested: operations that document a 409 but have no conflict test yet, each with the tracking issue that says why; the Hub invariant requires every documented 409 to be tested or listed here. chainBodies: body fields merged over an operation in the target's own setup chain, by operationId; here createFile makes an element-template file (a fixed template id is safe because none of these tests publishes a version organization-wide, which would reserve the id for later runs). body: fields merged over the target's own body. A before entry may name the target's own operation.",
   "replay": [
     {
       "operationId": "requestProjectSnapshotReview",
@@ -88,19 +88,54 @@
         "createProject"
       ],
       "reason": "A live workspace that still contains a project cannot be permanently deleted (\"The workspace must be empty\"); verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "template-version-exists",
+      "operationId": "createVersion",
+      "expectStatus": 409,
+      "chainBodies": {
+        "createFile": {
+          "type": "element-template",
+          "content": "{\"$schema\":\"https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json\",\"name\":\"Hub API test template\",\"id\":\"io.camunda.test.hub-api-tests.element-template\",\"appliesTo\":[\"bpmn:Task\"],\"properties\":[],\"version\":1}"
+        }
+      },
+      "before": [
+        "createVersion"
+      ],
+      "body": {
+        "organizationPublic": true
+      },
+      "reason": "An element-template file already has a version for its current template version; publishing another one to the organization answers 409 (A version with ID ... and version number 1 already exists). Verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "template-version-exists",
+      "operationId": "restoreVersion",
+      "expectStatus": 409,
+      "chainBodies": {
+        "createFile": {
+          "type": "element-template",
+          "content": "{\"$schema\":\"https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json\",\"name\":\"Hub API test template\",\"id\":\"io.camunda.test.hub-api-tests.element-template\",\"appliesTo\":[\"bpmn:Task\"],\"properties\":[],\"version\":1}"
+        }
+      },
+      "body": {
+        "version": 1
+      },
+      "reason": "Restoring an element-template version to template version 1 when the file is already at version 1 answers 409. Verified live against camunda/hub:SNAPSHOT."
+    },
+    {
+      "name": "template-version-missing",
+      "operationId": "restoreVersion",
+      "expectStatus": 400,
+      "chainBodies": {
+        "createFile": {
+          "type": "element-template",
+          "content": "{\"$schema\":\"https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json\",\"name\":\"Hub API test template\",\"id\":\"io.camunda.test.hub-api-tests.element-template\",\"appliesTo\":[\"bpmn:Task\"],\"properties\":[],\"version\":1}"
+        }
+      },
+      "reason": "Restoring an element-template version without the required `version` answers 400 ('version' must not be null). Verified live against camunda/hub:SNAPSHOT."
     }
   ],
   "untested": [
-    {
-      "operationId": "createVersion",
-      "issue": "https://github.com/camunda/api-test-generator/issues/637",
-      "reason": "Reproducible only on an element-template file; the fixture file is BPMN."
-    },
-    {
-      "operationId": "restoreVersion",
-      "issue": "https://github.com/camunda/api-test-generator/issues/637",
-      "reason": "Reproducible only on an element-template file; the fixture file is BPMN."
-    },
     {
       "operationId": "updateVersion",
       "issue": "https://github.com/camunda/api-test-generator/issues/638",

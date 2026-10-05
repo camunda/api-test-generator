@@ -544,6 +544,25 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       expect(sequenceTest, `${id}: the last call does not assert ${status}`).toContain(
         `toBe(${status})`,
       );
+      // chainBodies (on a setup-chain call) and body (on the target) must reach the generated request.
+      // Long values such as a template's JSON content are checked by key only.
+      const reaches = (fields: unknown, where: string): void => {
+        for (const [field, value] of Object.entries(isRecord(fields) ? fields : {})) {
+          const short = typeof value !== 'string' || value.length < 60;
+          // A long value is wrapped onto the next line by the formatter, so only its key is checked.
+          const expected = short
+            ? `${field}: ${JSON.stringify(value).replaceAll('"', "'")}`
+            : `${field}:`;
+          expect(
+            sequenceTest.replaceAll('"', "'"),
+            `${id}: ${where} ${field} is not in the generated request`,
+          ).toContain(expected);
+        }
+      };
+      for (const [op, fields] of Object.entries(isRecord(seq.chainBodies) ? seq.chainBodies : {})) {
+        reaches(fields, `chainBodies.${op}`);
+      }
+      reaches(seq.body, 'body');
       // A setup body override must reach the generated request: "${xVar}" becomes ctx.xVar.
       for (const step of Array.isArray(seq.before) ? seq.before : []) {
         if (!isRecord(step) || !isRecord(step.body)) continue;
@@ -789,6 +808,16 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
             normalised.indexOf(check, stepAt),
             `${id}: read-back ${readOp} does not check ${field}`,
           ).toBeGreaterThan(-1);
+        }
+      }
+      // Chain bodies reach the setup call they override (long values are checked by key only).
+      for (const [op, fields] of Object.entries(isRecord(v.chainBodies) ? v.chainBodies : {})) {
+        for (const [field, value] of Object.entries(isRecord(fields) ? fields : {})) {
+          const short = typeof value !== 'string' || value.length < 60;
+          expect(
+            normalised,
+            `${id}: chainBodies.${op}.${field} not in the generated request`,
+          ).toContain(short ? `${field}: ${render(value)}` : `${field}:`);
         }
       }
       // Each setup call runs, and its renamed key is stored under the chosen variable.

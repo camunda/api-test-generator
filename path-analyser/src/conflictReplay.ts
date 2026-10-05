@@ -31,7 +31,38 @@ export interface ConflictSequenceEntry {
   bodies: Record<number, Record<string, unknown>>;
   /** The status the target must answer: 409 (default) or 400 for a state precondition. */
   expectStatus: 409 | 400;
+  /**
+   * Body fields merged over the generated body of an operation in the target's own setup chain,
+   * by operationId (for example a different file type for `createFile`).
+   */
+  chainBodies: Record<string, Record<string, unknown>>;
+  /** Body fields merged over the target's own generated body. */
+  body?: Record<string, unknown>;
   reason: string;
+}
+
+/** Indexes of the setup-chain steps (never the last) whose operation has an entry in `chainBodies`. */
+export function chainBodyOverrides(
+  chain: EndpointScenario,
+  chainBodies: Record<string, Record<string, unknown>>,
+  target: string,
+): Record<number, Record<string, unknown>> {
+  const out: Record<number, Record<string, unknown>> = {};
+  const unmatched = new Set(Object.keys(chainBodies));
+  chain.operations.slice(0, -1).forEach((op, i) => {
+    const body = chainBodies[op.operationId];
+    if (!body) return;
+    out[i] = body;
+    unmatched.delete(op.operationId);
+  });
+  // A name that is not in the chain would be a silent no-op, and the test would then run against
+  // the default fixture instead of the one this config asks for.
+  if (unmatched.size) {
+    throw new Error(
+      `chainBodies names operation(s) the setup chain of ${target} does not call: ${[...unmatched].join(', ')}.`,
+    );
+  }
+  return out;
 }
 
 /**
@@ -58,6 +89,20 @@ function readConflictFile(configDir: string): { p: string; raw: Record<string, u
 
 /** A sequence name ends up in a scenario ID and a generated test title, so it must be quote-safe. */
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]*$/;
+
+function parseChainBodies(
+  p: string,
+  i: number,
+  raw: unknown,
+): Record<string, Record<string, unknown>> {
+  if (raw === undefined) return {};
+  if (!isRecord(raw) || !Object.values(raw).every(isRecord)) {
+    throw new Error(`${p}: sequences[${i}].chainBodies must map an operationId to a body object.`);
+  }
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [op, b] of Object.entries(raw)) if (isRecord(b)) out[op] = b;
+  return out;
+}
 
 function nonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
@@ -101,6 +146,11 @@ export function loadConflictSequences(configDir: string): ConflictSequenceEntry[
     const rec = isRecord(e) ? e : {};
     const { name, operationId, before: rawBefore, reason } = rec;
     const expectStatus = rec.expectStatus === undefined ? 409 : rec.expectStatus;
+    const chainBodies = parseChainBodies(p, i, rec.chainBodies);
+    if (rec.body !== undefined && !isRecord(rec.body)) {
+      throw new Error(`${p}: sequences[${i}].body must be an object when present.`);
+    }
+    const body = isRecord(rec.body) ? rec.body : undefined;
     const entries: unknown[] = Array.isArray(rawBefore) ? rawBefore : [];
     const before: string[] = [];
     const bodies: Record<number, Record<string, unknown>> = {};
@@ -123,18 +173,27 @@ export function loadConflictSequences(configDir: string): ConflictSequenceEntry[
       !SAFE_NAME.test(name) ||
       !nonEmptyString(operationId) ||
       !nonEmptyString(reason) ||
-      before.length === 0 ||
+      (before.length === 0 && Object.keys(chainBodies).length === 0 && !body) ||
       !before.every(nonEmptyString) ||
       (expectStatus !== 409 && expectStatus !== 400)
     ) {
       throw new Error(
-        `${p}: sequences[${i}] must be { name, operationId, before: [operationId | { operationId, body }, ...], reason, expectStatus?: 400 | 409 } with non-empty values.`,
+        `${p}: sequences[${i}] must be { name, operationId, before: [operationId | { operationId, body }, ...], reason, expectStatus?: 400 | 409 } with non-empty values; needs a before list, chainBodies or body.`,
       );
     }
     const key = `${operationId}/${name}`;
     if (seen.has(key)) throw new Error(`${p}: sequences[${i}] repeats ${key}.`);
     seen.add(key);
-    out.push({ name, operationId, before, bodies, expectStatus, reason });
+    out.push({
+      name,
+      operationId,
+      before,
+      bodies,
+      expectStatus,
+      chainBodies,
+      ...(body ? { body } : {}),
+      reason,
+    });
   });
   return out;
 }
@@ -195,17 +254,9 @@ export function validateConflictSequences(
   graph: OperationGraph,
   sequences: ConflictSequenceEntry[],
 ): void {
-  // The planner finds the final step by its operationId, so a setup call to the target itself would
-  // be taken for the final step too.
-  const same = sequences.filter((s) => s.before.includes(s.operationId));
-  if (same.length) {
-    throw new Error(
-      `conflict-replay.json: a setup call cannot be the target operation itself: ${same.map((s) => `${s.operationId}/${s.name}`).join(', ')}.`,
-    );
-  }
   const unknown = new Set<string>();
   for (const seq of sequences) {
-    for (const id of [seq.operationId, ...seq.before]) {
+    for (const id of [seq.operationId, ...seq.before, ...Object.keys(seq.chainBodies)]) {
       if (!graph.operations[id]) unknown.add(id);
     }
   }
@@ -236,9 +287,15 @@ export function buildConflictSequenceScenarios(
       strategy: 'featureCoverage' as const,
       variantKey: `conflict=${seq.name}`,
       expectedResult: { kind: 'error' as const, code: String(seq.expectStatus) },
-      stepBodies: Object.fromEntries(
-        Object.entries(seq.bodies).map(([i, b]) => [chain.operations.length - 1 + Number(i), b]),
-      ),
+      // The target is found by position, so a setup call to the target's own operation is fine.
+      finalStepIndex: chain.operations.length - 1 + seq.before.length,
+      stepBodies: {
+        ...chainBodyOverrides(chain, seq.chainBodies, seq.operationId),
+        ...Object.fromEntries(
+          Object.entries(seq.bodies).map(([i, b]) => [chain.operations.length - 1 + Number(i), b]),
+        ),
+        ...(seq.body ? { [chain.operations.length - 1 + seq.before.length]: seq.body } : {}),
+      },
       operations: [
         ...chain.operations.slice(0, -1),
         ...seq.before.map((id) => {

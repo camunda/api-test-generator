@@ -28,12 +28,13 @@ const v: OptionalFieldsEntry = {
   body: { description: 'd' },
   echo: { description: 'd' },
   before: [],
+  chainBodies: {},
 };
 
 describe('optional-fields.json', () => {
   it('is optional, and loads valid variants', () => {
     expect(loadOptionalFields(configDir())).toBeNull();
-    const { before: _omitted, ...written } = v;
+    const { before: _b, chainBodies: _c, ...written } = v;
     expect(loadOptionalFields(configDir({ variants: [written] }))).toEqual({ variants: [v] });
   });
 
@@ -95,6 +96,44 @@ describe('optional-fields.json', () => {
     expect(out[0].optionalFields).toEqual({ body: v.body, echo: v.echo, targetIndex: 1 });
     expect(out[0].operations.map((o) => o.operationId)).toEqual(['setup', 'createX']);
     expect(out[0].bindings).not.toBe(chain.bindings);
+  });
+
+  it('loads chain bodies and merges them into the setup chain of the target', () => {
+    const f = { variants: [{ ...v, chainBodies: { setup: { type: 't' } } }] };
+    const loaded = loadOptionalFields(configDir(f));
+    expect(loaded?.variants[0].chainBodies).toEqual({ setup: { type: 't' } });
+    const ref = (id: string) => ({ operationId: id, method: 'POST', path: `/${id}` });
+    // biome-ignore lint/plugin: the fixture only populates the fields under test
+    const graph = {
+      operations: { setup: ref('setup'), createX: ref('createX') },
+    } as unknown as OperationGraph;
+    const chain: EndpointScenario = {
+      id: 's',
+      operations: [ref('setup'), ref('createX')],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+    };
+    const [out] = buildOptionalFieldsScenarios(chain, { variants: loaded?.variants ?? [] }, graph);
+    expect(out.stepBodies).toEqual({ 0: { type: 't' } });
+    expect(() =>
+      buildOptionalFieldsScenarios(
+        chain,
+        { variants: [{ ...v, chainBodies: { nope: { a: 1 } } }] },
+        graph,
+      ),
+    ).toThrow(/nope/);
+    expect(() =>
+      validateOptionalFields(graph, { variants: [{ ...v, chainBodies: { gone: { a: 1 } } }] }),
+    ).toThrow(/gone/);
+  });
+
+  it('rejects chain bodies that are not a map of bodies', () => {
+    expect(() =>
+      loadOptionalFields(configDir({ variants: [{ ...v, chainBodies: [] }] })),
+    ).toThrow();
+    expect(() =>
+      loadOptionalFields(configDir({ variants: [{ ...v, chainBodies: { a: 'x' } }] })),
+    ).toThrow();
   });
 
   it('loads setup calls with a body override and a renamed extract', () => {
