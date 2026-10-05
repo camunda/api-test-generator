@@ -697,6 +697,16 @@ function renderScenarioTest(
       body.push(`      throw e;`);
       body.push(`    }`);
     }
+    if (step.echoChecks && isFinal && !isErrorScenario) {
+      body.push(`    {`);
+      body.push(`      const echoed = await ${varName}.json();`);
+      for (const [field, value] of Object.entries(step.echoChecks)) {
+        body.push(
+          `      expect(echoed[${JSON.stringify(field)}]).toEqual(${JSON.stringify(value)});`,
+        );
+      }
+      body.push(`    }`);
+    }
     if (step.searchChecks && isFinal && !isErrorScenario) {
       const { limit, order, offset } = step.searchChecks;
       const reqBody = `body${idx + 1}`;

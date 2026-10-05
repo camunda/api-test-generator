@@ -696,4 +696,39 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
         .sort(),
     ).toEqual(['searchCatalogAssets', 'searchWorkspaces']);
   });
+  it('optional request fields are sent and echoed back where the response allows it (#624)', () => {
+    const raw: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/optional-fields.json')),
+    );
+    const list = (key: string): Record<string, unknown>[] =>
+      isRecord(raw) && Array.isArray(raw[key]) ? raw[key].filter(isRecord) : [];
+    const variants = list('variants');
+    expect(variants.length, 'no optional-field variants configured').toBeGreaterThan(5);
+    for (const v of variants) {
+      const id = String(v.operationId);
+      const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
+      const start = spec.indexOf(`optional fields - ${String(v.name)}`);
+      expect(start, `${id}: no "${String(v.name)}" optional-fields test generated`).toBeGreaterThan(
+        -1,
+      );
+      const next = spec.indexOf('\n  test(', start + 1);
+      const test = spec.slice(start, next < 0 ? undefined : next);
+      for (const [field, value] of Object.entries(isRecord(v.body) ? v.body : {})) {
+        expect(test, `${id}: ${field} not sent`).toContain(
+          `${field}: ${JSON.stringify(value).replace(/^"|"$/g, "'")}`,
+        );
+      }
+      for (const [field, value] of Object.entries(isRecord(v.echo) ? v.echo : {})) {
+        // The formatter rewrites string quotes, so compare with quotes normalised.
+        expect(test.replaceAll('"', "'"), `${id}: ${field} not checked in the response`).toContain(
+          `echoed.${field}).toEqual(${JSON.stringify(value).replaceAll('"', "'")})`,
+        );
+      }
+    }
+    for (const u of list('untested')) {
+      expect(u.issue, `${String(u.operationId)}: untested needs a tracking issue URL`).toMatch(
+        /^https:\/\/github\.com\/.+\/issues\/\d+$/,
+      );
+    }
+  });
 });
