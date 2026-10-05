@@ -6,11 +6,11 @@
     "401": 64,
     "403": 61,
     "404": 42,
-    "409": 7
+    "409": 9
   },
-  "optionalFieldsSent": 62,
+  "optionalFieldsSent": 63,
   "requestChecksCovered": 32,
-  "fullyAssertedOperations": 54,
+  "fullyAssertedOperations": 56,
   "zeroTestOperations": [
     {
       "operationId": "getClusterUsageMetrics",

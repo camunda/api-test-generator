@@ -8,6 +8,7 @@ import {
   applyStepExtractAs,
   buildConflictSequenceScenarios,
   type ConflictSequenceEntry,
+  chainBodyOverrides,
   loadConflictReplay,
   loadConflictSequences,
   validateConflictSequences,
@@ -116,7 +117,12 @@ describe('conflict-replay.json', () => {
 
 describe('conflict-replay.json sequences', () => {
   const raw = { name: 'gone', operationId: 'restore', before: ['delete'], reason: 'r' };
-  const seq: ConflictSequenceEntry = { ...raw, bodies: {}, expectStatus: 409 };
+  const seq: ConflictSequenceEntry = {
+    ...raw,
+    bodies: {},
+    expectStatus: 409,
+    chainBodies: {},
+  };
 
   it('is optional, and loads valid entries', () => {
     expect(loadConflictSequences(configDir())).toEqual([]);
@@ -212,11 +218,72 @@ describe('conflict-replay.json sequences', () => {
     expect(() => applyStepExtractAs(undefined, renames, 2)).toThrow(/folderKey/);
   });
 
-  it('rejects a setup call to the target operation itself', () => {
-    const g = graphOf(node('restore'));
-    expect(() => validateConflictSequences(g, [{ ...seq, before: ['restore'] }])).toThrow(
-      /target operation itself/,
+  it('allows a setup call to the target operation itself, because the target is found by position', () => {
+    const g = graphOf(node('createX'), node('restore'));
+    const ref = (id: string) => ({ operationId: id, method: 'POST', path: `/${id}` });
+    const chain: EndpointScenario = {
+      id: 's',
+      operations: [ref('createX'), ref('restore')],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+    };
+    const same = { ...seq, before: ['restore'], body: { k: 1 } };
+    expect(() => validateConflictSequences(g, [same])).not.toThrow();
+    const [out] = buildConflictSequenceScenarios(chain, [same], g);
+    expect(out.operations.map((o) => o.operationId)).toEqual(['createX', 'restore', 'restore']);
+    expect(out.finalStepIndex).toBe(2);
+    // the target body goes to the last step only, not the earlier call to the same operation
+    expect(out.stepBodies).toEqual({ 2: { k: 1 } });
+  });
+
+  it('loads chain bodies and a target body, and lets them stand in for a before list', () => {
+    const [e] = loadConflictSequences(
+      configDir(
+        JSON.stringify({
+          sequences: [
+            {
+              name: 'n',
+              operationId: 'restore',
+              reason: 'r',
+              chainBodies: { createX: { type: 't' } },
+              body: { v: 1 },
+            },
+          ],
+        }),
+      ),
     );
+    expect(e.before).toEqual([]);
+    expect(e.chainBodies).toEqual({ createX: { type: 't' } });
+    expect(e.body).toEqual({ v: 1 });
+  });
+
+  it.each([
+    ['nothing to change', { sequences: [{ name: 'n', operationId: 'restore', reason: 'r' }] }],
+    ['chainBodies not a map', { sequences: [{ ...raw, chainBodies: [] }] }],
+    [
+      'a chain body that is not an object',
+      { sequences: [{ ...raw, chainBodies: { createX: 'x' } }] },
+    ],
+    ['body not an object', { sequences: [{ ...raw, body: [] }] }],
+  ])('rejects: %s', (_label, content) => {
+    expect(() => loadConflictSequences(configDir(JSON.stringify(content)))).toThrow();
+  });
+
+  it('merges chain bodies into the setup-chain steps of that operation only', () => {
+    const ref = (id: string) => ({ operationId: id, method: 'POST', path: `/${id}` });
+    const chain: EndpointScenario = {
+      id: 's',
+      operations: [ref('createWs'), ref('createX'), ref('restore')],
+      producedSemanticTypes: [],
+      satisfiedSemanticTypes: [],
+    };
+    expect(chainBodyOverrides(chain, { createX: { type: 't' } }, 'restore')).toEqual({
+      1: { type: 't' },
+    });
+    // the target itself is not part of the setup chain
+    expect(() => chainBodyOverrides(chain, { restore: { a: 1 } }, 'restore')).toThrow(/restore/);
+    // a name the chain never calls would silently do nothing
+    expect(() => chainBodyOverrides(chain, { createY: { a: 1 } }, 'restore')).toThrow(/createY/);
   });
 
   it('fails for an operation the spec does not have, whether target or setup', () => {

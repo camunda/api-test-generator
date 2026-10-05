@@ -692,7 +692,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   });
 }
 
-function buildRequestPlan(
+export function buildRequestPlan(
   scenario: EndpointScenario,
   resp: ResponseShapeSummary | undefined,
   graph: OperationGraph,
@@ -705,7 +705,7 @@ function buildRequestPlan(
   const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
   // An optional-fields variant with a read-back ends in a GET after the target; the target is
   // still the logical final step (its body, expected status and oneOf choice are the endpoint's own).
-  const finalIndex = scenario.optionalFields?.targetIndex;
+  const finalIndex = scenario.finalStepIndex ?? scenario.optionalFields?.targetIndex;
   for (const opRef of scenario.operations) {
     const isFinal =
       finalIndex === undefined ? opRef.operationId === lastOpId : steps.length === finalIndex;
@@ -1084,7 +1084,7 @@ export function aliasProducerExtractsToPlaceholders(
 ): void {
   // The last step consumes the chain; so does the logical target of an optional-fields variant
   // when a read-back follows it.
-  const targetIndex = scenario.optionalFields?.targetIndex;
+  const targetIndex = scenario.finalStepIndex ?? scenario.optionalFields?.targetIndex;
   const consumers = new Set([steps.length - 1]);
   if (targetIndex !== undefined && targetIndex < steps.length) consumers.add(targetIndex);
   for (const consumer of [...consumers].sort((a, b) => a - b)) {

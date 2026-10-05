@@ -324,6 +324,9 @@ resource does not overwrite the first one's key. In a `body` or `echo` value, th
 the value stored in `xVar` at runtime, and `null` is allowed. Hub uses it to move a folder under another
 folder and to the project root.
 
+A variant may also set `chainBodies` (see the conflict section), for example to make the setup `createFile` an
+element-template file.
+
 `readBack: { operationId, echo }` adds a GET after the target whose response must echo the given values,
 which shows the change persisted rather than only that the request was echoed. An echo field may be a
 dotted path (`folder.parentFolderKey`) because the get operations wrap the resource. The read-back is the
@@ -387,8 +390,12 @@ annotation (Hub) switches it on per operation in
 - `untested` lists operations that document a 409 but have no test yet, each with a
   tracking issue. The Hub invariant fails for any documented 409 that is neither
   tested nor listed.
-- A conflict that needs a different kind of fixture (an element-template file) is not
-  expressible yet.
+- `chainBodies: { "<operationId>": { ... } }` merges body fields over an operation in the target's own
+  setup chain, and `body` merges fields over the target's own body. Hub uses them to turn the chain's
+  `createFile` into an element-template file and to send `version` to `restoreVersion`. A name the chain
+  never calls fails generation. A `before` entry may be the target's own operation (the target is found by
+  position). The element-template id is fixed: that is safe only while no test publishes a version
+  organization-wide, because that reserves the id for every later run on the same Hub.
 
 ### Coverage has two axes: presence and completeness
 

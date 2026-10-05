@@ -1,5 +1,6 @@
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { chainBodyOverrides } from './conflictReplay.js';
 import type { EndpointScenario, OperationGraph } from './types.js';
 
 /** A setup call run after the target's own setup chain and before the target. */
@@ -24,6 +25,8 @@ export interface OptionalFieldsEntry {
   echo: Record<string, unknown>;
   /** Setup calls between the target's own chain and the target. */
   before: OptionalFieldsSetup[];
+  /** Body fields merged over operations in the target's own setup chain, by operationId (for example `createFile` as an element template). */
+  chainBodies: Record<string, Record<string, unknown>>;
   /** A GET run after the target; its response must echo these values, proving the change persisted. */
   readBack?: { operationId: string; echo: Record<string, unknown> };
 }
@@ -64,6 +67,17 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
     const { operationId, name, body, echo } = rec;
     const before = parseSetup(p, i, rec.before);
     const readBack = parseReadBack(p, i, rec.readBack);
+    const rawChain = rec.chainBodies;
+    if (
+      rawChain !== undefined &&
+      (!isRecord(rawChain) || !Object.values(rawChain).every(isRecord))
+    ) {
+      throw new Error(`${p}: variants[${i}].chainBodies must map an operationId to a body object.`);
+    }
+    const chainBodies: Record<string, Record<string, unknown>> = {};
+    for (const [op, b] of Object.entries(isRecord(rawChain) ? rawChain : {})) {
+      if (isRecord(b)) chainBodies[op] = b;
+    }
     if (
       typeof operationId !== 'string' ||
       !operationId ||
@@ -81,7 +95,15 @@ export function loadOptionalFields(configDir: string): OptionalFieldsConfig | nu
     const key = `${operationId}/${name}`;
     if (seen.has(key)) throw new Error(`${p}: variants[${i}] repeats ${key}.`);
     seen.add(key);
-    return { operationId, name, body, echo, before, ...(readBack ? { readBack } : {}) };
+    return {
+      operationId,
+      name,
+      body,
+      echo,
+      before,
+      chainBodies,
+      ...(readBack ? { readBack } : {}),
+    };
   });
   return { variants };
 }
@@ -170,6 +192,7 @@ export function validateOptionalFields(graph: OperationGraph, config: OptionalFi
     .flatMap((v) => [
       v.operationId,
       ...v.before.map((b) => b.operationId),
+      ...Object.keys(v.chainBodies),
       ...(v.readBack ? [v.readBack.operationId] : []),
     ])
     .filter((id) => !graph.operations[id]);
@@ -191,7 +214,9 @@ export function buildOptionalFieldsScenarios(
     .filter((v) => v.operationId === target?.operationId)
     .map((v) => {
       const first = chain.operations.length - 1;
-      const stepBodies: Record<number, Record<string, unknown>> = {};
+      const stepBodies: Record<number, Record<string, unknown>> = {
+        ...chainBodyOverrides(chain, v.chainBodies, v.operationId),
+      };
       const stepExtractAs: Record<number, Record<string, string>> = {};
       v.before.forEach((b, bi) => {
         if (b.body) stepBodies[first + bi] = b.body;

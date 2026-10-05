@@ -138,6 +138,22 @@
       "echo": {
         "comment": "Reviewed by the generated suite."
       }
+    },
+    {
+      "operationId": "restoreVersion",
+      "name": "element template version",
+      "chainBodies": {
+        "createFile": {
+          "type": "element-template",
+          "content": "{\"$schema\":\"https://unpkg.com/@camunda/element-templates-json-schema/resources/schema.json\",\"name\":\"Hub API test template\",\"id\":\"io.camunda.test.hub-api-tests.element-template\",\"appliesTo\":[\"bpmn:Task\"],\"properties\":[],\"version\":1}"
+        }
+      },
+      "body": {
+        "version": 2
+      },
+      "echo": {
+        "fileKey": "${fileKeyVar}"
+      }
     }
   ],
   "untested": [
@@ -145,7 +161,7 @@
       "operationId": "updateVersion",
       "field": "organizationPublic",
       "issue": "https://github.com/camunda/api-test-generator/issues/655",
-      "reason": "Hub rejects any change to it on a BPMN file; needs an element-template file."
+      "reason": "Setting it to true publishes the element template id to the whole organization, which makes every later private version of that id answer 409, so it needs a template id that is unique per run (not available yet)."
     },
     {
       "operationId": "replaceWorkspaceEnvironments",
@@ -158,12 +174,6 @@
       "field": "clusterId, profiles, properties",
       "issue": "https://github.com/camunda/api-test-generator/issues/655",
       "reason": "Answers 204 with no body to echo; needs a read-back and cleanup."
-    },
-    {
-      "operationId": "restoreVersion",
-      "field": "version",
-      "issue": "https://github.com/camunda/api-test-generator/issues/655",
-      "reason": "Required only when restoring an element template file; needs an element-template file fixture (same prerequisite as #637)."
     }
   ]
 }
