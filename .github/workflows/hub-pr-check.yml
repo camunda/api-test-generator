@@ -1209,6 +1209,7 @@ jobs:
           PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
           SHA: ${{ needs.validate.outputs.source_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-pr-check-cookbook.md
           CALLER_RUN_URL: ${{ needs.validate.outputs.caller_run_url }}
           CATEGORY: ${{ needs.classify.outputs.category }}
           SUITES_RAN: ${{ needs.run.outputs.suites_ran }}
@@ -1402,8 +1403,11 @@ jobs:
           else
             closing="${ping} please take a look."
           fi
-          text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s\n\n%s\n\n%s' \
-            "$headline" "$source_line" "$RUN_URL" "$caller_line" "$verdict" "$closing")
+          # Same "Run + Cookbook" pair the AlwaysGreen alert ends its links with, so a reader who
+          # does not know this check can find how to read it without asking.
+          cookbook_line=$(printf '\n• Cookbook: <%s|How to read and debug this check>' "$COOKBOOK_URL")
+          text=$(printf '%s\n\n• Source: %s\n• Run: <%s|View run>%s%s\n\n%s\n\n%s' \
+            "$headline" "$source_line" "$RUN_URL" "$caller_line" "$cookbook_line" "$verdict" "$closing")
 
           # Random delimiter, not a fixed string like "SLACKMSG" — $SUMMARY is
           # agent-produced free text and must never be able to prematurely

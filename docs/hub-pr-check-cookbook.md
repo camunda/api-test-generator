@@ -55,6 +55,8 @@ When the generator gap is caused by the PR's own spec change, an issue
 `[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo and assigned to the
 camunda-hub PR's author. It is edited in place on later pushes and closes itself on a green run.
 
+Every Slack reply lists the source PR and commit, the run, the camunda-hub run that triggered it, and a link to this cookbook.
+
 Slack is one thread per day with one reply per (PR, failure). What counts as "the same failure":
 
 - **With evidence** (a failing spec or operations with no test): the fingerprint of the failing set.
