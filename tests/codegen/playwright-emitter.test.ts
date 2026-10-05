@@ -1348,3 +1348,66 @@ describe('emitter: initSpecSalt emission (#175)', () => {
     expect(saltPos).toBeLessThan(describePos);
   });
 });
+
+describe('echo checks (optional-field variants)', () => {
+  const echoCollection = (echoChecks: Record<string, unknown>): EndpointScenarioCollection => ({
+    endpoint: { operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' },
+    requiredSemanticTypes: [],
+    optionalSemanticTypes: [],
+    scenarios: [
+      {
+        id: 'sc1',
+        name: 'echo',
+        operations: [{ operationId: 'getFolder', method: 'GET', path: '/folders/{folderKey}' }],
+        producedSemanticTypes: [],
+        satisfiedSemanticTypes: [],
+        requestPlan: [
+          {
+            operationId: 'getFolder',
+            method: 'GET',
+            pathTemplate: '/folders/{folderKey}',
+            expect: { status: 200 },
+            echoChecks,
+          },
+        ],
+      },
+    ],
+  });
+  const render = (echoChecks: Record<string, unknown>) =>
+    renderPlaywrightSuite(echoCollection(echoChecks), {
+      suiteName: 'getFolder',
+      mode: 'variant',
+      recordResponses: false,
+    });
+
+  // undefined equals undefined, so each value check must be preceded by a check that the
+  // field exists (and, for a reference, that the variable was stored).
+  test('asserts the field exists before comparing it, for a flat and a dotted path', () => {
+    const src = render({ description: 'd', 'folder.parentFolderKey': 'k' });
+    expect(src).toMatch(/expect\(echoed\)\.toHaveProperty\(\["description"\]\)/);
+    expect(src).toMatch(/expect\(echoed\)\.toHaveProperty\(\["folder","parentFolderKey"\]\)/);
+    expect(src).toMatch(/expect\(echoed\["folder"\]\["parentFolderKey"\]\)\.toEqual\("k"\)/);
+  });
+
+  test('a null expectation still asserts the field is present', () => {
+    const src = render({ 'folder.parentFolderKey': null });
+    const guard = src.indexOf('toHaveProperty(["folder","parentFolderKey"])');
+    const compare = src.indexOf('toEqual(null)');
+    expect(guard).toBeGreaterThan(-1);
+    expect(compare).toBeGreaterThan(guard);
+  });
+
+  test('a variable reference asserts the variable was stored, before the comparison', () => {
+    const src = render({ parentFolderKey: `\${otherFolderKeyVar}` });
+    const stored = src.indexOf(
+      'expect(ctx["otherFolderKeyVar"], "otherFolderKeyVar was never stored").toBeDefined()',
+    );
+    const compare = src.indexOf('toEqual(ctx["otherFolderKeyVar"])');
+    expect(stored).toBeGreaterThan(-1);
+    expect(compare).toBeGreaterThan(stored);
+  });
+
+  test('a literal value emits no stored-variable guard', () => {
+    expect(render({ description: 'd' })).not.toContain('was never stored');
+  });
+});
