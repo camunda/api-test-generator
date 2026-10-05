@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   applyConflictReplay,
+  applyStepBody,
   buildConflictSequenceScenarios,
   type ConflictSequenceEntry,
   loadConflictReplay,
@@ -127,6 +128,11 @@ describe('conflict-replay.json sequences', () => {
     ['no setup operations', { sequences: [{ ...raw, before: [] }] }],
     ['empty operation name', { sequences: [{ ...raw, before: [''] }] }],
     ['setup entry without an operation', { sequences: [{ ...raw, before: [{ body: {} }] }] }],
+    [
+      'setup body not an object',
+      { sequences: [{ ...raw, before: [{ operationId: 'a', body: [] }] }] },
+    ],
+    ['setup body a string', { sequences: [{ ...raw, before: [{ operationId: 'a', body: 'x' }] }] }],
     ['unsupported status', { sequences: [{ ...raw, expectStatus: 500 }] }],
     ['missing name', { sequences: [{ ...raw, name: undefined }] }],
     ['name with an apostrophe', { sequences: [{ ...raw, name: "it's gone" }] }],
@@ -173,6 +179,17 @@ describe('conflict-replay.json sequences', () => {
     // operations: createX(0), a(1), b(2), restore(3); the override targets b
     expect(out.stepBodies).toEqual({ 2: { k: 'v' } });
     expect(out.name).toContain('400 precondition');
+  });
+
+  it('merges a step override over that step only, leaving other steps and non-object bodies alone', () => {
+    const overrides = { 2: { folderKey: 'a placeholder' } };
+    expect(applyStepBody({ name: 'n', folderKey: null }, overrides, 2)).toEqual({
+      name: 'n',
+      folderKey: 'a placeholder',
+    });
+    expect(applyStepBody({ name: 'n' }, overrides, 1)).toEqual({ name: 'n' });
+    expect(applyStepBody({ name: 'n' }, undefined, 2)).toEqual({ name: 'n' });
+    expect(applyStepBody(undefined, overrides, 2)).toBeUndefined();
   });
 
   it('fails for an operation the spec does not have, whether target or setup', () => {

@@ -538,10 +538,22 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       const at = spec.indexOf(`${status} ${label} - ${String(seq.name).replace(/-/g, ' ')}`);
       expect(at, `${id}: no "${String(seq.name)}" ${label} test generated`).toBeGreaterThan(-1);
       const next = spec.indexOf('\n  test(', at + 1);
-      expect(
-        spec.slice(at, next < 0 ? undefined : next),
-        `${id}: the last call does not assert ${status}`,
-      ).toContain(`toBe(${status})`);
+      const sequenceTest = spec.slice(at, next < 0 ? undefined : next);
+      expect(sequenceTest, `${id}: the last call does not assert ${status}`).toContain(
+        `toBe(${status})`,
+      );
+      // A setup body override must reach the generated request: "${xVar}" becomes ctx.xVar.
+      for (const step of Array.isArray(seq.before) ? seq.before : []) {
+        if (!isRecord(step) || !isRecord(step.body)) continue;
+        for (const [field, value] of Object.entries(step.body)) {
+          const ref = typeof value === 'string' ? /^\$\{(\w+)\}$/.exec(value) : null;
+          const rendered = ref ? `ctx.${ref[1]}` : JSON.stringify(value).replaceAll('"', "'");
+          expect(
+            sequenceTest.replaceAll('"', "'"),
+            `${id}: the ${String(step.operationId)} body override ${field} is not in the generated request`,
+          ).toContain(`${field}: ${rendered}`);
+        }
+      }
     }
   });
   it('keyed and write operations assert a 403 for a principal without grants (#622)', () => {

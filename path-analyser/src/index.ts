@@ -15,6 +15,7 @@ import {
 } from './configResolver.js';
 import {
   applyConflictReplay,
+  applyStepBody,
   buildConflictSequenceScenarios,
   loadConflictReplay,
   loadConflictSequences,
@@ -858,10 +859,7 @@ function buildRequestPlan(
         if (extract.length) step.extract = (step.extract || []).concat(extract);
       }
     }
-    const stepBody = scenario.stepBodies?.[steps.length];
-    if (stepBody && isPlainRecord(step.bodyTemplate)) {
-      step.bodyTemplate = { ...step.bodyTemplate, ...stepBody };
-    }
+    step.bodyTemplate = applyStepBody(step.bodyTemplate, scenario.stepBodies, steps.length);
     steps.push(step);
     // If this is the final step and scenario has duplicateTest, append a duplicate invocation
     if (isFinal && scenario.optionalFields && isPlainRecord(step.bodyTemplate)) {

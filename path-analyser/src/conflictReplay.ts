@@ -108,7 +108,14 @@ export function loadConflictSequences(configDir: string): ConflictSequenceEntry[
       if (typeof item === 'string') before.push(item);
       else if (isRecord(item) && nonEmptyString(item.operationId)) {
         before.push(item.operationId);
-        if (isRecord(item.body)) bodies[bi] = item.body;
+        if (item.body !== undefined) {
+          if (!isRecord(item.body)) {
+            throw new Error(
+              `${p}: sequences[${i}].before[${bi}].body must be an object when present.`,
+            );
+          }
+          bodies[bi] = item.body;
+        }
       } else before.push('');
     }
     if (
@@ -145,6 +152,20 @@ export function applyConflictReplay(graph: OperationGraph, entries: ConflictRepl
     op.operationMetadata = { ...op.operationMetadata, duplicatePolicy: 'conflict' };
     if (e.changeBody) op.conflictReplay = { changeBody: e.changeBody };
   }
+}
+
+/**
+ * The request body for the step at `index` of a scenario: the generated body with any
+ * sequence override for that step merged over it.
+ */
+export function applyStepBody(
+  bodyTemplate: unknown,
+  stepBodies: Record<number, Record<string, unknown>> | undefined,
+  index: number,
+): unknown {
+  const override = stepBodies?.[index];
+  if (!override || !isRecord(bodyTemplate)) return bodyTemplate;
+  return { ...bodyTemplate, ...override };
 }
 
 /** Fails generation for a sequence that names an operation the spec does not have. */
