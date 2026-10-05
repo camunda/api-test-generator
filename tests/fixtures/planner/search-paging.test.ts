@@ -456,15 +456,30 @@ describe('local JSON pointers and path-item keys', () => {
     ).toEqual(['name', 'created']);
   });
 
-  it('percent-decodes pointer tokens and ignores references it cannot resolve', () => {
-    const decoded = {
+  it('percent-decodes pointer tokens', () => {
+    const encoded = {
       paths: {
+        // the path key has a space, written %20 in the pointer
         '/a b': {
           post: {
-            operationId: 'spaced',
-            requestBody: { $ref: '#/paths/~1x/post/requestBody' },
+            operationId: 'source',
+            requestBody: { content: { 'application/json': { schema: searchSchema } } },
           },
         },
+        '/consumer': {
+          post: {
+            operationId: 'consumer',
+            requestBody: { $ref: '#/paths/~1a%20b/post/requestBody' },
+          },
+        },
+      },
+    };
+    expect(findSearchOperations(encoded).map((o) => o.operationId)).toEqual(['source', 'consumer']);
+  });
+
+  it('ignores references it cannot resolve, and keeps a malformed escape from throwing', () => {
+    const unresolved = {
+      paths: {
         '/x': {
           post: {
             operationId: 'src',
@@ -478,12 +493,13 @@ describe('local JSON pointers and path-item keys', () => {
           },
         },
         '/remote': { post: { operationId: 'remote', requestBody: { $ref: 'other.yaml#/X' } } },
+        '/bad-escape': {
+          post: { operationId: 'badEscape', requestBody: { $ref: '#/paths/%E0%A4%A/post' } },
+        },
       },
     };
-    const ids = findSearchOperations(decoded).map((o) => o.operationId);
-    expect(ids).toContain('src');
-    expect(ids).not.toContain('dangling');
-    expect(ids).not.toContain('remote');
+    const ids = findSearchOperations(unresolved).map((o) => o.operationId);
+    expect(ids).toEqual(['src']);
   });
 
   it('only counts HTTP method keys as operations', () => {
