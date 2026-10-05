@@ -66,6 +66,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 // suite that hasn't been generated (the common local-repro slip) is obvious.
 const GEN_HINT =
   "check out the pinned specRef in ../camunda-hub, then run 'CONFIG=camunda-hub npm run fetch-spec && CONFIG=camunda-hub npm run testsuite:generate'";
+/**
+ * Whether generated code assigns `value` to `field`. The formatter chooses quote style and escaping and
+ * may put a long value on the next line, so both sides are compared with quotes, backslashes and
+ * whitespace normalised; the whole value is compared, not just the key.
+ */
+function assignsValue(source: string, field: string, value: unknown): boolean {
+  const norm = (x: string): string =>
+    x.replaceAll('\\', '').replaceAll('"', "'").replace(/\s+/g, ' ');
+  return norm(source).includes(`${field}: ${norm(JSON.stringify(value))}`);
+}
+
 function readRequired(path: string): string {
   if (!existsSync(path)) {
     throw new Error(`Hub pipeline output not found at ${path}. To reproduce: ${GEN_HINT}.`);
@@ -544,19 +555,14 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       expect(sequenceTest, `${id}: the last call does not assert ${status}`).toContain(
         `toBe(${status})`,
       );
-      // chainBodies (on a setup-chain call) and body (on the target) must reach the generated request.
-      // Long values such as a template's JSON content are checked by key only.
+      // chainBodies (on a setup-chain call) and body (on the target) must reach the generated request,
+      // with their whole value (a template's JSON content included).
       const reaches = (fields: unknown, where: string): void => {
         for (const [field, value] of Object.entries(isRecord(fields) ? fields : {})) {
-          const short = typeof value !== 'string' || value.length < 60;
-          // A long value is wrapped onto the next line by the formatter, so only its key is checked.
-          const expected = short
-            ? `${field}: ${JSON.stringify(value).replaceAll('"', "'")}`
-            : `${field}:`;
           expect(
-            sequenceTest.replaceAll('"', "'"),
+            assignsValue(sequenceTest, field, value),
             `${id}: ${where} ${field} is not in the generated request`,
-          ).toContain(expected);
+          ).toBe(true);
         }
       };
       for (const [op, fields] of Object.entries(isRecord(seq.chainBodies) ? seq.chainBodies : {})) {
@@ -810,14 +816,13 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
           ).toBeGreaterThan(-1);
         }
       }
-      // Chain bodies reach the setup call they override (long values are checked by key only).
+      // Chain bodies reach the setup call they override, with their whole value.
       for (const [op, fields] of Object.entries(isRecord(v.chainBodies) ? v.chainBodies : {})) {
         for (const [field, value] of Object.entries(isRecord(fields) ? fields : {})) {
-          const short = typeof value !== 'string' || value.length < 60;
           expect(
-            normalised,
+            assignsValue(test, field, value),
             `${id}: chainBodies.${op}.${field} not in the generated request`,
-          ).toContain(short ? `${field}: ${render(value)}` : `${field}:`);
+          ).toBe(true);
         }
       }
       // Each setup call runs, and its renamed key is stored under the chosen variable.

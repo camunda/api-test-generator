@@ -692,7 +692,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   });
 }
 
-function buildRequestPlan(
+export function buildRequestPlan(
   scenario: EndpointScenario,
   resp: ResponseShapeSummary | undefined,
   graph: OperationGraph,
