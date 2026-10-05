@@ -1,0 +1,20 @@
+{
+  "$comment": "Floors for the response-coverage numbers in scripts/e2e/hub_response_coverage.py, the same data as the weekly Slack report. The Hub invariant 'response coverage does not regress' runs the script and fails if an asserted per-status-code total, the request-check, fully-asserted or optional-field number is lower than its floor, or if an operation has no test at all that is not listed in zeroTestOperations with the reason. A floor is one-way: a PR that closes a gap should raise it, but a higher number never fails. Do not lower a floor to make CI pass; add the missing test.",
+  "assertedByStatus": {
+    "2xx": 64,
+    "400": 35,
+    "401": 64,
+    "403": 61,
+    "404": 42,
+    "409": 7
+  },
+  "optionalFieldsSent": 62,
+  "requestChecksCovered": 32,
+  "fullyAssertedOperations": 54,
+  "zeroTestOperations": [
+    {
+      "operationId": "getClusterUsageMetrics",
+      "reason": "Excluded under camunda-hub#26448 (ProblemDetail missing `type` on framework-level validation errors) and unchainable (camunda-hub#25907)."
+    }
+  ]
+}
