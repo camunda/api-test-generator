@@ -178,7 +178,9 @@ describe('optional-fields.json', () => {
 
   it('rejects a read-back that repeats the target or a setup call', () => {
     // biome-ignore lint/plugin: the fixture only populates the field under test
-    const graph = { operations: { createX: {}, a: {}, g: {} } } as unknown as OperationGraph;
+    const graph = {
+      operations: { createX: {}, a: {}, g: { method: 'GET' }, del: { method: 'DELETE' } },
+    } as unknown as OperationGraph;
     const echo = { d: 1 };
     expect(() =>
       validateOptionalFields(graph, {
@@ -198,6 +200,12 @@ describe('optional-fields.json', () => {
         variants: [{ ...v, readBack: { operationId: 'nope', echo } }],
       }),
     ).toThrow(/nope/);
+    // a read-back must not change anything
+    expect(() =>
+      validateOptionalFields(graph, {
+        variants: [{ ...v, readBack: { operationId: 'del', echo } }],
+      }),
+    ).toThrow(/read-back must be a GET/);
   });
 
   it('appends the read-back after the target and marks the target by position', () => {

@@ -156,6 +156,16 @@ export function validateOptionalFields(graph: OperationGraph, config: OptionalFi
       `optional-fields.json: a read-back must differ from the target and its setup calls: ${clash.map((v) => `${v.operationId}/${v.name}`).join(', ')}.`,
     );
   }
+  // A read-back runs after the target and must not change anything.
+  const mutating = config.variants.filter((v) => {
+    const op = v.readBack ? graph.operations[v.readBack.operationId] : undefined;
+    return op !== undefined && op.method.toUpperCase() !== 'GET';
+  });
+  if (mutating.length) {
+    throw new Error(
+      `optional-fields.json: a read-back must be a GET operation: ${mutating.map((v) => `${v.operationId}/${v.name} -> ${v.readBack?.operationId}`).join(', ')}.`,
+    );
+  }
   const unknown = config.variants
     .flatMap((v) => [
       v.operationId,
