@@ -9,6 +9,7 @@ import {
   getRequestValidationSuiteDir,
   getSpecBundleDir,
 } from '../../path-analyser/src/configResolver.js';
+import { deriveSearchPaging, loadSearchPaging } from '../../path-analyser/src/searchPaging.js';
 
 /**
  * Bundled-spec invariants — Layer 3, camunda-hub config (#128).
@@ -659,10 +660,21 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     const raw: unknown = JSON.parse(
       readRequired(join(REPO_ROOT, 'configs/camunda-hub/search-paging.json')),
     );
-    const searches =
+    const explicit =
       isRecord(raw) && Array.isArray(raw.searches) ? raw.searches.filter(isRecord) : [];
+    const excluded =
+      isRecord(raw) && Array.isArray(raw.exclude)
+        ? raw.exclude.filter(isRecord).map((e) => String(e.operationId))
+        : [];
     const limit = isRecord(raw) ? raw.limit : undefined;
     const bundle: unknown = JSON.parse(readRequired(BUNDLED_SPEC_PATH));
+    // The entries the generator used: the explicit ones plus, with `auto`, one derived per search
+    // operation in the spec. Detailed checks below run against every one of them.
+    const loaded = loadSearchPaging(join(REPO_ROOT, 'configs/camunda-hub'));
+    expect(loaded, 'search-paging.json did not load').not.toBeNull();
+    const searches: Record<string, unknown>[] = loaded
+      ? deriveSearchPaging(loaded, bundle).searches.map((e) => ({ ...e }))
+      : [];
     const schemas =
       isRecord(bundle) && isRecord(bundle.components) && isRecord(bundle.components.schemas)
         ? bundle.components.schemas
@@ -701,14 +713,23 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       'found suspiciously few search operations - did the spec parse?',
     ).toBeGreaterThan(10);
     const configured = searches.map((e) => String(e.operationId));
+    // Found independently of the generator's own lookup, so a miss there is noticed.
     expect(
-      searchOps.filter((id) => !configured.includes(id)),
-      'search operations with no paging test',
+      searchOps.filter((id) => !configured.includes(id) && !excluded.includes(id)),
+      'search operations with no paging test (list them under "exclude" with a reason, or fix the derivation)',
     ).toEqual([]);
     expect(
       configured.filter((id) => !searchOps.includes(id)),
       'paging entries for operations that are not searches',
     ).toEqual([]);
+    for (const id of excluded) {
+      expect(searchOps.includes(id), `${id} is excluded but is not a search operation`).toBe(true);
+      expect(
+        existsSync(join(SUITE_DIR, `${id}.variant.spec.ts`)) &&
+          readGeneratedSpec(`${id}.variant.spec.ts`).includes('page and sort (limit'),
+        `${id} is excluded but has a paging test`,
+      ).toBe(false);
+    }
     for (const entry of searches) {
       const id = String(entry.operationId);
       const spec = readGeneratedSpec(`${id}.variant.spec.ts`);
@@ -750,7 +771,7 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
       }
     }
     expect(
-      searches
+      explicit
         .filter((e) => isRecord(e.filter))
         .map((e) => e.operationId)
         .sort(),

@@ -9,6 +9,7 @@ import {
   getActivePlannerConfig,
   getFeatureOutputDir,
   getScenariosDir,
+  getSpecBundleDir,
   getTemplateScenariosDir,
   getTemplateScenariosRootDir,
   getVariantOutputDir,
@@ -43,6 +44,7 @@ import {
 import { instantiateAllTemplates } from './scenarioTemplateInstantiator.js';
 import {
   buildSearchPagingScenarios,
+  deriveSearchPaging,
   loadSearchPaging,
   validateSearchPaging,
 } from './searchPaging.js';
@@ -120,7 +122,18 @@ async function main() {
   applyConflictReplay(graph, loadConflictReplay(getActiveConfigDir(repoRoot)));
   const conflictSequences = loadConflictSequences(getActiveConfigDir(repoRoot));
   validateConflictSequences(graph, conflictSequences);
-  const searchPaging = loadSearchPaging(getActiveConfigDir(repoRoot));
+  const searchPagingConfig = loadSearchPaging(getActiveConfigDir(repoRoot));
+  const searchPaging = searchPagingConfig?.auto
+    ? deriveSearchPaging(
+        searchPagingConfig,
+        JSON.parse(
+          fsSync.readFileSync(
+            path.join(getSpecBundleDir(repoRoot), 'rest-api.bundle.json'),
+            'utf8',
+          ),
+        ),
+      )
+    : searchPagingConfig;
   if (searchPaging) validateSearchPaging(graph, searchPaging);
   const optionalFields = loadOptionalFields(getActiveConfigDir(repoRoot));
   if (optionalFields) validateOptionalFields(graph, optionalFields);

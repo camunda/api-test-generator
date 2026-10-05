@@ -1,7 +1,9 @@
 {
-  "$comment": "Search operations that also get a success-path test sending page.limit and a sort, asserting at most `limit` items and, when checkOrder is true, items ordered by the sort field. checkOrder is only true for timestamp fields: their ISO-8601 values order the same in JavaScript as on the server, while names depend on the database collation. searchCatalogAssets and searchWorkspaces also send a filter (name exists), since no other success test of theirs does. Each search also gets a page-offset test (page.from = offsetFrom) that, where the order is checked, compares its items with the same slice of an unpaged query. The order test sends the opposite sort too and expects the opposite order, so a server that ignores sort cannot pass.",
+  "$comment": "Every search operation (a JSON body that takes both page and sort) gets a success-path test sending page.limit and a sort, and an offset test; with auto set the entries are derived from the spec, so a new search operation is covered without editing this file. The derived choice is created, else updated, else deleted (whichever the sort enum offers), descending, with its order asserted (and the opposite sort compared); if the operation has none, the first enum field ascending, without an order assertion, because names sort by the database collation. 'searches' holds only the exceptions: searchCatalogAssets and searchWorkspaces also send a filter, since none of their other success tests do. 'exclude' lists operations that get no paging test, each with the reason (none today).",
   "limit": 2,
   "offsetFrom": 1,
+  "auto": true,
+  "exclude": [],
   "searches": [
     {
       "operationId": "searchCatalogAssets",
@@ -17,86 +19,6 @@
       }
     },
     {
-      "operationId": "searchCatalogAssetFileUsages",
-      "sort": {
-        "field": "name",
-        "order": "ASC"
-      },
-      "checkOrder": false
-    },
-    {
-      "operationId": "searchCatalogAssetProjectUsages",
-      "sort": {
-        "field": "name",
-        "order": "ASC"
-      },
-      "checkOrder": false
-    },
-    {
-      "operationId": "searchProjectCatalogAssetUsages",
-      "sort": {
-        "field": "name",
-        "order": "ASC"
-      },
-      "checkOrder": false
-    },
-    {
-      "operationId": "searchFiles",
-      "sort": {
-        "field": "created",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchRecentlyDeletedFiles",
-      "sort": {
-        "field": "deleted",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchRecentlyDeletedFolders",
-      "sort": {
-        "field": "deleted",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchProjects",
-      "sort": {
-        "field": "created",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchRecentlyDeletedProjects",
-      "sort": {
-        "field": "deleted",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchProjectSnapshots",
-      "sort": {
-        "field": "created",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchVersions",
-      "sort": {
-        "field": "created",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
       "operationId": "searchWorkspaces",
       "sort": {
         "field": "created",
@@ -108,22 +30,6 @@
           "$exists": true
         }
       }
-    },
-    {
-      "operationId": "searchRecentlyDeletedWorkspaces",
-      "sort": {
-        "field": "deleted",
-        "order": "DESC"
-      },
-      "checkOrder": true
-    },
-    {
-      "operationId": "searchMembers",
-      "sort": {
-        "field": "name",
-        "order": "ASC"
-      },
-      "checkOrder": false
     }
   ]
 }

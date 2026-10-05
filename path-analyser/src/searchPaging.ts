@@ -19,6 +19,14 @@ export interface SearchPagingConfig {
   limit: number;
   /** The `page.from` of the offset variant. */
   offsetFrom: number;
+  /**
+   * Derive an entry for every search operation in the spec (a JSON body that takes both `page` and
+   * `sort`) that has no explicit entry and is not excluded. See {@link deriveSearchPaging}.
+   */
+  auto: boolean;
+  /** Search operations that get no paging test, each with the reason. */
+  exclude: { operationId: string; reason: string }[];
+  /** Explicit entries: exceptions to the derived choice, or everything when `auto` is false. */
   searches: SearchPagingEntry[];
 }
 
@@ -53,6 +61,25 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
   if (typeof offsetFrom !== 'number' || !Number.isInteger(offsetFrom) || offsetFrom < 1) {
     throw new Error(`${p}: "offsetFrom" must be a positive integer.`);
   }
+  if (raw.auto !== undefined && typeof raw.auto !== 'boolean') {
+    throw new Error(`${p}: "auto" must be a boolean when present.`);
+  }
+  const rawExclude = raw.exclude ?? [];
+  if (!Array.isArray(rawExclude)) throw new Error(`${p}: "exclude" must be an array.`);
+  const exclude = rawExclude.map((e, i) => {
+    const rec = isRecord(e) ? e : {};
+    if (
+      typeof rec.operationId !== 'string' ||
+      !rec.operationId ||
+      typeof rec.reason !== 'string' ||
+      !rec.reason
+    ) {
+      throw new Error(
+        `${p}: exclude[${i}] must be { operationId, reason } with non-empty strings.`,
+      );
+    }
+    return { operationId: rec.operationId, reason: rec.reason };
+  });
   const seen = new Set<string>();
   const searches = raw.searches.map((e, i): SearchPagingEntry => {
     const rec = isRecord(e) ? e : {};
@@ -80,7 +107,98 @@ export function loadSearchPaging(configDir: string): SearchPagingConfig | null {
       ...(isRecord(rec.filter) ? { filter: rec.filter } : {}),
     };
   });
-  return { limit, offsetFrom, searches };
+  return { limit, offsetFrom, auto: raw.auto === true, exclude, searches };
+}
+
+/** Timestamp fields compare the same in JavaScript as on the server, so their order can be asserted. */
+const TIMESTAMP_FIELDS = ['created', 'updated', 'deleted'];
+
+/** A search operation found in the spec: its JSON body takes both `page` and `sort`. */
+export interface SpecSearchOperation {
+  operationId: string;
+  /** The values of the sort item's `field` enum, in spec order. */
+  sortFields: string[];
+}
+
+function resolveRef(spec: Record<string, unknown>, node: unknown): Record<string, unknown> {
+  let cur = node;
+  for (let depth = 0; depth < 10 && isRecord(cur) && typeof cur.$ref === 'string'; depth++) {
+    const name = cur.$ref.split('/').pop() ?? '';
+    const components = isRecord(spec.components) ? spec.components : {};
+    const schemas = isRecord(components.schemas) ? components.schemas : {};
+    cur = schemas[name];
+  }
+  return isRecord(cur) ? cur : {};
+}
+
+/** Every operation whose JSON request body has both a `page` and a `sort` property. */
+export function findSearchOperations(spec: unknown): SpecSearchOperation[] {
+  if (!isRecord(spec) || !isRecord(spec.paths)) return [];
+  const out: SpecSearchOperation[] = [];
+  for (const item of Object.values(spec.paths)) {
+    if (!isRecord(item)) continue;
+    for (const op of Object.values(item)) {
+      if (!isRecord(op) || typeof op.operationId !== 'string') continue;
+      const body = isRecord(op.requestBody) ? op.requestBody : {};
+      const content = isRecord(body.content) ? body.content : {};
+      const json = isRecord(content['application/json']) ? content['application/json'] : {};
+      const properties = resolveRef(spec, json.schema).properties;
+      if (!isRecord(properties) || !('page' in properties) || !('sort' in properties)) continue;
+      const sort = resolveRef(spec, properties.sort);
+      const sortItem = resolveRef(spec, sort.items);
+      const sortItemProps = isRecord(sortItem.properties) ? sortItem.properties : {};
+      const fieldSchema = resolveRef(spec, sortItemProps.field);
+      const sortFields = Array.isArray(fieldSchema.enum)
+        ? fieldSchema.enum.filter((f): f is string => typeof f === 'string')
+        : [];
+      out.push({ operationId: op.operationId, sortFields });
+    }
+  }
+  return out;
+}
+
+/**
+ * The effective config: the explicit entries plus, when `auto` is set, one derived entry per search
+ * operation in the spec that is neither listed nor excluded. The derived choice is `created`, else
+ * `updated`, else `deleted` (whichever the sort enum offers), descending, with its order asserted; if there is none, the first
+ * enum field ascending without an order assertion (names sort by the database collation).
+ */
+export function deriveSearchPaging(config: SearchPagingConfig, spec: unknown): SearchPagingConfig {
+  if (!config.auto) return config;
+  const found = findSearchOperations(spec);
+  const known = new Set(found.map((s) => s.operationId));
+  const stale = config.exclude.filter((e) => !known.has(e.operationId)).map((e) => e.operationId);
+  if (stale.length) {
+    throw new Error(
+      `search-paging.json excludes operationId(s) that are not search operations in the spec: ${stale.join(', ')}.`,
+    );
+  }
+  const listed = new Set(config.searches.map((s) => s.operationId));
+  const excluded = new Set(config.exclude.map((e) => e.operationId));
+  const derived: SearchPagingEntry[] = [];
+  for (const op of found) {
+    if (listed.has(op.operationId) || excluded.has(op.operationId)) continue;
+    if (op.sortFields.length === 0) {
+      throw new Error(
+        `search-paging.json: cannot derive a sort for ${op.operationId}, its sort field has no enum. List it in "searches" or "exclude" it.`,
+      );
+    }
+    const timestamp = TIMESTAMP_FIELDS.find((f) => op.sortFields.includes(f));
+    derived.push(
+      timestamp
+        ? {
+            operationId: op.operationId,
+            sort: { field: timestamp, order: 'DESC' },
+            checkOrder: true,
+          }
+        : {
+            operationId: op.operationId,
+            sort: { field: op.sortFields[0], order: 'ASC' },
+            checkOrder: false,
+          },
+    );
+  }
+  return { ...config, searches: [...config.searches, ...derived] };
 }
 
 /** Fails generation for an entry naming an operation the spec does not have. */
