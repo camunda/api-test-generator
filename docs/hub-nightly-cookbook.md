@@ -168,6 +168,8 @@ resources. Missing: ProjectSnapshot, Version" means those two resources have no 
 one, while their individual endpoint tests still exist. Today those two are simply not added yet; no Hub bug excludes
 them. The generator owner fixes it by adding the resource to `configs/camunda-hub/ontology/entity-kinds.json`. Lifecycle gaps open no
 issue, so only the weekly report shows them.
+Fixing a gap is maintainer work that needs the generator: follow "Closing a gap" in
+[hub-response-coverage-report.md](hub-response-coverage-report.md).
 
 ## What the workflows depend on
 

@@ -107,12 +107,26 @@ cat /tmp/cov/slack.txt
 
 ## Closing a gap
 
-1. Open the area issue and find the endpoint and the response or bad-request kind it lacks.
-2. Add the test. Most are derived automatically; state-dependent 409/400 cases are written by hand in
-   `configs/camunda-hub/conflict-replay.json`. Search paging and optional fields have their own
-   `auto`/`exclude` config files. See AGENTS.md for each.
-3. Regenerate and check the number moved with the local command above.
-4. Raise the matching floor in `configs/camunda-hub/coverage-floors.json`.
+This is maintainer work: it needs the generator, not just Hub. An area issue lists, per endpoint, the **missing responses**
+and the **missing bad-request tests**. Find the endpoint's row, then use the table for what it lacks.
+
+| The row says it is missing | What it means | Where to look, and the usual fix |
+|---|---|---|
+| **success** | No success test for the endpoint | First check `configs/camunda-hub/positive-suppress.json`: if it is listed, the reason and the Hub issue say why, and the fix is on the Hub side. If it is not listed, the generator could not chain the calls the endpoint needs (an ID it cannot create). See `unmappedOperations` in `generated/camunda-hub/playwright/coverage.json`, then teach the generator how to create that resource in `configs/camunda-hub/ontology/` (`entity-kinds.json`, `runtime-states.json`) or the fixtures |
+| **400**, **401**, **403**, **404** | A bad-request, no-auth, forbidden or not-found test is missing | These are generated for every operation unless it is excluded. Check `excludeOperations` in `configs/camunda-hub/request-validation.json` (the entry has a reason and a Hub issue). The modes `authAbsentMode`, `authDenyMode` and `notFoundMode` in the same file set how Hub is expected to answer. A 404 test needs an ID it can make up, so an endpoint with no path key may need a hand-written case |
+| **409** | A documented conflict is not tested | Needs a state first. Add a `sequences` entry (the setup calls, then the call that should answer 409) to `configs/camunda-hub/conflict-replay.json`, or list it under `untested` with an issue if it cannot be provoked. Use an existing entry as the pattern |
+| **a bad-request kind** (for example `allof-conflict`, `union`, `missing-body`) | The endpoint has no test of that kind | Generated from the spec's schema. For the body-shape kinds the report can list a kind that cannot be built for that endpoint, so first generate (see below) and look for the endpoint in `generated/camunda-hub/request-validation/COVERAGE.md`. If the kind applies but is not generated, the fix is in the generator's code (`request-validation/src/analysis/`), not in config. If it does not apply, it is an over-count |
+| **Lifecycle tests** (in the weekly Slack message, not in an area issue) | A resource or link has no create, read, delete flow | Add it to `configs/camunda-hub/ontology/entity-kinds.json` or `edges.json` |
+
+After the fix:
+
+1. Regenerate and run the report with the commands in "Running it yourself" above, and check that the number moved.
+2. Run `CONFIG=camunda-hub npx vitest run tests/request-validation configs/camunda-hub/regression-invariants.test.ts`.
+3. Raise the matching number in `configs/camunda-hub/coverage-floors.json` in the same PR.
+4. If the fix needed a flag or a new resource, see "Adding or changing an endpoint in Hub" in the PR-check cookbook for the labels.
+
+`AGENTS.md` has more on each config file, but it is written for AI agents and is long. If a step here is unclear, ask in
+`#camunda-hub-pr-e2e-results`.
 
 ### Floors
 
