@@ -1602,6 +1602,85 @@ describe('C# SDK Emitter — discriminators scoped to the selected union branch 
   });
 });
 
+/**
+ * Regression coverage for PR #668 review (round 9): an object's own
+ * discriminator resolution grows ONE `ownerChain`, and `renderCsharpValue`
+ * passes the SAME grown chain to EVERY one of that object's own child
+ * fields uniformly. A CHILD field's own, entirely independent discriminator
+ * can happen to offer the SAME `$ref` as one of its candidates (e.g. two
+ * unrelated polymorphic unions in the spec both reference a shared
+ * component schema) — the "already selected, don't re-offer" dedup then
+ * wrongly excludes that candidate for the child too, even though the child
+ * never selected it itself, silently dropping the child's own discriminator
+ * tag. The fix (a new `selectedAtPath` parameter, reset to empty for every
+ * freshly-rendered object) decouples eligibility (`ownerChain`, which must
+ * see every ancestor's selection) from per-path dedup (which must not).
+ */
+describe('C# SDK Emitter — sibling discriminator dedup is scoped to its own path (PR #668 review, round 9)', () => {
+  const SHARED_REF = '#/components/schemas/Shared';
+  const OTHER_REF = '#/components/schemas/Other';
+  const OTHER_META_REF = '#/components/schemas/OtherMeta';
+
+  test("a child field's own discriminator still resolves when its candidate ref was already selected by its parent", async () => {
+    const discriminators: CsharpDiscriminatorTable = {
+      createProcessInstance: [
+        {
+          path: 'result',
+          propertyName: 'kind',
+          subtypes: [
+            { value: 'Shared', properties: ['kind', 'meta'], required: [], ref: SHARED_REF },
+            { value: 'Other', properties: ['kind', 'meta'], required: [], ref: OTHER_REF },
+          ],
+        },
+        // `result.meta`'s own union happens to reference the SAME `Shared`
+        // ref as one of its candidates (an unrelated schema reuse), but is
+        // NOT `ownerRef`-scoped to it — it must be free to select `Shared`
+        // on its OWN merits, regardless of what `result` itself picked.
+        {
+          path: 'result.meta',
+          propertyName: 'type',
+          subtypes: [
+            {
+              value: 'SharedMeta',
+              properties: ['type', 'z'],
+              required: ['z'],
+              ref: SHARED_REF,
+            },
+            { value: 'OtherMeta', properties: ['type'], required: [], ref: OTHER_META_REF },
+          ],
+        },
+      ],
+    };
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                // `kind` is already explicit (selects `Shared`), so
+                // `result`'s own resolution adds `Shared`'s ref to the
+                // owner chain before ever rendering `meta`.
+                bodyTemplate: { result: { kind: 'Shared', meta: { z: 'val' } } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    // `meta`'s own `type` tag must still be injected as `SharedMeta` — not
+    // silently dropped because `Shared`'s ref was already in the inherited
+    // owner chain.
+    expect(files[0].content).toContain('["type"] = "SharedMeta"');
+  });
+});
+
 describe('C# SDK Emitter — discriminators at the request root (PR #668 review, round 6)', () => {
   const SUCCESS_REF = '#/components/schemas/Success';
   const FAILURE_REF = '#/components/schemas/Failure';

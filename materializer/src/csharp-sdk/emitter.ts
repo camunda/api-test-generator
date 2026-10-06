@@ -1053,8 +1053,15 @@ function renderCsharpValue(
     // first: the branch this object selects can itself declare a SECOND
     // discriminator on the SAME object, which only becomes eligible once
     // the first's ref is in the owner chain (PR #668 review, round 7).
+    //
+    // The explicit empty 5th argument seeds dedup FRESH for this object:
+    // `ownerChain` also carries every ref selected on unrelated ANCESTOR
+    // objects (different `path`s entirely), and this object's OWN
+    // discriminator candidates must not be rejected merely because an
+    // ancestor happened to select the SAME `$ref` schema for an unrelated
+    // decision (PR #668 review, round 9).
     const { fields: discriminatorFields, ownerChain: nextOwnerChain } =
-      resolveCsharpDiscriminatorChain(value, discriminators, path, ownerChain);
+      resolveCsharpDiscriminatorChain(value, discriminators, path, ownerChain, new Set());
     fields.unshift(...discriminatorFields);
     for (const [k, v] of fields) {
       const rendered = renderCsharpValue(

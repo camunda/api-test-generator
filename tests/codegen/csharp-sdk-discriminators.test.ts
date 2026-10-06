@@ -1334,3 +1334,186 @@ describe('buildCsharpDiscriminatorTable — wrapper-declared common fields merge
     });
   });
 });
+
+/**
+ * Regression coverage for PR #668 review "Previously missed" advisory
+ * (round 9): a discriminator/`oneOf` schema can be ONE of several SIBLING
+ * parts of an `allOf` (not itself the wrapper that declares common fields
+ * directly). `collectSubtypes(resolved, stores)` only merges in `resolved`'s
+ * OWN direct properties/required — never a SIBLING `allOf` part's common
+ * fields declared alongside it — so a value combining the common-fields
+ * part with a subtype's own fields was rejected as "extra properties" and
+ * the discriminator silently omitted.
+ */
+describe('buildCsharpDiscriminatorTable — allOf sibling common fields merge into every subtype', () => {
+  const bundle = {
+    paths: {
+      '/jobs': {
+        post: {
+          operationId: 'activateJob',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Wrapper' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        // Unlike the wrapper-declared-common-fields fixture above, `common`
+        // lives on a SEPARATE `allOf` sibling part — not merged into the
+        // discriminator part's own schema at all.
+        Wrapper: {
+          allOf: [
+            { type: 'object', properties: { common: { type: 'string' } }, required: ['common'] },
+            {
+              type: 'object',
+              discriminator: { propertyName: 'kind' },
+              oneOf: [{ $ref: '#/components/schemas/A' }, { $ref: '#/components/schemas/B' }],
+            },
+          ],
+        },
+        A: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        B: { type: 'object', properties: { b: { type: 'string' } } },
+      },
+    },
+  };
+
+  test("every subtype carries the sibling allOf part's common property and requirement", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypes = (table.activateJob ?? []).flatMap((d) => d.subtypes);
+    const a = subtypes.find((s) => s.value === 'A');
+    const b = subtypes.find((s) => s.value === 'B');
+    expect(a?.properties).toEqual(expect.arrayContaining(['a', 'common']));
+    expect(a?.required).toEqual(expect.arrayContaining(['common']));
+    expect(b?.properties).toEqual(expect.arrayContaining(['b', 'common']));
+  });
+
+  test('chooseCsharpDiscriminator selects the matching branch for a value combining the sibling common field', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.activateJob ?? [];
+    expect(chooseCsharpDiscriminator({ common: 'c', a: 'x' }, entries, '')).toEqual({
+      name: 'kind',
+      value: 'A',
+      ref: '#/components/schemas/A',
+    });
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review "Previously missed" advisory
+ * (round 9): a candidate subtype can itself declare a FURTHER same-object
+ * discriminator property as REQUIRED on its own schema (e.g. `Success`
+ * requires `kind`, and `kind` is itself a discriminator chained under
+ * `Success`'s ref). Before this fix, the required-field filter in
+ * `chooseCsharpDiscriminator` rejected `Success` outright because `kind`
+ * was not yet present in the probed value — never giving
+ * `resolveCsharpDiscriminatorChain`'s own loop a chance to inject it on a
+ * LATER pass once `Success`'s ref joins the owner chain. The fix treats a
+ * missing required name as satisfied when it is itself the `propertyName`
+ * of a same-path entry owned by that very subtype.
+ */
+describe('chooseCsharpDiscriminator — a required field that is itself a downstream discriminator', () => {
+  const SUCCESS_REF = '#/components/schemas/Success';
+
+  const entries: CsharpDiscriminator[] = [
+    {
+      path: 'result',
+      propertyName: 'family',
+      subtypes: [
+        // `Success` REQUIRES `kind` on its own schema -- unlike the
+        // pre-existing chained-discriminator fixtures elsewhere in this
+        // file, where the intermediate tag is never itself `required`.
+        { value: 'Success', properties: ['family', 'kind'], required: ['kind'], ref: SUCCESS_REF },
+        { value: 'Failure', properties: ['family'], required: [] },
+      ],
+    },
+    {
+      path: 'result',
+      propertyName: 'kind',
+      ownerRef: SUCCESS_REF,
+      subtypes: [{ value: 'Text', properties: ['kind', 'text'], required: ['text'] }],
+    },
+  ];
+
+  test('selects Success even though its required "kind" field is not yet present', () => {
+    expect(chooseCsharpDiscriminator({ text: 'hi' }, entries, 'result')).toEqual({
+      name: 'family',
+      value: 'Success',
+      ref: SUCCESS_REF,
+    });
+  });
+
+  test('resolveCsharpDiscriminatorChain resolves the full chain from an implicit value', () => {
+    const result = resolveCsharpDiscriminatorChain({ text: 'hi' }, entries, 'result');
+    expect(result.fields).toEqual([
+      ['family', 'Success'],
+      ['kind', 'Text'],
+    ]);
+  });
+});
+
+/**
+ * Regression coverage for a self-review finding during PR #668 review
+ * (round 9): `resolveCsharpDiscriminatorChain`'s loop decides whether a
+ * newly-recognised EXPLICIT tag's ref is genuinely NEW progress for `path`
+ * — and so whether to continue to a further pass that can recognise a
+ * SECOND explicit tag at the same path — by checking whether the ref is
+ * already present in a chain. Checking `ownerChain` for that decision is
+ * wrong: an ANCESTOR render can have already added the exact same ref to
+ * `ownerChain` for a totally unrelated reason (see `selectedAtPath`'s own
+ * fix above). Before this fix, `findExplicitCsharpDiscriminatorRef` (itself
+ * already `selectedAtPath`-aware) would correctly RETURN the outer ref, but
+ * the loop's own `!ownerChain.has(explicitRef)` guard then wrongly treated
+ * it as "no new progress" and terminated anyway — never reaching a second
+ * pass that would have recognised the INTERMEDIATE tag's own explicit value
+ * and added ITS ref to `ownerChain` too. A child rendered afterwards with
+ * this (incomplete) `ownerChain` would then wrongly be denied eligibility
+ * for anything scoped to that intermediate ref. The fix gates continuation
+ * on `selectedAtPath` instead, which starts fresh for a path even when
+ * `ownerChain` is inherited non-empty.
+ */
+describe('resolveCsharpDiscriminatorChain — continues past an explicit ref already selected by an ancestor', () => {
+  const SUCCESS_REF = '#/components/schemas/Success';
+  const TEXT_REF = '#/components/schemas/TextKind';
+
+  const entries: CsharpDiscriminator[] = [
+    {
+      path: 'meta',
+      propertyName: 'family',
+      subtypes: [
+        { value: 'Success', properties: ['family', 'kind'], required: [], ref: SUCCESS_REF },
+      ],
+    },
+    // Chained under `SUCCESS_REF` at the SAME path as the entry above —
+    // `findExplicitCsharpDiscriminatorRef` only reaches this entry on a
+    // SECOND pass, after `family`'s own explicit ref has been recorded.
+    {
+      path: 'meta',
+      propertyName: 'kind',
+      ownerRef: SUCCESS_REF,
+      subtypes: [{ value: 'Text', properties: ['kind', 'text'], required: [], ref: TEXT_REF }],
+    },
+  ];
+
+  test('an explicit outer tag whose ref is already in an inherited ownerChain still unlocks the intermediate explicit tag', () => {
+    // Both `family` and `kind` are already explicit in the value.
+    // `initialOwnerChain` already contains `SUCCESS_REF` (as an ancestor
+    // render would pass it, for a totally unrelated reason), but
+    // `initialSelectedAtPath` is fresh/empty (as the renderer now passes for
+    // every object) -- the loop must still continue past recognising
+    // `family` to recognise `kind`'s own ref too, growing the OWNER CHAIN a
+    // later child render will see — even though neither tag needs
+    // INJECTING (both are already present in the value).
+    const result = resolveCsharpDiscriminatorChain(
+      { family: 'Success', kind: 'Text', text: 'hi' },
+      entries,
+      'meta',
+      new Set([SUCCESS_REF]),
+      new Set(),
+    );
+    expect(result.fields).toEqual([]);
+    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+  });
+});
