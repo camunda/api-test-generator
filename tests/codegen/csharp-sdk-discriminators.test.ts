@@ -4,6 +4,7 @@ import {
   type CsharpDiscriminator,
   chooseCsharpDiscriminator,
   findExplicitCsharpDiscriminatorRef,
+  ownerChainKey,
   resolveCsharpDiscriminatorChain,
 } from '../../materializer/src/csharp-sdk/discriminators.js';
 
@@ -981,7 +982,7 @@ describe('buildCsharpDiscriminatorTable — shared nested schema reached via two
         {},
         payloadEntries,
         'payload',
-        new Set(['#/components/schemas/BranchA']),
+        new Set([ownerChainKey('', '#/components/schemas/BranchA')]),
       ),
     ).toEqual({ name: 'baseKind', value: 'TextPayload', ref: '#/components/schemas/TextPayload' });
     expect(
@@ -989,7 +990,7 @@ describe('buildCsharpDiscriminatorTable — shared nested schema reached via two
         {},
         payloadEntries,
         'payload',
-        new Set(['#/components/schemas/BranchB']),
+        new Set([ownerChainKey('', '#/components/schemas/BranchB')]),
       ),
     ).toEqual({ name: 'baseKind', value: 'TextPayload', ref: '#/components/schemas/TextPayload' });
   });
@@ -1008,6 +1009,7 @@ describe('chooseCsharpDiscriminator / findExplicitCsharpDiscriminatorRef — own
     path: 'payload',
     propertyName: 'kind',
     ownerRef: '#/components/schemas/Success',
+    ownerPath: '',
     subtypes: [{ value: 'Text', properties: ['text'], required: ['text'] }],
   };
   const topLevel: CsharpDiscriminator = {
@@ -1049,7 +1051,7 @@ describe('chooseCsharpDiscriminator / findExplicitCsharpDiscriminatorRef — own
         { text: 'hi' },
         [successPayload],
         'payload',
-        new Set(['#/components/schemas/Success']),
+        new Set([ownerChainKey('', '#/components/schemas/Success')]),
       ),
     ).toEqual({ name: 'kind', value: 'Text', ref: undefined });
   });
@@ -1118,15 +1120,21 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
     path: 'result',
     propertyName: 'kind',
     ownerRef: SUCCESS_REF,
+    ownerPath: 'result',
     subtypes: [{ value: 'Text', properties: ['kind', 'tag'], required: [], ref: TEXT_REF }],
   };
   const tag: CsharpDiscriminator = {
     path: 'result',
     propertyName: 'tag',
     ownerRef: TEXT_REF,
+    ownerPath: 'result',
     subtypes: [{ value: 'Plain', properties: ['tag', 'text'], required: ['text'] }],
   };
   const entries = [family, kind, tag];
+  const CHAINED_OWNERS = new Set([
+    ownerChainKey('result', SUCCESS_REF),
+    ownerChainKey('result', TEXT_REF),
+  ]);
 
   test('injects a chain of implicit same-object discriminators and returns the full owner chain', () => {
     const result = resolveCsharpDiscriminatorChain({ text: 'hi' }, entries, 'result');
@@ -1135,7 +1143,7 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
       ['kind', 'Text'],
       ['tag', 'Plain'],
     ]);
-    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+    expect(result.ownerChain).toEqual(CHAINED_OWNERS);
   });
 
   test('recognises an explicit outer tag and still chains the rest from it', () => {
@@ -1148,7 +1156,7 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
       ['kind', 'Text'],
       ['tag', 'Plain'],
     ]);
-    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+    expect(result.ownerChain).toEqual(CHAINED_OWNERS);
   });
 
   test('explicit tags at BOTH the outer AND intermediate level still resolve the remainder (PR #668 review, round 8)', () => {
@@ -1163,7 +1171,7 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
       'result',
     );
     expect(result.fields).toEqual([['tag', 'Plain']]);
-    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+    expect(result.ownerChain).toEqual(CHAINED_OWNERS);
   });
 
   test('a branch with no further same-object discriminator terminates after one field', () => {
@@ -1177,13 +1185,13 @@ describe('resolveCsharpDiscriminatorChain — same-object chained discriminators
       { text: 'hi' },
       entries,
       'result',
-      new Set([SUCCESS_REF]),
+      new Set([ownerChainKey('result', SUCCESS_REF)]),
     );
     expect(result.fields).toEqual([
       ['kind', 'Text'],
       ['tag', 'Plain'],
     ]);
-    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+    expect(result.ownerChain).toEqual(CHAINED_OWNERS);
   });
 
   /**
@@ -1433,6 +1441,7 @@ describe('chooseCsharpDiscriminator — a required field that is itself a downst
       path: 'result',
       propertyName: 'kind',
       ownerRef: SUCCESS_REF,
+      ownerPath: 'result',
       subtypes: [{ value: 'Text', properties: ['kind', 'text'], required: ['text'] }],
     },
   ];
@@ -1493,6 +1502,7 @@ describe('resolveCsharpDiscriminatorChain — continues past an explicit ref alr
       path: 'meta',
       propertyName: 'kind',
       ownerRef: SUCCESS_REF,
+      ownerPath: 'meta',
       subtypes: [{ value: 'Text', properties: ['kind', 'text'], required: [], ref: TEXT_REF }],
     },
   ];
@@ -1510,11 +1520,13 @@ describe('resolveCsharpDiscriminatorChain — continues past an explicit ref alr
       { family: 'Success', kind: 'Text', text: 'hi' },
       entries,
       'meta',
-      new Set([SUCCESS_REF]),
+      new Set([ownerChainKey('meta', SUCCESS_REF)]),
       new Set(),
     );
     expect(result.fields).toEqual([]);
-    expect(result.ownerChain).toEqual(new Set([SUCCESS_REF, TEXT_REF]));
+    expect(result.ownerChain).toEqual(
+      new Set([ownerChainKey('meta', SUCCESS_REF), ownerChainKey('meta', TEXT_REF)]),
+    );
   });
 });
 
@@ -1593,7 +1605,7 @@ describe('buildCsharpDiscriminatorTable — common fields survive a oneOf/anyOf 
         { common: 'c', text: 'hi' },
         kindEntry,
         '',
-        new Set(['#/components/schemas/Success']),
+        new Set([ownerChainKey('', '#/components/schemas/Success')]),
       ),
     ).toEqual({ name: 'kind', value: 'Text', ref: '#/components/schemas/Text' });
   });
@@ -1703,6 +1715,118 @@ describe("buildCsharpDiscriminatorTable — the enclosing schema's own direct pr
       name: 'kind',
       value: 'A',
       ref: '#/components/schemas/A',
+    });
+  });
+});
+
+/**
+ * Regression coverage for the unresolved PR #668 review finding (round 11):
+ * `ownerChain` is a flat `Set<string>` of refs threaded down through EVERY
+ * property of a rendered object, not scoped to the specific branch that
+ * selected each ref. Two INDEPENDENT sibling unions (`a`/`b` below) that
+ * both happen to offer the SAME subtype ref (`Shared`) as one of their own
+ * branches previously collapsed onto that one bare ref in `ownerChain`: if
+ * `a` selected `Shared`, `Shared`'s own nested `variant` discriminator
+ * became wrongly "eligible" for `b` too, even when `b` selected a
+ * completely different branch (`Y`). `ownerPath` pairs the ref with the
+ * EXACT path at which it was selected, so `ownerChain` entries are now
+ * keyed by `(path, ref)` and a ref selected for `a` can never satisfy a
+ * same-named entry owned by `b`.
+ */
+describe('chooseCsharpDiscriminator — owner chain scoped to the selecting union path, not a bare shared ref (PR #668 review, round 11)', () => {
+  const SHARED_REF = '#/components/schemas/Shared';
+
+  // `a` and `b` are independent sibling unions that both offer `Shared` as
+  // one of their own branches; `Shared` declares its own nested `variant`
+  // discriminator, so selecting it for `a` produces a `path: 'a'` entry
+  // owned by `Shared` at `ownerPath: 'a'`, and selecting it for `b`
+  // produces a SEPARATE `path: 'b'` entry owned by `Shared` at
+  // `ownerPath: 'b'` — this is exactly what `buildCsharpDiscriminatorTable`
+  // produces for the bundle below (verified directly, not hand-flattened).
+  const bundle = {
+    paths: {
+      '/envelopes': {
+        post: {
+          operationId: 'createEnvelope',
+          requestBody: {
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Envelope' } } },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Envelope: {
+          type: 'object',
+          properties: {
+            a: { $ref: '#/components/schemas/AUnion' },
+            b: { $ref: '#/components/schemas/BUnion' },
+          },
+        },
+        AUnion: {
+          type: 'object',
+          discriminator: { propertyName: 'akind' },
+          oneOf: [{ $ref: '#/components/schemas/Shared' }, { $ref: '#/components/schemas/X' }],
+        },
+        BUnion: {
+          type: 'object',
+          discriminator: { propertyName: 'bkind' },
+          oneOf: [{ $ref: '#/components/schemas/Shared' }, { $ref: '#/components/schemas/Y' }],
+        },
+        Shared: {
+          type: 'object',
+          discriminator: { propertyName: 'variant' },
+          oneOf: [{ $ref: '#/components/schemas/V1' }],
+        },
+        X: { type: 'object', properties: { x: { type: 'string' } } },
+        Y: { type: 'object', properties: { y: { type: 'string' } } },
+        V1: { type: 'object', properties: { v: { type: 'string' } } },
+      },
+    },
+  };
+
+  test("tags each union's own chained `variant` entry with ITS OWN path, not a bare shared ref", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.createEnvelope ?? [];
+    const aVariant = entries.find((d) => d.path === 'a' && d.propertyName === 'variant');
+    const bVariant = entries.find((d) => d.path === 'b' && d.propertyName === 'variant');
+    expect(aVariant?.ownerRef).toBe(SHARED_REF);
+    expect(aVariant?.ownerPath).toBe('a');
+    expect(bVariant?.ownerRef).toBe(SHARED_REF);
+    expect(bVariant?.ownerPath).toBe('b');
+  });
+
+  test("selecting Shared for 'a' does not leak eligibility to 'b's own chained variant entry, even when 'b' explicitly selected a different branch (Y) and the value also shapes like Shared's nested payload", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.createEnvelope ?? [];
+    const bEntries = entries.filter((d) => d.path === 'b');
+    // Simulates the leaked render-time owner chain described above: `Shared`
+    // was selected for `a` (so its ref legitimately sits in the overall
+    // chain), but `b` itself is explicitly `Y` -- the chain only ever
+    // actually carries `ownerChainKey('a', SHARED_REF)`, never one keyed on
+    // `'b'`. `v` is `Shared`'s own nested `V1` field, deliberately present
+    // alongside the explicit `bkind: 'Y'` so a pre-fix (bare-ref) owner
+    // chain's eligibility check — which cannot tell `'a'` and `'b'` apart —
+    // wrongly matches `variant` against it anyway.
+    const leakedOwnerChain = new Set([ownerChainKey('a', SHARED_REF)]);
+    const value = { bkind: 'Y', v: 'x' };
+    expect(chooseCsharpDiscriminator(value, bEntries, 'b', leakedOwnerChain)).toBeUndefined();
+    const result = resolveCsharpDiscriminatorChain(value, bEntries, 'b', leakedOwnerChain);
+    // Pre-fix, this wrongly resolved to `[['variant', 'V1']]` — injecting a
+    // discriminator field for a branch (`Shared`) that `b` never actually
+    // selected, purely because `a` had selected the same `$ref` elsewhere.
+    expect(result.fields).toEqual([]);
+  });
+
+  test("selecting Shared for 'b' itself (its own ownerChainKey) correctly makes 'b's chained variant entry eligible", () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const entries = table.createEnvelope ?? [];
+    const bEntries = entries.filter((d) => d.path === 'b');
+    const correctOwnerChain = new Set([ownerChainKey('b', SHARED_REF)]);
+    expect(chooseCsharpDiscriminator({ v: 'x' }, bEntries, 'b', correctOwnerChain)).toEqual({
+      name: 'variant',
+      value: 'V1',
+      ref: '#/components/schemas/V1',
     });
   });
 });

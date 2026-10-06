@@ -24,6 +24,29 @@ export interface CsharpDiscriminator {
   // `chooseCsharpDiscriminator` could apply one branch's mapping while
   // actually rendering the other (PR #668 review, round 5).
   ownerRef?: string;
+  // The path at which `ownerRef` itself was offered as a subtype (i.e. the
+  // path of the `oneOf`/`anyOf`/`mapping` union that selecting `ownerRef`
+  // commits to). Set ONCE at the exact point `ownerRef` is assigned a NEW
+  // value (see the `oneOf`/`anyOf`/`mapping` loops in `walkSchema`) and
+  // threaded UNCHANGED through further structural descent, exactly like
+  // `ownerRef` itself — so it stays fixed at the union's own path even as
+  // `path` keeps growing through nested `properties`/`items`.
+  //
+  // Required because the SAME `$ref` can be offered as a subtype by TWO
+  // STRUCTURALLY INDEPENDENT unions (e.g. an outer request root AND an
+  // unrelated nested property both list `Shared` as one of their options).
+  // Render-time eligibility (`chooseCsharpDiscriminator`,
+  // `findExplicitCsharpDiscriminatorRef`) must recognise that ONLY the
+  // union actually reached THIS entry's `ownerRef` nested discriminator
+  // through — not every union that happens to reuse the same ref anywhere
+  // in the document — selected it; a bare `ownerRef` (ref identity alone)
+  // cannot distinguish the two occurrences, and conflating them lets a
+  // ref picked at ancestor path "" wrongly make a sibling union's
+  // same-ref-owned nested entry at an unrelated path (e.g. "child.payload")
+  // eligible, even though THAT union selected a different branch (PR #668
+  // review, round 11: discovery/resolution/renderer must track the owning
+  // union's occurrence, not just its ref).
+  ownerPath?: string;
 }
 
 export type CsharpDiscriminatorTable = Readonly<Record<string, CsharpDiscriminator[]>>;
@@ -301,6 +324,12 @@ function walkSchema(
   // branch's own `$ref` only at the exact point we recurse into THAT
   // branch from a `oneOf`/`anyOf`/`mapping` loop below.
   ownerRef: string | undefined = undefined,
+  // The path at which `ownerRef` was selected (see
+  // `CsharpDiscriminator.ownerPath`). Threaded unchanged alongside
+  // `ownerRef` through plain structural descent, and refined to the
+  // CURRENT `path` only at the exact point a NEW `ownerRef` is committed
+  // below.
+  ownerPath: string | undefined = undefined,
   // Common properties/required contributed by SIBLING `allOf` parts of the
   // schema THIS call is visiting (see the `allOf` loop below) — passed
   // through to `collectSubtypes` so a discriminator declared in ONE `allOf`
@@ -366,6 +395,7 @@ function walkSchema(
       propertyName,
       subtypes: collectSubtypes(resolved, stores, extraProperties, extraRequired),
       ownerRef,
+      ownerPath,
     });
   }
 
@@ -395,11 +425,21 @@ function walkSchema(
           visited,
           activeRefs,
           ownerRef,
+          ownerPath,
         );
       }
     }
     if (isRecord(resolved.items)) {
-      walkSchema(resolved.items, `${path}[]`, stores, output, visited, activeRefs, ownerRef);
+      walkSchema(
+        resolved.items,
+        `${path}[]`,
+        stores,
+        output,
+        visited,
+        activeRefs,
+        ownerRef,
+        ownerPath,
+      );
     }
     // `allOf` branches merge into THIS schema (not an alternative), so they
     // inherit the incoming owner unchanged. `oneOf`/`anyOf` branches ARE
@@ -464,6 +504,7 @@ function walkSchema(
           visited,
           activeRefs,
           ownerRef,
+          ownerPath,
           [...siblingProperties],
           [...siblingRequired],
         );
@@ -474,7 +515,14 @@ function walkSchema(
       if (Array.isArray(parts)) {
         for (const part of parts) {
           const branchRef = isRecord(part) && typeof part.$ref === 'string' ? part.$ref : undefined;
-          const branchOwner = propertyName !== undefined ? (branchRef ?? ownerRef) : ownerRef;
+          // A NEW owner is only committed when THIS schema declares its own
+          // discriminator AND the branch itself is a resolvable `$ref` — an
+          // inline branch, or a branch reached while `propertyName` is
+          // unset, inherits the incoming owner (and its path) unchanged,
+          // same as `allOf` (see the `ownerRef` comment above).
+          const isNewOwner = propertyName !== undefined && branchRef !== undefined;
+          const branchOwner = isNewOwner ? branchRef : ownerRef;
+          const branchOwnerPath = isNewOwner ? path : ownerPath;
           walkSchema(
             part,
             path,
@@ -483,6 +531,7 @@ function walkSchema(
             visited,
             activeRefs,
             branchOwner,
+            branchOwnerPath,
             inheritedProperties,
             inheritedRequired,
           );
@@ -521,6 +570,7 @@ function walkSchema(
           visited,
           activeRefs,
           normalizedRef,
+          path,
           inheritedProperties,
           inheritedRequired,
         );
@@ -616,6 +666,20 @@ function collectChainedSubtypeProperties(
   return properties;
 }
 
+// Encodes a "ref R was selected while resolving path P" fact for the
+// render-time owner chain (see `CsharpDiscriminator.ownerPath`). Keying on
+// the PAIR, not the bare ref, is what lets eligibility distinguish two
+// structurally independent unions that happen to reuse the same `$ref`:
+// selecting `Shared` at the request root (`ownerChainKey('', sharedRef)`)
+// must not satisfy an entry that requires `Shared` to have been selected by
+// an unrelated nested union at `child` (`ownerChainKey('child', sharedRef)`)
+// (PR #668 review, round 11). `::` is safe as a separator: generated
+// `path`s only ever contain `.`/`[]`, and `$ref` strings are JSON-pointer-
+// shaped (`#/components/...`), so neither side can produce a collision.
+export function ownerChainKey(path: string | undefined, ref: string): string {
+  return `${path ?? ''}::${ref}`;
+}
+
 export function chooseCsharpDiscriminator(
   value: Record<string, unknown>,
   entries: readonly CsharpDiscriminator[],
@@ -657,7 +721,8 @@ export function chooseCsharpDiscriminator(
   const matching = entries.filter(
     (candidate) =>
       candidate.path === path &&
-      (candidate.ownerRef === undefined || ownerChain.has(candidate.ownerRef)),
+      (candidate.ownerRef === undefined ||
+        ownerChain.has(ownerChainKey(candidate.ownerPath, candidate.ownerRef))),
   );
   // A key already sitting on `value` under some OTHER same-path entry's own
   // `propertyName` (set explicitly by the caller, or injected by an EARLIER
@@ -706,7 +771,10 @@ export function chooseCsharpDiscriminator(
         // — re-offering it as a candidate here would spuriously re-derive an
         // already-decided field instead of letting a DIFFERENT, not-yet-owned
         // entry at this path make progress.
-        .filter((subtype) => subtype.ref === undefined || !selectedAtPath.has(subtype.ref))
+        .filter(
+          (subtype) =>
+            subtype.ref === undefined || !selectedAtPath.has(ownerChainKey(path, subtype.ref)),
+        )
         .filter((subtype) => {
           // A subtype's own `properties` doesn't include fields that only
           // belong to a further same-object discriminator chained beneath it
@@ -757,7 +825,8 @@ export function findExplicitCsharpDiscriminatorRef(
   const matching = entries.filter(
     (candidate) =>
       candidate.path === path &&
-      (candidate.ownerRef === undefined || ownerChain.has(candidate.ownerRef)),
+      (candidate.ownerRef === undefined ||
+        ownerChain.has(ownerChainKey(candidate.ownerPath, candidate.ownerRef))),
   );
   for (const entry of matching) {
     const explicitValue = value[entry.propertyName];
@@ -772,7 +841,8 @@ export function findExplicitCsharpDiscriminatorRef(
     // sitting right there in `value`. Skip it and keep scanning the
     // remaining entries instead of returning on the first (possibly stale)
     // match (PR #668 review, round 8).
-    if (subtype?.ref !== undefined && !selectedAtPath.has(subtype.ref)) return subtype.ref;
+    if (subtype?.ref !== undefined && !selectedAtPath.has(ownerChainKey(path, subtype.ref)))
+      return subtype.ref;
   }
   return undefined;
 }
@@ -839,9 +909,13 @@ export function resolveCsharpDiscriminatorChain(
       // genuinely NEW progress for this path look like a repeat and
       // terminate the loop before a further same-path entry owned by this
       // ref is ever reached (PR #668 review, round 9; self-review finding).
-      if (discriminator.ref !== undefined && !selectedAtPath.has(discriminator.ref)) {
-        ownerChain = new Set([...ownerChain, discriminator.ref]);
-        selectedAtPath = new Set([...selectedAtPath, discriminator.ref]);
+      if (
+        discriminator.ref !== undefined &&
+        !selectedAtPath.has(ownerChainKey(path, discriminator.ref))
+      ) {
+        const key = ownerChainKey(path, discriminator.ref);
+        ownerChain = new Set([...ownerChain, key]);
+        selectedAtPath = new Set([...selectedAtPath, key]);
         continue;
       }
       break;
@@ -854,9 +928,10 @@ export function resolveCsharpDiscriminatorChain(
       selectedAtPath,
     );
     // Same reasoning as above: gate on `selectedAtPath`, not `ownerChain`.
-    if (explicitRef !== undefined && !selectedAtPath.has(explicitRef)) {
-      ownerChain = new Set([...ownerChain, explicitRef]);
-      selectedAtPath = new Set([...selectedAtPath, explicitRef]);
+    if (explicitRef !== undefined && !selectedAtPath.has(ownerChainKey(path, explicitRef))) {
+      const key = ownerChainKey(path, explicitRef);
+      ownerChain = new Set([...ownerChain, key]);
+      selectedAtPath = new Set([...selectedAtPath, key]);
       continue;
     }
     break;

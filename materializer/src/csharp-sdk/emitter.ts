@@ -1026,11 +1026,15 @@ function renderCsharpValue(
   indent = '',
   path = '',
   discriminators: readonly CsharpDiscriminator[] = [],
-  // Refs of ancestor subtypes already selected during this render (see
-  // `CsharpDiscriminator.ownerRef` / `chooseCsharpDiscriminator`). Scopes a
-  // nested discriminator to the branch it actually belongs to, so a
-  // sibling union member's unrelated (or absent) same-path discriminator is
-  // never applied across branches.
+  // `(path, ref)` pairs (see `ownerChainKey`) for every ancestor subtype
+  // already selected during this render (see `CsharpDiscriminator.ownerRef`
+  // / `ownerPath` / `chooseCsharpDiscriminator`). Keying on the pair, not
+  // the bare ref, scopes a nested discriminator to the EXACT union
+  // occurrence that selected it, so a structurally independent sibling
+  // union that happens to reuse the same `$ref` — but selected a different
+  // branch — never wrongly inherits eligibility for it (PR #668 review,
+  // round 11). This function only ever threads `ownerChain` through
+  // opaquely; it never constructs or inspects an individual entry itself.
   ownerChain: ReadonlySet<string> = new Set(),
 ): string {
   if (value === null) return 'null';
