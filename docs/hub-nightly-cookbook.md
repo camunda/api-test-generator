@@ -25,12 +25,12 @@ So a night with no spec-bump or re-enable post is normal. A night with no nightl
 **If a morning has no nightly post,** the problem is the run or the posting, not Hub: a failing Hub still produces a post.
 Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) and check, in this order:
 
-1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
-2. **A run exists, but the step "Fetch Slack bot token from Vault" failed, or the "Notify Slack" steps were skipped.** The
-   Slack token could not be read, so nothing was posted. The run still ends green, so nothing warns you. Ask the
-   generator owner to check the Vault role and the Slack bot.
-3. **The run failed earlier.** Open the failing step. The posts run even after a failure, so if the run did finish, also
-   check that the Slack bot is still in the channel.
+1. **No run around 02:00 UTC.** The schedule did not fire, so there is no run to turn red. Start one with "Run workflow".
+2. **A run exists and is red with the error "Slack alert not posted".** A Slack step failed: the token could not be read from
+   Vault, or Slack rejected the post. The tests themselves may be fine. Ask the generator owner to check the Vault role and
+   the Slack bot. The same error turns the triage, spec-bump, re-enable, weekly report and gap digest runs red.
+3. **A run exists and is red for another reason.** Open the failing step. The posts run even after a failure, so if the run
+   did finish, also check that the Slack bot is still in the channel.
 
 **Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
 
