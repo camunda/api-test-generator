@@ -718,13 +718,14 @@ export function buildRequestPlan(
 ): RequestStep[] {
   const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
-  const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
   // An optional-fields variant with a read-back ends in a GET after the target; the target is
   // still the logical final step (its body, expected status and oneOf choice are the endpoint's own).
-  const finalIndex = scenario.finalStepIndex ?? scenario.optionalFields?.targetIndex;
-  for (const opRef of scenario.operations) {
-    const isFinal =
-      finalIndex === undefined ? opRef.operationId === lastOpId : steps.length === finalIndex;
+  const finalIndex =
+    scenario.finalStepIndex ??
+    scenario.optionalFields?.targetIndex ??
+    scenario.operations.length - 1;
+  for (const [opIndex, opRef] of scenario.operations.entries()) {
+    const isFinal = opIndex === finalIndex;
     const step: RequestStep = {
       operationId: opRef.operationId,
       method: opRef.method,
