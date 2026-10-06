@@ -1601,3 +1601,90 @@ describe('C# SDK Emitter — discriminators scoped to the selected union branch 
     expect(files[0].content).not.toContain('["kind"] = "FailurePayload"');
   });
 });
+
+describe('C# SDK Emitter — discriminators at the request root (PR #668 review, round 6)', () => {
+  const SUCCESS_REF = '#/components/schemas/Success';
+  const FAILURE_REF = '#/components/schemas/Failure';
+
+  // `emitJsonRequestDataLines` renders every top-level request field
+  // separately (one `data[field] = ...` statement per field) and never
+  // calls `renderCsharpValue` on the whole body, so a discriminator table
+  // entry at path `''` -- the request body ITSELF being the union, not a
+  // nested property -- was never selected: neither implicit injection nor
+  // an explicit root tag was recognised, and every field started with an
+  // empty owner chain, dropping any nested discriminator scoped to the
+  // branch the root actually selected.
+  const DISCRIMINATORS: CsharpDiscriminatorTable = {
+    createProcessInstance: [
+      {
+        path: '',
+        propertyName: 'status',
+        subtypes: [
+          { value: 'Success', properties: ['status', 'payload'], required: [], ref: SUCCESS_REF },
+          { value: 'Failure', properties: ['status', 'payload'], required: [], ref: FAILURE_REF },
+        ],
+      },
+      {
+        path: 'payload',
+        propertyName: 'kind',
+        ownerRef: SUCCESS_REF,
+        subtypes: [{ value: 'Text', properties: ['text'], required: ['text'] }],
+      },
+    ],
+  };
+
+  test('injects the root discriminator and scopes a root-selected branch field to it (implicit)', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators: DISCRIMINATORS });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                // `status` is omitted -- shape inference must select
+                // `Success` (the only matching subtype) at the request
+                // root and inject it, same as a nested polymorphic field.
+                bodyTemplate: { payload: { text: 'hi' } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["status"] = "Success"');
+    expect(files[0].content).toContain('["kind"] = "Text"');
+  });
+
+  test('recognises an explicit root tag and scopes its nested field to the selected branch', async () => {
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators: DISCRIMINATORS });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                // `status` is explicit -- nothing to inject at the root,
+                // but `payload`'s nested `kind` discriminator (owned by
+                // `Success`) must still be recognised as in-branch.
+                bodyTemplate: { status: 'Success', payload: { text: 'hi' } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["kind"] = "Text"');
+  });
+});
