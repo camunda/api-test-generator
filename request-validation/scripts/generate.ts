@@ -766,20 +766,23 @@ async function main() {
   if (rvConfig.nonScalarKeyOperations?.length) {
     const keyFields = new Set(Object.keys(rvConfig.resourceFixtures ?? {}));
     const missingFromSpec = rvConfig.nonScalarKeyOperations.filter((id) => !specOpIds.has(id));
-    const noCases =
-      opts.deep && !opts.onlyOperations
-        ? rvConfig.nonScalarKeyOperations.filter(
-            (id) =>
-              specOpIds.has(id) &&
-              !excludeOps.has(id) &&
-              !deduped.some(
-                (sc) =>
-                  sc.operationId === id &&
-                  sc.type === 'type-mismatch' &&
-                  keyFields.has((sc.target ?? '').split('.').pop() ?? ''),
-              ),
-          )
-        : [];
+    // Only a full run generates every key-field case: --only, --only-operations,
+    // --no-deep and --max-type-mismatch all narrow it on purpose.
+    const isFullRun =
+      !opts.only && !opts.onlyOperations && opts.deep && opts.maxTypeMismatch === undefined;
+    const noCases = isFullRun
+      ? rvConfig.nonScalarKeyOperations.filter(
+          (id) =>
+            specOpIds.has(id) &&
+            !excludeOps.has(id) &&
+            !deduped.some(
+              (sc) =>
+                sc.operationId === id &&
+                sc.type === 'type-mismatch' &&
+                keyFields.has((sc.target ?? '').split('.').pop() ?? ''),
+            ),
+        )
+      : [];
     for (const [ids, why] of [
       [
         missingFromSpec,
