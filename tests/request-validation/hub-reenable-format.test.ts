@@ -105,7 +105,15 @@ describe('re-enable check: suite-wide issues closed as not planned', () => {
       stdio: 'ignore',
     });
     const items: { url: string; reason?: string }[] = JSON.parse(readFileSync(summary, 'utf8'));
-    return items.map((i) => i.url.split('/').pop());
+    const message = execFileSync('bash', [script, summary], {
+      encoding: 'utf8',
+      env: { ...process.env, RUN_URL: '' },
+    });
+    return {
+      issues: items.map((i) => i.url.split('/').pop()),
+      reasons: items.map((i) => i.reason),
+      message,
+    };
   }
   const ki = (n: number, extra: object = {}) => ({
     summary: `issue ${n}`,
@@ -115,13 +123,24 @@ describe('re-enable check: suite-wide issues closed as not planned', () => {
 
   it('reports a not-planned closure until it is acknowledged on the entry', () => {
     expect(
-      runCheck([ki(11, { acknowledgedNotPlanned: true }), ki(12)], 'CLOSED NOT_PLANNED'),
+      runCheck([ki(11, { acknowledgedNotPlanned: true }), ki(12)], 'CLOSED NOT_PLANNED').issues,
     ).toEqual(['12']);
   });
 
   it('still reports an acknowledged entry once the issue was actually fixed', () => {
-    expect(runCheck([ki(11, { acknowledgedNotPlanned: true })], 'CLOSED COMPLETED')).toEqual([
-      '11',
-    ]);
+    expect(runCheck([ki(11, { acknowledgedNotPlanned: true })], 'CLOSED COMPLETED').issues).toEqual(
+      ['11'],
+    );
+  });
+
+  it('hands the close reason to the formatter, so each outcome gets its own instructions', () => {
+    const declined = runCheck([ki(12)], 'CLOSED NOT_PLANNED');
+    expect(declined.reasons).toEqual(['NOT_PLANNED']);
+    expect(declined.message).toContain('closed as *not planned*');
+    expect(declined.message).toContain('acknowledgedNotPlanned');
+    const fixed = runCheck([ki(12)], 'CLOSED COMPLETED');
+    expect(fixed.reasons).toEqual(['COMPLETED']);
+    expect(fixed.message).toContain('closed as *fixed*');
+    expect(fixed.message).toContain('To re-enable');
   });
 });
