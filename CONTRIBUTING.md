@@ -1,5 +1,7 @@
 # Contributing
 
+Taking over the camunda-hub suite? Read [docs/hub-handover.md](docs/hub-handover.md) first.
+
 ## Test strategy: fixture + invariant rule
 
 This repo uses a layered regression strategy (see [README §Regression Testing](README.md#regression-testing)).

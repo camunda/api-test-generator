@@ -6,6 +6,8 @@ dependency graph, then emits scenario-driven test files with full request/respon
 Also emits **negative request-validation tests** (intended HTTP 400) covering ~24 distinct
 malformed-request scenario kinds.
 
+> **Owning the camunda-hub suite?** Start with [docs/hub-handover.md](docs/hub-handover.md).
+
 ## Architecture
 
 ```
