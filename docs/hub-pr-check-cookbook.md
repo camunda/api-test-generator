@@ -30,7 +30,7 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 
 | The alert says | Whose problem | What to do |
 |---|---|---|
-| "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Re-run it (see "Re-run without a new push" below). If it keeps failing, ask in `#camunda-hub-pr-e2e-results` |
+| "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Open the failed step in the run and read the error first. If you can name a cause outside Hub (registry login, image pull, runner), re-run once (see "Re-run without a new push" below). If you cannot name it, or it fails again, ask in `#camunda-hub-pr-e2e-results` with the run link |
 | "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#camunda-hub-pr-e2e-results` |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
 | "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it (see the note under "Who gets told what"). Ask in `#camunda-hub-pr-e2e-results` for help |
