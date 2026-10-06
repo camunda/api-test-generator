@@ -220,6 +220,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack
+        id: slack-notify
         if: always() && steps.message.outcome == 'success'
         continue-on-error: true
         uses: slackapi/slack-github-action@v2
@@ -232,3 +233,9 @@ jobs:
               "text": ${{ toJSON(steps.message.outputs.text) }},
               "mrkdwn": true
             }
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ steps.slack.outcome }} ${{ steps.message.outcome }} ${{ steps.slack-notify.outcome }}"

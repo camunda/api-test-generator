@@ -75,3 +75,9 @@ jobs:
           # Scheduled runs post; a manual run defaults to a dry run.
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: node scripts/triage/hub-gap-digest.ts
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ steps.slack-secrets.outcome }}"

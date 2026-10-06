@@ -173,6 +173,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack
+        id: slack-notify
         if: >-
           always() && steps.slack.outputs.SLACK_BOT_TOKEN != '' &&
           steps.slack-message.outcome == 'success' && steps.slack-message.outputs.text != ''
@@ -198,3 +199,9 @@ jobs:
             cat "${{ github.workspace }}/hub-reenable-summary.json" 2>/dev/null || echo "[]"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if the Slack alert did not go out
+        if: always()
+        uses: ./.github/actions/fail-if-slack-failed
+        with:
+          outcomes: "${{ steps.slack.outcome }} ${{ steps.slack-message.outcome }} ${{ steps.slack-notify.outcome }}"
