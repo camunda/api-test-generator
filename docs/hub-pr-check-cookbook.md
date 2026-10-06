@@ -57,6 +57,24 @@ camunda-hub PR's author. It is edited in place on later pushes and closes itself
 
 Every Slack reply lists the source PR and commit, then one line of links: the run, the camunda-hub run that triggered it, and this cookbook.
 
+### Why a Slack message is sometimes edited instead of posted again
+
+A camunda-hub PR can get many pushes. To keep the channel readable, the alert for a PR is **edited** when the PR fails
+the same way again, and a **new** message is posted only when the failure is different.
+
+"The same way" is decided by a *fingerprint*: a short label built from exactly what failed, that is the list of
+failing tests plus the endpoints that have no test. Two runs with the same list have the same fingerprint.
+
+Example for PR #28390:
+
+1. A push fails tests `createFile` and `updateFolder`. A new message is posted and the medic is pinged.
+2. The next push still fails the same two tests. Same PR, same fingerprint, so the message is edited to show the
+   latest run. No new message, no new ping.
+3. A later push fails only `createFile`, or a different test. The fingerprint changed, so a new message is posted
+   and the medic is pinged again.
+
+A failure with no evidence (for example the run produced no report) has no fingerprint. See the list below.
+
 Slack is one thread per day with one reply per (PR, failure). What counts as "the same failure":
 
 - **With evidence** (a failing spec or operations with no test): the fingerprint of the failing set.
