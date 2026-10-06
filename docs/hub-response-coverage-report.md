@@ -62,6 +62,7 @@ Across positive and negative tests
 - **What counts as covered.** A test that exists in the generated files and asserts that response. A test skipped because of a known
   Hub bug is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
   the "Every kind of bad request" line, which leaves such endpoints out of both numbers.
+- The report's "Negative tests" section also counts 409 (a request that is wrong for the current state), although the generated 409 tests live in the positive suite, because they need setup calls first.
 - 500 responses are not counted. 403 is counted but not part of the "missing a test" roll-up (it is tracked separately).
 - "Every kind of bad request" counts kinds with at least one test (missing required field, wrong type, bad enum, and so on), not how many tests each kind has.
   It is only as complete as the generator's own rules for when a kind applies, so for body-schema kinds treat it as an upper bound: the headline can overstate real coverage.

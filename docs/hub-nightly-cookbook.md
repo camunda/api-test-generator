@@ -70,7 +70,7 @@ While Slack is down you can still read the night's result: open the nightly run,
 > 📊 View run · 📋 positive (the TestRail run)
 
 - The **positive** suite sends good requests and expects success (including create, read, delete and restore flows).
-  The **negative** suite sends bad requests and expects 400, 401, 403, 404 or 409.
+  The **negative** suite sends bad requests and expects 400, 401, 403 or 404. The 409 (conflict) tests are in the positive suite, because they need setup calls first.
 - **A thread reply under the post** lists the known issues that limit what the suite covers. Each item is either skipped
   on purpose (the tests are left out) or only partly checked (the test still runs but one assertion, such as the error-body
   shape, is not made), because of a Hub issue, with its link. A green run does **not** fully cover those. An item can stay
@@ -179,11 +179,12 @@ If one of these breaks, the matching alerts stop or fail. The owner and the rota
 
 | Dependency | Used for | Where it is configured |
 |---|---|---|
-| GitHub App `camunda/qa-processes` | Cloning the private camunda-hub repo, opening and editing issues and comments | Vault, `secret/data/products/qa/ci/github.com/apps/camunda/qa-processes` |
+| GitHub App `preview-envs` (read) | Cloning the private camunda-hub repo | Vault, `secret/data/products/web-modeler/ci/preview-envs`, read by `.github/actions/hub-clone-token` |
+| GitHub App `camunda/qa-processes` (write) | Opening and editing issues and comments | Vault, `secret/data/products/qa/ci/github.com/apps/camunda/qa-processes` |
 | Vault login (JWT role and an approle) | Every workflow reads its secrets from Vault | Repo secrets `VAULT_ADDR`, `VAULT_JWT_PATH`, `VAULT_JWT_ROLE`, `VAULT_JWT_AUDIENCE`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID` |
 | Slack bot token | Every post in the Slack channels | Vault, `secret/data/products/qa/ci/common`, key `SLACK_BOT_USER_OAUTH_TOKEN`, read by `.github/actions/slack-token` |
 | TestRail credentials | Publishing the nightly results | Vault, `secret/data/products/qa/ci/common` |
-| `ANTHROPIC_API_KEY` | The classifier on PRs and the nightly triage | Repo secret |
+| Claude API key | The classifier on PRs and the nightly triage | Vault, `secret/data/products/qa/ci/common`, key `CLAUDE_API_KEY` (the workflows alias it to `ANTHROPIC_API_KEY`) |
 | Container registry login | Pulling the PR's Hub image | Repo secrets `CAMUNDA_CONTAINER_REGISTRY_USER` and `_PASSWORD` |
 
 ## Who to ask
