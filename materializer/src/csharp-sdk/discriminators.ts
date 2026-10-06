@@ -379,7 +379,26 @@ function walkSchema(
     // happens to be visited first (an arbitrary function of `oneOf` array
     // order), a regression this round's owner-scoping fix would otherwise
     // introduce (PR #668 review, round 6: adversarial finding).
-    const visitKey = `${ref}:${path}:${ownerRef ?? ''}`;
+    //
+    // `ownerPath` is ALSO part of the key — not just `ref:path:ownerRef` —
+    // because the SAME `ownerRef` can commit to the SAME final `path` from
+    // TWO DIFFERENT union sites. E.g. an `allOf` with an independent root
+    // union and a `child` union, BOTH offering the same `Shared` ref, where
+    // `Shared` itself declares a nested `child` property: selecting `Shared`
+    // at the root (`ownerPath=''`) and then structurally descending into
+    // `Shared.child.payload` reaches `path="child.payload"`; selecting
+    // `Shared` at the `child` union (`ownerPath="child"`) and then
+    // structurally descending into `Shared`'s own `payload` ALSO reaches
+    // `path="child.payload"` (`"child" + ".payload"`). Both visits share the
+    // same `ref`/`path`/`ownerRef` triple but commit from different owner
+    // sites, so `ownerChainKey` (which keys on `ownerPath` + `ownerRef`,
+    // see below) treats them as two distinct, mutually exclusive owner
+    // contexts at render time. An `ownerPath`-blind cache key here collapses
+    // them into ONE table entry tagged with whichever `ownerPath` was
+    // visited first, silently dropping the other owner context's
+    // discriminator entry entirely (PR #668 review, round 5: "Cache key
+    // omits ownerPath and drops nested union entries").
+    const visitKey = `${ref}:${path}:${ownerRef ?? ''}:${ownerPath ?? ''}`;
     if (visited.has(visitKey)) return;
     visited.add(visitKey);
   }

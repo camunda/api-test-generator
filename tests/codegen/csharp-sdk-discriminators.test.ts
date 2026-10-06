@@ -997,6 +997,113 @@ describe('buildCsharpDiscriminatorTable — shared nested schema reached via two
 });
 
 /**
+ * Regression coverage for PR #668 review round 5: "Cache key omits
+ * ownerPath and drops nested union entries". `walkSchema`'s `visited`
+ * dedup keyed only on `ref:path:ownerRef` — omitting `ownerPath` even
+ * though `ownerChainKey` (used at render time to decide eligibility) keys
+ * on `ownerPath` + `ownerRef` together. An INDEPENDENT root union and
+ * `child` union both offer the SAME `Shared` ref; `Shared` itself declares
+ * both its own `payload` property AND a nested `child.payload` property of
+ * the SAME ref. Reaching `path="child.payload"` is possible two ways:
+ *   - via the ROOT union selecting `Shared` (`ownerPath=''`), then
+ *     structurally descending into `Shared`'s OWN nested `child.payload`;
+ *   - via the `child` union selecting `Shared` (`ownerPath="child"`), then
+ *     structurally descending into `Shared`'s OWN `payload` (reached at
+ *     `"child" + ".payload"`).
+ * Both visits share the identical `ref`/`path`/`ownerRef` triple but commit
+ * from two DIFFERENT owner sites — an `ownerPath`-blind cache key collapsed
+ * them into one entry (whichever was visited first), silently dropping the
+ * other owner context's discriminator entry. A render that chose a
+ * DIFFERENT root branch (so `ownerChainKey('', SharedRef)` is NOT in the
+ * owner chain) but DID choose `Shared` at `child` then had no entry left to
+ * find at all, and its `child.payload.payloadKind` discriminator was never
+ * injected.
+ */
+describe('buildCsharpDiscriminatorTable — same ref/path/ownerRef reached from two different owner paths', () => {
+  const bundle = {
+    paths: {
+      '/wraps': {
+        post: {
+          operationId: 'createWrap',
+          requestBody: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Request' } },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Request: {
+          allOf: [
+            { $ref: '#/components/schemas/RootUnion' },
+            { type: 'object', properties: { child: { $ref: '#/components/schemas/ChildUnion' } } },
+          ],
+        },
+        RootUnion: {
+          discriminator: { propertyName: 'rootKind' },
+          oneOf: [
+            { $ref: '#/components/schemas/Shared' },
+            { $ref: '#/components/schemas/OtherRoot' },
+          ],
+        },
+        ChildUnion: {
+          discriminator: { propertyName: 'childKind' },
+          oneOf: [
+            { $ref: '#/components/schemas/Shared' },
+            { $ref: '#/components/schemas/OtherChild' },
+          ],
+        },
+        // `Shared` is reachable at the ROOT (committing `ownerPath=''`) and
+        // at `child` (committing `ownerPath='child'`). It declares its own
+        // `payload` AND a nested `child.payload` property of the SAME ref,
+        // so both owner commitments reach the identical final path.
+        Shared: {
+          type: 'object',
+          properties: {
+            payload: { $ref: '#/components/schemas/Payload' },
+            child: {
+              type: 'object',
+              properties: { payload: { $ref: '#/components/schemas/Payload' } },
+            },
+          },
+        },
+        Payload: {
+          discriminator: { propertyName: 'payloadKind' },
+          oneOf: [{ $ref: '#/components/schemas/TextPayload' }],
+        },
+        TextPayload: { type: 'object', properties: { text: { type: 'string' } } },
+        OtherRoot: { type: 'object' },
+        OtherChild: { type: 'object' },
+      },
+    },
+  };
+
+  test('produces one child.payload entry per owning site, not just the first-visited one', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const childPayloadEntries = (table.createWrap ?? []).filter(
+      (d) => d.path === 'child.payload' && d.propertyName === 'payloadKind',
+    );
+    const ownerPaths = childPayloadEntries.map((entry) => entry.ownerPath).sort();
+    expect(ownerPaths).toEqual(['', 'child']);
+  });
+
+  test('chooseCsharpDiscriminator finds child.payload.payloadKind when only the child union chose Shared', () => {
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const childPayloadEntries = (table.createWrap ?? []).filter(
+      (d) => d.path === 'child.payload' && d.propertyName === 'payloadKind',
+    );
+    // The root union chose `OtherRoot` (so `ownerChainKey('', SharedRef)` is
+    // NOT in the chain) — only the `child` union chose `Shared`.
+    const ownerChain = new Set([ownerChainKey('child', '#/components/schemas/Shared')]);
+    expect(chooseCsharpDiscriminator({}, childPayloadEntries, 'child.payload', ownerChain)).toEqual(
+      { name: 'payloadKind', value: 'TextPayload', ref: '#/components/schemas/TextPayload' },
+    );
+  });
+});
+
+/**
  * Regression coverage for `chooseCsharpDiscriminator`'s new `ownerChain`
  * parameter and `findExplicitCsharpDiscriminatorRef` (PR #668 review, round
  * 5): a same-path entry scoped to a specific branch (`ownerRef`) must be
