@@ -24,6 +24,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+const CAPABILITY_GATE_KEYS = new Set(['disabledDetailContains', 'disabledStatus']);
+
 /** A field's capability-gate rejection, as declared in `global-context-seeds.json`. */
 export interface CapabilityGateInfo {
   disabledDetailContains: string;
@@ -101,6 +103,14 @@ export function loadCapabilityGates(
     ) {
       throw new Error(
         `Malformed ${seedsPath}: seeds[${i}].capabilityGate.disabledStatus must be a 4xx/5xx status string.`,
+      );
+    }
+    const unknownKeys = Object.keys(entry.capabilityGate).filter(
+      (k) => !CAPABILITY_GATE_KEYS.has(k),
+    );
+    if (unknownKeys.length) {
+      throw new Error(
+        `Malformed ${seedsPath}: seeds[${i}].capabilityGate has unknown key(s): ${unknownKeys.join(', ')}.`,
       );
     }
     out.set(entry.fieldName, {

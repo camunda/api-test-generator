@@ -456,6 +456,35 @@ describe('request-validation: capability-gated fields (#404)', () => {
       });
     });
 
+    it('throws on an unknown key inside capabilityGate instead of silently defaulting', () => {
+      // Review finding: a typo'd key (e.g. the real key is `disabledStatus`,
+      // not `disabledStaus`) previously loaded successfully and silently
+      // defaulted the rejection status to 400, even though the canonical
+      // schema/zod validator both reject unknown keys
+      // (`additionalProperties: false` / `.strict()`) — the two pipelines
+      // could disagree on the same file.
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({
+          version: 1,
+          seeds: [
+            {
+              binding: 'tenantIdVar',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar',
+              capabilityGate: {
+                disabledDetailContains: 'multi-tenancy is disabled',
+                disabledStaus: '403',
+              },
+            },
+          ],
+        }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
+        /capabilityGate has unknown key\(s\): disabledStaus/,
+      );
+    });
+
     it('throws when disabledStatus is not a 4xx/5xx status string', () => {
       fs.writeFileSync(
         path.join(ontologyDir, 'global-context-seeds.json'),
