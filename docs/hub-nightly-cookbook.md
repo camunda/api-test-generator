@@ -22,9 +22,15 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 
 The spec-bump and re-enable posts are silent when there is nothing to report.
 
-**If a morning has no nightly post at all,** something is wrong with the posting itself, not with Hub. A missing
-Slack token makes every workflow finish green without posting. Open the Actions tab of `camunda/api-test-generator`
-and look at `nightly-camunda-hub`.
+**If a morning has no nightly post,** the problem is the run or the posting, not Hub: a failing Hub still produces a post.
+Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions/workflows/nightly-camunda-hub.yml) and check, in this order:
+
+1. **No run around 02:00 UTC.** The schedule did not fire. Start one with "Run workflow".
+2. **A run exists, but the step "Fetch Slack bot token from Vault" failed, or the "Notify Slack" steps were skipped.** The
+   Slack token could not be read, so nothing was posted. The run still ends green, so nothing warns you. Ask the
+   generator owner to check the Vault role and the Slack bot.
+3. **The run failed earlier.** Open the failing step. The posts run even after a failure, so if the run did finish, also
+   check that the Slack bot is still in the channel.
 
 **Where to look (GitHub Actions pages, in `camunda/api-test-generator`)**
 
