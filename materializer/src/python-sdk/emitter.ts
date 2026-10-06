@@ -597,7 +597,15 @@ function renderPythonRequestStep(
         }
         requestArgs.push(`data=data_${stepNum}`);
       }
-      if (filesTemplate !== undefined) {
+      const isDocumentUpload =
+        step.operationId === 'createDocument' || step.operationId === 'createDocuments';
+      const hasNoFiles = !isRecord(filesTemplate) || Object.keys(filesTemplate).length === 0;
+      if (isDocumentUpload && hasNoFiles) {
+        // An empty files dict makes httpx send form-urlencoded, which the broker rejects with 415.
+        const field = step.operationId === 'createDocuments' ? 'files' : 'file';
+        lines.push(`    files_${stepNum} = {'${field}': ('hello.txt', b'Hello, world!')}`);
+        requestArgs.push(`files=files_${stepNum}`);
+      } else if (filesTemplate !== undefined) {
         lines.push(`    files_${stepNum} = ${renderPythonMultipartFiles(filesTemplate)}`);
         requestArgs.push(`files=files_${stepNum}`);
       }
