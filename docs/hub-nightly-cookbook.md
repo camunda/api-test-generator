@@ -1,9 +1,18 @@
 # Hub Nightly Channel Cookbook
 
 > **Goal:** read any message in `#camunda-hub-nightly-test-results` and know what it means, whether it is
-> yours to act on, and what to do. No knowledge of the generator needed.
+> yours to act on, and what to do. The "Start here" part needs no knowledge of the generator.
 > Messages about a single camunda-hub PR are in `#camunda-hub-pr-e2e-results` instead; see
 > [hub-pr-check-cookbook.md](hub-pr-check-cookbook.md).
+
+## Who owns what
+
+- **Generator owner:** the Hub team once the handover is done (until then, the test automation team). The generator owner
+  acts on the spec-bump, re-enable and weekly-report posts, and on the weekly coverage issues.
+- **Medic:** `hub-medic`. After the handover it also covers the generator and the pipeline. Until the workflows are
+  changed, alerts about the generator still ping `test-automation-medic`.
+- **The PR check is informational, not required:** a red check does not block merging.
+- **A normal night** has 0 failed tests. Known Hub bugs are skipped, not run, so they do not count as failures. Any number above 0 is news.
 
 ## Start here
 
@@ -16,9 +25,9 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 |---|---|---|
 | 02:00 | Posted every night. Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 |
 | After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures |
-| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner |
-| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner |
-| Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner |
+| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner (the Hub team after the handover) |
+| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner (the Hub team after the handover) |
+| Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner (the Hub team after the handover) |
 
 So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not (see below).
 
@@ -59,13 +68,12 @@ Open [nightly-camunda-hub](https://github.com/camunda/api-test-generator/actions
 > 📊 View run · 📋 positive (the TestRail run)
 
 - The **positive** suite sends good requests and expects success (including create, read, delete and restore flows).
-  The **negative** suite sends bad requests and expects 400, 401, 403 or 404.
+  The **negative** suite sends bad requests and expects 400, 401, 403, 404 or 409.
 - **A thread reply under the post** lists the known issues that limit what the suite covers. Each item is either skipped
   on purpose (the tests are left out) or only partly checked (the test still runs but one assertion, such as the error-body
   shape, is not made), because of a Hub issue, with its link. A green run does **not** fully cover those. An item can stay
   listed after its issue is closed, when Hub closed it as not planned.
-  The re-enable check (below) does **not** watch the partly checked items (`knownProblemDetailShapeGaps`, for example the empty
-  401 body), so nobody is told when their issue closes: follow those issues yourself.
+  The re-enable check does not watch the partly checked items; see "Not watched" in the re-enable section.
 - **`⚠️ config drift: positive-suppress lists X not in the current spec`**: an operation the config skips no longer exists
   upstream (renamed or removed). The generator owner updates `configs/camunda-hub/positive-suppress.json`.
 
@@ -133,7 +141,7 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 
 | Message | Meaning | Do this |
 |---|---|---|
-| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR, let the live check run, merge if green |
+| 🎉 *issue* is closed — re-enabled: `ops` → draft PR | The skip was removed in a draft PR | Review the draft PR and let the live check run. Merge if it is green **and** the Hub issue was closed as fixed. If Hub closed it as not planned, close the PR: the skip must stay |
 | 🎉 … already has an open unskip PR | A PR for it exists already | Review that PR |
 | ⚠️ … breaks local generate/tests | Removing the skip makes generation or tests fail | Open the workflow run and investigate |
 | ⚠️ … no generator token was available | The job could not open a PR this time | Nothing, it retries next run |
@@ -166,5 +174,10 @@ with the change since last week in brackets. Gaps become issues. Read
 - **Pin:** the camunda-hub commit the invariant tests are checked against.
 - **Skip:** a test left out on purpose because of a tracked Hub limitation, with an issue link. It can stay after the issue closes, when Hub will not fix it.
 - **Suite-wide skip:** a skip that is not tied to one endpoint.
-- **Medic:** a Slack group on call for a test area.
+- **Medic:** a Slack group on call for a test area (`hub-medic`).
+- **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
+- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself.
+- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
+- **TestRail:** the test-management tool the nightly results are also published to.
+- **Vault:** the secrets store the workflows read their tokens from.
 - **Unmapped operation / coverage gap:** an endpoint with no generated test at all.

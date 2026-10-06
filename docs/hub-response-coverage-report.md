@@ -38,14 +38,14 @@ Positive tests (the request is right)
 
 Negative tests (the request is wrong)
 • Bad request (400), Not authenticated (401), Forbidden (403), Not found (404), Conflict (409): "x of y" each
-• Every kind of bad request tested: 32 of 36 endpoints. <which kinds are missing most often>
+• Every kind of bad request tested: 32 of 64 endpoints. <which kinds are missing most often>
 
 Across positive and negative tests
 • Biggest gaps ...
 • N endpoints are missing a test for a success, 400, 401, 404 or 409 response
 ```
 
-- "x of y" means: y endpoints document that response, x of them have a test that asserts it.
+- "x of y" means: y endpoints document that response, x of them have a test that asserts it. Not every line counts endpoints: "Optional request fields" counts **fields** (63 of 68 fields), and the lifecycle lines count **resources** or **links**.
 - A number in brackets is the change since the previous scheduled report. Nothing is shown when it is unchanged or there is no previous report.
 - A "resource" is something the API lets you create, read by key and delete (files, folders, projects, and so on; one nested under a parent key counts too); it needs a
   restore flow too if a delete is soft: the key path has a `.../restoration` endpoint and the collection has a

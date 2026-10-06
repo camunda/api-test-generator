@@ -1,8 +1,9 @@
 # Hub PR Check Cookbook
 
 > **Goal:** if the `api-test-generator/hub-suite` check on your camunda-hub PR is red, or a Slack alert names
-> your PR, you can tell in a few minutes whether it is your problem and what to do. No knowledge of the
-> generator needed. The sections after "Start here" are reference for people who maintain the check.
+> your PR, you can tell in a few minutes whether it is your problem and what to do. "Start here" needs no
+> knowledge of the generator. The sections after it are reference for people who maintain the check. The check is
+> **informational, not required**: a red result does not block merging.
 
 Messages in `#camunda-hub-nightly-test-results` (nightly run, triage, spec bump, re-enable check, weekly report) are explained in
 [hub-nightly-cookbook.md](hub-nightly-cookbook.md).
@@ -16,7 +17,7 @@ spec and run against a Hub built from your PR. If you add or change an endpoint,
 (`api-test-generator`). A red check can mean your change broke Hub, but it can just as well mean the generator
 does not yet understand a new endpoint, or that the test run itself had a problem. The check tells you which.
 
-**The three results you will see**
+**The four results you will see**
 
 | You see | Plain meaning | You do |
 |---|---|---|
@@ -51,9 +52,21 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 - **Generator gap:** the generator has no test, or a wrong test, for an endpoint. Not a Hub bug.
 - **Coverage gap:** an endpoint with no generated test at all (also called an *unmapped operation*).
 - **Medic:** a Slack group on call for a test area (`hub-medic` for Hub, `test-automation-medic` for the generator and pipeline). The alert pings the right one.
-- **Classifier:** an automated step that reads the failure and picks one of the verdicts above.
+- **Classifier:** an automated step that reads the failure and picks one of the verdicts above. It is an AI agent and can be wrong; it is told to answer "unknown" rather than guess.
+- **Ontology:** the config files in `configs/camunda-hub/ontology/` that tell the generator how each resource is created, read, deleted and linked.
+- **Live check:** the `hub-pr-live-check` workflow, which runs the generated suite against a live Hub for pull requests to the generator repo itself.
+- **Invariant tests:** tests in the generator repo that check the generated output against one pinned camunda-hub spec.
 - **Fingerprint:** a short label for exactly what failed, used so the same failure does not post twice (see below).
 - **Evidence:** a failing test or an untested endpoint. "No evidence" means the run left no readable report.
+
+## Who owns what
+
+- **Generator owner:** the Hub team once the handover is done (until then, the test automation team). The generator owner
+  acts on the spec-bump, re-enable and weekly-report posts, and on the weekly coverage issues.
+- **Medic:** `hub-medic`. After the handover it also covers the generator and the pipeline. Until the workflows are
+  changed, alerts about the generator still ping `test-automation-medic`.
+- **The PR check is informational, not required:** a red check does not block merging.
+- **A normal night** has 0 failed tests. Known Hub bugs are skipped, not run, so they do not count as failures. Any number above 0 is news.
 
 ---
 
@@ -98,7 +111,7 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 | Outcome | Status | Slack (`#camunda-hub-pr-e2e-results`) | Comment on the camunda-hub PR | Issue in api-test-generator |
 |---|---|---|---|---|
 | Pass | `success` | no | no | none |
-| Draft PR fails | `failure` | no | no | none |
+| Draft PR, run by hand, fails (drafts are skipped otherwise) | `failure` | no | no | none |
 | Startup failure | `failure` | yes, hub-medic + test-automation-medic | no | none |
 | Pre-suite failure | `failure` | yes, test-automation-medic | no | none |
 | product (high confidence) | `failure` | yes, hub-medic + test-automation-medic | no | none |
@@ -169,6 +182,10 @@ The rules, in short. Alerts are grouped in one Slack thread per day, with one re
 
 ## Reproducing locally
 
+You need Docker, Node 22, Python 3 and, to pull a PR image, access to the container registry (no JDK unless you build Hub from source). The scripts expect
+the camunda-hub clone at `../camunda-hub` and the next command **switches its branch**: save or stash your work there
+first, and switch back afterwards.
+
 ```bash
 git -C ../camunda-hub checkout <PR sha>                 # sibling clone; SPEC_REF is ignored
 HUB_MODE=prebuilt HUB_IMAGE_TAG=pr-<sha> ./docker/start-hub.sh start   # needs registry access
@@ -220,8 +237,8 @@ in api-test-generator against any branch.
 - **Who:** the author of that camunda-hub PR, assigned automatically when possible (not for bots, and not for an author without
   access to this repo; then it stays unassigned). Reassign freely, it will not be overwritten.
 - **Not the same as the weekly report.** The weekly coverage report opens an index issue plus one issue per API
-  area. Those are repo-wide, not tied to any PR or author, so they are **not assigned**. Someone on the Hub
-  team has to pick them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
+  area. Those are repo-wide, not tied to any PR or author, so they are **not assigned**. The generator owner (the Hub
+  team after the handover) has to pick them up (see [hub-response-coverage-report.md](hub-response-coverage-report.md)).
 - **Daily nudge:** `hub-generator-gap-digest.yml` posts to `#camunda-hub-pr-e2e-results` on weekdays
   at 07:00 UTC, listing issues whose camunda-hub PR has merged and whose issue is still open,
   oldest merge first. Silent when there is nothing overdue.
