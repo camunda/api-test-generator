@@ -680,9 +680,8 @@ function buildRequestPlan(
 ): RequestStep[] {
   const steps: RequestStep[] = [];
   // Each operation becomes a step; final step uses response shape for extraction
-  const lastOpId = scenario.operations[scenario.operations.length - 1].operationId;
-  for (const opRef of scenario.operations) {
-    const isFinal = opRef.operationId === lastOpId;
+  for (const [opIndex, opRef] of scenario.operations.entries()) {
+    const isFinal = opIndex === scenario.operations.length - 1;
     const step: RequestStep = {
       operationId: opRef.operationId,
       method: opRef.method,
