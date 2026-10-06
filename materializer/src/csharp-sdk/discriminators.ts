@@ -16,41 +16,90 @@ interface SchemaRecord {
   [key: string]: unknown;
 }
 
+// The two component stores a `$ref` can point into for discriminator
+// discovery purposes: schema definitions, and request-body definitions (a
+// request body can itself be `{ "$ref": "#/components/requestBodies/X" }`,
+// which the extractor already resolves — see
+// `semantic-graph-extractor/schema-analyzer.ts:967-971` — but discriminator
+// discovery did not).
+interface ComponentStores {
+  schemas: SchemaRecord;
+  requestBodies: SchemaRecord;
+}
+
 function isRecord(value: unknown): value is SchemaRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function schemaRefName(ref: string): string | undefined {
-  const prefix = '#/components/schemas/';
-  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined;
+const REF_PREFIXES = {
+  '#/components/schemas/': 'schemas',
+  '#/components/requestBodies/': 'requestBodies',
+} as const satisfies Record<string, keyof ComponentStores>;
+
+function lookupRef(ref: string, stores: ComponentStores): SchemaRecord | undefined {
+  for (const [prefix, store] of Object.entries(REF_PREFIXES)) {
+    if (ref.startsWith(prefix)) {
+      const candidate = stores[store][ref.slice(prefix.length)];
+      return isRecord(candidate) ? candidate : undefined;
+    }
+  }
+  return undefined;
 }
 
-function resolveSchema(schema: unknown, schemas: SchemaRecord): SchemaRecord | undefined {
+// Resolves a `$ref` to its target, FOLLOWING an alias chain: a schema (or
+// request body) whose own body is itself just `{ "$ref": "..." }` (e.g.
+// `JobResultAlias` pointing at `JobResult`) is resolved all the way through
+// to the schema that actually carries `properties`/`allOf`/`discriminator`,
+// not just one hop. `seenRefs` guards against a chain that cycles back on
+// itself (`A -> B -> A`); each TOP-level `resolveSchema` call (from
+// `collectProperties`/`collectRequired`/`walkSchema`) starts walking a fresh
+// alias chain, so this guard is local to that one resolution, independent of
+// `activeRefs`'s allOf/property-descent ancestry tracking.
+function resolveRefChain(
+  ref: string,
+  stores: ComponentStores,
+  seenRefs: Set<string>,
+): SchemaRecord | undefined {
+  if (seenRefs.has(ref)) return undefined;
+  const candidate = lookupRef(ref, stores);
+  if (!candidate) return undefined;
+  const innerRef = typeof candidate.$ref === 'string' ? candidate.$ref : undefined;
+  if (innerRef === undefined) return candidate;
+  seenRefs.add(ref);
+  try {
+    return resolveRefChain(innerRef, stores, seenRefs) ?? candidate;
+  } finally {
+    seenRefs.delete(ref);
+  }
+}
+
+function resolveSchema(
+  schema: unknown,
+  stores: ComponentStores,
+  seenRefs: Set<string> = new Set(),
+): SchemaRecord | undefined {
   if (typeof schema === 'string') {
-    const ref = schemaRefName(schema);
-    const resolved = ref === undefined ? undefined : schemas[ref];
-    return isRecord(resolved) ? resolved : undefined;
+    return resolveRefChain(schema, stores, seenRefs);
   }
   if (!isRecord(schema)) return undefined;
-  const ref = typeof schema.$ref === 'string' ? schemaRefName(schema.$ref) : undefined;
+  const ref = typeof schema.$ref === 'string' ? schema.$ref : undefined;
   if (ref === undefined) return schema;
-  const resolved = schemas[ref];
-  if (!isRecord(resolved)) return undefined;
-  return { ...resolved, $ref: schema.$ref };
+  const resolved = resolveRefChain(ref, stores, seenRefs);
+  if (!resolved) return undefined;
+  // Preserve the ORIGINAL ref (not the alias chain's final link) as `$ref`:
+  // callers use it as the identity of THIS tree position for ancestry/visit
+  // tracking (`activeRefs`/`visited`), which must key on the ref actually
+  // reached here, not on whichever ref the chain happened to resolve through.
+  return { ...resolved, $ref: ref };
 }
 
-// `collectProperties`/`collectRequired` recurse only through `allOf`, so the only cycle they
-// can hit is a `$ref` reappearing in its own `allOf` chain (direct, or via a mutually-recursive
-// chain of `$ref`s). `activeRefs` tracks the refs on the CURRENT descent (mirroring the
-// ancestry-tracking fix in `walkSchema`); each top-level call from `collectSubtypes` starts a
-// fresh set, since a subtype's own allOf chain is independent of its siblings'.
 function collectProperties(
   schema: unknown,
-  schemas: SchemaRecord,
+  stores: ComponentStores,
   activeRefs: Set<string> = new Set(),
 ): Set<string> {
   const properties = new Set<string>();
-  const resolved = resolveSchema(schema, schemas);
+  const resolved = resolveSchema(schema, stores);
   if (!resolved) return properties;
   const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
   if (ref !== undefined) {
@@ -63,7 +112,7 @@ function collectProperties(
     }
     if (Array.isArray(resolved.allOf)) {
       for (const part of resolved.allOf) {
-        for (const name of collectProperties(part, schemas, activeRefs)) properties.add(name);
+        for (const name of collectProperties(part, stores, activeRefs)) properties.add(name);
       }
     }
   } finally {
@@ -74,11 +123,11 @@ function collectProperties(
 
 function collectRequired(
   schema: unknown,
-  schemas: SchemaRecord,
+  stores: ComponentStores,
   activeRefs: Set<string> = new Set(),
 ): Set<string> {
   const required = new Set<string>();
-  const resolved = resolveSchema(schema, schemas);
+  const resolved = resolveSchema(schema, stores);
   if (!resolved) return required;
   const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
   if (ref !== undefined) {
@@ -93,7 +142,7 @@ function collectRequired(
     }
     if (Array.isArray(resolved.allOf)) {
       for (const part of resolved.allOf) {
-        for (const name of collectRequired(part, schemas, activeRefs)) required.add(name);
+        for (const name of collectRequired(part, stores, activeRefs)) required.add(name);
       }
     }
   } finally {
@@ -102,50 +151,70 @@ function collectRequired(
   return required;
 }
 
+// Builds one subtype entry per `oneOf`/`anyOf` branch not already covered by
+// an explicit `discriminator.mapping` entry. Used both for branches left over
+// after a PARTIAL mapping, and for a discriminator with NO mapping at all
+// (`mapping` is `undefined`, so every branch is "uncovered").
+function collectUnmappedSubtypes(
+  branches: unknown[],
+  mappedRefs: ReadonlySet<string>,
+  stores: ComponentStores,
+): CsharpDiscriminatorSubtype[] {
+  const subtypes: CsharpDiscriminatorSubtype[] = [];
+  for (const subtype of branches) {
+    const name = isRecord(subtype) && typeof subtype.$ref === 'string' ? subtype.$ref : undefined;
+    if (name === undefined || mappedRefs.has(name)) continue;
+    subtypes.push({
+      value: name.split('/').at(-1) ?? name,
+      properties: [...collectProperties(subtype, stores)],
+      required: [...collectRequired(subtype, stores)],
+    });
+  }
+  return subtypes;
+}
+
 function collectSubtypes(
   schema: SchemaRecord,
-  schemas: SchemaRecord,
+  stores: ComponentStores,
 ): CsharpDiscriminatorSubtype[] {
   const discriminator = isRecord(schema.discriminator) ? schema.discriminator : undefined;
   const mapping =
     discriminator && isRecord(discriminator.mapping) ? discriminator.mapping : undefined;
   const oneOf = Array.isArray(schema.oneOf) ? schema.oneOf : [];
+  const anyOf = Array.isArray(schema.anyOf) ? schema.anyOf : [];
   const subtypes: CsharpDiscriminatorSubtype[] = [];
+  const mappedRefs = new Set<string>();
 
   if (mapping) {
     for (const [value, subtype] of Object.entries(mapping)) {
+      if (typeof subtype === 'string') mappedRefs.add(subtype);
       subtypes.push({
         value,
-        properties: [...collectProperties(subtype, schemas)],
-        required: [...collectRequired(subtype, schemas)],
+        properties: [...collectProperties(subtype, stores)],
+        required: [...collectRequired(subtype, stores)],
       });
     }
-    return subtypes;
   }
 
-  for (const subtype of oneOf) {
-    const properties = [...collectProperties(subtype, schemas)];
-    const name = isRecord(subtype) && typeof subtype.$ref === 'string' ? subtype.$ref : undefined;
-    if (name !== undefined) {
-      subtypes.push({
-        value: name.split('/').at(-1) ?? name,
-        properties,
-        required: [...collectRequired(subtype, schemas)],
-      });
-    }
-  }
+  // A mapping can legitimately cover only SOME of a `oneOf`/`anyOf`'s
+  // branches: the remaining referenced branches still participate in
+  // selection under their implicit schema-name value (per the OpenAPI
+  // discriminator spec), so they must still be collected here rather than
+  // dropped. When there is no mapping at all, every branch is "unmapped".
+  subtypes.push(...collectUnmappedSubtypes(oneOf, mappedRefs, stores));
+  subtypes.push(...collectUnmappedSubtypes(anyOf, mappedRefs, stores));
   return subtypes;
 }
 
 function walkSchema(
   schema: unknown,
   path: string,
-  schemas: SchemaRecord,
+  stores: ComponentStores,
   output: CsharpDiscriminator[],
   visited: Set<string>,
   activeRefs: Set<string>,
 ): void {
-  const resolved = resolveSchema(schema, schemas);
+  const resolved = resolveSchema(schema, stores);
   if (!resolved) return;
   const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
   if (ref !== undefined) {
@@ -183,7 +252,7 @@ function walkSchema(
     output.push({
       path,
       propertyName,
-      subtypes: collectSubtypes(resolved, schemas),
+      subtypes: collectSubtypes(resolved, stores),
     });
   }
 
@@ -191,16 +260,16 @@ function walkSchema(
   try {
     if (isRecord(resolved.properties)) {
       for (const [name, property] of Object.entries(resolved.properties)) {
-        walkSchema(property, path ? `${path}.${name}` : name, schemas, output, visited, activeRefs);
+        walkSchema(property, path ? `${path}.${name}` : name, stores, output, visited, activeRefs);
       }
     }
     if (isRecord(resolved.items)) {
-      walkSchema(resolved.items, `${path}[]`, schemas, output, visited, activeRefs);
+      walkSchema(resolved.items, `${path}[]`, stores, output, visited, activeRefs);
     }
     for (const key of ['allOf', 'oneOf', 'anyOf']) {
       const parts = resolved[key];
       if (Array.isArray(parts)) {
-        for (const part of parts) walkSchema(part, path, schemas, output, visited, activeRefs);
+        for (const part of parts) walkSchema(part, path, stores, output, visited, activeRefs);
       }
     }
   } finally {
@@ -216,7 +285,12 @@ export function buildCsharpDiscriminatorTable(bundle: unknown): CsharpDiscrimina
   if (!isRecord(bundle) || !isRecord(bundle.components) || !isRecord(bundle.components.schemas)) {
     throw new Error('Bundled OpenAPI spec is missing components.schemas');
   }
-  const schemas = bundle.components.schemas;
+  const stores: ComponentStores = {
+    schemas: bundle.components.schemas,
+    requestBodies: isRecord(bundle.components.requestBodies)
+      ? bundle.components.requestBodies
+      : {},
+  };
   if (!isRecord(bundle.paths)) return {};
 
   const table: Record<string, CsharpDiscriminator[]> = {};
@@ -224,13 +298,13 @@ export function buildCsharpDiscriminatorTable(bundle: unknown): CsharpDiscrimina
     if (!isRecord(pathItem)) continue;
     for (const operation of Object.values(pathItem)) {
       if (!isRecord(operation) || typeof operation.operationId !== 'string') continue;
-      const requestBody = resolveSchema(operation.requestBody, schemas);
+      const requestBody = resolveSchema(operation.requestBody, stores);
       if (!requestBody || !isRecord(requestBody.content)) continue;
-      const json = resolveSchema(requestBody.content['application/json'], schemas);
+      const json = resolveSchema(requestBody.content['application/json'], stores);
       const schema = json?.schema;
       if (schema === undefined) continue;
       const discriminators: CsharpDiscriminator[] = [];
-      walkSchema(schema, '', schemas, discriminators, new Set(), new Set());
+      walkSchema(schema, '', stores, discriminators, new Set(), new Set());
       if (discriminators.length > 0) table[operation.operationId] = discriminators;
     }
   }

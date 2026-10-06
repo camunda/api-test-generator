@@ -351,6 +351,266 @@ describe('buildCsharpDiscriminatorTable — inline schema visit-key collisions',
 });
 
 /**
+ * Regression coverage for PR #668 review findings (round 3): `collectSubtypes`
+ * returned early as soon as a `discriminator.mapping` was present, so any
+ * `oneOf`/`anyOf` branch NOT named in that mapping was dropped entirely
+ * instead of being collected under its implicit schema-name value (the
+ * OpenAPI discriminator spec treats a referenced-but-unmapped branch as
+ * still selectable). A discriminator with `ById` explicitly mapped but
+ * `ByKey` only referenced via `oneOf` previously had no way to ever select
+ * `ByKey`.
+ */
+describe('buildCsharpDiscriminatorTable — partial discriminator mappings', () => {
+  test('still collects a oneOf branch left out of a partial discriminator mapping', () => {
+    const bundle = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'activateJob',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/JobFilter' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          JobFilter: {
+            type: 'object',
+            discriminator: {
+              propertyName: 'filterType',
+              // Only ById is explicitly mapped — ByKey is referenced via
+              // `oneOf` below but has no mapping entry of its own.
+              mapping: { byId: '#/components/schemas/ById' },
+            },
+            oneOf: [
+              { $ref: '#/components/schemas/ById' },
+              { $ref: '#/components/schemas/ByKey' },
+            ],
+          },
+          ById: { type: 'object', properties: { id: { type: 'string' } } },
+          ByKey: { type: 'object', properties: { key: { type: 'string' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypeValues = (table.activateJob ?? []).flatMap((d) =>
+      d.subtypes.map((s) => s.value),
+    );
+    expect(subtypeValues).toContain('byId');
+    expect(subtypeValues).toContain('ByKey');
+    const byKey = (table.activateJob ?? [])
+      .flatMap((d) => d.subtypes)
+      .find((s) => s.value === 'ByKey');
+    expect(byKey?.properties).toEqual(['key']);
+  });
+
+  test('does not duplicate a oneOf branch that IS covered by the mapping', () => {
+    const bundle = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'activateJob',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/JobFilter' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          JobFilter: {
+            type: 'object',
+            discriminator: {
+              propertyName: 'filterType',
+              mapping: { byId: '#/components/schemas/ById' },
+            },
+            oneOf: [{ $ref: '#/components/schemas/ById' }],
+          },
+          ById: { type: 'object', properties: { id: { type: 'string' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypeValues = (table.activateJob ?? []).flatMap((d) =>
+      d.subtypes.map((s) => s.value),
+    );
+    expect(subtypeValues).toEqual(['byId']);
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review finding (round 3, "previously
+ * missed"): `collectSubtypes` without a `mapping` only ever iterated
+ * `oneOf`, so a discriminator placed on an `anyOf` schema with no explicit
+ * mapping got an empty subtype list — discovery found the discriminator via
+ * `walkSchema`'s `anyOf` traversal, but selection had nothing to choose
+ * from.
+ */
+describe('buildCsharpDiscriminatorTable — implicit anyOf subtype mapping', () => {
+  test('collects anyOf branches into subtypes when there is no explicit mapping', () => {
+    const bundle = {
+      paths: {
+        '/widgets': {
+          post: {
+            operationId: 'createWidget',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/WidgetRequest' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          WidgetRequest: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            anyOf: [
+              { $ref: '#/components/schemas/RedWidget' },
+              { $ref: '#/components/schemas/BlueWidget' },
+            ],
+          },
+          RedWidget: { type: 'object', properties: { shade: { type: 'string' } } },
+          BlueWidget: { type: 'object', properties: { tone: { type: 'string' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypeValues = (table.createWidget ?? []).flatMap((d) =>
+      d.subtypes.map((s) => s.value),
+    );
+    expect(subtypeValues.sort()).toEqual(['BlueWidget', 'RedWidget']);
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review finding (round 3): request bodies
+ * expressed as `{ "$ref": "#/components/requestBodies/X" }` were silently
+ * skipped by discriminator discovery because `resolveSchema` only resolved
+ * `#/components/schemas/` references — a request-body `$ref` resolved to
+ * `undefined`, `content` was then absent, and the whole operation was
+ * skipped even though its body carries a discriminator. The extractor
+ * already resolves this reference shape
+ * (`semantic-graph-extractor/schema-analyzer.ts`).
+ */
+describe('buildCsharpDiscriminatorTable — request body component references', () => {
+  test('resolves a requestBody expressed as a #/components/requestBodies ref', () => {
+    const bundle = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'createJob',
+            requestBody: { $ref: '#/components/requestBodies/CreateJobRequest' },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          JobFilter: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            oneOf: [{ $ref: '#/components/schemas/ById' }],
+          },
+          ById: { type: 'object', properties: { id: { type: 'string' } } },
+        },
+        requestBodies: {
+          CreateJobRequest: {
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/JobFilter' } },
+            },
+          },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    expect(table.createJob).toBeDefined();
+    expect((table.createJob ?? [])[0]?.propertyName).toBe('kind');
+  });
+});
+
+/**
+ * Regression coverage for PR #668 review finding (round 3, "previously
+ * missed"): `resolveSchema` resolved a `$ref` only ONE hop. An alias schema
+ * whose own body is itself just `{ "$ref": "..." }` (e.g. `JobResultAlias`
+ * pointing at `JobResult`) resolved to an object carrying no fields of its
+ * own except the overwritten `$ref`, so a body referencing the alias never
+ * saw `JobResult`'s `properties`/`discriminator`/`allOf` — only a DIRECT
+ * reference to `JobResult` worked.
+ */
+describe('buildCsharpDiscriminatorTable — schema alias reference chains', () => {
+  test('follows an alias schema (a bare $ref) through to the aliased schema discriminator', () => {
+    const bundle = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'createJob',
+            requestBody: {
+              content: {
+                'application/json': {
+                  // References the ALIAS, not JobResult directly.
+                  schema: { $ref: '#/components/schemas/JobResultAlias' },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          // An alias: its own schema body is nothing but a $ref.
+          JobResultAlias: { $ref: '#/components/schemas/JobResult' },
+          JobResult: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            oneOf: [{ $ref: '#/components/schemas/Success' }],
+          },
+          Success: { type: 'object', properties: { value: { type: 'string' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    expect(table.createJob).toBeDefined();
+    expect((table.createJob ?? [])[0]?.propertyName).toBe('kind');
+  });
+
+  test('terminates on an alias chain that cycles back on itself', () => {
+    const bundle = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'createJob',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/AliasA' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          AliasA: { $ref: '#/components/schemas/AliasB' },
+          AliasB: { $ref: '#/components/schemas/AliasA' },
+        },
+      },
+    };
+
+    expect(() => buildCsharpDiscriminatorTable(bundle)).not.toThrow();
+  });
+});
+
+/**
  * Regression coverage for `chooseCsharpDiscriminator` (PR #668 review,
  * adversarial finding): once the table-build fix above started allowing
  * MULTIPLE discriminator entries to share the same `path` (one per inline
