@@ -5,7 +5,7 @@
 # spec-bump-check.yml's "non-spammy" convention (silent on a no-op run).
 #
 #   RUN_URL=<workflow run url> hub-reenable-format-slack.sh <summary.json>
-# RUN_URL is optional; when set, a link to the run is added at the end.
+# RUN_URL and COOKBOOK_URL are optional; when set, links to the run and the cookbook are added at the end.
 set -euo pipefail
 
 FILE="${1:?usage: hub-reenable-format-slack.sh <summary.json>}"
@@ -47,6 +47,6 @@ jq -r '
     end;
   if length == 0 then "" else
     ":gear: *camunda-hub known-issue re-enable check*\n" + (map(line(.)) | join("\n"))
-    + (if $run != "" then "\n<" + $run + "|Open the workflow run>" else "" end)
+    + ([(if $run != "" then "<" + $run + "|Open the workflow run>" else empty end), (if $book != "" then "<" + $book + "|📖 Cookbook>" else empty end)] | if length > 0 then "\n" + join(" · ") else "" end)
   end
-' --arg run "${RUN_URL:-}" "$FILE"
+' --arg run "${RUN_URL:-}" --arg book "${COOKBOOK_URL:-}" "$FILE"

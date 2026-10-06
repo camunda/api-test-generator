@@ -165,7 +165,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          text="$(RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" bash .github/scripts/hub-reenable-format-slack.sh "${{ github.workspace }}/hub-reenable-summary.json")"
+          text="$(RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" COOKBOOK_URL="${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md" bash .github/scripts/hub-reenable-format-slack.sh "${{ github.workspace }}/hub-reenable-summary.json")"
           {
             echo 'text<<EOF'
             echo "$text"

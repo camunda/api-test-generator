@@ -573,6 +573,12 @@ describe('weekly Slack message', () => {
     );
   });
 
+  it('ends with a link to the guide that explains the report', () => {
+    expect(slackText(baseSummary(), null)).toContain(
+      '<https://github.com/camunda/api-test-generator/blob/main/docs/hub-response-coverage-report.md|📖 Guide>',
+    );
+  });
+
   it('shows the headline change in the same bracket format, and nothing when unchanged', () => {
     const up = slackText(baseSummary({ fullyAsserted: 8 }), baseSummary({ fullyAsserted: 7 }));
     expect(up).toContain(

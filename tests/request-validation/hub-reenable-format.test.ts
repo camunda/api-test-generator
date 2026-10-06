@@ -56,6 +56,20 @@ describe('re-enable check Slack message', () => {
     expect(format([suiteWide('COMPLETED')])).not.toContain('Open the workflow run');
   });
 
+  it('adds a link to the cookbook only when one is given', () => {
+    const withBoth = format([suiteWide('COMPLETED')], {
+      RUN_URL: 'https://x/run',
+      COOKBOOK_URL: 'https://x/book',
+    });
+    expect(withBoth).toContain(
+      '<https://x/run|Open the workflow run> · <https://x/book|📖 Cookbook>',
+    );
+    expect(format([suiteWide('COMPLETED')], { COOKBOOK_URL: 'https://x/book' })).toContain(
+      '<https://x/book|📖 Cookbook>',
+    );
+    expect(format([suiteWide('COMPLETED')])).not.toContain('Cookbook');
+  });
+
   it('prints nothing when there is nothing to report', () => {
     expect(format([]).trim()).toBe('');
   });

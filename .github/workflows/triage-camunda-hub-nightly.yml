@@ -765,12 +765,13 @@ jobs:
           SLACK_BOT_TOKEN: ${{ steps.slack.outputs.SLACK_BOT_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           NIGHTLY_RUN_URL: ${{ steps.nightly.outputs.run_url }}
+          COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
         run: |
           set -euo pipefail
           f="${GITHUB_WORKSPACE}/hub-triage.json"
           summary=$(bash scripts/triage/hub-triage-format-slack.sh "$f" summary || true)
           text=":mag: *camunda-hub API Triage — $(date -u +%Y-%m-%d)*"$'\n'"${summary}"
-          text="${text}"$'\n\n'"<${NIGHTLY_RUN_URL}|📊 nightly run> · <${RUN_URL}|🔎 triage run>"
+          text="${text}"$'\n\n'"<${NIGHTLY_RUN_URL}|📊 nightly run> · <${RUN_URL}|🔎 triage run> · <${COOKBOOK_URL}|📖 Cookbook>"
 
           payload=$(jq -nc --arg channel "$SLACK_CHANNEL" --arg text "$text" \
             '{channel: $channel, text: $text, mrkdwn: true}')

@@ -499,6 +499,7 @@ jobs:
           N_ADDED: ${{ steps.opdiff.outputs.n_added }}
           N_REMOVED: ${{ steps.opdiff.outputs.n_removed }}
           UNMAPPED: ${{ steps.unmapped.outputs.unmapped }}
+          COOKBOOK_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/docs/hub-nightly-cookbook.md
         run: |
           set -uo pipefail
           # ISSUE_TITLE + CONFIG (matrix env) are the single source of truth for
@@ -537,6 +538,7 @@ jobs:
           REMOVED_CSV="$(csv "${REMOVED:-}" "${N_REMOVED:-0}")" \
           UNMAPPED_LIST="${UNMAPPED:-}" \
           LINK="$link" \
+          COOKBOOK_URL="$COOKBOOK_URL" \
           node -e '
             const e = process.env;
             // UNMAPPED is already ", "-joined by the python step that produces it
@@ -561,7 +563,7 @@ jobs:
               : hasUnmapped
               ? `:alert2: *camunda-hub coverage regression* vs latest \`${e.LATEST}\` (no operationId churn):`
               : `:alert2: *camunda-hub spec pin is behind* latest \`${e.LATEST}\` (no operationId churn, no coverage regression):`;
-            const text = headline + unmappedLine + `\n${e.LINK}`;
+            const text = headline + unmappedLine + `\n${e.LINK}\n<${e.COOKBOOK_URL}|📖 What this alert means>`;
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `text_json=${JSON.stringify(text)}\n`);
           '
 
@@ -614,7 +616,7 @@ jobs:
           payload: |
             {
               "channel": "#camunda-hub-nightly-test-results",
-              "text": ${{ toJSON(format(':warning: *Spec-bump check failed for {0}* - a step failed, so the drift result for this config may be missing or incomplete. Check the run before trusting it. <{1}/{2}/actions/runs/{3}|Open the run>', matrix.config, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format(':warning: *Spec-bump check failed for {0}* - a step failed, so the drift result for this config may be missing or incomplete. Check the run before trusting it. <{1}/{2}/actions/runs/{3}|Open the run> · <{1}/{2}/blob/main/docs/hub-nightly-cookbook.md|📖 Cookbook>', matrix.config, github.server_url, github.repository, github.run_id)) }},
               "mrkdwn": true
             }
 
