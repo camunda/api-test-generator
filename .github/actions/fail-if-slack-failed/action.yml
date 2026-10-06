@@ -1,16 +1,17 @@
 name: Fail if the Slack alert failed
 description: >-
   The Slack steps of the scheduled Hub workflows use continue-on-error, so a Vault or Slack problem never
-  stopped the run and the alert silently did not go out. Put this as the LAST step (with `if: always()`) and pass
+  stopped the run and the alert silently did not go out. Put this as the LAST step (with if: always()) and pass
   the outcome of every Slack step: if any of them failed, the run is marked failed with a clear error.
 
 inputs:
   outcomes:
     description: >-
-      Space-separated outcomes of the Slack steps, for example
-      "${{ steps.slack-secrets.outcome }} ${{ steps.notify.outcome }}". For a token step, pass
-      "${{ (steps.T.outcome == 'success' && steps.T.outputs.SLACK_BOT_TOKEN == '') && 'failure' || steps.T.outcome }}"
-      so that a step that succeeded but produced an empty token counts as a failure too (every post would be skipped).
+      Space-separated outcomes of the Slack steps (the outcome of each step with an id, such as slack-secrets or a
+      notify step). For a token step pass "failure" instead of its outcome when it succeeded but its SLACK_BOT_TOKEN
+      output is empty, because then every post would be skipped. See any scheduled Hub workflow for the exact
+      expression. Do not write the double-brace expression syntax in this text: GitHub evaluates it here and the
+      action then fails to load.
     required: true
 
 runs:

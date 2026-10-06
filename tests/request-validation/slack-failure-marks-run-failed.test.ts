@@ -65,6 +65,24 @@ describe('the fail-if-slack-failed action', () => {
       encoding: 'utf8',
     });
 
+  it('only uses expressions GitHub can evaluate where it loads the action (a stray one makes it fail to load)', () => {
+    const text = readFileSync(
+      join(root, '.github/actions/fail-if-slack-failed/action.yml'),
+      'utf8',
+    );
+    const expressions = text.match(/\$\{\{[^}]*\}\}/g) ?? [];
+    // Only the run step's env may use one, and only the inputs context exists inside an action.
+    for (const e of expressions) expect(e).toMatch(/^\$\{\{\s*inputs\.[a-z-]+\s*\}\}$/);
+    const doc: unknown = parse(text);
+    const descriptions = [
+      isRecord(doc) ? str(doc.description) : undefined,
+      isRecord(doc) && isRecord(doc.inputs)
+        ? Object.values(doc.inputs).map((i) => (isRecord(i) ? str(i.description) : undefined))
+        : [],
+    ].flat();
+    for (const d of descriptions) expect(d ?? '').not.toContain('${{');
+  });
+
   it('fails the run when any Slack step failed, and says why', () => {
     const r = run('success failure skipped');
     expect(r.status).toBe(1);
