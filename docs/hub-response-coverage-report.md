@@ -59,9 +59,9 @@ Across positive and negative tests
   `EdgeLifecycle/<Edge>.lifecycle.spec.ts` was generated. A new link is listed by its add operation until the edge is added.
 - "Endpoints with no test at all" are listed with the issue that explains each one, taken from the `knownIssue` URL on the endpoint's
   entry in `positive-suppress.json` or `request-validation.json`. An endpoint with no such entry is listed bare, which means nobody has explained it yet.
-- **What counts as covered.** A test that exists in the generated files and asserts that response. A test skipped because of a known
-  Hub bug is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
-  the "Every kind of bad request" line, which treats a skip in two ways. A **kind** skipped on purpose for a known Hub bug is
+- **What counts as covered.** A test that exists in the generated files and asserts that response. A test left out by a suppression or exclusion in the config (usually for a
+  known Hub bug, but an exclusion needs only a `reason`) is **not** counted as tested: it stays in the "of" number and shows as held in the full table. The one exception is
+  the "Every kind of bad request" line, which treats a skip in two ways. A **kind** excluded in the config is
   taken out of what that endpoint needs, so the endpoint can still count as fully covered by its other kinds. An endpoint whose
   bad-request tests are **all** skipped or excluded is left out of both numbers.
 - The report's "Negative tests" section also counts 409 (a request that is wrong for the current state), although the generated 409 tests live in the positive suite, because they need setup calls first.

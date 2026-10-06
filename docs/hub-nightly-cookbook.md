@@ -163,7 +163,7 @@ reason for skips tied to one operation yet, so for those it is a human check.
 ## The weekly coverage report (Monday 05:00)
 
 Counts how many endpoints have a test for every response the spec lists, split into **positive** and **negative** tests,
-with the change since last week in brackets. Gaps become issues. Read
+with the change since last week in brackets. Gaps in endpoint responses and bad-request tests become issues (lifecycle gaps do not, see below). Read
 [hub-response-coverage-report.md](hub-response-coverage-report.md).
 
 **Is a gap bad?** It is a to-do, not an incident. Nothing is broken. A line such as "Lifecycle tests (create, read, delete): 4 of 6
