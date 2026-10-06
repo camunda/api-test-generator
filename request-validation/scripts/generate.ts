@@ -385,9 +385,11 @@ async function main() {
           onlyOperations: opts.onlyOperations,
           maxPerField: 2,
           // #427 — the resource-key fields (keys of resourceFixtures) are
-          // authz-resolved before body validation, so wrong-type mutations on
-          // them yield 403/500 not 400; skip them.
+          // authz-resolved before body validation, so a number or boolean on
+          // them yields 403, not 400; skip those. Object/array values are
+          // kept for the operations in nonScalarKeyOperations (400).
           resourceKeyFields: new Set(Object.keys(rvConfig.resourceFixtures ?? {})),
+          nonScalarKeyOperations: new Set(rvConfig.nonScalarKeyOperations ?? []),
         }),
       );
     }
@@ -755,6 +757,49 @@ async function main() {
   if (!deduped.length) {
     console.error('[generate] No scenarios produced. Check filters.');
     process.exit(2);
+  }
+
+  // nonScalarKeyOperations drift: an id that is not in the bundled spec, or an
+  // operation that no longer has a resource-key body field, restores nothing
+  // and the suite stays green. Warn + annotate, like the stale excludeOperations
+  // check; the Hub invariant makes the zero-case situation fail CI.
+  if (rvConfig.nonScalarKeyOperations?.length) {
+    const keyFields = new Set(Object.keys(rvConfig.resourceFixtures ?? {}));
+    const missingFromSpec = rvConfig.nonScalarKeyOperations.filter((id) => !specOpIds.has(id));
+    // Only a full run generates every key-field case: --only, --only-operations,
+    // --no-deep and --max-type-mismatch all narrow it on purpose.
+    const isFullRun =
+      !opts.only && !opts.onlyOperations && opts.deep && opts.maxTypeMismatch === undefined;
+    const noCases = isFullRun
+      ? rvConfig.nonScalarKeyOperations.filter(
+          (id) =>
+            specOpIds.has(id) &&
+            !excludeOps.has(id) &&
+            !deduped.some(
+              (sc) =>
+                sc.operationId === id &&
+                sc.type === 'type-mismatch' &&
+                keyFields.has((sc.target ?? '').split('.').pop() ?? ''),
+            ),
+        )
+      : [];
+    for (const [ids, why] of [
+      [
+        missingFromSpec,
+        'lists operationId(s) not present in the bundled spec (renamed/removed upstream, or a typo)',
+      ],
+      [
+        noCases,
+        'lists operationId(s) that produced no object/array resource-key test (no key field left in its body?)',
+      ],
+    ] as const) {
+      if (ids.length === 0) continue;
+      const list = ids.join(', ');
+      console.warn(
+        `⚠ configs/${configName}/request-validation.json "nonScalarKeyOperations" ${why}: ${list}.`,
+      );
+      console.log(`::warning title=Stale nonScalarKeyOperations entries::${configName}: ${list}`);
+    }
   }
 
   // ---- Default Multipart Adaptation (pre-emit) ----

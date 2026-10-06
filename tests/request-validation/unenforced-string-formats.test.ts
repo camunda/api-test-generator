@@ -289,6 +289,27 @@ describe('request-validation: unenforcedStringFormats', () => {
       expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(/excludeOperations/);
     });
 
+    it('parses nonScalarKeyOperations and rejects blank or non-string entries', () => {
+      const write = (v: unknown) =>
+        fs.writeFileSync(
+          path.join(cfgDir, 'request-validation.json'),
+          JSON.stringify({ nonScalarKeyOperations: v }),
+        );
+      write(['updateFolder', 'createFile']);
+      expect(loadRequestValidationConfig(tmpRoot, 'probe').nonScalarKeyOperations).toEqual([
+        'updateFolder',
+        'createFile',
+      ]);
+      write([]);
+      expect(loadRequestValidationConfig(tmpRoot, 'probe').nonScalarKeyOperations).toEqual([]);
+      for (const bad of [[' '], [''], [7], 'updateFolder']) {
+        write(bad);
+        expect(() => loadRequestValidationConfig(tmpRoot, 'probe')).toThrow(
+          /nonScalarKeyOperations/,
+        );
+      }
+    });
+
     it('parses a suite-wide knownIssues array and rejects a malformed one', () => {
       fs.writeFileSync(
         path.join(cfgDir, 'request-validation.json'),

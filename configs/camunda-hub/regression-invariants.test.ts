@@ -393,6 +393,32 @@ describeForThisConfig('camunda-hub bundled-spec invariants (#128)', () => {
     ).toBe(-1);
   });
 
+  // camunda-hub#25926 (fixed in #29809) — an object or array in a resource-key body field
+  // answers 400, so every operation in request-validation.json `nonScalarKeyOperations` must
+  // still produce those tests. A renamed operation or a dropped key field would otherwise remove
+  // the coverage with the suite staying green.
+  it('every nonScalarKeyOperations operation has object and array key-field tests', () => {
+    const cfg: unknown = JSON.parse(
+      readRequired(join(REPO_ROOT, 'configs/camunda-hub/request-validation.json')),
+    );
+    const listed =
+      isRecord(cfg) && Array.isArray(cfg.nonScalarKeyOperations)
+        ? cfg.nonScalarKeyOperations.filter((v): v is string => typeof v === 'string')
+        : [];
+    const keyFields =
+      isRecord(cfg) && isRecord(cfg.resourceFixtures) ? Object.keys(cfg.resourceFixtures) : [];
+    expect(listed.length, 'nonScalarKeyOperations must not be empty').toBeGreaterThan(0);
+    const secured = join(getRequestValidationSuiteDir(REPO_ROOT), 'secured');
+    const corpus = readdirSync(secured)
+      .filter((f) => f.endsWith('-validation-api-tests.spec.ts'))
+      .map((f) => readRequired(join(secured, f)))
+      .join('\n');
+    const missing = listed.filter(
+      (op) => !keyFields.some((k) => corpus.includes(`test('${op} - Param ${k} wrong type (#2)'`)),
+    );
+    expect(missing, 'operations with no object/array key-field test (#1 and #2)').toEqual([]);
+  });
+
   // #619 — Hub answers a nonexistent path key with a clean 404 on every method and on
   // list/search operations under a missing parent, so notFoundMode is 'declared' and every
   // operation with a path key that documents a 404 gets a "Nonexistent <key> returns 404" test.

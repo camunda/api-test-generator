@@ -208,12 +208,20 @@ export interface RequestValidationConfig {
     knownIssue?: KnownIssue;
   }[];
   /**
-   * Suite-wide known issues NOT tied to a single excluded op (e.g. the
-   * generator-level wrong-type-key skip for camunda/camunda-hub#25926). Surfaced
+   * Suite-wide known issues NOT tied to a single excluded op (e.g. a
+   * generator-level skip for one class of scenario). Surfaced
    * in the nightly's "skipped due to known issues" Slack thread alongside the
    * per-entry `knownIssue`s.
    */
   knownIssues?: KnownIssue[];
+  /**
+   * Operations that answer 400 (not 403 or 500) when a resource-key body field
+   * (a key of `resourceFixtures`) holds an object or array. For each, the body
+   * wrong-type scenarios for `{}` and `[]` on those fields are generated and
+   * expect 400; numbers and booleans on a key field stay skipped (403 by
+   * design). List an operation only after confirming it live.
+   */
+  nonScalarKeyOperations?: string[];
   /**
    * Scenario kinds where the server is known, for a systemic reason not tied
    * to one operation, to violate the ProblemDetail response-shape contract
@@ -494,6 +502,15 @@ export function loadRequestValidationConfig(
       );
     }
     merged.knownIssues = v;
+  }
+  if ('nonScalarKeyOperations' in parsed) {
+    const v = parsed.nonScalarKeyOperations;
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.trim().length > 0)) {
+      throw new Error(
+        `Invalid ${configPath}: "nonScalarKeyOperations" must be an array of non-empty strings.`,
+      );
+    }
+    merged.nonScalarKeyOperations = v;
   }
   if ('knownProblemDetailShapeGaps' in parsed) {
     const v = parsed.knownProblemDetailShapeGaps;
