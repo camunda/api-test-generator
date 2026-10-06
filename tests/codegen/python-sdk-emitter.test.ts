@@ -956,7 +956,10 @@ describe('Python SDK Emitter', () => {
       const output = renderPythonSuite(collectionWithDetailContains);
       expect(output).toContain('response_data_1 = response_1.json()');
       expect(output).toContain(
-        "assert isinstance(response_data_1, dict) and 'multi-tenancy is disabled' in response_data_1.get('detail', '')",
+        "detail_1 = response_data_1.get('detail') if isinstance(response_data_1, dict) else None",
+      );
+      expect(output).toContain(
+        "assert isinstance(detail_1, str) and 'multi-tenancy is disabled' in detail_1",
       );
     });
 
@@ -980,7 +983,17 @@ describe('Python SDK Emitter', () => {
         ],
       };
       const output = renderPythonSuite(withoutDetail);
-      expect(output).not.toContain("in response_data_1.get('detail', '')");
+      expect(output).not.toContain('detail_1');
+    });
+
+    // Copilot review (#642): `.get('detail', '')`'s default only applies when
+    // the key is ABSENT — a present `"detail": null` still returns None, and
+    // `in None` raises TypeError; a list-valued detail would do list
+    // membership instead of substring matching. Guard against regressing
+    // back to that pattern.
+    test("never uses the unsafe .get('detail', default) pattern", () => {
+      const output = renderPythonSuite(collectionWithDetailContains);
+      expect(output).not.toMatch(/\.get\('detail',/);
     });
   });
 });
