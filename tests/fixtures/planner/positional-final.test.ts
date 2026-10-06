@@ -44,8 +44,8 @@ describe('request plan for a scenario whose target is found by position', () => 
     expect(steps.map((s) => s.expect.status)).toEqual([200, 200, 409]);
   });
 
-  it('without finalStepIndex the old behaviour holds: every call to the last operation is final', () => {
+  it('without finalStepIndex the last position is final: an earlier call to the same operation keeps its success status', () => {
     const steps = plan(scenario({}));
-    expect(steps.map((s) => s.expect.status)).toEqual([200, 409, 409]);
+    expect(steps.map((s) => s.expect.status)).toEqual([200, 200, 409]);
   });
 });
