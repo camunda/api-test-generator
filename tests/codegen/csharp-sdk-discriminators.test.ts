@@ -443,6 +443,97 @@ describe('buildCsharpDiscriminatorTable — partial discriminator mappings', () 
     );
     expect(subtypeValues).toEqual(['byId']);
   });
+
+  /**
+   * Regression coverage for adversarial round-3 finding: a `discriminator.
+   * mapping` value is permitted by the OpenAPI spec to be a BARE schema
+   * name (e.g. `"ById"`) instead of a full `$ref` string. Before this fix,
+   * `collectUnmappedSubtypes` deduped by exact string match against the raw
+   * mapping value, so a bare name never matched the `oneOf`/`anyOf` branch's
+   * full `$ref` string — producing a second, broken (empty-properties)
+   * subtype entry for the same branch on top of the correct one.
+   */
+  test('does not duplicate a oneOf branch mapped via a bare schema-name value', () => {
+    const bundle = {
+      paths: {
+        '/jobs': {
+          post: {
+            operationId: 'activateJob',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/JobFilter' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          JobFilter: {
+            type: 'object',
+            discriminator: {
+              propertyName: 'filterType',
+              // Bare schema name, not a `$ref` string — valid per spec.
+              mapping: { byId: 'ById' },
+            },
+            oneOf: [
+              { $ref: '#/components/schemas/ById' },
+              { $ref: '#/components/schemas/ByKey' },
+            ],
+          },
+          ById: { type: 'object', properties: { id: { type: 'string' } } },
+          ByKey: { type: 'object', properties: { key: { type: 'string' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypes = (table.activateJob ?? []).flatMap((d) => d.subtypes);
+    // Exactly one entry for the mapped branch (under its mapping value),
+    // and it must resolve its properties — not come back empty.
+    expect(subtypes.filter((s) => s.value === 'byId' || s.value === 'ById')).toHaveLength(1);
+    const byId = subtypes.find((s) => s.value === 'byId' || s.value === 'ById');
+    expect(byId?.properties).toEqual(['id']);
+    expect(subtypes.map((s) => s.value)).toContain('ByKey');
+  });
+
+  /**
+   * Regression coverage for adversarial round-3 finding: calling
+   * `collectUnmappedSubtypes` separately for `oneOf` and `anyOf` without
+   * sharing already-emitted refs let the same `$ref` listed in BOTH produce
+   * a duplicate subtype entry.
+   */
+  test('does not duplicate a $ref listed in both oneOf and anyOf', () => {
+    const bundle = {
+      paths: {
+        '/widgets': {
+          post: {
+            operationId: 'createWidget',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/WidgetRequest' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          WidgetRequest: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            oneOf: [{ $ref: '#/components/schemas/RedWidget' }],
+            anyOf: [{ $ref: '#/components/schemas/RedWidget' }],
+          },
+          RedWidget: { type: 'object', properties: { shade: { type: 'string' } } },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    const subtypes = (table.createWidget ?? []).flatMap((d) => d.subtypes);
+    expect(subtypes.filter((s) => s.value === 'RedWidget')).toHaveLength(1);
+  });
 });
 
 /**
