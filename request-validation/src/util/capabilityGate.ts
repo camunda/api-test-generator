@@ -27,7 +27,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /** A field's capability-gate rejection, as declared in `global-context-seeds.json`. */
 export interface CapabilityGateInfo {
   disabledDetailContains: string;
-  /** HTTP status the rejection returns. Defaults to 400 when omitted. */
+  /** HTTP error status (4xx/5xx) the rejection returns. Defaults to 400 when omitted. */
   disabledStatus?: string;
 }
 
@@ -97,10 +97,10 @@ export function loadCapabilityGates(
     const { disabledStatus } = entry.capabilityGate;
     if (
       disabledStatus !== undefined &&
-      (typeof disabledStatus !== 'string' || !/^[0-9]{3}$/.test(disabledStatus))
+      (typeof disabledStatus !== 'string' || !/^[45][0-9]{2}$/.test(disabledStatus))
     ) {
       throw new Error(
-        `Malformed ${seedsPath}: seeds[${i}].capabilityGate.disabledStatus must be a 3-digit status string.`,
+        `Malformed ${seedsPath}: seeds[${i}].capabilityGate.disabledStatus must be a 4xx/5xx status string.`,
       );
     }
     out.set(entry.fieldName, {

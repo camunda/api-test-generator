@@ -456,7 +456,7 @@ describe('request-validation: capability-gated fields (#404)', () => {
       });
     });
 
-    it('throws when disabledStatus is not a 3-digit status string', () => {
+    it('throws when disabledStatus is not a 4xx/5xx status string', () => {
       fs.writeFileSync(
         path.join(ontologyDir, 'global-context-seeds.json'),
         JSON.stringify({
@@ -472,7 +472,30 @@ describe('request-validation: capability-gated fields (#404)', () => {
         }),
       );
       expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
-        /capabilityGate\.disabledStatus must be a 3-digit status string/,
+        /capabilityGate\.disabledStatus must be a 4xx\/5xx status string/,
+      );
+    });
+
+    // Copilot review (#642): a schema-valid but non-error disabledStatus
+    // (e.g. "200") would silently defeat the rejection contract this field
+    // exists to encode.
+    it('throws when disabledStatus is a non-error status like 200', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({
+          version: 1,
+          seeds: [
+            {
+              binding: 'tenantIdVar',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar',
+              capabilityGate: { disabledDetailContains: 'x', disabledStatus: '200' },
+            },
+          ],
+        }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
+        /capabilityGate\.disabledStatus must be a 4xx\/5xx status string/,
       );
     });
 

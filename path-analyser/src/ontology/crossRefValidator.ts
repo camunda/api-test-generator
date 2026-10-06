@@ -86,7 +86,7 @@ export const GlobalContextSeedSchema = z
         disabledDetailContains: z.string().min(1),
         disabledStatus: z
           .string()
-          .regex(/^[0-9]{3}$/)
+          .regex(/^[45][0-9]{2}$/)
           .optional(),
       })
       .strict()

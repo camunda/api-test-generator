@@ -743,11 +743,15 @@ export interface CapabilityGate {
   /** Substring the rejection response's `detail` must contain. */
   disabledDetailContains: string;
   /**
-   * HTTP status the disabled-capability rejection returns. Defaults to
-   * `400` (confirmed for `tenantId`) when omitted — only set this when a
-   * future gated field's confirmed rejection status is something else
-   * (e.g. `403`), rather than hardcoding a different literal at each
-   * consuming generator.
+   * HTTP error status (4xx/5xx) the disabled-capability rejection returns.
+   * Defaults to `400` (confirmed for `tenantId`) when omitted — only set
+   * this when a future gated field's confirmed rejection status is
+   * something else (e.g. `403`), rather than hardcoding a different
+   * literal at each consuming generator. Restricted to 4xx/5xx because
+   * this field always describes a rejection; request-validation's own
+   * assertion machinery only applies `expectDetailContains` to an error
+   * expectation in the first place, so a non-error status here would be
+   * silently ignored downstream rather than doing anything useful.
    */
   disabledStatus?: string;
 }

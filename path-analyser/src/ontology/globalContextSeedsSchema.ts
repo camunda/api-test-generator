@@ -120,9 +120,9 @@ export const globalContextSeedsSchema = {
             },
             disabledStatus: {
               type: 'string',
-              pattern: '^[0-9]{3}$',
+              pattern: '^[45][0-9]{2}$',
               description:
-                'HTTP status the disabled-capability rejection returns. Defaults to "400" (confirmed for tenantId) when omitted.',
+                'HTTP error status (4xx/5xx) the disabled-capability rejection returns. Defaults to "400" (confirmed for tenantId) when omitted.',
             },
           },
         },
