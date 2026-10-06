@@ -84,17 +84,21 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 
 ## Who gets told what
 
-| Outcome | Status | Slack (`#camunda-hub-pr-e2e-results`) | Comment on the camunda-hub PR |
-|---|---|---|---|
-| Pass | `success` | no | no |
-| Draft PR fails | `failure` | no | no |
-| Startup failure | `failure` | yes, hub-medic + test-automation-medic | no |
-| Pre-suite failure | `failure` | yes, test-automation-medic | no |
-| product (high confidence) | `failure` | yes, hub-medic + test-automation-medic | no |
-| product (lower), infra, flaky, unknown, **with evidence** (a failing spec or unmapped operations) | `failure` | yes, test-automation-medic | no |
-| any **suite** failure with **no evidence** (the suite ran but left no readable report, and nothing says what failed; not startup or pre-suite) | `failure` | one quiet reply per PR per day, nobody pinged until the 3rd time that day | no |
-| generator-gap on an operation the PR did not touch | `failure` | yes, test-automation-medic | no |
-| generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment |
+| Outcome | Status | Slack (`#camunda-hub-pr-e2e-results`) | Comment on the camunda-hub PR | Issue in api-test-generator |
+|---|---|---|---|---|
+| Pass | `success` | no | no | none |
+| Draft PR fails | `failure` | no | no | none |
+| Startup failure | `failure` | yes, hub-medic + test-automation-medic | no | none |
+| Pre-suite failure | `failure` | yes, test-automation-medic | no | none |
+| product (high confidence) | `failure` | yes, hub-medic + test-automation-medic | no | none |
+| product (lower), infra, flaky, unknown, **with evidence** (a failing spec or unmapped operations) | `failure` | yes, test-automation-medic | no | none |
+| any **suite** failure with **no evidence** (the suite ran but left no readable report, and nothing says what failed; not startup or pre-suite) | `failure` | one quiet reply per PR per day, nobody pinged until the 3rd time that day | no | none |
+| generator-gap on an operation the PR did not touch | `failure` | yes, test-automation-medic | no | none (Slack only; the nightly sees the same gap later) |
+| generator-gap caused by the PR's own spec change (high confidence) | `failure` | yes, test-automation-medic | **yes**, one sticky comment | **`Generator gap on camunda-hub#N`**, assigned to the PR author |
+
+**One more issue can appear in any row:** if some endpoints have no generated test at all, `[hub-pr-check] Coverage gap
+on camunda-hub#N` is opened (labels `missing-coverage` and `hub`, not assigned) and closed again once every endpoint
+has a test. It is separate from the `Generator gap` issue above.
 
 When the generator gap is caused by the PR's own spec change, an issue
 `[hub-pr-check] Generator gap on camunda-hub#N` is also opened in this repo and assigned to the
