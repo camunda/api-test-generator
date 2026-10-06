@@ -287,18 +287,33 @@ function walkSchema(
     // in `finally`) and is checked here BEFORE the `ref:path` dedupe so a
     // cycle is caught regardless of how deep `path` has grown.
     if (activeRefs.has(ref)) return;
-    // Only dedupe on an actual `$ref` + path pair — that's the only other
-    // case that can recur (the SAME ref reached again at the SAME path,
-    // e.g. via two sibling branches). An inline schema has no identity
-    // beyond its position in the tree: the wrapper and EVERY one of its
-    // `allOf`/`oneOf`/`anyOf` branches are walked with the SAME `path` (see
-    // below), so keying an inline visit on `<inline>:path` collided the
-    // wrapper with its first inline branch — and every inline sibling
-    // branch under a `$ref`-resolved parent with every other inline sibling
-    // at that same path — silently dropping their discriminators. Skipping
-    // the cache entirely for inline schemas is safe: inline schemas form a
-    // bounded tree with no cycles of their own.
-    const visitKey = `${ref}:${path}`;
+    // Only dedupe on an actual `$ref` + path (+ owner) triple — that's the
+    // only other case that can recur (the SAME ref reached again at the
+    // SAME path, e.g. via two sibling branches). An inline schema has no
+    // identity beyond its position in the tree: the wrapper and EVERY one
+    // of its `allOf`/`oneOf`/`anyOf` branches are walked with the SAME
+    // `path` (see below), so keying an inline visit on `<inline>:path`
+    // collided the wrapper with its first inline branch — and every inline
+    // sibling branch under a `$ref`-resolved parent with every other inline
+    // sibling at that same path — silently dropping their discriminators.
+    // Skipping the cache entirely for inline schemas is safe: inline
+    // schemas form a bounded tree with no cycles of their own.
+    //
+    // `ownerRef` is part of the key — not just `ref:path` — because the
+    // SAME nested `$ref` schema can be reached at the SAME path through TWO
+    // DIFFERENT sibling `oneOf`/`anyOf` branches (e.g. both `BranchA` and
+    // `BranchB`'s own `payload` property point at a shared `Base` schema
+    // that itself declares a discriminator). Each branch needs its OWN
+    // table entry tagged with ITS OWN `ownerRef`, because
+    // `chooseCsharpDiscriminator`/`findExplicitCsharpDiscriminatorRef`
+    // gate selection on the owner actually chosen at render time — an
+    // owner-blind key here would let the first-visited branch's walk
+    // dedupe away the second branch's otherwise-identical entry, silently
+    // making the nested discriminator only work for whichever branch
+    // happens to be visited first (an arbitrary function of `oneOf` array
+    // order), a regression this round's owner-scoping fix would otherwise
+    // introduce (PR #668 review, round 6: adversarial finding).
+    const visitKey = `${ref}:${path}:${ownerRef ?? ''}`;
     if (visited.has(visitKey)) return;
     visited.add(visitKey);
   }
