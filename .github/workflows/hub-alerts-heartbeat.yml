@@ -1,0 +1,48 @@
+# Heartbeat for the Hub Slack alerts. Every Hub workflow skips its Slack steps and still ends green when
+# the Slack token cannot be read (a deliberate choice: a Vault hiccup must not fail the run), so a broken
+# token silences every alert and nobody is told. This workflow asks GitHub, not Slack, whether the nightly
+# and the triage ran in the last day and whether their main Slack post steps succeeded. If not it opens or
+# updates one rolling issue and fails, so GitHub reports it. It closes the issue itself once alerts return.
+# Logic: .github/scripts/hub-alerts-heartbeat.sh (tested with a stub gh).
+name: Hub alerts heartbeat
+
+on:
+  schedule:
+    # 06:00 UTC: after the nightly (02:00), its triage, the spec-bump check (03:00) and the re-enable check (04:00).
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print what was found, change no issue.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read # read the nightly and triage runs and their steps
+  issues: write # open, update and close the rolling issue
+
+concurrency:
+  group: hub-alerts-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    name: Check that the Hub alerts were posted
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check the nightly and the triage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: bash .github/scripts/hub-alerts-heartbeat.sh

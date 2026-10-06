@@ -917,6 +917,16 @@ self-contained page (`scripts/e2e/hub_coverage_page.py`, text derived from the n
 `hub-coverage-report` artifact as `page.html`, which can be published as a Claude page by hand (use `--fragment` for the wrapper-free form the Artifact tool expects).
 The Slack message links to the run (matrix), that issue, and the per-area issues.
 
+The **Hub alerts heartbeat** ([hub-alerts-heartbeat.yml](.github/workflows/hub-alerts-heartbeat.yml), daily 06:00 UTC,
+logic in `.github/scripts/hub-alerts-heartbeat.sh`, tested by `tests/request-validation/hub-alerts-heartbeat.test.ts`)
+exists because every Hub workflow skips its Slack steps and still ends green when the Slack token cannot be read from
+Vault. It asks GitHub, not Slack, whether `nightly-camunda-hub.yml` and `triage-camunda-hub-nightly.yml` started in the
+last 26 hours and whether their main Slack post steps (`Notify Slack (positive|negative suite)`, `Post triage summary to
+Slack`) concluded `success`. If not, it opens or updates one rolling issue `[hub-alerts] Slack alerts are not being
+posted` (label `hub`) and fails; it closes that issue itself once alerts post again. A manual `workflow_dispatch` is a dry
+run by default. If a watched step is renamed, update the patterns in the script (the heartbeat reports "has no Slack post
+step" when it cannot find one).
+
 The **on-demand hub test** ([hub-ondemand-test.yml](.github/workflows/hub-ondemand-test.yml))
 is the nightly's manual sibling: `workflow_dispatch` it against **any branch**
 (`gh workflow run hub-ondemand-test.yml --ref <branch>`, or the Actions UI branch
