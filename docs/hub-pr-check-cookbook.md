@@ -64,6 +64,31 @@ Still stuck? Post the run link in `#camunda-hub-pr-e2e-results`. Every alert car
 
 See "Who owns what" in [hub-nightly-cookbook.md](hub-nightly-cookbook.md). In short: the Hub team owns the generator after the handover, `hub-medic` is the medic, and this check is **informational, not required**.
 
+## Adding or changing an endpoint in Hub: do you need a generator PR?
+
+**Usually no.** For a normal new endpoint the generator writes the success, bad-request, 401, 403 and 404 tests by itself, and
+search paging and optional-field tests too. You only need a PR in this repo when the endpoint needs something the generator
+cannot work out:
+
+- a **feature flag** the test Hub does not switch on (see the table above);
+- a **state-dependent 409 or 400** that needs setup calls (`conflict-replay.json`);
+- a **new kind of resource** that should get a create, read, delete flow test (`ontology/entity-kinds.json`).
+
+**If you need one, open it at the same time as your Hub PR.** Ideally it merges first, so the check is green from the
+first push and the nightly never fails. Then:
+
+1. **Add both labels to the generator PR: `nightly-api-fix` and `do-not-close`.**
+   - `nightly-api-fix` lets the nightly's triage see your PR. If the nightly runs before yours merges, the triage looks for
+     open PRs with that label that already cover the endpoint, and links to yours instead of opening its own. Without
+     the label it cannot see your PR, and you get a duplicate (the two race, and the loser is closed).
+   - `do-not-close` is needed because a daily job (01:00 UTC) **closes every open `nightly-api-fix` PR that has had no
+     activity for a day**. Without `do-not-close`, a PR that waits for review overnight can be closed on you.
+2. Ask for review in `#camunda-hub-pr-e2e-results`. After the handover the Hub team reviews generator PRs.
+
+**If the nightly fails before your PR merges,** the triage agent may open its own fix PR for the same endpoint. That is the
+backstop, not a mistake by anyone. Keep whichever merges first and close the other. Whoever is on call for the nightly
+(`hub-medic` after the handover) watches the nightly; you do not need to wait for them to start the generator PR.
+
 ---
 
 # Reference for maintainers
