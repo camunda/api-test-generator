@@ -122,9 +122,7 @@ describe('loadCsharpDiscriminatorTable', () => {
     mkdirSync(path.dirname(specPath), { recursive: true });
     writeFileSync(specPath, '{}');
 
-    expect(() => loadCsharpDiscriminatorTable(repoRoot)).toThrow(
-      /missing components\.schemas/,
-    );
+    expect(() => loadCsharpDiscriminatorTable(repoRoot)).toThrow(/missing components\.schemas/);
   });
 
   test('throws a clear error when the bundled spec is not valid JSON', () => {

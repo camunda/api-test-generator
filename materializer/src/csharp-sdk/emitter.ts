@@ -20,6 +20,7 @@ import {
   type CsharpDiscriminator,
   type CsharpDiscriminatorTable,
   chooseCsharpDiscriminator,
+  findExplicitCsharpDiscriminatorRef,
 } from './discriminators.js';
 import {
   type CsharpOperationMap,
@@ -996,6 +997,12 @@ function renderCsharpValue(
   indent = '',
   path = '',
   discriminators: readonly CsharpDiscriminator[] = [],
+  // Refs of ancestor subtypes already selected during this render (see
+  // `CsharpDiscriminator.ownerRef` / `chooseCsharpDiscriminator`). Scopes a
+  // nested discriminator to the branch it actually belongs to, so a
+  // sibling union member's unrelated (or absent) same-path discriminator is
+  // never applied across branches.
+  ownerChain: ReadonlySet<string> = new Set(),
 ): string {
   if (value === null) return 'null';
   if (typeof value === 'string') {
@@ -1006,16 +1013,34 @@ function renderCsharpValue(
   }
   if (Array.isArray(value)) {
     const inner = value
-      .map((v) => renderCsharpValue(v, `${indent}  `, `${path}[]`, discriminators))
+      .map((v) => renderCsharpValue(v, `${indent}  `, `${path}[]`, discriminators, ownerChain))
       .join(', ');
     return `new object?[] { ${inner} }`;
   }
   if (isRecord(value)) {
     const entries: string[] = [];
     const fields = Object.entries(value);
-    const discriminator = chooseCsharpDiscriminator(value, discriminators, path);
+    const discriminator = chooseCsharpDiscriminator(value, discriminators, path, ownerChain);
+    let nextOwnerChain = ownerChain;
     if (discriminator !== undefined && !Object.hasOwn(value, discriminator.name)) {
       fields.unshift([discriminator.name, discriminator.value]);
+      if (discriminator.ref !== undefined) {
+        nextOwnerChain = new Set([...ownerChain, discriminator.ref]);
+      }
+    } else {
+      // The discriminator field can already be explicit in the data (the
+      // scenario sets it directly rather than relying on shape inference).
+      // Still record which branch that selects, so a nested discriminator
+      // scoped to it is recognised even though nothing needs injecting here.
+      const explicitRef = findExplicitCsharpDiscriminatorRef(
+        value,
+        discriminators,
+        path,
+        ownerChain,
+      );
+      if (explicitRef !== undefined) {
+        nextOwnerChain = new Set([...ownerChain, explicitRef]);
+      }
     }
     for (const [k, v] of fields) {
       const rendered = renderCsharpValue(
@@ -1023,6 +1048,7 @@ function renderCsharpValue(
         `${indent}  `,
         path ? `${path}.${k}` : k,
         discriminators,
+        nextOwnerChain,
       );
       entries.push(`${indent}  [${stringLiteral(k)}] = ${rendered},`);
     }

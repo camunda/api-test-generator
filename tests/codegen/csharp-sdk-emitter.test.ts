@@ -1479,3 +1479,125 @@ describe.skipIf(!OCA_BUNDLE_AVAILABLE)('C# SDK Emitter — real OCA bundle discr
     expect(files[0].content).not.toContain('["sourceType"]');
   });
 });
+
+/**
+ * Regression coverage for PR #668 review finding (round 5): a nested
+ * discriminator table entry sharing its `path` with a SIBLING union
+ * branch's own entry had no record of which branch it belonged to, so
+ * `renderCsharpValue`/`chooseCsharpDiscriminator` could apply one branch's
+ * mapping while actually rendering a DIFFERENT branch's value — either
+ * tagging a plain, non-polymorphic sibling property with a foreign
+ * discriminator, or picking the wrong one of two CONFLICTING same-path
+ * mappings. The `ownerRef`/`ownerChain` fix (discriminators.ts) scopes each
+ * nested entry to the branch ref that must have been selected for it to
+ * apply.
+ */
+describe('C# SDK Emitter — discriminators scoped to the selected union branch (PR #668 review, round 5)', () => {
+  const SUCCESS_REF = '#/components/schemas/Success';
+  const FAILURE_REF = '#/components/schemas/Failure';
+
+  test("does not tag a non-polymorphic sibling branch property with another branch's nested discriminator", async () => {
+    // `result` is itself discriminated by `status` into `Success`/`Failure`.
+    // `Success.payload` is polymorphic (tagged `kind`); `Failure.payload` is
+    // a plain object and has NO corresponding table entry at all. Before the
+    // fix, the lone `result.payload` entry (owned by `Success`) matched by
+    // `path` alone regardless of which branch `result.status` actually
+    // selected.
+    const discriminators: CsharpDiscriminatorTable = {
+      createProcessInstance: [
+        {
+          path: 'result',
+          propertyName: 'status',
+          subtypes: [
+            { value: 'Success', properties: ['status', 'payload'], required: [], ref: SUCCESS_REF },
+            { value: 'Failure', properties: ['status', 'payload'], required: [], ref: FAILURE_REF },
+          ],
+        },
+        {
+          path: 'result.payload',
+          propertyName: 'kind',
+          ownerRef: SUCCESS_REF,
+          subtypes: [{ value: 'Text', properties: ['text'], required: ['text'] }],
+        },
+      ],
+    };
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                // `status` is already explicit (selects `Failure`); `payload`
+                // is a plain object that must NOT receive Success's `kind` tag.
+                bodyTemplate: { result: { status: 'Failure', payload: { text: 'message' } } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["text"] = "message"');
+    expect(files[0].content).not.toContain('["kind"]');
+  });
+
+  test("picks the owning branch's mapping, not a conflicting sibling branch's same-path mapping", async () => {
+    // Both `Success.payload` and `Failure.payload` are polymorphic, sharing
+    // the SAME path ("result.payload") and the SAME required shape
+    // (`value`), but tagging a DIFFERENT subtype name. The `Failure`-owned
+    // entry is listed FIRST so a path-only (owner-blind) selection would
+    // tie-break onto it.
+    const discriminators: CsharpDiscriminatorTable = {
+      createProcessInstance: [
+        {
+          path: 'result',
+          propertyName: 'status',
+          subtypes: [
+            { value: 'Success', properties: ['status', 'payload'], required: [], ref: SUCCESS_REF },
+            { value: 'Failure', properties: ['status', 'payload'], required: [], ref: FAILURE_REF },
+          ],
+        },
+        {
+          path: 'result.payload',
+          propertyName: 'kind',
+          ownerRef: FAILURE_REF,
+          subtypes: [{ value: 'FailurePayload', properties: ['value'], required: ['value'] }],
+        },
+        {
+          path: 'result.payload',
+          propertyName: 'kind',
+          ownerRef: SUCCESS_REF,
+          subtypes: [{ value: 'SuccessPayload', properties: ['value'], required: ['value'] }],
+        },
+      ],
+    };
+    const emitter = createCsharpEmitter(OPERATION_MAP, { discriminators });
+    const files = await emitter.emit(
+      {
+        ...SAMPLE_COLLECTION,
+        scenarios: [
+          {
+            ...SAMPLE_COLLECTION.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                bodyKind: 'json',
+                bodyTemplate: { result: { status: 'Success', payload: { value: 'x' } } },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["kind"] = "SuccessPayload"');
+    expect(files[0].content).not.toContain('["kind"] = "FailurePayload"');
+  });
+});
