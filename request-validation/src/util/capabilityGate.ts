@@ -73,6 +73,7 @@ export function loadCapabilityGates(
   if (!Array.isArray(parsed.seeds)) {
     throw new Error(`Malformed ${seedsPath}: expected "seeds" to be an array.`);
   }
+  const fieldNameCounts = new Map<string, number>();
   for (const [i, entry] of parsed.seeds.entries()) {
     if (!isPlainObject(entry)) {
       throw new Error(`Malformed ${seedsPath}: seeds[${i}] must be an object.`);
@@ -80,6 +81,7 @@ export function loadCapabilityGates(
     if (typeof entry.fieldName !== 'string' || entry.fieldName.length === 0) {
       throw new Error(`Malformed ${seedsPath}: seeds[${i}].fieldName must be a non-empty string.`);
     }
+    fieldNameCounts.set(entry.fieldName, (fieldNameCounts.get(entry.fieldName) ?? 0) + 1);
     if (entry.capabilityGate === undefined) continue;
     if (!isPlainObject(entry.capabilityGate)) {
       throw new Error(`Malformed ${seedsPath}: seeds[${i}].capabilityGate must be an object.`);
@@ -105,6 +107,17 @@ export function loadCapabilityGates(
       disabledDetailContains: entry.capabilityGate.disabledDetailContains,
       ...(disabledStatus !== undefined ? { disabledStatus } : {}),
     });
+  }
+  // Reject duplicate fieldName values up front — a duplicate would silently
+  // shadow one entry's capabilityGate with another's (the Map above keeps
+  // only the last write), exactly the kind of silent-divergence path-
+  // analyser's own loader already guards against for this same file
+  // (`path-analyser/src/ontology/loader.ts`'s `dupeFields` check).
+  const dupeFields = [...fieldNameCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name);
+  if (dupeFields.length) {
+    throw new Error(`Malformed ${seedsPath}: duplicate fieldName(s): ${dupeFields.join(', ')}`);
   }
   return out;
 }

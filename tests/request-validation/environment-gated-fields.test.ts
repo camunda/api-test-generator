@@ -485,5 +485,31 @@ describe('request-validation: capability-gated fields (#404)', () => {
         /fieldName must be a non-empty string/,
       );
     });
+
+    it('throws on a duplicate fieldName instead of silently keeping only the last entry', () => {
+      fs.writeFileSync(
+        path.join(ontologyDir, 'global-context-seeds.json'),
+        JSON.stringify({
+          version: 1,
+          seeds: [
+            {
+              binding: 'tenantIdVar',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar',
+              capabilityGate: { disabledDetailContains: 'multi-tenancy is disabled' },
+            },
+            {
+              binding: 'tenantIdVar2',
+              fieldName: 'tenantId',
+              seedRule: 'tenantIdVar2',
+              capabilityGate: { disabledDetailContains: 'a different, shadowing message' },
+            },
+          ],
+        }),
+      );
+      expect(() => loadCapabilityGates(tmpRoot, 'probe')).toThrow(
+        /duplicate fieldName\(s\): tenantId/,
+      );
+    });
   });
 });
