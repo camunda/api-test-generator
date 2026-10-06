@@ -1,5 +1,9 @@
+import type { RequestStep } from 'path-analyser/types';
 import { describe, expect, test } from 'vitest';
-import { resolveScenarioServerOverride } from '../../materializer/src/playwright/stepRenderer.ts';
+import {
+  renderInlineStepLines,
+  resolveScenarioServerOverride,
+} from '../../materializer/src/playwright/stepRenderer.ts';
 
 describe('resolveScenarioServerOverride', () => {
   test('returns undefined when no operation overrides servers', () => {
@@ -34,5 +38,61 @@ describe('resolveScenarioServerOverride', () => {
         { serverOverride: undefined },
       ]),
     ).toThrow(/mixes operations with different server overrides/);
+  });
+});
+
+describe('renderInlineStepLines — detailContains assertion on an error step (#404)', () => {
+  function buildStep(expectation: RequestStep['expect']): RequestStep {
+    return {
+      operationId: 'createWidget',
+      method: 'post',
+      pathTemplate: '/widgets',
+      expect: expectation,
+    };
+  }
+
+  test('parses the response body and asserts detail contains the substring', () => {
+    const lines = renderInlineStepLines({
+      step: buildStep({ status: 400, detailContains: 'multi-tenancy is disabled' }),
+      idx: 0,
+      varName: 'response1',
+      urlExpr: "'/widgets'",
+      method: 'post',
+    });
+    const output = lines.join('\n');
+    expect(output).toContain('const detailBody = await response1.json().catch(() => undefined)');
+    expect(output).toContain(
+      'expect(typeof detailBody?.detail === \'string\' && detailBody.detail.includes("multi-tenancy is disabled")',
+    );
+  });
+
+  test('omits the assertion entirely when detailContains is not set', () => {
+    const lines = renderInlineStepLines({
+      step: buildStep({ status: 400 }),
+      idx: 0,
+      varName: 'response1',
+      urlExpr: "'/widgets'",
+      method: 'post',
+    });
+    const output = lines.join('\n');
+    expect(output).not.toContain('detailBody');
+  });
+
+  test('matches a detail string containing the exact substring, not an unrelated one', () => {
+    const lines = renderInlineStepLines({
+      step: buildStep({ status: 400, detailContains: 'multi-tenancy is disabled' }),
+      idx: 0,
+      varName: 'response1',
+      urlExpr: "'/widgets'",
+      method: 'post',
+    });
+    const output = lines.join('\n');
+    // The rendered assertion is a template literal string, not code we can
+    // eval directly here — but a non-inverted `.includes()` check against
+    // the real detailContains value proves the polarity directly, rather
+    // than trusting the substring match alone (which would also pass for
+    // an accidentally-inverted `!detailBody.detail.includes(...)`).
+    expect(output).not.toContain('!detailBody.detail.includes');
+    expect(output).toContain('detailBody.detail.includes(');
   });
 });
