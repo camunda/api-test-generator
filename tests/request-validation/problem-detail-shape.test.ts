@@ -343,4 +343,41 @@ describe('assertResponseStatus — expectDetailContains check', () => {
       }),
     ).rejects.toThrow(/ProblemDetail\.detail missing or not a string/);
   });
+
+  // Review finding: expectDetailContains was only ever evaluated inside the
+  // broader ProblemDetail shape check, which is itself skipped entirely when
+  // skipProblemDetailShape is set (for a scenario kind with a known, systemic
+  // shape gap). A gated scenario that also needed skipProblemDetailShape
+  // would silently lose the detail-pinning guarantee. Not reachable in the
+  // current camunda-oca config (knownProblemDetailShapeGaps is empty there
+  // today), but the assertion must not regress silently if that changes.
+  it('still checks detail contains the substring when skipProblemDetailShape suppresses the rest of the shape check', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    const body = JSON.stringify({ detail: 'Expected ... but multi-tenancy is disabled' });
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, body), 400, ctx, {
+        skipProblemDetailShape: true,
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('fails on a non-matching detail even when skipProblemDetailShape is set', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, VALID_PROBLEM_DETAIL_400), 400, ctx, {
+        skipProblemDetailShape: true,
+        expectDetailContains: 'multi-tenancy is disabled',
+      }),
+    ).rejects.toThrow(/ProblemDetail\.detail .* does not contain/);
+  });
+
+  it('is a no-op when skipProblemDetailShape is set and expectDetailContains is not', async () => {
+    const assertResponseStatus = await loadAssertResponseStatus();
+    await expect(
+      assertResponseStatus(fakeTestInfo(), fakeResponse(400, '{}'), 400, ctx, {
+        skipProblemDetailShape: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
 });
