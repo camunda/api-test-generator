@@ -16,8 +16,8 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 |---|---|---|
 | 02:00 | Posted every night. Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 |
 | After the run | Posted every night. **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures |
-| 03:00 | **Spec-bump alert**, only when the spec changed: the pinned spec is behind Hub's latest | Only the generator owner |
-| 04:00 | **Re-enable check**, only when something can change: a skipped test can come back because its Hub bug is closed | Only the generator owner |
+| 03:00 | **Spec-bump alert**, only when the spec changed (the pinned spec is behind Hub's latest), or when the check itself failed and cannot tell | Only the generator owner |
+| 04:00 | **Re-enable check**, only when a watched Hub bug closed: a skipped test can come back, or a skip that cannot come back (closed as not planned) needs a decision | Only the generator owner |
 | Monday 05:00 | Posted every week. **Weekly coverage report** | Only the generator owner |
 
 So a night with no spec-bump or re-enable post is normal. A night with no nightly post or no triage digest is not (see below).
@@ -142,7 +142,9 @@ Skipped tests point to a Hub bug. This job watches those bugs. When one closes, 
 | 📋 … is closed as **not planned** | Hub will not fix it, so the skip must stay | Set `"acknowledgedNotPlanned": true` on its `knownIssues` entry. The alert then stops. Until you do, it repeats every day |
 
 **Not watched:** the "partly checked" items in the negative thread (`knownProblemDetailShapeGaps` in
-`request-validation.json`) are not covered by this check. When their Hub issue closes, remove the entry by hand.
+`request-validation.json`) are not covered by this check, so nothing tells you when their Hub issue closes. Look at the
+issue's close reason first. **Closed as fixed:** remove the entry by hand. **Closed as not planned:** keep the entry, since
+Hub still does not meet that assertion and removing it would make the nightly fail.
 
 **Check why the issue closed.** If Hub closed it as "not planned", the skip must stay. The check does not read the close
 reason for skips tied to one operation yet, so for those it is a human check.
