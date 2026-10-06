@@ -59,6 +59,13 @@ export function generateConstraintViolations(
       const gate =
         node.key && node.requiredByParent !== true ? capabilityGates.get(node.key) : undefined;
       const isNested = path.length > 1;
+      // Confirmed live ONLY for a search/list operation's `filter` object
+      // (e.g. `filter.tenantId`): a malformed-but-correctly-typed value
+      // inside it is never validated, always a non-matching predicate. A
+      // gated field nested under some OTHER root (not yet observed in the
+      // bundled spec) is NOT assumed to behave the same way — leave it
+      // ungated rather than guess.
+      const isFilterNested = isNested && path[0] === 'filter';
       const mutations = planConstraintMutations(node.constraints, t);
       for (const mut of mutations) {
         if (opts.capPerOperation && produced >= opts.capPerOperation) break;
@@ -68,6 +75,12 @@ export function generateConstraintViolations(
         // operation, and not generalizable to one alternate expectation,
         // so skip it rather than assert a guess.
         if (gate && !isNested && isBlankValue(mut.value)) continue;
+        // A gated field nested under some root OTHER than `filter` has no
+        // confirmed behaviour either way — skip it rather than assert the
+        // filter-specific 200/empty-items outcome or the flat rejection,
+        // neither of which is verified for this shape (see isFilterNested
+        // comment above).
+        if (gate && isNested && !isFilterNested) continue;
         const body = structuredClone(baseline);
         if (!applyAtPath(body, path, mut.value)) continue;
         const target = path.join('.');
@@ -86,7 +99,7 @@ export function generateConstraintViolations(
           constraintKind: mut.kind,
           constraintOrigin: 'body',
         };
-        if (gate && isNested) {
+        if (gate && isFilterNested) {
           // Confirmed: a search/filter field is never validated regardless
           // of value — always 200 with empty results.
           scenario.expectedStatus = 200;

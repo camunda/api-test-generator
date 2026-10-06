@@ -64,22 +64,23 @@ function buildOp(opts: {
   };
 }
 
-function buildNestedOp(operationId: string): OperationModel {
+function buildNestedOp(operationId: string, rootKey = 'filter'): OperationModel {
   return {
     operationId,
     method: 'POST',
     path: `/${operationId}`,
     tags: [],
     bodyRequired: true,
-    requiredProps: ['filter'],
+    requiredProps: [rootKey],
     requestBodySchema: {
-      // `filter` is itself REQUIRED (matching the real bundled spec's
-      // ProcessDefinitionInstanceVersionStatisticsQuery) so buildBaselineBody
-      // always materialises it — only `tenantId` within it is optional.
+      // The nested root is itself REQUIRED (matching the real bundled
+      // spec's ProcessDefinitionInstanceVersionStatisticsQuery) so
+      // buildBaselineBody always materialises it — only `tenantId` within
+      // it is optional.
       type: 'object',
-      required: ['filter'],
+      required: [rootKey],
       properties: {
-        filter: {
+        [rootKey]: {
           type: 'object',
           required: [],
           properties: {
@@ -118,6 +119,11 @@ const opOptionalTenantId = buildOp({
 // getProcessDefinitionInstanceVersionStatistics-like: tenantId nested under
 // a search filter object.
 const opNestedTenantId = buildNestedOp('getProcessDefinitionInstanceVersionStatistics');
+
+// A gated field nested under a root OTHER than `filter` — no confirmed
+// behaviour either way, must be left ungated entirely (#404 code-review
+// finding: "nested" must not be conflated with "search filter").
+const opNonFilterNestedTenantId = buildNestedOp('hypotheticalNonSearchOp', 'metadata');
 
 function buildQueryParamOp(opts: { operationId: string; param: ParameterModel }): OperationModel {
   return {
@@ -240,6 +246,16 @@ describe('request-validation: capability-gated fields (#404)', () => {
         expect(s.expectedStatus).toBe(403);
         expect(s.expectDetailContains).toBe('tenant scoping is unavailable');
       }
+    });
+
+    it('leaves a gated field nested under a root OTHER than `filter` entirely ungated', () => {
+      const scenarios = generateConstraintViolations([opNonFilterNestedTenantId], {
+        capabilityGates: GATE,
+      });
+      const tenantIdScenarios = scenarios.filter((s) => s.target === 'metadata.tenantId');
+      // No confirmed behaviour for this shape — skipped rather than guessed,
+      // not flipped to the filter-specific 200/empty-items outcome.
+      expect(tenantIdScenarios).toEqual([]);
     });
   });
 
