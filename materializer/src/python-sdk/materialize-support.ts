@@ -345,6 +345,69 @@ def seed_binding(name: str, unique: bool = False) -> str:
     },
 
     {
+      relativePath: 'support/await_eventually.py',
+      content: `"""
+Poll an eventually-consistent read until the broker's secondary storage has caught up.
+
+Mirrors materializer/src/playwright/support/await-eventually.ts (same retry and
+abort rules) so the Python suite waits exactly where the Playwright suite does.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Awaitable, Callable
+
+import httpx
+
+_ABORT_STATUSES = {400, 401, 403, 409, 422}
+
+
+def _is_non_empty_items_page(response: httpx.Response) -> bool:
+    try:
+        body = response.json()
+    except ValueError:
+        return True
+    items = body.get('items') if isinstance(body, dict) else None
+    return isinstance(items, list) and len(items) > 0
+
+
+async def await_eventually(
+    fetch: Callable[[], Awaitable[httpx.Response]],
+    *,
+    operation_id: str,
+    method: str,
+    require_items: bool = True,
+    wait_up_to_ms: int = 10_000,
+    poll_interval_ms: int = 500,
+) -> httpx.Response:
+    started = time.monotonic()
+    is_get = method.upper() == 'GET'
+    attempts = 0
+    while True:
+        attempts += 1
+        response = await fetch()
+        status = response.status_code
+        if status in _ABORT_STATUSES or status >= 500:
+            return response
+        if 200 <= status < 400 and (is_get or not require_items or _is_non_empty_items_page(response)):
+            return response
+        if not (status == 404 and is_get) and status != 429 and not (200 <= status < 400):
+            return response
+        elapsed_ms = (time.monotonic() - started) * 1000
+        remaining_ms = wait_up_to_ms - elapsed_ms
+        if remaining_ms <= 0:
+            raise AssertionError(
+                f"Eventual consistency timeout for operation '{operation_id}' after "
+                f"{attempts} attempt(s) in {elapsed_ms:.0f}ms (lastStatus={status}): "
+                f"{response.text[:1000]}"
+            )
+        await asyncio.sleep(max(10, min(poll_interval_ms, remaining_ms)) / 1000)
+`,
+    },
+
+    {
       relativePath: 'conftest.py',
       content: `"""
 Pytest configuration and fixtures for Camunda SDK tests.
