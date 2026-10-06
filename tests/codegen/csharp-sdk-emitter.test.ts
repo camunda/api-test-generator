@@ -1,6 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { buildCsharpDiscriminatorTable } from '../../materializer/src/csharp-sdk/discriminators.js';
+import {
+  buildCsharpDiscriminatorTable,
+  type CsharpDiscriminatorTable,
+} from '../../materializer/src/csharp-sdk/discriminators.js';
 import {
   type CsharpOperationMap,
   createCsharpEmitter,
@@ -177,20 +180,22 @@ const EMIT_CTX = {
   resolveConfigPath: (rel: string) => rel,
 } as const;
 
-const CSHARP_DISCRIMINATORS = buildCsharpDiscriminatorTable(
-  (() => {
-    const bundle: unknown = JSON.parse(
-      readFileSync(
-        new URL('../../spec/camunda-oca/bundled/rest-api.bundle.json', import.meta.url),
-        'utf8',
-      ),
-    );
-    return bundle;
-  })(),
-);
+// The generic, structure-focused tests in this file (operation-map
+// resolution, path parameters, consistency blocks, SDK method binding,
+// etc.) never need a REAL discriminator — `createSpecEmitter`'s default
+// table here is an empty synthetic one, so this file no longer depends on
+// the OCA bundle having been fetched at module-import time (PR #668
+// review: a module-level `readFileSync` of `spec/camunda-oca/bundled/
+// rest-api.bundle.json` threw `ENOENT` and failed to COLLECT this entire
+// file under `CONFIG=camunda-hub`, where only the Hub bundle exists).
+// Tests that assert specific real-spec discriminator shapes (JobResult
+// userTask/adHocSubProcess, sourceType byId/byKey, ...) live in their own
+// `describe.skipIf` block below, guarded on the OCA bundle actually being
+// present on disk, and read the real bundle lazily there instead.
+const SYNTHETIC_DISCRIMINATORS: CsharpDiscriminatorTable = {};
 
 function createSpecEmitter(mapping: CsharpOperationMap = OPERATION_MAP) {
-  return createCsharpEmitter(mapping, { discriminators: CSHARP_DISCRIMINATORS });
+  return createCsharpEmitter(mapping, { discriminators: SYNTHETIC_DISCRIMINATORS });
 }
 
 describe('C# SDK Emitter', () => {
@@ -199,7 +204,7 @@ describe('C# SDK Emitter', () => {
     const emitter = createCsharpEmitter(OPERATION_MAP, {
       discriminators: () => {
         resolveCount += 1;
-        return CSHARP_DISCRIMINATORS;
+        return SYNTHETIC_DISCRIMINATORS;
       },
     });
 
@@ -213,7 +218,7 @@ describe('C# SDK Emitter', () => {
     const emitter = createCsharpEmitter(OPERATION_MAP, {
       discriminators: () => {
         resolveCount += 1;
-        return CSHARP_DISCRIMINATORS;
+        return SYNTHETIC_DISCRIMINATORS;
       },
     });
 
@@ -572,204 +577,6 @@ describe('C# SDK Emitter', () => {
       'await Client.SearchJobsAsync(JobKey.AssumeExists(RequireStringBinding(ctx, "jobKeyVar")), request1, consistency: new() { WaitUpToMs = 10_000, PollIntervalMs = 500 });',
     );
     expect(files[0].content).not.toContain('RequireBinding(ctx, "jobKeyVar")');
-  });
-
-  test('preserves the supported JobResult userTask discriminator', async () => {
-    const emitter = createSpecEmitter();
-    const collection = {
-      ...SAMPLE_COLLECTION,
-      scenarios: [
-        {
-          ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-              operationId: 'completeJob',
-              bodyKind: 'json',
-              bodyTemplate: { result: { denied: true } },
-              expect: { status: 200 },
-            } satisfies RequestStep,
-          ],
-        },
-      ],
-    };
-    const files = await emitter.emit(collection, EMIT_CTX);
-    expect(files[0].content).toContain('["type"] = "userTask"');
-  });
-
-  test('preserves the supported JobResult adHocSubProcess discriminator', async () => {
-    const emitter = createSpecEmitter();
-    const collection = {
-      ...SAMPLE_COLLECTION,
-      scenarios: [
-        {
-          ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-              operationId: 'completeJob',
-              bodyKind: 'json',
-              bodyTemplate: { result: { activateElements: [] } },
-              expect: { status: 200 },
-            } satisfies RequestStep,
-          ],
-        },
-      ],
-    };
-    const files = await emitter.emit(collection, EMIT_CTX);
-    expect(files[0].content).toContain('["type"] = "adHocSubProcess"');
-  });
-
-  test('preserves the creation terminate discriminator', async () => {
-    const emitter = createSpecEmitter();
-    const collection = {
-      ...SAMPLE_COLLECTION,
-      scenarios: [
-        {
-          ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-              bodyKind: 'json',
-              bodyTemplate: { runtimeInstructions: [{ afterElementId: 'element-1' }] },
-              expect: { status: 200 },
-            } satisfies RequestStep,
-          ],
-        },
-      ],
-    };
-    const files = await emitter.emit(collection, EMIT_CTX);
-    expect(files[0].content).toContain('["type"] = "TERMINATE_PROCESS_INSTANCE"');
-  });
-
-  test('preserves sourceType byId and byKey discriminators', async () => {
-    const emitter = createSpecEmitter();
-    const collection = {
-      ...SAMPLE_COLLECTION,
-      scenarios: [
-        {
-          ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-              operationId: 'modifyProcessInstance',
-              bodyKind: 'json',
-              bodyTemplate: {
-                moveInstructions: [{ sourceElementInstruction: { sourceElementId: 'element-1' } }],
-              },
-              expect: { status: 200 },
-            } satisfies RequestStep,
-          ],
-        },
-      ],
-    };
-    const files = await emitter.emit(collection, EMIT_CTX);
-    expect(files[0].content).toContain('["sourceType"] = "byId"');
-    const byKeyFiles = await emitter.emit(
-      {
-        ...collection,
-        scenarios: [
-          {
-            ...collection.scenarios[0],
-            requestPlan: [
-              {
-                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-                operationId: 'modifyProcessInstance',
-                bodyKind: 'json',
-                bodyTemplate: {
-                  moveInstructions: [
-                    { sourceElementInstruction: { sourceElementInstanceKey: '1' } },
-                  ],
-                },
-                expect: { status: 200 },
-              } satisfies RequestStep,
-            ],
-          },
-        ],
-      },
-      EMIT_CTX,
-    );
-    expect(byKeyFiles[0].content).toContain('["sourceType"] = "byKey"');
-  });
-
-  test('preserves the direct ancestor scope discriminator', async () => {
-    const emitter = createSpecEmitter();
-    const collection = {
-      ...SAMPLE_COLLECTION,
-      scenarios: [
-        {
-          ...SAMPLE_COLLECTION.scenarios[0],
-          requestPlan: [
-            {
-              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
-              operationId: 'modifyProcessInstance',
-              bodyKind: 'json',
-              bodyTemplate: {
-                moveInstructions: [
-                  { ancestorScopeInstruction: { ancestorElementInstanceKey: '1' } },
-                ],
-              },
-              expect: { status: 200 },
-            } satisfies RequestStep,
-          ],
-        },
-      ],
-    };
-    const files = await emitter.emit(collection, EMIT_CTX);
-    expect(files[0].content).toContain('["ancestorScopeType"] = "direct"');
-  });
-
-  test('does not add a JobResult discriminator to a searchJobs filter', async () => {
-    const files = await createSpecEmitter().emit(
-      singleStepCollection({
-        operationId: 'searchJobs',
-        method: 'POST',
-        pathTemplate: '/jobs/search',
-        bodyKind: 'json',
-        bodyTemplate: { filter: { deniedReason: 'not allowed' } },
-        expect: { status: 200 },
-      }),
-      EMIT_CTX,
-    );
-    expect(files[0].content).toContain('["deniedReason"]');
-    expect(files[0].content).not.toContain('["type"]');
-  });
-
-  test('does not add an ancestor discriminator to an activate instruction', async () => {
-    const files = await createSpecEmitter().emit(
-      singleStepCollection({
-        operationId: 'modifyProcessInstance',
-        method: 'POST',
-        pathTemplate: '/process-instances/{processInstanceKey}/modification',
-        bodyKind: 'json',
-        bodyTemplate: {
-          activateInstructions: [{ elementId: 'task-1', ancestorElementInstanceKey: '1' }],
-        },
-        expect: { status: 204 },
-      }),
-      EMIT_CTX,
-    );
-    expect(files[0].content).toContain('["ancestorElementInstanceKey"]');
-    expect(files[0].content).not.toContain('["ancestorScopeType"]');
-  });
-
-  test('does not add a source discriminator to a migration mapping', async () => {
-    const files = await createSpecEmitter().emit(
-      singleStepCollection({
-        operationId: 'migrateProcessInstance',
-        method: 'POST',
-        pathTemplate: '/process-instances/{processInstanceKey}/migration',
-        bodyKind: 'json',
-        bodyTemplate: {
-          targetProcessDefinitionKey: '1',
-          mappingInstructions: [{ sourceElementId: 'a', targetElementId: 'b' }],
-        },
-        expect: { status: 204 },
-      }),
-      EMIT_CTX,
-    );
-    expect(files[0].content).toContain('["sourceElementId"]');
-    expect(files[0].content).not.toContain('["sourceType"]');
   });
 
   test('wraps id only for global task listener operations', async () => {
@@ -1445,5 +1252,230 @@ describe('C# SDK Emitter', () => {
     await expect(emitter.emit(collection, EMIT_CTX)).rejects.toThrow(
       /No published C# SDK method mapping found for operationId getProcessInstance/,
     );
+  });
+});
+
+/**
+ * These assertions genuinely need the REAL bundled OCA spec's discriminator
+ * shapes (JobResult's `userTask`/`adHocSubProcess`, `sourceType`
+ * `byId`/`byKey`, the ancestor-scope discriminator, ...) — a synthetic
+ * fixture replicating them would just be a second, drifting copy of the
+ * same spec facts. Guarding this block on the OCA bundle actually being on
+ * disk (rather than reading it at module scope, unconditionally, for the
+ * WHOLE file) means a `CONFIG=camunda-hub` run — where only the Hub bundle
+ * has been fetched — can still collect and run every other test in this
+ * file; only this block is skipped (PR #668 review).
+ */
+const OCA_BUNDLE_URL = new URL(
+  '../../spec/camunda-oca/bundled/rest-api.bundle.json',
+  import.meta.url,
+);
+const OCA_BUNDLE_AVAILABLE = existsSync(OCA_BUNDLE_URL);
+
+describe.skipIf(!OCA_BUNDLE_AVAILABLE)('C# SDK Emitter — real OCA bundle discriminators', () => {
+  const OCA_DISCRIMINATORS: CsharpDiscriminatorTable = OCA_BUNDLE_AVAILABLE
+    ? buildCsharpDiscriminatorTable(JSON.parse(readFileSync(OCA_BUNDLE_URL, 'utf8')))
+    : {};
+
+  function createOcaSpecEmitter(mapping: CsharpOperationMap = OPERATION_MAP) {
+    return createCsharpEmitter(mapping, { discriminators: OCA_DISCRIMINATORS });
+  }
+
+  test('preserves the supported JobResult userTask discriminator', async () => {
+    const emitter = createOcaSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'completeJob',
+              bodyKind: 'json',
+              bodyTemplate: { result: { denied: true } },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["type"] = "userTask"');
+  });
+
+  test('preserves the supported JobResult adHocSubProcess discriminator', async () => {
+    const emitter = createOcaSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'completeJob',
+              bodyKind: 'json',
+              bodyTemplate: { result: { activateElements: [] } },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["type"] = "adHocSubProcess"');
+  });
+
+  test('preserves the creation terminate discriminator', async () => {
+    const emitter = createOcaSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              bodyKind: 'json',
+              bodyTemplate: { runtimeInstructions: [{ afterElementId: 'element-1' }] },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["type"] = "TERMINATE_PROCESS_INSTANCE"');
+  });
+
+  test('preserves sourceType byId and byKey discriminators', async () => {
+    const emitter = createOcaSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'modifyProcessInstance',
+              bodyKind: 'json',
+              bodyTemplate: {
+                moveInstructions: [{ sourceElementInstruction: { sourceElementId: 'element-1' } }],
+              },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["sourceType"] = "byId"');
+    const byKeyFiles = await emitter.emit(
+      {
+        ...collection,
+        scenarios: [
+          {
+            ...collection.scenarios[0],
+            requestPlan: [
+              {
+                ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+                operationId: 'modifyProcessInstance',
+                bodyKind: 'json',
+                bodyTemplate: {
+                  moveInstructions: [
+                    { sourceElementInstruction: { sourceElementInstanceKey: '1' } },
+                  ],
+                },
+                expect: { status: 200 },
+              } satisfies RequestStep,
+            ],
+          },
+        ],
+      },
+      EMIT_CTX,
+    );
+    expect(byKeyFiles[0].content).toContain('["sourceType"] = "byKey"');
+  });
+
+  test('preserves the direct ancestor scope discriminator', async () => {
+    const emitter = createOcaSpecEmitter();
+    const collection = {
+      ...SAMPLE_COLLECTION,
+      scenarios: [
+        {
+          ...SAMPLE_COLLECTION.scenarios[0],
+          requestPlan: [
+            {
+              ...CREATE_PROCESS_INSTANCE_REQUEST_STEP,
+              operationId: 'modifyProcessInstance',
+              bodyKind: 'json',
+              bodyTemplate: {
+                moveInstructions: [
+                  { ancestorScopeInstruction: { ancestorElementInstanceKey: '1' } },
+                ],
+              },
+              expect: { status: 200 },
+            } satisfies RequestStep,
+          ],
+        },
+      ],
+    };
+    const files = await emitter.emit(collection, EMIT_CTX);
+    expect(files[0].content).toContain('["ancestorScopeType"] = "direct"');
+  });
+
+  test('does not add a JobResult discriminator to a searchJobs filter', async () => {
+    const files = await createOcaSpecEmitter().emit(
+      singleStepCollection({
+        operationId: 'searchJobs',
+        method: 'POST',
+        pathTemplate: '/jobs/search',
+        bodyKind: 'json',
+        bodyTemplate: { filter: { deniedReason: 'not allowed' } },
+        expect: { status: 200 },
+      }),
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["deniedReason"]');
+    expect(files[0].content).not.toContain('["type"]');
+  });
+
+  test('does not add an ancestor discriminator to an activate instruction', async () => {
+    const files = await createOcaSpecEmitter().emit(
+      singleStepCollection({
+        operationId: 'modifyProcessInstance',
+        method: 'POST',
+        pathTemplate: '/process-instances/{processInstanceKey}/modification',
+        bodyKind: 'json',
+        bodyTemplate: {
+          activateInstructions: [{ elementId: 'task-1', ancestorElementInstanceKey: '1' }],
+        },
+        expect: { status: 204 },
+      }),
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["ancestorElementInstanceKey"]');
+    expect(files[0].content).not.toContain('["ancestorScopeType"]');
+  });
+
+  test('does not add a source discriminator to a migration mapping', async () => {
+    const files = await createOcaSpecEmitter().emit(
+      singleStepCollection({
+        operationId: 'migrateProcessInstance',
+        method: 'POST',
+        pathTemplate: '/process-instances/{processInstanceKey}/migration',
+        bodyKind: 'json',
+        bodyTemplate: {
+          targetProcessDefinitionKey: '1',
+          mappingInstructions: [{ sourceElementId: 'a', targetElementId: 'b' }],
+        },
+        expect: { status: 204 },
+      }),
+      EMIT_CTX,
+    );
+    expect(files[0].content).toContain('["sourceElementId"]');
+    expect(files[0].content).not.toContain('["sourceType"]');
   });
 });

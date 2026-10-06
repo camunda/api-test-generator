@@ -156,6 +156,149 @@ describe('buildCsharpDiscriminatorTable — inline schema visit-key collisions',
 
     expect(() => buildCsharpDiscriminatorTable(bundle)).not.toThrow();
   });
+
+  /**
+   * Regression coverage for PR #668 review: a cycle reached through a
+   * PROPERTY or ARRAY reference (rather than an `allOf` self-reference at
+   * the SAME path) grows `path` on every descent (`''`, `child`,
+   * `child.child`, ...an array adds `[]` the same way), so a `ref:path`
+   * key never repeats and the walk recursed without bound until the call
+   * stack overflowed — even for a recursive schema with no discriminator
+   * at all, since discovery scans every request schema. `activeRefs`
+   * tracks the refs on the CURRENT descent (push on enter, pop on exit),
+   * so it catches the cycle regardless of how deep `path` has grown. Each
+   * fixture also carries an independent sibling property (`label`) with
+   * its OWN discriminator, at a path the cycle never touches, to prove the
+   * fix does not also give up early on unrelated branches.
+   */
+  test('terminates on property recursion through a growing path (Node.child -> Node) and still finds an independent sibling discriminator', () => {
+    const bundle = {
+      paths: {
+        '/nodes': {
+          post: {
+            operationId: 'createNode',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/Node' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Node: {
+            type: 'object',
+            properties: {
+              child: { $ref: '#/components/schemas/Node' },
+              label: {
+                type: 'object',
+                discriminator: { propertyName: 'labelType' },
+                oneOf: [{ $ref: '#/components/schemas/PlainLabel' }],
+              },
+            },
+          },
+          PlainLabel: { type: 'object', properties: { labelType: { type: 'string' } } },
+        },
+      },
+    };
+
+    expect(() => buildCsharpDiscriminatorTable(bundle)).not.toThrow();
+    const table = buildCsharpDiscriminatorTable(bundle);
+    expect((table.createNode ?? []).map((d) => d.path)).toContain('label');
+  });
+
+  test('terminates on array recursion through a growing path (Node.children[] -> Node) and still finds an independent sibling discriminator', () => {
+    const bundle = {
+      paths: {
+        '/nodes': {
+          post: {
+            operationId: 'createNode',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/Node' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Node: {
+            type: 'object',
+            properties: {
+              children: { type: 'array', items: { $ref: '#/components/schemas/Node' } },
+              label: {
+                type: 'object',
+                discriminator: { propertyName: 'labelType' },
+                oneOf: [{ $ref: '#/components/schemas/PlainLabel' }],
+              },
+            },
+          },
+          PlainLabel: { type: 'object', properties: { labelType: { type: 'string' } } },
+        },
+      },
+    };
+
+    expect(() => buildCsharpDiscriminatorTable(bundle)).not.toThrow();
+    const table = buildCsharpDiscriminatorTable(bundle);
+    expect((table.createNode ?? []).map((d) => d.path)).toContain('label');
+  });
+
+  test('a recursive schema without its own discriminator does not block discovery at an independent sibling path', () => {
+    // "discovery scans every request schema, even a recursive schema
+    // without a discriminator prevents the entire C# table from loading"
+    // — assert at the TABLE level (two unrelated operations) that one
+    // operation's undiscriminated recursive schema can never prevent a
+    // completely separate operation's discriminator from being found.
+    const bundle = {
+      paths: {
+        '/nodes': {
+          post: {
+            operationId: 'createNode',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/Node' } },
+              },
+            },
+          },
+        },
+        '/widgets': {
+          post: {
+            operationId: 'createWidget',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/WidgetRequest' } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          // No discriminator anywhere in Node — purely recursive, nothing
+          // to find, but discovery must still terminate.
+          Node: {
+            type: 'object',
+            properties: { child: { $ref: '#/components/schemas/Node' } },
+          },
+          WidgetRequest: {
+            type: 'object',
+            discriminator: { propertyName: 'kind' },
+            oneOf: [{ $ref: '#/components/schemas/CircularWidget' }],
+          },
+          CircularWidget: {
+            type: 'object',
+            properties: { kind: { type: 'string', enum: ['circular'] } },
+          },
+        },
+      },
+    };
+
+    const table = buildCsharpDiscriminatorTable(bundle);
+    expect(table.createNode).toBeUndefined();
+    expect(table.createWidget).toBeDefined();
+  });
 });
 
 /**
