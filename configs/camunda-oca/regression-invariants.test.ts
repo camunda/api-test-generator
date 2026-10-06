@@ -10674,3 +10674,44 @@ describeForThisConfig('variant planning: endpoint-scoped optional leaves are sel
     expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
   });
 });
+
+describeForThisConfig('request plan: cursor variants extract the cursor before sending it', () => {
+  it('an earlier step extracts page.endCursor / page.startCursor for every cursor variant', () => {
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const f of readdirSync(VARIANT_SCENARIOS_DIR)) {
+      if (!f.endsWith('-scenarios.json')) continue;
+      // biome-ignore lint/plugin: runtime contract boundary for parsed JSON
+      const parsed = JSON.parse(readFileSync(join(VARIANT_SCENARIOS_DIR, f), 'utf8')) as {
+        endpoint: { operationId: string };
+        scenarios?: {
+          variantKey?: string;
+          requestPlan?: { operationId: string; extract?: { fieldPath: string }[] }[];
+        }[];
+      };
+      for (const s of parsed.scenarios ?? []) {
+        const semantic = s.variantKey?.split('::').pop();
+        const leaf =
+          semantic === 'EndCursor'
+            ? 'page.endCursor'
+            : semantic === 'StartCursor'
+              ? 'page.startCursor'
+              : undefined;
+        if (!leaf) continue;
+        checked++;
+        const plan = s.requestPlan ?? [];
+        const earlier = plan.slice(0, -1);
+        const extracted = earlier.some((step) =>
+          (step.extract ?? []).some((e) => e.fieldPath === leaf),
+        );
+        if (!extracted) {
+          offenders.push(
+            `${parsed.endpoint.operationId} ${s.variantKey}: ${plan.map((p) => p.operationId).join(' > ')}`,
+          );
+        }
+      }
+    }
+    expect(checked, 'non-vacuity: expected cursor variants to be checked').toBeGreaterThan(50);
+    expect(offenders, offenders.slice(0, 10).join('\n')).toEqual([]);
+  });
+});
