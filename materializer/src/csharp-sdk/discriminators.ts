@@ -112,21 +112,32 @@ function walkSchema(
   schemas: SchemaRecord,
   output: CsharpDiscriminator[],
   visited: Set<string>,
+  activeRefs: Set<string>,
 ): void {
   const resolved = resolveSchema(schema, schemas);
   if (!resolved) return;
   const ref = typeof resolved.$ref === 'string' ? resolved.$ref : undefined;
-  // Only dedupe on an actual `$ref` + path pair — that's the only case that
-  // can recur (a schema reachable again via a true graph cycle). An inline
-  // schema has no identity beyond its position in the tree: the wrapper and
-  // EVERY one of its `allOf`/`oneOf`/`anyOf` branches are walked with the
-  // SAME `path` (see below), so keying an inline visit on `<inline>:path`
-  // collided the wrapper with its first inline branch — and every inline
-  // sibling branch under a `$ref`-resolved parent with every other inline
-  // sibling at that same path — silently dropping their discriminators.
-  // Skipping the cache entirely for inline schemas is safe: inline schemas
-  // form a bounded tree with no cycles of their own.
   if (ref !== undefined) {
+    // A TRUE graph cycle (e.g. `Node.child` or `Node.children[]` referencing
+    // `Node` again) is only detectable by ancestry, not by `path`: `path`
+    // grows on every descent (`''`, `child`, `child.child`, ...), so it
+    // never repeats and a `ref:path` key alone never fires for this case —
+    // the walk would recurse until the call stack overflows. `activeRefs`
+    // tracks the refs currently on the descent stack (pushed below, popped
+    // in `finally`) and is checked here BEFORE the `ref:path` dedupe so a
+    // cycle is caught regardless of how deep `path` has grown.
+    if (activeRefs.has(ref)) return;
+    // Only dedupe on an actual `$ref` + path pair — that's the only other
+    // case that can recur (the SAME ref reached again at the SAME path,
+    // e.g. via two sibling branches). An inline schema has no identity
+    // beyond its position in the tree: the wrapper and EVERY one of its
+    // `allOf`/`oneOf`/`anyOf` branches are walked with the SAME `path` (see
+    // below), so keying an inline visit on `<inline>:path` collided the
+    // wrapper with its first inline branch — and every inline sibling
+    // branch under a `$ref`-resolved parent with every other inline sibling
+    // at that same path — silently dropping their discriminators. Skipping
+    // the cache entirely for inline schemas is safe: inline schemas form a
+    // bounded tree with no cycles of their own.
     const visitKey = `${ref}:${path}`;
     if (visited.has(visitKey)) return;
     visited.add(visitKey);
@@ -145,19 +156,28 @@ function walkSchema(
     });
   }
 
-  if (isRecord(resolved.properties)) {
-    for (const [name, property] of Object.entries(resolved.properties)) {
-      walkSchema(property, path ? `${path}.${name}` : name, schemas, output, visited);
+  if (ref !== undefined) activeRefs.add(ref);
+  try {
+    if (isRecord(resolved.properties)) {
+      for (const [name, property] of Object.entries(resolved.properties)) {
+        walkSchema(property, path ? `${path}.${name}` : name, schemas, output, visited, activeRefs);
+      }
     }
-  }
-  if (isRecord(resolved.items)) {
-    walkSchema(resolved.items, `${path}[]`, schemas, output, visited);
-  }
-  for (const key of ['allOf', 'oneOf', 'anyOf']) {
-    const parts = resolved[key];
-    if (Array.isArray(parts)) {
-      for (const part of parts) walkSchema(part, path, schemas, output, visited);
+    if (isRecord(resolved.items)) {
+      walkSchema(resolved.items, `${path}[]`, schemas, output, visited, activeRefs);
     }
+    for (const key of ['allOf', 'oneOf', 'anyOf']) {
+      const parts = resolved[key];
+      if (Array.isArray(parts)) {
+        for (const part of parts) walkSchema(part, path, schemas, output, visited, activeRefs);
+      }
+    }
+  } finally {
+    // Pop on exit (not just "never remove"): a sibling branch reached via a
+    // DIFFERENT path after this ref's subtree has fully unwound must still
+    // be able to walk the same ref again — only an ref that is an ACTIVE
+    // ancestor on the current descent is a cycle.
+    if (ref !== undefined) activeRefs.delete(ref);
   }
 }
 
@@ -179,7 +199,7 @@ export function buildCsharpDiscriminatorTable(bundle: unknown): CsharpDiscrimina
       const schema = json?.schema;
       if (schema === undefined) continue;
       const discriminators: CsharpDiscriminator[] = [];
-      walkSchema(schema, '', schemas, discriminators, new Set());
+      walkSchema(schema, '', schemas, discriminators, new Set(), new Set());
       if (discriminators.length > 0) table[operation.operationId] = discriminators;
     }
   }

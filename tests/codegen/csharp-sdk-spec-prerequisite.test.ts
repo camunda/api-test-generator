@@ -32,9 +32,20 @@ describe('assertCsharpSpecPresent', () => {
   function makeSyntheticRepoRoot(): string {
     const repoRoot = mkdtempSync(path.join(tmpdir(), 'csharp-spec-prereq-'));
     tempDirs.push(repoRoot);
+    // `getSpecBundleDir()` (via `getActiveConfigName`) picks `process.env.CONFIG`
+    // over this synthetic index's `default` when it's set, and validates
+    // whichever it picks against this index's `configs` allowlist BEFORE
+    // `assertCsharpSpecPresent` ever runs — so an inherited `CONFIG=camunda-oca`
+    // or `CONFIG=camunda-hub` from the ambient shell/CI env throws "Unknown
+    // CONFIG" here instead of reaching the prerequisite check this file means
+    // to test. Including whatever CONFIG is actually inherited (if any) keeps
+    // these fixtures isolated without mutating `process.env` ourselves.
+    const inheritedConfig = process.env.CONFIG?.trim();
+    const configs: Record<string, unknown> = { 'synthetic-config': {} };
+    if (inheritedConfig) configs[inheritedConfig] = {};
     writeFileSync(
       path.join(repoRoot, 'configs.json'),
-      JSON.stringify({ default: 'synthetic-config', configs: { 'synthetic-config': {} } }),
+      JSON.stringify({ default: 'synthetic-config', configs }),
     );
     return repoRoot;
   }
