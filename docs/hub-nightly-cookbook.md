@@ -12,10 +12,10 @@ A set of automatic jobs then post what they found. Most nights the posts are gre
 
 **What you will see, in the order it happens** (all times UTC):
 
-| When | Message | Needs you? |
+| When | Message (always posted unless noted) | Do you need to act? |
 |---|---|---|
 | 02:00 | Two posts: **positive suite** and **negative suite**, each with a ✅ passed / ❌ failed count | Only if ❌ is above 0 |
-| After the run | **Triage digest**, posted every night ("No failures tonight" when green) with links to the nightly run and the triage run, plus a thread with one line per failure | Only if it lists failures |
+| After the run | **Triage digest**, with "No failures tonight" when green, and links to the nightly run and the triage run. When there are failures, a thread under it has one line per failure | Only if the digest lists failures |
 | 03:00 | **Spec-bump alert**: the pinned spec is behind Hub's latest | Only the generator owner |
 | 04:00 | **Re-enable check**: a skipped test can come back because its Hub bug is closed | Only the generator owner |
 | Monday 05:00 | **Weekly coverage report** | Only the generator owner |
