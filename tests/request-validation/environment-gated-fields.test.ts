@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { generateConstraintViolations } from '../../request-validation/src/analysis/constraintViolations.js';
-import type { OperationModel } from '../../request-validation/src/model/types.js';
+import {
+  generateParamConstraintViolations,
+  isParamConstraintEligible,
+} from '../../request-validation/src/analysis/paramConstraintViolations.js';
+import type { OperationModel, ParameterModel } from '../../request-validation/src/model/types.js';
 import {
   isBlankValue,
   loadCapabilityGates,
@@ -112,6 +116,46 @@ const opOptionalTenantId = buildOp({
 // a search filter object.
 const opNestedTenantId = buildNestedOp('getProcessDefinitionInstanceVersionStatistics');
 
+function buildQueryParamOp(opts: { operationId: string; param: ParameterModel }): OperationModel {
+  return {
+    operationId: opts.operationId,
+    method: 'GET',
+    // No path params — matches the real getUsageMetrics shape
+    // (GET /system/usage-metrics) this fixture is modeled on, and exercises
+    // buildParams's path-param-less case directly (see the dedicated test
+    // below).
+    path: `/${opts.operationId}`,
+    tags: [],
+    bodyRequired: false,
+    requiredProps: [],
+    parameters: [opts.param],
+  };
+}
+
+// getUsageMetrics-like: tenantId is an OPTIONAL query parameter with its own
+// length/pattern constraints, on an operation with NO path params at all.
+const opOptionalQueryTenantId = buildQueryParamOp({
+  operationId: 'getUsageMetrics',
+  param: {
+    name: 'tenantId',
+    in: 'query',
+    required: false,
+    schema: { type: 'string', minLength: 1, maxLength: 5, pattern: '^[a-z]+$' },
+  },
+});
+
+// A query parameter whose only producible violation is blank (minLength:1,
+// nothing else) — exercises the eligibility/generator-agreement edge case.
+const opBlankOnlyQueryTenantId = buildQueryParamOp({
+  operationId: 'blankOnlyTenantIdOp',
+  param: {
+    name: 'tenantId',
+    in: 'query',
+    required: false,
+    schema: { type: 'string', minLength: 1 },
+  },
+});
+
 describe('request-validation: capability-gated fields (#404)', () => {
   describe('generateConstraintViolations', () => {
     it('still exercises a REQUIRED occurrence of a gated field name, untouched', () => {
@@ -179,6 +223,67 @@ describe('request-validation: capability-gated fields (#404)', () => {
       for (const s of tenantIdScenarios) {
         expect(s.expectedStatus).toBe(200);
         expect(s.expectEmptyItems).toBe(true);
+        expect(s.expectDetailContains).toBeUndefined();
+      }
+    });
+  });
+
+  describe('generateParamConstraintViolations', () => {
+    it('excludes a blank mutation, flips non-blank ones, for an OPTIONAL gated query parameter', () => {
+      const scenarios = generateParamConstraintViolations([opOptionalQueryTenantId], {
+        capabilityGates: GATE,
+      });
+      expect(scenarios.length).toBeGreaterThan(0);
+      for (const s of scenarios) {
+        expect(s.params?.tenantId).not.toBe('');
+        expect(s.expectedStatus).toBe(400);
+        expect(s.expectDetailContains).toBe('multi-tenancy is disabled');
+      }
+    });
+
+    it('sends the violating value for a query param on a path with NO path params (buildParams regression guard)', () => {
+      // Pre-existing bug: buildParams returned undefined whenever the
+      // operation's path carried zero `{...}` tokens, silently dropping
+      // every query-param override — a getUsageMetrics-shaped op's
+      // generated test never actually sent its malformed tenantId.
+      const scenarios = generateParamConstraintViolations([opOptionalQueryTenantId], {});
+      expect(scenarios.length).toBeGreaterThan(0);
+      for (const s of scenarios) {
+        expect(s.params).toBeDefined();
+        expect('tenantId' in (s.params ?? {})).toBe(true);
+        expect(typeof s.params?.tenantId).toBe('string');
+      }
+    });
+
+    it('emits the blank mutation untouched when no gate is configured', () => {
+      const scenarios = generateParamConstraintViolations([opOptionalQueryTenantId], {});
+      const hasBlank = scenarios.some((s) => s.params?.tenantId === '');
+      expect(hasBlank).toBe(true);
+      for (const s of scenarios) expect(s.expectDetailContains).toBeUndefined();
+    });
+
+    it('marks a parameter whose only violation is blank-and-gated as ineligible, matching the generator', () => {
+      expect(isParamConstraintEligible(opBlankOnlyQueryTenantId, GATE)).toBe(false);
+      expect(
+        generateParamConstraintViolations([opBlankOnlyQueryTenantId], { capabilityGates: GATE })
+          .length,
+      ).toBe(0);
+    });
+
+    it('still flips a REQUIRED gated query parameter’s own occurrence untouched (gate only applies to optional)', () => {
+      const requiredOp = buildQueryParamOp({
+        operationId: 'requiredTenantIdOp',
+        param: {
+          name: 'tenantId',
+          in: 'query',
+          required: true,
+          schema: { type: 'string', minLength: 1, maxLength: 5, pattern: '^[a-z]+$' },
+        },
+      });
+      const scenarios = generateParamConstraintViolations([requiredOp], { capabilityGates: GATE });
+      expect(scenarios.length).toBeGreaterThan(0);
+      for (const s of scenarios) {
+        expect(s.expectedStatus).toBe(400);
         expect(s.expectDetailContains).toBeUndefined();
       }
     });

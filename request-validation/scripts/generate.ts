@@ -573,6 +573,7 @@ async function main() {
         ...generateParamConstraintViolations(model.operations, {
           capPerOperation: 10,
           onlyOperations: opts.onlyOperations,
+          capabilityGates,
         }),
       );
     }
@@ -1354,7 +1355,7 @@ async function main() {
       // paramConstraintViolations.ts's own generator calls (resolveParamSchema,
       // which merges the allOf chain — a flat p.schema.* read misses
       // constraints carried in an allOf branch, e.g. Camunda key types).
-      if (isParamConstraintEligible(op)) {
+      if (isParamConstraintEligible(op, capabilityGates)) {
         applicable.add('param-constraint-violation');
       }
       // malformed-json-body (#499) needs only a JSON request body of ANY type
