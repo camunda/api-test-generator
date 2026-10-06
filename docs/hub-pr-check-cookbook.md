@@ -30,7 +30,8 @@ does not yet understand a new endpoint, or that the test run itself had a proble
 
 | The alert says | Whose problem | What to do |
 |---|---|---|
-| "infrastructure failure" or "looks flaky" | Not yours, not Hub's. The run itself had a problem | Re-run it (see "Re-run without a new push" below). If it keeps failing, ask in `#camunda-hub-pr-e2e-results` |
+| "infrastructure failure" | Not yours, not Hub's. The run itself had a problem | Re-run it (see "Re-run without a new push" below). If it keeps failing, ask in `#camunda-hub-pr-e2e-results` |
+| "looks flaky" | A real defect that comes and goes, not something to retry until green: a race or bad wait in a test, or a race or missed signal in Hub | Do not just re-run. Open the failing test in the run's report and look at the passed and failed attempts. If it is a Hub race, it is yours; if the test is at fault, ask in `#camunda-hub-pr-e2e-results` |
 | "Hub PR image did not start" | Possibly yours: Hub did not become ready | Open the run, find the step "Wait for Hub to be ready", read the startup error |
 | "api-test-generator not yet handling a new/changed endpoint" | The generator's, not a Hub bug | When your spec change caused it, an issue `Generator gap on camunda-hub#N` is opened, and assigned to you if GitHub allows it (see the note under "Who gets told what"). Ask in `#camunda-hub-pr-e2e-results` for help |
 | "Likely a real regression from this PR" | Probably yours | Read the change the alert points to. The tests are right and Hub now answers differently |
@@ -142,7 +143,8 @@ camunda-hub PR (non-draft, not a fork, base not self-managed/*)
 | `failure`, Slack says **presuite** | A setup step failed before the suites (checkout, clone, install, registry login, image pull) | The failed step in the run; not a Hub or PR problem |
 | `failure`, **generator-gap** | api-test-generator does not handle this endpoint shape yet | Spec diff for the named operations; then the ontology/scenario templates |
 | `failure`, **product**, high confidence | A specific code change in the PR plausibly caused it | The cited controller/handler change in the PR |
-| `failure`, **infra / flaky / unknown** | Environmental, retried, or not enough evidence | Reports in the `hub-suite-reports` artifact |
+| `failure`, **infra / unknown** | Environmental, or not enough evidence | Reports in the `hub-suite-reports` artifact |
+| `failure`, **flaky** | An intermittent failure: a test or Hub defect that has to be diagnosed, not retried away | Passed and failed attempts in the `hub-suite-reports` artifact (see "Debugging steps") |
 
 ## Who gets told what
 
